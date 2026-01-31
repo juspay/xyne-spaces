@@ -1,0 +1,5 @@
+Line 1: This is a test file
+Line 2: With multiple lines
+Line 3: To test the ReadTool
+Line 4: Implementation with line numbers
+Line 5: And offset/limit functionality

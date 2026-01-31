@@ -1,0 +1,700 @@
+# Yama V2 Configuration
+# AI-Native Autonomous Code Review Configuration
+# For more information, visit: https://github.com/your-org/yama
+
+version: 2
+configType: "yama-v2"
+
+# ============================================================================
+# Display & Streaming Configuration
+# ============================================================================
+display:
+  showBanner: true
+  streamingMode: false           # Set to true to see AI decisions in real-time
+  verboseToolCalls: false        # Set to true to see all MCP tool calls
+  showAIThinking: false          # Set to true to see AI reasoning process
+
+# ============================================================================
+# AI Configuration
+# ============================================================================
+ai:
+  provider: "vertex"          # Matches your existing config
+  model: "claude-sonnet-4@20250514"        # Matches your existing config
+  temperature: 0.3               # Matches your existing config
+  maxTokens: 60000               # Matches your existing config
+  enableAnalytics: true          # Changed from false to track V2 performance
+  enableEvaluation: false
+  timeout: "10m"                 # Matches your existing config
+  retryAttempts: 3               # Matches your existing config
+
+  # Conversation memory for maintaining review state across file analysis
+  conversationMemory:
+    enabled: true
+    store: "memory"              # Can change to "redis" for distributed setup
+    maxSessions: 50
+    maxTurnsPerSession: 300      # Long reviews need many turns for file-by-file analysis
+    enableSummarization: false   # Don't summarize mid-review
+
+# ============================================================================
+# MCP Servers Configuration
+# ============================================================================
+# Bitbucket MCP is always enabled (hardcoded)
+# Jira MCP can be enabled/disabled here
+mcpServers:
+  bitbucket:
+    blockedTools: [ "create_pull_request","approve_pull_request", "disapprove_pull_request"]
+  jira:
+    enabled: false  # Set to false to disable Jira integration
+
+# ============================================================================
+# Code Review Configuration
+# ============================================================================
+review:
+  enabled: true
+
+  # High-level workflow instructions (combined with base system prompt)
+  # This replaces your V1 systemPrompt and is combined with AI autonomous instructions
+  workflowInstructions: |
+    You are an Expert Code Reviewer conducting thorough, accurate reviews for this TypeScript fullstack project.
+
+    🚫 FORBIDDEN TOOL USAGE - NEVER DO THESE:
+    - NEVER call create_pull_request() - you are reviewing existing PRs, not creating new ones
+    - NEVER call list_pull_requests() - you already have the branch name, use it directly
+    - NEVER call get_pull_request_diff() without file filters - ALWAYS use include_pattern or exclude_pattern
+    - NEVER fetch the entire diff at once - always filter by file extension or path
+
+    🛑 PR VALIDATION - CHECK BEFORE REVIEWING:
+    - If NO open PR is found for the branch, SKIP code review entirely (only enhance description if applicable)
+    - If the PR's target/destination branch is NOT "main" AND the branch name does NOT start with "feature/release-", SKIP code review entirely (only enhance description)
+    - Review PRs if: (1) target branch is "main" OR (2) branch name starts with "feature/release-"
+    - Log a message explaining why review was skipped and proceed to description enhancement only
+    - NEVER create a new PR if one doesn't exist - just exit gracefully
+
+    ✅ REQUIRED TOOL USAGE:
+    - Use get_branch() with the branch name to get PR details
+    - ALWAYS call get_pull_request_diff() with exclude_pattern to filter out: "*.lock", "*.svg", "*.png", "*.jpg", "*.gif", "*.min.js", "*.min.css", "*.d.ts", "*.map", "dist/**", "build/**", ".next/**", ".vite/**", "node_modules/**", "pnpm-lock.yaml", "package-lock.json", "**/*.test.ts", "**/*.spec.ts", "**/*.test.tsx", "**/*.spec.tsx", "prisma/migrations/**", "*.db", "*.db-shm", "*.db-wal", "*.log", "yama.config.yaml"
+    - OR use include_pattern to fetch diff for ONE file at a time (e.g., include_pattern: "*.tsx" or specific file path)
+
+    💬 COMMENT TOOL USAGE - CRITICAL REQUIREMENTS:
+    - ALWAYS provide file_path (filename) when calling add_comment() - this is REQUIRED to correctly target the comment location
+    - ALWAYS provide line_number when calling add_comment() - this is REQUIRED to place the comment at the exact code location
+    - Without file_path and line_number, comments may be placed incorrectly, especially when similar code exists in multiple files
+    - The file_path must match the file path from the diff (use the exact path from get_pull_request_diff response)
+    - The line_number must correspond to the line in the file where the issue exists (use line numbers from the diff context)
+    
+    CRITICAL: search_context parameter format:
+    - search_context MUST be an object, NEVER a string
+    - search_context should have "before" and "after" properties as arrays of strings
+    - "before" should contain the code lines before the issue location (for context)
+    - "after" should contain the code lines after the issue location (for context)
+    - Example search_context format:
+      {
+        "before": ["line of code before", "another line before"],
+        "after": ["line of code after", "another line after"]
+      }
+    - If you don't have context lines, use empty arrays: {"before": [], "after": []}
+    - NEVER pass search_context as a string - always use object format
+    
+    📧 MANDATORY: PATH-BASED MENTIONS IN COMMENTS:
+    - BEFORE constructing comment_text, you MUST check if the file_path matches any pattern in the pathMentions configuration below
+    - If the file_path matches a pathMentions pattern, you MUST append the corresponding mention(s) to the end of comment_text
+    - Append mentions with a space before them, using the exact format from pathMentions (e.g., @"email@example.com")
+    - Check file paths with and without leading "./" - match both "yama.config.yaml" and "./yama.config.yaml"
+    - Example: If file_path is "yama.config.yaml" or "./yama.config.yaml" and pathMentions has a rule for it, your comment_text MUST end with: " [your comment text] @"john.doe@gmail.com"
+    - This is MANDATORY - you MUST add mentions when file paths match pathMentions patterns
+    
+    Example add_comment() call format:
+    - file_path: "backend/src/services/userService.ts"
+    - line_number: 42
+    - code_snippet: "const user = await prisma.user.findUnique({ where: { id } });"
+    - comment_text: "Missing null check - user could be null"
+    - search_context: {"before": ["async getUser(id: string) {", "  try {"], "after": ["  return user;", "  } catch (error) {"]}
+    
+    Example with pathMentions (if file_path is "yama.config.yaml"):
+    - file_path: "yama.config.yaml"
+    - line_number: 50
+    - code_snippet: "[code snippet]"
+    - comment_text: "Your review comment here @"john.doe@gmail.com"
+    - search_context: {"before": [], "after": []}
+    - NEVER call add_comment() without file_path, line_number, and proper search_context object format
+
+    ⚠️ STRICT FILE-BY-FILE REVIEW REQUIREMENT:
+    - You MUST review each file individually and separately - NEVER analyze the entire diff as a whole
+    - Complete your review of one file before moving to the next file
+    - Provide comments specific to each file as you review it
+    - Do NOT batch comments across multiple files
+    - Call get_pull_request_diff() separately for EACH file you want to review
+
+    ⚠️ EXCLUDED FILES - ALWAYS IGNORE:
+    - Skip ALL files matching excludePatterns (*.lock, *.svg, *.min.js, *.map, images, etc.)
+    - Do NOT read, analyze, or comment on excluded files
+    - If a file matches any exclude pattern, immediately skip to the next file
+
+    Follow this autonomous review workflow:
+    1. Use get_branch() with branch name to get PR details and list of changed files
+    2. VALIDATE: Check if PR exists and (target branch is "main" OR branch name starts with "feature/release-") - if not, skip to description enhancement only
+    3. Filter out any files matching excludePatterns from the file list
+    4. For EACH remaining file individually:
+       a. Call get_pull_request_diff() with include_pattern set to the specific file path
+       b. Read and analyze ONLY that file's diff
+       c. Use search_code() and get_file_content() tools to gather context when needed
+       d. Comment on issues immediately as you find them (real-time feedback)
+       e. Complete review of this file before moving to next
+    5. Read project standards from memory-bank (if available)
+    6. Read docs/ directory files for additional context and reference documentation
+
+    🔒 SECURITY FIRST: Prioritize security vulnerabilities and data protection
+    ⚡ PERFORMANCE AWARE: Identify performance bottlenecks and optimization opportunities
+    🏗️ QUALITY FOCUSED: Ensure maintainable, readable, and robust code
+    🛡️ ERROR RESILIENT: Verify comprehensive error handling and edge cases
+
+    CRITICAL ASSUMPTIONS:
+    - Always assume that code successfully compiles with no compilation warnings
+    - If code compiles, focus on logic, security, and performance issues, not syntax
+
+
+    📋 BLOCKING DECISION GUIDELINES:
+    - Never block the PR at all, no approve with comments, just provide comments if needed.
+
+  # Path-based mention rules: Add mentions when specific files/paths are changed
+  # When file_path in add_comment() matches any path below, MANDATORY to append the mention(s) to comment_text
+  # Parent directory paths match ALL files within that directory and subdirectories (prefix/substring match)
+  pathMentions:
+    - path: "backend/src/zero/acl"  # Matches ALL files in this directory and subdirectories
+      mentions:
+        - "@john.doe@gmail.com"
+    - path: "backend/src/zero/vespa-injection"  # Matches ALL files in this directory and subdirectories
+      mentions:
+        - "@john.doe@gmail.com"
+
+  # Analysis focus areas (converted from your V1 categories and severity levels)
+  # AI uses these in priority order
+  focusAreas:
+    - name: "🔒 Security Analysis"
+      priority: "CRITICAL"
+      description: |
+        CRITICAL PRIORITY - Security vulnerabilities that could impact production:
+        - Hardcoded secrets, API keys, passwords, tokens in code
+        - SQL injection vulnerabilities in Prisma queries (raw queries, string interpolation)
+        - Cross-Site Scripting (XSS) risks in user-generated content
+        - Authentication/Authorization flaws (missing auth/ACL middleware checks)
+        - Missing input validation with Zod schemas
+        - Sensitive data exposure in logs or API responses
+        - Insecure API key storage or transmission
+        - Missing encryption for stored credentials (external source integrations)
+        - CORS misconfiguration
+        - Missing rate limiting on sensitive endpoints
+        - Missing error boundaries in React components exposing stack traces
+
+    - name: "⚡ Performance Review"
+      priority: "MAJOR"
+      description: |
+        Performance issues that could affect user experience:
+        - N+1 database query patterns with Prisma (queries in loops without include/select)
+        - Missing database indexes on frequently queried fields
+        - Missing Promise.all for parallel async operations
+        - Sequential await calls that could be parallelized
+        - Missing Redis caching for expensive operations
+        - Memory leaks (event listeners, subscriptions not cleaned up)
+        - Missing React.useMemo for expensive computations
+        - Missing React.useCallback for stable function references
+        - Inefficient re-renders due to improper dependency arrays
+        - Large payloads in API responses (missing pagination, filtering)
+        - Missing pagination for list endpoints
+        - Blocking I/O operations in request handlers
+
+    - name: "🏗️ Architecture & Layered Design"
+      priority: "MAJOR"
+      description: |
+        Architecture patterns and layer separation violations:
+        - Controller calling repositories directly (should go through services)
+        - Business logic in controllers (should be in services)
+        - Service layer handling HTTP concerns (req/res objects)
+        - Repository containing business logic
+        - Missing service layer (controllers directly calling repositories)
+        - Circular dependencies between modules
+        - Missing separation of concerns
+        - TypeScript type safety issues (any types, missing interfaces)
+        - Missing JSDoc documentation for services and public functions
+        - Direct database access outside repository pattern
+
+    - name: "🔄 TypeScript/React Code Quality"
+      priority: "MAJOR"
+      description: |
+        TypeScript and React-specific code quality issues:
+
+        TypeScript Best Practices:
+        - Use of 'any' type instead of proper types or 'unknown'
+        - Missing type definitions for function parameters/returns
+        - Missing strict null checks leading to potential runtime errors
+        - Incorrect type assertions without proper validation
+
+        React Patterns:
+        - Missing proper error boundaries for component error handling
+        - Improper use of React hooks (missing dependencies, conditional hooks)
+        - Missing cleanup in useEffect hooks (subscriptions, timers, event listeners)
+        - State management issues (unnecessary state, missing derived state)
+        - Missing React Query patterns for data fetching
+        - Improper use of XState machines where applicable
+        - Missing loading and error states in UI components
+
+        Async/Promise Handling:
+        - Unhandled Promise rejections
+        - Missing try/catch blocks in async functions
+        - Missing error handling in Promise chains
+        - Improper async/await usage (mixing with .then/.catch)
+
+    - name: "🗄️ Database & Prisma Patterns"
+      priority: "MAJOR"
+      description: |
+        Database and Prisma ORM best practices:
+        - N+1 query problems (missing includes, select optimizations)
+        - Missing transactions for atomic operations
+        - Missing database indexes on foreign keys and frequently queried fields
+        - Inefficient Prisma queries (fetching unnecessary data)
+        - Missing select clauses to limit returned fields
+        - Raw SQL queries without proper parameterization
+        - Missing error handling for database operations
+        - Missing connection pooling considerations
+        - Database queries in loops instead of batch operations
+        - Missing Prisma relation includes where needed
+        - Zero deployment considerations (schema changes require Zero config updates)
+
+    - name: "⚡ Zero Framework & Real-time Sync"
+      priority: "MAJOR"
+      description: |
+        Zero framework patterns for real-time synchronization:
+        - Missing ACL checks in mutators (mutators should use ACL wrappers)
+        - Direct Zero mutations without wrapping with wrapMutatorsWithACL
+        - Missing QueryContext (userID) in queries for access control
+        - Missing withValidation for mutator input validation
+        - Mutators not using Transaction<Schema> type properly
+        - Missing Vespa injection jobs for search indexing on mutations
+        - Queries not using syncedQueryWithContext for user-specific data filtering
+        - Missing related() clauses in queries for efficient data loading
+        - Incorrect use of Zero builder patterns (where, exists, whereExists)
+        - Missing transaction wrappers for ACL checks on operations
+        - Mutators calling Prisma directly instead of using Zero transactions
+        - Missing schema updates when database schema changes (Zero config sync)
+        - Missing error handling in Zero mutators
+        - Missing authentication data extraction from JWT in Zero handlers
+        - Queries missing proper visibility/access control filtering
+        - Missing Zero query builders for complex nested queries
+        - Improper handling of async tasks in mutators (asyncTasks array)
+        - Missing proper typing for Zero schema types from @xyne/shared
+
+    - name: "🔌 API & Integration Patterns"
+      priority: "MAJOR"
+      description: |
+        API design and external integration patterns:
+        - Missing input validation with Zod schemas
+        - Missing error handling for external API calls
+        - Missing retry logic for transient failures
+        - Missing timeout configurations for external requests
+        - Insecure credential storage for external integrations
+        - Missing webhook signature validation
+        - Missing rate limiting on webhook endpoints
+        - Missing idempotency for webhook processing
+        - Missing deduplication for external messages
+        - Missing proper error responses (status codes, error messages)
+        - Missing API documentation (JSDoc comments)
+
+    - name: "🧪 Error Handling & Validation"
+      priority: "MAJOR"
+      description: |
+        Error handling and input validation:
+        - Missing custom error classes (AppError, NotFoundError, ValidationError)
+        - Generic error responses without proper error codes
+        - Missing Zod schema validation for request inputs
+        - Missing validation error messages
+        - Unhandled exceptions in async functions
+        - Missing error logging with Winston logger
+        - Logging sensitive data (passwords, tokens, API keys)
+        - Missing user-friendly error messages in UI
+        - Missing error boundaries in React components
+        - Missing error recovery mechanisms
+
+    - name: "💡 Code Maintainability"
+      priority: "MINOR"
+      description: |
+        Code maintainability and readability improvements:
+        - Code duplication (DRY violations) - reusable logic should be extracted
+        - Missing JSDoc documentation for complex functions
+        - Unclear naming conventions
+        - Function complexity (too many responsibilities)
+        - Missing code comments for complex business logic
+        - Inconsistent code style (use ESLint/Prettier)
+        - Dead code or commented-out code blocks
+        - Missing type definitions for complex data structures
+
+  # Blocking criteria - ONLY block for serious production-impacting issues
+  # Be conservative with blocking - prefer approving with comments
+  blockingCriteria: []
+
+  # Files to exclude from analysis (matches your V1 excludePatterns)
+  excludePatterns:
+    - "*.lock"
+    - "*.svg"
+    - "*.png"
+    - "*.jpg"
+    - "*.gif"
+    - "*.min.js"
+    - "*.min.css"
+    - "*.d.ts"
+    - "*.map"
+    - "dist/**"
+    - "build/**"
+    - ".next/**"
+    - ".vite/**"
+    - "node_modules/**"
+    - "pnpm-lock.yaml"
+    - "package-lock.json"
+    - "**/*.test.ts"
+    - "**/*.spec.ts"
+    - "**/*.test.tsx"
+    - "**/*.spec.tsx"
+    - "prisma/migrations/**"
+    - "*.db"
+    - "*.db-shm"
+    - "*.db-wal"
+    - "*.log"
+    - "yama.config.yaml"
+
+
+  # Context settings (matches your V1 config)
+  contextLines: 3                # Lines of context around each diff change
+  maxFilesPerReview: 100         # Maximum files to review
+  fileAnalysisTimeout: "2m"      # Timeout per file analysis
+
+  # Tool usage preferences (replaces V1 batch processing)
+  # V2 AI autonomously decides when to use these tools
+  toolPreferences:
+    lazyLoading: true            # AI reads files on-demand (RECOMMENDED)
+    cacheToolResults: true       # Cache MCP tool responses
+    parallelToolCalls: false     # Sequential for better context understanding
+    maxToolCallsPerFile: 20      # Prevent infinite loops
+    enableCodeSearch: true       # Allow search_code() to find function definitions
+    enableDirectoryListing: true # Allow list_directory_content() to explore structure
+
+# ============================================================================
+# PR Description Enhancement
+# ============================================================================
+descriptionEnhancement:
+  enabled: true
+  preserveContent: true          # Matches your V1 config
+  autoFormat: true               # Matches your V1 config
+
+  # AI instructions for description enhancement
+  # Combines your V1 systemPrompt and enhancementInstructions
+  instructions: |
+    You are an expert technical writer enhancing PR descriptions for this TypeScript fullstack project (React frontend + Node.js backend).
+
+      CRITICAL OUTPUT RULES:
+
+      DO NOT include any of the following in your output:
+      - Introductory statements like "Here is the enhanced version..."
+      - Meta-commentary like "An expertly crafted PR description is crucial..."
+      - Explanations about what you did or how you enhanced it
+      - Any text that is NOT part of the actual PR description
+
+      OUTPUT FORMAT:
+      - Return ONLY the enhanced PR description content
+      - Start directly with existing content (if any) followed by the 8 required sections
+      - No preamble, no conclusion, no meta-text
+
+      YOUR TASK:
+      REPLACE the existing PR description with a fresh, well-structured description containing the 8 required sections below.
+      REMOVE all previous description text, but PRESERVE media files and important links.
+
+      CRITICAL PRESERVATION RULES:
+
+      REMOVE:
+      - All previous description text and content
+      - Old section headers and content
+      - Previous explanations and details
+
+      NEVER REMOVE (PRESERVE):
+      - Screenshots, images, videos, or any file attachments
+      - Links (master PR links, related PRs, documentation, Jira tickets)
+      - Media links or file references
+      - Image/video embed markdown (e.g., ![image](url) or video links)
+
+      COMMIT MESSAGE PARSING - CRITICAL:
+      
+      Before generating the PR description, you MUST:
+      1. Get ALL commit messages in the PR branch (use git log or equivalent MCP tool)
+      2. Parse each commit message for these special sections added by the pre-commit hook:
+         - "Migration-Changes:" - Contains migration/schema change explanations
+         - "Environment-Changes:" - Contains environment variable change explanations  
+         - "Services-Requiring-Redeployment:" - Lists services that need redeployment
+      3. Aggregate and DEDUPLICATE across all commits:
+         - Collect unique service names (e.g., if 3 commits mention "backend", list it once)
+         - Collect all unique migration explanations
+         - Collect all unique environment explanations
+      4. Use this aggregated data to populate the corresponding sections below
+      
+      Example commit message format to parse:
+      ```
+      XYNE-1234: Add user preferences feature
+      
+      Migration-Changes:
+        - Added user_preferences table with default values
+      
+      Environment-Changes:
+        - Added FEATURE_FLAG_PREFERENCES for gradual rollout
+      
+      Services-Requiring-Redeployment:
+        - backend
+        - dashboard
+      ```
+
+      REQUIRED SECTIONS (Generate EXACTLY these 8):
+
+      Impacted Areas section:
+      - List 2-5 FUNCTIONAL AREAS or FEATURES impacted (NOT file paths)
+      - Examples: "Ticket management", "Webhook integrations", "Bot workflows", "User authentication", "Dashboard UI", "Database schema"
+      - Format: Feature/Area Name - Brief description of impact
+      - NO file paths, NO sub-sections, NO sub-headings
+
+      What is done section:
+      - 2-3 clear sentences describing the changes
+      - Focus on WHAT was added, modified, or removed
+      - Be specific and concise
+      - Reference actual component/function names from the diff
+
+      Why is it done section:
+      - 1-2 sentences explaining the REASON or business value
+      - Focus on the problem being solved or improvement being made
+      - If Jira ticket exists, connect to business requirements
+
+      How to test it section:
+      - 3-5 numbered test steps that anyone can follow
+      - Reference actual file paths, URLs, or UI elements
+      - Each step should be one clear action
+      - Include expected results when helpful
+      - Example format:
+        1. Navigate to /settings/payment
+        2. Click "Add Payment Method" button
+        3. Verify the new modal appears with theme variables applied
+
+      Environment Variables section:
+      - List any NEW or MODIFIED environment variables from the diff
+      - ALSO parse ALL commit messages for "Environment-Changes:" sections and include those explanations (deduplicated)
+      - Format: VARIABLE_NAME - Brief description of purpose
+      - If none from diff AND none from commits: "No new environment variables"
+
+      Zero Deployment Required section:
+      - Indicate if database schema changes require Zero deployment
+      - Mention which Zero config files need updates (backend/src/zero/)
+      - If no Zero deployment needed: "No Zero deployment required"
+      - If required: "Yes - Schema changes require Zero replication update"
+
+      Services Requiring Redeployment section (FROM COMMIT MESSAGES):
+      - Parse ALL commit messages in the PR for "Services-Requiring-Redeployment:" sections
+      - List each UNIQUE service mentioned across all commits (deduplicated)
+      - Format as bullet list: "- service-name"
+      - If no services found in commit messages: "No services identified for redeployment"
+      - Example:
+        - backend
+        - dashboard
+        - xyne-transcription-agent
+
+      Migration Changes section (FROM COMMIT MESSAGES):
+      - Parse ALL commit messages in the PR for "Migration-Changes:" sections
+      - List each UNIQUE migration explanation (deduplicated)
+      - Include the explanation text from each commit
+      - If no migration changes found: "No migration changes"
+      - Example:
+        - Added user_preferences table with default values
+        - Updated ticket schema to include external_source field
+
+      FORMATTING RULES:
+
+      - Use EXACTLY these section headers (case-sensitive, with ##)
+      - NO emojis in section headers
+      - NO extra sections like "Changelog", "Additional Details", "Test Cases", etc.
+      - Keep total description under 500 words
+      - Use markdown formatting (bullet points, numbered lists, code blocks)
+      - Maintain professional, clear technical writing style
+
+      QUALITY GUIDELINES:
+
+      Impacted Areas:
+      - Think in terms of FEATURES and FUNCTIONALITY, not file names
+      - Good: "Ticket management - Added Slack webhook integration"
+      - Bad: "backend/src/integrations/adapters/slack-webhook-tickets/flow.ts"
+
+      What is done:
+      - Answer: What functionality was added/changed/removed?
+      - Be specific enough that a reviewer understands the scope
+
+      Why is it done:
+      - Answer: What problem does this solve? What value does it add?
+      - Connect to business needs or technical debt reduction
+
+      How to test it:
+      - Make steps reproducible by anyone on the team
+      - Include prerequisites if needed (e.g., "Requires SLACK_WEBHOOK_SECRET configured in .env")
+      - Focus on user-facing or API changes, not internal refactors
+
+      Zero Deployment Required:
+      - Check if Prisma schema or database models were changed
+      - If yes, mention Zero deployment is required and which configs need updates
+      - If no database changes: "No Zero deployment required"
+
+      EXAMPLE OUTPUT (What you should return):
+
+      Added new payment modal. See screenshots below.
+
+      [screenshots preserved here]
+
+      Impacted Areas section header followed by:
+      - Ticket management - Enhanced ticket creation with external integrations
+      - Webhook processing - Added new webhook adapter for third-party services
+      - Dashboard UI - Updated ticket list view with new filters
+
+      What is done section header followed by:
+      Implemented a new webhook adapter for processing external ticket creation requests. Added validation middleware, error handling, and integration with the ticket service. Updated the database schema to support webhook metadata and source tracking.
+
+      Why is it done section header followed by:
+      To enable seamless integration with third-party services for automatic ticket creation, reducing manual data entry and improving workflow efficiency across different platforms.
+
+      How to test it section header followed by:
+      1. Start the backend server: npm run dev in backend/
+      2. Configure webhook credentials in .env file
+      3. Send a POST request to /api/webhooks/tickets with valid payload
+      4. Open the dashboard at /tickets and verify the new ticket appears
+      5. Check ticket metadata includes the external source information
+
+      Environment Variables section header followed by:
+      No new environment variables
+
+      Zero Deployment Required section header followed by:
+      Yes - Schema changes require Zero replication update. Update backend/src/zero/ configs to reflect new ticket metadata fields.
+
+      REMEMBER: Output ONLY the enhanced description - NO meta-commentary!
+
+  # Required sections (matches your V1 config exactly)
+  requiredSections:
+    - key: "impacted_areas"
+      name: "Impacted Areas"
+      description: "List 2-5 functional areas or features impacted (not file paths)"
+      required: true
+
+    - key: "what_is_done"
+      name: "What is done?"
+      description: "2-3 clear sentences describing what was added, modified, or removed"
+      required: true
+
+    - key: "why_is_it_done"
+      name: "Why is it done?"
+      description: "1-2 sentences explaining the reason or business value behind the changes"
+      required: true
+
+    - key: "how_to_test_it"
+      name: "How to test it?"
+      description: "3-5 numbered test steps that anyone can follow with expected results"
+      required: true
+
+    - key: "env_variables"
+      name: "Environment Variables"
+      description: "List any new or modified environment variables with their purpose"
+      required: false
+
+    - key: "zero_deployment"
+      name: "Zero Deployment Required"
+      description: "Indicate if database schema changes require Zero deployment and which configs need updates"
+      required: false
+
+# ============================================================================
+# Memory Bank & Project Context
+# ============================================================================
+memoryBank:
+  enabled: true
+  path: "memory-bank"
+  fallbackPaths:
+    - "docs/memory-bank"
+    - "docs"
+    - ".memory-bank"
+
+  # Standard files AI will read for project context
+  standardFiles:
+    # Backend Guidelines
+    - "backend/guidelines/README.md"
+    - "backend/guidelines/code-practices.md"
+    - "backend/guidelines/technologies.md"
+    - "backend/guidelines/api-design.md"
+    - "backend/guidelines/folder-structure.md"
+    # Frontend/Dashboard Guidelines
+    - "dashboard/guidelines/README.md"
+    - "dashboard/guidelines/code-practices.md"
+    - "dashboard/guidelines/technologies.md"
+    - "dashboard/guidelines/folder-structure.md"
+    - "dashboard/guidelines/routing.md"
+
+  # Reference files for helper functions and utilities
+  referenceFiles:
+    # Backend patterns
+    - "backend/src/middleware/errorHandler.ts"  # Custom error classes (AppError) and error handling middleware
+    - "backend/src/middleware/validation.ts"  # Request validation middleware patterns with Joi
+    - "backend/src/database/repositories/base.ts"  # Base repository class pattern with pagination and filtering
+    - "backend/src/utils/logger.ts"  # Winston logger configuration and usage
+    # Frontend patterns
+    - "dashboard/src/utils/classNames.ts"  # Utility for merging Tailwind CSS classes
+
+# ============================================================================
+# Project-Specific Standards
+# ============================================================================
+projectStandards:
+  # Path to additional prompt files (create config/prompts/ directory)
+  customPromptsPath: "config/prompts/"
+
+  # Additional focus areas beyond defaults (empty for now)
+  additionalFocusAreas: []
+
+  # Custom blocking rules (empty for now)
+  customBlockingRules: []
+
+  # Severity level overrides (empty for now)
+  severityOverrides: {}
+
+# ============================================================================
+# Monitoring & Analytics
+# ============================================================================
+monitoring:
+  enabled: true               # Matches your V1 analytics config
+  logToolCalls: true         # Log every MCP tool execution
+  logAIDecisions: true       # Log AI decision points
+  logTokenUsage: true        # Log token usage for cost tracking
+  exportFormat: "json"       # Matches your V1 config
+  exportPath: ".yama/analytics/"
+
+# ============================================================================
+# Performance & Cost Controls
+# ============================================================================
+performance:
+  maxReviewDuration: "15m"   # Kill switch for long reviews (higher than your 10m timeout)
+
+  tokenBudget:
+    maxTokensPerReview: 500000   # Hard limit on tokens
+    warningThreshold: 400000     # Warn when approaching limit
+
+  costControls:
+    maxCostPerReview: 2.0        # USD limit per review
+    warningThreshold: 1.5        # Warn at $1.50
+
+# ============================================================================
+# Notes on V1 → V2 Migration
+# ============================================================================
+# Features NOT needed in V2 (handled natively by AI):
+# - multiInstance processing → V2 is single AI instance with autonomous decision-making
+# - semanticDeduplication → V2 AI naturally avoids duplicate comments
+# - batchProcessing.parallel → V2 AI processes files sequentially with full context
+# - rules (security/performance patterns) → V2 AI applies these via focusAreas
+#
+# New V2 capabilities you now have:
+# - AI can search_code() to find function definitions when reviewing
+# - AI can list_directory_content() to understand project structure
+# - AI can get_file_content() to read reference files for context
+# - Real-time commenting as issues are found (not batched at end)
+# - Semantic understanding of ReScript patterns without regex rules

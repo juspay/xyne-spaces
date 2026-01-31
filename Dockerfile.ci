@@ -1,0 +1,35 @@
+# CI/CD Dockerfile for running Yama PR tools
+# This image contains pre-installed npm dependencies for Jenkins
+
+FROM node:22.22.3-bookworm
+
+# Install canvas native dependencies (required by @juspay/neurolink)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3 \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    libpixman-1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy only package files first (for layer caching)
+COPY package.json package-lock.json* ./
+
+# Install dependencies
+RUN npm ci --omit=dev --ignore-scripts && npm rebuild canvas
+
+# Copy yama config (cached separately)
+# This layer will be cached if yama.config.yaml doesn't change
+COPY yama.config.yaml ./
+
+# Set environment to production
+ENV NODE_ENV=production
+
+# Default command
+CMD ["node", "--version"]

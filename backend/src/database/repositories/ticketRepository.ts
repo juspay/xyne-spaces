@@ -1,0 +1,244 @@
+import { TicketStatusV2, TicketPriority, Prisma, ActivityType } from '@prisma/client';
+import { CreateTicketRequest } from '../../types/ticket';
+import { websocketService } from '@/services/websocketService';
+import { logger } from '@/utils/logger';
+import { DatabaseClient } from '@/database/client';
+import { calculateETADeadline } from '@/utils/etaCalculation';
+//import { queueTicketIngestion } from '@/queues/vespaQueue';
+
+const prisma = DatabaseClient.getInstance();
+
+export class TicketRepository {
+
+  /**
+   * Create a ticket (repository method - database access only)
+   * NOTE: For creating tickets with conversations, use TicketService.createTicketWithConversation()
+   * This method expects conversationId and xyneId to be provided
+   */
+  async createTicket(data: CreateTicketRequest & { xyneId: string }) {
+    // Validate required fields
+    if (!data.conversationId) {
+      throw new Error('conversationId is required');
+    }
+
+    if (!data.xyneId) {
+      throw new Error('xyneId is required');
+    }
+
+    if (!data.boardId) {
+      throw new Error('boardId is required');
+    }
+
+    if (!data.channelId) {
+      throw new Error('channelId is required');
+    }
+
+    // Fetch all stages of the board
+    const stages = await prisma.stage.findMany({
+      where: {
+        boardId: data.boardId
+      },
+      orderBy: {
+        sequenceNumber: 'asc'
+      }
+    });
+
+    if (!stages || stages.length === 0) {
+      throw new Error(`No stages found for board ${data.boardId}. Board must have at least one stage.`);
+    }
+
+    // Get the stage - use provided stageName if it exists in stages, otherwise use first stage
+    let selectedStage = stages[0]; // Default to first stage
+    
+    if (data.stageName) {
+      const foundStage = stages.find(stage => stage.name === data.stageName);
+      if (foundStage) {
+        selectedStage = foundStage;
+      }
+    }
+
+    // Calculate total ETA by summing all stage ETAs (in hours)
+    const totalEtaHours = stages.reduce((sum, stage) => sum + stage.eta, 0);
+
+    // Calculate ETA deadline using working hours logic
+    const etaDeadline = calculateETADeadline(new Date(), totalEtaHours);
+
+    // Create ticket with the conversationId, auto-assigned stageName, and calculated ETA
+    const ticket = await prisma.ticket.create({
+      data: {
+        title: data.title,
+        description: data.description,
+        createdBy: data.createdBy,
+        updatedBy: data.updatedBy,
+        assignedTo: data.assignedTo,
+        conversationId: data.conversationId,
+        channelId: data.channelId,
+        xyneId: data.xyneId,
+        projectId: data.projectId,
+        userGroupId: data.userGroupId,
+        boardId: data.boardId,
+        stageName: selectedStage.name,
+        statusV2: data.statusV2 || TicketStatusV2.TODO,
+        priority: data.priority || TicketPriority.LOW,
+        eta: data.eta || etaDeadline,
+        metadata: data.metadata as Prisma.InputJsonValue,
+        closedAt: data.closedAt,
+        closedBy: data.closedBy,
+        merchantId: data.merchantId,
+        ...(data.createdAt && { createdAt: data.createdAt }),
+      }
+    });
+
+    // Track user activity using Redis Set - O(1) operation, no DB query
+    websocketService.trackUserActivity(data.createdBy)
+      .catch(err => logger.error('Failed to track user activity after ticket creation:', err));
+
+    // Queue ticket for Vespa ingestion with complete data
+    // try {
+    //   // Run all independent database queries concurrently
+    //   const [workflow, subTicketMapping, createdByUser, conversation] = await Promise.all([
+    //     // Get workflow for this ticket
+    //     prisma.workflow.findFirst({
+    //       where: { ticketId: ticket.id },
+    //       orderBy: { createdAt: 'desc' }
+    //     }),
+    //     // Check if this ticket is a sub-ticket to find its parent
+    //     prisma.ticketSubTicketMapping.findFirst({
+    //       where: { subTicketId: ticket.id }
+    //     }),
+    //     // Get createdBy user's email for ownerEmail and name for createdBy
+    //     prisma.user.findUnique({
+    //       where: { id: ticket.createdBy },
+    //       select: { email: true, name: true }
+    //     }),
+    //     // Get conversation to fetch channelId for Vespa reference
+    //     ticket.conversationId ? prisma.conversation.findUnique({
+    //       where: { conversationId: ticket.conversationId },
+    //       select: { channelId: true }
+    //     }) : Promise.resolve(null)
+    //   ]);
+
+    //   const channelId = conversation?.channelId || '';
+
+    //   const ticketWithAdditionalData = {
+    //     ...ticket,
+    //     createdBy: createdByUser?.email, // Send email instead of ID
+    //     workflowType: workflow?.workflowType || 'default',
+    //     parentTicketId: subTicketMapping?.ticketId || '',
+    //     ownerEmail: createdByUser?.email || '',
+    //     channelId, // Include channelId for Vespa channelRef
+    //   };
+
+    //   await queueTicketIngestion(ticketWithAdditionalData, 'feed');
+    // } catch (error) {
+    //   logger.error(`[VESPA-FLOW] Failed to queue ticket for Vespa: ${ticket.id}`, error);
+    //   // Don't throw - ticket is still created in DB
+    // }
+
+    return ticket;
+  }
+
+  /**
+   * Update ticket stage
+   */
+  async updateTicketStage(ticketId: string, newStageName: string, updatedBy: string) {
+    // Get current ticket to capture old stage name
+    const currentTicket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { stageName: true }
+    });
+
+    if (!currentTicket) {
+      throw new Error(`Ticket ${ticketId} not found`);
+    }
+
+    const oldStageName = currentTicket.stageName;
+
+    // Update the ticket stage
+    const updatedTicket = await prisma.ticket.update({
+      where: { id: ticketId },
+      data: {
+        stageName: newStageName,
+        updatedBy: updatedBy,
+        updatedAt: new Date()
+      }
+    });
+
+    // Create activity record for the stage change
+    await prisma.ticketActivity.create({
+      data: {
+        ticketId: ticketId,
+        updatedBy: updatedBy,
+        activityType: ActivityType.STAGE_NAME,
+        value: {
+          field: 'stageName',
+          oldValue: oldStageName,
+          newValue: newStageName
+        } as Prisma.InputJsonValue
+      }
+    });
+
+    // Track user activity using Redis Set - O(1) operation, no DB query
+    websocketService.trackUserActivity(updatedBy)
+      .catch(err => logger.error('Failed to track user activity after ticket stage update:', err));
+
+    // Queue ticket update for Vespa ingestion with complete data
+    // try {
+    //   // Run all independent database queries concurrently
+    //   const [workflow, subTicketMapping, createdByUser, conversation] = await Promise.all([
+    //     // Get workflow for this ticket
+    //     prisma.workflow.findFirst({
+    //       where: { ticketId: updatedTicket.id },
+    //       orderBy: { createdAt: 'desc' }
+    //     }),
+    //     // Check if this ticket is a sub-ticket to find its parent
+    //     prisma.ticketSubTicketMapping.findFirst({
+    //       where: { subTicketId: updatedTicket.id }
+    //     }),
+    //     // Get createdBy user's email for ownerEmail and name for createdBy
+    //     prisma.user.findUnique({
+    //       where: { id: updatedTicket.createdBy },
+    //       select: { email: true, name: true }
+    //     }),
+    //     // Get conversation to fetch channelId for Vespa reference
+    //     updatedTicket.conversationId ? prisma.conversation.findUnique({
+    //       where: { conversationId: updatedTicket.conversationId },
+    //       select: { channelId: true }
+    //     }) : Promise.resolve(null)
+    //   ]);
+
+    //   const channelId = conversation?.channelId || '';
+
+    //   const ticketWithAdditionalData = {
+    //     ...updatedTicket,
+    //     createdBy: createdByUser?.name,
+    //     workflowType: workflow?.workflowType || 'default',
+    //     parentTicketId: subTicketMapping?.ticketId || '',
+    //     ownerEmail: createdByUser?.email || '',
+    //     channelId, // Include channelId for Vespa channelRef
+    //   };
+
+    //   await queueTicketIngestion(ticketWithAdditionalData, 'update');
+    // } catch (error) {
+    //   logger.error(`[VESPA-FLOW] Failed to queue ticket update for Vespa: ${updatedTicket.id}`, error);
+    //   // Don't throw - ticket is still updated in DB
+    // }
+
+    return updatedTicket;
+  }
+
+  /**
+   * Get ticket by ID with board information
+   */
+  async getTicketWithBoard(ticketId: string) {
+    return await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        id: true,
+        boardId: true,
+        stageName: true,
+        updatedBy: true
+      }
+    });
+  }
+}

@@ -1,0 +1,16 @@
+# Grafana Datasource Configuration
+# VictoriaMetrics is Prometheus-compatible, so we use type: prometheus
+
+apiVersion: 1
+
+datasources:
+  - name: VictoriaMetrics
+    type: prometheus
+    access: proxy
+    url: http://victoriametrics:8428
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: '15s'
+      queryTimeout: '60s'
+      httpMethod: 'POST'

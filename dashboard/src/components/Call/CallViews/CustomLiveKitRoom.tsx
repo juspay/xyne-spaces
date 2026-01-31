@@ -1,0 +1,307 @@
+import { useEffect, useCallback, useMemo } from 'react';
+import { useSelector } from '@xstate/react';
+import type { Zero } from '@rocicorp/zero';
+import { CallType } from '@xyne/shared';
+import { roomActor } from '../../../machines/roomMachine';
+import { MiniCallView } from './MiniCallView';
+import { FullCallView } from './FullCallView';
+import { usePlatform } from '../../../hooks/usePlatform';
+import { AIInviteDialog } from '../CallModals/AIInviteDialog';
+import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
+import { useChannel } from '../../../hooks/useChannels';
+import { useAuth } from '../../../hooks/useAuth';
+
+export interface CustomLiveKitRoomProps {
+  token: string;
+  serverUrl: string;
+  callId: string;
+  callType: CallType;
+  externalId: string;
+  zero: Zero | null;
+}
+
+export function CustomLiveKitRoom({
+  token,
+  serverUrl,
+  callId,
+  callType,
+  externalId,
+  zero,
+}: CustomLiveKitRoomProps): React.ReactElement {
+  // Subscribe to room state from global XState machine using a single snapshot
+  const snapshot = useSelector(roomActor, state => state);
+  const { isMobile } = usePlatform();
+  const { user } = useAuth();
+
+  // Extract values from snapshot
+  const {
+    participants,
+    connectionState,
+    isMicEnabled,
+    isCameraEnabled,
+    isScreenSharing,
+    isAIAssistantEnabled,
+    aiController,
+    pendingControlRequest,
+    isAiControlRequested,
+    viewMode: machineViewMode,
+    roomLink,
+    channelId,
+    isChatOpen,
+    room,
+    activeCalls,
+    inviteDialogOpen,
+    inviteUsers,
+    inviteSuggestedMessage,
+    ticketDialogOpen,
+    ticketTitle,
+    ticketDescription,
+    ticketBoardId,
+    isNativeMode,
+  } = snapshot.context;
+
+  // Determine simple machine state string for child components
+  // Handle nested states like { connected: 'nativeMode' }
+  const machineState = snapshot.matches('connected')
+    ? 'connected'
+    : snapshot.matches('connecting')
+      ? 'connecting'
+      : snapshot.matches('initiating')
+        ? 'initiating'
+        : snapshot.matches('joining')
+          ? 'joining'
+          : snapshot.matches('disconnecting')
+            ? 'disconnecting'
+            : 'idle';
+
+  const metadata = useMemo(() => {
+    const activeCall = activeCalls.find(call => call.externalId === externalId);
+    return activeCall?.metadata as { conversationId?: string; channelId?: string } | undefined;
+  }, [activeCalls, externalId]);
+
+  const currentChannel = useChannel(channelId || '');
+
+  // const isAiControlRequested = useMemo(() => {
+  //   return pendingControlRequest !== null;
+  // }, [pendingControlRequest]);
+  // Connect to room on mount
+  useEffect(() => {
+    if (token && serverUrl) {
+      roomActor.send({
+        type: 'CONNECT',
+        token,
+        serverUrl,
+        callType,
+        externalId,
+        zero,
+      });
+    }
+  }, [token, serverUrl, callType, externalId, zero]);
+  // Toggle microphone via XState
+  const toggleMicrophone = useCallback(() => {
+    roomActor.send({ type: 'TOGGLE_MIC' });
+  }, []);
+
+  // Toggle camera via XState
+  const toggleCamera = useCallback(() => {
+    roomActor.send({ type: 'TOGGLE_CAMERA' });
+  }, []);
+
+  // Toggle screen share via XState
+  const toggleScreenShare = useCallback(() => {
+    roomActor.send({ type: 'TOGGLE_SCREEN_SHARE' });
+  }, []);
+
+  // Disconnect from room via XState
+  const handleDisconnect = useCallback(() => {
+    // Close thread panel first if it's open
+    if (isChatOpen) {
+      roomActor.send({ type: 'TOGGLE_CHAT' });
+    }
+    // Then disconnect from the call
+    roomActor.send({ type: 'DISCONNECT' });
+  }, [isChatOpen]);
+
+  const handleToggleThread = useCallback(() => {
+    if (channelId && metadata?.conversationId) {
+      roomActor.send({ type: 'TOGGLE_CHAT' });
+    }
+  }, [channelId, metadata]);
+
+  // AI Invite dialog handlers
+  const handleCloseInviteDialog = useCallback(() => {
+    roomActor.send({ type: 'CLOSE_INVITE_DIALOG' });
+  }, []);
+
+  const handleSendInvite = useCallback((userIds: string[], message: string) => {
+    roomActor.send({ type: 'SEND_INVITE', userIds, message });
+  }, []);
+
+  // AI Ticket dialog handlers
+  const handleCloseTicketDialog = useCallback(() => {
+    roomActor.send({ type: 'CLOSE_TICKET_DIALOG' });
+  }, []);
+
+  const handleTicketCreated = useCallback(() => {
+    roomActor.send({ type: 'TICKET_CREATED' });
+  }, []);
+
+  // Prepare initial values for AI ticket creation
+  const initialTicketAssignee = useMemo(() => {
+    if (user?.id) {
+      return { type: 'assigneeTo' as const, value: user.id };
+    }
+    return null;
+  }, [user?.id]);
+
+  const initialTicketEta = useMemo(() => {
+    // Set due date to tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(23, 59, 59, 999); // End of tomorrow
+    return tomorrow;
+  }, []);
+
+  // Handle request for AI control
+  const handleRequestControl = useCallback(() => {
+    if (room) {
+      const localIdentity = room.localParticipant.identity;
+      const localName = room.localParticipant.name || 'Unknown';
+      void room.localParticipant.publishData(
+        new TextEncoder().encode(
+          JSON.stringify({
+            type: 'ai_control_request',
+            requester_id: localIdentity,
+            requester_name: localName,
+          }),
+        ),
+        { reliable: true },
+      );
+      // Send event to track that local user has a pending request
+      roomActor.send({ type: 'AI_CONTROL_REQUEST_SENT' });
+    }
+  }, [room]);
+
+  // Don't render if in native mode - native UI will handle the call
+  if (isNativeMode) {
+    return <></>;
+  }
+
+  // Route to appropriate view based on viewMode
+  if (machineViewMode === 'mini') {
+    // Mobile: Don't render anything (header is in AppRoot), Desktop: Show mini view
+    if (isMobile) {
+      return <></>;
+    }
+
+    return (
+      <>
+        <MiniCallView
+          participants={participants}
+          isMicEnabled={isMicEnabled}
+          isCameraEnabled={isCameraEnabled}
+          isScreenSharing={isScreenSharing}
+          isAIAssistantEnabled={isAIAssistantEnabled}
+          aiController={aiController}
+          requestedAiController={isAiControlRequested}
+          localParticipantId={room?.localParticipant.identity ?? null}
+          connectionState={connectionState}
+          machineState={machineState}
+          callId={callId}
+          roomLink={roomLink || ''}
+          isChatOpen={isChatOpen}
+          channelId={channelId}
+          conversationId={metadata?.conversationId || null}
+          room={room}
+          pendingControlRequest={pendingControlRequest}
+          onToggleMic={toggleMicrophone}
+          onToggleCamera={toggleCamera}
+          onToggleScreenShare={toggleScreenShare}
+          onDisconnect={handleDisconnect}
+          onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+          onToggleThread={handleToggleThread}
+          onRequestControl={handleRequestControl}
+        />
+        <AIInviteDialog
+          isOpen={inviteDialogOpen}
+          onClose={handleCloseInviteDialog}
+          onSend={handleSendInvite}
+          callId={callId}
+          users={inviteUsers}
+          suggestedMessage={inviteSuggestedMessage}
+          roomLink={roomLink || undefined}
+        />
+        {channelId && currentChannel?.projectId && (
+          <CreateTicketModal
+            isOpen={ticketDialogOpen}
+            onClose={handleCloseTicketDialog}
+            channelId={channelId}
+            projectId={currentChannel.projectId}
+            selectedBoardId={ticketBoardId}
+            initialTitle={ticketTitle}
+            initialDescription={ticketDescription}
+            initialAssignee={initialTicketAssignee}
+            initialEta={initialTicketEta}
+            isFromAI={true}
+            onTicketCreated={handleTicketCreated}
+          />
+        )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <FullCallView
+        participants={participants}
+        isMicEnabled={isMicEnabled}
+        isCameraEnabled={isCameraEnabled}
+        isScreenSharing={isScreenSharing}
+        isAIAssistantEnabled={isAIAssistantEnabled}
+        aiController={aiController}
+        localParticipantId={room?.localParticipant.identity || null}
+        callId={callId}
+        connectionState={connectionState}
+        machineState={machineState}
+        roomLink={roomLink || ''}
+        isChatOpen={isChatOpen}
+        channelId={channelId}
+        conversationId={metadata?.conversationId || null}
+        room={room}
+        pendingControlRequest={pendingControlRequest}
+        onToggleMic={toggleMicrophone}
+        onToggleCamera={toggleCamera}
+        onToggleScreenShare={toggleScreenShare}
+        onDisconnect={handleDisconnect}
+        onMinimize={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+        onToggleThread={handleToggleThread}
+        onRequestControl={handleRequestControl}
+        requestedAiController={isAiControlRequested}
+      />
+      <AIInviteDialog
+        isOpen={inviteDialogOpen}
+        onClose={handleCloseInviteDialog}
+        onSend={handleSendInvite}
+        callId={callId}
+        users={inviteUsers}
+        suggestedMessage={inviteSuggestedMessage}
+        roomLink={roomLink || undefined}
+      />
+      {channelId && currentChannel?.projectId && (
+        <CreateTicketModal
+          isOpen={ticketDialogOpen}
+          onClose={handleCloseTicketDialog}
+          channelId={channelId}
+          projectId={currentChannel.projectId}
+          selectedBoardId={ticketBoardId}
+          initialTitle={ticketTitle}
+          initialDescription={ticketDescription}
+          initialAssignee={initialTicketAssignee}
+          initialEta={initialTicketEta}
+          isFromAI={true}
+          onTicketCreated={handleTicketCreated}
+        />
+      )}
+    </>
+  );
+}

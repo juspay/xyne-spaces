@@ -1,0 +1,155 @@
+// Frontend search types that mirror the backend search types
+
+// Entity types from backend (plural form) - using const object due to erasableSyntaxOnly
+export const SearchableEntityType = {
+  USERS: 'users',
+  MESSAGES: 'messages',
+  CHANNELS: 'channels',
+  TICKETS: 'tickets',
+  ATTACHMENTS: 'attachments',
+} as const;
+
+export type SearchableEntityType = (typeof SearchableEntityType)[keyof typeof SearchableEntityType];
+
+// Display types for frontend UI (some singular, conversation instead of messages)
+export type DisplayEntityType = 'user' | 'channel' | 'conversation' | 'ticket' | 'attachment';
+
+export interface GlobalSearchFilters {
+  query: string;
+  entityTypes?: SearchableEntityType[];
+  orgName?: string;
+  channelIds?: string[];
+  userIds?: string[];
+  dateRange?: {
+    from?: string;
+    to?: string;
+  };
+  page?: number;
+  limit?: number;
+  searchType?: 'trigram' | 'fts' | 'both';
+  sort?: 'relevance' | 'newest' | 'oldest';
+}
+
+export interface SearchResult {
+  id: string;
+  type: SearchableEntityType;
+  title: string;
+  subtitle?: string;
+  content: string;
+  relevanceScore: number;
+  createdAt: string;
+  avatar?: string;
+  context?: SearchContext;
+}
+
+export interface SearchContext {
+  channelId?: string;
+  channelTitle?: string;
+  scopeType?: string; // Channel scope type: 'DM', 'GROUP_DM', 'DEFAULT', etc.
+  conversationId?: string;
+  messageId?: string;
+  replyCount?: number; // Number of replies - determines if message is a thread
+  orgName?: string;
+  senderName?: string;
+  senderId?: string;
+  ticketId?: string;
+  ticketStatus?: string;
+  attachmentId?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+}
+
+export interface PaginatedSearchResults {
+  results: SearchResult[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    hasMore: boolean;
+  };
+  aggregations: {
+    userCount: number;
+    messageCount: number;
+    channelCount: number;
+    ticketCount: number;
+    attachmentCount: number;
+  };
+  meta: {
+    query: string;
+    searchTime: string;
+    searchType: string;
+  };
+}
+
+// Frontend display types for the UI components
+export interface DisplaySearchResult {
+  type: DisplayEntityType;
+  id: string;
+  title: string;
+  subtitle: string;
+  context?: string;
+  avatar?: string;
+  metadata: {
+    channelName?: string;
+    timestamp?: string;
+    status?: string;
+    fileSize?: string;
+    unreadCount?: number;
+  };
+  // Preserve the original search context for navigation
+  searchContext?: SearchContext;
+  relevanceScore: number;
+  debugInfo?: {
+    matchfeatures?: Record<string, string | number>;
+    rankfeatures?: Record<string, string | number>;
+  };
+}
+
+export interface SearchApiResponse {
+  success: boolean;
+  data?: PaginatedSearchResults;
+  error?: string;
+}
+
+// Vespa-specific types
+export interface VespaSearchFilters {
+  query: string;
+  type?: string; // 'messages' | 'attachments' | 'channels' | 'tickets' | 'users'
+  from?: string; // User IDs
+  in?: string; // Channel IDs
+  offset?: number;
+  limit?: number;
+  apps?: string; // 'slack,ticket,user'
+  rankProfile?: string;
+  includeDebugInfo?: boolean; // Include matchfeatures and rankfeatures
+  // Additional filters
+  channelId?: string;
+  projectId?: string;
+  docType?: string;
+  senderId?: string;
+  groupId?: string;
+  status?: string;
+  ticketId?: string;
+  searchId?: string;
+}
+
+export interface VespaSearchGroup {
+  groupBy: string;
+  groupValue: string;
+  count: number;
+  results: DisplaySearchResult[];
+}
+
+export interface VespaSearchResponse {
+  success: boolean;
+  data: {
+    grouped?: boolean;
+    groups?: VespaSearchGroup[];
+    results?: DisplaySearchResult[];
+    totalCount: number;
+    offset: number;
+    limit: number;
+  };
+  error?: string;
+}

@@ -1,0 +1,422 @@
+import React, { ReactNode, useEffect, useRef, useState } from 'react';
+import { useConnectionState, useZero } from '@rocicorp/zero/react';
+import { useQuery as useTanStackQuery } from '@tanstack/react-query';
+import { queries } from '../zero/queries';
+import { useAuthContextValues } from '../hooks/useAuth';
+import AppLoader from '../components/AppLoader/AppLoader';
+import { stateMachineActor } from '../machines/stateMachine';
+import {
+  setupQueryCachePersistence,
+  hydrateQueryCacheFromIndexedDB,
+} from '../machines/queryCacheMachine';
+import { UserPermission } from '../machines/stateMachine';
+import { apiInstance } from '../services/clients/apiClient';
+import { emojiActor } from '../machines/emojiMachine';
+import { ReadonlyJSONValue } from '@rocicorp/zero';
+import { websocketService } from '../services/clients/socketClient';
+import { initializeMetrics, cleanupMetrics } from '../services/metricsService';
+import axios from 'axios';
+import { API_BASE_URL } from '../config';
+import { v4 as uuidv4 } from 'uuid';
+import { mixpanelService } from '../services/Analytics/mixpanelService';
+import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
+import { dropAllDatabases } from '@rocicorp/zero';
+import { clearAuthTokens } from '../services/clients/apiClient';
+import { logger, Event as LoggerEvent } from '../utils/logger';
+import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
+import { useCachedQuery } from '../hooks/useCachedQuery';
+import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
+
+interface InitialStateLoaderProps {
+  children: ReactNode;
+}
+
+interface PermissionsApiResponse {
+  success: boolean;
+  permissions: UserPermission[];
+}
+
+// const isQueryError = (obj: QueryResultDetails[]): boolean => {
+//   return obj.some(v => v.type === "error");
+// }
+
+type QueryDetails =
+  | {
+      readonly type: 'complete';
+    }
+  | {
+      readonly type: 'unknown';
+    }
+  | {
+      readonly type: 'error';
+      readonly retry: () => void;
+      readonly refetch: () => void;
+      readonly error:
+        | {
+            readonly type: 'app';
+            readonly message: string;
+            readonly details?: ReadonlyJSONValue;
+          }
+        | {
+            readonly type: 'parse';
+            readonly message: string;
+            readonly details?: ReadonlyJSONValue;
+          };
+    };
+
+const isQueryCompleted = (obj: QueryDetails): boolean => {
+  return obj.type === 'complete';
+};
+
+const areQueriesCompleted = (obj: QueryDetails[]): boolean => {
+  return obj.every(isQueryCompleted);
+};
+
+const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): ReactNode => {
+  const isRefreshing = useRef(false);
+  const persistenceSetup = useRef(false);
+
+  const [isHydrated, setIsHydrated] = useState(false);
+  const context = useAuthContextValues();
+  const zero = useZero();
+  const state = useConnectionState();
+  logger.setZeroClientID(zero.clientID);
+  logger.setZeroClientGroupID(zero.clientGroupID);
+
+  useZeroConnectionLogger(state);
+
+  const schemaVersion = zero.schemaVersion;
+
+  // Retry logic state
+  const retryCountRef = useRef(0);
+  const resetTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const previousStateRef = useRef<string>('');
+  const MAX_RETRIES = 4;
+
+  const getRetryDelay = (retryCount: number): number => {
+    return Math.min(1000 * Math.pow(2, retryCount), 10000); // Max 10 seconds
+  };
+
+  const handleReAuth = async (): Promise<void> => {
+    // Prevent multiple simultaneous refresh attempts
+    if (isRefreshing.current) {
+      return;
+    }
+
+    isRefreshing.current = true;
+    try {
+      // Note: Using direct axios call instead of apiInstance
+      // Call refresh endpoint directly (browser receives Set-Cookie)
+      const refreshHeaders: Record<string, string> = {};
+      refreshHeaders['x-request-id'] = uuidv4();
+      if (logger.zeroClientID) {
+        refreshHeaders['x-client-id'] = logger.zeroClientID;
+      }
+      if (logger.zeroClientGroupID) {
+        refreshHeaders['x-zero-client-group-id'] = logger.zeroClientGroupID;
+      }
+      const userEmail = logger.emailId;
+      if (userEmail) {
+        refreshHeaders['x-user-email'] = userEmail;
+      }
+      const refreshStartTime = Date.now();
+
+      await axios.get(`${API_BASE_URL}/auth/refresh-session`, {
+        withCredentials: true, // Send cookies (session ID)
+        headers: refreshHeaders,
+      });
+
+      const refreshLatency = Date.now() - refreshStartTime;
+
+      logger.info(LoggerEvent.AUTH_REFRESH_SUCCESS, {
+        trigger: 'ZERO_SYNC_AUTH_REQUIRED',
+        refresh_latency_ms: refreshLatency,
+      });
+
+      safeRecordMetric(() => {
+        authRefreshDuration.record(refreshLatency, {
+          trigger: 'zero_sync_auth_invalidated',
+          platformName: logger.platformName,
+        });
+        authRefreshTotal.add(1, {
+          trigger: 'zero_sync_auth_invalidated',
+          platformName: logger.platformName,
+          status: 'success',
+        });
+      });
+
+      // Reconnect WebSocket with new token
+      if (websocketService.isConnectedToServer()) {
+        websocketService.reconnect();
+      }
+
+      await zero.connection.connect();
+      isRefreshing.current = false;
+
+      logger.info(LoggerEvent.APP_REFRESH, {
+        url: window.location.href,
+        trigger: 'ZERO_SYNC_AUTH_INVALIDATED',
+      });
+    } catch (err) {
+      logger.error(LoggerEvent.AUTH_REFRESH_FAILED, {
+        trigger: 'ZERO_SYNC_AUTH_INVALIDATED',
+        error_message: err,
+        sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
+      });
+
+      safeRecordMetric(() => {
+        authRefreshTotal.add(1, {
+          trigger: 'zero_sync_auth_invalidated',
+          status: 'error',
+          platformName: logger.platformName,
+          reason: err instanceof Error ? err.message : 'Unknown error',
+        });
+      });
+
+      // Track app refresh before reload
+      mixpanelService.track(EVENTS.APP_REFRESH, {
+        trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.ZERO_SYNC_AUTH_INVALIDATED,
+        errorMessage: 'ReAuth triggered',
+        url: window.location.href,
+        sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
+      });
+
+      // Clear Zero's local databases
+      void dropAllDatabases();
+
+      // Clear all cookies and auth tokens (handles Electron + Web)
+      clearAuthTokens();
+
+      // Force hard reload to reset all state
+      window.location.href = '/auth';
+      window.location.reload();
+    } finally {
+      isRefreshing.current = false;
+    }
+  };
+
+  // Hydrate from IndexedDB on mount (only when logged in)
+  useEffect(() => {
+    const initializeState = async (): Promise<void> => {
+      try {
+        if (context.userID) {
+          const hydrationStartTime = Date.now();
+          // User is logged in - hydrate their specific database
+          await hydrateQueryCacheFromIndexedDB(context.userID, schemaVersion);
+
+          const hydrationLatency = Date.now() - hydrationStartTime;
+
+          logger.info(LoggerEvent.INITIAL_STATE_HYDRATION_COMPLETE, {
+            schemaVersion,
+            latency: hydrationLatency,
+          });
+        }
+      } catch (error) {
+        logger.error(LoggerEvent.INITIAL_STATE_HYDRATION_FAILED, {
+          schemaVersion,
+          error,
+        });
+      } finally {
+        setIsHydrated(true);
+      }
+    };
+
+    void initializeState();
+  }, [context.userID, schemaVersion]);
+
+  useEffect(() => {
+    if (context.userID && !persistenceSetup.current && isHydrated) {
+      setupQueryCachePersistence(context.userID, schemaVersion);
+      persistenceSetup.current = true;
+    }
+  }, [context.userID, schemaVersion, isHydrated]);
+
+  // Initialize metrics once user is authenticated
+  useEffect(() => {
+    if (context.userID && isHydrated) {
+      void initializeMetrics();
+    }
+
+    return () => {
+      cleanupMetrics();
+    };
+  }, [context.userID, isHydrated]);
+
+  useEffect(() => {
+    const currentState = state.name;
+    const previousState = previousStateRef.current;
+
+    switch (currentState) {
+      case 'needs-auth':
+        void handleReAuth();
+        break;
+      case 'error':
+        // Clear timer when we hit error state
+        if (resetTimerRef.current) {
+          clearTimeout(resetTimerRef.current);
+          resetTimerRef.current = null;
+        }
+
+        // Only attempt reconnect if we haven't exceeded max retries
+        if (retryCountRef.current < MAX_RETRIES) {
+          retryCountRef.current += 1;
+
+          // Calculate exponential backoff delay
+          const delay = getRetryDelay(retryCountRef.current - 1);
+
+          // Apply exponential backoff before retry
+          setTimeout(() => {
+            if (retryCountRef.current === 1) {
+              logger.info(LoggerEvent.ZERO_ERROR_RECONNECT_INITIATED, {
+                trigger: 'ZERO_SOCKET_CONNECTION_ERROR',
+                reason: state.reason,
+              });
+              void zero.connection.connect();
+              return;
+            }
+            logger.info(LoggerEvent.ZERO_ERROR_RELOAD_INITIATED, {
+              trigger: 'ZERO_SOCKET_CONNECTION_ERROR',
+              reason: state.reason,
+            });
+            stateMachineActor.send({ type: 'REFRESH_ZERO' });
+          }, delay);
+        } else {
+          // Track max retries reached
+          logger.info(LoggerEvent.ZERO_ERROR_RELOAD_LIMIT_REACHED, {
+            trigger: 'ZERO_ERROR_RELOAD_INITIATED',
+            count: retryCountRef.current,
+          });
+        }
+        break;
+      default:
+        // Only start timer if we just transitioned FROM error state
+        if (previousState === 'error') {
+          // Clear any existing timer first
+          if (resetTimerRef.current) {
+            clearTimeout(resetTimerRef.current);
+          }
+
+          resetTimerRef.current = setTimeout(() => {
+            retryCountRef.current = 0; // Reset after 5 seconds without error
+            resetTimerRef.current = null;
+          }, 5000);
+        }
+        break;
+    }
+
+    // Update previous state for next iteration
+    previousStateRef.current = currentState;
+
+    // Cleanup timer on unmount
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, [state.name]);
+
+  const [users, usersDetails] = useCachedQuery(queries.getUsers(), { ttl: '10m' });
+  const [bookmarks, bookmarksDetails] = useCachedQuery(queries.userBookmarks(), { ttl: '10m' });
+  const [visibleChannels, visibleChannelsDetails] = useCachedQuery(queries.userVisibleChannels(), {
+    ttl: '10m',
+  });
+  const [allChannels, allChannelsDetails] = useCachedQuery(queries.userAllChannels(), {
+    ttl: '10m',
+  });
+  const [allUserGroups, allUserGroupsDetails] = useCachedQuery(queries.getAllUserGroups());
+  const [userChannelStatus, userChannelStatusDetails] = useCachedQuery(
+    queries.getAllChannelsUserStatus(),
+    { ttl: '10m' },
+  );
+
+  const permissionsQuery = useTanStackQuery<PermissionsApiResponse>({
+    queryKey: ['user-permissions', context.userID],
+    queryFn: async () => {
+      const response = await apiInstance.get<PermissionsApiResponse>('/auth/permissions');
+      return response.data;
+    },
+    staleTime: 10 * 60 * 1000,
+    enabled: !!context.userID,
+  });
+
+  useEffect(() => {
+    if (isQueryCompleted(usersDetails)) {
+      stateMachineActor.send({ type: 'ADD_USERS', users: users || [] });
+      if (users && context.userID) {
+        const currentUser = users.find(user => user.id === context.userID);
+        if (currentUser?.email) {
+          logger.setEmailId(currentUser.email);
+        }
+      }
+    }
+
+    if (isQueryCompleted(visibleChannelsDetails)) {
+      stateMachineActor.send({ type: 'ADD_VISIBLE_CHANNELS', channels: visibleChannels || [] });
+    }
+
+    if (isQueryCompleted(allChannelsDetails)) {
+      stateMachineActor.send({ type: 'ADD_ALL_CHANNELS', channels: allChannels || [] });
+    }
+
+    if (permissionsQuery.isSuccess && permissionsQuery.data?.success) {
+      stateMachineActor.send({
+        type: 'SET_USER_PERMISSIONS',
+        permissions: permissionsQuery.data.permissions || [],
+      });
+    }
+
+    if (isQueryCompleted(userChannelStatusDetails)) {
+      stateMachineActor.send({
+        type: 'ADD_USER_CHANNEL_STATUSES',
+        userChannelStatuses: userChannelStatus,
+      });
+    }
+
+    if (isQueryCompleted(bookmarksDetails)) {
+      stateMachineActor.send({ type: 'ADD_USER_BOOKMARKS', bookmarks: bookmarks });
+    }
+
+    if (isQueryCompleted(allUserGroupsDetails)) {
+      stateMachineActor.send({ type: 'ADD_ALL_USER_GROUPS', userGroups: allUserGroups });
+    }
+
+    // Fetch custom emojis when user is authenticated
+    if (context.userID && isHydrated) {
+      emojiActor.send({ type: 'FETCH_EMOJIS' });
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    users,
+    usersDetails.type,
+    visibleChannels,
+    visibleChannelsDetails.type,
+    allChannels,
+    allChannelsDetails.type,
+    permissionsQuery.data,
+    userChannelStatus,
+    userChannelStatusDetails.type,
+    bookmarks,
+    bookmarksDetails.type,
+    allUserGroups,
+    allUserGroupsDetails.type,
+  ]);
+
+  const areAllQueriesCompleted =
+    areQueriesCompleted([
+      usersDetails,
+      bookmarksDetails,
+      visibleChannelsDetails,
+      userChannelStatusDetails,
+    ]) && permissionsQuery.isSuccess;
+
+  // Once hydrated, show cached content while queries are loading
+  // This provides immediate UI feedback with cached data
+  if (areAllQueriesCompleted) {
+    return children;
+  }
+
+  return <AppLoader />;
+};
+
+export default InitialStateLoader;

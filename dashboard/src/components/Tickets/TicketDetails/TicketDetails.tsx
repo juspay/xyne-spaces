@@ -1,0 +1,1662 @@
+import React, { useMemo, useState, useRef, useEffect } from 'react';
+import { useZero } from '@rocicorp/zero/react';
+import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  Tag,
+  Plus,
+  X,
+  Check,
+  FileText,
+  ChevronDown,
+  ChevronLeft,
+  ChevronUp,
+  LinkIcon,
+  Minimize2,
+  Play,
+  Sparkles,
+  Calendar,
+  SquareKanban,
+} from 'lucide-react';
+import type { SubTicket, TicketReferenceMapping, FormFields, FormEntityValues } from '@xyne/shared';
+import {
+  TicketPriority,
+  TicketStatusV2,
+  TicketReferenceRelation,
+  FormFieldType,
+  FormContextType,
+  FormEntityType,
+} from '@xyne/shared';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { TicketActivity } from '../TicketActivity';
+import { UserSelector } from '../CreateTicketModal/UserSelector';
+import { SubTicketModal } from '../SubTicketModal/SubTicketModal';
+import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
+import { MappedTicketModal } from '../MappedTicketModal/MappedTicketModal';
+import { EditableFormField } from './EditableFormField';
+import { queries } from '../../../zero/queries';
+import { useChannel } from '../../../hooks/useChannels';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import UserAvatar from '../../UserAvatar/UserAvatar';
+import { AvatarShape, AvatarSize } from '@juspay/blend-design-system';
+import { Selector } from './Selector';
+import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
+import { mutators } from '../../../zero/mutators';
+import { useUsers } from '../../../hooks/useUsers';
+import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import {
+  formatIncomingReferenceLabel,
+  formatReferenceLabel,
+  useTicketReferences,
+} from '../../../hooks/useTicketReferences';
+import { TicketStatusIcon as TicketStageIcon } from '../TicketStatus/TicketStatusIcon';
+import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
+import { formatETADisplay, getLocalISOString } from '../utils';
+import { cn } from '../../ui/Drawer';
+import Button from '../../ui/Button';
+import { FileBubble } from '../../ui/FileBubble/FileBubble';
+import Tooltip from '../../ui/Tooltip';
+import WorkflowTriggerModal from '../../Workflow/WorkflowTriggerModal';
+import { SHAREABLE_ORIGIN } from '../../../config';
+import ApprovalNudgeBanner from './ApprovalNudgeBanner';
+
+const formatTimestamp = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  return ` ${date.toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })}`;
+};
+
+interface StageInfo {
+  boardId: string;
+  name: string;
+  sequenceNumber: number;
+  defaultTicketStatusV2?: string;
+}
+
+const getStageProgress = (
+  currentStageName: string | null | undefined,
+  stages: StageInfo[] | undefined,
+): number => {
+  if (!stages || stages.length === 0 || !currentStageName) return 0;
+
+  const currentStage = stages.find(stage => stage.name === currentStageName);
+  if (!currentStage) return 0;
+
+  return Math.round((currentStage.sequenceNumber / stages.length) * 100);
+};
+
+const PRIORITY_OPTIONS: TicketPriority[] = [
+  TicketPriority.LOW,
+  TicketPriority.MEDIUM,
+  TicketPriority.HIGH,
+  TicketPriority.CRITICAL,
+];
+
+interface TicketTag {
+  id: string;
+  name: string;
+}
+
+interface TicketReferenceWithTicket extends TicketReferenceMapping {
+  targetTicket?: {
+    id?: string;
+    title?: string | null;
+    xyneId?: string | null;
+    boardId?: string | null;
+    stageName?: string | null;
+    priority?: TicketPriority;
+    assignedTo?: string | null;
+  };
+  sourceTicket?: {
+    id?: string;
+    title?: string | null;
+    xyneId?: string | null;
+    boardId?: string | null;
+    stageName?: string | null;
+    priority?: TicketPriority;
+    assignedTo?: string | null;
+  };
+}
+
+// Type for form entity values with the related form field
+interface FormEntityValueWithField extends FormEntityValues {
+  formField?: FormFields;
+}
+
+interface TicketDetailsProps {
+  ticketId: string;
+  onNavigateToTicket?: (ticketId: string) => void;
+  expandedView?: boolean;
+  navigation?: {
+    currentIndex: number;
+    totalCount: number;
+    canNavigatePrevious: boolean;
+    canNavigateNext: boolean;
+  };
+  onNavigatePrevious?: () => void;
+  onNavigateNext?: () => void;
+}
+
+const TicketKeyValuePair = ({
+  ticketKey,
+  value,
+  className,
+}: {
+  ticketKey: string;
+  value: React.ReactElement;
+  className?: string;
+}): React.ReactElement => {
+  return (
+    <div className='flex flex-wrap items-center gap-2 w-fit'>
+      <span className='text-sm text-[#181B1D] w-[85px]'>{ticketKey}</span>
+      <div className={`text-sm text-[#3B4145] break-all ${className}`}>{value}</div>
+    </div>
+  );
+};
+
+export const TicketDetails: React.FC<TicketDetailsProps> = ({
+  ticketId,
+  onNavigateToTicket,
+  expandedView = false,
+  navigation,
+  onNavigatePrevious,
+  onNavigateNext,
+}) => {
+  const zero = useZero();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // State declarations
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleValue, setTitleValue] = useState('');
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionValue, setDescriptionValue] = useState('');
+  const [showTagDropdown, setShowTagDropdown] = useState(false);
+  const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
+  const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
+  const [selectedSubTicket, setSelectedSubTicket] = useState<SubTicket | null>(null);
+  const [mappedTicketId, setMappedTicketId] = useState<string | null>(null);
+  const [tagSearchQuery, setTagSearchQuery] = useState('');
+  const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
+  const [editingETA, setEditingETA] = useState(false);
+  const [etaValue, setETAValue] = useState('');
+
+  // Query ticket data
+  const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId }));
+
+  // Query all users for assignee dropdown
+  const users = useUsers();
+
+  // Query stages if ticket has a boardId
+  const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: ticket?.boardId ?? '' }), {
+    enabled: !!ticket?.boardId,
+  });
+
+  // Query channel if ticket has conversation with channelId
+  const channelId = ticket?.conversation?.channelId;
+  const channel = useChannel(channelId || '');
+
+  // Query user group if ticket has userGroupId
+  const [userGroup] = useCachedQuery(
+    queries.getUserGroupById({ userGroupId: ticket?.userGroupId ?? '' }),
+    { enabled: !!ticket?.userGroupId },
+  );
+
+  // Query all tickets in the project to extract available tags
+  const [projectTickets] = useCachedQuery(
+    queries.ticketsByProject({ projectId: ticket?.projectId ?? '' }),
+    { enabled: !!ticket?.projectId },
+  );
+
+  const [boards] = useCachedQuery(queries.boardsByProject({ projectId: ticket?.projectId || '' }), {
+    enabled: !!ticket?.projectId,
+  });
+
+  // Query ticket attachments
+  const [ticketAttachments] = useCachedQuery(queries.attachmentsByTicket({ ticketId }));
+
+  // Ref hooks
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+  const etaInputRef = useRef<HTMLInputElement>(null);
+
+  // Memoized values
+  const createdByUser = useMemo(
+    () => users?.find(u => u.id === ticket?.createdBy),
+    [users, ticket?.createdBy],
+  );
+
+  // Fetch ticket activities
+  const [activities] = useCachedQuery(queries.ticketActivities({ ticketId: ticket?.id ?? '' }), {
+    enabled: !!ticket?.id,
+  });
+
+  // Fetch subtickets
+  const [subTicketMappings] = useCachedQuery(queries.subTicketsForTicket({ ticketId: ticketId }));
+  const subTickets = useMemo(
+    () =>
+      subTicketMappings
+        ?.map(mapping => mapping.subTicket)
+        .filter((st): st is NonNullable<typeof st> => st !== null && st !== undefined) || [],
+    [subTicketMappings],
+  );
+
+  // Fetch parent tickets - check if this ticket is a mapped ticket for any sub-ticket
+  const [parentSubTickets] = useCachedQuery(
+    queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
+  );
+
+  // Query parent tickets through the mappings
+  const parentTicketIds = useMemo(
+    () =>
+      parentSubTickets
+        ?.flatMap(st => st.ticketMappings?.map(m => m.ticketId) || [])
+        .filter((id): id is string => id !== null && id !== undefined) || [],
+    [parentSubTickets],
+  );
+
+  const [parentTickets] = useCachedQuery(queries.ticketsByIds({ ticketIds: parentTicketIds }), {
+    enabled: parentTicketIds.length > 0,
+  });
+
+  // Fetch form entity values for this ticket
+  const [formEntityValues] = useCachedQuery(
+    queries.getFormEntityValuesByEntityId({ entityId: ticketId }),
+    { enabled: !!ticketId },
+  );
+
+  // Fetch form mapping for the ticket's board to get all defined fields
+  const [formMapping] = useCachedQuery(
+    queries.getFormMappingByContextId({
+      contextId: ticket?.boardId || '',
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    }),
+    { enabled: !!ticket?.boardId },
+  );
+
+  // Merge form field definitions with entity values to show all fields including optional ones
+  const allFormFields = useMemo((): FormEntityValueWithField[] | undefined => {
+    if (!formMapping?.formFields || formMapping.formFields.length === 0) {
+      return formEntityValues as FormEntityValueWithField[] | undefined;
+    }
+
+    // Build a map of field ID to existing values
+    const existingValuesMap = new Map<string, FormEntityValueWithField>();
+    (formEntityValues as FormEntityValueWithField[] | undefined)?.forEach(fev => {
+      if (fev.fieldId) {
+        existingValuesMap.set(fev.fieldId, fev);
+      }
+    });
+
+    // Create array of all fields - defined fields from form mapping, with values if they exist
+    return (formMapping.formFields as FormFields[]).map((formField): FormEntityValueWithField => {
+      const existingValue = existingValuesMap.get(formField.id);
+      if (existingValue) {
+        return existingValue;
+      }
+      // Field exists in form definition but has no value - create a placeholder entry
+      return {
+        id: `placeholder-${formField.id}`,
+        fieldId: formField.id,
+        entityId: ticketId,
+        entityType: FormEntityType.TICKET,
+        fieldValue: '',
+        actualFieldValue: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        formField,
+      };
+    });
+  }, [formMapping, formEntityValues, ticketId]);
+
+  const tags = ticket?.tags;
+  // Extract unique tags from all project tickets
+  const availableTags = useMemo(() => {
+    if (!projectTickets) return [];
+
+    const tagSet = new Set<string>();
+    projectTickets.forEach(t => {
+      // Type guard to safely check for tags property
+      if ('tags' in t && Array.isArray(t.tags)) {
+        const ticketTags = t.tags as TicketTag[];
+        ticketTags.forEach(tag => {
+          if (tag?.name) {
+            tagSet.add(tag.name);
+          }
+        });
+      }
+    });
+
+    return Array.from(tagSet).sort();
+  }, [projectTickets]);
+
+  const priorityItems = useMemo(
+    () => PRIORITY_OPTIONS.map(priority => ({ id: priority, name: priority })),
+    [],
+  );
+
+  // Filter available tags based on search query and exclude already assigned tags
+  const filteredTags = useMemo(() => {
+    return availableTags.filter(tagName =>
+      tagName.toLowerCase().includes(tagSearchQuery.toLowerCase()),
+    );
+  }, [availableTags, tagSearchQuery]);
+  const selectedTagNames = useMemo(() => new Set(tags?.map(t => t.name)), [tags]);
+
+  const referencesOut = useMemo<TicketReferenceWithTicket[]>(
+    () =>
+      Array.isArray(ticket?.referencesOut)
+        ? (ticket.referencesOut as TicketReferenceWithTicket[])
+        : [],
+    [ticket?.referencesOut],
+  );
+  const referencesIn = useMemo<TicketReferenceWithTicket[]>(
+    () =>
+      Array.isArray(ticket?.referencesIn)
+        ? (ticket.referencesIn as TicketReferenceWithTicket[])
+        : [],
+    [ticket?.referencesIn],
+  );
+  const referenceBoardIds = useMemo(() => {
+    if (!ticket) return [];
+    const boardIds = new Set<string>();
+
+    // Add ticket's own board
+    if (ticket.boardId) {
+      boardIds.add(ticket.boardId);
+    }
+
+    referencesOut.forEach(reference => {
+      if (reference.targetTicket?.boardId) {
+        boardIds.add(reference.targetTicket.boardId);
+      }
+    });
+
+    referencesIn.forEach(reference => {
+      if (reference.sourceTicket?.boardId) {
+        boardIds.add(reference.sourceTicket.boardId);
+      }
+    });
+
+    // Add board IDs from mapped tickets of sub-tickets
+    subTickets.forEach(subTicket => {
+      if (subTicket?.mappedTicket?.boardId) {
+        boardIds.add(subTicket.mappedTicket.boardId);
+      }
+    });
+
+    return Array.from(boardIds);
+  }, [referencesOut, referencesIn, ticket, subTickets]);
+  const [referenceStages] = useCachedQuery(
+    queries.getStagesByBoardIds({ boardIds: referenceBoardIds }),
+    {
+      enabled: referenceBoardIds.length > 0,
+    },
+  );
+  const stagesByBoardId = useMemo(() => {
+    const stageMap = new Map<string, StageInfo[]>();
+    if (!referenceStages) {
+      return stageMap;
+    }
+
+    referenceStages.forEach(stage => {
+      const existing = stageMap.get(stage.boardId) ?? [];
+      existing.push({
+        boardId: stage.boardId,
+        name: stage.name,
+        sequenceNumber: stage.sequenceNumber,
+        defaultTicketStatusV2: stage.defaultTicketStatusV2,
+      });
+      stageMap.set(stage.boardId, existing);
+    });
+
+    return stageMap;
+  }, [referenceStages]);
+  const {
+    referenceError,
+    isReferenceSaving,
+    referenceTicketOptions,
+    referenceRelationOptions,
+    handleAddReference,
+    handleRemoveReference,
+    handleReferenceRelationChange,
+  } = useTicketReferences({
+    ticketId: ticket?.id,
+    projectTickets,
+    referencesOut,
+  });
+
+  // Check if search query matches exactly with any filtered tag
+  const exactMatch = useMemo(() => {
+    return filteredTags.some(tag => tag.toLowerCase() === tagSearchQuery.toLowerCase());
+  }, [filteredTags, tagSearchQuery]);
+
+  // Initialize edit values when ticket changes
+  useEffect(() => {
+    if (ticket) {
+      setTitleValue(ticket.title);
+      setDescriptionValue(ticket.description);
+      if (ticket.eta) {
+        setETAValue(getLocalISOString(ticket.eta));
+      }
+    }
+  }, [ticket]);
+
+  // Auto-focus inputs when entering edit mode
+  useEffect(() => {
+    if (editingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [editingTitle]);
+
+  useEffect(() => {
+    if (editingDescription && descriptionTextareaRef.current) {
+      descriptionTextareaRef.current.focus();
+    }
+  }, [editingDescription]);
+
+  // Auto-focus tag input when dropdown opens
+  useEffect(() => {
+    if (showTagDropdown && tagInputRef.current) {
+      tagInputRef.current.focus();
+    }
+  }, [showTagDropdown]);
+
+  // Auto-focus ETA input when entering edit mode
+  useEffect(() => {
+    if (editingETA && etaInputRef.current) {
+      etaInputRef.current.focus();
+      etaInputRef.current.select();
+    }
+  }, [editingETA]);
+
+  // Click outside handlers
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent): void => {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(event.target as Node)) {
+        setShowTagDropdown(false);
+        setTagSearchQuery('');
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return (): void => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Early return if no ticket data - after all hooks
+  if (!ticket) {
+    return (
+      <div className='max-w-5xl mx-auto px-6 py-6'>
+        <p className='text-gray-500'>Loading ticket details...</p>
+      </div>
+    );
+  }
+
+  const buildTicketLink = (refTicket?: {
+    id?: string;
+    boardId?: string | null;
+  }): string | undefined => {
+    if (!refTicket?.id) {
+      return undefined;
+    }
+    const boardId = refTicket.boardId || ticket.boardId;
+    return `/projects/${ticket.projectId}/${boardId}/${refTicket.id}`;
+  };
+
+  const getReferenceTitle = (refTicket?: {
+    title?: string | null;
+    xyneId?: string | null;
+    id?: string;
+  }): string => {
+    return refTicket?.title || refTicket?.xyneId || refTicket?.id || 'Unknown ticket';
+  };
+
+  const handleSaveTitle = (): void => {
+    if (titleValue.trim() && titleValue !== ticket.title) {
+      void zero.mutate(
+        mutators.ticket.update({
+          id: ticket.id,
+          title: titleValue.trim(),
+          updatedAt: Date.now(),
+        }),
+      );
+    }
+    setEditingTitle(false);
+  };
+
+  const handleSaveDescription = (): void => {
+    if (descriptionValue !== ticket.description) {
+      void zero.mutate(
+        mutators.ticket.update({
+          id: ticket.id,
+          description: descriptionValue,
+          updatedAt: Date.now(),
+        }),
+      );
+    }
+    setEditingDescription(false);
+  };
+
+  const handlePriorityChange = (priority: string): void => {
+    void zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        priority: priority as TicketPriority,
+        updatedAt: Date.now(),
+      }),
+    );
+  };
+
+  const handleAssigneeChange = (userId: string | null): void => {
+    void zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        assignedTo: userId,
+        updatedAt: Date.now(),
+      }),
+    );
+  };
+
+  const handleStageChange = (stageName: string): void => {
+    // Find the stage's default ticket status
+    const boardStages = ticket.boardId ? stagesByBoardId.get(ticket.boardId) : undefined;
+    const targetStage = boardStages?.find(s => s.name === stageName);
+    const newStatus = targetStage?.defaultTicketStatusV2 as TicketStatusV2 | undefined;
+
+    void zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        stageName,
+        ...(newStatus && { statusV2: newStatus }),
+        updatedAt: Date.now(),
+      }),
+    );
+  };
+
+  const handleETAChange = (): void => {
+    const originalETA = ticket.eta ? getLocalISOString(ticket.eta) : '';
+
+    if (etaValue.trim() === originalETA) {
+      setEditingETA(false);
+      return;
+    }
+
+    if (!etaValue.trim()) {
+      setEditingETA(false);
+      return;
+    }
+
+    const etaDate = new Date(etaValue);
+    if (isNaN(etaDate.getTime())) {
+      setEditingETA(false);
+      return;
+    }
+
+    void zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        eta: etaDate.getTime(),
+        updatedAt: Date.now(),
+      }),
+    );
+    setEditingETA(false);
+  };
+
+  const handleBoardChange = (boardId: string | null): void => {
+    if (boardId && boardId !== ticket.boardId) {
+      void zero.mutate(
+        mutators.ticket.update({
+          id: ticket.id,
+          boardId,
+          updatedAt: Date.now(),
+        }),
+      );
+    }
+  };
+
+  const handleToggleTag = (tagName: string): void => {
+    const existingTag = tags?.find(t => t.name === tagName);
+
+    if (existingTag) {
+      // Unassign tag (remove only from ticket)
+      zero.mutate(
+        mutators.ticketTag.delete({
+          tagId: existingTag.id,
+        }),
+      );
+    } else {
+      // Assign tag
+      zero.mutate(
+        mutators.ticketTag.create({
+          ticketId: ticket.id,
+          tagId: uuidv4(),
+          tagName: tagName.trim(),
+        }),
+      );
+    }
+
+    setTagSearchQuery('');
+  };
+
+  const handleRemoveTag = (tagId: string): void => {
+    zero.mutate(
+      mutators.ticketTag.delete({
+        tagId,
+      }),
+    );
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter' && tagSearchQuery.trim()) {
+      e.preventDefault();
+      void handleToggleTag(tagSearchQuery);
+    } else if (e.key === 'Escape') {
+      setShowTagDropdown(false);
+      setTagSearchQuery('');
+    }
+  };
+
+  const handleMinimizeExpandedView = (): void => {
+    if (!ticket) return;
+
+    const state = location.state as {
+      activeTab?: string;
+      fromMyTickets?: boolean;
+      returnToUrl?: string;
+    } | null;
+    const isFromMyTickets = !!state?.fromMyTickets;
+    const returnToUrl = state?.returnToUrl;
+    const activeTabParam = state?.activeTab
+      ? `?selectedTab=${encodeURIComponent(state.activeTab)}`
+      : '';
+    if (isFromMyTickets) {
+      // Take them back to the My Tickets list
+      void navigate(`/chat/my-tickets`);
+    }
+    // If user comes from project->board
+    else if (returnToUrl) {
+      void navigate(returnToUrl);
+      return;
+    } else {
+      // Standard chat navigation
+      void navigate(
+        `/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}${activeTabParam}`,
+      );
+    }
+  };
+
+  const handleBackFromExpandedView = (): void => {
+    void navigate(-1);
+  };
+
+  const handleCopyTicketViewLink = (): void => {
+    if (!ticket) return;
+
+    // Use shareable origin from environment variable
+
+    const expandedTicketViewRoute = `${SHAREABLE_ORIGIN}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
+    void navigator.clipboard.writeText(expandedTicketViewRoute);
+    toast.success('Link copied', {
+      description: 'Ticket link copied to clipboard',
+      duration: 3000,
+    });
+  };
+
+  const handleFormFieldSave = (formEntityValueId: string, newValue: string[]): void => {
+    // Check if this is a placeholder field (no existing record)
+    const isPlaceholder = formEntityValueId.startsWith('placeholder-');
+    const formFieldId = isPlaceholder ? formEntityValueId.replace('placeholder-', '') : '';
+
+    if (isPlaceholder) {
+      // Create a new form entity value record
+      void zero.mutate(
+        mutators.formEntityValue.create({
+          id: uuidv4(),
+          entityId: ticketId,
+          entityType: FormEntityType.TICKET,
+          fieldId: formFieldId,
+          newValue,
+          timestamp: Date.now(),
+        }),
+      );
+    } else {
+      // Update existing record
+      void zero.mutate(
+        mutators.formEntityValue.update({
+          formEntityValueId,
+          newValue,
+          updatedAt: Date.now(),
+        }),
+      );
+    }
+  };
+
+  const renderRelatedTicketRow = (
+    reference: TicketReferenceWithTicket,
+    relatedTicket:
+      | TicketReferenceWithTicket['targetTicket']
+      | TicketReferenceWithTicket['sourceTicket'],
+    label: string,
+    allowEdit: boolean,
+  ): React.ReactElement => {
+    const link = buildTicketLink(relatedTicket);
+    const boardStages = relatedTicket?.boardId
+      ? stagesByBoardId.get(relatedTicket.boardId)
+      : undefined;
+    const stageProgress = getStageProgress(relatedTicket?.stageName, boardStages);
+    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
+    const assigneeId = relatedTicket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
+    const priorityIcon = relatedTicket?.priority ? getPriorityIcon(relatedTicket.priority) : null;
+
+    return (
+      <div key={reference.id} className='flex flex-col gap-2'>
+        <div>
+          {allowEdit ? (
+            <div className='relative inline-flex items-center'>
+              <select
+                className='appearance-none pl-3 pr-8 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg shadow-sm'
+                value={reference.relationType}
+                onChange={event =>
+                  handleReferenceRelationChange(
+                    reference.id,
+                    event.target.value as TicketReferenceRelation,
+                  )
+                }
+              >
+                {referenceRelationOptions.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className='pointer-events-none absolute right-3 h-4 w-4 text-gray-400' />
+            </div>
+          ) : (
+            <span className='inline-flex items-center px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 bg-white shadow-sm'>
+              {label}
+            </span>
+          )}
+        </div>
+
+        <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-[#F9F9F9] px-3 py-2.5 shadow-sm'>
+          <div className='flex items-center gap-3 min-w-0'>
+            <TicketStageIcon progressPercentage={displayProgress} size={18} />
+            <div className='flex items-center gap-4 min-w-0'>
+              <span className='text-sm font-medium text-gray-500 font-mono shrink-0'>
+                {relatedTicket?.xyneId || relatedTicket?.id || '—'}
+              </span>
+              {link ? (
+                <Link className='text-sm font-normal text-gray-900 truncate' to={link}>
+                  {getReferenceTitle(relatedTicket)}
+                </Link>
+              ) : (
+                <span className='text-sm font-normal text-gray-900 truncate'>
+                  {getReferenceTitle(relatedTicket)}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className='flex items-center gap-3 shrink-0'>
+            {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
+            {assigneeId ? (
+              <UserAvatar
+                userId={assigneeId}
+                size={AvatarSize.SM}
+                shape={AvatarShape.ROUNDED}
+                showActiveStatus={false}
+              />
+            ) : (
+              <div className='h-7 w-7 rounded-lg border border-gray-200 bg-gray-100' />
+            )}
+          </div>
+          {allowEdit && (
+            <button
+              type='button'
+              className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100'
+              onClick={() => handleRemoveReference(reference.id)}
+              aria-label='Remove reference'
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className='mx-auto px-[24px] py-[20px] h-full overflow-scroll'>
+      {expandedView && (
+        <div className='flex items-center justify-between mb-6'>
+          <div className='flex items-center gap-x-1/2'>
+            <button onClick={handleBackFromExpandedView}>
+              <ChevronLeft size={18} color='#222530' />
+            </button>
+            <span className='text-[14px] font-medium text-[#2B303B] px-2 py-0.5'>
+              {ticket.xyneId}
+            </span>
+          </div>
+          <div className='flex gap-x-3'>
+            <div className='flex items-center gap-x-2'>
+              <button
+                onClick={onNavigatePrevious}
+                disabled={!navigation?.canNavigatePrevious}
+                className={
+                  navigation?.canNavigatePrevious
+                    ? 'hover:bg-gray-100 rounded cursor-pointer'
+                    : 'opacity-40 cursor-not-allowed'
+                }
+                aria-label='Previous ticket'
+              >
+                <ChevronUp size={18} color='#222530' />
+              </button>
+              <button
+                onClick={onNavigateNext}
+                disabled={!navigation?.canNavigateNext}
+                className={
+                  navigation?.canNavigateNext
+                    ? 'hover:bg-gray-100 rounded cursor-pointer'
+                    : 'opacity-40 cursor-not-allowed'
+                }
+                aria-label='Next ticket'
+              >
+                <ChevronDown size={18} color='#222530' />
+              </button>
+              <div className='flex items-center gap-x-1/2 text-[14px] text-[#2B303B] font-medium'>
+                <span>{(navigation?.currentIndex ?? 0) + 1}</span>
+                <span>/</span>
+                <span className='text-[#99A0AE]'>{navigation?.totalCount ?? 0}</span>
+              </div>
+            </div>
+            <div className='flex items-center gap-x-2'>
+              <Tooltip content='Copy Ticket Link'>
+                <Button
+                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  variant='ghost'
+                  size='sm'
+                  onClick={handleCopyTicketViewLink}
+                  aria-label='Copy Ticket'
+                >
+                  <LinkIcon size={20} />
+                </Button>
+              </Tooltip>
+              <Tooltip content='Summarize thread'>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  onClick={() => {
+                    void navigate(
+                      `/chat/dir/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
+                    );
+                  }}
+                  title='Summarize thread'
+                >
+                  <Sparkles size={20} />
+                </Button>
+              </Tooltip>
+              <Tooltip content='Trigger Workflow'>
+                <Button
+                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  variant='ghost'
+                  size='sm'
+                  onClick={() => setIsWorkflowModalOpen(true)}
+                  aria-label='Trigger Workflow'
+                >
+                  <Play size={20} />
+                </Button>
+              </Tooltip>
+              <Tooltip content='Minimize View'>
+                <Button
+                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  variant='ghost'
+                  size='sm'
+                  onClick={handleMinimizeExpandedView}
+                  aria-label='Copy Ticket'
+                >
+                  <Minimize2 size={20} />
+                </Button>
+              </Tooltip>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ApprovalNudgeBanner ticketId={ticket.id} className='mb-4' />
+
+      {/* Title Section */}
+      <div className='flex items-start gap-3'>
+        {editingTitle ? (
+          <div className='flex-1 flex items-center gap-2'>
+            <input
+              ref={titleInputRef}
+              type='text'
+              value={titleValue}
+              onChange={e => setTitleValue(e.target.value)}
+              onBlur={handleSaveTitle}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleSaveTitle();
+                if (e.key === 'Escape') {
+                  setTitleValue(ticket.title);
+                  setEditingTitle(false);
+                }
+              }}
+              className='flex-1 text-2xl font-semibold text-gray-900 outline-none bg-transparent'
+            />
+          </div>
+        ) : (
+          <div
+            role='button'
+            tabIndex={0}
+            className='text-[20px] font-semibold text-[#2B303B] flex-1 cursor-text px-2 -mx-2 break-all'
+            onClick={() => setEditingTitle(true)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setEditingTitle(true);
+              }
+            }}
+          >
+            {ticket.title}
+          </div>
+        )}
+      </div>
+      <div>
+        {editingDescription ? (
+          <div className='bg-gray-50 rounded-lg p-4 border border-gray-300'>
+            <textarea
+              ref={descriptionTextareaRef}
+              value={descriptionValue}
+              onChange={e => setDescriptionValue(e.target.value)}
+              onBlur={handleSaveDescription}
+              onKeyDown={e => {
+                if (e.key === 'Escape') {
+                  setDescriptionValue(ticket.description);
+                  setEditingDescription(false);
+                }
+              }}
+              className='w-full text-sm text-gray-700 leading-relaxed outline-none bg-transparent resize-none min-h-[100px]'
+            />
+          </div>
+        ) : (
+          <div
+            role='button'
+            tabIndex={0}
+            className='cursor-text my-3 text-[#181B1D]'
+            onClick={() => setEditingDescription(true)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setEditingDescription(true);
+              }
+            }}
+          >
+            <p className='text-sm text-gray-700 leading-relaxed whitespace-pre-wrap break-all'>
+              <RenderMessageWithHTML message={ticket.description || ''} />
+            </p>
+          </div>
+        )}
+      </div>
+      {/* Display Ticket Files */}
+      {expandedView && ticketAttachments && ticketAttachments.length > 0 && (
+        <div className='space-y-3'>
+          {ticketAttachments.map(attachment => (
+            <FileBubble
+              key={attachment.id}
+              createdBy={attachment.createdBy}
+              createdAt={attachment.createdAt}
+              attachment={attachment}
+            />
+          ))}
+        </div>
+      )}
+      {/* Ticket MetaData Key Value */}
+      <div
+        className={cn(
+          'grid grid-cols-2 gap-x-2 gap-y-4 mt-8 mb-4',
+          expandedView ? 'grid-cols-2' : 'grid-cols-1',
+        )}
+      >
+        {/* Left Column */}
+
+        <div className='space-y-4'>
+          {/* Status */}
+          <TicketKeyValuePair
+            ticketKey='Status Category'
+            value={
+              <span className='flex items-center gap-2'>
+                {' '}
+                {<TicketStatusIcon size={14} />} {ticket.statusV2}
+              </span>
+            }
+          />
+
+          {/* Assignee */}
+          <TicketKeyValuePair
+            ticketKey='Assignee'
+            value={
+              <UserSelector
+                selectedUserId={ticket.assignedTo ?? null}
+                onUserSelect={handleAssigneeChange}
+                noBorder={true}
+              />
+            }
+          />
+
+          {/* Created At */}
+          <TicketKeyValuePair
+            ticketKey='Created at'
+            value={<span>{formatTimestamp(ticket.createdAt)}</span>}
+          />
+
+          {/* Board */}
+          <TicketKeyValuePair
+            ticketKey='Board'
+            value={
+              <EntitySelector
+                options={(boards ?? []).map(board => ({
+                  value: board.id,
+                  label: board.name,
+                  icon: <SquareKanban size={18} className='text-purple-600' />,
+                }))}
+                selectedValue={ticket.boardId ?? null}
+                onSelect={handleBoardChange}
+                placeholder='Select board'
+                searchPlaceholder='Search boards...'
+                isLoading={!boards}
+                width='auto'
+                noBorder={true}
+              />
+            }
+          />
+
+          {/* Add Tag Button */}
+          <TicketKeyValuePair
+            ticketKey='Tags'
+            value={
+              <div className='relative flex items-center' ref={tagDropdownRef}>
+                {/* Tags */}
+                <div className='flex items-center gap-2 flex-wrap'>
+                  {tags &&
+                    tags.length > 0 &&
+                    tags.map((tag, index) => {
+                      const colors = [
+                        {
+                          bg: 'bg-cyan-400',
+                          text: 'text-cyan-700',
+                          icon: 'text-cyan-600',
+                          hoverBg: 'hover:bg-cyan-200',
+                        },
+                        {
+                          bg: 'bg-yellow-400',
+                          text: 'text-yellow-700',
+                          icon: 'text-yellow-600',
+                          hoverBg: 'hover:bg-yellow-200',
+                        },
+                        {
+                          bg: 'bg-purple-400',
+                          text: 'text-purple-700',
+                          icon: 'text-purple-600',
+                          hoverBg: 'hover:bg-purple-200',
+                        },
+                        {
+                          bg: 'bg-green-400',
+                          text: 'text-green-700',
+                          icon: 'text-green-600',
+                          hoverBg: 'hover:bg-green-200',
+                        },
+                        {
+                          bg: 'bg-pink-400',
+                          text: 'text-pink-700',
+                          icon: 'text-pink-600',
+                          hoverBg: 'hover:bg-pink-200',
+                        },
+                        {
+                          bg: 'bg-blue-400',
+                          text: 'text-blue-700',
+                          icon: 'text-blue-600',
+                          hoverBg: 'hover:bg-blue-200',
+                        },
+                      ] as const;
+                      const color = colors[index % colors.length]!;
+
+                      return (
+                        <span
+                          key={tag.id}
+                          className={`inline-flex items-center gap-1.5 px-2 py-1 text-sm font-medium group relative rounded-[6px] border border-[#F2F2F3] bg-[#FAFAFA]`}
+                        >
+                          {/* <Tag size={14} className={color.icon} /> */}
+                          <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
+                          {tag.name}
+                          {
+                            <button
+                              onClick={() => void handleRemoveTag(tag.id)}
+                              className={`ml-1 p-0.5 rounded transition-colors`}
+                              aria-label='Remove tag'
+                            >
+                              <X size={12} />
+                            </button>
+                          }
+                        </span>
+                      );
+                    })}
+                  <button
+                    onClick={() => setShowTagDropdown(!showTagDropdown)}
+                    className='inline-flex items-center justify-center gap-1 text-sm text-gray-600 hover:text-gray-900 transition-colors'
+                    aria-label='Add tag'
+                  >
+                    <Plus size={14} />
+                    <span>Add</span>
+                  </button>
+                </div>
+
+                {showTagDropdown && (
+                  <div className='absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[250px] max-h-64 overflow-hidden'>
+                    {/* Search Input */}
+                    <div className='p-2 border-b border-gray-200'>
+                      <input
+                        ref={tagInputRef}
+                        type='text'
+                        value={tagSearchQuery}
+                        onChange={e => setTagSearchQuery(e.target.value)}
+                        onKeyDown={handleTagKeyDown}
+                        placeholder='Search or create tag...'
+                        className='w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-blue-500'
+                      />
+                    </div>
+
+                    {/* Tag List */}
+                    <div className='max-h-48 overflow-y-auto'>
+                      {tagSearchQuery.trim() && !exactMatch && (
+                        <button
+                          onClick={() => void handleToggleTag(tagSearchQuery)}
+                          className='w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100'
+                        >
+                          <Plus size={14} className='text-blue-600' />
+                          <span className='text-blue-600 font-medium'>
+                            Create &quot;{tagSearchQuery.trim()}&quot;
+                          </span>
+                        </button>
+                      )}
+
+                      {filteredTags.map(tagName => {
+                        const isSelected = selectedTagNames.has(tagName);
+
+                        return (
+                          <button
+                            key={tagName}
+                            onClick={() => void handleToggleTag(tagName)}
+                            className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-gray-50'
+                          >
+                            <div className='flex items-center gap-2'>
+                              <Tag size={14} className='text-gray-400' />
+                              <span>{tagName}</span>
+                            </div>
+
+                            {isSelected && (
+                              <span className='text-sm'>
+                                <Check size={14} />
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            }
+          />
+        </div>
+
+        {/* Right Column */}
+        <div className='space-y-4'>
+          {/* Stage */}
+          <TicketKeyValuePair
+            ticketKey='Status'
+            value={
+              <Selector
+                items={stages}
+                selectedValue={ticket.stageName}
+                onValueChange={handleStageChange}
+                placeholder='Set Status'
+                icon={<TicketStatusIcon size={14} />}
+                noBorder={true}
+              />
+            }
+          />
+
+          {/* Created By */}
+          <TicketKeyValuePair
+            ticketKey='Created by'
+            value={
+              <div className='items-center flex gap-2'>
+                <UserAvatar userId={createdByUser?.id || ''} shape={AvatarShape.CIRCULAR} />
+                {createdByUser?.name || 'Merchant User'}
+              </div>
+            }
+          />
+
+          {/* Priority */}
+          <TicketKeyValuePair
+            ticketKey='Priority'
+            value={
+              <Selector
+                items={priorityItems}
+                selectedValue={ticket.priority}
+                onValueChange={handlePriorityChange}
+                placeholder='Set Priority'
+                icon={<TicketPriorityIcon size={14} />}
+                noBorder={true}
+              />
+            }
+          />
+
+          {/* Channel */}
+          <TicketKeyValuePair
+            ticketKey='Channel'
+            value={<p>{channel ? `${channel.name}` : 'XyneSpace'}</p>}
+          />
+
+          {/* ETA */}
+          <TicketKeyValuePair
+            ticketKey='ETA'
+            value={
+              editingETA ? (
+                <div className='flex items-center gap-2'>
+                  <input
+                    ref={etaInputRef}
+                    type='datetime-local'
+                    value={etaValue}
+                    onChange={e => setETAValue(e.target.value)}
+                    onBlur={handleETAChange}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleETAChange();
+                      if (e.key === 'Escape') {
+                        setETAValue(ticket.eta ? getLocalISOString(ticket.eta) : '');
+                        setEditingETA(false);
+                      }
+                    }}
+                    className='text-sm border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+                  />
+                </div>
+              ) : (
+                <div
+                  role='button'
+                  tabIndex={0}
+                  className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] cursor-pointer hover:bg-gray-100 px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-gray-200 transition-colors'
+                  onClick={() => setEditingETA(true)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setEditingETA(true);
+                    }
+                  }}
+                >
+                  <Calendar
+                    size={14}
+                    className={
+                      ticket.eta && new Date(ticket.eta) < new Date()
+                        ? 'text-red-500'
+                        : 'text-gray-500'
+                    }
+                  />
+                  <span>{formatETADisplay(ticket.eta)}</span>
+                  {ticket.eta && new Date(ticket.eta) < new Date() && (
+                    <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
+                      Overdue
+                    </span>
+                  )}
+                </div>
+              )
+            }
+          />
+
+          {/* User Group */}
+          {ticket?.userGroupId && (
+            <TicketKeyValuePair
+              ticketKey='User Group'
+              value={<p>{userGroup ? `${userGroup.name}` : '—'}</p>}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Merchant ID */}
+      {ticket.merchantId && (
+        <TicketKeyValuePair
+          ticketKey='Merchant ID'
+          value={<span className='text-sm text-[#525866]'>{ticket.merchantId}</span>}
+        />
+      )}
+
+      {/* Additional Form Fields */}
+      {allFormFields && allFormFields.length > 0 && (
+        <div className='border border-gray-200 bg-gray-50 rounded-lg p-4 my-4'>
+          <h3 className='text-base font-semibold text-gray-900 mb-4'>Additional Form Fields</h3>
+          <div className='space-y-4'>
+            {allFormFields.map(fieldValue => (
+              <EditableFormField
+                key={fieldValue.id}
+                fieldName={fieldValue.formField?.fieldName || 'Unknown Field'}
+                fieldValue={fieldValue.actualFieldValue ?? fieldValue.fieldValue}
+                fieldType={
+                  (fieldValue.formField?.fieldType as FormFieldType) || FormFieldType.STRING
+                }
+                fieldEnum={fieldValue.formField?.fieldEnum as string[] | undefined}
+                onSave={newValue => handleFormFieldSave(fieldValue.id, newValue)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Sub-Tickets Section */}
+      <div className='mt-6 space-y-6'>
+        <div>
+          <div className='flex items-center gap-3'>
+            <p className='text-base font-semibold text-gray-900'>Sub-Tickets</p>
+            <span className='inline-flex items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'>
+              {subTickets.length}
+            </span>
+          </div>
+
+          <div className='mt-4 space-y-3'>
+            {subTickets.length > 0 ? (
+              <div className='space-y-2'>
+                {subTickets.map(subTicket => {
+                  // Extract mappedTicket once
+                  const mappedTicket = subTicket?.mappedTicket;
+
+                  const displayId =
+                    mappedTicket?.xyneId || subTicket.id.substring(0, 8).toUpperCase();
+                  const displayTitle = mappedTicket?.title || subTicket.title;
+
+                  // Calculate stage progress using existing helper
+                  const boardStages = mappedTicket?.boardId
+                    ? stagesByBoardId.get(mappedTicket.boardId)
+                    : undefined;
+                  const stageProgress = getStageProgress(mappedTicket?.stageName, boardStages);
+                  const displayProgress = stageProgress === 0 ? 1 : stageProgress;
+
+                  const priority = mappedTicket?.priority;
+                  const assignedTo = mappedTicket?.assignedTo;
+                  const priorityIcon = priority ? getPriorityIcon(priority) : null;
+                  const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
+
+                  const handleClick = (): void => {
+                    if (subTicket.mappedTicketId) {
+                      if (onNavigateToTicket) {
+                        onNavigateToTicket(subTicket.mappedTicketId);
+                      } else {
+                        setMappedTicketId(subTicket.mappedTicketId);
+                      }
+                    } else {
+                      setSelectedSubTicket(subTicket);
+                      setIsCreateTicketModalOpen(true);
+                    }
+                  };
+
+                  return (
+                    <div
+                      key={subTicket.id}
+                      role='button'
+                      tabIndex={0}
+                      onClick={handleClick}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleClick();
+                        }
+                      }}
+                      className='flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer'
+                    >
+                      <div className='flex items-center gap-3 flex-1 min-w-0'>
+                        <span className='text-xs font-medium text-gray-500 whitespace-nowrap'>
+                          {displayId}
+                        </span>
+                        <span className='text-sm text-gray-900 truncate'>{displayTitle}</span>
+                        {subTicket.mappedTicketId && (
+                          <FileText size={14} className='text-blue-600 flex-shrink-0' />
+                        )}
+                      </div>
+                      <div className='flex items-center gap-3 shrink-0'>
+                        {/* Stage progress using TicketStatusIcon */}
+                        {boardStages && boardStages.length > 0 && (
+                          <div className='flex items-center gap-1.5'>
+                            <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                            <span className='text-xs font-medium text-gray-700 whitespace-nowrap'>
+                              {boardStages.findIndex(s => s.name === mappedTicket?.stageName) + 1}/
+                              {boardStages.length}
+                            </span>
+                          </div>
+                        )}
+                        {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
+                        {assigneeId ? (
+                          <UserAvatar
+                            userId={assigneeId}
+                            size={AvatarSize.SM}
+                            shape={AvatarShape.ROUNDED}
+                            showActiveStatus={false}
+                          />
+                        ) : (
+                          <div className='h-7 w-7 rounded-lg border border-gray-200 bg-gray-100' />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+            <button
+              onClick={() => setIsSubTicketModalOpen(true)}
+              className='flex items-center gap-2 mt-3 text-sm text-gray-600 hover:text-gray-900 transition-colors'
+            >
+              <Plus size={16} />
+              Create Sub-Ticket
+            </button>
+          </div>
+        </div>
+      </div>
+      {/* Related Tickets Section */}
+      <div className='border-t border-gray-200 pt-6 mt-6'>
+        <div>
+          <div className='flex items-center gap-3'>
+            <p className='text-base font-semibold text-gray-900'>Related Tickets</p>
+            <span className='inline-flex items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'>
+              {referencesOut.length + referencesIn.length + (parentTickets?.length || 0)}
+            </span>
+          </div>
+
+          <div className='mt-4 space-y-3'>
+            {/* Parent Tickets */}
+            {parentTickets && parentTickets.length > 0 && (
+              <div className='space-y-3'>
+                {parentTickets.map(parentTicket => {
+                  const link = buildTicketLink(parentTicket);
+                  const priorityIcon = parentTicket.priority
+                    ? getPriorityIcon(parentTicket.priority)
+                    : null;
+                  const boardStages = parentTicket.boardId
+                    ? stagesByBoardId.get(parentTicket.boardId)
+                    : undefined;
+                  const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
+                  const displayProgress = stageProgress === 0 ? 1 : stageProgress;
+                  const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+
+                  return (
+                    <div key={parentTicket.id} className='flex flex-col gap-2'>
+                      <div>
+                        <span className='inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-gray-700'>
+                          Parent:
+                        </span>
+                      </div>
+                      <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-[#F9F9F9] px-3 py-2.5 shadow-sm'>
+                        <div className='flex items-center gap-3 min-w-0'>
+                          <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                          <div className='flex items-center gap-4 min-w-0'>
+                            <span className='text-sm font-medium text-gray-500 font-mono shrink-0'>
+                              {parentTicket.xyneId || parentTicket.id.substring(0, 8).toUpperCase()}
+                            </span>
+                            {link ? (
+                              <Link
+                                className='text-sm font-normal text-gray-900 truncate'
+                                to={link}
+                              >
+                                {parentTicket.title || 'Untitled Ticket'}
+                              </Link>
+                            ) : (
+                              <span className='text-sm font-normal text-gray-900 truncate'>
+                                {parentTicket.title || 'Untitled Ticket'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className='flex items-center gap-3 shrink-0'>
+                          {priorityIcon && (
+                            <span className='flex items-center'>{priorityIcon}</span>
+                          )}
+                          {assigneeId ? (
+                            <UserAvatar
+                              userId={assigneeId}
+                              size={AvatarSize.SM}
+                              shape={AvatarShape.ROUNDED}
+                              showActiveStatus={false}
+                            />
+                          ) : (
+                            <div className='h-7 w-7 rounded-lg border border-gray-200 bg-gray-100' />
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (onNavigateToTicket) {
+                              onNavigateToTicket(parentTicket.id);
+                            } else {
+                              setMappedTicketId(parentTicket.id);
+                            }
+                          }}
+                          className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                        >
+                          View
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Regular Related Tickets */}
+            {referencesOut.length + referencesIn.length > 0 && (
+              <>
+                {referencesOut.map(reference =>
+                  renderRelatedTicketRow(
+                    reference,
+                    reference.targetTicket,
+                    formatReferenceLabel(reference.relationType),
+                    true,
+                  ),
+                )}
+                {referencesIn.map(reference =>
+                  renderRelatedTicketRow(
+                    reference,
+                    reference.sourceTicket,
+                    formatIncomingReferenceLabel(reference.relationType),
+                    false,
+                  ),
+                )}
+              </>
+            )}
+
+            {!parentTickets?.length && referencesOut.length + referencesIn.length === 0 && (
+              <p className='text-sm text-gray-400'>No related tickets yet.</p>
+            )}
+
+            <div
+              className={`rounded-lg border border-gray-200 px-3 py-2 flex items-center ${
+                isReferenceSaving ? 'opacity-60 pointer-events-none' : ''
+              }`}
+            >
+              <EntitySelector
+                options={referenceTicketOptions}
+                selectedValue={null}
+                onSelect={value => handleAddReference(value)}
+                placeholder='+ Add ticket'
+                searchPlaceholder='Search by ID or name'
+                width='100%'
+                noBorder
+              />
+            </div>
+            {referenceError && <p className='text-xs text-red-600'>{referenceError}</p>}
+          </div>
+        </div>
+      </div>
+      <TicketActivity activities={activities} users={users} boards={boards} />
+      {/* SubTicket Modal */}
+      {ticket?.conversationId && (
+        <SubTicketModal
+          isOpen={isSubTicketModalOpen}
+          onClose={() => setIsSubTicketModalOpen(false)}
+          ticketId={ticketId}
+          conversationId={ticket.conversationId}
+          onSuccess={() => {
+            // Subtickets are automatically synced via Zero
+          }}
+        />
+      )}
+      {/* CreateTicket Modal for SubTicket */}
+      {ticket?.projectId && selectedSubTicket && isCreateTicketModalOpen && (
+        <CreateTicketModal
+          isOpen={isCreateTicketModalOpen}
+          onClose={() => {
+            setIsCreateTicketModalOpen(false);
+            setSelectedSubTicket(null);
+          }}
+          channelId={ticket.conversation?.channelId || ''}
+          projectId={ticket.projectId}
+          isFromSubTicket={true}
+          initialTitle={selectedSubTicket?.title ?? ''}
+          initialDescription={selectedSubTicket?.description ?? ''}
+          onTicketCreated={createdTicket => {
+            // Update subticket with mappedTicketId and assignedTo
+            if (!selectedSubTicket) return;
+            const timestamp = Date.now();
+            void zero.mutate(
+              mutators.subTicket.update({
+                subTicketId: selectedSubTicket.id,
+                mappedTicketId: createdTicket.id,
+                conversationId: createdTicket.conversationId,
+                timestamp,
+              }),
+            );
+            setIsCreateTicketModalOpen(false);
+            setSelectedSubTicket(null);
+          }}
+        />
+      )}
+      {/* Mapped Ticket Modal */}
+      {mappedTicketId && (
+        <MappedTicketModal
+          mappedTicketId={mappedTicketId}
+          onClose={() => setMappedTicketId(null)}
+          onNavigateToParent={setMappedTicketId}
+        />
+      )}
+      {/* Workflow Trigger Modal */}
+      {ticket && (
+        <WorkflowTriggerModal
+          isOpen={isWorkflowModalOpen}
+          onClose={() => setIsWorkflowModalOpen(false)}
+          ticketId={ticket.id}
+        />
+      )}
+    </div>
+  );
+};

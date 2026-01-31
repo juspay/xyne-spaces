@@ -1,0 +1,13 @@
+# VictoriaMetrics Scrape Configuration
+# Built-in scraper (replaces vmagent)
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'xyne-backend'
+    static_configs:
+      - targets: ['host.docker.internal:3001']
+        labels:
+          env: 'development'
+          service: 'xyne-backend'

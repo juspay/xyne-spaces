@@ -1,0 +1,3626 @@
+import { ReadonlyJSONValue, defineMutators, defineMutator } from '@rocicorp/zero';
+import {
+  ChannelRole,
+  ChannelVisibility,
+  MessageType,
+  CallType,
+  CallStatus,
+  InvitationResponse,
+  ChannelScopeType,
+  ConversationParticipation,
+  TicketStatusV2,
+  TicketPriority,
+  TicketReferenceRelation,
+  CanvasVisibility,
+  CanvasRole,
+  BookmarkEntityType,
+  UserPresenceStatus,
+  FormFieldType,
+  FormContextType,
+  FormEntityType,
+  DocType,
+  createForwardedMessageXml,
+  parseForwardedMessageXml,
+  ActivityClassification,
+} from '@xyne/shared';
+import { extractAllMentions } from '../utils/mentionParser';
+import { z } from 'zod';
+import { zql } from './queries';
+
+export type AuthData = {
+  sub: string;
+};
+
+export const mutators = defineMutators({
+  channel: {
+    joinChannel: defineMutator(
+      z.object({
+        channelId: z.string(),
+        channelParticipantId: z.string(),
+        channelUserStatusId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { channelId, channelParticipantId, channelUserStatusId, timestamp },
+      }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        // Check if channel is public
+        if (channel.visibility !== ChannelVisibility.PUBLIC) {
+          throw new Error('Can only join public channels');
+        }
+
+        const joiningUser = await tx.run(zql.users.where('id', ctx.userID).one());
+        if (!joiningUser) {
+          throw new Error('Invalid user requesting to join');
+        }
+
+        // Check if user is already a participant
+        const existingParticipant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (existingParticipant) {
+          throw new Error('You are already a member of this channel');
+        }
+
+        // Add user as a participant
+        await tx.mutate.channel_participants.insert({
+          id: channelParticipantId,
+          channelId: channelId,
+          joinedAt: timestamp,
+          role: ChannelRole.MEMBER,
+          userId: ctx.userID,
+
+          // TODO: deprecated columns needs to be removed
+          lastViewedAt: timestamp,
+          isStarred: false,
+          isClosed: false,
+        });
+
+        await tx.mutate.channel_user_status.insert({
+          id: channelUserStatusId,
+          channelId: channelId,
+          lastViewedAt: timestamp,
+          userId: ctx.userID,
+          isStarred: false,
+          isClosed: false,
+          unreadCount: 0,
+        });
+      },
+    ),
+    addParticipants: defineMutator(
+      z.object({
+        channelId: z.string(),
+        userIds: z.array(z.string()),
+        timestamp: z.number(),
+        participantIds: z.record(z.string(), z.string()), // Map userId -> participantId
+        userStatusIds: z.record(z.string(), z.string()), // Map userId -> userStatusId
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { channelId, userIds, timestamp, participantIds, userStatusIds },
+      }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exists");
+        }
+
+        const participationOfRequestingUser = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (
+          !participationOfRequestingUser ||
+          (channel.visibility === ChannelVisibility.PRIVATE &&
+            participationOfRequestingUser.role === ChannelRole.MEMBER &&
+            channel.scopeType !== ChannelScopeType.GROUP_DM)
+        ) {
+          throw new Error('You are not allowed to add someone');
+        }
+
+        const users = await Promise.all(userIds.map(id => tx.run(zql.users.where('id', id).one())));
+        const validUsers = users.filter(user => user !== undefined);
+
+        for (const user of validUsers) {
+          const isAlreadyParticipant = await tx.run(
+            zql.channel_participants.where('channelId', channelId).where('userId', user.id).one(),
+          );
+          if (isAlreadyParticipant) {
+            continue;
+          }
+
+          const participantId = participantIds[user.id];
+          if (!participantId) {
+            throw new Error(`participantId is required for user ${user.id}`);
+          }
+          const statusId = userStatusIds[user.id];
+          if (!statusId) {
+            throw new Error(`userStatusId is required for user ${user.id}`);
+          }
+          await tx.mutate.channel_participants.insert({
+            id: participantId,
+            channelId: channelId,
+            joinedAt: timestamp,
+            role: ChannelRole.MEMBER,
+            userId: user.id,
+            // TODO: deprecated columns needs to be removed
+            lastViewedAt: timestamp,
+            isStarred: false,
+            isClosed: false,
+          });
+
+          await tx.mutate.channel_user_status.insert({
+            id: statusId,
+            channelId: channelId,
+            lastViewedAt: timestamp,
+            userId: user.id,
+            isStarred: false,
+            isClosed: false,
+            unreadCount: 0,
+          });
+        }
+      },
+    ),
+    removeParticipant: defineMutator(
+      z.object({ channelId: z.string(), targetUserId: z.string() }),
+      async ({ tx, ctx, args: { channelId, targetUserId } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        // Check if channel is private
+        if (
+          channel.visibility !== ChannelVisibility.PRIVATE ||
+          channel.scopeType !== ChannelScopeType.DEFAULT
+        ) {
+          throw new Error('Participants can only be removed from private channels');
+        }
+
+        // Check if requesting user is a participant (any participant can remove others - Slack default)
+        const participationOfRequestingUser = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participationOfRequestingUser) {
+          throw new Error('Only channel members can remove participants from private channels');
+        }
+
+        // Check if target user is actually a participant
+        const targetParticipant = await tx.run(
+          zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', targetUserId)
+            .one(),
+        );
+
+        if (!targetParticipant) {
+          throw new Error('User is not a participant in this channel');
+        }
+
+        // Prevent removing yourself
+        if (targetUserId === ctx.userID) {
+          throw new Error('Cannot remove yourself from the channel');
+        }
+
+        // Prevent removing the channel creator
+        if (targetUserId === channel.createdBy) {
+          throw new Error('Cannot remove the channel creator');
+        }
+
+        // Remove the participant
+        await tx.mutate.channel_participants.delete({
+          id: targetParticipant.id,
+        });
+
+        const channelUserStatusParticipant = await tx.run(
+          zql.channel_user_status.where('channelId', channelId).where('userId', targetUserId).one(),
+        );
+
+        if (channelUserStatusParticipant) {
+          await tx.mutate.channel_user_status.delete({
+            id: channelUserStatusParticipant.id,
+          });
+        }
+      },
+    ),
+    leaveChannel: defineMutator(
+      z.object({ channelId: z.string() }),
+      async ({ tx, ctx, args: { channelId } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error('Channel not found');
+        }
+
+        // Check if user is participant
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participant) {
+          throw new Error('Not a channel participant');
+        }
+
+        // Don't allow channel creator to leave if there are other participants
+        if (channel.createdBy === ctx.userID) {
+          const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
+
+          if (participants.length > 1) {
+            throw new Error('Channel creator cannot leave while other participants remain');
+          }
+        }
+
+        // Remove participant
+        await tx.mutate.channel_participants.delete({
+          id: participant.id,
+        });
+
+        const channelUserStatusParticipant = await tx.run(
+          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (channelUserStatusParticipant) {
+          await tx.mutate.channel_user_status.delete({
+            id: channelUserStatusParticipant.id,
+          });
+        }
+      },
+    ),
+    markChannelAsViewed: defineMutator(
+      z.object({
+        channelId: z.string(),
+        conversationId: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { channelId, conversationId, timestamp } }) => {
+        const participant = await tx.run(
+          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participant) {
+          throw new Error('Not a channel participant');
+        }
+
+        const updateData: {
+          lastViewedAt: number;
+          unreadCount: number;
+          lastViewedConversationId?: string;
+        } = {
+          lastViewedAt: timestamp,
+          unreadCount: 0,
+        };
+
+        if (conversationId) {
+          updateData.lastViewedConversationId = conversationId;
+        }
+
+        await tx.mutate.channel_user_status.update({
+          id: participant.id,
+          ...updateData,
+        });
+
+        const unreadActivities = await tx.run(
+          zql.activities
+            .where('userId', ctx.userID)
+            .where('isRead', false)
+            .where('channelId', channelId),
+        );
+
+        if (unreadActivities.length === 0) {
+          return;
+        }
+
+        const messageIds = Array.from(
+          new Map(
+            unreadActivities.map(a => [
+              a.actionSourceId,
+              { activityId: a.id, sourceId: a.actionSourceId },
+            ]),
+          ).values(),
+        );
+
+        const messages = await Promise.all(
+          messageIds.map(messagePair =>
+            tx.run(
+              zql.messages.where('messageId', messagePair.sourceId).related('conversation').one(),
+            ),
+          ),
+        );
+
+        for (const [index, message] of messages.entries()) {
+          const messagePair = messageIds[index];
+          if (message?.conversation?.initialMessageId === message?.messageId && messagePair) {
+            await tx.mutate.activities.update({
+              id: messagePair.activityId,
+              isRead: true,
+            });
+          }
+        }
+      },
+    ),
+    toggleStarred: defineMutator(
+      z.object({ channelId: z.string() }),
+      async ({ tx, ctx, args: { channelId } }) => {
+        const participation = await tx.run(
+          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participation) {
+          throw new Error('Not a channel participant');
+        }
+
+        await tx.mutate.channel_user_status.update({
+          id: participation.id,
+          isStarred: !participation.isStarred,
+        });
+      },
+    ),
+    closeDm: defineMutator(
+      z.object({ channelId: z.string() }),
+      async ({ tx, ctx, args: { channelId } }) => {
+        const participation = await tx.run(
+          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participation) {
+          throw new Error('Not a channel participant');
+        }
+
+        await tx.mutate.channel_user_status.update({
+          id: participation.id,
+          isClosed: true,
+        });
+      },
+    ),
+    reopenDm: defineMutator(
+      z.object({ channelId: z.string() }),
+      async ({ tx, ctx, args: { channelId } }) => {
+        const participation = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participation) {
+          throw new Error('Not a channel participant');
+        }
+
+        await tx.mutate.channel_user_status.update({
+          id: participation.id,
+          isClosed: false,
+        });
+      },
+    ),
+    updateDescription: defineMutator(
+      z.object({
+        channelId: z.string(),
+        description: z.string(),
+        messageId: z.string(),
+        conversationId: z.string(),
+        timestamp: z.number(),
+        conversationParticipantId: z.string(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          channelId,
+          description,
+          messageId,
+          conversationId,
+          timestamp,
+          conversationParticipantId,
+        },
+      }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        // Check if user is a participant
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participant) {
+          throw new Error('Only channel participants can update the description');
+        }
+
+        // Get user info for system message
+        const user = await tx.run(zql.users.where('id', ctx.userID).one());
+        if (!user) {
+          throw new Error('User not found');
+        }
+
+        await tx.mutate.channels.update({
+          id: channelId,
+          description: description,
+        });
+
+        const now = timestamp;
+
+        // Create conversation for the system message
+        await tx.mutate.conversations.insert({
+          conversationId,
+          channelId,
+          createdBy: ctx.userID,
+          initialMessageId: messageId,
+          lastActivityAt: now,
+          replyCount: 0,
+          pinned: false,
+          metadata: undefined,
+          createdAt: now,
+        });
+
+        // Create the system message
+        const systemMessageContent = `set the channel description to: ${description}`;
+
+        await tx.mutate.messages.insert({
+          messageId,
+          conversationId,
+          senderId: ctx.userID,
+          content: systemMessageContent,
+          msgType: MessageType.SYSTEM,
+          hasAttachment: false,
+          edited: false,
+          isSent: false,
+          isDeleted: false,
+          showInChannel: false,
+          createdAt: now,
+          metadata: {
+            operationType: 'description_updated',
+            newDescription: description,
+            userId: ctx.userID,
+            userName: user.name,
+          },
+        });
+
+        // Update channel last activity
+        await tx.mutate.channels.update({
+          id: channelId,
+          lastActivityAt: now,
+        });
+
+        // Add creator as conversation participant
+        await tx.mutate.conversation_participants.insert({
+          id: conversationParticipantId,
+          conversationId,
+          userId: ctx.userID,
+          participationType: ConversationParticipation.AUTHOR,
+          joinedAt: now,
+        });
+      },
+    ),
+    updateParticipantRole: defineMutator(
+      z.object({
+        channelId: z.string(),
+        targetUserId: z.string(),
+        newRole: z.enum(ChannelRole),
+        timestamp: z.number(),
+        conversationId: z.string(),
+        messageId: z.string(),
+        conversationParticipantId: z.string(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          channelId,
+          targetUserId,
+          newRole,
+          timestamp,
+          conversationId,
+          messageId,
+          conversationParticipantId,
+        },
+      }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        // Check if requesting user is an admin or channel creator
+        const requestingParticipant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!requestingParticipant) {
+          throw new Error('You are not a participant in this channel');
+        }
+
+        const isAdmin = requestingParticipant.role === ChannelRole.ADMIN;
+        const isCreator = channel.createdBy === ctx.userID;
+
+        if (!isAdmin && !isCreator) {
+          throw new Error('Only channel admins or creators can update participant roles');
+        }
+
+        // Get target participant
+        const targetParticipant = await tx.run(
+          zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', targetUserId)
+            .one(),
+        );
+
+        if (!targetParticipant) {
+          throw new Error('User is not a participant in this channel');
+        }
+
+        // Prevent modifying the channel creator's role
+        if (targetUserId === channel.createdBy) {
+          throw new Error("Cannot modify the channel creator's role");
+        }
+
+        // Only creators can grant admin role
+        if (newRole === ChannelRole.ADMIN && !isCreator) {
+          throw new Error('Only channel creators can grant admin role');
+        }
+
+        // Non-creators cannot change admin roles
+        if (targetParticipant.role === ChannelRole.ADMIN && !isCreator) {
+          throw new Error('Only channel creators can modify admin roles');
+        }
+
+        // Update the participant's role
+        await tx.mutate.channel_participants.update({
+          id: targetParticipant.id,
+          role: newRole,
+        });
+
+        // Get user info for system message
+        const requestingUser = await tx.run(zql.users.where('id', ctx.userID).one());
+        const targetUser = await tx.run(zql.users.where('id', targetUserId).one());
+
+        if (!requestingUser || !targetUser) {
+          throw new Error('User not found');
+        }
+
+        const now = timestamp;
+
+        // Create conversation for the system message
+        await tx.mutate.conversations.insert({
+          conversationId,
+          channelId,
+          createdBy: ctx.userID,
+          initialMessageId: messageId,
+          lastActivityAt: now,
+          replyCount: 0,
+          pinned: false,
+          metadata: undefined,
+          createdAt: now,
+        });
+
+        // Create the system message
+        const systemMessageContent = `changed ${targetUser.name}'s role to ${newRole}`;
+
+        await tx.mutate.messages.insert({
+          messageId,
+          conversationId,
+          senderId: ctx.userID,
+          content: systemMessageContent,
+          msgType: MessageType.SYSTEM,
+          hasAttachment: false,
+          edited: false,
+          isDeleted: false,
+          isSent: false,
+          showInChannel: false,
+          createdAt: now,
+          metadata: {
+            operationType: 'role_updated',
+            targetUserId: targetUserId,
+            targetUserName: targetUser.name,
+            newRole: newRole,
+            updatedBy: ctx.userID,
+            updatedByName: requestingUser.name,
+          },
+        });
+
+        // Update channel last activity
+        await tx.mutate.channels.update({
+          id: channelId,
+          lastActivityAt: now,
+        });
+
+        // Add creator as conversation participant
+        await tx.mutate.conversation_participants.insert({
+          id: conversationParticipantId,
+          conversationId,
+          userId: ctx.userID,
+          participationType: ConversationParticipation.AUTHOR,
+          joinedAt: now,
+        });
+      },
+    ),
+  },
+  conversations: {
+    send: defineMutator(
+      z.object({
+        channelId: z.string(),
+        content: z.string(),
+        conversationId: z.string(),
+        messageId: z.string(),
+        timestamp: z.number(),
+        type: z.enum(MessageType),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { channelId, content, type, conversationId, messageId, timestamp },
+      }) => {
+        if (content === '') {
+          throw new Error('Message content or files are required to start a conversation');
+        }
+
+        const now = timestamp;
+
+        await tx.mutate.conversations.insert({
+          conversationId,
+          channelId,
+          createdBy: ctx.userID,
+          initialMessageId: messageId,
+          lastActivityAt: now,
+          replyCount: 0,
+          pinned: false,
+          metadata: {},
+          createdAt: now,
+        });
+
+        await tx.mutate.messages.insert({
+          messageId,
+          conversationId,
+          senderId: ctx.userID,
+          content: content.trim(),
+          msgType: type,
+          hasAttachment: false,
+          edited: false,
+          isDeleted: false,
+          isSent: false,
+          showInChannel: false,
+          createdAt: now,
+          metadata: {},
+        });
+
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        const participation = await tx.run(
+          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (participation) {
+          await tx.mutate.channel_user_status.update({
+            id: participation.id,
+            lastViewedAt: now,
+            lastViewedConversationId: conversationId,
+            isClosed: false,
+          });
+        }
+      },
+    ),
+    update: defineMutator(
+      z.object({ messageId: z.string(), content: z.string() }),
+      async ({ tx, args: { messageId, content } }) => {
+        if (content === '') {
+          throw new Error('Message content or files are required to start a conversation');
+        }
+
+        await tx.mutate.messages.update({
+          messageId,
+          content: content,
+          edited: true,
+        });
+      },
+    ),
+    togglePin: defineMutator(
+      z.object({ conversationId: z.string() }),
+      async ({ tx, args: { conversationId } }) => {
+        const conversation = await tx.run(
+          zql.conversations.where('conversationId', conversationId).one(),
+        );
+
+        if (!conversation) {
+          throw new Error("Conversation doesn't exist");
+        }
+
+        await tx.mutate.conversations.update({
+          conversationId,
+          pinned: !conversation.pinned,
+        });
+      },
+    ),
+    forwardMessage: defineMutator(
+      z.object({
+        targetChannelId: z.string(),
+        originalMessageId: z.string(),
+        optionalMessage: z.string().optional(),
+        conversationId: z.string(),
+        messageId: z.string(),
+        timestamp: z.number(),
+        conversationParticipantId: z.string(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          targetChannelId,
+          originalMessageId,
+          optionalMessage,
+          conversationId,
+          messageId,
+          timestamp,
+          conversationParticipantId,
+        },
+      }) => {
+        // Verify target channel exists
+        const targetChannel = await tx.run(zql.channels.where('id', targetChannelId).one());
+        if (!targetChannel) {
+          throw new Error('Target channel not found');
+        }
+
+        // Verify user is a participant of the target channel
+        const participation = await tx.run(
+          zql.channel_participants
+            .where('channelId', targetChannelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participation) {
+          throw new Error('You are not a participant of the target channel');
+        }
+
+        // Get the original message
+        const originalMessage = await tx.run(
+          zql.messages.where('messageId', originalMessageId).one(),
+        );
+        if (!originalMessage) {
+          throw new Error('Original message not found');
+        }
+
+        // Get original sender info
+        const originalSender = await tx.run(zql.users.where('id', originalMessage.senderId).one());
+
+        // Get original message's conversation to find the channel
+        const originalConversation = await tx.run(
+          zql.conversations.where('conversationId', originalMessage.conversationId).one(),
+        );
+
+        // Verify user is a participant of the origin channel (where the message is being forwarded from)
+        if (originalConversation?.channelId) {
+          const originParticipation = await tx.run(
+            zql.channel_participants
+              .where('channelId', originalConversation.channelId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (!originParticipation) {
+            throw new Error('You are not a participant of the origin channel');
+          }
+        }
+
+        // Handle re-forwarding: if the original message is already forwarded,
+        // parse the XML to get the optionalText and use that as content (if exists)
+        // When using optionalText, don't include attachments (it's either optionalText OR message content with attachments)
+        const isReForwarding = originalMessage.msgType === MessageType.FORWARDED;
+        let forwardedContent = originalMessage.content;
+        let useOptionalText = false;
+
+        if (isReForwarding) {
+          const parsedForwarded = parseForwardedMessageXml(originalMessage.content);
+          if (parsedForwarded?.optionalText) {
+            forwardedContent = parsedForwarded.optionalText;
+            useOptionalText = true;
+          } else if (parsedForwarded?.content) {
+            forwardedContent = parsedForwarded.content;
+          }
+        }
+        const forwardedHasAttachment = useOptionalText ? false : originalMessage.hasAttachment;
+
+        const now = timestamp;
+
+        // Create conversation for the forwarded message
+        await tx.mutate.conversations.insert({
+          conversationId,
+          channelId: targetChannelId,
+          createdBy: ctx.userID,
+          initialMessageId: messageId,
+          lastActivityAt: now,
+          replyCount: 0,
+          pinned: false,
+          metadata: {},
+          createdAt: now,
+        });
+
+        // Create XML content for the forwarded message
+        const xmlContent = createForwardedMessageXml({
+          originalMessageId,
+          originalSenderId: originalMessage.senderId,
+          originalSenderName: originalSender?.name || 'Unknown User',
+          originalCreatedAt: originalMessage.createdAt,
+          originalChannelId: originalConversation?.channelId || null,
+          originalConversationId: originalMessage.conversationId,
+          optionalText: optionalMessage || null,
+          content: forwardedContent,
+        });
+
+        // Create the forwarded message with XML content
+        await tx.mutate.messages.insert({
+          messageId,
+          conversationId,
+          senderId: ctx.userID,
+          content: xmlContent,
+          msgType: MessageType.FORWARDED,
+          hasAttachment: forwardedHasAttachment,
+          edited: false,
+          isDeleted: false,
+          isSent: false,
+          showInChannel: false,
+          createdAt: now,
+          metadata: {},
+        });
+
+        // Update channel last activity
+        await tx.mutate.channels.update({
+          id: targetChannelId,
+          lastActivityAt: now,
+        });
+
+        // Update user's last viewed time
+        const userStatus = await tx.run(
+          zql.channel_user_status
+            .where('channelId', targetChannelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (userStatus) {
+          await tx.mutate.channel_user_status.update({
+            id: userStatus.id,
+            lastViewedAt: now,
+            lastViewedConversationId: conversationId,
+          });
+        }
+
+        // Add creator as conversation participant
+        await tx.mutate.conversation_participants.insert({
+          id: conversationParticipantId,
+          conversationId,
+          userId: ctx.userID,
+          participationType: ConversationParticipation.AUTHOR,
+          joinedAt: now,
+        });
+      },
+    ),
+  },
+  messages: {
+    send: defineMutator(
+      z.object({
+        conversationId: z.string(),
+        content: z.string(),
+        type: z.enum(MessageType),
+        showInChannel: z.boolean().optional(),
+        timestamp: z.number(),
+        messageId: z.string(),
+        childConversationId: z.string().optional(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          conversationId,
+          content,
+          type,
+          showInChannel,
+          timestamp,
+          messageId,
+          childConversationId,
+        },
+      }) => {
+        if (content === '') {
+          throw new Error('Message content or files are required to start a conversation');
+        }
+
+        const conversation = await tx.run(
+          zql.conversations.where('conversationId', conversationId).one(),
+        );
+
+        if (!conversation) {
+          throw new Error('Conversation not found');
+        }
+
+        const channel = await tx.run(zql.channels.where('id', conversation.channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exists");
+        }
+
+        const message = {
+          messageId,
+          conversationId,
+          senderId: ctx.userID,
+          content: content.trim(),
+          msgType: type,
+          hasAttachment: false,
+          edited: false,
+          isSent: false,
+          isDeleted: false,
+          showInChannel: showInChannel || false,
+          childConversationId: showInChannel ? childConversationId || null : null,
+          createdAt: timestamp,
+          metadata: undefined,
+        };
+
+        await tx.mutate.messages.insert(message);
+
+        // If showInChannel is true, create a new conversation for this message in the channel
+        if (showInChannel) {
+          if (!childConversationId) {
+            throw new Error('Child conversation ID is required when showInChannel is true');
+          }
+
+          await tx.mutate.conversations.insert({
+            conversationId: childConversationId,
+            channelId: conversation.channelId,
+            createdBy: ctx.userID,
+            initialMessageId: messageId,
+            parentMessageId: conversation.initialMessageId,
+            lastActivityAt: timestamp,
+            replyCount: 0,
+            pinned: false,
+            createdAt: timestamp,
+          });
+        }
+
+        // Find the most recent message before this one
+        // and set its child conversation replyCount to 1 if it has showInChannel=true
+        const mostRecentPrevMsg = await tx.run(
+          zql.messages
+            .where('conversationId', message.conversationId)
+            .where('createdAt', '<', message.createdAt)
+            .orderBy('createdAt', 'desc')
+            .limit(1)
+            .one(),
+        );
+
+        if (mostRecentPrevMsg?.showInChannel && mostRecentPrevMsg.childConversationId) {
+          await tx.mutate.conversations.update({
+            conversationId: mostRecentPrevMsg.childConversationId,
+            replyCount: 1,
+          });
+        }
+      },
+    ),
+    update: defineMutator(
+      z.object({ messageId: z.string(), content: z.string().optional() }),
+      async ({ tx, ctx, args: { messageId, content } }) => {
+        const message = await tx.run(
+          zql.messages
+            .where('messageId', messageId)
+            .where(helpers => {
+              return helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', ctx.userID),
+              );
+            })
+            .one(),
+        );
+
+        if (!message) {
+          throw new Error('Message not available');
+        }
+
+        // For forwarded messages, empty content is allowed (clearing optional message)
+        // For regular messages, content cannot be empty
+        const isForwardedMessage = message.msgType === MessageType.FORWARDED;
+        if (content !== undefined && content === '' && !isForwardedMessage) {
+          throw new Error('Message content cannot be empty');
+        }
+
+        // Allow system messages to be updated by any channel participant
+        if (message.msgType !== MessageType.SYSTEM && message.senderId !== ctx.userID) {
+          throw new Error('Only the sender can edit the messages');
+        }
+
+        if (content !== undefined) {
+          if (isForwardedMessage) {
+            // For forwarded messages, parse XML, update optionalText, and re-serialize
+            const parsedForwarded = parseForwardedMessageXml(message.content);
+            if (parsedForwarded) {
+              const updatedXmlContent = createForwardedMessageXml({
+                ...parsedForwarded,
+                optionalText: content || null,
+              });
+              await tx.mutate.messages.update({
+                messageId,
+                content: updatedXmlContent,
+                edited: true,
+              });
+            }
+          } else {
+            // For regular messages, update the content directly
+            await tx.mutate.messages.update({
+              messageId,
+              content,
+              edited: true,
+            });
+          }
+        }
+      },
+    ),
+    updateShowInChannel: defineMutator(
+      z.object({
+        messageId: z.string(),
+        showInChannel: z.boolean(),
+        childConversationId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { messageId, showInChannel, childConversationId, timestamp } }) => {
+        if (!showInChannel) {
+          throw new Error('This action only supports sending messages to the channel.');
+        }
+        const message = await tx.run(
+          zql.messages
+            .where('messageId', messageId)
+            .where(helpers => {
+              return helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', ctx.userID),
+              );
+            })
+            .one(),
+        );
+
+        if (!message) {
+          throw new Error('Unauthorized');
+        }
+
+        if (message.senderId !== ctx.userID) {
+          throw new Error('Unauthorized');
+        }
+        if (message.showInChannel) {
+          return;
+        }
+
+        await tx.mutate.messages.update({
+          messageId,
+          showInChannel: true,
+        });
+
+        // Get the conversation to get channelId
+        const conversation = await tx.run(
+          zql.conversations.where('conversationId', message.conversationId).one(),
+        );
+
+        if (!conversation) {
+          throw new Error('Conversation not found');
+        }
+
+        const messagesAfterThis = await tx.run(
+          zql.messages
+            .where('conversationId', message.conversationId)
+            .where('createdAt', '>', message.createdAt),
+        );
+
+        const hasNewerReplies = messagesAfterThis.length > 0;
+
+        // Create a new conversation for this message in the channel (like send does)
+        await tx.mutate.conversations.insert({
+          conversationId: childConversationId,
+          channelId: conversation.channelId,
+          createdBy: ctx.userID,
+          initialMessageId: messageId,
+          parentMessageId: conversation.initialMessageId,
+          lastActivityAt: timestamp,
+          replyCount: hasNewerReplies ? 1 : 0,
+          pinned: false,
+          createdAt: timestamp,
+        });
+
+        // Update the message with the child conversation ID
+        await tx.mutate.messages.update({
+          messageId,
+          childConversationId: childConversationId,
+        });
+      },
+    ),
+    react: defineMutator(
+      z.object({
+        messageId: z.string(),
+        emojiName: z.string(),
+        action: z.enum(['add', 'remove']),
+        timestamp: z.number(),
+        reactionId: z.string().optional(),
+        countId: z.string().optional(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { messageId, emojiName, action, timestamp, reactionId, countId },
+      }) => {
+        const decodedEmoji = decodeURIComponent(emojiName);
+        if (!decodedEmoji.trim() || decodedEmoji.length > 100) {
+          throw new Error('Invalid Emoji');
+        }
+        const reaction = await tx.run(
+          zql.reaction_counts.where('messageId', messageId).where('emojiName', decodedEmoji).one(),
+        );
+
+        if (action === 'add') {
+          const reactionIdToUse = reactionId;
+          if (!reactionIdToUse) {
+            throw new Error('reactionId is required when adding a reaction');
+          }
+          const countIdToUse = countId;
+          if (!countIdToUse) {
+            throw new Error('countId is required when creating a new reaction count');
+          }
+          await tx.mutate.reactions.insert({
+            reactionId: reactionIdToUse,
+            messageId,
+            userId: ctx.userID,
+            emojiName: decodedEmoji,
+            createdAt: timestamp,
+          });
+
+          if (reaction) {
+            await tx.mutate.reaction_counts.update({
+              countId: reaction.countId,
+              count: reaction.count + 1,
+            });
+          } else {
+            await tx.mutate.reaction_counts.insert({
+              countId: countIdToUse,
+              count: 1,
+              messageId,
+              emojiName: decodedEmoji,
+              updatedAt: timestamp,
+            });
+          }
+        } else if (action === 'remove') {
+          const reactionRow = await tx.run(
+            zql.reactions
+              .where('emojiName', decodedEmoji)
+              .where('messageId', messageId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+
+          if (!reactionRow) {
+            throw new Error('Reaction not found');
+          }
+
+          await tx.mutate.reactions.delete({ reactionId: reactionRow.reactionId });
+          if (reaction) {
+            if (reaction.count > 1) {
+              await tx.mutate.reaction_counts.update({
+                countId: reaction.countId,
+                count: reaction.count - 1,
+                updatedAt: timestamp,
+              });
+            } else {
+              await tx.mutate.reaction_counts.delete({ countId: reaction.countId });
+            }
+          }
+        }
+      },
+    ),
+    handleNonParticipantAction: defineMutator(
+      z.object({
+        messageId: z.string(),
+        action: z.enum(['add', 'add_all', 'ignore', 'ignore_all']),
+        userIds: z.array(z.string()),
+        channelId: z.string(),
+      }),
+      async ({ tx, args: { messageId } }) => {
+        // First delete the message
+        await tx.mutate.messages.delete({ messageId });
+
+        // This mutator is also handled on the backend for adding participants
+        // Frontend handles the deletion, backend handles participant addition
+      },
+    ),
+    delete: defineMutator(
+      z.object({ messageId: z.string() }),
+      async ({ tx, ctx, args: { messageId } }) => {
+        const message = await tx.run(
+          zql.messages
+            .where('messageId', messageId)
+            .where(helpers => {
+              return helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', ctx.userID),
+              );
+            })
+            .one(),
+        );
+
+        if (!message) {
+          throw new Error('Message not found');
+        }
+
+        const conversation = await tx.run(
+          zql.conversations.where('conversationId', message.conversationId).one(),
+        );
+
+        if (!conversation) {
+          throw new Error('conversation not found');
+        }
+
+        const attachments = await tx.run(zql.message_attachments.where('entityId', messageId));
+        const reactions = await tx.run(zql.reactions.where('messageId', messageId));
+        const reactionCounts = await tx.run(zql.reaction_counts.where('messageId', messageId));
+
+        await Promise.all(
+          attachments.map(async attachment => {
+            await tx.mutate.message_attachments.delete({
+              id: attachment.id,
+            });
+          }),
+        );
+
+        await Promise.all(
+          reactions.map(async reaction => {
+            await tx.mutate.reactions.delete({
+              reactionId: reaction.reactionId,
+            });
+          }),
+        );
+
+        await Promise.all(
+          reactionCounts.map(async count => {
+            await tx.mutate.reaction_counts.delete({
+              countId: count.countId,
+            });
+          }),
+        );
+
+        // Get all OTHER messages in the conversation (excluding the one being deleted)
+        const allMessages = await tx.run(
+          zql.messages.where('conversationId', message.conversationId),
+        );
+
+        const otherMessages = allMessages.filter(m => m.messageId !== messageId);
+
+        const isInitialMessage = conversation.initialMessageId === messageId;
+        const hasReplies = otherMessages.length > 0;
+        const shouldSoftDelete = isInitialMessage && hasReplies;
+
+        // Clean up MENTIONED participants within Zero transaction
+        const mentions = extractAllMentions(message.content);
+
+        if (mentions.userIds.length > 0) {
+          // For each mentioned user, check if they're still mentioned elsewhere
+          for (const userId of mentions.userIds) {
+            // Check if user is still mentioned in any other message
+            const stillMentioned = otherMessages.some(msg => {
+              const msgMentions = extractAllMentions(msg.content);
+              return msgMentions.userIds.includes(userId);
+            });
+
+            // If not mentioned elsewhere, check if they're a MENTIONED participant and remove them
+            if (!stillMentioned && userId !== conversation.createdBy) {
+              const participant = await tx.run(
+                zql.conversation_participants
+                  .where('conversationId', message.conversationId)
+                  .where('userId', userId)
+                  .one(),
+              );
+
+              // Only delete if they're MENTIONED type (keep AUTHOR participants for now)
+              if (
+                participant &&
+                participant.participationType === ConversationParticipation.MENTIONED
+              ) {
+                await tx.mutate.conversation_participants.delete({
+                  id: participant.id,
+                });
+              }
+            }
+          }
+        }
+
+        // Clean up AUTHOR participant if this was their only message
+        const senderId = message.senderId;
+
+        // Check if sender has any other messages in this conversation
+        const otherMessagesFromSender = otherMessages.filter(msg => msg.senderId === senderId);
+
+        // If this was their only message, remove their AUTHOR participant
+        if (otherMessagesFromSender.length === 0) {
+          const senderParticipant = await tx.run(
+            zql.conversation_participants
+              .where('conversationId', message.conversationId)
+              .where('userId', senderId)
+              .one(),
+          );
+
+          // Remove AUTHOR participant (they have no more messages)
+          if (
+            senderParticipant &&
+            senderParticipant.participationType === ConversationParticipation.AUTHOR
+          ) {
+            await tx.mutate.conversation_participants.delete({
+              id: senderParticipant.id,
+            });
+          }
+        }
+
+        // Handle showInChannel viewNewerReplies updates when deleting a message
+        // Check if there are any messages after this one with showInChannel=true
+        const messagesAfterThis = await tx.run(
+          zql.messages
+            .where('conversationId', message.conversationId)
+            .where('createdAt', '>', message.createdAt)
+            .limit(1)
+            .one(),
+        );
+
+        // If no messages below, check for a message above
+        if (!messagesAfterThis) {
+          const messageAbove = await tx.run(
+            zql.messages
+              .where('conversationId', message.conversationId)
+              .where('createdAt', '<', message.createdAt)
+              .orderBy('createdAt', 'desc')
+              .limit(1)
+              .one(),
+          );
+
+          // If there's a message above with showInChannel, set its replyCount to 0
+          if (messageAbove?.childConversationId && messageAbove.showInChannel) {
+            await tx.mutate.conversations.update({
+              conversationId: messageAbove.childConversationId,
+              replyCount: 0,
+            });
+          }
+        }
+
+        // 5. Final Delete Logic
+        if (shouldSoftDelete) {
+          // SCENARIO 1: Root Message + Has Replies -> Soft Delete
+          // Keep conversation, wipe message content
+          await tx.mutate.messages.update({
+            messageId,
+            isDeleted: true,
+            content: '',
+            hasAttachment: false,
+            edited: false,
+          });
+        } else {
+          // SCENARIO 2: Hard Delete (Reply OR Root with no replies)
+          await tx.mutate.messages.delete({ messageId });
+
+          const isInitialMessageDeleted =
+            otherMessages.length === 1 &&
+            otherMessages[0] &&
+            otherMessages[0].messageId === conversation.initialMessageId &&
+            otherMessages[0].isDeleted === true;
+
+          const shouldDeleteConversation = otherMessages.length === 0 || isInitialMessageDeleted;
+
+          if (shouldDeleteConversation) {
+            // Delete the conversation
+            await tx.mutate.conversations.delete({ conversationId: conversation.conversationId });
+
+            // Clean up the ghost root message if it exists so we don't leave orphaned data
+            if (isInitialMessageDeleted && otherMessages[0]) {
+              await tx.mutate.messages.delete({ messageId: otherMessages[0].messageId });
+            }
+          } else {
+            // Just a normal reply deletion, update the count
+            await tx.mutate.conversations.update({
+              conversationId: conversation.conversationId,
+              replyCount: Math.max(0, conversation.replyCount - 1),
+            });
+          }
+        }
+      },
+    ),
+  },
+  messageAttachment: {
+    delete: defineMutator(
+      z.object({ attachmentId: z.string() }),
+      async ({ tx, args: { attachmentId } }) => {
+        const attachment = await tx.run(zql.message_attachments.where('id', attachmentId).one());
+
+        if (!attachment) {
+          throw new Error('Attachment not found');
+        }
+
+        await tx.mutate.message_attachments.delete({ id: attachment.id });
+
+        const remainingAttachments = await tx.run(
+          zql.message_attachments.where('entityId', attachment.entityId),
+        );
+
+        if (remainingAttachments.length === 0) {
+          const message = await tx.run(zql.messages.where('messageId', attachment.entityId).one());
+          if (!message) {
+            throw new Error('Message not found for the attachment');
+          }
+
+          // Check if the message content is empty (including HTML-only content like <p><br></p>)
+          const doc = new DOMParser().parseFromString(message.content, 'text/html');
+          const plainText = doc.body.textContent?.trim();
+
+          if (plainText === '') {
+            await tx.mutate.messages.delete({
+              messageId: message.messageId,
+            });
+          } else {
+            await tx.mutate.messages.update({
+              messageId: attachment.entityId,
+              hasAttachment: false,
+            });
+          }
+        }
+      },
+    ),
+  },
+  calls: {
+    initiate: defineMutator(
+      z.object({
+        channelId: z.string(),
+        callType: z.enum(CallType),
+        targetUserIds: z.array(z.string()).optional(),
+        externalId: z.string(),
+        roomLink: z.string(),
+        timestamp: z.number(),
+        callId: z.string(),
+        creatorParticipantId: z.string(),
+        targetParticipantIds: z.record(z.string(), z.string()).optional(), // Map userId -> participantId
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          channelId,
+          callType,
+          targetUserIds,
+          externalId,
+          roomLink,
+          timestamp,
+          callId,
+          creatorParticipantId,
+          targetParticipantIds = {},
+        },
+      }) => {
+        const now = timestamp;
+
+        await tx.mutate.calls.insert({
+          id: callId,
+          externalId: externalId,
+          createdByUserId: ctx.userID,
+          channelId: channelId,
+          callType: callType,
+          status: CallStatus.ACTIVE,
+          roomLink: roomLink,
+          timezone: 'UTC',
+          isRecurring: false,
+          recordingEnabled: false,
+          startedAt: now,
+          lastActivityAt: now,
+          createdAt: now,
+          updatedAt: now,
+          metadata: undefined,
+        });
+
+        // Creator joins immediately
+        await tx.mutate.call_participants.insert({
+          id: creatorParticipantId,
+          callId: callId,
+          userId: ctx.userID,
+          invitedBy: ctx.userID,
+          invitedAt: now,
+          response: InvitationResponse.ACCEPTED,
+          respondedAt: now,
+          joinedAt: now,
+          leftAt: null,
+        });
+
+        // Invite target user(s) or all channel participants
+        if (targetUserIds && targetUserIds.length > 0) {
+          // Invite specific array of users
+          for (const userId of targetUserIds) {
+            if (userId !== ctx.userID) {
+              const participantId = targetParticipantIds[userId];
+              if (!participantId) {
+                throw new Error(`participantId is required for user ${userId}`);
+              }
+              await tx.mutate.call_participants.insert({
+                id: participantId,
+                callId: callId,
+                userId: userId,
+                invitedBy: ctx.userID,
+                invitedAt: now,
+                response: InvitationResponse.INVITED,
+                respondedAt: null,
+                joinedAt: null,
+                leftAt: null,
+              });
+            }
+          }
+        }
+      },
+    ),
+    join: defineMutator(
+      z.object({
+        callId: z.string(),
+        timestamp: z.number(),
+        participantId: z.string().optional(),
+      }),
+      async ({ tx, ctx, args: { callId, timestamp, participantId } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+
+        if (!call) {
+          throw new Error('Call not found');
+        }
+
+        if (call.status !== CallStatus.ACTIVE) {
+          throw new Error('Call is not active');
+        }
+
+        const now = timestamp;
+
+        const existingParticipant = await tx.run(
+          zql.call_participants.where('callId', call.id).where('userId', ctx.userID).one(),
+        );
+
+        if (existingParticipant) {
+          await tx.mutate.call_participants.update({
+            id: existingParticipant.id,
+            response: InvitationResponse.ACCEPTED,
+            respondedAt: now,
+            joinedAt: now,
+            leftAt: null,
+          });
+        } else {
+          const newParticipantId = participantId;
+          if (!newParticipantId) {
+            throw new Error('participantId is required when joining a call');
+          }
+          await tx.mutate.call_participants.insert({
+            id: newParticipantId,
+            callId: call.id,
+            userId: ctx.userID,
+            invitedBy: ctx.userID,
+            invitedAt: now,
+            response: InvitationResponse.ACCEPTED,
+            respondedAt: now,
+            joinedAt: now,
+            leftAt: null,
+          });
+        }
+      },
+    ),
+    leave: defineMutator(
+      z.object({ callId: z.string(), timestamp: z.number() }),
+      async ({ tx, ctx, args: { callId, timestamp } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+
+        if (!call) {
+          throw new Error('Call not found');
+        }
+
+        const participant = await tx.run(
+          zql.call_participants.where('callId', call.id).where('userId', ctx.userID).one(),
+        );
+
+        if (!participant || participant.leftAt !== null) {
+          return;
+        }
+
+        const now = timestamp;
+
+        await tx.mutate.call_participants.update({
+          id: participant.id,
+          response: InvitationResponse.DECLINED,
+          leftAt: now,
+        });
+
+        const activeParticipants = await tx.run(
+          zql.call_participants
+            .where('callId', call.id)
+            .where('response', InvitationResponse.ACCEPTED),
+        );
+
+        if (activeParticipants.length === 0) {
+          await tx.mutate.calls.update({
+            id: call.id,
+            status: CallStatus.ENDED,
+            endedAt: now,
+            updatedAt: now,
+          });
+        }
+      },
+    ),
+    reject: defineMutator(
+      z.object({ callId: z.string(), timestamp: z.number() }),
+      async ({ tx, ctx, args: { callId, timestamp } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+
+        if (!call) {
+          throw new Error('Call not found');
+        }
+
+        const participant = await tx.run(
+          zql.call_participants.where('callId', call.id).where('userId', ctx.userID).one(),
+        );
+
+        if (participant) {
+          await tx.mutate.call_participants.update({
+            id: participant.id,
+            response: InvitationResponse.DECLINED,
+            respondedAt: timestamp,
+          });
+        }
+      },
+    ),
+    invite: defineMutator(
+      z.object({
+        callId: z.string(),
+        userIds: z.array(z.string()),
+        timestamp: z.number(),
+        participantIds: z.record(z.string(), z.string()),
+      }),
+      async ({ tx, ctx, args: { callId, userIds, timestamp, participantIds = {} } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+        if (!call || call.status !== CallStatus.ACTIVE) {
+          throw new Error('Call not found');
+        }
+
+        const now = timestamp;
+
+        // Invite each user
+        for (const userId of userIds) {
+          // Check if user already has a participant record
+          const existingParticipant = await tx.run(
+            zql.call_participants.where('callId', call.id).where('userId', userId).one(),
+          );
+
+          if (existingParticipant) {
+            // Re-invite: reset to INVITED status (works for declined or left users)
+            if (
+              existingParticipant.response !== InvitationResponse.ACCEPTED ||
+              existingParticipant.leftAt !== null
+            ) {
+              await tx.mutate.call_participants.update({
+                id: existingParticipant.id,
+                response: InvitationResponse.INVITED,
+                invitedBy: ctx.userID,
+                invitedAt: now,
+                respondedAt: null,
+                joinedAt: null,
+                leftAt: null,
+              });
+            }
+          } else {
+            // Create new participant invitation
+            const newParticipantId = participantIds[userId];
+            if (!newParticipantId) {
+              throw new Error(`participantId is required for user ${userId}`);
+            }
+            await tx.mutate.call_participants.insert({
+              id: newParticipantId,
+              callId: call.id,
+              userId: userId,
+              invitedBy: ctx.userID,
+              invitedAt: now,
+              response: InvitationResponse.INVITED,
+              respondedAt: null,
+              joinedAt: null,
+              leftAt: null,
+            });
+          }
+        }
+      },
+    ),
+  },
+  activities: {
+    markAsRead: defineMutator(
+      z.object({ activityId: z.string() }),
+      async ({ tx, ctx, args: { activityId } }) => {
+        const activity = await tx.run(zql.activities.where('id', activityId).one());
+
+        if (!activity) {
+          throw new Error('Activity not found');
+        }
+
+        if (activity.userId !== ctx.userID) {
+          throw new Error('You can only mark your own activities as read');
+        }
+
+        await tx.mutate.activities.update({
+          id: activityId,
+          isRead: true,
+        });
+      },
+    ),
+    markAsReadByFilter: defineMutator(
+      z.object({
+        actorAction: z.string().optional(),
+        classification: z.enum(ActivityClassification).optional(),
+      }),
+      async ({ tx, ctx, args: { actorAction, classification } }) => {
+        let query = zql.activities.where('userId', ctx.userID).where('isRead', false);
+
+        if (actorAction) {
+          query = query.where('actorAction', actorAction);
+        }
+        if (classification) {
+          query = query.where('classification', classification);
+        }
+
+        const unreadActivities = await tx.run(query);
+
+        if (unreadActivities.length > 0) {
+          await Promise.all(
+            unreadActivities.map(activity =>
+              tx.mutate.activities.update({
+                id: activity.id,
+                isRead: true,
+              }),
+            ),
+          );
+          const channelIdCounts = new Map<string, number>();
+          unreadActivities.forEach(activity => {
+            if (activity.channelId) {
+              const currentCount = channelIdCounts.get(activity.channelId) || 0;
+              channelIdCounts.set(activity.channelId, currentCount + 1);
+            }
+          });
+
+          const uniqueChannelIds = Array.from(channelIdCounts.keys());
+          const channelUserStatuses = await tx.run(
+            zql.channel_user_status
+              .where('userId', ctx.userID)
+              .where('channelId', 'IN', uniqueChannelIds),
+          );
+          await Promise.all(
+            channelUserStatuses.map(channelStatus => {
+              const readCount = channelIdCounts.get(channelStatus.channelId) || 0;
+              const newUnreadCount = Math.max(0, channelStatus.unreadCount - readCount);
+              return tx.mutate.channel_user_status.update({
+                id: channelStatus.id,
+                unreadCount: newUnreadCount,
+              });
+            }),
+          );
+        }
+      },
+    ),
+    markActivitiesSeenByMessageId: defineMutator(
+      z.object({ messageId: z.string() }),
+      async ({ tx, ctx, args: { messageId } }) => {
+        const messageActivities = await tx.run(
+          zql.activities
+            .where(helper =>
+              helper.or(
+                helper.cmp('actionSource', 'message'),
+                helper.cmp('actionSource', 'missed_call'),
+              ),
+            )
+            .where('actionSourceId', messageId)
+            .where('userId', ctx.userID),
+        );
+
+        for (const activity of messageActivities) {
+          if (!activity.isRead) {
+            await tx.mutate.activities.update({
+              id: activity.id,
+              isRead: true,
+            });
+          }
+        }
+
+        // Step 2: Get all reactions for this message
+        const reactions = await tx.run(zql.reactions.where('messageId', messageId));
+
+        // Step 3: Mark all reaction activities as read for these reactions
+        for (const reaction of reactions) {
+          const reactionActivities = await tx.run(
+            zql.activities
+              .where('actionSource', 'reaction')
+              .where('actionSourceId', reaction.reactionId),
+          );
+
+          for (const activity of reactionActivities) {
+            if (!activity.isRead) {
+              await tx.mutate.activities.update({
+                id: activity.id,
+                isRead: true,
+              });
+            }
+          }
+        }
+      },
+    ),
+    markThreadActivitiesAsRead: defineMutator(
+      z.object({ conversationId: z.string() }),
+      async ({ tx, ctx, args: { conversationId } }) => {
+        const conversation = await tx.run(
+          zql.conversations.where('conversationId', conversationId).one(),
+        );
+
+        if (!conversation) {
+          throw new Error('Conversation not found');
+        }
+
+        const channelId = conversation.channelId;
+
+        const unreadActivities = await tx.run(
+          zql.activities
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isRead', false)
+            .where('actionSource', 'message'),
+        );
+
+        if (unreadActivities.length === 0) {
+          return;
+        }
+
+        const messageIds = Array.from(
+          new Map(
+            unreadActivities.map(a => [
+              a.actionSourceId,
+              { activityId: a.id, sourceId: a.actionSourceId },
+            ]),
+          ).values(),
+        );
+
+        const messages = await Promise.all(
+          messageIds.map(messagePair =>
+            tx.run(
+              zql.messages.where('messageId', messagePair.sourceId).related('conversation').one(),
+            ),
+          ),
+        );
+
+        for (const [index, message] of messages.entries()) {
+          const messagePair = messageIds[index];
+          if (message?.conversation?.initialMessageId !== message?.messageId && messagePair) {
+            await tx.mutate.activities.update({
+              id: messagePair.activityId,
+              isRead: true,
+            });
+          }
+        }
+      },
+    ),
+    markMissedCallsAsRead: defineMutator(z.object({}), async ({ tx, ctx }) => {
+      const query = zql.activities
+        .where('userId', ctx.userID)
+        .where('actorAction', 'missed_call')
+        .where('isRead', false);
+
+      const unreadMissedCalls = await tx.run(query);
+      if (unreadMissedCalls.length > 0) {
+        await Promise.all(
+          unreadMissedCalls.map(activity =>
+            tx.mutate.activities.update({
+              id: activity.id,
+              isRead: true,
+            }),
+          ),
+        );
+      }
+    }),
+  },
+  ticket: {
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        statusV2: z.string().optional(),
+        priority: z.string().optional(),
+        stageName: z.string().optional(),
+        assignedTo: z.string().nullable().optional(),
+        eta: z.number().optional(),
+        boardId: z.string().optional(),
+        metadata: z.any().optional(),
+        updatedAt: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          id,
+          title,
+          description,
+          statusV2,
+          priority,
+          stageName,
+          assignedTo,
+          eta,
+          boardId,
+          metadata,
+          updatedAt,
+        },
+      }) => {
+        interface TicketUpdateData {
+          updatedBy: string;
+          updatedAt: number;
+          title?: string;
+          description?: string;
+          statusV2?: TicketStatusV2;
+          priority?: TicketPriority;
+          stageName?: string;
+          assignedTo?: string | null;
+          eta?: number;
+          boardId?: string;
+          metadata?: ReadonlyJSONValue;
+        }
+
+        const updateData: TicketUpdateData = {
+          updatedBy: ctx.userID,
+          updatedAt: updatedAt,
+        };
+
+        if (title !== undefined) updateData.title = title;
+        if (description !== undefined) updateData.description = description;
+        if (statusV2 !== undefined) {
+          updateData.statusV2 = statusV2 as TicketStatusV2;
+        }
+        if (priority !== undefined) updateData.priority = priority as TicketPriority;
+        if (stageName !== undefined) updateData.stageName = stageName;
+        if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
+        if (eta !== undefined) updateData.eta = eta;
+        if (boardId !== undefined) updateData.boardId = boardId;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        if (metadata !== undefined) updateData.metadata = metadata;
+
+        await tx.mutate.tickets.update({
+          id,
+          ...updateData,
+        });
+      },
+    ),
+    updateAssignment: defineMutator(
+      z.object({ ticketId: z.string(), assignedTo: z.string().nullable(), timestamp: z.number() }),
+      async ({ tx, ctx, args: { ticketId, assignedTo, timestamp } }) => {
+        await tx.mutate.tickets.update({
+          id: ticketId,
+          assignedTo,
+          updatedBy: ctx.userID,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+  subTicket: {
+    create: defineMutator(
+      z.object({
+        subTicketId: z.string(),
+        mappingId: z.string(),
+        timestamp: z.number(),
+        title: z.string(),
+        description: z.string().optional(),
+        ticketId: z.string(),
+        conversationId: z.string().optional(),
+        subTicketXyneId: z.string().optional(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { subTicketId, timestamp, mappingId, title, description, ticketId, conversationId },
+      }) => {
+        // Create the subticket
+        await tx.mutate.sub_tickets.insert({
+          id: subTicketId,
+          title,
+          description: description || null,
+          mappedTicketId: null,
+          createdBy: ctx.userID,
+          updatedBy: ctx.userID,
+          conversationId: conversationId || null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          stageProgression: null,
+          assignedTo: null,
+        });
+
+        // Create the mapping
+        await tx.mutate.ticket_sub_ticket_mappings.insert({
+          id: mappingId,
+          ticketId,
+          subTicketId,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        subTicketId: z.string(),
+        timestamp: z.number(),
+        mappedTicketId: z.string().optional(),
+        conversationId: z.string().optional(),
+        assignedTo: z.string().optional().nullable(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { subTicketId, mappedTicketId, conversationId, timestamp, assignedTo },
+      }) => {
+        // Update the subticket
+        await tx.mutate.sub_tickets.update({
+          id: subTicketId,
+          ...(mappedTicketId !== undefined && { mappedTicketId }),
+          ...(conversationId !== undefined && { conversationId }),
+          ...(assignedTo !== undefined && { assignedTo }),
+          updatedBy: ctx.userID,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+  project: {
+    update: defineMutator(
+      z.object({
+        projectId: z.string(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { projectId, name, description, timestamp } }) => {
+        // Validate project exists
+        const project = await tx.run(zql.projects.where('id', projectId).one());
+        if (!project) {
+          throw new Error('Project not found');
+        }
+
+        // Check for duplicate name if name is being changed
+        if (name && name !== project.name) {
+          const existingProject = await tx.run(zql.projects.where('name', name).one());
+          if (existingProject && existingProject.id !== projectId) {
+            throw new Error(`Project with name '${name}' already exists`);
+          }
+        }
+
+        // Update project
+        await tx.mutate.projects.update({
+          id: projectId,
+          ...(name !== undefined && { name }),
+          ...(description !== undefined && { description }),
+          updatedBy: ctx.userID,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    delete: defineMutator(
+      z.object({ projectId: z.string() }),
+      async ({ tx, args: { projectId } }) => {
+        // Validate project exists
+        const project = await tx.run(zql.projects.where('id', projectId).one());
+        if (!project) {
+          throw new Error('Project not found');
+        }
+
+        // Delete project
+        await tx.mutate.projects.delete({
+          id: projectId,
+        });
+      },
+    ),
+  },
+  userGroup: {
+    update: defineMutator(
+      z.object({
+        userGroupId: z.string(),
+        name: z.string().optional(),
+        alias: z.string().optional(),
+        description: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { userGroupId, name, alias, description, timestamp } }) => {
+        // Get all user groups to check for duplicates in a single query
+        const allUserGroups = await tx.run(zql.user_groups);
+
+        // Find the current user group
+        const userGroup = allUserGroups.find(ug => ug.id === userGroupId);
+        if (!userGroup) {
+          throw new Error('User group not found');
+        }
+
+        // Check for duplicate name if name is being changed
+        if (name && name !== userGroup.name) {
+          const existingUserGroup = allUserGroups.find(ug => ug.name === name);
+          if (existingUserGroup && existingUserGroup.id !== userGroupId) {
+            throw new Error(`User group with name '${name}' already exists`);
+          }
+        }
+
+        // Check for duplicate alias if alias is being changed
+        if (alias && alias !== userGroup.alias) {
+          if (!/^[a-z0-9_-]+$/.test(alias)) {
+            throw new Error(
+              'Alias can only contain lowercase letters, numbers, hyphens, and underscores',
+            );
+          }
+          const existingUserGroup = allUserGroups.find(ug => ug.alias === alias);
+          if (existingUserGroup && existingUserGroup.id !== userGroupId) {
+            throw new Error(`User group with alias '${alias}' already exists`);
+          }
+        }
+
+        // Update user group
+        await tx.mutate.user_groups.update({
+          id: userGroupId,
+          ...(name !== undefined && { name }),
+          ...(alias !== undefined && { alias }),
+          ...(description !== undefined && { description }),
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    delete: defineMutator(
+      z.object({ userGroupId: z.string() }),
+      async ({ tx, args: { userGroupId } }) => {
+        // Validate user group exists
+        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+        if (!userGroup) {
+          throw new Error('User group not found');
+        }
+
+        // Check if user group has tickets with terminal statuses (CANCELLED, COMPLETED)
+        const terminalTickets = await tx.run(
+          zql.tickets
+            .where('userGroupId', userGroupId)
+            .where(helpers =>
+              helpers.or(
+                helpers.cmp('statusV2', TicketStatusV2.CANCELLED),
+                helpers.cmp('statusV2', TicketStatusV2.COMPLETED),
+              ),
+            ),
+        );
+
+        if (terminalTickets.length > 0) {
+          throw new Error(
+            'Cannot delete user group with tickets in terminal status (CANCELLED or COMPLETED)',
+          );
+        }
+
+        // First, delete all mappings associated with the user group
+        const mappings = await tx.run(zql.user_group_mappings.where('userGroupId', userGroupId));
+        for (const mapping of mappings) {
+          await tx.mutate.user_group_mappings.delete({ id: mapping.id });
+        }
+
+        // Then, delete the user group itself
+        await tx.mutate.user_groups.delete({
+          id: userGroupId,
+        });
+      },
+    ),
+    addUsers: defineMutator(
+      z.object({
+        userGroupId: z.string(),
+        userIds: z.array(z.string()),
+        timestamp: z.number(),
+        mappingIds: z.record(z.string(), z.string()), // Map userId -> mappingId
+      }),
+      async ({ tx, args: { userGroupId, userIds, timestamp, mappingIds = {} } }) => {
+        // Validate user group exists
+        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+        if (!userGroup) {
+          throw new Error('User group not found');
+        }
+
+        // Bulk validate users exist using individual queries (Zero doesn't support IN with arrays directly)
+        const users = await Promise.all(
+          userIds.map(userId => tx.run(zql.users.where('id', userId).one())),
+        );
+        const allUsersExist = users.every(user => user !== undefined);
+        if (!allUsersExist) {
+          const foundUserIds = new Set(
+            users.filter((u): u is NonNullable<typeof u> => u !== undefined).map(u => u.id),
+          );
+          const notFound = userIds.filter(id => !foundUserIds.has(id));
+          throw new Error(`Users with ids '${notFound.join(', ')}' not found`);
+        }
+
+        // Bulk check for existing mappings to avoid duplicates
+        const existingMappings = await Promise.all(
+          userIds.map(userId =>
+            tx.run(
+              zql.user_group_mappings
+                .where('userGroupId', userGroupId)
+                .where('userId', userId)
+                .one(),
+            ),
+          ),
+        );
+        const existingUserIds = new Set(
+          existingMappings
+            .filter((m): m is NonNullable<typeof m> => m !== undefined)
+            .map(m => m.userId),
+        );
+
+        // Add only users who are not already in the group
+        const userIdsToAdd = userIds.filter(userId => !existingUserIds.has(userId));
+
+        // Add new users
+        for (const userId of userIdsToAdd) {
+          const mappingId = mappingIds[userId];
+          if (!mappingId) {
+            throw new Error(`mappingId is required for user ${userId}`);
+          }
+          await tx.mutate.user_group_mappings.insert({
+            id: mappingId,
+            userGroupId,
+            userId,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    removeUsers: defineMutator(
+      z.object({ userGroupId: z.string(), userIds: z.array(z.string()) }),
+      async ({ tx, args: { userGroupId, userIds } }) => {
+        // Validate user group exists
+        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+        if (!userGroup) {
+          throw new Error('User group not found');
+        }
+
+        // Remove users from group
+        // Find all mappings to be removed using individual queries
+        const mappingsToRemove = await Promise.all(
+          userIds.map(userId =>
+            tx.run(
+              zql.user_group_mappings
+                .where('userGroupId', userGroupId)
+                .where('userId', userId)
+                .one(),
+            ),
+          ),
+        );
+
+        // Delete the found mappings
+        for (const mapping of mappingsToRemove) {
+          if (mapping) {
+            await tx.mutate.user_group_mappings.delete({
+              id: mapping.id,
+            });
+          }
+        }
+      },
+    ),
+  },
+  board: {
+    update: defineMutator(
+      z.object({
+        boardId: z.string(),
+        name: z.string().optional(),
+        projectId: z.string().optional(),
+        metadata: z.any().optional(),
+        stages: z
+          .array(
+            z.object({
+              id: z.string().optional(),
+              name: z.string(),
+              eta: z.number(),
+              sequenceNumber: z.number(),
+              defaultTicketStatusV2: z.string().optional(),
+            }),
+          )
+          .optional(),
+        timestamp: z.number(),
+        stageIds: z.record(z.string(), z.string()).optional(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { boardId, name, projectId, metadata, stages, timestamp, stageIds = {} },
+      }) => {
+        // Validate board exists
+        const board = await tx.run(zql.boards.where('id', boardId).one());
+        if (!board) {
+          throw new Error('Board not found');
+        }
+
+        // Validate project exists if projectId is being changed
+        if (projectId && projectId !== board.projectId) {
+          const project = await tx.run(zql.projects.where('id', projectId).one());
+          if (!project) {
+            throw new Error('Project not found');
+          }
+        }
+
+        // Check for duplicate name if name is being changed
+        if (name && name !== board.name) {
+          const existingBoard = await tx.run(zql.boards.where('name', name).one());
+          if (existingBoard && existingBoard.id !== boardId) {
+            throw new Error(`Board with name '${name}' already exists`);
+          }
+        }
+
+        // Update board
+        await tx.mutate.boards.update({
+          id: boardId,
+          ...(name !== undefined && { name }),
+          ...(projectId !== undefined && { projectId }),
+          ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),
+          updatedBy: ctx.userID,
+          updatedAt: timestamp,
+        });
+
+        // Update stages if provided
+        if (stages) {
+          // Delete all existing stages
+          const existingStages = await tx.run(zql.stages.where('boardId', boardId));
+          for (const stage of existingStages) {
+            await tx.mutate.stages.delete({
+              id: stage.id,
+            });
+          }
+
+          // Create new stages
+          for (const stage of stages) {
+            const stageId = stageIds[stage.sequenceNumber];
+            if (!stageId) {
+              throw new Error(`stageId is required for stage at sequence ${stage.sequenceNumber}`);
+            }
+            await tx.mutate.stages.insert({
+              id: stageId,
+              name: stage.name,
+              eta: stage.eta,
+              sequenceNumber: stage.sequenceNumber,
+              boardId: boardId,
+              createdBy: ctx.userID,
+              updatedBy: ctx.userID,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              defaultTicketStatusV2:
+                (stage.defaultTicketStatusV2 as TicketStatusV2) || TicketStatusV2.STARTED,
+            });
+          }
+        }
+      },
+    ),
+    delete: defineMutator(z.object({ boardId: z.string() }), async ({ tx, args: { boardId } }) => {
+      // Validate board exists
+      const board = await tx.run(zql.boards.where('id', boardId).one());
+      if (!board) {
+        throw new Error('Board not found');
+      }
+
+      // Check if board has tickets with terminal statuses (CANCELLED, COMPLETED)
+      const terminalTickets = await tx.run(
+        zql.tickets
+          .where('boardId', boardId)
+          .where(helpers =>
+            helpers.or(
+              helpers.cmp('statusV2', TicketStatusV2.CANCELLED),
+              helpers.cmp('statusV2', TicketStatusV2.COMPLETED),
+            ),
+          ),
+      );
+
+      if (terminalTickets.length > 0) {
+        throw new Error(
+          'Cannot delete board with tickets in terminal status (CANCELLED or COMPLETED)',
+        );
+      }
+
+      // Delete all stages first
+      const stages = await tx.run(zql.stages.where('boardId', boardId));
+      for (const stage of stages) {
+        await tx.mutate.stages.delete({
+          id: stage.id,
+        });
+      }
+
+      // Delete board
+      await tx.mutate.boards.delete({
+        id: boardId,
+      });
+    }),
+  },
+  ticketTag: {
+    create: defineMutator(
+      z.object({ ticketId: z.string(), tagName: z.string(), tagId: z.string() }),
+      async ({ tx, args: { ticketId, tagName, tagId } }) => {
+        // Validate tag name
+        if (!tagName || !tagName.trim()) {
+          throw new Error('Tag name cannot be empty');
+        }
+
+        const trimmedTagName = tagName.trim();
+
+        // Check if tag already exists for this ticket
+        const existingTag = await tx.run(
+          zql.ticket_tags.where('ticketId', ticketId).where('name', trimmedTagName).one(),
+        );
+
+        if (existingTag) {
+          throw new Error('Tag already exists for this ticket');
+        }
+
+        // Create new tag
+        await tx.mutate.ticket_tags.insert({
+          id: tagId,
+          name: trimmedTagName,
+          ticketId,
+        });
+      },
+    ),
+    delete: defineMutator(z.object({ tagId: z.string() }), async ({ tx, args: { tagId } }) => {
+      // Validate tag exists
+      const tag = await tx.run(zql.ticket_tags.where('id', tagId).one());
+      if (!tag) {
+        throw new Error('Tag not found');
+      }
+
+      // Delete tag
+      await tx.mutate.ticket_tags.delete({
+        id: tagId,
+      });
+    }),
+  },
+  ticketReference: {
+    create: defineMutator(
+      z.object({
+        sourceTicketId: z.string(),
+        targetTicketId: z.string(),
+        relationType: z.nativeEnum(TicketReferenceRelation),
+        timestamp: z.number(),
+        referenceId: z.string(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { sourceTicketId, targetTicketId, relationType, timestamp, referenceId },
+      }) => {
+        const existingReference = await tx.run(
+          zql.ticket_reference_mappings
+            .where('sourceTicketId', sourceTicketId)
+            .where('targetTicketId', targetTicketId)
+            .where('relationType', relationType)
+            .one(),
+        );
+
+        if (existingReference) {
+          throw new Error('Ticket reference already exists');
+        }
+
+        await tx.mutate.ticket_reference_mappings.insert({
+          id: referenceId,
+          sourceTicketId,
+          targetTicketId,
+          relationType,
+          createdBy: ctx.userID,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    updateRelationType: defineMutator(
+      z.object({
+        id: z.string(),
+        relationType: z.nativeEnum(TicketReferenceRelation),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { id, relationType, timestamp } }) => {
+        const reference = await tx.run(zql.ticket_reference_mappings.where('id', id).one());
+        if (!reference) {
+          throw new Error('Ticket reference not found');
+        }
+
+        await tx.mutate.ticket_reference_mappings.update({
+          id,
+          relationType,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    delete: defineMutator(z.object({ id: z.string() }), async ({ tx, args: { id } }) => {
+      const reference = await tx.run(zql.ticket_reference_mappings.where('id', id).one());
+      if (!reference) {
+        throw new Error('Ticket reference not found');
+      }
+
+      await tx.mutate.ticket_reference_mappings.delete({
+        id,
+      });
+    }),
+  },
+  canvas: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        channelId: z.string().optional(),
+        viewAccessId: z.string().optional(),
+        editAccessId: z.string().optional(),
+        visibility: z.enum(CanvasVisibility).optional(),
+        content: z.any().optional(),
+        timestamp: z.number(),
+        participantId: z.string(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          id,
+          title,
+          channelId,
+          viewAccessId,
+          editAccessId,
+          visibility,
+          content,
+          timestamp,
+          participantId,
+        },
+      }) => {
+        const now = timestamp;
+
+        await tx.mutate.canvases.insert({
+          id,
+          title,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          content: content || [],
+          channelId,
+          createdBy: ctx.userID,
+          viewAccessId,
+          editAccessId,
+          visibility: visibility || CanvasVisibility.PRIVATE,
+          isTemplate: false,
+          isCollaborative: false,
+          docType: DocType.Canvas,
+          lastEditedBy: ctx.userID,
+          lastEditedAt: now,
+          createdAt: now,
+          updatedAt: now,
+          metadata: {},
+        });
+
+        // Add creator as participant with OWNER role
+        await tx.mutate.canvas_participants.insert({
+          id: participantId,
+          canvasId: id,
+          userId: ctx.userID,
+          role: CanvasRole.OWNER,
+          joinedAt: now,
+          updatedAt: now,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        title: z.string().optional(),
+        content: z.any().optional(),
+        visibility: z.enum(CanvasVisibility).optional(),
+        isCollaborative: z.boolean().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, title, content, visibility, isCollaborative, timestamp } }) => {
+        await tx.mutate.canvases.update({
+          id,
+          lastEditedBy: ctx.userID,
+          lastEditedAt: timestamp,
+          updatedAt: timestamp,
+          ...(title !== undefined && { title }),
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          ...(content !== undefined && { content }),
+          ...(visibility !== undefined && { visibility }),
+          ...(isCollaborative !== undefined && { isCollaborative }),
+        });
+      },
+    ),
+    delete: defineMutator(z.object({ id: z.string() }), async ({ tx, ctx, args: { id } }) => {
+      const canvas = await tx.run(zql.canvases.where('id', id).one());
+      if (!canvas) {
+        throw new Error('Canvas not found');
+      }
+
+      if (canvas.createdBy !== ctx.userID) {
+        throw new Error('Only the creator can delete the canvas');
+      }
+
+      await tx.mutate.canvases.delete({ id });
+    }),
+    addParticipants: defineMutator(
+      z.object({
+        canvasId: z.string(),
+        userIds: z.array(z.string()),
+        role: z.enum(CanvasRole),
+        timestamp: z.number(),
+        participantIds: z.record(z.string(), z.string()), // Map userId -> participantId
+      }),
+      async ({ tx, ctx, args: { canvasId, userIds, role, timestamp, participantIds = {} } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error("Canvas doesn't exist");
+        }
+
+        // Check if requesting user is owner
+        const requestingUserParticipant = await tx.run(
+          zql.canvas_participants.where('canvasId', canvasId).where('userId', ctx.userID).one(),
+        );
+
+        const isOwner =
+          canvas.createdBy === ctx.userID ||
+          (requestingUserParticipant && requestingUserParticipant.role === CanvasRole.OWNER);
+
+        const isEditor =
+          requestingUserParticipant && requestingUserParticipant.role === CanvasRole.EDITOR;
+
+        if (!isOwner && !isEditor) {
+          throw new Error('Only canvas owners can add participants');
+        }
+        // Prevent editors from granting owner role
+        if (isEditor && role === CanvasRole.OWNER) {
+          throw new Error('Editors cannot grant owner role');
+        }
+
+        const now = timestamp;
+
+        // Add each user as participant
+        for (const userId of userIds) {
+          // Check if user exists
+          const user = await tx.run(zql.users.where('id', userId).one());
+          if (!user) {
+            continue;
+          }
+
+          // Check if already a participant
+          const existingParticipant = await tx.run(
+            zql.canvas_participants.where('canvasId', canvasId).where('userId', userId).one(),
+          );
+
+          if (existingParticipant) {
+            continue;
+          }
+
+          const participantId = participantIds[userId];
+          if (!participantId) {
+            throw new Error(`participantId is required for user ${userId}`);
+          }
+          await tx.mutate.canvas_participants.insert({
+            id: participantId,
+            canvasId,
+            userId,
+            role,
+            joinedAt: now,
+            updatedAt: now,
+          });
+        }
+      },
+    ),
+    removeParticipant: defineMutator(
+      z.object({ canvasId: z.string(), userId: z.string() }),
+      async ({ tx, ctx, args: { canvasId, userId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error("Canvas doesn't exist");
+        }
+
+        // Check if requesting user is owner
+        const requestingUserParticipant = await tx.run(
+          zql.canvas_participants.where('canvasId', canvasId).where('userId', ctx.userID).one(),
+        );
+
+        const isOwner =
+          canvas.createdBy === ctx.userID ||
+          (requestingUserParticipant && requestingUserParticipant.role === CanvasRole.OWNER);
+
+        const isEditor =
+          requestingUserParticipant && requestingUserParticipant.role === CanvasRole.EDITOR;
+
+        if (!isOwner && !isEditor) {
+          throw new Error('Only canvas owners or editors can remove participants');
+        }
+
+        // Get target participant
+        const targetParticipant = await tx.run(
+          zql.canvas_participants.where('canvasId', canvasId).where('userId', userId).one(),
+        );
+
+        if (!targetParticipant) {
+          throw new Error('User is not a participant');
+        }
+
+        // Prevent removing yourself if you're the creator
+        if (userId === ctx.userID && canvas.createdBy === ctx.userID) {
+          throw new Error('Canvas creator cannot be removed');
+        }
+
+        // Prevent editors from removing owners
+        if (isEditor && targetParticipant.role === CanvasRole.OWNER) {
+          throw new Error('Editors cannot remove owners');
+        }
+
+        await tx.mutate.canvas_participants.delete({
+          id: targetParticipant.id,
+        });
+      },
+    ),
+    updateParticipantRole: defineMutator(
+      z.object({
+        canvasId: z.string(),
+        userId: z.string(),
+        role: z.enum(CanvasRole),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { canvasId, userId, role, timestamp } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error("Canvas doesn't exist");
+        }
+
+        // Check if requesting user is owner
+        const requestingUserParticipant = await tx.run(
+          zql.canvas_participants.where('canvasId', canvasId).where('userId', ctx.userID).one(),
+        );
+
+        const isOwner =
+          canvas.createdBy === ctx.userID ||
+          (requestingUserParticipant && requestingUserParticipant.role === CanvasRole.OWNER);
+
+        const isEditor =
+          requestingUserParticipant && requestingUserParticipant.role === CanvasRole.EDITOR;
+
+        if (!isOwner && !isEditor) {
+          throw new Error('Only canvas owners or editors can update participant roles');
+        }
+
+        // Get target participant
+        const targetParticipant = await tx.run(
+          zql.canvas_participants.where('canvasId', canvasId).where('userId', userId).one(),
+        );
+
+        if (!targetParticipant) {
+          throw new Error('User is not a participant');
+        }
+
+        // Prevent editors from granting owner role
+        if (isEditor && role === CanvasRole.OWNER) {
+          throw new Error('Editors cannot grant owner role');
+        }
+        // Prevent editors from modifying owners
+        if (isEditor && targetParticipant.role === CanvasRole.OWNER) {
+          throw new Error('Editors cannot modify owner roles');
+        }
+
+        // Prevent changing creator's role
+        if (userId === canvas.createdBy) {
+          throw new Error("Cannot change canvas creator's role");
+        }
+
+        await tx.mutate.canvas_participants.update({
+          id: targetParticipant.id,
+          role,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+  bookmark: {
+    add: defineMutator(
+      z.object({
+        entityId: z.string(),
+        entityType: z.enum(BookmarkEntityType),
+        bookmarkId: z.string(),
+        timestamp: z.number(),
+        metadata: z.any().optional(),
+      }),
+      async ({ tx, ctx, args: { entityId, entityType, bookmarkId, timestamp, metadata } }) => {
+        // Check if bookmark already exists
+        const existing = await tx.run(
+          zql.bookmarks
+            .where('userId', ctx.userID)
+            .where('entityId', entityId)
+            .where('entityType', entityType)
+            .one(),
+        );
+
+        if (existing) {
+          return; // Silently return instead of throwing error
+        }
+
+        await tx.mutate.bookmarks.insert({
+          id: bookmarkId,
+          userId: ctx.userID,
+          entityId,
+          entityType,
+          createdAt: timestamp,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata,
+        });
+      },
+    ),
+    remove: defineMutator(
+      z.object({ entityId: z.string(), entityType: z.enum(BookmarkEntityType) }),
+      async ({ tx, ctx, args: { entityId, entityType } }) => {
+        const bookmark = await tx.run(
+          zql.bookmarks
+            .where('userId', ctx.userID)
+            .where('entityId', entityId)
+            .where('entityType', entityType)
+            .one(),
+        );
+
+        if (!bookmark) {
+          throw new Error('Bookmark not found');
+        }
+
+        await tx.mutate.bookmarks.delete({
+          id: bookmark.id,
+        });
+      },
+    ),
+    updateMetadata: defineMutator(
+      z.object({
+        entityId: z.string(),
+        entityType: z.enum(BookmarkEntityType),
+        metadata: z.any(),
+      }),
+      async ({ tx, ctx, args: { entityId, entityType, metadata } }) => {
+        const bookmark = await tx.run(
+          zql.bookmarks
+            .where('userId', ctx.userID)
+            .where('entityId', entityId)
+            .where('entityType', entityType)
+            .one(),
+        );
+
+        if (!bookmark) {
+          throw new Error('Bookmark not found');
+        }
+
+        await tx.mutate.bookmarks.update({
+          id: bookmark.id,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata,
+        });
+      },
+    ),
+  },
+  userProfile: {
+    upsert: defineMutator(
+      z.object({
+        displayName: z.string().nullable().optional(),
+        pronunciation: z.string().nullable().optional(),
+        team: z.string().nullable().optional(),
+        phoneNumber: z.string().nullable().optional(),
+        dob: z.number().nullable().optional(),
+        manager: z.string().nullable().optional(),
+        timestamp: z.number(),
+        profileId: z.string(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          displayName,
+          pronunciation,
+          team,
+          phoneNumber,
+          dob,
+          manager,
+          timestamp,
+          profileId: inputProfileId,
+        },
+      }) => {
+        // Check if profile already exists to get the ID
+        const existingProfile = await tx.run(zql.user_profiles.where('userId', ctx.userID).one());
+
+        const profileId = existingProfile?.id || inputProfileId;
+        if (!profileId) {
+          throw new Error('profileId is required');
+        }
+
+        const profileData: {
+          id: string;
+          userId: string;
+          displayName?: string | null;
+          pronunciation?: string | null;
+          team?: string | null;
+          phoneNumber?: string | null;
+          dob?: number | null;
+          manager?: string | null;
+          updatedAt: number;
+          createdAt: number;
+        } = {
+          id: profileId,
+          userId: ctx.userID,
+          ...(displayName !== undefined && { displayName }),
+          ...(pronunciation !== undefined && { pronunciation }),
+          ...(team !== undefined && { team }),
+          ...(phoneNumber !== undefined && { phoneNumber }),
+          ...(dob !== undefined && { dob }),
+          ...(manager !== undefined && { manager }),
+          updatedAt: timestamp,
+          createdAt: existingProfile ? existingProfile.createdAt || timestamp : timestamp,
+        };
+
+        await tx.mutate.user_profiles.upsert(profileData);
+      },
+    ),
+  },
+  userPresence: {
+    upsert: defineMutator(
+      z.object({
+        statusEmoji: z.string().nullable().optional(),
+        statusContent: z.string().nullable().optional(),
+        statusExpiryAt: z.number().nullable().optional(),
+        timestamp: z.number(),
+        presenceId: z.string(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          statusEmoji,
+          statusContent,
+          statusExpiryAt,
+          timestamp,
+          presenceId: inputPresenceId,
+        },
+      }) => {
+        // Decode and validate emoji if provided
+        let validatedEmoji: string | undefined;
+        if (statusEmoji) {
+          try {
+            const decodedEmoji = decodeURIComponent(statusEmoji);
+            if (!decodedEmoji.trim() || decodedEmoji.length > 100) {
+              throw new Error('Invalid emoji encoding');
+            }
+            validatedEmoji = decodedEmoji;
+          } catch (e) {
+            if (e instanceof URIError) {
+              throw new Error('Invalid emoji encoding');
+            }
+            throw e;
+          }
+        }
+
+        // Check if user presence record exists
+        const existingPresence = await tx.run(zql.user_presence.where('userId', ctx.userID).one());
+
+        const presenceId = existingPresence?.id || inputPresenceId;
+        if (!presenceId) {
+          throw new Error('presenceId is required');
+        }
+        const now = timestamp;
+
+        const presenceData = {
+          id: presenceId,
+          userId: ctx.userID,
+          status: UserPresenceStatus.ONLINE, // Default status
+          lastActiveAt: now,
+          lastSeenAt: now,
+          isManual: false,
+          ...(statusEmoji !== undefined && { statusEmoji: validatedEmoji || null }),
+          ...(statusContent !== undefined && { statusContent }),
+          ...(statusExpiryAt !== undefined && { statusExpiryAt }),
+          updatedAt: now,
+          createdAt: existingPresence ? existingPresence.createdAt || now : now,
+        };
+
+        await tx.mutate.user_presence.upsert(presenceData);
+      },
+    ),
+  },
+  assignmentConfig: {
+    batchUpdate: defineMutator(
+      z.object({
+        userGroupId: z.string(),
+        userStates: z.array(
+          z.object({
+            userId: z.string(),
+            onCall: z.boolean(),
+            isActive: z.boolean(),
+          }),
+        ),
+        boardWeight: z
+          .object({
+            boardId: z.string(),
+            weight: z.number(),
+            usePercentage: z.boolean(),
+          })
+          .optional(),
+        expertiseMappings: z
+          .object({
+            boardId: z.string(),
+            userConfigs: z.array(
+              z.object({
+                userId: z.string(),
+                hasExpertise: z.boolean(),
+                percentage: z.number(),
+                maxTickets: z.number(),
+              }),
+            ),
+          })
+          .optional(),
+        timestamp: z.number(),
+        stateIds: z.record(z.string(), z.string()), // Map userId -> stateId
+        complexityScoreId: z.string().optional(),
+        mappingIds: z.record(z.string(), z.string()).optional(), // Map userId -> mappingId
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          userGroupId,
+          userStates,
+          boardWeight,
+          expertiseMappings,
+          timestamp,
+          stateIds = {},
+          complexityScoreId,
+          mappingIds = {},
+        },
+      }) => {
+        const now = timestamp;
+
+        // Validate user group exists
+        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+        if (!userGroup) {
+          throw new Error('User group not found');
+        }
+
+        // Update user assignment states
+        for (const state of userStates) {
+          // Check if state already exists
+          const existingState = await tx.run(
+            zql.user_assignment_states
+              .where('userId', state.userId)
+              .where('userGroupId', userGroupId)
+              .one(),
+          );
+
+          const stateId = existingState?.id || stateIds[state.userId];
+          if (!stateId) {
+            throw new Error(`stateId is required for user ${state.userId}`);
+          }
+          const isActiveForAssignment = state.isActive;
+
+          const stateData = {
+            id: stateId,
+            userId: state.userId,
+            userGroupId,
+            onCall: state.onCall,
+            isActiveForAssignment,
+            createdBy: existingState?.createdBy ?? ctx.userID,
+            updatedAt: now,
+            createdAt: existingState?.createdAt ?? now,
+          };
+
+          await tx.mutate.user_assignment_states.upsert(stateData);
+        }
+
+        // Update board complexity score if provided
+        if (boardWeight) {
+          if (boardWeight.weight < 1) {
+            throw new Error('Weight must be at least 1');
+          }
+
+          const existingScore = await tx.run(
+            zql.board_complexity_scores
+              .where('userGroupId', userGroupId)
+              .where('boardId', boardWeight.boardId)
+              .one(),
+          );
+
+          if (existingScore) {
+            await tx.mutate.board_complexity_scores.update({
+              id: existingScore.id,
+              weight: boardWeight.weight,
+              usePercentage: boardWeight.usePercentage,
+              updatedAt: now,
+            });
+          } else {
+            const scoreId = complexityScoreId;
+            if (!scoreId) {
+              throw new Error(
+                'complexityScoreId is required when creating a new board complexity score',
+              );
+            }
+            await tx.mutate.board_complexity_scores.insert({
+              id: scoreId,
+              userGroupId,
+              boardId: boardWeight.boardId,
+              weight: boardWeight.weight,
+              usePercentage: boardWeight.usePercentage,
+              createdBy: ctx.userID,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        }
+
+        // Update expertise mappings if provided
+        if (expertiseMappings) {
+          // For each user in the group, check if they need expertise mapping
+          for (const userConfig of expertiseMappings.userConfigs) {
+            const existingMapping = await tx.run(
+              zql.user_expertise_mappings
+                .where('userId', userConfig.userId)
+                .where('userGroupId', userGroupId)
+                .where('boardId', expertiseMappings.boardId)
+                .one(),
+            );
+
+            const needsSave =
+              userConfig.hasExpertise ||
+              userConfig.percentage !== 100 ||
+              userConfig.maxTickets !== -1;
+
+            if (needsSave) {
+              const mappingId = existingMapping?.id || mappingIds[userConfig.userId];
+              if (!mappingId) {
+                throw new Error(`mappingId is required for user ${userConfig.userId}`);
+              }
+              const mappingData = {
+                id: mappingId,
+                userId: userConfig.userId,
+                userGroupId,
+                boardId: expertiseMappings.boardId,
+                hasExpertise: userConfig.hasExpertise,
+                percentage: userConfig.percentage,
+                maxTickets: userConfig.maxTickets,
+                updatedAt: now,
+                createdBy: existingMapping?.createdBy ?? ctx.userID,
+                createdAt: existingMapping?.createdAt ?? now,
+              };
+
+              await tx.mutate.user_expertise_mappings.upsert(mappingData);
+            } else if (existingMapping) {
+              // Remove mapping if no special configuration
+              await tx.mutate.user_expertise_mappings.delete({
+                id: existingMapping.id,
+              });
+            }
+          }
+        }
+      },
+    ),
+  },
+  repo: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        url: z.string(),
+        baseBranch: z.array(z.string()),
+        prefix: z.string(),
+      }),
+      async ({ tx, ctx, args: { id, name, url, baseBranch, prefix } }) => {
+        // Check if repo with same URL already exists
+        const existing = await tx.run(zql.repos.where('url', url).one());
+        if (existing) {
+          throw new Error(`Repo with URL '${url}' already exists`);
+        }
+
+        await tx.mutate.repos.insert({
+          id,
+          name,
+          url,
+          baseBranch,
+          prefix,
+          createdBy: ctx.userID,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string().optional(),
+        url: z.string().optional(),
+        baseBranch: z.array(z.string()).optional(),
+        prefix: z.string().optional(),
+      }),
+      async ({ tx, args: { id, name, url, baseBranch, prefix } }) => {
+        const repo = await tx.run(zql.repos.where('id', id).one());
+        if (!repo) {
+          throw new Error('Repo not found');
+        }
+
+        await tx.mutate.repos.update({
+          id,
+          ...(name !== undefined && { name }),
+          ...(url !== undefined && { url }),
+          ...(baseBranch !== undefined && { baseBranch }),
+          ...(prefix !== undefined && { prefix }),
+        });
+      },
+    ),
+    delete: defineMutator(z.object({ id: z.string() }), async ({ tx, args: { id } }) => {
+      const repo = await tx.run(zql.repos.where('id', id).one());
+      if (!repo) {
+        throw new Error('Repo not found');
+      }
+
+      await tx.mutate.repos.delete({ id });
+    }),
+    addBranch: defineMutator(
+      z.object({ id: z.string(), branchName: z.string() }),
+      async ({ tx, args: { id, branchName } }) => {
+        const repo = await tx.run(zql.repos.where('id', id).one());
+        if (!repo) {
+          throw new Error('Repo not found');
+        }
+
+        const currentBranches = repo.baseBranch || [];
+        if (!currentBranches.includes(branchName)) {
+          const newBaseBranch = [...currentBranches, branchName];
+          await tx.mutate.repos.update({
+            id,
+            baseBranch: newBaseBranch,
+          });
+        }
+      },
+    ),
+  },
+  form: {
+    update: defineMutator(
+      z.object({
+        formId: z.string(),
+        formDescription: z.string().optional(),
+        fields: z
+          .array(
+            z.object({
+              id: z.string().optional(), // Existing field ID for updates
+              fieldName: z.string(),
+              fieldType: z.enum(FormFieldType),
+              fieldEnum: z.array(z.string()).optional(),
+              isOptional: z.boolean().optional(),
+            }),
+          )
+          .optional(),
+        timestamp: z.number(),
+        fieldIds: z.record(z.number(), z.string()).optional(), // Map field array index -> fieldId
+      }),
+      async ({ tx, ctx, args: { formId, formDescription, fields, timestamp, fieldIds = {} } }) => {
+        // Validate form exists
+        const form = await tx.run(zql.forms.where('id', formId).one());
+        if (!form) {
+          throw new Error('Form not found');
+        }
+
+        // Check if user is the form creator
+        if (form.createdBy !== ctx.userID) {
+          throw new Error('Only the form creator can update the form');
+        }
+
+        // Update form description if provided
+        if (formDescription !== undefined) {
+          await tx.mutate.forms.update({
+            id: formId,
+            formDescription: formDescription.trim() || undefined,
+            updatedAt: timestamp,
+          });
+        }
+
+        // Handle field operations if provided
+        if (fields) {
+          const existingFields = await tx.run(zql.form_fields.where('formId', formId));
+          const fieldsToBeDeleted = existingFields.filter(
+            field => !fields.map(f => f.id).includes(field.id),
+          );
+
+          for (const field of fieldsToBeDeleted) {
+            // Delete the field
+            await tx.mutate.form_fields.delete({
+              id: field.id,
+            });
+          }
+
+          for (const [index, field] of fields.entries()) {
+            if (field.id) {
+              // Update existing field
+              const updateData: {
+                id: string;
+                formId: string;
+                fieldName: string;
+                fieldType: FormFieldType;
+                updatedAt: number;
+                fieldEnum?: ReadonlyJSONValue;
+                isOptional?: boolean;
+              } = {
+                id: field.id,
+                formId,
+                fieldName: field.fieldName.trim(),
+                fieldType: field.fieldType,
+                updatedAt: timestamp,
+              };
+
+              // Add fieldEnum if present
+              if (field.fieldEnum && field.fieldEnum.length > 0) {
+                const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
+                if (nonEmptyOptions.length > 0) {
+                  updateData.fieldEnum = nonEmptyOptions;
+                }
+              }
+
+              // Add isOptional if defined
+              if (field.isOptional !== undefined) {
+                updateData.isOptional = field.isOptional;
+              }
+
+              await tx.mutate.form_fields.update(updateData);
+            } else {
+              // Create new field
+              const newFieldId = fieldIds[index];
+              if (!newFieldId) {
+                throw new Error(`fieldId is required for field at index ${index}`);
+              }
+              await tx.mutate.form_fields.insert({
+                id: newFieldId,
+                formId,
+                fieldName: field.fieldName.trim(),
+                fieldType: field.fieldType,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+
+              // Add fieldEnum if present
+              if (field.fieldEnum && field.fieldEnum.length > 0) {
+                const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
+                if (nonEmptyOptions.length > 0) {
+                  await tx.mutate.form_fields.update({
+                    id: newFieldId,
+                    fieldEnum: nonEmptyOptions,
+                  });
+                }
+              }
+
+              // Add isOptional if defined
+              if (field.isOptional !== undefined) {
+                await tx.mutate.form_fields.update({
+                  id: newFieldId,
+                  isOptional: field.isOptional,
+                });
+              }
+            }
+          }
+        }
+      },
+    ),
+  },
+  formContextMapping: {
+    upsert: defineMutator(
+      z.object({
+        contextId: z.string(),
+        contextType: z.enum(FormContextType),
+        entityType: z.enum(FormEntityType),
+        formId: z.string(),
+        mappingId: z.string(),
+      }),
+      async ({ tx, args: { contextId, contextType, entityType, formId, mappingId } }) => {
+        // Check if a mapping already exists for this context
+        const existingMapping = await tx.run(
+          zql.forms_context_mapping
+            .where('contextId', contextId)
+            .where('contextType', contextType)
+            .where('entityType', entityType)
+            .one(),
+        );
+
+        if (existingMapping) {
+          // Update existing mapping
+          await tx.mutate.forms_context_mapping.update({
+            id: existingMapping.id,
+            formId,
+          });
+        } else {
+          await tx.mutate.forms_context_mapping.insert({
+            id: mappingId,
+            contextId,
+            contextType,
+            entityType,
+            formId,
+          });
+        }
+      },
+    ),
+    delete: defineMutator(
+      z.object({
+        contextId: z.string(),
+        contextType: z.enum(FormContextType),
+        entityType: z.enum(FormEntityType),
+      }),
+      async ({ tx, args: { contextId, contextType, entityType } }) => {
+        // Find and delete the mapping
+        const existingMapping = await tx.run(
+          zql.forms_context_mapping
+            .where('contextId', contextId)
+            .where('contextType', contextType)
+            .where('entityType', entityType)
+            .one(),
+        );
+
+        if (existingMapping) {
+          await tx.mutate.forms_context_mapping.delete({
+            id: existingMapping.id,
+          });
+        }
+      },
+    ),
+  },
+  formEntityValue: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        entityId: z.string(),
+        entityType: z.enum(FormEntityType),
+        fieldId: z.string(),
+        newValue: z.array(z.string()),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { id, entityId, entityType, fieldId, newValue, timestamp } }) => {
+        // Fetch the form field to determine field type
+        const formField = await tx.run(zql.form_fields.where('id', fieldId).one());
+
+        if (!formField) {
+          throw new Error('Form field not found');
+        }
+
+        const fieldType = formField.fieldType;
+
+        // Determine actualFieldValue based on field type
+        const isMultiValue =
+          fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
+        const actualFieldValue = isMultiValue ? newValue : newValue[0] || null;
+
+        // Upsert the form entity value
+        await tx.mutate.form_entity_values.insert({
+          id,
+          entityId,
+          entityType,
+          fieldId,
+          fieldValue: '',
+          actualFieldValue,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        formEntityValueId: z.string(),
+        newValue: z.array(z.string()),
+        updatedAt: z.number(),
+      }),
+      async ({ tx, args: { formEntityValueId, newValue, updatedAt } }) => {
+        // Validate form entity value exists and get formField relation
+        const formEntityValue = await tx.run(
+          zql.form_entity_values.where('id', formEntityValueId).related('formField').one(),
+        );
+
+        if (!formEntityValue) {
+          throw new Error('Form entity value not found');
+        }
+
+        const fieldType = formEntityValue.formField?.fieldType;
+
+        // Determine what to store based on field type
+        const isMultiValue =
+          fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
+        const valueToStore = isMultiValue
+          ? newValue // Store array for MULTI_SELECT/USER (including empty arrays)
+          : newValue[0] || null; // Store first element or null for other types
+
+        await tx.mutate.form_entity_values.update({
+          id: formEntityValueId,
+          actualFieldValue: valueToStore,
+          updatedAt,
+        });
+      },
+    ),
+  },
+  dashboard: {
+    upsert: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+        createdBy: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { id, name, description, createdBy, timestamp } }) => {
+        const now = timestamp;
+
+        const existingDashboard = await tx.run(zql.dashboards.where('id', id).one());
+
+        await tx.mutate.dashboards.upsert({
+          id: id,
+          name: name.trim(),
+          description: description?.trim(),
+          createdBy: existingDashboard?.createdBy ?? createdBy,
+          updatedAt: now,
+          createdAt: existingDashboard?.createdAt ?? now,
+        });
+      },
+    ),
+    delete: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        const mappings = await tx.run(zql.dashboard_queries_mapping.where('dashboardId', id));
+        for (const mapping of mappings) {
+          await tx.mutate.dashboard_queries_mapping.delete({ id: mapping.id });
+          await tx.mutate.queries.delete({ id: mapping.queryId });
+        }
+        await tx.mutate.dashboards.delete({ id });
+      },
+    ),
+  },
+  query: {
+    upsert: defineMutator(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        queryJson: z.any(),
+        entityType: z.nativeEnum(FormEntityType),
+        dashboardId: z.string().optional(),
+        createdBy: z.string(),
+        timestamp: z.number(),
+        mappingId: z.string().optional(),
+      }),
+      async ({
+        tx,
+        args: { id, title, queryJson, entityType, dashboardId, createdBy, timestamp, mappingId },
+      }) => {
+        const now = timestamp;
+
+        const existingQuery = await tx.run(zql.queries.where('id', id).one());
+
+        await tx.mutate.queries.upsert({
+          id: id,
+          title: title.trim(),
+          queryJson: queryJson as ReadonlyJSONValue,
+          entityType,
+          createdBy: existingQuery?.createdBy ?? createdBy,
+          updatedAt: now,
+          createdAt: existingQuery?.createdAt ?? now,
+        });
+
+        // If dashboardId is provided, create the mapping
+        if (dashboardId) {
+          // Check for duplicate mapping
+          const duplicate = await tx.run(
+            zql.dashboard_queries_mapping
+              .where('dashboardId', dashboardId)
+              .where('queryId', id)
+              .one(),
+          );
+          if (!duplicate) {
+            const newMappingId = mappingId;
+            if (!newMappingId) {
+              throw new Error('mappingId is required when creating a new dashboard query mapping');
+            }
+            await tx.mutate.dashboard_queries_mapping.insert({
+              id: newMappingId,
+              dashboardId,
+              queryId: id,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        }
+      },
+    ),
+    delete: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        const mappings = await tx.run(zql.dashboard_queries_mapping.where('queryId', id));
+        for (const mapping of mappings) {
+          await tx.mutate.dashboard_queries_mapping.delete({ id: mapping.id });
+        }
+        await tx.mutate.queries.delete({ id });
+      },
+    ),
+  },
+});

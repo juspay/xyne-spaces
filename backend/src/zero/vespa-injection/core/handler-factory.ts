@@ -1,0 +1,55 @@
+import type { TableName } from './types';
+import type { QueryContext } from '../../acl/core/types';
+import { BaseVespaHandler } from './base-handler';
+
+// Table-specific handlers - import as they are created
+import { MessagesVespaHandler } from '../tables/messages-handler';
+import { TicketsVespaHandler } from '../tables/tickets-handler';
+import { ChannelsVespaHandler } from '../tables/channels-handler';
+import { ProjectsVespaHandler } from '../tables/projects-handler';
+
+/**
+ * Factory for getting the appropriate Vespa handler for a given table.
+ * 
+ * Similar to ACLFactory, this provides a centralized mapping from
+ * table names to their Vespa injection handlers.
+ * 
+ * Tables without specific handlers will use BaseVespaHandler,
+ * which returns empty arrays (no jobs queued).
+ */
+export class VespaHandlerFactory {
+  /**
+   * Get the Vespa handler for a specific table.
+   * 
+   * @param table - The table name
+   * @param ctx - Query context with user info
+   * @returns The appropriate handler for the table
+   */
+  static getHandler(table: TableName, ctx: QueryContext): BaseVespaHandler<any> {
+    switch (table) {
+      // Chat/messaging tables
+      case 'messages':
+        return new MessagesVespaHandler(ctx);
+      case 'channels':
+        return new ChannelsVespaHandler(ctx);
+
+      // Ticketing tables
+      case 'tickets':
+        return new TicketsVespaHandler(ctx);
+
+      // Project tables
+      case 'projects':
+        return new ProjectsVespaHandler(ctx);
+
+      // TODO: Add more handlers as needed
+      // case 'users':
+      //   return new UsersVespaHandler(ctx);
+      // case 'message_attachments':
+      //   return new AttachmentsVespaHandler(ctx);
+
+      // Default: no Vespa jobs for unhandled tables
+      default:
+        return new BaseVespaHandler(ctx, table);
+    }
+  }
+}

@@ -1,0 +1,1031 @@
+import React, {
+  useState,
+  useCallback,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+  useEffect,
+} from 'react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import LinkExtension from '@tiptap/extension-link';
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { common, createLowlight } from 'lowlight';
+import {
+  ArrowUp,
+  AtSign,
+  Plus,
+  Loader2,
+  X,
+  DotIcon,
+  ChevronDown,
+  Ticket,
+  FileText,
+} from 'lucide-react';
+import { Tooltip, TooltipSide, Menu, MenuSide, MenuAlignment } from '@juspay/blend-design-system';
+
+import { toast } from 'sonner';
+import { EditorToolbar } from '../EditorToolbar';
+import { EmojiPickerButton } from '../EditorToolbar';
+import { MentionSelector } from '../Selectors';
+import { CommandSelector } from '../Selectors';
+import { AttachmentPreview } from '../files';
+import type { MentionResult } from '../Selectors/Selectors.types';
+import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
+import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
+import { ChannelMentionExtension, channelMentionPluginKey } from '../TipTapExtensions';
+import type { InputBoxProps } from './InputBox.types';
+import { formatTypingMessage } from './InputBox.utils';
+import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
+import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
+import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
+import { useDragDropFiles } from '../../../contexts/DragDropFileContext';
+import { MediaViewer } from '../files';
+import { usePlatform } from '../../../hooks/usePlatform';
+import { MobileEditor } from './MobileEditor';
+import { useTypingState } from '../../../contexts/TypingStateContext';
+import { validateFile } from '../utils/files';
+import { useScope, useShortcutById } from '../../../shortcuts';
+import { Dialog } from '../Dialog';
+import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
+import { EmojiClickData } from 'emoji-picker-react';
+import { InlineEmoji } from '../EditorToolbar/InlineEmoji';
+
+const lowlight = createLowlight(common);
+
+export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
+  (
+    {
+      autoFocus = null,
+      id,
+      onSendMessage,
+      onContentChange,
+      onCancel,
+      mentionItems = [],
+      onMentionSearch,
+      onMentionSelect,
+      channelItems = [],
+      onChannelSearch,
+      onChannelSelect,
+      commandItems = [],
+      onCommandSelect,
+      isLoadingCommands = false,
+      onTyping,
+      typingUsers = [],
+      showTypingIndicator = true,
+      placeholder = 'Type a message...',
+      value,
+      disabled = false,
+      className = '',
+      features = {
+        richText: true,
+        mentions: true,
+        commands: true,
+        fileAttachments: true,
+        emojiPicker: true,
+      },
+      allowedFileTypes,
+      maxFiles = 10,
+      onAlsoSendToChannelChange,
+      alsoSendToChannelChecked = false,
+      onCreateTicket,
+      onTranscriptSelect,
+      hasTicket = false,
+      disableEnterToSend = false,
+      hideSendButton = false,
+    },
+
+    ref,
+  ) => {
+    const {
+      droppedFiles,
+      addDroppedFile: addContextAttachment,
+      removeDroppedFile: removeContextAttachment,
+      // clearDroppedFiles: clearContextAttachments,
+      clearDroppedFiles,
+    } = useDragDropFiles();
+    const [localAttachments, setLocalAttachments] = useState<File[]>([]);
+    const [videoThumbnails, setVideoThumbnails] = useState<Map<File, Blob>>(new Map());
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [isViewerOpen, setIsViewerOpen] = useState(false);
+
+    const contextAttachments = React.useMemo(() => {
+      if (Array.isArray(droppedFiles)) {
+        console.error('Context Error: droppedFiles is an array, expected an object.');
+        return [];
+      }
+      return (id ? droppedFiles[id] : []) || [];
+    }, [droppedFiles, id]);
+
+    // Combine attachments from both sources
+    const allAttachments = [...contextAttachments, ...localAttachments];
+    const [isFocused, setIsFocused] = useState(false);
+    const [content, setContent] = useState('');
+    const [isSending, setIsSending] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [sendMode, setSendMode] = useState<'message' | 'ticket'>('message');
+    const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
+    const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
+    const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
+    const [emojiSizeClass, setEmojiSizeClass] = useState('text-sm');
+
+    const [ticketCreated, setTicketCreated] = useState(false);
+
+    const { isMobile } = usePlatform();
+    const { notifyTyping } = useTypingState();
+
+    useScope('composer', isFocused && !disabled && !isSending);
+
+    useShortcutById(
+      'composer.attach',
+      () => {
+        if (!fileInputRef.current) return;
+        fileInputRef.current.click();
+      },
+      {
+        enabled: Boolean(features.fileAttachments) && !disabled && !isSending,
+      },
+    );
+
+    const handleTyping = onTyping;
+
+    // Helper function to add files with limit and validation
+    const addFilesWithLimit = useCallback(
+      (files: File[] | FileList) => {
+        const filesArray = Array.from(files);
+        const availableSlots = maxFiles - allAttachments.length;
+
+        if (availableSlots <= 0) {
+          toast.error('Cannot add more files', {
+            description: `Maximum ${maxFiles} files allowed`,
+          });
+          return;
+        }
+
+        const filesToValidate = filesArray.slice(0, availableSlots);
+        const validFiles: File[] = [];
+        const rejectedFiles: Array<{ name: string; reason: string }> = [];
+
+        // Validate each file
+        filesToValidate.forEach(file => {
+          const validationOptions: { maxSize?: number; allowedTypes?: string[] } = {
+            maxSize: 1024 * 1024 * 1024, // 1GB
+          };
+
+          if (allowedFileTypes && allowedFileTypes.length > 0) {
+            validationOptions.allowedTypes = allowedFileTypes;
+          }
+
+          const validation = validateFile(file, validationOptions);
+
+          if (validation.isValid) {
+            validFiles.push(file);
+          } else {
+            rejectedFiles.push({
+              name: file.name,
+              reason: validation.error || 'Unknown error',
+            });
+          }
+        });
+
+        // Add valid files
+        validFiles.forEach(file => addContextAttachment(id, file));
+
+        // Show error for rejected files
+        if (rejectedFiles.length > 0) {
+          const firstRejection = rejectedFiles[0];
+          if (firstRejection) {
+            const moreCount = rejectedFiles.length - 1;
+
+            toast.error('File upload rejected', {
+              description:
+                moreCount > 0
+                  ? `${firstRejection.name}: ${firstRejection.reason} (and ${moreCount} more)`
+                  : `${firstRejection.name}: ${firstRejection.reason}`,
+            });
+          }
+        }
+      },
+      [maxFiles, allAttachments.length, addContextAttachment, id, allowedFileTypes],
+    );
+
+    const updateEmojiSizeClass = useCallback((editor: ReturnType<typeof useEditor>): void => {
+      if (!editor) return;
+      const htmlContent = sanitizeHtmlContent(editor.getHTML());
+      const sizeClass = getEmojiFontSizeClass(htmlContent);
+      setEmojiSizeClass(sizeClass);
+    }, []);
+
+    const editor = useEditor({
+      extensions: [
+        StarterKit.configure({
+          codeBlock: false,
+          trailingNode: false,
+          bold: {
+            HTMLAttributes: {
+              class: 'font-semibold',
+            },
+          },
+          italic: {
+            HTMLAttributes: {
+              class: 'italic',
+            },
+          },
+          code: {
+            HTMLAttributes: {
+              class: 'bg-blue-50 rounded px-1 py-0.5 text-blue-800 font-mono text-[0.85em]',
+            },
+          },
+          blockquote: {
+            HTMLAttributes: {
+              class: 'border-l-4 border-gray-400 pl-4 text-gray-700',
+            },
+          },
+          bulletList: {
+            HTMLAttributes: {
+              class: 'list-disc pl-6 my-2',
+            },
+          },
+          orderedList: {
+            HTMLAttributes: {
+              class: 'list-decimal pl-6 my-2',
+            },
+          },
+          listItem: {
+            HTMLAttributes: {
+              class: 'my-1',
+            },
+          },
+          paragraph: {
+            HTMLAttributes: {
+              class: 'm-0 leading-6',
+            },
+          },
+        }),
+        InlineEmoji,
+        CodeBlockLowlight.configure({
+          lowlight,
+          defaultLanguage: 'plaintext',
+          HTMLAttributes: {
+            class: 'bg-slate-50 border border-slate-200 rounded-lg overflow-x-auto relative',
+            style: 'padding: 0.75rem;',
+          },
+        }),
+        LinkExtension.configure({
+          openOnClick: false,
+          HTMLAttributes: {
+            class: 'text-blue-600 underline cursor-pointer hover:text-blue-700',
+            rel: 'noopener noreferrer',
+            target: '_blank',
+          },
+        }),
+        Placeholder.configure({
+          placeholder,
+        }),
+        MentionExtension.configure({
+          userActions: [],
+          groupActions: [],
+        }),
+        ChannelMentionExtension,
+        CommandsExtension,
+      ],
+      content: value || '',
+      editable: !isSending,
+      onCreate: ({ editor }) => {
+        setContent(editor.getText().trim());
+        updateEmojiSizeClass(editor);
+      },
+      autofocus: autoFocus ? autoFocus : null,
+      onFocus: () => {
+        setIsFocused(true);
+      },
+      onBlur: () => {
+        setIsFocused(false);
+      },
+      onUpdate: ({ editor }) => {
+        setContent(editor.getText().trim());
+        handleTyping?.();
+        notifyTyping(); // Notify the typing state context
+
+        const htmlContent = sanitizeHtmlContent(editor.getHTML());
+        onContentChange?.(htmlContent, editor.getText());
+
+        updateEmojiSizeClass(editor);
+      },
+      editorProps: {
+        attributes: {
+          class: 'tiptap chat-input-editor prose prose-sm focus:outline-none',
+          style: 'min-height: 20px; max-height: 200px; overflow-y: auto;',
+          'aria-label': 'Message input',
+          'data-testid': 'message-input',
+          role: 'textbox',
+          'aria-multiline': 'true',
+        },
+        handleKeyDown: (view, event) => {
+          // Check if screen width is below 500px
+          const isMobile = window.innerWidth < 500;
+
+          // Shift+Enter: Create new line in special contexts
+          if (event.key === 'Enter' && event.shiftKey) {
+            event.preventDefault();
+            if (editor?.isActive('blockquote')) {
+              editor.chain().focus().splitBlock().lift('blockquote').run();
+            } else if (editor?.isActive('bulletList') || editor?.isActive('orderedList')) {
+              // For lists, exit the list on a new line (similar to pressing Enter twice)
+              editor?.chain().focus().splitListItem('listItem').liftListItem('listItem').run();
+              return true;
+            } else {
+              editor?.chain().focus().splitBlock().run();
+            }
+            return true;
+          }
+
+          // Handle backspace to prevent unwanted list item lifting
+          if (
+            event.key === 'Backspace' &&
+            (editor?.isActive('bulletList') || editor?.isActive('orderedList'))
+          ) {
+            const { state } = view;
+            const { selection } = state;
+            const { $from } = selection;
+
+            // Check if cursor is at the start of a list item
+            if ($from.parentOffset === 0) {
+              // Check if we're not at the first list item
+              const listItemPos = $from.before($from.depth);
+              if (listItemPos > 0) {
+                return false;
+              }
+            }
+          }
+
+          if (event.key === 'Escape' && onCancel) {
+            event.preventDefault();
+            onCancel();
+            return true;
+          }
+
+          // Enter key WITHOUT Shift: Send message (desktop only) or check special contexts
+          if (event.key === 'Enter' && !event.shiftKey) {
+            const mentionState = mentionPluginKey.getState(view.state);
+            const channelMentionState = channelMentionPluginKey.getState(view.state);
+            const commandState = commandPluginKey.getState(view.state);
+
+            // If any menu is open, let it handle the Enter key
+            if (
+              (mentionState?.isOpen && mentionState.items.length > 0) ||
+              (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
+              (commandState?.isOpen && commandState.items.length > 0)
+            ) {
+              return false;
+            }
+
+            // If in special formatting context, allow default behavior
+            if (
+              editor?.isActive('bulletList') ||
+              editor?.isActive('orderedList') ||
+              editor?.isActive('codeBlock') ||
+              editor?.isActive('blockquote')
+            ) {
+              return false;
+            }
+
+            // On mobile or when Enter-to-send is disabled, create new line
+            if (isMobile || disableEnterToSend) {
+              return false;
+            }
+
+            // On desktop: Send the message
+            event.preventDefault();
+            void handleSend();
+            return true;
+          }
+
+          return false;
+        },
+        handlePaste: (_view, event) => {
+          const clipboard = event.clipboardData;
+
+          /** Handle File Pasting */
+          const files = clipboard?.files ?? [];
+          if (files.length > 0) {
+            addFilesWithLimit(files);
+          }
+
+          const pastedText = clipboard?.getData('text');
+          if (pastedText && pastedText.length > 11500) {
+            event.preventDefault();
+
+            // Check if attachment limit has been reached before adding text file
+            if (allAttachments.length >= maxFiles) {
+              return true;
+            }
+
+            // Try to parse as JSON to determine file type
+            let fileName: string;
+            let fileType: string;
+            let blobContent: Blob;
+
+            try {
+              // Attempt to parse the text as JSON
+              JSON.parse(pastedText);
+              // If successful, create a JSON file
+              fileName = `pasted-text-${Date.now()}.json`;
+              fileType = 'application/json';
+              blobContent = new Blob([pastedText], { type: fileType });
+            } catch {
+              // If parsing fails, create a text file
+              fileName = `pasted-text-${Date.now()}.txt`;
+              fileType = 'text/plain';
+              blobContent = new Blob([pastedText], { type: fileType });
+            }
+
+            const file = new File([blobContent], fileName, { type: fileType });
+            addContextAttachment(id, file);
+            editor?.commands.setContent('');
+            setContent('');
+            return true;
+          }
+          return false;
+        },
+      },
+    });
+
+    // Expose imperative API for drag and drop and clearing content
+    useImperativeHandle(
+      ref,
+      () => ({
+        addFiles: (files: File[]): void => {
+          if (files.length > 0) {
+            addFilesWithLimit(files);
+          }
+          // Focus the editor after adding files via drag and drop
+          editor?.commands.focus();
+        },
+        clearContent: (): void => {
+          editor?.commands.setContent('');
+          setContent('');
+          clearDroppedFiles(id);
+          setLocalAttachments([]);
+          setVideoThumbnails(new Map());
+        },
+        insertContent: (content: string): void => {
+          editor?.commands.insertContent(content);
+          editor?.commands.focus();
+        },
+      }),
+      [editor, addFilesWithLimit, clearDroppedFiles],
+    );
+
+    const handleSend = useCallback(async () => {
+      if (!editor || isSending) return;
+
+      const plainText = editor.getText().trim();
+      const htmlContent = editor.getHTML();
+
+      if (!plainText && allAttachments.length === 0) return;
+
+      setIsSending(true);
+      try {
+        await onSendMessage(plainText, htmlContent, allAttachments, videoThumbnails);
+        editor.commands.setContent('');
+        setContent('');
+        clearDroppedFiles(id);
+        setLocalAttachments([]);
+        setVideoThumbnails(new Map()); // Clear thumbnails after sending
+        editor.commands.focus();
+      } finally {
+        setIsSending(false);
+      }
+    }, [editor, allAttachments, videoThumbnails, onSendMessage, isSending]);
+
+    const handleFileSelect = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFiles = Array.from(e.target.files || []);
+        if (selectedFiles.length > 0) {
+          addFilesWithLimit(selectedFiles);
+        }
+        e.target.value = '';
+        // Focus the editor after file selection
+        editor?.commands.focus();
+      },
+      [addFilesWithLimit, editor],
+    );
+
+    const handleAttachClick = useCallback(() => {
+      fileInputRef.current?.click();
+    }, []);
+
+    // Reset ticketCreated when hasTicket prop changes or id changes (different conversation)
+    useEffect(() => {
+      if (hasTicket) {
+        setTicketCreated(true);
+      } else {
+        setTicketCreated(false);
+      }
+    }, [hasTicket, id]);
+
+    const handleRemoveAttachment = useCallback(
+      (file: File) => {
+        // Check if file is from context or local state
+        const isFromContext = contextAttachments.includes(file);
+
+        if (isFromContext) {
+          // Remove from context using the context's remove function
+          removeContextAttachment?.(id, file);
+        } else {
+          // Remove from local state
+          setLocalAttachments(prev => prev.filter(f => f !== file));
+        }
+
+        // Remove from video thumbnails if present
+        setVideoThumbnails(prev => {
+          if (!prev.has(file)) {
+            return prev;
+          }
+          const newMap = new Map(prev);
+          newMap.delete(file);
+          return newMap;
+        });
+      },
+      [contextAttachments, removeContextAttachment],
+    );
+    const handlePreview = (file: File): void => {
+      setSelectedFile(file);
+      setIsViewerOpen(true);
+      // onPreview?.(file);
+    };
+
+    const handleCloseViewer = (): void => {
+      setIsViewerOpen(false);
+      setSelectedFile(null);
+    };
+
+    // Convert channelItems to MentionResult format for the MentionSelector
+    const channelMentionItems: MentionResult[] = channelItems.map(channel => ({
+      id: channel.id,
+      name: channel.name,
+      type: 'channel' as const,
+      isPrivate: channel.isPrivate,
+      ...(channel.description !== undefined && { description: channel.description }),
+    }));
+
+    // Wrap the onChannelSelect callback to match MentionResult type
+    const handleChannelSelect = useCallback(
+      (mention: MentionResult) => {
+        if (mention.type === 'channel' && onChannelSelect) {
+          onChannelSelect({
+            id: mention.id,
+            name: mention.name,
+            isPrivate: mention.isPrivate ?? false,
+            ...(mention.description !== undefined && { description: mention.description }),
+          });
+        }
+      },
+      [onChannelSelect],
+    );
+
+    return (
+      <div className={`flex-shrink-0 relative ${className}`} data-input-id={id}>
+        {features.mentions && (
+          <MentionSelector
+            editor={editor}
+            mentionItems={mentionItems}
+            {...(onMentionSearch && { onMentionSearch })}
+            {...(onMentionSelect && { onMentionSelect })}
+          />
+        )}
+
+        {features.commands && (
+          <CommandSelector
+            editor={editor}
+            commandItems={commandItems}
+            isLoadingCommands={isLoadingCommands}
+            onCommandSelect={onCommandSelect}
+          />
+        )}
+
+        <MentionSelector
+          editor={editor}
+          mentionItems={channelMentionItems}
+          triggerChar='#'
+          {...(onChannelSearch && { onMentionSearch: onChannelSearch })}
+          {...(onChannelSelect && { onMentionSelect: handleChannelSelect })}
+        />
+
+        <div
+          className={`
+            overflow-hidden transition-all flex flex-col relative
+            ${isMobile ? 'bg-muted rounded-[26px] text-foreground shadow-sm' : 'bg-card rounded-2xl border text-foreground shadow-none'}
+            ${!isMobile && isFocused ? 'border-ring' : !isMobile ? 'border-input' : ''}
+            ${isSending ? 'opacity-60 pointer-events-none' : ''}
+          `}
+        >
+          {/* Desktop: Editor Toolbar */}
+          {features.richText && !isMobile && <EditorToolbar editor={editor} />}
+
+          {/* Conditionally render mobile or desktop layout */}
+          {isMobile ? (
+            <MobileEditor
+              editor={editor}
+              content={content}
+              allAttachments={allAttachments}
+              isSending={isSending}
+              disabled={disabled}
+              emojiSizeClass={emojiSizeClass}
+              onAttachClick={handleAttachClick}
+              onSend={() => void handleSend()}
+              placeholder={placeholder}
+            />
+          ) : (
+            <div
+              className={`
+                relative py-2 px-3
+                ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}
+              `}
+            >
+              <EditorContent
+                editor={editor}
+                className={`
+                  chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-6 break-words
+                  text-foreground placeholder:text-muted-foreground
+                  ${emojiSizeClass}
+                `}
+              />
+            </div>
+          )}
+
+          {features.fileAttachments && allAttachments.length > 0 && (
+            <div className='px-3 pb-2 flex flex-wrap gap-3'>
+              {allAttachments.map((file, index) => (
+                <AttachmentPreview
+                  key={`${file.name}-${index}`}
+                  file={file}
+                  onRemove={() => handleRemoveAttachment(file)}
+                  onPreview={() => handlePreview(file)}
+                  isUploading={false}
+                  onThumbnailGenerated={(file, thumbnailBlob) => {
+                    setVideoThumbnails(prev => {
+                      const newMap = new Map(prev);
+                      newMap.set(file, thumbnailBlob);
+                      return newMap;
+                    });
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Full-screen Media Viewer */}
+          {selectedFile && (
+            <MediaViewer
+              file={selectedFile}
+              isOpen={isViewerOpen}
+              onClose={handleCloseViewer}
+              // showDownload={showDownload}
+            />
+          )}
+
+          {/* Show checkbox for "also send to channel" functionality */}
+          {onAlsoSendToChannelChange && (
+            <div className='flex items-center space-x-1.5 px-3 py-1'>
+              <input
+                type='checkbox'
+                id='also-send-to-channel'
+                checked={alsoSendToChannelChecked}
+                onChange={e => {
+                  onAlsoSendToChannelChange(e.target.checked);
+                }}
+                className='h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded'
+                disabled={disabled || isSending}
+              />
+              <label
+                htmlFor='also-send-to-channel'
+                className='text-xs text-gray-500 cursor-pointer'
+              >
+                Also send to channel
+              </label>
+            </div>
+          )}
+
+          {/* Hidden file input - always rendered for both mobile and desktop */}
+          {features.fileAttachments && (
+            <input
+              ref={fileInputRef}
+              type='file'
+              multiple
+              onChange={handleFileSelect}
+              className='hidden'
+              accept={allowedFileTypes?.join(',')}
+              aria-label='File attachment input'
+            />
+          )}
+
+          {/* Desktop Footer Actions */}
+          {!isMobile && (
+            <div className='flex items-center justify-between p-2'>
+              <div className='flex items-center gap-1'>
+                {features.fileAttachments && (
+                  <Menu
+                    trigger={
+                      <button
+                        type='button'
+                        className='p-1.5 bg-[#E8EAED] hover:bg-[#ccd3d9] transition-all duration-200 ease-in-out rounded-full'
+                        aria-label='Add content'
+                        disabled={disabled || isSending}
+                      >
+                        <Plus className='h-4 w-4 text-gray-600' />
+                      </button>
+                    }
+                    open={isPlusMenuOpen}
+                    onOpenChange={setIsPlusMenuOpen}
+                    side={MenuSide.TOP}
+                    alignment={MenuAlignment.START}
+                    items={[
+                      {
+                        items: [
+                          {
+                            label: 'Upload Files',
+                            slot1: <Plus className='h-4 w-4' />,
+                            onClick: () => {
+                              handleAttachClick();
+                              setIsPlusMenuOpen(false);
+                            },
+                          },
+                          {
+                            label: 'Add Call Summary',
+                            slot1: <FileText className='h-4 w-4' />,
+                            onClick: () => {
+                              setIsTranscriptSelectorOpen(true);
+                              setIsPlusMenuOpen(false);
+                            },
+                          },
+                        ],
+                      },
+                    ]}
+                  />
+                )}
+
+                <Dialog
+                  open={isTranscriptSelectorOpen}
+                  onOpenChange={setIsTranscriptSelectorOpen}
+                  className='max-w-[900px] w-full !p-0 border-none bg-transparent shadow-none overflow-visible'
+                >
+                  <CallTranscriptSelector
+                    onSelect={transcript => {
+                      if (onTranscriptSelect) {
+                        onTranscriptSelect(transcript);
+                      } else {
+                        editor?.commands.insertContent(transcript);
+                      }
+                      setIsTranscriptSelectorOpen(false);
+                    }}
+                    onAttach={file => {
+                      addContextAttachment(id, file);
+                      setIsTranscriptSelectorOpen(false);
+                      editor?.commands.focus();
+                    }}
+                    onClose={() => setIsTranscriptSelectorOpen(false)}
+                  />
+                </Dialog>
+
+                <div className='h-3 w-px bg-gray-300 mx-1' aria-hidden='true' />
+
+                {features.emojiPicker && (
+                  // Inside InputBox.tsx -> EmojiPickerButton component
+                  <EmojiPickerButton
+                    onEmojiSelect={(emojiData: EmojiClickData) => {
+                      // Type it correctly
+                      if (!editor) return;
+
+                      const { from } = editor.state.selection;
+                      const textBefore = editor.state.doc.textBetween(from - 1, from);
+                      let chain = editor.chain().focus();
+
+                      if (textBefore === '@') {
+                        chain = chain.deleteRange({ from: from - 1, to: from });
+                      }
+
+                      // Check if it's a Custom Emoji or Native
+                      // Custom emojis from emoji-picker-react usually have isCustom: true
+                      if (emojiData.isCustom) {
+                        chain
+                          .insertContent({
+                            type: 'inlineEmoji',
+                            attrs: {
+                              emojiId: emojiData.emoji,
+                              src: emojiData.imageUrl,
+                              alt: `:${emojiData.names[0]}:`,
+                              title: emojiData.names[0],
+                            },
+                          })
+                          .run();
+                      } else {
+                        // It's a NATIVE emoji (e.g., 😂, ❤️)
+                        // Just insert the raw string glyph
+                        chain.insertContent(emojiData.emoji).run();
+                      }
+                    }}
+                    disabled={disabled || isSending}
+                  />
+                )}
+
+                {features.mentions && (
+                  <Tooltip content='Mention user (@)' side={TooltipSide.TOP}>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        editor?.chain().focus().insertContent('@').run();
+                      }}
+                      className='p-1.5 rounded hover:bg-gray-100 transition-all duration-200 ease-in-out'
+                      aria-label='Mention user'
+                      disabled={disabled || isSending}
+                    >
+                      <AtSign className='h-4 w-4 text-gray-600' />
+                    </button>
+                  </Tooltip>
+                )}
+
+                <Tooltip content='Mention channel (#)' side={TooltipSide.TOP}>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      editor?.chain().focus().insertContent('#').run();
+                    }}
+                    className='p-1.5 rounded hover:bg-gray-100 transition-all duration-200 ease-in-out'
+                    aria-label='Mention channel'
+                    disabled={disabled || isSending}
+                  >
+                    <span className='text-gray-600 font-semibold text-sm'>#</span>
+                  </button>
+                </Tooltip>
+              </div>
+
+              <div className='flex gap-2'>
+                {onCancel && (
+                  <Tooltip content='Cancel editing' side={TooltipSide.TOP}>
+                    <button
+                      type='button'
+                      onClick={onCancel}
+                      className='p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                      aria-label='Cancel editing'
+                    >
+                      <X className='h-4 w-4' />
+                    </button>
+                  </Tooltip>
+                )}
+
+                {!hideSendButton && (
+                  <div className='relative flex items-center'>
+                    {onCreateTicket ? (
+                      <div
+                        className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          content || allAttachments.length > 0 || sendMode === 'ticket'
+                            ? 'bg-primary text-white hover:bg-primary/90'
+                            : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-50'
+                        }`}
+                      >
+                        <Tooltip
+                          content={sendMode === 'message' ? 'Send message' : 'Create ticket'}
+                          side={TooltipSide.TOP}
+                        >
+                          <button
+                            type='button'
+                            onClick={() => {
+                              if (sendMode === 'message') {
+                                void handleSend();
+                              } else {
+                                // Pass current editor content as description for the ticket
+                                const currentContent = editor?.getText().trim() || '';
+                                setSendMode('message');
+                                onCreateTicket(currentContent);
+                              }
+                            }}
+                            disabled={
+                              disabled ||
+                              isSending ||
+                              (sendMode === 'message' && !content && allAttachments.length === 0)
+                            }
+                            className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                            aria-label={sendMode === 'message' ? 'Send message' : 'Create ticket'}
+                            data-testid='send-message-button'
+                          >
+                            {isSending ? (
+                              <Loader2 className='h-4 w-4 animate-spin' />
+                            ) : sendMode === 'message' ? (
+                              <ArrowUp className='h-4 w-4' />
+                            ) : (
+                              <div className='flex items-center gap-2 px-1'>
+                                <span className='text-xs font-medium whitespace-nowrap'>
+                                  Create Ticket
+                                </span>
+                              </div>
+                            )}
+                          </button>
+                        </Tooltip>
+                        <div
+                          className={`w-px h-4 ${
+                            content || allAttachments.length > 0 || sendMode === 'ticket'
+                              ? 'bg-white/20'
+                              : 'bg-gray-400/20'
+                          }`}
+                        ></div>
+                        <Menu
+                          trigger={
+                            <button
+                              type='button'
+                              disabled={disabled || isSending}
+                              className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                            >
+                              <ChevronDown className='h-3 w-3' />
+                            </button>
+                          }
+                          items={[
+                            {
+                              items: [
+                                ...(!(hasTicket || ticketCreated)
+                                  ? [
+                                      {
+                                        label: 'Create a ticket',
+                                        slot1: <Ticket className='h-4 w-4' />,
+                                        onClick: (): void => {
+                                          setSendMode('ticket');
+                                          setIsSendMenuOpen(false);
+                                        },
+                                      },
+                                    ]
+                                  : []),
+                                {
+                                  label: 'Send as message',
+                                  slot1: <ArrowUp className='h-4 w-4' />,
+                                  onClick: (): void => {
+                                    setSendMode('message');
+                                    setIsSendMenuOpen(false);
+                                  },
+                                },
+                              ],
+                            },
+                          ]}
+                          open={isSendMenuOpen}
+                          onOpenChange={setIsSendMenuOpen}
+                          side={MenuSide.TOP}
+                          alignment={MenuAlignment.END}
+                        />
+                      </div>
+                    ) : (
+                      <Tooltip content='Send message' side={TooltipSide.TOP}>
+                        <button
+                          type='button'
+                          onClick={() => void handleSend()}
+                          disabled={
+                            disabled || isSending || (!content && allAttachments.length === 0)
+                          }
+                          className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
+                            content || allAttachments.length > 0
+                              ? 'bg-primary text-white hover:bg-primary/90'
+                              : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-50'
+                          }`}
+                          aria-label='Send message'
+                          data-testid='send-message-button'
+                        >
+                          {isSending ? (
+                            <Loader2 className='h-4 w-4 animate-spin' />
+                          ) : (
+                            <ArrowUp className='h-4 w-4' />
+                          )}
+                        </button>
+                      </Tooltip>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Typing Indicator - Always reserve space to prevent layout shift */}
+        <div className='mt-1 h-4 flex items-baseline justify-start px-1 mb-1 absolute -bottom-1 right-0 left-0 translate-y-full'>
+          {showTypingIndicator && typingUsers.length > 0 && (
+            <small className='text-[10px] text-gray-600 flex items-baseline'>
+              {formatTypingMessage(typingUsers)}
+              <span className='flex items-center ml-1'>
+                <span className='animate-[loading-dots_1.4s_infinite_0.2s]'>
+                  <DotIcon className='size-2 text-gray-500' />
+                </span>
+                <span className='animate-[loading-dots_1.4s_infinite_0.4s]'>
+                  <DotIcon className='size-2 text-gray-500' />
+                </span>
+                <span className='animate-[loading-dots_1.4s_infinite_0.6s]'>
+                  <DotIcon className='size-2 text-gray-500' />
+                </span>
+              </span>
+            </small>
+          )}
+        </div>
+      </div>
+    );
+  },
+);
+
+InputBox.displayName = 'InputBox';

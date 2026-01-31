@@ -1,0 +1,92 @@
+import { QueryResultType } from '@rocicorp/zero';
+import { ReactElement } from 'react';
+import { queries } from '../../../zero/queries';
+import { ChatBubble } from '../ChatBubble/ChatBubble';
+import { DatePill } from '../DatePill';
+import { type ChatListItemWithSeparator } from '../../../utils/chatUtils';
+import { shouldShowAvatar } from '../ChatList/ChatListUtils';
+import { useDraft } from '../../../hooks/useDraft';
+import { ChannelScopeType } from '@xyne/shared';
+
+type ChatListItemProps = {
+  item: ChatListItemWithSeparator;
+  index: number;
+  chatListItems: ChatListItemWithSeparator[];
+  channelId: string;
+  projectId?: string | undefined;
+  channelScopeType?: ChannelScopeType | undefined;
+  handleOpenThread: (conversationId: string, e?: React.MouseEvent) => void;
+  measureRef?: (node: Element | null) => void;
+  dataIndex?: number;
+  onEmojiPickerOpenChange?: (isOpen: boolean) => void;
+};
+
+export const ChatListItem = ({
+  item,
+  index,
+  chatListItems,
+  channelId,
+  projectId,
+  channelScopeType,
+  handleOpenThread,
+  measureRef,
+  dataIndex,
+  onEmojiPickerOpenChange,
+}: ChatListItemProps): ReactElement | null => {
+  // All non-date-separator items are conversations - get conversation data first
+  const conversation =
+    item.type !== 'date-separator'
+      ? (item.data as QueryResultType<typeof queries.channelConversations>[number])
+      : null;
+
+  // Hooks must be called unconditionally
+  const draft = useDraft(conversation?.conversationId ?? '');
+
+  // Render date separator
+  if (item.type === 'date-separator') {
+    return (
+      <div ref={measureRef} data-index={dataIndex}>
+        <DatePill dateText={item.dateText} />
+      </div>
+    );
+  }
+
+  // Now we know it's a conversation
+  const message = conversation?.initialMessage;
+
+  if (!message || !conversation) return null;
+
+  // Use centralized avatar logic for conversations
+  const prevItem = index > 0 ? (chatListItems[index - 1] ?? null) : null;
+  let showAvatar = true;
+
+  if (prevItem && prevItem.type !== 'date-separator') {
+    showAvatar = shouldShowAvatar(item, prevItem);
+  }
+
+  return (
+    <div
+      ref={measureRef}
+      data-index={dataIndex}
+      id={`conv-${conversation.conversationId}`}
+      data-hash-id={`conv-${conversation.conversationId}`}
+      className={`${showAvatar ? 'pt-4' : ''} space-y-1`}
+    >
+      <ChatBubble
+        message={message}
+        channelId={channelId}
+        projectId={projectId}
+        channelScopeType={channelScopeType}
+        showAvatar={showAvatar}
+        conversation={conversation}
+        draft={draft}
+        replies={{
+          replyCount: conversation.replyCount,
+          lastActivityAt: conversation.lastActivityAt,
+          onOpenThread: (e?: React.MouseEvent) => handleOpenThread(conversation.conversationId, e),
+        }}
+        {...(onEmojiPickerOpenChange && { onEmojiPickerOpenChange })}
+      />
+    </div>
+  );
+};

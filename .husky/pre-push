@@ -1,0 +1,12 @@
+BRANCH_NAME=$(git branch --show-current)
+REQUIRED_PATTERN="^(fix|feature)\/.+$"
+
+if [[ ! $BRANCH_NAME =~ $REQUIRED_PATTERN ]]; then
+echo "Branch naming validation failed!"
+echo "Branch name: '$BRANCH_NAME'"
+echo "Required pattern: (fix|feature)/(name)"
+echo "Please rename your branch using: git branch -m $BRANCH_NAME (fix|feature)/(name)"
+exit 1
+fi
+
+exit 0

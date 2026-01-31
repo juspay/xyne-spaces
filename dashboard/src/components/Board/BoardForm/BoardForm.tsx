@@ -1,0 +1,552 @@
+import { ReactElement, useState, useEffect } from 'react';
+import { TextInput } from '@juspay/blend-design-system';
+import { X } from 'lucide-react';
+import type { ReadonlyJSONValue } from '@rocicorp/zero';
+import { queries } from '../../../zero/queries';
+import { Button } from '../../../components/ui/Button';
+import { type BoardFormProps } from './types';
+import BoardFormSelector from '../BoardFormSelector/BoardFormSelector';
+import { FormContextType, TicketStatusV2 } from '@xyne/shared';
+import { DEFAULT_STAGES_TEMPLATE } from './templates/defaultStagesTemplate';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import {
+  BoardTicketFormConfig,
+  type BoardMetadata,
+  type TicketFormConfig,
+  DEFAULT_CONFIG,
+} from '../BoardTicketFormConfig';
+
+interface Stage {
+  id?: string;
+  tempId: number;
+  name: string;
+  eta: string;
+  sequenceNumber: string;
+  defaultTicketStatusV2: TicketStatusV2;
+}
+
+type StageTemplateType = 'none' | 'default';
+
+// Helper function to create an empty stage
+const createEmptyStage = (sequenceNumber: number): Stage => ({
+  tempId: Date.now() + sequenceNumber,
+  name: '',
+  eta: '',
+  sequenceNumber: String(sequenceNumber),
+  defaultTicketStatusV2: TicketStatusV2.STARTED,
+});
+
+export const BoardForm = ({
+  board,
+  onSubmit,
+  onCancel,
+  loading = false,
+  projectId: providedProjectId,
+}: BoardFormProps): ReactElement => {
+  const isEdit = !!board;
+  const [name, setName] = useState(board?.name || '');
+  const [projectId, setProjectId] = useState(board?.projectId || providedProjectId || '');
+  const [selectedFormIds, setSelectedFormIds] = useState<Set<string>>(new Set());
+
+  // Initialize ticket form config from board metadata
+  const boardMetadata = board?.metadata as BoardMetadata | null;
+  const initialConfig: Required<TicketFormConfig> = {
+    userGroupsOnly:
+      boardMetadata?.ticketFormConfig?.userGroupsOnly || DEFAULT_CONFIG.userGroupsOnly,
+    dueDate: boardMetadata?.ticketFormConfig?.dueDate || DEFAULT_CONFIG.dueDate,
+    todo: boardMetadata?.ticketFormConfig?.todo || DEFAULT_CONFIG.todo,
+    workflows: boardMetadata?.ticketFormConfig?.workflows || DEFAULT_CONFIG.workflows,
+    labels: boardMetadata?.ticketFormConfig?.labels || DEFAULT_CONFIG.labels,
+    merchantId: boardMetadata?.ticketFormConfig?.merchantId || DEFAULT_CONFIG.merchantId,
+  };
+  const [ticketFormConfig, setTicketFormConfig] =
+    useState<Required<TicketFormConfig>>(initialConfig);
+
+  // Fetch all BOARD context forms
+  const [forms] = useCachedQuery(
+    queries.getFormsByContextType({ contextType: FormContextType.BOARD }),
+  );
+
+  // Set initial form IDs from mappings
+  useEffect(() => {
+    if (board && forms) {
+      const selectedIds = new Set<string>();
+      forms.forEach(form => {
+        // Check if this form is mapped to the board
+        const isMapped = form.formContextMappings?.some(
+          mapping =>
+            mapping.contextId === board.id && mapping.contextType === FormContextType.BOARD,
+        );
+        if (isMapped) {
+          selectedIds.add(form.id);
+        }
+      });
+      setSelectedFormIds(selectedIds);
+    }
+  }, [board, forms]);
+
+  // Handle form selection with auto-deselect of conflicting entity type
+  const handleFormSelect = (formId: string): void => {
+    if (!forms) return;
+
+    const form = forms.find(f => f.id === formId);
+    if (!form) return;
+
+    setSelectedFormIds(prev => {
+      const newSet = new Set(prev);
+
+      // Check if another form with same entityType is selected
+      const conflictingFormId = Array.from(prev).find(id => {
+        const f = forms.find(form => form.id === id);
+        return f?.entityType === form.entityType;
+      });
+
+      // Remove conflicting form if exists
+      if (conflictingFormId) {
+        newSet.delete(conflictingFormId);
+      }
+
+      // Add the new form
+      newSet.add(formId);
+
+      return newSet;
+    });
+  };
+
+  const handleFormDeselect = (formId: string): void => {
+    setSelectedFormIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(formId);
+      return newSet;
+    });
+  };
+
+  // Extract stages from board, handling readonly array and Error type
+  const boardStages =
+    board?.stages && Array.isArray(board.stages)
+      ? (board.stages as readonly {
+          readonly id: string;
+          readonly name: string;
+          readonly eta: number;
+          readonly sequenceNumber: number;
+          readonly defaultTicketStatusV2: TicketStatusV2;
+        }[])
+      : [];
+
+  // Stage template selection: 'none', 'ai', or 'default'
+  const [selectedTemplate, setSelectedTemplate] = useState<StageTemplateType>(
+    !isEdit ? 'none' : 'none',
+  );
+
+  // Separate user stages from managed stages when loading board
+  const initialUserStages =
+    boardStages.length > 0
+      ? boardStages.map((s, idx) => ({
+          id: s.id,
+          tempId: Date.now() + idx,
+          name: s.name,
+          eta: String(s.eta),
+          sequenceNumber: String(s.sequenceNumber),
+          defaultTicketStatusV2: s.defaultTicketStatusV2 || TicketStatusV2.STARTED,
+        }))
+      : [
+          {
+            tempId: Date.now(),
+            name: '',
+            eta: '',
+            sequenceNumber: '1',
+            defaultTicketStatusV2: TicketStatusV2.STARTED,
+          },
+        ];
+
+  const [stages, setStages] = useState<Stage[]>(initialUserStages);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch projects using Zero
+  const [projects] = useCachedQuery(queries.getAllProjects());
+  const loadingProjects = projects === undefined;
+
+  // Sync stages with template selection
+  useEffect(() => {
+    if (!isEdit) {
+      // Only auto-manage stages in create mode
+      setStages(() => {
+        if (selectedTemplate === 'default') {
+          // Use default stages template + one empty stage for user to add
+          const templateStages = DEFAULT_STAGES_TEMPLATE.definitions.map((stage, idx) => ({
+            tempId: Date.now() + idx,
+            name: stage.name,
+            eta: stage.eta,
+            sequenceNumber: stage.sequenceNumber,
+            defaultTicketStatusV2: stage.defaultTicketStatusV2,
+          }));
+          const nextSequenceNumber = templateStages.length + 1;
+          return [...templateStages, createEmptyStage(nextSequenceNumber)];
+        } else {
+          // No template - return empty stage
+          return [createEmptyStage(1)];
+        }
+      });
+    }
+  }, [selectedTemplate, isEdit]);
+
+  const addStage = (): void => {
+    const nextSequenceNumber = stages.length + 1;
+
+    setStages([
+      ...stages,
+      {
+        tempId: Date.now(),
+        name: '',
+        eta: '',
+        sequenceNumber: String(nextSequenceNumber),
+        defaultTicketStatusV2: TicketStatusV2.STARTED,
+      },
+    ]);
+  };
+
+  const removeStage = (index: number): void => {
+    if (stages.length === 1) return;
+    const newStages = stages.filter((_, i) => i !== index);
+    setStages(newStages);
+  };
+
+  const updateStage = (index: number, field: keyof Stage, value: string | TicketStatusV2): void => {
+    const newStages = [...stages];
+    const currentStage = newStages[index];
+    if (currentStage) {
+      newStages[index] = { ...currentStage, [field]: value } as Stage;
+    }
+    setStages(newStages);
+  };
+
+  const handleSubmit = (): void => {
+    if (!name.trim()) {
+      setError('Board name is required');
+      return;
+    }
+
+    if (!projectId) {
+      setError('Please select a project');
+      return;
+    }
+
+    // Validate stages
+    for (const stage of stages) {
+      if (!stage.name.trim()) {
+        setError('All stages must have a name');
+        return;
+      }
+
+      const etaValue = parseInt(stage.eta);
+      if (isNaN(etaValue) || etaValue <= 0) {
+        setError('All stages must have a valid ETA (hours)');
+        return;
+      }
+
+      const sequenceValue = parseInt(stage.sequenceNumber);
+      if (isNaN(sequenceValue) || sequenceValue <= 0) {
+        setError('All stages must have a valid sequence number');
+        return;
+      }
+    }
+
+    // Validate that at least one stage has each required status
+    const hasTodo = stages.some(s => s.defaultTicketStatusV2 === TicketStatusV2.TODO);
+    const hasStarted = stages.some(s => s.defaultTicketStatusV2 === TicketStatusV2.STARTED);
+    const hasCompleted = stages.some(s => s.defaultTicketStatusV2 === TicketStatusV2.COMPLETED);
+
+    if (!hasTodo && !hasStarted && !hasCompleted) {
+      setError('At least one stage must have TODO, STARTED, and COMPLETED status');
+      return;
+    }
+    if (stages.length < 3) {
+      setError('Board must have at least 3 stages');
+      return;
+    }
+
+    void (async (): Promise<void> => {
+      try {
+        setIsSubmitting(true);
+        setError(null);
+
+        if (isEdit) {
+          // Edit mode - only send changed fields
+          const updateData: {
+            name?: string;
+            projectId?: string;
+            metadata?: ReadonlyJSONValue;
+            stages?: Array<{
+              name: string;
+              eta: number;
+              sequenceNumber: number;
+              defaultTicketStatusV2: TicketStatusV2;
+            }>;
+            formIds?: string[] | null;
+          } = {};
+
+          if (name.trim() !== board.name) {
+            updateData.name = name.trim();
+          }
+          if (projectId !== board.projectId) {
+            updateData.projectId = projectId;
+          }
+
+          // Always include metadata with ticket form config
+          updateData.metadata = {
+            ...boardMetadata,
+            ticketFormConfig: ticketFormConfig,
+          } as ReadonlyJSONValue;
+
+          // Always include stages for update
+          updateData.stages = stages.map(stage => ({
+            id: stage.id,
+            name: stage.name.trim(),
+            eta: parseInt(stage.eta),
+            sequenceNumber: parseInt(stage.sequenceNumber),
+            defaultTicketStatusV2: stage.defaultTicketStatusV2,
+          }));
+
+          // Include form IDs if they changed
+          const currentFormIds =
+            forms
+              ?.filter(form =>
+                form.formContextMappings?.some(
+                  mapping =>
+                    mapping.contextId === board.id && mapping.contextType === FormContextType.BOARD,
+                ),
+              )
+              .map(form => form.id) || [];
+
+          if (selectedFormIds.size > 0 || currentFormIds.length > 0) {
+            const newFormIds = Array.from(selectedFormIds).sort();
+            const currentSorted = currentFormIds.sort();
+
+            if (JSON.stringify(newFormIds) !== JSON.stringify(currentSorted)) {
+              updateData.formIds = newFormIds.length > 0 ? newFormIds : null;
+            }
+          }
+
+          await onSubmit(updateData);
+        } else {
+          // Create mode - send all fields
+          await onSubmit({
+            name: name.trim(),
+            projectId,
+            stages: stages.map(stage => ({
+              name: stage.name.trim(),
+              eta: parseInt(stage.eta),
+              sequenceNumber: parseInt(stage.sequenceNumber),
+              defaultTicketStatusV2: stage.defaultTicketStatusV2,
+            })),
+          });
+        }
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : `Failed to ${isEdit ? 'update' : 'create'} board`,
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
+  };
+
+  const isLoading = loading || isSubmitting;
+
+  return (
+    <div className='space-y-4 max-h-[60vh] overflow-y-auto'>
+      {error && (
+        <div className='bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded'>
+          {error}
+        </div>
+      )}
+
+      <div>
+        <TextInput
+          label='Board Name'
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder='Enter board name'
+          required
+          disabled={isLoading}
+        />
+      </div>
+
+      {!providedProjectId && (
+        <div>
+          <label htmlFor='project-select' className='block text-sm font-medium text-gray-700 mb-1'>
+            Project <span className='text-red-500'>*</span>
+          </label>
+          <select
+            id='project-select'
+            value={projectId}
+            onChange={e => setProjectId(e.target.value)}
+            disabled={isLoading || loadingProjects || isEdit}
+            className='w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+          >
+            <option value=''>{loadingProjects ? 'Loading projects...' : 'Select a project'}</option>
+            {projects?.map(project => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          {isEdit && (
+            <p className='mt-1 text-xs text-gray-500'>
+              Project cannot be changed when editing a board
+            </p>
+          )}
+        </div>
+      )}
+
+      <div>
+        <div className='flex items-center justify-between mb-2'>
+          <div className='text-sm font-medium text-gray-700'>
+            Stages <span className='text-red-500'>*</span>
+          </div>
+          <div className='flex items-center gap-2'>
+            {!isEdit && (
+              <select
+                value={selectedTemplate}
+                onChange={e => setSelectedTemplate(e.target.value as StageTemplateType)}
+                disabled={isLoading}
+                className='px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+              >
+                <option value='none'>No Template</option>
+                <option value='default'>Default stages</option>
+              </select>
+            )}
+            <Button variant='secondary' onClick={addStage} disabled={isLoading}>
+              Add Stage
+            </Button>
+          </div>
+        </div>
+
+        <div className='space-y-3'>
+          {stages.map((stage, index) => {
+            return (
+              <div key={stage.tempId} className='border rounded-md p-3 border-gray-200 bg-gray-50'>
+                <div className='flex items-start gap-2'>
+                  <div className='flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold bg-blue-100 text-blue-700'>
+                    {stage.sequenceNumber}
+                  </div>
+                  <div className='flex-1 space-y-2'>
+                    <TextInput
+                      label=''
+                      value={stage.name}
+                      onChange={e => updateStage(index, 'name', e.target.value)}
+                      placeholder='Stage name'
+                      disabled={isLoading}
+                    />
+                    <div className='grid grid-cols-2 gap-2'>
+                      <TextInput
+                        label=''
+                        value={stage.eta}
+                        onChange={e => updateStage(index, 'eta', e.target.value)}
+                        placeholder='ETA (hours)'
+                        type='number'
+                        disabled={isLoading}
+                      />
+                      <TextInput
+                        label=''
+                        value={stage.sequenceNumber}
+                        onChange={e => updateStage(index, 'sequenceNumber', e.target.value)}
+                        placeholder='Sequence #'
+                        type='number'
+                        disabled={isLoading}
+                      />
+                    </div>
+                    {/* Default Ticket Status Dropdown */}
+                    <div className='mt-2'>
+                      <label
+                        htmlFor={`stage-status-${index}`}
+                        className='block text-xs text-gray-500 mb-1'
+                      >
+                        Default Ticket Status
+                      </label>
+                      <select
+                        id={`stage-status-${index}`}
+                        value={stage.defaultTicketStatusV2}
+                        onChange={e =>
+                          updateStage(
+                            index,
+                            'defaultTicketStatusV2',
+                            e.target.value as TicketStatusV2,
+                          )
+                        }
+                        disabled={isLoading}
+                        className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+                      >
+                        <option value={TicketStatusV2.TODO}>TODO</option>
+                        <option value={TicketStatusV2.STARTED}>STARTED</option>
+                        <option value={TicketStatusV2.PAUSED}>PAUSED</option>
+                        <option value={TicketStatusV2.CANCELLED}>CANCELLED</option>
+                        <option value={TicketStatusV2.COMPLETED}>COMPLETED</option>
+                      </select>
+                    </div>
+                  </div>
+                  {stages.length > 1 && (
+                    <button
+                      onClick={() => removeStage(index)}
+                      disabled={isLoading}
+                      className='flex-shrink-0 text-red-500 hover:text-red-700 p-1'
+                      type='button'
+                    >
+                      <X size={20} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Form Selector - Only in edit mode */}
+      {isEdit && (
+        <div>
+          <hr className='border-gray-200 my-6' />
+          <BoardFormSelector
+            selectedFormIds={selectedFormIds}
+            onFormSelect={handleFormSelect}
+            onFormDeselect={handleFormDeselect}
+            disabled={isLoading}
+          />
+        </div>
+      )}
+
+      {/* Ticket Form Configuration - Only in edit mode */}
+      {isEdit && board && (
+        <div>
+          <hr className='border-gray-200 my-6' />
+          <BoardTicketFormConfig
+            config={ticketFormConfig}
+            onChange={setTicketFormConfig}
+            disabled={isLoading}
+          />
+        </div>
+      )}
+
+      <div className='flex gap-2 justify-end'>
+        <Button variant='secondary' onClick={onCancel} disabled={isLoading}>
+          Cancel
+        </Button>
+        <Button
+          variant='default'
+          onClick={handleSubmit}
+          disabled={isLoading || !name.trim() || loadingProjects}
+          loading={isLoading}
+        >
+          {isLoading
+            ? isEdit
+              ? 'Updating...'
+              : 'Creating...'
+            : isEdit
+              ? 'Update Board'
+              : 'Create Board'}
+        </Button>
+      </div>
+    </div>
+  );
+};

@@ -1,0 +1,122 @@
+import { apiInstance } from '../clients/apiClient';
+
+export interface CheckDuplicateChannelResponse {
+  isDuplicate: boolean;
+  name: string;
+  projectId: string;
+}
+
+export interface CreateChannelFormData {
+  name: string;
+  description: string;
+  visibility: 'public' | 'private';
+  topicTags: string[];
+  projectId: string;
+}
+
+export interface CreateChannelRequest {
+  name: string;
+  scopeType: 'DEFAULT';
+  scopeId?: string;
+  description?: string;
+  topicTags?: string[];
+  visibility?: 'PUBLIC' | 'PRIVATE';
+  projectId: string;
+  participants?: string[];
+}
+
+export interface CreateChannelResponse {
+  success: boolean;
+  id: string;
+  name: string;
+  scopeType: string;
+  description?: string | null;
+  visibility?: string | null;
+  projectId: string;
+  ownerId: string;
+  createdAt: Date | string;
+}
+
+export interface ForwardedMessageData {
+  originalMessageId: string;
+  optionalMessage?: string | undefined;
+}
+
+export interface CreateDmRequest {
+  participantIds: string[];
+  message?: string | undefined;
+  forwardedMessage?: ForwardedMessageData;
+}
+
+export interface CreateDmResponse {
+  message: string;
+  id: string;
+  name: string;
+  scopeType: string;
+  description?: string;
+  visibility: string;
+  projectId: string;
+  ownerId: string;
+  participantCount: number;
+  unreadCount: number;
+  lastActivityAt?: string;
+  createdAt: string;
+  isExisting: boolean;
+}
+
+export interface AddGroupDmParticipantsRequest {
+  userIds: string[];
+  includeHistory: boolean;
+}
+
+export interface AddGroupDmParticipantsResponse {
+  channelId: string;
+  isExisting: boolean;
+  participantsAdded: number;
+  conversationsMigrated?: number;
+  message: string;
+}
+
+export class ChannelService {
+  async checkDuplicateChannel(
+    title: string,
+    orgName: string,
+  ): Promise<CheckDuplicateChannelResponse> {
+    const response = await apiInstance.post<CheckDuplicateChannelResponse>(
+      '/channels/check-duplicate',
+      { name: title, projectId: orgName || 'default' },
+    );
+    return response.data;
+  }
+
+  async createChannel(formData: CreateChannelFormData): Promise<CreateChannelResponse> {
+    const requestData = {
+      name: formData.name,
+      scopeType: 'DEFAULT',
+      description: formData.description || '',
+      visibility: formData.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+      projectId: formData.projectId,
+    };
+
+    const response = await apiInstance.post<CreateChannelResponse>('/channels', requestData);
+    return response.data;
+  }
+
+  async createDm(data: CreateDmRequest): Promise<CreateDmResponse> {
+    const response = await apiInstance.post<CreateDmResponse>('/users/me/dms', data);
+    return response.data;
+  }
+
+  async addGroupDmParticipants(
+    channelId: string,
+    data: AddGroupDmParticipantsRequest,
+  ): Promise<AddGroupDmParticipantsResponse> {
+    const response = await apiInstance.post<AddGroupDmParticipantsResponse>(
+      `/users/me/dms/${channelId}/add`,
+      data,
+    );
+    return response.data;
+  }
+}
+
+export const channelService = new ChannelService();

@@ -1,0 +1,408 @@
+import { BaseRepository } from './base';
+import {
+  User,
+  CreateUserInput,
+  UpdateUserInput,
+  QueryOptions,
+  UserWithMappings,
+  UserWithAccess,
+  PaginationOptions,
+  PaginatedResult,
+} from '@/types/database';
+import { AuthProvider, UserStatus } from '@prisma/client';
+//import { queueUserIngestion } from '@/queues/vespaQueue';
+
+export class UserRepository extends BaseRepository<User, CreateUserInput, UpdateUserInput> {
+  constructor() {
+    super('user');
+  }
+
+  async create(data: CreateUserInput): Promise<User> {
+    await this.validateString(data.email, 'email', 255);
+    await this.validateString(data.name, 'name', 255);
+    await this.validateString(data.providerUserId, 'providerUserId', 255);
+
+    if (data.authProvider) {
+      await this.validateEnum(data.authProvider, 'authProvider', Object.values(AuthProvider));
+    }
+
+    if (data.status) {
+      await this.validateEnum(data.status, 'status', Object.values(UserStatus));
+    }
+
+    const user = await this.db.user.create({
+      data,
+    });
+
+    // Queue user for Vespa ingestion
+    // try {
+    //   await queueUserIngestion(user, 'feed');
+    // } catch (error) {
+    //   // Log error but don't fail the user creation
+    //   console.error('Failed to queue user for Vespa ingestion:', error);
+    // }
+
+    return user;
+  }
+
+  async findById(id: string): Promise<User | null> {
+    return await this.db.user.findUnique({
+      where: { id },
+    });
+  }
+
+  async findByEmail(email: string): Promise<User | null> {
+    return await this.db.user.findUnique({
+      where: { email },
+    });
+  }
+
+  async findByUsername(username: string): Promise<User | null> {
+    return await this.db.user.findFirst({
+      where: { name: username },
+    });
+  }
+
+  async findByProviderUserId(providerUserId: string): Promise<User | null> {
+    return await this.db.user.findUnique({
+      where: { providerUserId },
+    });
+  }
+
+  async findMany(options?: QueryOptions): Promise<User[]> {
+    const { skip, take, orderBy, where } = options || {};
+
+    return await this.db.user.findMany({
+      skip,
+      take,
+      orderBy,
+      where,
+    });
+  }
+
+  async findManyPaginated(options: PaginationOptions & { where?: any }): Promise<PaginatedResult<User>> {
+    const { page, pageSize, where } = options;
+    const paginationQuery = this.buildPaginationQuery({ page, pageSize });
+
+    return this.paginate(
+      () => this.db.user.findMany({
+        ...paginationQuery,
+        where,
+        orderBy: { createdAt: 'desc' },
+      }),
+      () => this.db.user.count({ where }),
+      { page, pageSize }
+    );
+  }
+
+  async update(id: string, data: UpdateUserInput): Promise<User> {
+    if (data.email && typeof data.email === 'string') {
+      await this.validateString(data.email, 'email', 255);
+    }
+
+    if (data.name && typeof data.name === 'string') {
+      await this.validateString(data.name, 'name', 255);
+    }
+
+    if (data.providerUserId && typeof data.providerUserId === 'string') {
+      await this.validateString(data.providerUserId, 'providerUserId', 255);
+    }
+
+    if (data.authProvider) {
+      await this.validateEnum(data.authProvider, 'authProvider', Object.values(AuthProvider));
+    }
+
+    if (data.status) {
+      await this.validateEnum(data.status, 'status', Object.values(UserStatus));
+    }
+
+    const user = await this.db.user.update({
+      where: { id },
+      data,
+    });
+
+    // Queue updated user for Vespa ingestion
+    // try {
+    //   await queueUserIngestion(user, 'update');
+    // } catch (error) {
+    //   // Log error but don't fail the user update
+    //   console.error('Failed to queue user update for Vespa ingestion:', error);
+    // }
+
+    return user;
+  }
+
+  async delete(id: string): Promise<User> {
+    // Get the user before deletion for Vespa queue
+    // const user = await this.db.user.findUnique({
+    //   where: { id },
+    // });
+
+    const deletedUser = await this.db.user.delete({
+      where: { id },
+    });
+
+    // Queue user deletion for Vespa
+    // if (user) {
+    //   try {
+    //     await queueUserIngestion(user, 'delete');
+    //   } catch (error) {
+    //     // Log error but don't fail the user deletion
+    //     console.error('Failed to queue user deletion for Vespa:', error);
+    //   }
+    // }
+
+    return deletedUser;
+  }
+
+  async findWithMappings(id: string): Promise<UserWithMappings | null> {
+    const user = await this.db.user.findUnique({
+      where: { id }
+    });
+
+    if (!user) return null;
+
+    // Fetch all mappings for this user
+    const mappings = await this.db.userGroupMapping.findMany({
+      where: { userId: id }
+    });
+
+    if (mappings.length === 0) {
+      return {
+        ...user,
+        userGroupMappings: []
+      } as UserWithMappings;
+    }
+
+    // Extract user group IDs from mappings
+    const userGroupIds = mappings.map(m => m.userGroupId);
+
+    // Fetch all user groups in ONE batch query
+    const userGroups = await this.db.userGroup.findMany({
+      where: { id: { in: userGroupIds } }
+    });
+
+    // Create a map for quick lookup
+    const userGroupMap = new Map(userGroups.map(g => [g.id, g]));
+
+    // Combine mappings with their corresponding user groups
+    const userGroupMappings = mappings.map(mapping => ({
+      ...mapping,
+      userGroup: userGroupMap.get(mapping.userGroupId) || null
+    }));
+
+    return {
+      ...user,
+      userGroupMappings
+    } as UserWithMappings;
+  }
+
+  async findWithAccess(id: string): Promise<UserWithAccess | null> {
+    return await this.db.user.findUnique({
+      where: { id },
+      include: {
+        resourceAccess: {
+          include: {
+            resource: true,
+          },
+        },
+      },
+    });
+  }
+
+  async findByUserGroup(userGroupId: string): Promise<User[]> {
+    // Get all user IDs in this group
+    const mappings = await this.db.userGroupMapping.findMany({
+      where: { userGroupId },
+      select: { userId: true }
+    });
+
+    if (mappings.length === 0) return [];
+
+    const userIds = mappings.map(m => m.userId);
+
+    // Fetch all users in ONE batch query
+    return await this.db.user.findMany({
+      where: { id: { in: userIds } },
+      orderBy: { email: 'asc' }
+    });
+  }
+
+  async findByStatus(status: UserStatus): Promise<User[]> {
+    return await this.db.user.findMany({
+      where: { status },
+      orderBy: { email: 'asc' },
+    });
+  }
+
+  /**
+   * Private helper method to enrich users with their group mappings
+   * Efficiently fetches mappings and groups in batched queries, then combines them
+   */
+  private async enrichUsersWithMappings(users: User[]): Promise<UserWithMappings[]> {
+    if (users.length === 0) {
+      return [];
+    }
+
+    // Get all mappings for these users
+    const userIds = users.map(u => u.id);
+    const mappings = await this.db.userGroupMapping.findMany({
+      where: { userId: { in: userIds } }
+    });
+
+    if (mappings.length === 0) {
+      return users.map(user => ({ ...user, userGroupMappings: [] })) as UserWithMappings[];
+    }
+
+    // Get all unique user group IDs
+    const groupIds = [...new Set(mappings.map(m => m.userGroupId))];
+
+    // Batch fetch all user groups
+    const userGroups = await this.db.userGroup.findMany({
+      where: { id: { in: groupIds } }
+    });
+
+    // Create maps for quick lookup
+    const groupMap = new Map(userGroups.map(g => [g.id, g]));
+    const userMappingsMap = new Map<string, any[]>();
+
+    // Build user mappings map
+    mappings.forEach(mapping => {
+      if (!userMappingsMap.has(mapping.userId)) {
+        userMappingsMap.set(mapping.userId, []);
+      }
+      userMappingsMap.get(mapping.userId)!.push({
+        ...mapping,
+        userGroup: groupMap.get(mapping.userGroupId) || null
+      });
+    });
+
+    // Combine users with their mappings
+    return users.map(user => ({
+      ...user,
+      userGroupMappings: userMappingsMap.get(user.id) || []
+    })) as UserWithMappings[];
+  }
+
+  async findBySearch(searchTerm: string, options?: PaginationOptions): Promise<PaginatedResult<UserWithMappings> | UserWithMappings[]> {
+    // Search filter that only matches names starting with the search term
+    const searchFilter = {
+      name: {
+        startsWith: searchTerm,
+        mode: 'insensitive' as const,
+      },
+    };
+
+    if (options) {
+      const { page, pageSize } = options;
+      const paginationQuery = this.buildPaginationQuery({ page, pageSize });
+
+      // Get paginated users first
+      const users = await this.db.user.findMany({
+        ...paginationQuery,
+        where: searchFilter,
+        orderBy: { name: 'asc' },
+      });
+
+      const count = await this.db.user.count({ where: searchFilter });
+
+      // Enrich users with their group mappings using helper method
+      const usersWithMappings = await this.enrichUsersWithMappings(users);
+
+      return {
+        data: usersWithMappings,
+        pagination: {
+          page,
+          pageSize,
+          totalPages: Math.ceil(count / pageSize),
+          total: count
+        }
+      };
+    }
+
+    // Non-paginated search
+    const users = await this.db.user.findMany({
+      where: searchFilter,
+      orderBy: { name: 'asc' },
+    });
+
+    // Enrich users with their group mappings using helper method
+    return await this.enrichUsersWithMappings(users);
+  }
+
+  async validateEmailUnique(email: string, excludeId?: string): Promise<void> {
+    const existing = await this.db.user.findUnique({
+      where: { email },
+    });
+
+    if (existing && existing.id !== excludeId) {
+      throw new Error(`User with email '${email}' already exists`);
+    }
+  }
+
+  async validateProviderUserIdUnique(providerUserId: string, excludeId?: string): Promise<void> {
+    const existing = await this.db.user.findUnique({
+      where: { providerUserId },
+    });
+
+    if (existing && existing.id !== excludeId) {
+      throw new Error(`User with provider user ID '${providerUserId}' already exists`);
+    }
+  }
+
+  async findActiveUsers(): Promise<User[]> {
+    return await this.db.user.findMany({
+      where: { status: UserStatus.ACTIVE },
+      orderBy: { email: 'asc' },
+    });
+  }
+
+  async updateStatus(id: string, status: UserStatus): Promise<User> {
+    const user = await this.db.user.update({
+      where: { id },
+      data: { status },
+    });
+
+    // Queue user status update for Vespa ingestion
+    // try {
+    //   await queueUserIngestion(user, 'update');
+    // } catch (error) {
+    //   // Log error but don't fail the status update
+    //   console.error('Failed to queue user status update for Vespa ingestion:', error);
+    // }
+
+    return user;
+  }
+
+  async findByMetadataField(key: string, value: string): Promise<User | null> {
+    return await this.db.user.findFirst({
+      where: {
+        metadata: {
+          path: [key],
+          equals: value,
+        },
+      },
+    });
+  }
+
+  async upsertMetaDataField(userId: string, key: string, value: any): Promise<User> {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new Error(`User with id '${userId}' not found`);
+    }
+
+    const currentMetadata = (user.metadata as Record<string, any>) || {};
+
+    const updatedMetadata = {
+      ...currentMetadata,
+      [key]: value,
+    };
+
+    return await this.db.user.update({
+      where: { id: userId },
+      data: {
+        metadata: updatedMetadata,
+      },
+    });
+  }
+}

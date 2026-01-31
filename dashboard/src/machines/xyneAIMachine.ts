@@ -1,0 +1,142 @@
+import { setup, createActor, assign } from 'xstate';
+import { RefObject } from 'react';
+
+// Available XyneAI states
+export type XyneAIState = 'closed' | 'open';
+
+// XyneAI context types - what section is XyneAI being used in
+export type XyneAIContextType = 'chat' | 'ticket' | 'call' | 'general';
+
+// Context interface for the XyneAI machine
+export interface XyneAIContext {
+  xyneAIState: XyneAIState;
+  contextType: XyneAIContextType;
+  contextId: string | null; // channelId, ticketId, callId, or null for general
+  // Legacy support
+  channelId: string | null;
+}
+
+// Event types for XyneAI machine
+export type XyneAIEvent =
+  | { type: 'OPEN'; contextType?: XyneAIContextType; contextId?: string; channelId?: string }
+  | { type: 'CLOSE' }
+  | { type: 'SET_CONTEXT'; contextType: XyneAIContextType; contextId: string }
+  | { type: 'SET_CHANNEL'; channelId: string };
+
+// Interface for panel handle (to avoid importing react-resizable-panels here)
+interface PanelHandle {
+  resize: (size: number) => void;
+}
+
+// Panel refs interface
+interface PanelRefs {
+  left: RefObject<PanelHandle | null>;
+  right: RefObject<PanelHandle | null>;
+}
+
+// Global panel refs that will be set by AppRoot
+export let globalXyneAIPanelRefs: PanelRefs = {
+  left: { current: null },
+  right: { current: null },
+};
+
+// Function to set panel refs from AppRoot
+export const setXyneAIPanelRefs = (panelRefs: PanelRefs): void => {
+  globalXyneAIPanelRefs = panelRefs;
+};
+
+export const xyneAIMachine = setup({
+  types: {
+    context: {} as XyneAIContext,
+    events: {} as XyneAIEvent,
+  },
+  actions: {
+    // Update context when transitioning to different states
+    setOpen: assign(({ event }) => {
+      if (event.type === 'OPEN') {
+        // Support both new contextType/contextId and legacy channelId
+        const contextType = event.contextType ?? (event.channelId ? 'chat' : 'general');
+        const contextId = event.contextId ?? event.channelId ?? null;
+
+        return {
+          xyneAIState: 'open' as XyneAIState,
+          contextType,
+          contextId,
+          channelId: contextType === 'chat' ? contextId : null, // Legacy support
+        };
+      }
+      return { xyneAIState: 'open' as XyneAIState };
+    }),
+    setClosed: assign({
+      xyneAIState: 'closed' as XyneAIState,
+      contextType: 'general' as XyneAIContextType,
+      contextId: null,
+      channelId: null,
+    }),
+    setContext: assign(({ event }) => {
+      if (event.type === 'SET_CONTEXT') {
+        return {
+          contextType: event.contextType,
+          contextId: event.contextId,
+          channelId: event.contextType === 'chat' ? event.contextId : null, // Legacy support
+        };
+      }
+      return {};
+    }),
+    setChannel: assign(({ event }) => {
+      if (event.type === 'SET_CHANNEL') {
+        return {
+          contextType: 'chat' as XyneAIContextType,
+          contextId: event.channelId,
+          channelId: event.channelId,
+        };
+      }
+      return {};
+    }),
+    // Panel resizing actions
+    resizeToDefault: () => {
+      globalXyneAIPanelRefs.left.current?.resize(65);
+      globalXyneAIPanelRefs.right.current?.resize(35);
+    },
+    resizeToClosed: () => {
+      globalXyneAIPanelRefs.left.current?.resize(100);
+      globalXyneAIPanelRefs.right.current?.resize(0);
+    },
+  },
+}).createMachine({
+  context: () => ({
+    xyneAIState: 'closed' as XyneAIState,
+    contextType: 'general' as XyneAIContextType,
+    contextId: null,
+    channelId: null,
+  }),
+  id: 'xyneAIMachine',
+  initial: 'closed',
+  states: {
+    closed: {
+      on: {
+        OPEN: {
+          target: 'open',
+          actions: ['setOpen', 'resizeToDefault'],
+        },
+      },
+    },
+    open: {
+      on: {
+        CLOSE: {
+          target: 'closed',
+          actions: ['setClosed', 'resizeToClosed'],
+        },
+        SET_CONTEXT: {
+          actions: 'setContext',
+        },
+        SET_CHANNEL: {
+          actions: 'setChannel',
+        },
+      },
+    },
+  },
+});
+
+// Global XyneAI actor instance
+export const xyneAIActor = createActor(xyneAIMachine).start();

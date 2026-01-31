@@ -1,0 +1,52 @@
+import { ReactElement } from 'react';
+import type { ActivityWithRelated } from '../../types/activity';
+import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
+import { ActivityItemCard } from './ActivityItemCard';
+import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { useUser } from '../../hooks/useUsers';
+import { useRouteContext } from '../../hooks/useRouteContext';
+import { renderEmoji } from '../../utils/customEmojiUtils';
+
+export const ReactionAddedActivity = ({
+  activity,
+  isExpanded = true,
+}: {
+  activity: ActivityWithRelated;
+  isExpanded: boolean;
+}): ReactElement | null => {
+  const reaction = activity.reaction;
+  const message = activity.message;
+  const actorUser = useUser(reaction?.userId ?? '');
+  const { baseRoute } = useRouteContext();
+
+  if (!reaction || !message || !reaction.userId || !message.conversation) return null;
+
+  const actionText = activity.actorAction === 'added' ? 'reacted' : 'removed reaction';
+  const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
+  const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
+
+  return (
+    <ActivityItemCard
+      activity={activity}
+      actorId={reaction.userId}
+      actorName={actorUser?.name ?? 'unknown'}
+      channelId={message.conversation?.channelId}
+      badgeIcon={renderEmoji(reaction.emojiName)}
+      badgeColorClass={actorUser?.picture ? 'bg-[#FAFAFA]' : 'bg-[#EDF3F7]'}
+      description={
+        <>
+          <span className='text-gray-500 text-sm'>{actionText}</span>
+          <span className='text-gray-500 text-sm ml-1'>to your message in</span>
+        </>
+      }
+      targetPath={targetPath}
+      isExpanded={isExpanded}
+    >
+      {isExpanded ? (
+        <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />
+      ) : (
+        <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
+      )}
+    </ActivityItemCard>
+  );
+};

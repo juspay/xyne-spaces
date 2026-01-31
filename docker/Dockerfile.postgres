@@ -1,0 +1,5 @@
+FROM mirror.gcr.io/library/postgres:16-alpine
+
+# Copy init script into the image (avoids host-mount noexec issues on macOS/Podman)
+COPY docker/init-db.sh /docker-entrypoint-initdb.d/init-db.sh
+RUN chmod 755 /docker-entrypoint-initdb.d/init-db.sh

@@ -1,0 +1,1795 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "darwin"]
+  previewFeatures = ["multiSchema"]
+}
+
+generator zero {
+  provider       = "prisma-generator-zero"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["public", "workflow"]
+}
+
+
+// Enums for Workflow model
+enum WorkflowCategory {
+  USER_ONBOARDING
+  BUG_WORKFLOW
+  BUG_WORKFLOW_EVAL
+  BUG_WORKFLOW_EVAL_INNER_STEPS
+  BUG_WORKFLOW_EVAL_INNER_STEPS_EXPERIMENTAL
+  FEATURE_IMPLEMENTATION
+  FEATURE_PLANNING
+  XYNE_SPACES_FEATURE_IMPLEMENTATION
+  FIDO_SERVER_WORKFLOW
+  CONNECTOR_MIGRATION
+  CODER_WORKFLOW
+  QUERY_WORKFLOW
+  QUERY
+  ISSUE
+  REQUIREMENT_NEW
+  REQUIREMENT_ENHANCEMENT
+  FULL_PG_INTEGRATION
+  INVESTIGATION_WORKFLOW
+  GENIUS_INVESTIGATION_WORKFLOW
+  STAGE_APPROVAL_WORKFLOW
+  @@schema("public")
+}
+
+enum TicketStatus {      // Deprecated
+  NEW                    // Ticket created, awaiting triage or auto-assignment
+  IN_PROGRESS            // Work actively ongoing
+  WAIT_FOR_APPROVAL      // Awaiting approval from authorized personnel
+  REJECTED               // Ticket invalid or not approved. Cannot be reopened
+  RESOLVED               // Final terminal state
+  @@schema("public")
+}
+
+enum TicketStatusV2 {
+  TODO                   // Ticket created, awaiting triage or auto-assignment
+  STARTED                // Work actively ongoing
+  PAUSED                 // Awaiting approval from authorized personnel
+  CANCELLED              // Ticket invalid or not approved. Cannot be reopened
+  COMPLETED              // Final terminal state
+  @@schema("public")
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+  @@schema("public")
+}
+
+enum TicketReferenceRelation {
+  LINKED
+  DUPLICATE_CONFIRMED
+  DUPLICATE_POSSIBLE
+  @@schema("public")
+}
+
+enum EntityType {
+  MERCHANT
+  GATEWAY
+  @@schema("public")
+}
+
+enum ActivityType {
+  TITLE
+  DESCRIPTION
+  STATUS
+  ASSIGNED_TO
+  PRIORITY
+  ETA
+  METADATA
+  CLOSED_AT
+  CLOSED_BY
+  REFERENCE_TICKET
+  STAGE_NAME
+  TAGS
+  ENTITY
+  SUBTICKET_CREATED
+  BOARD
+  @@schema("public")
+}
+
+enum AttachmentEntityType {
+  TICKET
+  CHAT
+  CANVAS
+  EMAIL
+  @@schema("public")
+}
+
+enum TicketEnvironment {
+  DEVELOPMENT
+  STAGING
+  PRODUCTION
+  @@schema("public")
+}
+
+enum ReportedBy {
+  MERCHANT
+  INTERNAL
+  @@schema("public")
+}
+
+// Chat Feature Enums
+enum ChannelScopeType {
+  DEFAULT
+  DM
+  TICKET
+  DOCUMENT
+  GROUP_DM
+  @@schema("public")
+}
+
+enum ChannelType {
+  DEFAULT
+  EMAIL
+  @@schema("public")
+}
+
+enum ChannelRole {
+  ADMIN
+  MEMBER
+  @@schema("public")
+}
+
+enum ChannelVisibility {
+  PUBLIC
+  PRIVATE
+  @@schema("public")
+}
+
+enum MessageType {
+  USER
+  BOT
+  SYSTEM
+  FORWARDED
+  @@schema("public")
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+  @@schema("public")
+}
+
+// Call Feature Enums
+enum CallType {
+  AUDIO
+  VIDEO
+  HEADLESS
+  @@schema("public")
+}
+
+enum CallStatus {
+  SCHEDULED
+  ACTIVE
+  IN_PROGRESS
+  ENDED
+  CANCELLED
+  @@schema("public")
+}
+
+enum InvitationResponse {
+  INVITED
+  ACCEPTED
+  DECLINED
+  MISSED
+  @@schema("public")
+}
+
+enum ConversationParticipation {
+  AUTHOR      // Sent at least one message in the conversation
+  MENTIONED   // Tagged/mentioned but hasn't replied yet
+  @@schema("public")
+}
+
+model Agent {
+  id            String   @id @default(cuid())
+  userDefinedId String   @unique
+  modelId       String
+  systemPrompt  String
+  description   String?
+  name          String
+  version       Int      @default(1)
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  temp          Float?   @default(0.7)
+  scope         String   @default("project") // juspay/team/project
+  scopeURI      String?
+
+  // Relations
+  model              Model               @relation(fields: [modelId], references: [id])
+  agentToolsMappings AgentToolsMapping[]
+  agentSteps         AgentStep[] // <-- Required for Prisma validation
+
+  @@unique([name, version])
+  @@map("agents")
+  @@schema("public")
+}
+
+model Model {
+  id            String   @id @default(cuid())
+  userDefinedId String   @unique
+  name          String
+  provider      String
+  credentials   String // JSON string for credentials
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  agents Agent[]
+
+  @@map("models")
+  @@schema("public")
+}
+
+model Tool {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  status      String   @default("Enabled") // Enabled/Disabled
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  agentToolsMappings AgentToolsMapping[]
+
+  @@map("tools")
+  @@schema("public")
+}
+
+model AgentToolsMapping {
+  id                 String   @id @default(cuid())
+  agentId            String
+  toolId             String
+  specialDescription String?
+  status             String   @default("Enabled") // Enabled/Disabled
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Relations
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tool  Tool  @relation(fields: [toolId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, toolId])
+  @@map("agent_tools_mappings")
+  @@schema("public")
+}
+
+// Tracker models
+model Ticket {
+  id               String            @id @default(cuid())
+  title            String
+  description      String
+  status           TicketStatus      @default(NEW)  // Deprecated - use statusV2
+  statusV2         TicketStatusV2    @default(TODO)
+  createdBy        String            // Foreign key to User - Reporter/Owner of the ticket
+  updatedBy        String           // Foreign key to User
+  assignedTo       String?           // Foreign key to User
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  merchantId       String?           // Merchant ID to which the ticket is linked
+  conversationId   String            // The xyne chat conversation to which the ticket is linked
+  channelId        String            // The channel to which the ticket is linked
+  eta              DateTime?         // Calculated ETA for a ticket based on ETA of task Type
+  priority         TicketPriority    @default(LOW)
+  metadata         Json?             // Additional metadata - external source tracking, domain-specific context
+  closedAt         DateTime?         // When the reporter closed the ticket after verification
+  closedBy         String?           // User who closed the ticket
+  referenceTicket  String[]          // Array of ticket IDs for related tickets (duplicates, related incidents, etc.)
+  xyneId           String            @unique // Human readable ID
+  projectId        String            // Project to which the ticket is linked
+  userGroupId      String?            // User group to which the ticket belongs
+  boardId          String            // Board to which the ticket belongs
+  stageName        String            // Current stage of the ticket
+
+  @@index([status])
+  @@index([assignedTo, status])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@index([eta])
+  @@index([boardId])
+  @@index([projectId])
+  @@index([userGroupId])
+  @@map("tickets")
+  @@schema("public")
+}
+
+model SubTicket {
+  id                String    @id @default(cuid())
+  title             String
+  description       String?
+  mappedTicketId    String?   // Refers to L1 ticket of the other team (optional - set later when linking)
+  createdBy         String    // The user who created the sub ticket
+  updatedBy         String    // Refers to updatedBy of mappedTicket (mandatory)
+  conversationId    String?   // The mapped Ticket ID conversation for syncing updates (optional - set later when posting)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  stageProgression  String?   // UI display value like '2/7' showing progression
+  assignedTo        String?
+
+  @@index([title])
+  @@index([mappedTicketId])
+  @@map("sub_tickets")
+  @@schema("public")
+}
+
+model TicketSubTicketMapping {
+  id          String @id @default(cuid())
+  ticketId    String // Parent ticket ID
+  subTicketId String // Sub ticket ID
+
+  @@index([ticketId])
+  @@index([subTicketId])
+  @@map("ticket_sub_ticket_mappings")
+  @@schema("public")
+}
+
+model TicketActivity {
+  id           String       @id @default(cuid())
+  ticketId     String       // Ticket reference
+  updatedBy    String       // User who made the change
+  timestamp    DateTime     @default(now())
+  activityType ActivityType // Type of data stored in value (STRING, NUMBER, JSON, OBJECT)
+  value        Json         // The value containing field info, old/new values, etc.
+
+  @@index([ticketId])
+  @@map("ticket_activities")
+  @@schema("public")
+}
+
+model TicketEntityMapping {
+  id         String     @id @default(cuid())
+  ticketId   String     // Ticket reference
+  entityType EntityType // MERCHANT or GATEWAY
+  entityName String     // merchant_id or gateway_name
+
+  @@index([ticketId])
+  @@map("ticket_entity_mappings")
+  @@schema("public")
+}
+
+model TicketTag {
+  id       String @id @default(cuid())
+  name     String // Tag provided by user
+  ticketId String // Ticket reference
+
+  @@index([ticketId])
+  @@map("ticket_tags")
+  @@schema("public")
+}
+
+model TicketReferenceMapping {
+  id             String                   @id @default(cuid())
+  sourceTicketId String                   // Ticket owning the reference
+  targetTicketId String                   // Referenced ticket
+  relationType   TicketReferenceRelation
+  createdBy      String
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  @@index([sourceTicketId])
+  @@index([targetTicketId])
+  @@unique([sourceTicketId, targetTicketId, relationType])
+  @@map("ticket_reference_mappings")
+  @@schema("public")
+}
+
+
+model Workflow {
+  id               String    @id @default(cuid())
+  ticketId         String?   // Foreign key
+  context          String? // Initial context for workflow (readonly input) - only for top-level workflows
+  status           String    @default("NEW") // NEW/PENDING/SCHEDULED/SUCCESS/FAILURE/PAUSED/INTERACTIVE
+  workflowName     String?
+  metadata         String?
+  configuration    String?
+  workflowType     String? // Only for top-level workflows - child executions store this in WorkflowExecution
+  scheduledAt      DateTime? // Do the deployment only after 12 AM
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  workflowExecutions WorkflowExecution[]
+
+  @@map("workflows")
+  @@schema("public")
+}
+
+model WorkflowExecution {
+  id                        String   @id @default(cuid())
+  workflowId                String
+  workflowType              String? // For child executions - type of workflow being executed
+  context                   String? // For child executions - initial context (JSON)
+  status                    String   @default("NEW") // NEW/PENDING/SCHEDULED/RUNNING/SUCCESS/FAILURE/EXTERNAL_WAIT/WAITING_FOR_CHILD_EXECUTIONS/PAUSED/CANCELLED
+  output                    String? // Execution-specific output (typed result)
+  parentWorkflowExecutionId String?
+  sourceStepsId             String?
+  stepInputOverrideData     String? // JSON string of modified input data for rerun executions
+  tag                       String   @default("root") // "root" | "child" | "rerun"
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+  ignoreDuration            Int      @default(0) // ~22 days max (PAUSED or Waiting for external input)
+
+  // Relations
+  workflow                Workflow               @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  parentWorkflowExecution WorkflowExecution?     @relation("WorkflowExecutionParent", fields: [parentWorkflowExecutionId], references: [id])
+  childWorkflowExecutions WorkflowExecution[]    @relation("WorkflowExecutionParent")
+  workflowSteps           WorkflowStep[]
+  workflowExecutionLock   WorkflowExecutionLock?
+  externalStepResponses   ExternalStepResponse[]
+
+  @@map("workflow_executions")
+  @@schema("public")
+}
+
+model WorkflowExecutionLock {
+  id                  String   @id @default(cuid())
+  workflowExecutionId String   @unique
+  workerId            String
+  expiry              DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  workflowExecution WorkflowExecution @relation(fields: [workflowExecutionId], references: [id], onDelete: Cascade)
+
+  @@map("workflow_execution_locks")
+  @@schema("public")
+
+}
+
+// Workflow Execution Users - Maps users to workflow executions
+model WorkflowExecutionUsers {
+  id                  String   @id @default(cuid())
+  userId              String
+  workflowExecutionId String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+
+  @@unique([userId, workflowExecutionId])
+  @@index([userId])
+  @@index([workflowExecutionId])
+  @@map("workflow_execution_users")
+  @@schema("public")
+}
+
+model WorkflowStep {
+  id                  String   @id @default(cuid())
+  workflowExecutionId String
+  stepExecutorType    String // deterministic/parallel/agent/loops/conditional
+  stepSubType         String? // Sub-classification: user_approval, webhook, api_callback, etc.
+  stepName            String?
+  type                String? // input/output
+  previousStepId      String?
+  data                String? // JSON string
+  status              String?
+  markdownSummary     String? // AI-generated markdown summary of checkpoint execution
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  workflowExecution     WorkflowExecution     @relation(fields: [workflowExecutionId], references: [id], onDelete: Cascade)
+  externalStepResponse  ExternalStepResponse?
+
+  @@index([stepSubType])
+  @@map("workflow_steps")
+  @@schema("workflow")
+}
+
+model WorkflowKnowledge {
+  id                  String   @id @default(cuid())
+  workflowExecutionId String
+  checkpointId        String
+  learningType        String
+  title               String
+  content             String
+  codeContext         String?
+  filePaths           String[]
+  createdAt           DateTime @default(now())
+
+  @@map("workflow_knowledge")
+  @@schema("public")
+}
+
+// Knowledge Documents - approved learnings as simple docs for AI and users
+model KnowledgeDocument {
+  id                  String    @id @default(cuid())
+  projectId           String    // Project scope (from channel)
+  repositoryUrl       String?   // Optional: specific repo scope
+  title               String
+  content             String    // Markdown content (converted from BlockNote)
+  
+  // Source tracking
+  sourceKnowledgeId   String?   // Original WorkflowKnowledge ID
+  workflowExecutionId String?   // Original workflow execution
+  conversationId      String?   // Thread where approved
+  
+  // Approval info
+  approvedBy          String    // User who approved
+  approvedAt          DateTime  @default(now())
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  metadata            Json?     // filePaths, tags, learningType, etc.
+
+  @@index([projectId])
+  @@index([projectId, repositoryUrl])
+  @@map("knowledge_documents")
+  @@schema("public")
+}
+
+model AgentStep {
+  id            String   @id @default(cuid())
+  stepsId       String?
+  toolCallId         String?
+  stepType      String // tool, llm-call, hooks
+  agentId       String?
+  toolName      String?
+  commitHash    String?
+  repositoryURL String?
+  branch        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  agent Agent? @relation(fields: [agentId], references: [id])
+
+  @@map("agent_steps")
+  @@schema("public")
+}
+
+
+
+
+model ExternalStepResponse {
+  id                  String   @id @default(cuid())
+  workflowExecutionId String
+  workflowStepId      String   @unique // Make this unique for one-to-one relation
+  rawResponse         String // JSON string containing external response
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  workflowExecution WorkflowExecution @relation(fields: [workflowExecutionId], references: [id], onDelete: Cascade)
+  workflowStep      WorkflowStep      @relation(fields: [workflowStepId], references: [id], onDelete: Cascade)
+
+  @@map("external_step_responses")
+  @@schema("public")
+}
+
+// Enums for User Management
+enum AuthProvider {
+  GOOGLE
+  API_KEY
+  @@schema("public")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  @@schema("public")
+}
+
+enum UserType {
+  USER
+  BOT
+  @@schema("public")
+}
+
+enum UserPresenceStatus {
+  ONLINE
+  AWAY
+  OFFLINE
+  @@schema("public")
+}
+
+enum AccessType {
+  ADMIN
+  READ
+  WRITE
+  @@schema("public")
+}
+
+// API Key Management
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String    // Human readable name
+  description String?
+  keyHash     String    @unique // SHA256 hash of the actual key
+  userId      String    // Link to User record
+  scopes      String?   // JSON array of scopes (optional, uses ResourceAccess if empty)
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+  @@schema("public")
+}
+
+// User Management Models
+model UserGroup {
+  id          String   @id @default(cuid())
+  name        String   @unique // Xyne Space Developers | Frontend Team | Backend Team
+  alias       String?  @unique // xyne-space-dev | frontend | backend (for mentions)
+  description String?
+  metadata    Json? // Team-specific config: statuses, skills, etc.
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  resourceAccess ResourceAccess[]
+
+  @@map("user_groups")
+  @@schema("public")
+}
+
+enum SessionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  @@schema("public")
+}
+
+model UserSession {
+  id                  String        @id @default(cuid())
+  userId              String
+  refreshToken        String        @unique
+  refreshTokenExpiry  DateTime
+  accessToken         String?       // Store the current access token
+  accessTokenExpiry   DateTime?
+  status              SessionStatus @default(ACTIVE)
+  deviceInfo          String?       // JSON string containing device/browser info
+  deviceId            String?       // Native mobile device identifier
+  fcmToken            String?       // Stored as <platform>:<raw token>
+  voipToken           String?       // Stored as <platform>:<raw token> for VoIP pushes
+  ipAddress           String?
+  lastActivity        DateTime      @default(now())
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshToken])
+  @@index([status])
+  @@index([refreshTokenExpiry])
+  @@map("user_sessions")
+  @@schema("public")
+}
+
+model User {
+  id             String       @id @default(cuid())
+  name           String
+  email          String       @unique
+  picture        String?      // Google profile picture URL
+  authProvider   AuthProvider @default(GOOGLE)
+  providerUserId String       @unique
+  status         UserStatus   @default(ACTIVE)
+  userType       UserType     @default(USER) // USER or BOT
+  metadata       Json? // Flexible user metadata
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Relations
+  resourceAccess            ResourceAccess[]
+  auditLogs                 ACLAuditLog[]
+  sessions             UserSession[]         // User can have multiple sessions (multi-device support)
+  apiKeys              ApiKey[]              // User can have multiple API keys
+  presenceStatus       UserPresence?         // One-to-one relation with presence status
+
+  @@map("users")
+  @@schema("public")
+}
+
+// User-Team membership (many-to-many, no FK constraints)
+model UserGroupMapping {
+  id          String   @id @default(cuid())
+  userId      String // No FK constraint
+  userGroupId String // No FK constraint
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, userGroupId])
+  @@map("user_group_mappings")
+  @@schema("public")
+}
+
+// User Assignment State - tracks on-call status and active status for assignment
+model UserAssignmentState {
+  id                    String   @id @default(cuid())
+  userId                String
+  userGroupId           String
+  onCall                Boolean  @default(true)
+  isActiveForAssignment Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  createdBy             String
+
+  @@unique([userId, userGroupId])
+  @@index([userGroupId])
+  @@map("user_assignment_states")
+  @@schema("public")
+}
+
+// Board Complexity Score - board weight and assignment strategy
+model BoardComplexityScore {
+  id              String   @id @default(cuid())
+  userGroupId     String
+  boardId         String
+  weight          Int      @default(1)
+  usePercentage   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String
+
+  @@unique([userGroupId, boardId])
+  @@index([userGroupId])
+  @@map("board_complexity_scores")
+  @@schema("public")
+}
+
+// User Workload Mapping - per-user, per-board workload
+model UserWorkloadMapping {
+  id          String   @id @default(cuid())
+  userId      String
+  userGroupId String
+  boardId     String
+  activeTasks Int      @default(0)
+  totalTasks  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String
+
+  @@unique([userId, userGroupId, boardId])
+  @@index([userGroupId])
+  @@map("user_workload_mappings")
+  @@schema("public")
+}
+
+// User Expertise Mapping - skill-based routing and assignment configuration
+model UserExpertiseMapping {
+  id            String   @id @default(cuid())
+  userId        String
+  userGroupId   String
+  boardId       String
+  hasExpertise  Boolean  @default(false)
+  percentage    Float    @default(100.0)
+  maxTickets    Int      @default(-1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdBy     String
+
+  @@unique([userId, userGroupId, boardId])
+  @@index([userGroupId])
+  @@map("user_expertise_mappings")
+  @@schema("public")
+}
+
+// User Presence Status Model
+model UserPresence {
+  id            String            @id @default(cuid())
+  userId        String            @unique // One-to-one with User
+  status        UserPresenceStatus @default(OFFLINE)
+  lastActiveAt  DateTime          @default(now())
+  lastSeenAt    DateTime          @default(now())
+  isManual      Boolean           @default(false) // If user manually set status
+  deviceInfo    String?           // Optional: which device/browser
+  statusEmoji   String?           // Current status emoji
+  statusContent String?           // Current status text
+  statusExpiryAt DateTime?         // Status expiry timestamp
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status]) // Fast lookup by status
+  @@index([lastActiveAt]) // Fast lookup for cleanup
+  @@map("user_presence")
+  @@schema("public")
+}
+
+// User Profile Model
+model UserProfile {
+  id            String    @id @default(cuid())
+  userId        String    @unique // One-to-one with User
+  dob           DateTime? // Date of birth (optional)
+  phoneNumber   String?   // Phone number (optional)
+  displayName   String?   // Display name (optional)
+  team          String?   // Team name/identifier (optional)
+  pronunciation String?   // Name pronunciation guide (optional)
+  manager       String?   // Manager userId (optional)
+  role          String?   // User role (optional)
+  joinedOn      DateTime? // Date when user joined (optional for backfill)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId]) // Fast lookup by user
+  @@map("user_profiles")
+  @@schema("public")
+}
+
+model Resource {
+  id          String   @id @default(cuid())
+  name        String   @unique // endpoint name
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  resourceAccess ResourceAccess[]
+
+  @@map("resources")
+  @@schema("public")
+}
+
+model ResourceAccess {
+  id         String     @id @default(cuid())
+  groupId    String?
+  userId     String?
+  resourceId String
+  accessType AccessType
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  // Relations
+  userGroup UserGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resource  Resource   @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  // Constraints - either groupId or userId must be present, but not both
+  @@unique([groupId, resourceId, accessType])
+  @@unique([userId, resourceId, accessType])
+  @@map("resource_access")
+  @@schema("public")
+}
+
+// ACL Audit Trail
+enum ACLAuditEventType {
+  RESOURCE_CREATED
+  RESOURCE_UPDATED
+  RESOURCE_DELETED
+  PERMISSION_GRANTED
+  PERMISSION_REVOKED
+  PERMISSION_UPDATED
+  USER_GROUP_CREATED
+  USER_GROUP_UPDATED
+  USER_GROUP_DELETED
+  @@schema("public")
+}
+
+enum ACLAuditTargetType {
+  RESOURCE
+  RESOURCE_ACCESS
+  USER_GROUP
+  @@schema("public")
+}
+
+model ACLAuditLog {
+  id          String               @id @default(cuid())
+  timestamp   DateTime             @default(now())
+  actorUserId String?
+  eventType   ACLAuditEventType
+  targetType  ACLAuditTargetType
+  targetId    String
+  description String
+  createdAt   DateTime             @default(now())
+
+  // Relations
+  actorUser User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([timestamp])
+  @@index([eventType])
+  @@index([targetType, targetId])
+  @@index([actorUserId])
+  @@map("acl_audit_logs")
+  @@schema("public")
+}
+
+enum PRStatus {
+  OPEN
+  DECLINED
+  MERGED
+  @@schema("public")
+}
+
+// PR Analytics models
+model PullRequests {
+  id                      String    @id @default(cuid())
+  prId                    Int       // ID of PR
+  workflowExecutionId     String?   // Links to workflow execution (and through it to ticket) - handled in code, no FK
+  repoName                String
+  sourceBranchName        String
+  destinationBranchName   String
+  date                    DateTime  // Start of day (00:00:00)
+  numberOfComments        Int       @default(0)
+  repositoryUrl           String
+  prUrl                   String
+  updatedAt               DateTime  @updatedAt
+  status                  PRStatus
+
+  @@unique([prId, prUrl])
+  @@index([date])
+  @@map("pull_requests")
+  @@schema("public")
+}
+
+// Chat Feature Models - New Schema Design
+
+// Organization Models
+model Organization {
+  orgId       String   @id @default(cuid())
+  name        String   @unique // Organization name
+  description String?
+  createdBy   String   // User ID (no FK constraint)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  metadata    Json?
+
+  @@map("organizations")
+  @@schema("public")
+}
+
+model OrgMember {
+  memberId    String   @id @default(cuid())
+  orgId       String   // Organization ID (no FK constraint)
+  userId      String   // User ID (no FK constraint)
+  role        OrgRole  // OWNER | ADMIN | MEMBER | VIEWER
+  joinedAt    DateTime @default(now())
+  invitedBy   String?  // Who invited this user (no FK constraint)
+
+  @@unique([orgId, userId]) // User can only be member once per org
+  @@index([orgId]) // Fast org member lookup
+  @@index([userId]) // Fast user org lookup
+  @@map("org_members")
+  @@schema("public")
+}
+
+// Project Models
+model Project {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  createdBy   String    // User ID (no FK constraint)
+  updatedBy   String?   // User ID (no FK constraint)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime? @updatedAt
+
+  @@map("projects")
+  @@schema("public")
+}
+
+// Board Models
+model Board {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  projectId   String    // Project ID (no FK constraint)
+  createdBy   String    // User ID (no FK constraint)
+  updatedBy   String?   // User ID (no FK constraint)
+  metadata    Json?     // Board configuration including ticketFormConfig
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime? @updatedAt
+
+  @@index([projectId])
+  @@map("boards")
+  @@schema("public")
+}
+
+model Stage {
+  id                   String       @id @default(cuid())
+  name                 String
+  eta                  Int
+  boardId              String       // Board ID (no FK constraint)
+  sequenceNumber       Int
+  createdBy            String       // User ID (no FK constraint)
+  updatedBy            String?      // User ID (no FK constraint)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime?    @updatedAt
+  defaultTicketStatus     TicketStatus    @default(IN_PROGRESS)  // Deprecated - use defaultTicketStatusV2
+  defaultTicketStatusV2   TicketStatusV2 @default(STARTED)
+
+  @@index([boardId])
+  @@map("stages")
+  @@schema("public")
+}
+
+// Channel Models
+model Channel {
+  id              String            @id @default(cuid())
+  name            String
+  description     String?
+  type            ChannelType       @default(DEFAULT)
+  scopeType       ChannelScopeType  // DEFAULT | DM | TICKET | DOCUMENT | GROUP_DM
+  visibility      ChannelVisibility @default(PUBLIC) // PUBLIC | PRIVATE
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  lastActivityAt  DateTime          @default(now())
+  createdBy       String            // User ID (no FK constraint)
+  metadata        Json?             // Additional metadata for future extension
+  projectId       String            // Project to which the channel is linked
+  participantCount Int              @default(0)
+  isMigrated      Boolean?          @default(false)
+
+  @@map("channels")
+  @@schema("public")
+}
+
+model ChannelParticipant {
+  id                        String      @id @default(cuid())
+  channelId                 String      // Channel ID (no FK constraint)
+  userId                    String      // User ID (no FK constraint)
+  joinedAt                  DateTime    @default(now())
+  role                      ChannelRole @default(MEMBER) // ADMIN | MEMBER
+
+  // deprecated columns will be removed in future
+  lastViewedAt              DateTime    @default(now()) // Track when user last viewed channel
+  lastViewedConversationId  String?     // Track last conversation viewed for optimization
+  isStarred                 Boolean     @default(false)
+  isClosed                  Boolean     @default(false) // Track if user has closed/hidden this DM
+
+  @@unique([channelId, userId]) // Prevent duplicate participants
+  @@index([channelId]) // Fast channel participant lookup
+  @@index([userId]) // Fast user channel lookup
+  @@index([userId, isStarred]) // Fast Starred Channels Lookup
+  @@index([userId, isClosed]) // Fast closed DMs lookup
+  @@map("channel_participants")
+  @@schema("public")
+}
+
+model ChannelUserStatus {
+  id                        String      @id @default(cuid())
+  channelId                 String      // Channel ID (no FK constraint)
+  userId                    String      // User ID (no FK constraint)
+  lastViewedAt              DateTime    @default(now()) // Track when user last viewed channel
+  lastViewedConversationId  String?     // Track last conversation viewed for optimization
+  isStarred                 Boolean     @default(false)
+  isClosed                  Boolean     @default(false) // Track if user has closed/hidden this DM
+  unreadCount               Int         @default(0) // Track unread count for this channel
+
+  @@unique([channelId, userId]) // Prevent duplicate participants
+  @@index([channelId]) // Fast channel participant lookup
+  @@index([userId]) // Fast user channel lookup
+  @@index([userId, isStarred]) // Fast Starred Channels Lookup
+  @@index([userId, isClosed]) // Fast closed DMs lookup
+  @@map("channel_user_status")
+  @@schema("public")
+}
+
+// Conversation Models (threads within channels)
+model Conversation {
+  conversationId    String   @id @default(cuid())
+  channelId         String   // Channel this thread belongs to (no FK constraint)
+  createdBy         String   // User who started the thread (no FK constraint)
+  initialMessageId  String   // First message - use this for thread preview (no FK constraint)
+  parentMessageId   String?  // Parent message that this conversation is replying to (no FK constraint)
+  lastActivityAt    DateTime @default(now())
+  replyCount        Int      @default(0)
+  pinned            Boolean  @default(false)
+  ticketId          String?  // Direct reference to ticket (no FK constraint)
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  @@index([channelId, lastActivityAt]) // Fast channel conversation lookup
+  @@index([channelId]) // Alternative simple index
+  @@index([ticketId]) // Fast ticket lookup
+  @@map("conversations")
+  @@schema("public")
+}
+
+// Conversation Participant Models (track who participated in threads)
+model ConversationParticipant {
+  id                String                        @id @default(cuid())
+  conversationId    String                        // Conversation ID (no FK constraint)
+  userId            String                        // User ID (no FK constraint)
+  participationType ConversationParticipation
+  joinedAt          DateTime                      @default(now())
+
+  @@unique([conversationId, userId]) // One participation record per user per conversation
+  @@index([conversationId]) // Fast conversation participant lookup
+  @@index([userId]) // Fast user conversation lookup
+  @@map("conversation_participants")
+  @@schema("public")
+}
+
+enum EmailType {
+  DEFAULT
+  REPLY
+  REPLY_ALL
+  @@schema("public")
+}
+
+model Email {
+  id String @id @default(cuid())
+  type EmailType
+  subject String
+  body String
+  to String[]
+  from String
+  cc String[] @default([])
+  bcc String[] @default([])
+  conversationId String
+  externalThreadId String
+  externalMessageId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([conversationId])
+  @@index([externalThreadId])
+  @@index([externalMessageId])
+  @@map("emails")
+  @@schema("public")
+}
+
+model EmailDraft {
+  id String @id @default(cuid())
+  conversationId String
+  draftContent String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([conversationId])
+  @@map("email_drafts")
+  @@schema("public")
+}
+ 
+// Message Models
+model Message {
+  messageId           String      @id @default(cuid())
+  conversationId      String      // Every message belongs to a conversation (no FK constraint)
+  childConversationId String?     // Child conversation created from this message (no FK constraint)
+  senderId            String      // User who sent the message (no FK constraint)
+  content             String      // Text content
+  msgType             MessageType @default(USER) // USER | BOT | SYSTEM
+  hasAttachment       Boolean     @default(false) // Quick check for attachments
+  edited              Boolean     @default(false) // Whether the message has been edited
+  isDeleted           Boolean     @default(false)
+  showInChannel       Boolean     @default(false) // Whether message should appear in channel
+  visibleTo           String?     // null = public (visible to all), userId = visible only to the userId 
+  createdAt           DateTime    @default(now())
+  metadata            Json?       // Future extensibility
+  isSent              Boolean     @default(true) // Whether the message is sent
+  
+  // Relations
+  messageSearch  MessageSearch? // One-to-one relation with search index
+  
+  @@index([conversationId, createdAt]) // Fast conversation message lookup
+  @@index([conversationId]) // Alternative simple index
+  @@index([visibleTo]) // Fast visibility filtering
+  @@index([conversationId, visibleTo]) // Composite index for visibility queries
+  @@map("messages")
+  @@schema("public")
+}
+//Message Search Model
+model MessageSearch {
+  messageId        String      @id
+  plaintextContent String
+  searchVector     Unsupported("tsvector")
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  message          Message     @relation(fields: [messageId], references: [messageId], onDelete: Cascade)
+
+  @@map("message_search")
+  @@schema("public")
+}
+
+
+// File Attachment Models
+model MessageAttachment {
+  id                 String                @id @default(cuid())
+  entityType         AttachmentEntityType  // TICKET or CHAT
+  entityId           String                // Ticket id or message id (mandatory)
+  storageProvider    String                // Storage provider where file is stored
+  originalFilename   String                // Original filename uploaded by user
+  mimetype           String                // image/png, application/pdf, etc.
+  size               Int                   // Size in bytes
+  width              Int?                  // Width in pixels (for images/videos)
+  height             Int?                  // Height in pixels (for images/videos)
+  uploadedByUserId   String                // User who uploaded (no FK constraint)
+  createdAt          DateTime              @default(now())
+  url                String                // URL for fetching the attachment (mandatory)
+  createdBy          String                // User who uploaded the attachment (no FK constraint)
+  metadata           Json?                 // Width/height for images, duration for videos, etc.
+  conversationId     String                // Every message belongs to a conversation (no FK constraint)
+  thumbnailUrl       String?               // For images/videos
+
+  @@index([entityType])
+  @@index([conversationId])
+  @@index([entityId])
+  @@map("message_attachments")
+  @@schema("public")
+}
+
+// Reaction Models
+model Reaction {
+  reactionId  String   @id @default(cuid())
+  messageId   String   // Message being reacted to (no FK constraint)
+  userId      String   // User who reacted (no FK constraint)
+  emojiName   String   // Any Unicode emoji: "👍", "❤️", "😄", "🎉", etc.
+  createdAt   DateTime @default(now())
+
+  @@unique([messageId, userId, emojiName]) // User can only react once per emoji per message
+  @@index([messageId]) // Fast lookup of message reactions
+  @@map("reactions")
+  @@schema("public")
+}
+
+model ReactionCount {
+  countId     String   @id @default(cuid())
+  messageId   String   // Message being counted (no FK constraint)
+  emojiName   String   // The emoji being counted
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([messageId, emojiName]) // One count record per emoji per message
+  @@index([messageId]) // Fast lookup of message reaction counts
+  @@map("reaction_counts")
+  @@schema("public")
+
+}
+
+// Custom Emoji Models
+model CustomEmoji {
+  id        String   @id @default(cuid())
+  name      String   // Shortcode without colons, e.g. "party_parrot"
+  url       String   // GCS path to the emoji image
+  createdBy String   // User ID who created the emoji (no FK constraint)
+  createdAt DateTime @default(now())
+
+  @@unique([name])
+  @@map("custom_emojis")
+  @@schema("public")
+}
+
+// Activity Feed System
+model Activity {
+  id              String   @id @default(cuid())
+  userId          String   // User who receives this notification (no FK constraint)
+  actorAction     String   // Action performed: 'mentioned_user', 'group_mention', 'replied', 'added', 'created', etc.
+  /// @deprecated Use messageId, reactionId, or callId instead. Will be removed in future migration.
+  actionSource    String   // Source entity: 'message', 'reaction', 'channel' (singular)
+  /// @deprecated Use messageId, reactionId, or callId instead. Will be removed in future migration.
+  actionSourceId  String   // ID of the source entity (no FK constraint)
+  // New FK columns to replace polymorphic pattern
+  messageId       String?  // FK to messages.messageId (no constraint)
+  reactionId      String?  // FK to reactions.reactionId (no constraint)
+  callId          String?  // FK to calls.id (no constraint)
+  channelId       String?  // Channel where the activity occurred (optional, not present for ticket activities)
+  classification  ActivityClassification @default(PENDING)
+  classificationConfidence Float?
+  classificationJobType ActivityClassificationJobType?
+  isRead          Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt]) // Fast lookup of user activities sorted by time
+  @@index([userId, classification, createdAt]) // Fast lookup for classification tabs
+  @@index([classification, classificationJobType, createdAt])
+  @@index([classificationJobType, actionSourceId, channelId, classification])
+  @@index([actionSource, actionSourceId]) // Fast lookup by source entity (deprecated)
+  @@index([messageId]) // Fast lookup by message
+  @@index([reactionId]) // Fast lookup by reaction
+  @@index([callId]) // Fast lookup by call
+  @@index([channelId]) // Fast lookup by channel
+  @@map("activities")
+  @@schema("public")
+}
+
+// External Source Integration Models
+model ExternalSource {
+  id              String   @id @default(cuid())
+  name            String   @unique           // "zoho-euler", "slack-external"
+  sourceType      String                    // "zoho", "slack", "jira", etc. - flexible string
+  displayName     String                    // "Zoho (Euler Team)"
+  channelId       String                    // Target channel for messages (no FK constraint)
+  credentials     String                    // Encrypted credentials (IV:ciphertext format)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("external_sources")
+  @@schema("public")
+}
+
+enum ExternalEntityType {
+  MESSAGE
+  EMAIL
+  @@schema("public")
+}
+
+model ExternalMessage {
+  id                 String   @id @default(cuid())
+  externalSourceId   String                // External source ID (no FK constraint)
+  externalId         String                // Message ID in external system (for deduplication)
+  externalThreadId   String                // Thread/ticket ID in external system (to find conversation)
+  entityType         ExternalEntityType    @default(MESSAGE)            
+  entityId           String?               // Entity ID for MESSAGE, Email ID
+  messageId          String                // Link to our Message (no FK constraint)
+  direction          MessageDirection      // INCOMING | OUTGOING
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([externalSourceId, externalId])  // Prevent duplicates
+  @@index([externalSourceId, externalThreadId])  // Fast lookup by thread
+  @@index([messageId])                           // Fast lookup by message
+  @@map("external_messages")
+  @@schema("public")
+}
+
+enum MessageDirection {
+  INCOMING   // From external source → Xyne
+  OUTGOING   // From Xyne → external source (Phase 2)
+  @@schema("public")
+}
+
+enum ActivityClassification {
+  ACTIONABLE
+  FYI
+  SKIP
+  PENDING
+  PROCESSING
+  ERROR
+  @@schema("public")
+}
+
+enum ActivityClassificationJobType {
+  SINGLE
+  SPECIAL_MENTION_AUDIENCE
+  @@schema("public")
+}
+
+// Notification System Enums
+enum NotificationType {
+  TICKET_STATUS_CHANGE
+  TICKET_ASSIGNMENT
+  TICKET_REASSIGNMENT
+  MENTION
+  DIRECT_MESSAGE
+  WORKFLOW_COMPLETION
+  WORKFLOW_FAILURE
+  THREAD_REPLY
+  INCOMING_CALL
+  MISSED_CALL
+  CALL_DISMISS
+  @@schema("public")
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  DISMISSED
+  DELIVERED
+  FAILED
+  @@schema("public")
+}
+
+enum NotificationDeliveryMethod {
+  BROWSER
+  EMAIL
+  SLACK
+  MOBILE
+  IOS
+  ANDROID
+  @@schema("public")
+}
+
+// Notification System Models
+model Notification {
+  id                String                      @id @default(cuid())
+  userId            String                      // User receiving the notification (no FK constraint)
+  type              NotificationType
+  title             String
+  message           String
+  status            NotificationStatus          @default(UNREAD)
+  deliveryMethods   NotificationDeliveryMethod[]
+  metadata          Json?                       // Additional context data
+  relatedEntityType String?                     // "ticket", "workflow", "message", etc.
+  relatedEntityId   String?                     // ID of the related entity
+  actionUrl         String?                     // URL to navigate when notification is clicked
+  expiresAt         DateTime?                   // Optional expiration for time-sensitive notifications
+  readAt            DateTime?                   // When the notification was read
+  dismissedAt       DateTime?                   // When the notification was dismissed
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+
+  @@index([userId, status])
+  @@index([type])
+  @@index([relatedEntityType, relatedEntityId])
+  @@index([createdAt])
+  @@map("notifications")
+  @@schema("public")
+}
+
+model NotificationPreference {
+  id               String           @id @default(cuid())
+  userId           String           // User ID (no FK constraint)
+  notificationType NotificationType
+  browserEnabled   Boolean          @default(true)
+  emailEnabled     Boolean          @default(false)
+  slackEnabled     Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([userId, notificationType])
+  @@map("notification_preferences")
+  @@schema("public")
+}
+
+model BrowserNotificationSubscription {
+  id         String    @id @default(cuid())
+  userId     String    // User ID (no FK constraint)
+  endpoint   String    @unique // Push service endpoint
+  p256dh     String    // Public key for encryption
+  auth       String    // Authentication secret
+  userAgent  String?   // Browser/device info
+  isActive   Boolean   @default(true)
+  lastUsedAt DateTime? // Track when subscription was last used
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("browser_notification_subscriptions")
+  @@schema("public")
+}
+
+// Call Models
+model Call {
+  id               String      @id @default(cuid())
+  externalId       String      @unique // Public ID for linking/sharing
+  title            String?     // Meeting/call title
+  createdByUserId  String      // User who initiated the call (no FK constraint)
+  organizerId      String?     // Who organized the meeting
+  channelId        String      // Channel where call is happening (no FK constraint)
+  orgName          String?     // Organization name (no FK constraint)
+  description      String?     // Meeting description/agenda
+  callType         CallType    @default(VIDEO)
+  status           CallStatus  @default(ACTIVE)
+  roomLink         String?     // LiveKit room URL/token
+  startsAt         DateTime?   // Scheduled start time
+  endsAt           DateTime?   // Scheduled end time
+  timezone         String      @default("UTC")
+  isRecurring      Boolean     @default(false)
+  recurringSeriesId String?    // Links to parent series (app handles)
+  recurrenceRule   String?     // RRULE format: "FREQ=WEEKLY;BYDAY=MO,WE,FR"
+  instanceDate     DateTime?   // For recurring instances
+  recordingEnabled Boolean     @default(false)
+  transcript       String?     // Call transcript
+  aiSummary        String?     // AI-generated summary
+  startedAt        DateTime    @default(now())
+  endedAt          DateTime?   // NULL = still active
+  lastActivityAt   DateTime    @default(now())
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  metadata         Json?       // LiveKit room config, max participants, etc.
+
+  @@index([externalId]) // Fast lookup by public ID
+  @@index([createdByUserId]) // Fast lookup of user's calls
+  @@index([organizerId]) // Fast lookup by organizer
+  @@index([channelId]) // Fast lookup by channel
+  @@index([status, lastActivityAt]) // Fast active calls lookup
+  @@index([startsAt]) // Fast lookup by scheduled time
+  @@index([recurringSeriesId]) // Fast lookup of recurring series
+  @@index([isRecurring]) // Fast lookup of recurring calls
+  @@index([instanceDate]) // Fast lookup by instance date
+  @@index([orgName]) // Fast org call lookup
+  @@map("calls")
+  @@schema("public")
+}
+
+model CallParticipant {
+  id           String              @id @default(cuid())
+  callId       String              // Call ID (no FK constraint)
+  userId       String              // User ID (no FK constraint)
+  invitedBy    String              // User who sent invitation (no FK constraint)
+  invitedAt    DateTime            @default(now())
+  response     InvitationResponse? // INVITED | ACCEPTED | null (rejected/left)
+  respondedAt  DateTime?           // When they accepted/rejected
+  joinedAt     DateTime?           // NULL = not joined yet
+  leftAt       DateTime?           // NULL = still in call
+  metadata     Json?               // Connection quality, device info, etc.
+
+  @@unique([callId, userId]) // Prevent duplicate participants
+  @@index([callId]) // Fast call participant lookup
+  @@index([userId]) // Fast user call lookup
+  @@index([callId, leftAt]) // Fast active participants lookup
+  @@index([response]) // Fast response lookup
+  @@map("call_participants")
+  @@schema("public")
+}
+
+// Canvas Feature Models (Notion/Slack Canvas-like documents)
+
+enum CanvasVisibility {
+  PUBLIC
+  PRIVATE
+  @@schema("public")
+}
+
+enum CanvasRole {
+  OWNER
+  EDITOR
+  VIEWER
+  @@schema("public")
+}
+
+enum DocType {
+  Canvas
+  Quarto
+  @@schema("public")
+}
+
+model Canvas {
+  id           String           @id @default(cuid())
+  title        String
+  content      Json // BlockNote JSON block array
+  channelId    String? // Optional: Link to a channel (no FK constraint)
+  createdBy    String // User ID (no FK constraint)
+  viewAccessId String? @unique // Random ID for view-only access
+  editAccessId String? @unique // Random ID for edit access
+  visibility   CanvasVisibility @default(PRIVATE)
+  isTemplate   Boolean          @default(false)
+  lastEditedBy String? // Last user who edited (no FK constraint)
+  lastEditedAt DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  metadata     Json? // Tags, categories, custom properties
+  isCollaborative   Boolean   @default(false)
+
+  // Doc type - Canvas or Quarto
+  docType      DocType          @default(Canvas)
+  // Quarto Doc fields - when docType is Quarto
+  userRepo     String?          // Combined org/repo/branch identifier (for backward compatibility)
+  repoId       String?          // Repo ID (no FK constraint) - for editing capability
+  branchName   String?          // Branch name for the Quarto doc
+  entryFile    String?          // Entry file path within the bundle
+  quartoDocumentType String?    // "docs" | "book" | "slides" | "website" (type of Quarto document)
+  gcsPath      String?          // Path in GCS where the bundle is stored
+
+  @@unique([userRepo]) // One doc per repo/branch combination (backward compatibility)
+  @@unique([repoId, branchName]) // One doc per repo/branch combination (when repoId is set)
+  @@index([createdBy])
+  @@index([channelId])
+  @@index([visibility])
+  @@index([isTemplate])
+  @@index([viewAccessId])
+  @@index([editAccessId])
+  @@index([docType])
+  @@map("canvases")
+  @@schema("public")
+}
+
+model CanvasParticipant {
+  id        String     @id @default(cuid())
+  canvasId  String // Canvas ID (no FK constraint)
+  userId    String // User ID (no FK constraint)
+  role      CanvasRole @default(VIEWER) // OWNER | EDITOR | VIEWER
+  joinedAt  DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([canvasId, userId]) // User can only have one role per canvas
+  @@index([canvasId])
+  @@index([userId])
+  @@map("canvas_participants")
+  @@schema("public")
+}
+
+// Bookmark Feature Models
+enum BookmarkEntityType {
+  MESSAGE
+  CONVERSATION
+  TICKET
+  CANVAS
+  @@schema("public")
+}
+
+model Bookmark {
+  id         String             @id @default(cuid())
+  userId     String             // User who bookmarked (no FK constraint)
+  entityId   String             // ID of the bookmarked entity
+  entityType BookmarkEntityType // Type of entity bookmarked
+  createdAt  DateTime           @default(now())
+  metadata   Json?              // Additional metadata
+
+  @@unique([userId, entityId, entityType]) // User can only bookmark an entity once
+  @@index([userId, entityType]) // Fast lookup of user's bookmarks by type
+  @@index([userId, createdAt]) // Fast lookup of user's bookmarks sorted by time
+  @@map("bookmarks")
+  @@schema("public")
+}
+
+// Vespa Insertion Logs
+enum VespaInsertionStatus {
+  PENDING
+  FAILED
+  @@schema("public")
+}
+
+enum VespaOperationType {
+  INSERT
+  UPDATE
+  DELETE
+  @@schema("public")
+}
+
+model VespaInsertionLogs {
+  id           String                @id @default(cuid())
+  entityId     String
+  entityType   String
+  type         VespaOperationType    // INSERT | UPDATE | DELETE
+  status       VespaInsertionStatus  @default(PENDING)
+  namespace    String?
+  cluster      String?
+  errorMessage String?
+  errorDetails Json?
+  retryCount   Int                   @default(0)
+  createdAt    DateTime              @default(now())
+  resolvedAt   DateTime?
+  userId       String?               // User who initiated the operation
+
+  @@index([entityId])
+  @@index([entityType])
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([entityId, entityType])
+  @@map("vespa_insertion_logs")
+  @@schema("public")
+}
+
+// Repository Configuration for IDE Integration
+model Repo {
+  id         String @id @default(cuid())
+  name       String         // e.g., "xyne-spaces"
+  url        String @unique // SSH or HTTPS URL
+  baseBranch Json           // Base branches to checkout from: ["main", "develop"]
+  prefix     String         // Branch prefix: "feature"
+  createdBy  String         // User who added the repo
+
+  @@index([name])
+  @@map("repos")
+  @@schema("public")
+}
+
+// Form Models
+enum FormFieldType {
+  STRING
+  NUMBER
+  BOOLEAN
+  DATE
+  SINGLE_SELECT
+  MULTI_SELECT
+  USER
+  @@schema("public")
+}
+
+enum FormContextType {
+  BOARD
+  @@schema("public")
+}
+
+enum FormEntityType {
+  TICKET
+  @@schema("public")
+}
+
+model Form {
+  id              String         @id @default(cuid())
+  formName        String
+  formDescription String?
+  entityType      FormEntityType
+  contextType     FormContextType
+  createdBy       String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([createdBy])
+  @@index([entityType, contextType])
+  @@map("forms")
+  @@schema("public")
+}
+
+model FormContextMapping {
+  id          String         @id @default(cuid())
+  formId      String
+  contextId   String
+  contextType FormContextType
+  entityType  FormEntityType
+
+  @@unique([contextId, contextType, formId])
+  @@unique([contextId, entityType])
+  @@index([contextId, contextType])
+  @@map("forms_context_mapping")
+  @@schema("public")
+}
+
+model FormFields {
+  id         String   @id @default(cuid())
+  formId     String   // Reference to Form
+  fieldName  String   // Name of the field
+  fieldType  FormFieldType
+  fieldEnum  Json?
+  isOptional Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([formId, fieldName]) // Prevent duplicate fields per form
+  @@index([formId])
+  @@map("form_fields")
+  @@schema("public")
+}
+
+model FormEntityValues {
+  id              String   @id @default(cuid())
+  entityId        String   // ID of the entity (e.g., ticketId, userId, etc.)
+  entityType      String   // Type of entity (e.g., "TICKET", "USER", etc.)
+  fieldId         String   // Reference to FormFieldsMapping.id
+  fieldValue      String   // Value stored as String (backward compatibility)
+  actualFieldValue Json?   // Value stored as Json for structured data (parse based on fieldType)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([entityId, entityType])
+  @@index([fieldId])
+  @@unique([entityId, entityType, fieldId]) // One value per field per entity
+  @@map("form_entity_values")
+  @@schema("public")
+}
+
+model Dashboard {
+  id           String    @id @default(cuid())
+  name         String
+  description  String?
+  createdBy    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("dashboards")
+  @@schema("public")
+}
+
+model Query {
+  id          String    @id @default(cuid())
+  title       String
+  queryJson   Json
+  entityType  FormEntityType
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("queries")
+  @@schema("public")
+}
+
+model dashboardQueryMapping {
+  id          String    @id @default(cuid())
+  dashboardId String
+  queryId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([dashboardId])
+  @@map("dashboard_queries_mapping")
+  @@schema("public")
+}

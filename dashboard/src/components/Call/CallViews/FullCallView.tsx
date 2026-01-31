@@ -1,0 +1,204 @@
+import type { Room } from 'livekit-client';
+import { ConnectionState, Track } from 'livekit-client';
+import { useCallback, useEffect, useState } from 'react';
+import type { ParticipantInfo } from '../../../machines/roomMachine';
+import { cn } from '../../../utils/classNames';
+import ThreadMessages from '../../Chat/ThreadPannel';
+import { CallControls } from '../CallControls/CallControls';
+import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
+import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
+import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
+import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
+import { roomActor } from '../../../machines/roomMachine';
+
+interface FullCallViewProps {
+  participants: ParticipantInfo[];
+  isMicEnabled: boolean;
+  isCameraEnabled: boolean;
+  isScreenSharing: boolean;
+  isAIAssistantEnabled: boolean;
+  aiController: { id: string; name: string } | null;
+  requestedAiController: boolean;
+  localParticipantId: string | null;
+  callId: string;
+  connectionState: ConnectionState;
+  machineState: string;
+  roomLink: string;
+  channelId: string | null;
+  conversationId: string | null;
+  isChatOpen: boolean;
+  room: Room | null;
+  pendingControlRequest: { requesterId: string; requesterName: string } | null;
+  onToggleMic: () => void;
+  onToggleCamera: () => void;
+  onToggleScreenShare: () => void;
+  onDisconnect: () => void;
+  onMinimize: () => void;
+  onToggleThread: () => void;
+  onRequestControl?: () => void;
+}
+
+export function FullCallView({
+  participants,
+  isMicEnabled,
+  isCameraEnabled,
+  isScreenSharing,
+  isAIAssistantEnabled,
+  aiController,
+  localParticipantId,
+  callId,
+  connectionState,
+  machineState,
+  roomLink,
+  channelId,
+  isChatOpen,
+  conversationId,
+  pendingControlRequest,
+  onToggleMic,
+  onToggleCamera,
+  onToggleScreenShare,
+  onDisconnect,
+  onMinimize,
+  onToggleThread,
+  onRequestControl,
+  requestedAiController,
+}: FullCallViewProps): React.ReactElement {
+  // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
+  // UI state
+  const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
+
+  // Get all participants sharing screen
+  // In native mode, use isScreenShareEnabled flag; in web mode, check the actual track publication
+  const screenSharingParticipants = participants.filter(p => {
+    // If no participant object (native mode), use the isScreenShareEnabled flag
+    if (!p.participant) {
+      return p.isScreenShareEnabled;
+    }
+    // Web mode: check actual track publication
+    return p.participant.getTrackPublication(Track.Source.ScreenShare)?.isSubscribed;
+  });
+
+  // Memoize screen sharer identities for dependency
+  const screenSharerIdentities = screenSharingParticipants.map(p => p.identity).join(',');
+
+  // Auto-focus first screen share if none is focused
+  useEffect(() => {
+    if (screenSharingParticipants.length > 0 && !focusedScreenShareIdentity) {
+      setFocusedScreenShareIdentity(screenSharingParticipants[0]!.identity);
+    } else if (screenSharingParticipants.length === 0 && focusedScreenShareIdentity) {
+      setFocusedScreenShareIdentity(null);
+    } else if (
+      focusedScreenShareIdentity &&
+      !screenSharingParticipants.some(p => p.identity === focusedScreenShareIdentity)
+    ) {
+      // Focused participant stopped sharing, switch to first available
+      setFocusedScreenShareIdentity(screenSharingParticipants[0]?.identity || null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screenSharerIdentities, focusedScreenShareIdentity]);
+
+  // Get the focused screen share participant
+  const focusedScreenShare = screenSharingParticipants.find(
+    p => p.identity === focusedScreenShareIdentity,
+  );
+
+  // Handle clicking on a screen share to focus it
+  const handleScreenShareClick = useCallback((identity: string): void => {
+    setFocusedScreenShareIdentity(identity);
+  }, []);
+
+  return (
+    <div
+      className={cn(
+        'h-screen bg-gradient-to-br from-gray-900 to-gray-950 relative overflow-hidden transition-all duration-300',
+      )}
+    >
+      <CallStateTransition connectionState={connectionState} machineState={machineState}>
+        {focusedScreenShare ? (
+          // Screen share layout with sidebar
+          <div
+            className='h-full w-full pb-32 sm:pb-36 transition-all duration-300'
+            style={{ paddingRight: isChatOpen ? 'min(500px, 100vw)' : '0' }}
+          >
+            <ScreenShareView
+              focusedScreenShare={focusedScreenShare}
+              screenSharingCount={screenSharingParticipants.length}
+              participants={participants}
+              onScreenShareClick={handleScreenShareClick}
+              className='h-full'
+              showSidebar={true}
+              aiController={aiController}
+              requestedAiController={requestedAiController}
+            />
+          </div>
+        ) : (
+          // Normal grid layout when no screen share
+          <div
+            className='h-full w-full p-2 sm:p-4 pb-32 sm:pb-36 transition-all duration-300'
+            style={{ paddingRight: isChatOpen ? 'min(500px, 100vw)' : '0' }}
+          >
+            <ParticipantGrid
+              participants={participants}
+              aiController={aiController}
+              requestedAiController={requestedAiController}
+            />
+          </div>
+        )}
+
+        {/* Control Bar */}
+        <div
+          className='absolute bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-1rem)] sm:w-auto max-w-[calc(100%-1rem)] transition-transform duration-300'
+          style={{
+            transform: isChatOpen
+              ? 'translateX(calc(-50% - min(250px, 50vw)))'
+              : 'translateX(-50%)',
+          }}
+        >
+          <CallControls
+            isMicEnabled={isMicEnabled}
+            isCameraEnabled={isCameraEnabled}
+            isScreenSharing={isScreenSharing}
+            isChatOpen={isChatOpen}
+            isAIAssistantEnabled={isAIAssistantEnabled}
+            aiController={aiController}
+            localParticipantId={localParticipantId}
+            callId={callId}
+            roomLink={roomLink}
+            onToggleMic={onToggleMic}
+            onToggleCamera={onToggleCamera}
+            onToggleScreenShare={onToggleScreenShare}
+            onDisconnect={onDisconnect}
+            onToggleView={onMinimize}
+            onToggleChat={onToggleThread}
+            onToggleAIAssistant={() => roomActor.send({ type: 'TOGGLE_AI_ASSISTANT' })}
+            onRequestControl={onRequestControl}
+            viewMode='full'
+            requestedAiController={requestedAiController}
+            pendingControlRequest={pendingControlRequest}
+          />
+        </div>
+      </CallStateTransition>
+
+      {/* Thread Panel - Sidebar */}
+      {isChatOpen && channelId && conversationId && (
+        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-white shadow-xl z-[60]'>
+          <ThreadMessages
+            channelId={channelId}
+            conversationId={conversationId}
+            onClose={onToggleThread}
+          />
+        </div>
+      )}
+
+      {/* Control Request Dialog */}
+      {pendingControlRequest && localParticipantId === aiController?.id && (
+        <ControlRequestDialog
+          isOpen={true}
+          requesterName={pendingControlRequest.requesterName}
+          onApprove={() => roomActor.send({ type: 'APPROVE_CONTROL_REQUEST' })}
+          onDeny={() => roomActor.send({ type: 'DENY_CONTROL_REQUEST' })}
+        />
+      )}
+    </div>
+  );
+}

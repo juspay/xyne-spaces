@@ -1,0 +1,44 @@
+import { ReactElement } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { useLoadingAnimationLog } from '../../hooks/useLoadingAnimationLog';
+import { Event } from '../../utils/logger';
+
+const AppLoader = (): ReactElement => {
+  useLoadingAnimationLog({
+    event: Event.APP_LOADER_HIDDEN,
+    source: 'AppLoader',
+    message: 'App loader animation hidden',
+  });
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        key='app-loader'
+        initial={{ opacity: 1 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0, backdropFilter: 'blur(4px)' }}
+        transition={{ duration: 0.3, ease: 'easeOut' }}
+        className='fixed inset-0 flex flex-col gap-4 items-center justify-center z-[1000] backdrop-blur-lg'
+        style={{ background: 'var(--root-bg)' }}
+      >
+        <div className='absolute inset-0 backdrop-blur-3xl'></div>
+        <img
+          src='/images/xyne_logo_loading.png'
+          alt='Xyne Logo'
+          className='h-[80px] w-[80px] z-[1100]'
+          loading='eager'
+          decoding='async'
+        />
+        <img
+          src='/images/spaces_logo_loading.png'
+          alt='Xyne Logo'
+          className='w-[120px] z-[1100]'
+          loading='eager'
+          decoding='async'
+        />
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
+export default AppLoader;

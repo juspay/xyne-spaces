@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "CallType" ADD VALUE 'HEADLESS';

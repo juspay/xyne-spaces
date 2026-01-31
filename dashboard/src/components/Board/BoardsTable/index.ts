@@ -1,0 +1,1 @@
+export { BoardsTable } from './BoardsTable';

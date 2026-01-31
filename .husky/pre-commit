@@ -1,0 +1,71 @@
+#!/usr/bin/env sh
+
+echo "Running pre-commit checks..."
+
+# Get list of changed files
+CHANGED_FILES=$(git diff --cached --name-only)
+
+# Check if backend files are changed
+BACKEND_CHANGED=$(echo "$CHANGED_FILES" | grep '^backend/' || true)
+
+# Check if dashboard files are changed
+DASHBOARD_CHANGED=$(echo "$CHANGED_FILES" | grep '^dashboard/' || true)
+
+# Check if xyne-automation files are changed
+AUTOMATION_CHANGED=$(echo "$CHANGED_FILES" | grep '^xyne-automation/' || true)
+
+# Backend checks (only if backend files changed)
+if [ -n "$BACKEND_CHANGED" ]; then
+  echo "🔧 Checking backend (backend files changed)..."
+  cd "$(git rev-parse --show-toplevel)/backend"
+
+  echo "Running backend typecheck..."
+  npm run typecheck || exit 1
+
+  echo "Running backend build..."
+  npm run build || exit 1
+else
+  echo "⏭️  Skipping backend checks (no backend files changed)"
+fi
+
+# Dashboard checks (only if dashboard files changed)
+if [ -n "$DASHBOARD_CHANGED" ]; then
+  echo "🎨 Checking dashboard (dashboard files changed)..."
+  cd "$(git rev-parse --show-toplevel)/dashboard"
+
+  echo "Running dashboard lint (errors only)..."
+  npm run lint:errors-only || exit 1
+
+  echo "Running dashboard build..."
+  npm run validate || exit 1
+else
+  echo "⏭️  Skipping dashboard checks (no dashboard files changed)"
+fi
+
+# Automation checks (only if xyne-automation files changed)
+if [ -n "$AUTOMATION_CHANGED" ]; then
+  echo "🤖 Checking automation (xyne-automation files changed)..."
+  cd "$(git rev-parse --show-toplevel)/xyne-automation"
+
+  echo "Running automation format..."
+  npm run format || exit 1
+  git add .
+
+  echo "Running automation lint..."
+  npm run lint || exit 1
+else
+  echo "⏭️  Skipping automation checks (no xyne-automation files changed)"
+fi
+
+# If no relevant files changed, still run a basic check
+if [ -z "$BACKEND_CHANGED" ] && [ -z "$DASHBOARD_CHANGED" ] && [ -z "$AUTOMATION_CHANGED" ]; then
+  echo "ℹ️  No backend or dashboard files changed, running basic dashboard check..."
+  cd "$(git rev-parse --show-toplevel)/dashboard"
+  npm run lint:errors-only || exit 1
+fi
+
+# Run service change analysis (ensure we're in repo root)
+cd "$(git rev-parse --show-toplevel)"
+bash scripts/change-analysis.sh || exit 1
+
+echo "✅ All pre-commit checks passed!" 

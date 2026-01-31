@@ -1,0 +1,355 @@
+import { BaseRepository } from './base';
+import { Channel, ChannelScopeType, ChannelVisibility, ChannelType } from '@prisma/client';
+import { QueryOptions } from '@/types/database';
+import {logger} from '@/utils/logger';
+//import { queueChannelIngestion } from '@/queues/vespaQueue';
+
+export interface CreateChannelInput {
+  scopeType: ChannelScopeType;
+  name: string;
+  description?: string;
+  visibility?: ChannelVisibility;
+  createdBy: string;
+  projectId: string;
+}
+
+export interface UpdateChannelInput {
+  name?: string;
+  description?: string;
+  lastActivityAt?: Date;
+  isMigrated?: boolean;
+  type?: ChannelType;
+}
+
+export interface ChannelFilters {
+  scopeType?: ChannelScopeType;
+  projectId?: string;
+  visibility?: ChannelVisibility;
+}
+
+export class ChannelRepository extends BaseRepository<Channel, CreateChannelInput, UpdateChannelInput> {
+  constructor() {
+    super('channel');
+  }
+
+  async create(data: CreateChannelInput): Promise<Channel> {
+    await this.validateString(data.name, 'name', 255);
+    await this.validateString(data.createdBy, 'createdBy');
+    await this.validateString(data.scopeType, 'scopeType');
+    await this.validateString(data.projectId, 'projectId');
+    await this.validateEnum(data.scopeType, 'scopeType', ['DEFAULT', 'DM', 'TICKET', 'DOCUMENT', 'GROUP_DM']);
+
+    // Validate visibility if provided
+    if (data.visibility) {
+      await this.validateEnum(data.visibility, 'visibility', ['PUBLIC', 'PRIVATE']);
+    }
+
+    // Check for duplicate channel name across all projects
+    const isDuplicate = await this.checkDuplicateName(data.name);
+    if (isDuplicate) {
+      throw new Error(`Channel with name "${data.name}" already exists.`);
+    }
+
+    const result = await this.db.channel.create({
+      data: {
+        scopeType: data.scopeType,
+        name: data.name,
+        description: data.description,
+        visibility: data.visibility || 'PUBLIC',
+        createdBy: data.createdBy,
+        projectId: data.projectId,
+      }
+    });
+
+
+    return result;
+  }
+
+  /**
+   * Queue channel for Vespa ingestion with complete data
+   * Should be called AFTER participants are added to the channel
+   */
+  // async queueChannelForVespa(channelId: string, jobType: 'feed' | 'update' | 'delete'): Promise<void> {
+  //   try {
+  //     if (jobType === 'delete') {
+  //       await queueChannelIngestion({ id: channelId }, jobType);
+  //       return;
+  //     }
+
+  //     const channel = await this.findById(channelId);
+  //     if (!channel) {
+  //       throw new Error(`Channel not found: ${channelId}`);
+  //     }
+
+  //     // Fetch createdBy user's email
+  //     const createdByUser = await this.db.user.findUnique({
+  //       where: { id: channel.createdBy },
+  //       select: { email: true }
+  //     });
+
+  //     // Fetch channel participants to include permissions and memberCount
+  //     const channelParticipants = await this.db.channelParticipant.findMany({
+  //       where: { channelId: channel.id }
+  //     });
+
+  //     // Extract user IDs for permissions
+  //     const permissions = channelParticipants.map(p => p.userId);
+
+  //     const channelWithAdditionalData = {
+  //       ...channel,
+  //       creator: createdByUser?.email, // Send user email in creator field
+  //       // createdBy and ownerId will remain as user IDs (from channel object)
+  //       permissions,
+  //       memberCount: channelParticipants.length,
+  //       lastActivityAt: channel.lastActivityAt || new Date(channel.createdAt),
+  //       updatedAt: new Date(),
+  //     };
+
+  //     console.log(`[VESPA-FLOW] Channel ${channelId}: Final creator value being sent:`, channelWithAdditionalData.creator);
+  //     console.log(`[VESPA-FLOW] Channel ${channelId}: Channel.createdBy:`, channel.createdBy);
+
+  //     await queueChannelIngestion(channelWithAdditionalData, jobType);
+  //   } catch (error) {
+  //     console.error(`[VESPA-FLOW] Failed to queue channel for Vespa: ${channelId}`, error);
+  //     // Don't throw - operation continues even if Vespa queuing fails
+  //   }
+  // }
+
+  async findById(id: string): Promise<Channel | null> {
+    return await this.db.channel.findUnique({
+      where: { id }
+    });
+  }
+
+  async findMany(options?: QueryOptions): Promise<Channel[]>;
+  async findMany(filters?: ChannelFilters): Promise<Channel[]>;
+  async findMany(optionsOrFilters?: QueryOptions | ChannelFilters): Promise<Channel[]> {
+    const filters = optionsOrFilters as ChannelFilters;
+    const where: any = {};
+
+    logger.info("scopeType", filters.scopeType)
+
+    if (filters?.scopeType) {
+      where.scopeType = filters.scopeType;
+    }
+
+    if (filters?.projectId) {
+      where.projectId = filters.projectId;
+    }
+
+
+    if (filters?.visibility) {
+      where.visibility = filters.visibility;
+    }
+
+    return await this.db.channel.findMany({
+      where,
+      orderBy: {
+        lastActivityAt: 'desc'
+      }
+    });
+  }
+
+  async update(id: string, data: UpdateChannelInput): Promise<Channel> {
+    if (data.name) {
+      // Skip 255 char validation for DM and GROUP_DM channels
+      // Their names are comma-separated user IDs (internal identifiers)
+      // and can exceed 255 chars with many participants
+      const channel = await this.findById(id);
+      const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
+      
+      if (!isDMChannel) {
+        await this.validateString(data.name, 'name', 255);
+      }
+    }
+
+    const result = await this.db.channel.update({
+      where: { id },
+      data: {
+        ...data,
+        updatedAt: new Date(),
+      }
+    });
+
+    // Queue channel update for Vespa
+   // await this.queueChannelForVespa(result.id, 'update');
+
+    return result;
+  }
+
+  async delete(id: string): Promise<Channel> {
+    const result = await this.db.channel.delete({
+      where: { id }
+    });
+
+    // Queue channel deletion from Vespa
+   // await this.queueChannelForVespa(result.id, 'delete');
+
+    return result;
+  }
+
+  // Channel-specific methods
+  async updateLastActivity(id: string): Promise<void> {
+    await this.db.channel.update({
+      where: { id },
+      data: {
+        lastActivityAt: new Date(),
+      }
+    });
+  }
+
+  async getChannelsByScope(scopeType: ChannelScopeType): Promise<Channel[]> {
+    return await this.findMany({ scopeType });
+  }
+
+  async getChannelsByProject(projectId: string): Promise<Channel[]> {
+    return await this.findMany({ projectId });
+  }
+
+  async getDMChannel(userId1: string, userId2: string): Promise<Channel | null> {
+    // For DM channels, we create a name using sorted user IDs
+    const name = [userId1, userId2].sort().join(",");
+    return await this.db.channel.findFirst({
+      where: {
+       name: name
+      }
+    });
+  }
+
+  async getChannelsByIds(channelIds: string[], filters?: Omit<ChannelFilters, 'channelId'>): Promise<Channel[]> {
+    if (channelIds.length === 0) {
+      return [];
+    }
+
+    const where: any = {
+      id: {
+        in: channelIds
+      }
+    };
+
+    // Apply additional filters if provided
+    if (filters?.scopeType) {
+      where.scopeType = filters.scopeType;
+    }
+
+    if (filters?.projectId) {
+      where.projectId = filters.projectId;
+    }
+
+    if (filters?.visibility) {
+      where.visibility = filters.visibility;
+    }
+
+    return await this.db.channel.findMany({
+      where,
+      orderBy: {
+        lastActivityAt: 'desc'
+      }
+    });
+  }
+
+  async getGroupChannelByMembers(memberIds: string[]): Promise<Channel | null> {
+    // Get all GROUP_DM scope channels
+    const name = memberIds.sort().join(",");
+    return await this.db.channel.findFirst({
+      where: {
+        scopeType: 'GROUP_DM',
+        name: name
+      }
+    });
+  }
+
+  async checkDuplicateName(name: string): Promise<boolean> {
+    const existingChannel = await this.db.channel.findFirst({
+      where: {
+        name: name
+      }
+    });
+    return !!existingChannel;
+  }
+
+  async findByName(name: string): Promise<Channel | null> {
+    return await this.db.channel.findFirst({
+      where: {
+        name: {
+          equals: name,
+          mode: 'insensitive'
+        }
+      }
+    });
+  }
+
+  /**
+   * Find or create a DM or GROUP_DM channel based on the number of invited users
+   * @param userId - The ID of the user initiating the channel creation
+   * @param invitedUserIds - Array of user IDs to include in the channel
+   * @param channelParticipants - Channel participants repository for adding users
+   * @returns The channel ID (either existing or newly created)
+   */
+  async findOrCreateDMChannel(
+    userId: string,
+    invitedUserIds: string[],
+    channelParticipants: any // We'll pass this from the controller to avoid circular dependency
+  ): Promise<string> {
+    if (invitedUserIds.length === 0) {
+      throw new Error('No users to invite');
+    }
+
+    // Single user - create or find DM channel
+    if (invitedUserIds.length === 1) {
+      const targetUserId = invitedUserIds[0];
+      
+      // Check if DM channel exists
+      let dmChannel = await this.getDMChannel(userId, targetUserId);
+
+      if (dmChannel) {
+        return dmChannel.id;
+      }
+
+      // Create new DM channel
+      const channelName = [userId, targetUserId].sort().join(',');
+
+      dmChannel = await this.create({
+        scopeType: ChannelScopeType.DM,
+        name: channelName,
+        visibility: ChannelVisibility.PRIVATE,
+        createdBy: userId,
+        projectId: 'default',
+      });
+
+      // Add both users as participants
+      await channelParticipants.addParticipant(dmChannel.id, userId, 'ADMIN', false);
+      await channelParticipants.addParticipant(dmChannel.id, targetUserId, 'MEMBER', false);
+
+      return dmChannel.id;
+    }
+
+    // Multiple users - create or find group DM channel
+    const allUserIds = [userId, ...invitedUserIds].sort();
+    const channelName = allUserIds.join(',');
+
+    // Check if group DM already exists with these exact participants
+    const existingGroupDM = await this.getGroupChannelByMembers(allUserIds);
+
+    if (existingGroupDM) {
+      return existingGroupDM.id;
+    }
+
+    // Create new group DM channel
+    const groupDMChannel = await this.create({
+      scopeType: ChannelScopeType.GROUP_DM,
+      name: channelName,
+      visibility: ChannelVisibility.PRIVATE,
+      createdBy: userId,
+      projectId: 'default',
+    });
+
+    // Add all users as participants
+    await channelParticipants.addParticipant(groupDMChannel.id, userId, 'ADMIN', false);
+    for (const invitedId of invitedUserIds) {
+      await channelParticipants.addParticipant(groupDMChannel.id, invitedId, 'MEMBER', false);
+    }
+
+    return groupDMChannel.id;
+  }
+}

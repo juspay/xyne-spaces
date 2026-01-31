@@ -1,0 +1,1219 @@
+import { Request, Response } from 'express';
+import { livekitService } from '@/services/liveKitService';
+import { repositories } from '@/database/repositories';
+import { DatabaseClient, db } from '@/database/client';
+import { logger } from '@/utils/logger';
+import { v4 as uuidv4 } from 'uuid';
+import { transcriptService } from '@/services/transcriptService';
+import { websocketService } from '@/services/websocketService';
+import { CallStatus, CallType, InvitationResponse } from '@prisma/client';
+import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
+import { callSideEffectService } from '@/services/callSideEffectService';
+
+export class CallController {
+  /**
+   * Helper method to get the Xyne Automatic bot user
+   * Uses the unified bot service to ensure consistency with transcript service
+   */
+  async getOrCreateBotUser() {
+    try {
+      const botUser = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+      
+      if (!botUser) {
+        throw new Error('Xyne Automatic bot not found - make sure bot registry is initialized');
+      }
+
+      return botUser;
+    } catch (error) {
+      logger.error('Failed to get bot user:', error);
+      throw new Error('Failed to get bot user for headless recording');
+    }
+  }
+
+  // POST /api/calls/initiate - Start a new call
+  initiateCall = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless } = req.body;
+      const userId = req.user?.id;
+      const userName = req.user?.name;
+      const userEmail = req.user?.email;
+
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      let finalChannelId = channelId;
+
+      // Handle headless recording - create DM with bot
+      if (isHeadless && !channelId && !invitedUserIds) {
+        const botUser = await this.getOrCreateBotUser();
+        finalChannelId = await repositories.channels.findOrCreateDMChannel(
+          userId,
+          [botUser.id],
+          repositories.channelParticipants
+        );        
+      }
+      // If no channelId but invitedUserIds is provided, find or create channel
+      else if (!channelId && invitedUserIds && invitedUserIds.length > 0) {
+        finalChannelId = await repositories.channels.findOrCreateDMChannel(
+          userId,
+          invitedUserIds,
+          repositories.channelParticipants
+        );
+      }
+
+      // Validate channelId is provided (either directly or resolved from invitedUserIds)
+      if (!finalChannelId) {
+        res.status(400).json({ success: false, error: 'Either channelId or invitedUserIds is required' });
+        return;
+      }
+
+      // Validate call type
+      if (!['AUDIO', 'VIDEO'].includes(callType)) {
+        res.status(400).json({ success: false, error: 'Invalid call type' });
+        return;
+      }
+
+      // For headless recordings, always create a new recording session
+      // For regular calls, check if there's already an active call in this channel
+      const existingCall = isHeadless 
+        ? null 
+        : await repositories.calls.findActiveCallByChannelId(finalChannelId);
+      
+      if (existingCall) {
+        // Verify the LiveKit room still exists
+        const roomInfo = await livekitService.getRoomInfo(existingCall.externalId);
+        
+        if (roomInfo) {
+          // Room exists, generate token to join the existing call
+          const token = await livekitService.generateAccessToken({
+            userIdentity: userId,
+            roomName: existingCall.externalId,
+            userName: userName || userEmail || 'Unknown',
+          });
+
+          logger.info(`User ${userId} joining existing call ${existingCall.externalId} in channel ${finalChannelId}`);
+
+          // Return credentials for existing call
+          res.json({
+            success: true,
+            token,
+            livekitUrl: livekitService.getServerUrl(),
+            externalId: existingCall.externalId,
+            roomLink: existingCall.roomLink || `${livekitService.getClientUrl()}/call/${existingCall.externalId}?type=${callType}`,
+            channelId: finalChannelId,
+          });
+          return;
+        } else {
+          // Room doesn't exist but call is marked as active - mark it as ended
+          logger.info(`Call ${existingCall.externalId} marked as active but room not found. Ending call.`);
+          await repositories.calls.update(existingCall.id, {
+            status: CallStatus.ENDED,
+            endedAt: new Date(),
+          });
+        }
+      }
+
+      // No active call or existing call's room is gone - create a new call
+      // Generate unique call ID
+      const callExternalId = uuidv4();
+
+      // Fetch channel to get projectId and boardId for room metadata
+      const channel = await repositories.channels.findById(finalChannelId);
+      if (!channel) {
+        res.status(404).json({ success: false, error: 'Channel not found' });
+        return;
+      }
+
+      // Prepare room metadata for transcription agent
+      const roomMetadata = JSON.stringify({
+        channelId: channel.id,
+        projectId: channel.projectId,
+      });
+
+      // Create LiveKit room with metadata
+      await livekitService.createRoom({
+        name: callExternalId,
+        maxParticipants: 100,
+        emptyTimeout: 120,
+        metadata: roomMetadata,
+      });
+
+      // Generate room link
+      const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
+
+      // Generate access token for initiator
+      const token = await livekitService.generateAccessToken({
+        userIdentity: userId,
+        roomName: callExternalId,
+        userName: userName || userEmail || 'Unknown',
+      });
+
+      logger.info(`LiveKit credentials generated for call: ${callExternalId} by user ${userId}`);
+
+      // For headless calls, create the Call record in database
+      // (Normal calls create the record via Zero mutator on client-side)
+      if (isHeadless) {
+        await repositories.calls.create({
+          externalId: callExternalId,
+          createdByUserId: userId,
+          channelId: finalChannelId,
+          callType: 'HEADLESS' as CallType, // Use HEADLESS type for recordings
+          status: 'ACTIVE',
+          roomLink,
+          timezone: 'UTC',
+          isRecurring: false,
+          recordingEnabled: true, // Headless calls are recordings
+          startedAt: new Date(),
+        });
+        logger.info(`Created Call record for headless recording: ${callExternalId}`);
+
+        // Create system message for headless call (so transcript can be attached later)
+        // Generate IDs upfront
+        const conversationId = uuidv4();
+        const messageId = uuidv4();
+
+        // Create conversation first with the message ID we'll use
+        await repositories.conversations.create({
+          conversationId,
+          channelId: finalChannelId,
+          createdBy: userId,
+          initialMessageId: messageId,
+          metadata: {
+            isHeadlessRecording: true,
+            callId: callExternalId,
+          },
+        });
+
+        // Then create the call system message with custom messageId
+        await repositories.messages.createWithExecutionId({
+          conversationId,
+          senderId: 'system',
+          content: `<p>📞 Recording started</p>`,
+          msgType: 'SYSTEM',
+          showInChannel: true,
+          metadata: {
+            isCallMessage: true,  // Required for UI to render call-specific components
+            callId: callExternalId,
+            callType: callType,
+            messageSubtype: 'call_started',
+            isHeadlessRecording: true,
+          },
+        }, messageId);
+
+        // Update channel activity
+        await repositories.channels.updateLastActivity(finalChannelId);
+        logger.info(`Created system message for headless recording: ${callExternalId}`);
+      }
+
+      // Return credentials with resolved channelId
+      res.json({
+        success: true,
+        token,
+        livekitUrl: livekitService.getServerUrl(),
+        externalId: callExternalId,
+        roomLink,
+        channelId: finalChannelId, // Include the resolved or provided channelId
+      });
+    } catch (error) {
+      logger.error('Failed to initiate call:', error);
+      res.status(500).json({ success: false, error: 'Failed to initiate call' });
+    }
+  };
+
+  // POST /api/calls/join - Join an existing call
+  joinCall = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { callId } = req.body;
+      const user = req.user;
+
+      if (!user?.id) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      if (!callId) {
+        res.status(400).json({ success: false, error: 'Call ID is required' });
+        return;
+      }
+
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if(call && call.status === CallStatus.ENDED) {
+        res.status(400).json({ success: false, error: 'Cannot join an ended call' });
+        return;
+      }
+
+      // Verify room exists in LiveKit
+      const roomInfo = await livekitService.getRoomInfo(callId);
+      if (!roomInfo) {
+        res.status(404).json({ success: false, error: 'Call room not found' });
+        return;
+      }
+
+      // Generate access token
+      const token = await livekitService.generateAccessToken({
+        userIdentity: user.id,
+        roomName: callId,
+        userName: user.name || user.email || 'Unknown',
+      });
+
+      // Generate room link for sharing
+      const roomLink = `${livekitService.getClientUrl()}/call/${callId}?type=AUDIO`;
+
+      logger.info(`LiveKit credentials generated for user ${user.id} to join call ${callId}`);
+
+      // Return credentials only - frontend will write to DB via Zero mutators after connection
+      res.json({
+        success: true,
+        token,
+        livekitUrl: livekitService.getServerUrl(),
+        externalId: callId,
+        roomLink,
+      });
+    } catch (error) {
+      logger.error('Failed to join call:', error);
+      res.status(500).json({ success: false, error: 'Failed to join call' });
+    }
+  };
+
+  // POST /api/calls/validate-rooms - Validate active calls against LiveKit room state
+  validateRooms = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { callIds } = req.body;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      if (!Array.isArray(callIds) || callIds.length === 0) {
+        res.status(400).json({ success: false, error: 'callIds array is required' });
+        return;
+      }
+
+      logger.info(`Validating ${callIds.length} calls for user ${userId}`);
+
+      // Validate each call against LiveKit room state
+      const validationPromises = callIds.map(async (callId: string) => {
+        try {
+          // Get call from database
+          const call = await repositories.calls.findByExternalId(callId);
+          if (!call || call.status !== 'ACTIVE') {
+            return; // Skip if call doesn't exist or is already ended
+          }
+
+          // Check LiveKit room state
+          const roomInfo = await livekitService.getRoomInfo(callId);
+          
+          let shouldEndCall = false;
+          let reason = '';
+
+          // Check if room doesn't exist
+          if (!roomInfo) {
+            shouldEndCall = true;
+            reason = 'room not found';
+          } else {
+            // Get actual participant list (more reliable than numParticipants)
+            const participants = await livekitService.listParticipants(callId);
+            logger.info(`Room ${callId} - numParticipants: ${roomInfo.numParticipants}, actual participants: ${participants.length}`);
+            
+            // Check if room has no active participants
+            if (participants.length === 0) {
+              shouldEndCall = true;
+              reason = 'no active participants';
+            }
+          }
+
+          // Mark call as ended if either condition is true
+          if (shouldEndCall) {
+            const endedAt = new Date();
+            await repositories.calls.update(call.id, {
+              status: 'ENDED',
+              endedAt,
+            });
+            logger.info(`Marked call ${callId} as ENDED - ${reason}`);
+            logger.info(`Transcript will be processed when user views the ended call message`);
+
+            // Increment call count and add duration only for calls lasting > 60 seconds
+            const callDurationSeconds = (endedAt.getTime() - call.startedAt.getTime()) / 1000;
+            if (callDurationSeconds > 60) {
+              // Convert duration to minutes (rounded to 1 decimal place)
+              const callDurationMinutes = Math.round((callDurationSeconds / 60) * 10) / 10;
+              
+              try {
+                await Promise.all([
+                  websocketService.incrementTodayCallCount(),
+                  websocketService.addCallDuration(callDurationMinutes)
+                ]);
+                logger.info(`Successfully updated metrics for call ${callId} (duration: ${callDurationSeconds}s / ${callDurationMinutes}m)`);
+              } catch (err) {
+                logger.error('Failed to update call metrics for auto-ended call:', err);
+              }
+            }
+            
+            // Update the call system message metadata to mark as ended
+            const metadata = call.metadata as { systemMessageId?: string } | null;
+            const systemMessageId = metadata?.systemMessageId;
+            if (systemMessageId) {
+              await repositories.messages.update(systemMessageId, {
+                metadata: {
+                  isCallMessage: true,
+                  callId: call.externalId,
+                  operation: 'call_ended',
+                },
+              });
+              logger.info(`Updated message ${systemMessageId} to call_ended for call ${callId}`);
+            }
+          }
+        } catch (error) {
+          logger.error(`Failed to validate call ${callId}:`, error);
+          // Continue with other calls even if one fails
+        }
+      });
+
+      // Execute all validations in parallel
+      await Promise.all(validationPromises);
+
+      // No response body needed - just acknowledge
+      res.status(204).send();
+    } catch (error) {
+      logger.error('Failed to validate rooms:', error);
+      res.status(500).json({ success: false, error: 'Failed to validate rooms' });
+    }
+  };
+
+  /**
+   * Private helper method to process transcript for a call
+   * Shared logic between webhook and manual endpoints
+   */
+  private async _processCallTranscript(callId: string, messageId?: string): Promise<{ success: boolean; message?: string; attachmentId?: string; error?: string; statusCode?: number }> {
+    try {
+      // 1. Verify the call exists
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        logger.error(`Call not found: ${callId}`);
+        return { success: false, error: 'Call not found', statusCode: 404 };
+      }
+
+      // 2. Get the call message - either by messageId or by callId metadata lookup
+      let callMessage;
+      if (messageId) {
+        logger.info(`Using messageId from request: ${messageId}`);
+        callMessage = await repositories.messages.findById(messageId);
+        if (!callMessage) {
+          logger.error(`Message not found: ${messageId}`);
+          return { success: false, error: 'Message not found', statusCode: 404 };
+        }
+
+        // Cross-validate that the message belongs to the specified call
+        const messageCallId = (callMessage.metadata as { callId?: string })?.callId;
+        if (messageCallId !== callId) {
+          logger.error(`Message ${messageId} does not belong to call ${callId}. Message callId: ${messageCallId}`);
+          return { success: false, error: 'Message does not belong to the specified call', statusCode: 400 };
+        }
+      } else {
+        logger.info(`messageId not provided, querying by callId`);
+        callMessage = await repositories.messages['db'].message.findFirst({
+          where: {
+            metadata: {
+              path: ['callId'],
+              equals: callId
+            }
+          }
+        });
+
+        if (!callMessage) {
+          logger.error(`Call message not found for call: ${callId}`);
+          return { success: false, error: 'Call message not found', statusCode: 404 };
+        }
+      }
+
+      logger.info(`Found call message ${callMessage.messageId} for call ${callId}`);
+
+      // 3. Check if attachment already exists
+      const existingAttachments = await repositories.messageAttachments.findByMessageId(callMessage.messageId);
+      const transcriptAttachment = existingAttachments.find(att =>
+        att.metadata && typeof att.metadata === 'object' && 'type' in att.metadata && att.metadata.type === 'transcript'
+      );
+
+      if (transcriptAttachment) {
+        logger.info(`Transcript already exists for call ${callId}`);
+        return {
+          success: true,
+          message: 'Transcript already exists',
+          attachmentId: transcriptAttachment.id
+        };
+      }
+
+      // 4. Process the transcript and generate AI summary
+      await transcriptService.processCallWithSummary(callId, callMessage.messageId);
+
+      logger.info(`Successfully processed transcript and AI summary for call ${callId}`);
+      return { success: true, message: 'Transcript and summary processed successfully' };
+    } catch (error) {
+      logger.error(`Failed to process transcript for call ${callId}:`, error);
+      return { success: false, error: 'Transcript not available or processing failed', statusCode: 404 };
+    }
+  }
+
+  /**
+   * POST /api/calls/:callId/transcript-ready
+   * Webhook called by Python transcription agent when transcript file is uploaded to GCS
+   * The agent calls this after successfully closing the GCS stream
+   */
+  transcriptReady = async (req: Request, res: Response): Promise<void> => {
+    const { callId } = req.params;
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    logger.info(`Transcript ready webhook received for call ${callId}`);
+
+    const result = await this._processCallTranscript(callId);
+
+    if (result.statusCode) {
+      res.status(result.statusCode).json(result);
+    } else {
+      res.json(result);
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/process-transcript
+   * Manual endpoint to process transcript - triggered by user clicking "View Transcript" button
+   * This allows manual retry if webhook fails or for testing before webhook is deployed
+   */
+  processTranscript = async (req: Request, res: Response): Promise<void> => {
+    const { callId } = req.params;
+    const { messageId } = req.body;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    logger.info(`Manual transcript processing requested for call ${callId} by user ${userId}`);
+
+    const result = await this._processCallTranscript(callId, messageId);
+
+    if (result.statusCode) {
+      res.status(result.statusCode).json(result);
+    } else {
+      res.json(result);
+    }
+  };
+
+  /**
+   * GET /api/calls/recordings
+   * Get all HEADLESS recordings for the current user, sorted by newest first
+   */
+  getRecordings = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const recordings = await repositories.calls.findByUserAndType(userId, 'HEADLESS' as CallType);
+      
+      // Transform to response format, sorted newest first
+      const response = recordings
+        .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+        .map(call => ({
+          id: call.id,
+          externalId: call.externalId,
+          title: call.title || 'Untitled Recording',
+          startedAt: call.startedAt,
+          endedAt: call.endedAt,
+          durationMs: call.endedAt 
+            ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
+            : null,
+          hasTranscript: !!call.transcript,
+          hasSummary: !!call.aiSummary,
+        }));
+
+      res.json({ success: true, recordings: response });
+    } catch (error) {
+      logger.error('Failed to fetch recordings:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch recordings' });
+    }
+  };
+
+  /**
+   * GET /api/calls/recordings/:callId
+   * Get recording detail with transcript and summary
+   */
+  getRecordingDetail = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      // Verify ownership
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      // Fetch transcript content from GCS URL if available
+      let transcriptContent: string | null = null;
+      
+      if (call.transcript && call.transcript.startsWith('gs://')) {
+        try {
+          // Use transcriptService to fetch from GCS
+          transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+        } catch (fetchError) {
+          logger.warn(`Failed to fetch transcript from GCS: ${fetchError}`);
+        }
+      } else if (call.transcript) {
+        // If transcript is plain text (legacy), use directly
+        transcriptContent = call.transcript;
+      }
+
+      // Determine AI summary format (markdown if starts with ## or has no HTML tags)
+      let aiSummaryFormat: 'markdown' | 'html' | undefined;
+      if (call.aiSummary) {
+        const hasHtmlTags = /<[^>]+>/i.test(call.aiSummary);
+        const startsWithMarkdown = /^##?\s/.test(call.aiSummary.trim());
+        aiSummaryFormat = (!hasHtmlTags || startsWithMarkdown) ? 'markdown' : 'html';
+      }
+
+      res.json({
+        success: true,
+        recording: {
+          id: call.id,
+          externalId: call.externalId,
+          title: call.title || 'Untitled Recording',
+          startedAt: call.startedAt,
+          endedAt: call.endedAt,
+          durationMs: call.endedAt 
+            ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
+            : null,
+          transcript: transcriptContent,
+          aiSummary: call.aiSummary,
+          aiSummaryFormat,
+        },
+      });
+    } catch (error) {
+      logger.error('Failed to fetch recording detail:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch recording' });
+    }
+  };
+
+  /**
+   * PATCH /api/calls/recordings/:callId
+   * Update recording title
+   */
+  updateRecordingTitle = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+    const { title } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!title || typeof title !== 'string') {
+      res.status(400).json({ success: false, error: 'Title is required' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      // Verify ownership
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      await repositories.calls.update(call.id, { title: title.trim() });
+
+      // For headless recordings, update the system message content
+      if (call.callType === CallType.HEADLESS) {
+        try {
+          // Find the message associated with this call
+          const callMessage = await repositories.messages['db'].message.findFirst({
+            where: {
+              metadata: {
+                path: ['callId'],
+                equals: callId
+              }
+            }
+          });
+
+          if (callMessage) {
+            await repositories.messages.update(callMessage.messageId, {
+              content: `<p>📝 Recording Saved: ${title.trim()}</p>`,
+              metadata: {
+                ...(callMessage.metadata as Record<string, any> || {}),
+                operation: 'call_ended',
+                messageSubtype: 'call_ended',
+              }
+            });
+            logger.info(`Updated message content for headless recording: ${callId}`);
+          }
+        } catch (messageError) {
+          // Don't fail the request if message update fails
+          logger.error('Failed to update message for headless recording:', messageError);
+        }
+      }
+
+      res.json({ success: true, message: 'Title updated' });
+    } catch (error) {
+      logger.error('Failed to update recording title:', error);
+      res.status(500).json({ success: false, error: 'Failed to update title' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/generate-prd
+   * Generate PRD from call transcript and post to conversation as Canvas
+   */
+  generatePRD = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+    const { messageId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    logger.info(`PRD generation requested for call ${callId} by user ${userId}`);
+
+    try {
+      // 1. Get call details
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      // 2. Get call message to find conversationId
+      let callMessage;
+      if (messageId) {
+        callMessage = await repositories.messages.findById(messageId);
+      } else {
+        callMessage = await repositories.messages['db'].message.findFirst({
+          where: {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+        });
+      }
+
+      if (!callMessage) {
+        res.status(404).json({ success: false, error: 'Call message not found' });
+        return;
+      }
+
+      // 3. Get transcript content
+      const transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+      if (!transcriptContent) {
+        res.status(404).json({ success: false, error: 'Transcript not available for this call' });
+        return;
+      }
+
+      // 4. Get AI summary if available
+      const summary = call.aiSummary || null;
+
+      // 5. Generate PRD and post to conversation
+      const { callDocumentService } = await import('@/services/callDocumentService');
+      const result = await callDocumentService.generateAndPostPRD(
+        callId,
+        transcriptContent,
+        summary,
+        userId,
+        callMessage.conversationId
+      );
+
+      if (!result.success) {
+        res.status(500).json({ success: false, error: result.error || 'Failed to generate PRD' });
+        return;
+      }
+
+      logger.info(`Successfully generated PRD for call ${callId}`);
+      res.json({
+        success: true,
+        message: 'PRD generated successfully',
+        canvasUrl: result.canvasUrl,
+      });
+    } catch (error) {
+      logger.error('Failed to generate PRD:', error);
+      res.status(500).json({ success: false, error: 'Failed to generate PRD' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/generate-detailed-summary
+   * Generate detailed summary from call transcript
+   */
+  generateDetailedSummary = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+    const { messageId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    logger.info(`Detailed summary generation requested for call ${callId} by user ${userId}`);
+
+    try {
+      // 1. Get call details
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      // 2. Get call message to find conversationId
+      let callMessage;
+      if (messageId) {
+        callMessage = await repositories.messages.findById(messageId);
+      } else {
+        callMessage = await repositories.messages['db'].message.findFirst({
+          where: {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+        });
+      }
+
+      if (!callMessage) {
+        res.status(404).json({ success: false, error: 'Call message not found' });
+        return;
+      }
+
+      // 3. Get transcript content
+      const transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+      if (!transcriptContent) {
+        res.status(404).json({ success: false, error: 'Transcript not available for this call' });
+        return;
+      }
+
+      // 4. Generate detailed summary and post to conversation
+      const { callDocumentService } = await import('@/services/callDocumentService');
+      const result = await callDocumentService.generateAndPostDetailedSummary(
+        callId,
+        transcriptContent,
+        callMessage.conversationId
+      );
+
+      if (!result.success) {
+        res.status(500).json({ success: false, error: result.error || 'Failed to generate detailed summary' });
+        return;
+      }
+
+      logger.info(`Successfully generated detailed summary for call ${callId}`);
+      res.json({
+        success: true,
+        message: 'Detailed summary generated successfully',
+        canvasUrl: result.canvasUrl,
+      });
+    } catch (error) {
+      logger.error('Failed to generate detailed summary:', error);
+      res.status(500).json({ success: false, error: 'Failed to generate detailed summary' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/invite
+   * Invite users to an active call - creates call_participants with INVITED status
+   * This enables notifications for invited users (mirrors Zero mutator behavior)
+   */
+  inviteUsers = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+    const { userIds } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      res.status(400).json({ success: false, error: 'userIds array is required' });
+      return;
+    }
+
+    try {
+      // Get call by externalId
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (call.status !== 'ACTIVE') {
+        res.status(400).json({ success: false, error: 'Call is not active' });
+        return;
+      }
+
+      const now = new Date();
+      const invitedUserIds: string[] = [];
+      const db = DatabaseClient.getInstance();
+
+      // Process each user
+      for (const targetUserId of userIds) {
+        // Check if participant already exists
+        const existingParticipant = await db.callParticipant.findFirst({
+          where: {
+            callId: call.id,
+            userId: targetUserId,
+          },
+        });
+
+        if (existingParticipant) {
+          // Re-invite: update to INVITED if not currently accepted/active
+          if (existingParticipant.response !== InvitationResponse.ACCEPTED || existingParticipant.leftAt !== null) {
+            await db.callParticipant.update({
+              where: { id: existingParticipant.id },
+              data: {
+                response: InvitationResponse.INVITED,
+                invitedBy: userId,
+                invitedAt: now,
+                respondedAt: null,
+                joinedAt: null,
+                leftAt: null,
+              },
+            });
+            invitedUserIds.push(targetUserId);
+          }
+          // Already accepted and in call - skip
+        } else {
+          // Create new participant invitation
+          await db.callParticipant.create({
+            data: {
+              id: uuidv4(),
+              callId: call.id,
+              userId: targetUserId,
+              invitedBy: userId,
+              invitedAt: now,
+              response: InvitationResponse.INVITED,
+            },
+          });
+          invitedUserIds.push(targetUserId);
+        }
+      }
+
+      logger.info(`User ${userId} invited ${invitedUserIds.length} user(s) to call ${callId}`);
+
+      res.json({
+        success: true,
+        invitedCount: invitedUserIds.length,
+        invitedUserIds,
+      });
+    } catch (error) {
+      logger.error('Failed to invite users to call:', error);
+      res.status(500).json({ success: false, error: 'Failed to invite users' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/decline
+   * Decline an incoming call
+   */
+  declineCall = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+    
+    logger.info(`[CallController] Declining call ${callId} for user ${userId}`);
+
+    try {
+      // Find call by external ID
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        logger.warn(`[CallController] Call not found for decline: ${callId}`);
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      // Find participant record
+      const participant = await db.callParticipant.findFirst({
+        where: {
+          callId: call.id,
+          userId: userId
+        }
+      });
+      
+      if (!participant) {
+        logger.warn(`[CallController] Participant not found for decline: callId=${callId}, userId=${userId}`);
+        res.status(404).json({ success: false, error: 'Participant not found' });
+        return;
+      }
+
+      // Only update if currently invited (don't overwrite ACCEPTED/MISSED)
+      if (participant.response === InvitationResponse.INVITED) {
+        await db.callParticipant.update({
+          where: { id: participant.id },
+          data: {
+            response: InvitationResponse.DECLINED,
+            respondedAt: new Date(),
+          }
+        });
+
+        // Trigger side effects manually as Zero mutator won't catch this API update in time/context
+        // This ensures notifications are cancelled and other participants are updated if needed
+        await callSideEffectService.handleParticipantResponse(participant.id, InvitationResponse.DECLINED);
+        
+        logger.info(`User ${userId} declined call ${callId}`);
+      } else {
+        logger.info(`User ${userId} attempted to decline call ${callId} but status was ${participant.response}`);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Failed to decline call:', error);
+      res.status(500).json({ success: false, error: 'Failed to decline call' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/leave
+   * Participant explicitly leaves the call
+   */
+  leaveCall = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+    
+    logger.info(`[CallController] User ${userId} leaving call ${callId}`);
+
+    try {
+      // Find call by external ID
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        logger.warn(`[CallController] Call not found for leave: ${callId}`);
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      // Find participant record
+      const participant = await db.callParticipant.findFirst({
+        where: {
+          callId: call.id,
+          userId: userId
+        }
+      });
+      
+      if (!participant) {
+        logger.warn(`[CallController] Participant not found for leave: callId=${callId}, userId=${userId}`);
+        res.status(404).json({ success: false, error: 'Participant not found' });
+        return;
+      }
+
+      if (participant.leftAt) {
+        logger.info(`[CallController] User ${userId} already left call ${callId} at ${participant.leftAt}`);
+        res.json({ success: true });
+        return;
+      }
+
+      const now = new Date();
+
+      // Update participant leftAt
+      await db.callParticipant.update({
+        where: { id: participant.id },
+        data: {
+          leftAt: now,
+        }
+      });
+
+      // Check if any active participants remain
+      // Active = Accepted AND leftAt is null
+      const activeParticipants = await db.callParticipant.findMany({
+        where: {
+          callId: call.id,
+          response: InvitationResponse.ACCEPTED,
+          leftAt: null
+        }
+      });
+
+      if (activeParticipants.length === 0) {
+        logger.info(`[CallController] No active participants remaining for call ${callId}. Ending call.`);
+        
+        await repositories.calls.update(call.id, {
+          status: CallStatus.ENDED,
+          endedAt: now,
+        });
+      }
+
+      logger.info(`User ${userId} left call ${callId}`);
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Failed to leave call:', error);
+      res.status(500).json({ success: false, error: 'Failed to leave call' });
+    }
+  };
+
+  /**
+   * DELETE /api/calls/recordings/:callId
+   * Delete HEADLESS recording + update messages with placeholder
+   */
+  deleteRecording = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'You can only delete your own recordings' });
+        return;
+      }
+
+      if (call.callType !== CallType.HEADLESS) {
+        res.status(400).json({ success: false, error: 'Only recordings can be deleted' });
+        return;
+      }
+
+      const db = DatabaseClient.getInstance();
+
+      // Find conversation for this recording
+      const conversation = await db.conversation.findFirst({
+        where: {
+          metadata: {
+            path: ['callId'],
+            equals: callId,
+          },
+        },
+      });
+
+      if (conversation) {
+        // Get all message IDs in this conversation to delete their attachments
+        const messages = await db.message.findMany({
+          where: { conversationId: conversation.conversationId },
+          select: { messageId: true },
+        });
+        const messageIds = messages.map(m => m.messageId);
+
+        // Delete attachments for these messages (transcript attachments, etc.)
+        if (messageIds.length > 0) {
+          const deleteResult = await db.messageAttachment.deleteMany({
+            where: {
+              entityId: { in: messageIds },
+              entityType: 'CHAT',
+            },
+          });
+          logger.info(`Deleted ${deleteResult.count} attachments for recording ${callId}`);
+        }
+
+        // Update all messages in this conversation with placeholder text
+        await db.message.updateMany({
+          where: {
+            conversationId: conversation.conversationId,
+          },
+          data: {
+            content: '<p>Transcript was deleted for this recording</p>',
+            metadata: {
+              deleted: true,
+              deletedAt: new Date().toISOString(),
+            },
+          },
+        });
+
+        logger.info(`Updated messages in conversation ${conversation.conversationId} for deleted recording ${callId}`);
+      }
+
+      // Delete activities
+      await db.activity.deleteMany({
+        where: {
+          callId: call.id,
+        },
+      });
+
+      // Delete the call record
+      await repositories.calls.delete(call.id);
+
+      logger.info(`User ${userId} deleted HEADLESS recording ${callId}`);
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Failed to delete recording:', error);
+      res.status(500).json({ success: false, error: 'Failed to delete recording' });
+    }
+  };
+}
+
+
+export const callController = new CallController();

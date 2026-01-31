@@ -1,0 +1,307 @@
+// ============================================================================
+// ATTACHMENT PREVIEW COMPONENT
+// ============================================================================
+// Shows thumbnail preview of file attachments
+// ============================================================================
+
+import React, { useState, useEffect, useRef } from 'react';
+import { X, FileText, Image as ImageIcon, Video, Music, Loader2, Headphones } from 'lucide-react';
+import {
+  getFileCategory,
+  getFileExtension,
+  getExtensionColor,
+  truncateFileName,
+} from '../utils/files';
+// Type guard to check if file is a browser File object
+const isBrowserFile = (file: File | UploadedFile): file is File => {
+  return 'slice' in file && 'type' in file && 'name' in file;
+};
+
+// Helper functions to get properties from either File or UploadedFile
+const getFileName = (file: File | UploadedFile): string => {
+  return isBrowserFile(file) ? file.name : file.originalName;
+};
+
+const getMimeType = (file: File | UploadedFile): string => {
+  return isBrowserFile(file) ? file.type : file.mimeType;
+};
+
+const getThumbnailUrl = (file: File | UploadedFile): string | undefined => {
+  return isBrowserFile(file) ? undefined : file.thumbnailUrl;
+};
+import type { AttachmentPreviewProps, UploadedFile } from './Files.types';
+import { generateWebThumbnail, isVideoFile } from '../../../services/thumbnailService';
+
+export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
+  file,
+  onRemove,
+  onPreview,
+  isUploading = false,
+  onThumbnailGenerated,
+  variant = 'compact',
+}) => {
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [videoThumbnailUrl, setVideoThumbnailUrl] = useState<string | null>(null);
+  const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
+  const [textPreview, setTextPreview] = useState<string | null>(null);
+  const category = getFileCategory({
+    type: getMimeType(file),
+    name: getFileName(file),
+  });
+  const isTextFile = getMimeType(file) === 'text/plain' || getFileName(file).endsWith('.txt');
+
+  // Use ref to avoid dependency issues
+  const onThumbnailGeneratedRef = useRef(onThumbnailGenerated);
+  useEffect(() => {
+    onThumbnailGeneratedRef.current = onThumbnailGenerated;
+  }, [onThumbnailGenerated]);
+
+  useEffect((): (() => void) | void => {
+    // Create object URL for images to show actual preview (only for browser File objects)
+    if (category === 'image' && isBrowserFile(file)) {
+      const url = URL.createObjectURL(file);
+      setImagePreviewUrl(url);
+      return (): void => URL.revokeObjectURL(url);
+    } else if (category === 'image' && !isBrowserFile(file)) {
+      // For uploaded files, use the thumbnail URL if available
+      setImagePreviewUrl(getThumbnailUrl(file) || null);
+    }
+
+    // Generate thumbnail for videos (only for browser File objects)
+    if (category === 'video' && isBrowserFile(file) && isVideoFile(file)) {
+      let cancelled = false;
+
+      setIsGeneratingThumbnail(true);
+      generateWebThumbnail(file)
+        .then(result => {
+          if (!cancelled) {
+            setVideoThumbnailUrl(result.dataUrl);
+            // Notify parent component that thumbnail was generated
+            onThumbnailGeneratedRef.current?.(file, result.blob);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            // Thumbnail generation failed silently
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setIsGeneratingThumbnail(false);
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Read text content for .txt files (only first 150 chars, safe for any file size)
+    if (isTextFile && isBrowserFile(file)) {
+      const reader = new FileReader();
+      reader.onload = (e): void => {
+        const text = e.target?.result as string;
+        if (text) {
+          // Get first 3 lines or first 150 characters
+          const lines = text.split('\n').slice(0, 3);
+          const preview = lines.join('\n').substring(0, 150);
+          setTextPreview(preview);
+        }
+      };
+      // Only read first 1KB for preview (more than enough for 150 chars)
+      const blob = file.slice(0, 1024);
+      reader.readAsText(blob);
+    }
+    return undefined;
+  }, [file, category, isTextFile]);
+
+  const renderPreview = (): React.ReactElement => {
+    switch (category) {
+      case 'image':
+        return imagePreviewUrl ? (
+          <img
+            src={imagePreviewUrl}
+            alt={getFileName(file)}
+            className='w-full h-full object-cover'
+          />
+        ) : (
+          <ImageIcon className='h-8 w-8 text-blue-600' />
+        );
+
+      case 'video':
+        // Show loading spinner while generating thumbnail
+        if (isGeneratingThumbnail) {
+          return (
+            <div className='w-full h-full bg-purple-50 flex items-center justify-center'>
+              <Loader2 className='h-8 w-8 text-purple-600 animate-spin' />
+            </div>
+          );
+        }
+
+        // Show thumbnail with video icon overlay if thumbnail was generated
+        if (videoThumbnailUrl) {
+          return (
+            <div className='relative w-full h-full'>
+              <img
+                src={videoThumbnailUrl}
+                alt={getFileName(file)}
+                className='w-full h-full object-cover'
+              />
+              <div className='absolute inset-0 flex items-center justify-center bg-black bg-opacity-30'>
+                <Video className='h-8 w-8 text-white drop-shadow-lg' />
+              </div>
+            </div>
+          );
+        }
+
+        // Fallback to video icon if thumbnail generation failed
+        return (
+          <div className='w-full h-full bg-purple-50 flex items-center justify-center'>
+            <Video className='h-8 w-8 text-purple-600' />
+          </div>
+        );
+
+      case 'audio':
+        return (
+          <div className='w-full h-full bg-green-50 flex items-center justify-center'>
+            <Music className='h-8 w-8 text-green-600' />
+          </div>
+        );
+
+      default:
+        // Show text preview for .txt files
+        if (isTextFile && textPreview) {
+          return (
+            <div className='w-full h-full bg-white flex flex-col p-2 gap-1 overflow-hidden'>
+              <div className='flex items-center gap-1 mb-1'>
+                <FileText className='h-3 w-3 text-gray-600' />
+                <div
+                  className={`${getExtensionColor(getFileName(file))} text-white text-[8px] font-bold px-1 py-0.5 rounded`}
+                >
+                  {getFileExtension(getFileName(file))}
+                </div>
+              </div>
+              <div className='text-[9px] text-gray-700 font-mono leading-tight overflow-hidden whitespace-pre-wrap'>
+                {textPreview}
+                {textPreview.length >= 150 && '...'}
+              </div>
+            </div>
+          );
+        }
+
+        // Default file icon for other types
+        return (
+          <div className='w-full h-full bg-gray-50 flex flex-col items-center justify-center p-2 gap-1'>
+            <FileText className='h-6 w-6 text-gray-600' />
+            <div
+              className={`${getExtensionColor(getFileName(file))} text-white text-[10px] font-bold px-1.5 py-0.5 rounded`}
+            >
+              {getFileExtension(getFileName(file))}
+            </div>
+            <div className='text-[8px] text-gray-600 text-center w-full px-1 leading-tight'>
+              {truncateFileName(getFileName(file))}
+            </div>
+          </div>
+        );
+    }
+  };
+
+  if (variant === 'detailed') {
+    return (
+      <div className='flex items-center justify-between w-full p-3 rounded-lg border border-gray-300 bg-gray-100'>
+        <div className='flex gap-3 items-center w-full'>
+          <span className='size-8 flex-shrink-0 rounded-lg overflow-hidden'>
+            {category === 'image' && imagePreviewUrl ? (
+              <img
+                src={imagePreviewUrl}
+                alt={getFileName(file)}
+                className='w-full h-full object-cover'
+              />
+            ) : category === 'video' && videoThumbnailUrl ? (
+              <img
+                src={videoThumbnailUrl}
+                alt={getFileName(file)}
+                className='w-full h-full object-cover'
+              />
+            ) : category === 'audio' ? (
+              <div className='w-full h-full bg-red-500 flex items-center justify-center'>
+                <Headphones className='size-4 text-white' />
+              </div>
+            ) : (
+              <div
+                className={`${getExtensionColor(getFileName(file))} text-white text-[10px] flex items-center font-bold px-1.5 h-full w-full rounded`}
+              >
+                {getFileExtension(getFileName(file))}
+              </div>
+            )}
+          </span>
+          <div className='flex flex-col w-full'>
+            <span className='flex items-center justify-between'>
+              <p className='text-gray-900 text-sm font-medium overflow-hidden truncate max-w-64'>
+                {getFileName(file)}
+              </p>
+              {!isUploading && (
+                <button
+                  type='button'
+                  title='Remove attachment'
+                  aria-label={`Remove attachment ${getFileName(file)}`}
+                  onClick={e => {
+                    e.stopPropagation();
+                    onRemove();
+                  }}
+                >
+                  <X className='size-3.5 text-red-600' strokeWidth={2.33} />
+                </button>
+              )}
+            </span>
+            <p className='text-gray-600 text-xs'>{getFileExtension(getFileName(file))}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className='relative flex items-center justify-center bg-white cursor-pointer group rounded-xl border border-gray-200 hover:border-gray-300 shadow-sm hover:shadow-md transition-all duration-200'
+      style={{ width: '80px', height: '80px' }}
+      onClick={() => onPreview?.()}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onPreview?.();
+        }
+      }}
+      role='button'
+      tabIndex={0}
+      title={getFileName(file)}
+    >
+      {/* File preview/icon */}
+      <div className='absolute inset-0 flex items-center justify-center overflow-hidden rounded-xl'>
+        {renderPreview()}
+      </div>
+
+      {/* Upload loading overlay */}
+      {isUploading && (
+        <div className='absolute inset-0 flex items-center justify-center backdrop-blur-sm bg-white/80 rounded-xl z-10'>
+          <Loader2 className='h-8 w-8 text-gray-900 animate-spin' />
+        </div>
+      )}
+
+      {/* Remove button */}
+      {!isUploading && (
+        <button
+          type='button'
+          onClick={e => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          className='absolute -top-2 -right-2 p-1 bg-white hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100 shadow-md border border-gray-200 z-10'
+          title='Remove attachment'
+        >
+          <X className='h-3.5 w-3.5 text-red-600' />
+        </button>
+      )}
+    </div>
+  );
+};

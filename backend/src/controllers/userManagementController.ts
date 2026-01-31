@@ -1,0 +1,801 @@
+import { Request, Response } from 'express';
+import { UserManagementService } from '../services/userManagementService';
+import { AccessType } from '@prisma/client';
+import { logger } from '../utils/logger';
+
+const userManagementService = UserManagementService.getInstance();
+
+export class UserManagementController {
+  private static instance: UserManagementController;
+
+  private constructor() {}
+
+  public static getInstance(): UserManagementController {
+    if (!UserManagementController.instance) {
+      UserManagementController.instance = new UserManagementController();
+    }
+    return UserManagementController.instance;
+  }
+
+  /**
+   * Get all users with pagination
+   */
+  getAllUsers = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
+
+      // Validate pagination parameters
+      if (limit < 1 || limit > 2000) {
+        res.status(400).json({ error: 'Limit must be between 1 and 2000' });
+        return;
+      }
+
+      if (offset < 0) {
+        res.status(400).json({ error: 'Offset must be non-negative' });
+        return;
+      }
+
+      // Use the dedicated method that includes group information
+      const resultWithMappings = await userManagementService.getAllUsersWithMappings({
+        page: Math.floor(offset / limit) + 1,
+        pageSize: limit
+      });
+
+      if ('data' in resultWithMappings) {
+        // Paginated result
+        const response = {
+          data: resultWithMappings.data.map(user => ({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            status: user.status,
+            userGroups: user.userGroupMappings.reduce((acc, mapping) => {
+              if (mapping.userGroup) {
+                acc.push({
+                  id: mapping.userGroup.id,
+                  name: mapping.userGroup.name,
+                  alias: mapping.userGroup.alias,
+                  description: mapping.userGroup.description
+                });
+              }
+              return acc;
+            }, [] as Array<{ id: string; name: string; alias: string | null; description: string | null }>),
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+          })),
+          pagination: resultWithMappings.pagination
+        };
+        res.status(200).json(response);
+      } else {
+        // Non-paginated result
+        const response = {
+          data: resultWithMappings.map(user => ({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            status: user.status,
+            userGroups: user.userGroupMappings.reduce((acc, mapping) => {
+              if (mapping.userGroup) {
+                acc.push({
+                  id: mapping.userGroup.id,
+                  name: mapping.userGroup.name,
+                  alias: mapping.userGroup.alias,
+                  description: mapping.userGroup.description
+                });
+              }
+              return acc;
+            }, [] as Array<{ id: string; name: string; alias: string | null; description: string | null }>),
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+          })),
+          pagination: {
+            page: 1,
+            pageSize: resultWithMappings.length,
+            total: resultWithMappings.length,
+            totalPages: 1,
+          }
+        };
+        res.status(200).json(response);
+      }
+    } catch (error) {
+      logger.error('Error getting all users:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Get user details by ID
+   */
+  getUserById = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      const user = await userManagementService.getUserWithMappings(id);
+
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const response = {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        status: user.status,
+        userGroups: user.userGroupMappings.reduce((acc, mapping) => {
+          if (mapping.userGroup) {
+            acc.push({
+              id: mapping.userGroup.id,
+              name: mapping.userGroup.name,
+              alias: mapping.userGroup.alias,
+              description: mapping.userGroup.description
+            });
+          }
+          return acc;
+        }, [] as Array<{ id: string; name: string; alias: string | null; description: string | null }>),
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      };
+
+      res.status(200).json(response);
+    } catch (error) {
+      logger.error('Error getting user by ID:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Get user access permissions
+   */
+  getUserAccess = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      // Check if user exists
+      const user = await userManagementService.getUser(id);
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const accessReport = await userManagementService.getUserAccessReport(id);
+
+      res.status(200).json(accessReport);
+    } catch (error) {
+      logger.error('Error getting user access:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Update user access permissions
+   */
+  updateUserAccess = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { resourceAccess } = req.body;
+
+      // Validate request body
+      if (!Array.isArray(resourceAccess)) {
+        res.status(400).json({ error: 'resourceAccess must be an array' });
+        return;
+      }
+
+      // Check if user exists
+      const user = await userManagementService.getUser(id);
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const results = {
+        successful: [] as string[],
+        failed: [] as { resourceName: string; error: string }[]
+      };
+
+      // Process each resource access update
+      for (const access of resourceAccess) {
+        const { resourceName, accessType, action } = access;
+
+        if (!resourceName || !accessType || !action) {
+          results.failed.push({
+            resourceName: resourceName || 'unknown',
+            error: 'Missing required fields: resourceName, accessType, action'
+          });
+          continue;
+        }
+
+        if (!Object.values(AccessType).includes(accessType)) {
+          results.failed.push({
+            resourceName,
+            error: `Invalid access type: ${accessType}`
+          });
+          continue;
+        }
+
+        if (!['grant', 'revoke'].includes(action)) {
+          results.failed.push({
+            resourceName,
+            error: `Invalid action: ${action}. Must be 'grant' or 'revoke'`
+          });
+          continue;
+        }
+
+        try {
+          if (action === 'grant') {
+            const result = await userManagementService.grantUserResourceAccess(
+              id,
+              resourceName,
+              accessType
+            );
+            if (result.success) {
+              results.successful.push(resourceName);
+            } else {
+              results.failed.push({ resourceName, error: result.message });
+            }
+          } else {
+            const result = await userManagementService.revokeUserResourceAccess(
+              id,
+              resourceName
+            );
+            if (result.success) {
+              results.successful.push(resourceName);
+            } else {
+              results.failed.push({ resourceName, error: result.message });
+            }
+          }
+        } catch (error) {
+          results.failed.push({
+            resourceName,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
+
+      res.status(200).json({
+        message: 'User access update completed',
+        results
+      });
+    } catch (error) {
+      logger.error('Error updating user access:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Get all resources
+   */
+  getAllResources = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const resources = await userManagementService.getAllResources();
+
+      const response = Array.isArray(resources) ? resources : resources.data;
+
+      res.status(200).json({
+        data: response.map(resource => ({
+          id: resource.id,
+          name: resource.name,
+          description: resource.description,
+          createdAt: resource.createdAt,
+          updatedAt: resource.updatedAt
+        }))
+      });
+    } catch (error) {
+      logger.error('Error getting all resources:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Update user status (activate/deactivate)
+   */
+  updateUserStatus = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      if (!status || !['ACTIVE', 'INACTIVE'].includes(status)) {
+        res.status(400).json({ error: 'Invalid status. Must be ACTIVE or INACTIVE' });
+        return;
+      }
+
+      const updatedUser = await userManagementService.updateUser(id, { status });
+
+      res.status(200).json({
+        id: updatedUser.id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        status: updatedUser.status,
+        createdAt: updatedUser.createdAt,
+        updatedAt: updatedUser.updatedAt
+      });
+    } catch (error) {
+      logger.error('Error updating user status:', error);
+      if (error instanceof Error && error.message.includes('not found')) {
+        res.status(404).json({ error: 'User not found' });
+      } else {
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  };
+
+  /**
+   * Get current user's permissions
+   */
+  getCurrentUserPermissions = async (req: Request, res: Response): Promise<void> => {
+    try {
+      // Get the current user from the request (set by auth middleware)
+      if (!req.user) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      const userId = req.user.id;
+
+      // Get user's resource access permissions
+      const accessReport = await userManagementService.getUserAccessReport(userId);
+
+      // Transform the combined permissions (both direct and group-inherited) for frontend consumption
+      const permissions = accessReport.combinedResources.map(resource => ({
+        resourceName: resource.resourceName,
+        accessType: resource.accessType
+      }));
+
+      res.status(200).json({
+        success: true,
+        permissions
+      });
+    } catch (error) {
+      logger.error('Error getting current user permissions:', error);
+      res.status(500).json({ 
+        success: false,
+        error: 'Internal server error' 
+      });
+    }
+  };
+
+  /**
+   * Search users
+   */
+  searchUsers = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { q } = req.query;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
+
+      if (!q || typeof q !== 'string') {
+        res.status(400).json({ error: 'Search query (q) is required' });
+        return;
+      }
+
+      const result = await userManagementService.searchUsers(q, {
+        page: Math.floor(offset / limit) + 1,
+        pageSize: limit
+      });
+
+      if ('data' in result) {
+        // Paginated result
+        const response = {
+          data: result.data,
+          pagination: {
+            page: result.pagination.page,
+            pageSize: result.pagination.pageSize,
+            total: result.pagination.total,
+            totalPages: result.pagination.totalPages,
+          }
+        };
+        res.status(200).json(response);
+      } else {
+        // Non-paginated result
+        const response = {
+          data: result.map(user => ({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            status: user.status,
+            userGroups: user.userGroupMappings.reduce((acc, mapping) => {
+              if (mapping.userGroup) {
+                acc.push({
+                  id: mapping.userGroup.id,
+                  name: mapping.userGroup.name,
+                  alias: mapping.userGroup.alias,
+                  description: mapping.userGroup.description
+                });
+              }
+              return acc;
+            }, [] as Array<{ id: string; name: string; alias: string | null; description: string | null }>),
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+          })),
+          pagination: {
+            page: 1,
+            pageSize: result.length,
+            total: result.length,
+            totalPages: 1,
+          }
+        };
+        res.status(200).json(response);
+      }
+    } catch (error) {
+      logger.error('Error searching users:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // ==================== GROUP MANAGEMENT METHODS ====================
+
+  /**
+   * Get all user groups
+   */
+  getAllGroups = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const groups = await userManagementService.getAllUserGroupsWithCounts();
+
+      const groupsArray = Array.isArray(groups) ? groups : groups.data;
+
+      res.status(200).json({
+        data: groupsArray.map((group: any) => ({
+          id: group.id,
+          name: group.name,
+          alias: group.alias,
+          description: group.description,
+          userCount: group._count?.userGroupMappings || 0,
+          createdAt: group.createdAt,
+          updatedAt: group.updatedAt
+        }))
+      });
+    } catch (error) {
+      logger.error('Error getting all groups:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Get group details by ID
+   */
+  getGroupById = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      const group = await userManagementService.getUserGroupWithMappings(id);
+
+      if (!group) {
+        res.status(404).json({ error: 'Group not found' });
+        return;
+      }
+
+      res.status(200).json({
+        id: group.id,
+        name: group.name,
+        alias: group.alias,
+        description: group.description,
+        userCount: group.userGroupMappings?.length || 0,
+        users: group.userGroupMappings?.map((mapping: any) => ({
+          id: mapping.user.id,
+          name: mapping.user.name,
+          email: mapping.user.email,
+          status: mapping.user.status
+        })) || [],
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt
+      });
+    } catch (error) {
+      logger.error('Error getting group by ID:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Create a new user group
+   */
+  createGroup = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { name, alias, description } = req.body;
+
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        res.status(400).json({ error: 'Group name is required and must be a non-empty string' });
+        return;
+      }
+
+      if (alias && typeof alias !== 'string') {
+        res.status(400).json({ error: 'Alias must be a string' });
+        return;
+      }
+
+      if (description && typeof description !== 'string') {
+        res.status(400).json({ error: 'Description must be a string' });
+        return;
+      }
+
+      const group = await userManagementService.createUserGroup({
+        name: name.trim(),
+        alias: alias?.trim() || null,
+        description: description?.trim() || null
+      });
+
+      res.status(201).json({
+        id: group.id,
+        name: group.name,
+        alias: group.alias,
+        description: group.description,
+        userCount: 0,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt
+      });
+    } catch (error) {
+      logger.error('Error creating group:', error);
+      if (error instanceof Error && error.message.includes('unique')) {
+        res.status(400).json({ error: 'Group name already exists' });
+      } else {
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  };
+
+  /**
+   * Update a user group
+   */
+  updateGroup = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { name, alias, description } = req.body;
+
+      if (name !== undefined && (typeof name !== 'string' || name.trim().length === 0)) {
+        res.status(400).json({ error: 'Group name must be a non-empty string' });
+        return;
+      }
+
+      if (alias !== undefined && typeof alias !== 'string') {
+        res.status(400).json({ error: 'Alias must be a string' });
+        return;
+      }
+
+      if (description !== undefined && typeof description !== 'string') {
+        res.status(400).json({ error: 'Description must be a string' });
+        return;
+      }
+
+      const updateData: { name?: string; alias?: string | null; description?: string | null } = {};
+      if (name !== undefined) updateData.name = name.trim();
+      if (alias !== undefined) updateData.alias = alias?.trim() || null;
+      if (description !== undefined) updateData.description = description?.trim() || null;
+
+      const group = await userManagementService.updateUserGroup(id, updateData);
+
+      res.status(200).json({
+        id: group.id,
+        name: group.name,
+        alias: group.alias,
+        description: group.description,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt
+      });
+    } catch (error) {
+      logger.error('Error updating group:', error);
+      if (error instanceof Error) {
+        if (error.message.includes('not found')) {
+          res.status(404).json({ error: 'Group not found' });
+        } else if (error.message.includes('unique')) {
+          res.status(400).json({ error: 'Group name already exists' });
+        } else {
+          res.status(500).json({ error: 'Internal server error' });
+        }
+      } else {
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  };
+
+  /**
+   * Delete a user group
+   */
+  deleteGroup = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      await userManagementService.deleteUserGroup(id);
+
+      res.status(200).json({ message: 'Group deleted successfully' });
+    } catch (error) {
+      logger.error('Error deleting group:', error);
+      if (error instanceof Error) {
+        if (error.message.includes('not found')) {
+          res.status(404).json({ error: 'Group not found' });
+        } else if (error.message.includes('Cannot delete')) {
+          res.status(400).json({ error: error.message });
+        } else {
+          res.status(500).json({ error: 'Internal server error' });
+        }
+      } else {
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  };
+
+  /**
+   * Assign user to group
+   */
+  assignUserToGroup = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { groupId, userId } = req.params;
+
+      const result = await userManagementService.assignUserToGroup(userId, groupId);
+
+      if (!result.success) {
+        if (result.message.includes('not found')) {
+          res.status(404).json({ error: result.message });
+        } else {
+          res.status(400).json({ error: result.message });
+        }
+        return;
+      }
+
+      res.status(200).json({ message: 'User assigned to group successfully' });
+    } catch (error) {
+      logger.error('Error assigning user to group:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Remove user from group (assign to default group)
+   */
+  removeUserFromGroup = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { groupId, userId } = req.params;
+
+      const result = await userManagementService.removeUserFromGroup(userId, groupId);
+
+      if (!result.success) {
+        if (result.message.includes('not found')) {
+          res.status(404).json({ error: result.message });
+        } else {
+          res.status(400).json({ error: result.message });
+        }
+        return;
+      }
+
+      res.status(200).json({ message: 'User removed from group successfully' });
+    } catch (error) {
+      logger.error('Error removing user from group:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // ==================== GROUP PERMISSION MANAGEMENT METHODS ====================
+
+  /**
+   * Get group permissions
+   */
+  getGroupPermissions = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      // Check if group exists
+      const group = await userManagementService.getUserGroup(id);
+      if (!group) {
+        res.status(404).json({ error: 'Group not found' });
+        return;
+      }
+
+      const groupAccess = await userManagementService.getGroupAccess(id);
+
+      res.status(200).json({
+        group: {
+          id: group.id,
+          name: group.name,
+          description: group.description
+        },
+        permissions: groupAccess.map(access => ({
+          id: access.id,
+          resourceName: access.resource.name,
+          resourceDescription: access.resource.description,
+          accessType: access.accessType,
+          createdAt: access.createdAt,
+          updatedAt: access.updatedAt
+        }))
+      });
+    } catch (error) {
+      logger.error('Error getting group permissions:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Update group permissions
+   */
+  updateGroupPermissions = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { permissions } = req.body;
+
+      // Validate request body
+      if (!Array.isArray(permissions)) {
+        res.status(400).json({ error: 'permissions must be an array' });
+        return;
+      }
+
+      // Check if group exists
+      const group = await userManagementService.getUserGroup(id);
+      if (!group) {
+        res.status(404).json({ error: 'Group not found' });
+        return;
+      }
+
+      const results = {
+        successful: [] as string[],
+        failed: [] as { resourceName: string; error: string }[]
+      };
+
+      // Process each permission update
+      for (const permission of permissions) {
+        const { resourceName, accessType, action } = permission;
+
+        if (!resourceName || !accessType || !action) {
+          results.failed.push({
+            resourceName: resourceName || 'unknown',
+            error: 'Missing required fields: resourceName, accessType, action'
+          });
+          continue;
+        }
+
+        if (!Object.values(AccessType).includes(accessType)) {
+          results.failed.push({
+            resourceName,
+            error: `Invalid access type: ${accessType}`
+          });
+          continue;
+        }
+
+        if (!['grant', 'revoke'].includes(action)) {
+          results.failed.push({
+            resourceName,
+            error: `Invalid action: ${action}. Must be 'grant' or 'revoke'`
+          });
+          continue;
+        }
+
+        try {
+          if (action === 'grant') {
+            const result = await userManagementService.grantGroupResourceAccess(
+              id,
+              resourceName,
+              accessType
+            );
+            if (result.success) {
+              results.successful.push(resourceName);
+            } else {
+              results.failed.push({ resourceName, error: result.message });
+            }
+          } else {
+            const result = await userManagementService.revokeGroupResourceAccess(
+              id,
+              resourceName
+            );
+            if (result.success) {
+              results.successful.push(resourceName);
+            } else {
+              results.failed.push({ resourceName, error: result.message });
+            }
+          }
+        } catch (error) {
+          results.failed.push({
+            resourceName,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
+
+      res.status(200).json({
+        message: 'Group permissions update completed',
+        results
+      });
+    } catch (error) {
+      logger.error('Error updating group permissions:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+}
+
+export const userManagementController = UserManagementController.getInstance();

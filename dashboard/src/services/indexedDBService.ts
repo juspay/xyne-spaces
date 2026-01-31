@@ -1,0 +1,327 @@
+/**
+ * IndexedDB Service for persisting XState machine context
+ * Uses Zero's schema version for cache invalidation
+ * Stores each context property as individual keys
+ * Scopes databases by userId for multi-user support
+ */
+
+const DB_PREFIX = 'xyne-state-machine';
+const STORE_NAME = 'state';
+const SCHEMA_VERSION_KEY = '_schemaVersion';
+
+class IndexedDBService {
+  private db: IDBDatabase | null = null;
+  private initPromise: Promise<IDBDatabase> | null = null;
+  private currentSchemaVersion: string | null = null;
+  private currentUserId: string | null = null;
+
+  /**
+   * Initialize IndexedDB with schema version validation
+   * Drops and recreates DB if schema version doesn't match
+   * Scopes database to the provided userId
+   */
+  async init(userId: string, schemaVersion: string): Promise<IDBDatabase> {
+    // If already initialized with same userId and version, return existing
+    if (this.db && this.currentUserId === userId && this.currentSchemaVersion === schemaVersion) {
+      return this.db;
+    }
+
+    // Close existing connection if userId or schema version changed
+    if (this.db && (this.currentUserId !== userId || this.currentSchemaVersion !== schemaVersion)) {
+      this.close();
+    }
+
+    if (
+      this.initPromise &&
+      this.currentUserId === userId &&
+      this.currentSchemaVersion === schemaVersion
+    ) {
+      return this.initPromise;
+    }
+
+    this.currentUserId = userId;
+    this.currentSchemaVersion = schemaVersion;
+    this.initPromise = this.openDatabase(userId, schemaVersion);
+    return this.initPromise;
+  }
+
+  private getDatabaseName(userId: string): string {
+    return `${DB_PREFIX}-${userId}`;
+  }
+
+  private async openDatabase(userId: string, schemaVersion: string): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const dbName = this.getDatabaseName(userId);
+      const request = indexedDB.open(dbName, 1);
+
+      request.onerror = () => {
+        reject(new Error('Failed to open IndexedDB'));
+      };
+
+      request.onsuccess = async () => {
+        const db = request.result;
+
+        // Check stored schema version
+        try {
+          const storedVersion = await this.getStoredSchemaVersion(db);
+
+          if (storedVersion !== null && storedVersion !== schemaVersion) {
+            // Schema version mismatch - drop and recreate
+            console.log(
+              `Schema version mismatch (stored: ${storedVersion}, current: ${schemaVersion}). Dropping database.`,
+            );
+            db.close();
+            await this.dropDatabase();
+            // Reopen with fresh DB
+            const newDb = await this.recreateDatabase(schemaVersion);
+            this.db = newDb;
+            resolve(newDb);
+            return;
+          }
+
+          // Store current schema version if not set
+          if (storedVersion === null) {
+            await this.setStoredSchemaVersion(db, schemaVersion);
+          }
+
+          this.db = db;
+          resolve(db);
+        } catch {
+          this.db = db;
+          resolve(db);
+        }
+      };
+
+      request.onupgradeneeded = event => {
+        const db = (event.target as IDBOpenDBRequest).result;
+
+        // Create object store if it doesn't exist
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME);
+        }
+      };
+    });
+  }
+
+  private async getStoredSchemaVersion(db: IDBDatabase): Promise<string | null> {
+    return new Promise(resolve => {
+      try {
+        const transaction = db.transaction([STORE_NAME], 'readonly');
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.get(SCHEMA_VERSION_KEY);
+
+        request.onsuccess = () => {
+          //eslint-disable-next-line  @typescript-eslint/no-unsafe-argument
+          resolve(request.result ?? null);
+        };
+
+        request.onerror = () => {
+          resolve(null);
+        };
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  private async setStoredSchemaVersion(db: IDBDatabase, version: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.put(version, SCHEMA_VERSION_KEY);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(new Error('Failed to store schema version'));
+    });
+  }
+
+  private async dropDatabase(): Promise<void> {
+    if (!this.currentUserId) {
+      return;
+    }
+
+    const dbName = this.getDatabaseName(this.currentUserId);
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(dbName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(new Error('Failed to delete database'));
+      request.onblocked = () => {
+        console.warn('Database deletion blocked, proceeding anyway');
+        resolve();
+      };
+    });
+  }
+
+  private async recreateDatabase(schemaVersion: string): Promise<IDBDatabase> {
+    if (!this.currentUserId) {
+      throw new Error('Cannot recreate database: no userId set');
+    }
+
+    const dbName = this.getDatabaseName(this.currentUserId);
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(dbName, 1);
+
+      request.onerror = () => reject(new Error('Failed to recreate IndexedDB'));
+
+      request.onsuccess = async () => {
+        const db = request.result;
+        await this.setStoredSchemaVersion(db, schemaVersion);
+        resolve(db);
+      };
+
+      request.onupgradeneeded = event => {
+        const db = (event.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME);
+        }
+      };
+    });
+  }
+
+  /**
+   * Save a single context property to IndexedDB
+   */
+  async saveContextProperty(key: string, value: unknown): Promise<void> {
+    if (!this.db) {
+      throw new Error('IndexedDB not initialized. Call init() first.');
+    }
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.put(value, key);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(new Error(`Failed to save ${key} to IndexedDB`));
+    });
+  }
+
+  /**
+   * Save entire context to IndexedDB (each property as separate key)
+   */
+  async saveContext(context: Record<string, unknown>): Promise<void> {
+    if (!this.db) {
+      throw new Error('IndexedDB not initialized. Call init() first.');
+    }
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+
+      // Store timestamp
+      store.put(Date.now(), '_timestamp');
+
+      // Store each context property
+      for (const [key, value] of Object.entries(context)) {
+        store.put(value, key);
+      }
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(new Error('Failed to save context to IndexedDB'));
+    });
+  }
+
+  /**
+   * Load entire context from IndexedDB
+   * Returns all stored values as-is without any TTL filtering
+   * TTL logic is handled by XState machine
+   */
+  async loadContext(): Promise<Record<string, unknown> | null> {
+    if (!this.db) {
+      throw new Error('IndexedDB not initialized. Call init() first.');
+    }
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.openCursor();
+      const context: Record<string, unknown> = {};
+
+      request.onsuccess = event => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          const key = cursor.key as string;
+          // Skip internal keys
+          if (!key.startsWith('_')) {
+            context[key] = cursor.value;
+          }
+          cursor.continue();
+        } else {
+          // Done iterating
+          if (Object.keys(context).length === 0) {
+            resolve(null);
+          } else {
+            resolve(context);
+          }
+        }
+      };
+
+      transaction.oncomplete = () => resolve(context);
+
+      transaction.onerror = () => reject(new Error('Failed to load context from IndexedDB'));
+      request.onerror = () => reject(new Error('Failed to iterate through cache entries'));
+    });
+  }
+
+  /**
+   * Check if database is initialized
+   */
+  isInitialized(): boolean {
+    return this.db !== null;
+  }
+
+  /**
+   * Close the database connection
+   */
+  close(): void {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+      this.initPromise = null;
+    }
+  }
+
+  /**
+   * Drop all user-scoped databases
+   * This is useful when clearing data for logged-out users
+   */
+  async dropAllUserDatabases(): Promise<void> {
+    try {
+      const databases = await indexedDB.databases();
+
+      if (!databases) {
+        return;
+      }
+
+      const userDatabases = databases
+        .filter(db => db.name && db.name.startsWith(DB_PREFIX))
+        .map(db => db.name as string);
+
+      const dropPromises = userDatabases.map(dbName => {
+        return new Promise<void>(res => {
+          const dropRequest = indexedDB.deleteDatabase(dbName);
+          dropRequest.onsuccess = () => res();
+          dropRequest.onerror = () => res();
+          dropRequest.onblocked = () => {
+            console.warn(`Database deletion blocked for ${dbName}, proceeding anyway`);
+            res();
+          };
+        });
+      });
+
+      await Promise.all(dropPromises);
+
+      if (userDatabases.length > 0) {
+        console.log(`Dropped ${userDatabases.length} user-scoped databases`);
+      }
+    } catch (error) {
+      // If we can't list databases, just proceed
+      console.warn('Failed to list user databases:', error);
+    }
+  }
+}
+
+// Export singleton instance
+export const indexedDBService = new IndexedDBService();

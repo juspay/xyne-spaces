@@ -1,0 +1,14 @@
+[
+    {
+        "relation": [
+            "delegate_permission/common.handle_all_urls"
+        ],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "net.juspay.xynespaces",
+            "sha256_cert_fingerprints": [
+                "3e:ad:94:8f:db:3f:6a:b1:fc:e5:cc:ae:21:eb:ab:cc:3d:63:ad:9a:b9:27:d1:08:cb:a3:d8:7a:ba:fb:7e:3c"
+            ]
+        }
+    }
+]

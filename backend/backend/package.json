@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "@types/socket.io": "^3.0.1",
+    "ioredis": "^5.8.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
+  }
+}

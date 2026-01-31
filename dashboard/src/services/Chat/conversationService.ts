@@ -1,0 +1,404 @@
+import { apiInstance } from '../clients/apiClient';
+import { AxiosError } from 'axios';
+import { mixpanelService } from '../Analytics/mixpanelService';
+import { EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanel.types';
+import { getFilesDimensions } from '../../components/ui/utils/files';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+export interface MessageSender {
+  id: string;
+  name: string;
+  email: string;
+  picture?: string;
+}
+
+export interface MessageAttachment {
+  attachmentId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  fileUrl: string;
+  thumbnailUrl?: string;
+  uploadedBy: string;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface InitialMessage {
+  messageId: string;
+  content: string;
+  msgType: string;
+  hasAttachment?: boolean;
+  attachments?: MessageAttachment[];
+  createdAt: string;
+  sender: MessageSender;
+}
+
+export interface ConversationMessage {
+  messageId: string;
+  conversationId: string;
+  content: string;
+  msgType: string;
+  hasAttachment?: boolean;
+  edited?: boolean;
+  attachments?: MessageAttachment[];
+  createdAt: string;
+  sender: MessageSender;
+}
+
+export interface CreateConversationRequest {
+  content: string;
+  msgType?: 'USER' | 'BOT';
+  files?: File[];
+  videoThumbnails?: Map<File, Blob>;
+}
+
+export interface CreateConversationResponse {
+  conversationId: string;
+  channelId: string;
+  createdBy: string;
+  initialMessage: InitialMessage;
+  replyCount: number;
+  pinned: boolean;
+  createdAt: string;
+}
+
+export interface SendMessageRequest {
+  content: string;
+  msgType?: 'USER' | 'BOT';
+  files?: File[];
+  showInChannel?: boolean;
+  videoThumbnails?: Map<File, Blob>;
+}
+
+export interface ReplyToConversationResponse {
+  messageId: string;
+  conversationId: string;
+  content: string;
+  msgType: string;
+  hasAttachment?: boolean;
+  attachments?: MessageAttachment[];
+  createdAt: string;
+  sender: MessageSender;
+}
+
+export interface ApiErrorResponse {
+  error: string;
+  code?: string;
+  message?: string;
+}
+
+// ============================================================================
+// CUSTOM ERROR CLASS
+// ============================================================================
+
+export class ApiError extends Error {
+  public readonly status: number;
+  public readonly code: string;
+
+  constructor(message: string, status: number, code: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, ApiError);
+    }
+  }
+}
+
+// ============================================================================
+// TYPE GUARDS
+// ============================================================================
+
+function isApiErrorResponse(data: unknown): data is ApiErrorResponse {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'error' in data &&
+    typeof (data as ApiErrorResponse).error === 'string'
+  );
+}
+
+// ============================================================================
+// SERVICE CLASS
+// ============================================================================
+
+export class ConversationService {
+  /**
+   * Private helper to track file upload analytics (no sensitive data)
+   */
+  private trackFileUpload(
+    files: File[],
+    uploadContext: 'NewConversation' | 'ConversationReply',
+  ): void {
+    if (files && files.length > 0) {
+      const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+      const fileTypes = files.map(file => file.type);
+
+      mixpanelService.track(EVENTS.INITIATE_ACTION, {
+        type: EVENT_PROPERTIES.ACTION_TYPES.FILE_UPLOADED,
+        uploadContext,
+        fileCount: files.length,
+        totalSizeBytes: totalSize,
+        fileTypes,
+      });
+    }
+  }
+
+  /**
+   * Create a new conversation with optional file attachments
+   * Uses multipart/form-data for file uploads
+   */
+  async createConversation(
+    channelId: string,
+    data: CreateConversationRequest,
+  ): Promise<CreateConversationResponse> {
+    try {
+      console.log('📤 [FRONTEND-ATTACHMENT] Starting conversation creation with files:', {
+        channelId,
+        hasContent: !!data.content,
+        contentLength: data.content?.length || 0,
+        filesCount: data.files?.length || 0,
+        thumbnailsCount: data.videoThumbnails?.size || 0,
+        msgType: data.msgType,
+        timestamp: new Date().toISOString(),
+      });
+
+      const formData = new FormData();
+
+      // Add text fields
+      if (data.content) {
+        formData.append('content', data.content);
+      }
+      if (data.msgType) {
+        formData.append('msgType', data.msgType);
+      }
+
+      // Add files if present
+      if (data.files && data.files.length > 0) {
+        console.log(
+          '📎 [FRONTEND-ATTACHMENT] Processing files for upload:',
+          data.files.map((file, index) => ({
+            index,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            hasThumbnail: data.videoThumbnails?.has(file) || false,
+          })),
+        );
+
+        // Extract dimensions for all files (images/videos only)
+        const dimensionsMap = await getFilesDimensions(data.files);
+
+        // Build file metadata mapping
+        const fileMetadata: Array<{
+          fileIndex: number;
+          hasThumbnail: boolean;
+          thumbnailIndex?: number;
+          width?: number;
+          height?: number;
+        }> = [];
+
+        let thumbnailIndex = 0;
+
+        data.files.forEach((file: File, fileIndex: number) => {
+          console.log(`📤 [FRONTEND-ATTACHMENT] Adding file ${fileIndex} to form data:`, {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+          });
+          formData.append('files', file);
+
+          // Get dimensions for this file (null for non-media files)
+          const dimensions = dimensionsMap.get(file);
+
+          // Check if this file has a thumbnail
+          const thumbnail = data.videoThumbnails?.get(file);
+          if (thumbnail) {
+            console.log(`🖼️ [FRONTEND-ATTACHMENT] Adding thumbnail for file ${fileIndex}:`, {
+              thumbnailSize: thumbnail.size,
+              thumbnailType: thumbnail.type,
+            });
+            // Add thumbnail to form data
+            formData.append('thumbnails', thumbnail, `thumb_${thumbnailIndex}.jpg`);
+
+            // Record the mapping with dimensions
+            fileMetadata.push({
+              fileIndex,
+              hasThumbnail: true,
+              thumbnailIndex,
+              ...(dimensions && { width: dimensions.width, height: dimensions.height }),
+            });
+
+            thumbnailIndex++;
+          } else {
+            // No thumbnail for this file
+            fileMetadata.push({
+              fileIndex,
+              hasThumbnail: false,
+              ...(dimensions && { width: dimensions.width, height: dimensions.height }),
+            });
+          }
+        });
+
+        // Add metadata as JSON
+        const fileMetadataJson = JSON.stringify(fileMetadata);
+        console.log('📋 [FRONTEND-ATTACHMENT] File metadata prepared:', fileMetadata);
+        formData.append('fileMetadata', fileMetadataJson);
+      }
+
+      console.log('🚀 [FRONTEND-ATTACHMENT] Sending API request to create conversation:', {
+        endpoint: `/channels/${channelId}/conversations`,
+        formDataKeys: Array.from(formData.keys()),
+        timestamp: new Date().toISOString(),
+      });
+
+      const response = await apiInstance.post<CreateConversationResponse>(
+        `/channels/${channelId}/conversations`,
+        formData,
+      );
+
+      console.log('✅ [FRONTEND-ATTACHMENT] Conversation created successfully:', {
+        conversationId: response.data.conversationId,
+        messageId: response.data.initialMessage.messageId,
+        hasAttachments: (response.data.initialMessage.attachments?.length ?? 0) > 0,
+        attachmentsCount: response.data.initialMessage.attachments?.length ?? 0,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Track file upload using helper (no sensitive data - only metadata)
+      if (data.files && data.files.length > 0) {
+        this.trackFileUpload(data.files, 'NewConversation');
+      }
+
+      return response.data;
+    } catch (error) {
+      // Handle Axios errors with proper typing
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+
+      // Re-throw unknown errors
+      throw error;
+    }
+  }
+
+  /**
+   * Reply to an existing conversation with optional file attachments
+   * Uses multipart/form-data for file uploads
+   */
+  async replyToConversation(
+    conversationId: string,
+    data: SendMessageRequest,
+  ): Promise<ReplyToConversationResponse> {
+    try {
+      const formData = new FormData();
+
+      // Add text fields
+      if (data.content) {
+        formData.append('content', data.content);
+      }
+      if (data.msgType) {
+        formData.append('msgType', data.msgType);
+      }
+      if (data.showInChannel) {
+        formData.append('showInChannel', 'true');
+      }
+
+      // Add files if present
+      if (data.files && data.files.length > 0) {
+        // Extract dimensions for all files (images/videos only)
+        const dimensionsMap = await getFilesDimensions(data.files);
+
+        // Build file metadata mapping
+        const fileMetadata: Array<{
+          fileIndex: number;
+          hasThumbnail: boolean;
+          thumbnailIndex?: number;
+          width?: number;
+          height?: number;
+        }> = [];
+
+        let thumbnailIndex = 0;
+
+        data.files.forEach((file: File, fileIndex: number) => {
+          formData.append('files', file);
+
+          // Get dimensions for this file (null for non-media files)
+          const dimensions = dimensionsMap.get(file);
+
+          // Check if this file has a thumbnail
+          const thumbnail = data.videoThumbnails?.get(file);
+          if (thumbnail) {
+            // Add thumbnail to form data
+            formData.append('thumbnails', thumbnail, `thumb_${thumbnailIndex}.jpg`);
+
+            // Record the mapping with dimensions
+            fileMetadata.push({
+              fileIndex,
+              hasThumbnail: true,
+              thumbnailIndex,
+              ...(dimensions && { width: dimensions.width, height: dimensions.height }),
+            });
+
+            thumbnailIndex++;
+          } else {
+            // No thumbnail for this file
+            fileMetadata.push({
+              fileIndex,
+              hasThumbnail: false,
+              ...(dimensions && { width: dimensions.width, height: dimensions.height }),
+            });
+          }
+        });
+
+        // Add metadata as JSON
+        const fileMetadataJson = JSON.stringify(fileMetadata);
+        formData.append('fileMetadata', fileMetadataJson);
+      }
+
+      const response = await apiInstance.post<ReplyToConversationResponse>(
+        `/conversations/${conversationId}/messages`,
+        formData,
+      );
+
+      // Track file upload using helper (no sensitive data - only metadata)
+      if (data.files && data.files.length > 0) {
+        this.trackFileUpload(data.files, 'ConversationReply');
+      }
+
+      return response.data;
+    } catch (error) {
+      // Handle Axios errors with proper typing
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+
+      // Re-throw unknown errors
+      throw error;
+    }
+  }
+}
+
+export const conversationService = new ConversationService();

@@ -1,0 +1,37 @@
+{
+  "name": "@xyne/shared",
+  "license": "Apache-2.0",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Shared code between dashboard and backend",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./zero": {
+      "types": "./dist/zero/index.d.ts",
+      "import": "./dist/zero/index.js",
+      "default": "./dist/zero/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@rocicorp/zero": "0.25.5",
+    "fast-xml-parser": "^5.3.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
