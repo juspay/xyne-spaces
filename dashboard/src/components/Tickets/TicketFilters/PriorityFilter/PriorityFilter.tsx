@@ -1,0 +1,106 @@
+import { ReactElement, useState } from 'react';
+import { ChevronDown, X } from 'lucide-react';
+import { TicketPriority } from '@xyne/shared';
+import { PriorityFilterProps } from '../types';
+import { Button } from '../../../ui/Button';
+import { PRIORITY_CONFIG } from '../Utils/filterConstants';
+
+export const PriorityFilter = ({
+  selectedPriorities,
+  onChange,
+  className = '',
+}: PriorityFilterProps): ReactElement => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const handleToggle = (priority: TicketPriority): void => {
+    const isSelected = selectedPriorities.includes(priority);
+
+    if (isSelected) {
+      onChange(selectedPriorities.filter(p => p !== priority));
+    } else {
+      onChange([...selectedPriorities, priority]);
+    }
+  };
+
+  const handleClear = (): void => {
+    onChange([]);
+  };
+
+  const hasSelection = selectedPriorities.length > 0;
+
+  return (
+    <div className={`relative ${className}`}>
+      {/* Trigger Button */}
+      <Button
+        className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors ${
+          hasSelection
+            ? 'border-blue-200 bg-blue-50 text-blue-700'
+            : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+        }`}
+        onClick={() => setIsOpen(!isOpen)}
+        variant='ghost'
+      >
+        <span>Priority</span>
+        {hasSelection && (
+          <span className='bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full'>
+            {selectedPriorities.length}
+          </span>
+        )}
+        <ChevronDown className='w-4 h-4' />
+      </Button>
+
+      {/* Clear Button */}
+      {hasSelection && (
+        <Button
+          onClick={handleClear}
+          className='absolute -top-1 -right-1 p-1'
+          title='Clear priority filter'
+          size='icon'
+          variant='ghost'
+        >
+          <X className='w-3 h-3 text-gray-600' />
+        </Button>
+      )}
+
+      {/* Dropdown Content */}
+      <div
+        className={`absolute top-full left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50 ${!isOpen && 'hidden'}`}
+      >
+        <div className='p-2'>
+          {Object.entries(PRIORITY_CONFIG).map(([priority, config]) => {
+            const isSelected = selectedPriorities.includes(priority as TicketPriority);
+
+            return (
+              <label
+                key={priority}
+                className='flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer transition-colors'
+              >
+                <input
+                  type='checkbox'
+                  checked={isSelected}
+                  onChange={() => handleToggle(priority as TicketPriority)}
+                  className='rounded border-gray-300 text-blue-600 focus:ring-blue-500'
+                />
+                <span className={`px-2 py-1 text-xs font-medium rounded border ${config.color}`}>
+                  {config.label}
+                </span>
+              </label>
+            );
+          })}
+
+          {selectedPriorities.length > 0 && (
+            <div className='mt-2 pt-2 border-t border-gray-100'>
+              <Button
+                onClick={handleClear}
+                className='text-xs text-gray-500 hover:text-gray-700 transition-colors p-0 h-auto'
+                variant='ghost'
+              >
+                Clear all
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

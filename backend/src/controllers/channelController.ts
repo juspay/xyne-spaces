@@ -1,0 +1,1658 @@
+import { Request, Response } from 'express';
+import { ChannelRepository, CreateChannelInput } from '../database/repositories/channelRepository';
+import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
+import { ConversationRepository, CreateConversationInput } from '../database/repositories/conversationRepository';
+import { MessageRepository, CreateMessageInput } from '../database/repositories/messageRepository';
+import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository';
+import { UserRepository } from '../database/repositories/users';
+import { UserGroupRepository } from '../database/repositories/userGroups';
+import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType } from '@prisma/client';
+import { createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
+import '../types/express'; // Import to enable Express types augmentation
+import { unreadService } from '../services/unreadService';
+import { redisService } from '../services/redisService';
+import { notificationService } from '../services/notificationService';
+import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
+import {
+  CreateChannelResponse,
+  CheckDuplicateChannelResponse,
+} from '../api/types/ChannelTypes';
+import { websocketService } from '../services/websocketService';
+import { createChannelCreatedActivity } from '../utils/channelActivityUtils';
+import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { channelSchema } from '@/vespa/src/types';
+import { db } from '@/database/client';
+import { NAMESPACE } from '@/vespa/vespaConfig';
+import {logger} from '@/utils/logger';
+
+export class ChannelController {
+  private channelRepository: ChannelRepository;
+  private channelParticipantRepository: ChannelParticipantRepository;
+  private conversationRepository: ConversationRepository;
+  private messageRepository: MessageRepository;
+  private messageAttachmentRepository: MessageAttachmentRepository;
+  private userRepository: UserRepository;
+  private userGroupRepository: UserGroupRepository;
+  private channelUserStatusRepository: ChannelUserStatusRepository;
+
+  constructor() {
+    this.channelRepository = new ChannelRepository();
+    this.channelParticipantRepository = new ChannelParticipantRepository();
+    this.conversationRepository = new ConversationRepository();
+    this.messageRepository = new MessageRepository();
+    this.messageAttachmentRepository = new MessageAttachmentRepository();
+    this.userRepository = new UserRepository();
+    this.userGroupRepository = new UserGroupRepository();
+    this.channelUserStatusRepository = new ChannelUserStatusRepository();
+  }
+
+  // Helper method to get user info
+  private async getUserInfo(userId: string) {
+    try {
+      const user = await this.userRepository.findById(userId);
+      if (user) {
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          picture: user.picture
+        };
+      }
+    } catch (error) {
+      logger.warn(`Failed to lookup user ${userId}:`, error);
+    }
+
+    return {
+      id: userId,
+      name: 'User',
+      email: 'user@example.com',
+      picture: undefined
+    };
+  }
+
+  // Helper method to send system message for added/removed participants
+  private async sendAddAndRemoveParticipantsSystemMessage(
+    channelId: string,
+    newParticipants: Array<{ userId: string; userName: string }>,
+    authData: { id: string; name: string },
+    operationType: 'participants_added' | 'participants_removed'
+  ): Promise<void> {
+    try {
+      if (newParticipants.length === 0) {
+        return;
+      }
+
+      // Format system message
+      const allUserNames = newParticipants.map((p) => p.userName);
+      let formattedUsers = '';
+      if (allUserNames.length === 1) {
+        formattedUsers = allUserNames[0];
+      } else if (allUserNames.length > 1) {
+        formattedUsers = `${allUserNames.slice(0, -1).join(', ')} and ${allUserNames[allUserNames.length - 1]}`;
+      }
+
+      const addedOrRemovedText = operationType === 'participants_added' ? 'added' : 'removed';
+      const systemContent = `${formattedUsers} ${allUserNames.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${authData.name}`;
+
+      // Create metadata
+      const messageMetadata = {
+        operationType,
+        participants: newParticipants,
+        adminUserId: authData.id,
+        adminUserName: authData.name,
+      };
+
+      // Create conversation for system message
+      const conversationData: CreateConversationInput = {
+        channelId,
+        createdBy: 'system',
+        initialMessageId: 'temp', // Will be updated after message creation
+      };
+
+      const conversation = await this.conversationRepository.create(conversationData);
+
+      // Create system message
+      const messageData: CreateMessageInput = {
+        conversationId: conversation.conversationId,
+        senderId: newParticipants[0].userId,
+        content: systemContent,
+        msgType: MessageType.SYSTEM,
+        hasAttachment: false,
+        metadata: messageMetadata,
+      };
+
+      const createdMessage = await this.messageRepository.create(messageData);
+
+      // Update conversation with real initial message ID
+      await this.conversationRepository.update(conversation.conversationId, {
+        initialMessageId: createdMessage.messageId,
+      });
+
+      // Update channel last activity
+      await this.channelRepository.updateLastActivity(channelId);
+
+      // Reopen DM for all participants so they can see the system message
+      await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
+
+      // Get sender info
+      const senderInfo = await this.getUserInfo(newParticipants[0].userId);
+
+      // Broadcast new conversation via WebSocket
+      const conversationMessage = {
+        conversationId: conversation.conversationId,
+        channelId,
+        messageId: createdMessage.messageId,
+        senderId: createdMessage.senderId,
+        senderName: senderInfo.name,
+        senderPicture: senderInfo.picture,
+        content: createdMessage.content,
+        msgType: createdMessage.msgType,
+        hasAttachment: createdMessage.hasAttachment,
+        attachments: [],
+        createdAt: createdMessage.createdAt,
+      };
+
+      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
+      await redisService.broadcastMessageToSession(channelId, conversationMessage);
+    } catch (error) {
+      logger.error('Error sending add/remove participants system message:', error);
+      logger.error('Channel ID:', channelId);
+      logger.error('Operation type:', operationType);
+      logger.error('Participants:', newParticipants);
+      // Rethrow the error so the caller can handle it appropriately
+      throw error;
+    }
+  }
+
+  // Helper method to send initial message to a channel
+  private async sendInitialMessage(
+    channelId: string,
+    senderId: string,
+    messageContent: string
+  ): Promise<{
+    conversationId: string;
+    initialMessage: {
+      messageId: string;
+      content: string;
+      msgType: MessageType;
+      hasAttachment: boolean;
+      attachments: any[];
+      createdAt: Date;
+      sender: any;
+    };
+  } | null> {
+    try {
+      // Create conversation
+      const conversationData: CreateConversationInput = {
+        channelId: channelId,
+        createdBy: senderId,
+        initialMessageId: 'temp', // Will be updated after message creation
+      };
+
+      const conversation = await this.conversationRepository.create(conversationData);
+
+      // Create initial message
+      const messageData: CreateMessageInput = {
+        conversationId: conversation.conversationId,
+        senderId: senderId,
+        content: messageContent.trim(),
+        msgType: MessageType.USER,
+        hasAttachment: false
+      };
+
+      const createdMessage = await this.messageRepository.create(messageData);
+
+      // Update conversation with real initial message ID
+      await this.conversationRepository.update(conversation.conversationId, {
+        initialMessageId: createdMessage.messageId,
+      });
+
+      // Update channel last activity
+      await this.channelRepository.updateLastActivity(channelId);
+
+      // Reopen DM for all participants so they can see the message
+      await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
+
+      // Get sender info
+      const senderInfo = await this.getUserInfo(senderId);
+
+      // Get channel participants for notifications and unread count
+      const channelParticipants =
+        await this.channelParticipantRepository.getChannelParticipants(channelId);
+
+      // Get recipient IDs (all participants except sender)
+      const recipientIds = channelParticipants
+        .map(p => p.userId)
+        .filter(userId => userId !== senderId);
+
+      // Extract clean content for notification
+      const cleanContent =
+        messageContent.replace(/<[^>]*>/g, '').trim() || 'Sent a message';
+
+      // Send notifications to recipients
+      if (recipientIds.length > 0) {
+        await notificationService.createDirectMessageNotifications(
+          recipientIds,
+          createdMessage.messageId,
+          conversation.conversationId,
+          channelId,
+          senderId,
+          senderInfo.name,
+          cleanContent
+        );
+
+        // Update unread counts for recipients
+        await handleUnreadCount(
+          channelId,
+          true, // isDMChannel
+          channelParticipants.map(p => ({ userId: p.userId })),
+          senderId
+        );
+      }
+
+      // Broadcast new conversation via WebSocket
+      const conversationMessage = {
+        conversationId: conversation.conversationId,
+        channelId: channelId,
+        messageId: createdMessage.messageId,
+        senderId: createdMessage.senderId,
+        senderName: senderInfo.name,
+        senderPicture: senderInfo.picture,
+        content: createdMessage.content,
+        msgType: createdMessage.msgType,
+        hasAttachment: createdMessage.hasAttachment,
+        attachments: [],
+        createdAt: createdMessage.createdAt,
+      };
+
+      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
+      await redisService.broadcastMessageToSession(channelId, conversationMessage);
+
+      return {
+        conversationId: conversation.conversationId,
+        initialMessage: {
+          messageId: createdMessage.messageId,
+          content: createdMessage.content,
+          msgType: createdMessage.msgType,
+          hasAttachment: createdMessage.hasAttachment,
+          attachments: [],
+          createdAt: createdMessage.createdAt,
+          sender: senderInfo,
+        }
+      };
+    } catch (error) {
+      logger.error('Error sending initial message:', error);
+      // Don't fail the entire operation if message creation fails
+      return null;
+    }
+  }
+
+  // Helper method to send a forwarded message to a channel
+  private async sendForwardedMessage(
+    channelId: string,
+    senderId: string,
+    forwardedMessage: { originalMessageId: string; optionalMessage?: string }
+  ): Promise<{
+    conversationId: string;
+    forwardedMessage: {
+      messageId: string;
+      content: string;
+      msgType: MessageType;
+      hasAttachment: boolean;
+      attachments: any[];
+      createdAt: Date;
+      sender: any;
+      metadata: any;
+    };
+  } | null> {
+    try {
+      // Get the original message
+      const originalMessage = await this.messageRepository.findById(
+        forwardedMessage.originalMessageId
+      );
+      if (!originalMessage) {
+        logger.error('Original message not found:', forwardedMessage.originalMessageId);
+        return null;
+      }
+
+      const originalConversation = await this.conversationRepository.findById(
+        originalMessage.conversationId
+      );
+      if (!originalConversation) {
+        logger.error('Original conversation not found');
+        return null;
+      }
+
+      // Check if user has access to original channel
+      const hasAccess = await this.channelParticipantRepository.isParticipant(
+        originalConversation.channelId,
+        senderId
+      );
+      if (!hasAccess) {
+        logger.error("User doesn't have access to original message channel");
+        return null;
+      }
+
+      // Handle re-forwarding: if the original message is already forwarded,
+      // parse the XML to get the optionalText and use that as content (if exists)
+      // When using optionalText, don't include attachments (it's either optionalText OR message content with attachments)
+      const isReForwarding = originalMessage.msgType === MessageType.FORWARDED;
+      let forwardedContent = originalMessage.content;
+      let useOptionalText = false;
+
+      if (isReForwarding) {
+        const parsedForwarded = parseForwardedMessageXml(originalMessage.content);
+        if (parsedForwarded?.optionalText) {
+          forwardedContent = parsedForwarded.optionalText;
+          useOptionalText = true;
+        } else if (parsedForwarded?.content) {
+          forwardedContent = parsedForwarded.content;
+        }
+      }
+
+      // Get attachments from the original message (only if not using optionalText)
+      const originalAttachments = useOptionalText
+        ? []
+        : await this.messageAttachmentRepository.findByMessageId(
+            forwardedMessage.originalMessageId
+          );
+
+      // Get original sender info with fallback
+      let originalSenderInfo;
+      try {
+        originalSenderInfo = await this.getUserInfo(originalMessage.senderId);
+      } catch (error) {
+        logger.warn('Original sender not found, using fallback:', originalMessage.senderId);
+        originalSenderInfo = { name: 'Deleted User', picture: null };
+      }
+
+      // Get sender info (read operation, can be outside transaction)
+      const senderInfo = await this.getUserInfo(senderId);
+
+      // Create XML content for the forwarded message
+      const xmlContent = createForwardedMessageXml({
+        originalMessageId: forwardedMessage.originalMessageId,
+        originalSenderId: originalMessage.senderId,
+        originalSenderName: originalSenderInfo.name,
+        originalCreatedAt: originalMessage.createdAt.getTime(),
+        originalChannelId: originalConversation?.channelId || null,
+        originalConversationId: originalMessage.conversationId,
+        optionalText: forwardedMessage.optionalMessage || null,
+        content: forwardedContent,
+      });
+
+      // Use transaction for all write operations to maintain atomicity
+      const result = await db.$transaction(async (tx) => {
+        // Create conversation
+        const conversation = await tx.conversation.create({
+          data: {
+            channelId: channelId,
+            createdBy: senderId,
+            initialMessageId: 'temp', // Will be updated after message creation
+            lastActivityAt: new Date(),
+            replyCount: 0,
+            pinned: false,
+          },
+        });
+
+        // Create the forwarded message with XML content
+        const createdMessage = await tx.message.create({
+          data: {
+            conversationId: conversation.conversationId,
+            senderId: senderId,
+            content: xmlContent,
+            msgType: MessageType.FORWARDED,
+            hasAttachment: originalAttachments.length > 0,
+            metadata: {},
+          },
+        });
+
+        // Copy attachments to the new message
+        const copiedAttachments: any[] = [];
+        if (originalAttachments.length > 0) {
+          for (const attachment of originalAttachments) {
+            const copiedAttachment = await tx.messageAttachment.create({
+              data: {
+                entityId: createdMessage.messageId,
+                entityType: AttachmentEntityType.CHAT,
+                originalFilename: attachment.originalFilename,
+                size: attachment.size,
+                mimetype: attachment.mimetype,
+                url: attachment.url,
+                thumbnailUrl: attachment.thumbnailUrl || undefined,
+                uploadedByUserId: senderId,
+                createdBy: senderId,
+                storageProvider: attachment.storageProvider,
+                conversationId: conversation.conversationId,
+                metadata: (attachment.metadata as Record<string, any>) || {},
+              },
+            });
+            copiedAttachments.push(copiedAttachment);
+          }
+        }
+
+        // Update conversation with real initial message ID
+        await tx.conversation.update({
+          where: { conversationId: conversation.conversationId },
+          data: { initialMessageId: createdMessage.messageId },
+        });
+
+        // Update channel last activity
+        await tx.channel.update({
+          where: { id: channelId },
+          data: { lastActivityAt: new Date() },
+        });
+
+        // Reopen DM for all participants so they can see the message
+        await tx.channelUserStatus.updateMany({
+          where: { channelId: channelId, isClosed: true },
+          data: { isClosed: false },
+        });
+
+        return {
+          conversation,
+          createdMessage,
+          copiedAttachments,
+        };
+      });
+
+      // Get channel participants for notifications and unread count
+      const channelParticipants = await this.channelParticipantRepository.getChannelParticipants(channelId);
+      
+      // Extract clean content for notification - parse forwarded XML to get actual content
+      const parsedContent = parseForwardedMessageXml(result.createdMessage.content);
+      let cleanContent = parsedContent?.optionalText || parsedContent?.content || 'Forwarded a message';
+      // Strip any remaining HTML tags
+      cleanContent = cleanContent.replace(/<[^>]*>/g, '').trim();
+      if (!cleanContent) {
+        cleanContent = result.createdMessage.hasAttachment ? 'Forwarded an attachment' : 'Forwarded a message';
+      }
+
+      // Get recipient IDs (all participants except sender)
+      const recipientIds = channelParticipants
+        .map(p => p.userId)
+        .filter(userId => userId !== senderId);
+
+      // Send notifications to recipients
+      if (recipientIds.length > 0) {
+        await notificationService.createDirectMessageNotifications(
+          recipientIds,
+          result.createdMessage.messageId,
+          result.conversation.conversationId,
+          channelId,
+          senderId,
+          senderInfo.name,
+          cleanContent
+        );
+
+        // Update unread counts for recipients
+        await handleUnreadCount(
+          channelId,
+          true, // isDMChannel
+          channelParticipants.map(p => ({ userId: p.userId })),
+          senderId
+        );
+      }
+
+      // Broadcast new conversation via WebSocket
+      const conversationMessage = {
+        conversationId: result.conversation.conversationId,
+        channelId: channelId,
+        messageId: result.createdMessage.messageId,
+        senderId: result.createdMessage.senderId,
+        senderName: senderInfo.name,
+        senderPicture: senderInfo.picture,
+        content: result.createdMessage.content,
+        msgType: result.createdMessage.msgType,
+        hasAttachment: result.createdMessage.hasAttachment,
+        attachments: result.copiedAttachments,
+        createdAt: result.createdMessage.createdAt,
+      };
+
+      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
+      await redisService.broadcastMessageToSession(channelId, conversationMessage);
+
+      return {
+        conversationId: result.conversation.conversationId,
+        forwardedMessage: {
+          messageId: result.createdMessage.messageId,
+          content: result.createdMessage.content,
+          msgType: result.createdMessage.msgType,
+          hasAttachment: result.createdMessage.hasAttachment,
+          attachments: result.copiedAttachments,
+          createdAt: result.createdMessage.createdAt,
+          sender: senderInfo,
+          metadata: {},
+        },
+      };
+    } catch (error) {
+      logger.error('Error sending forwarded message:', error);
+      // Don't fail the entire operation if message creation fails
+      return null;
+    }
+  }
+
+  // POST /api/channels - Create new channel
+  createChannel = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const {
+        scopeType,
+        scopeId, // For DM channels - other user ID (not stored in DB)
+        name,
+        description,
+        visibility,
+        projectId,
+        participants
+      }: {
+        scopeType: ChannelScopeType;
+        scopeId?: string;
+        name?: string;
+        description?: string;
+        visibility?: ChannelVisibility;
+        projectId: string;
+        participants?: string[];
+      } = req.body;
+
+      const userId = req.user!.id;
+
+      // Validate required fields
+      if (!scopeType || !projectId) {
+        res.status(400).json({
+          error: 'ScopeType and projectId are required',
+          details: {
+            scopeType: !scopeType ? 'ScopeType is required' : undefined,
+            projectId: !projectId ? 'ProjectId is required' : undefined,
+          }
+        });
+        return;
+      }
+
+      // For non-DM channels, name is required
+      if (scopeType !== 'DM' && !name) {
+        res.status(400).json({
+          error: 'Name is required for non-DM channels'
+        });
+        return;
+      }
+
+      // Validate scopeType using Prisma enum
+      const validScopeTypes = Object.values(ChannelScopeType);
+      if (!validScopeTypes.includes(scopeType)) {
+        res.status(400).json({
+          error: 'Invalid scopeType',
+          validValues: validScopeTypes
+        });
+        return;
+      }
+
+      // Validate visibility if provided using Prisma enum
+      if (visibility) {
+        const validVisibilities = Object.values(ChannelVisibility);
+        if (!validVisibilities.includes(visibility)) {
+          res.status(400).json({
+            error: 'Invalid visibility',
+            validValues: validVisibilities
+          });
+          return;
+        }
+      }
+
+      // For DM channels, ensure scopeId is provided (other user's ID)
+      if (scopeType === 'DM' && !scopeId) {
+        res.status(400).json({
+          error: 'scopeId (other user ID) is required for DM channels'
+        });
+        return;
+      }
+
+      // For DM channels, validate that participants array is not provided
+      // DM channels should only have 2 participants: creator and scopeId user
+      if (scopeType === 'DM' && participants && participants.length > 0) {
+        res.status(400).json({
+          error: 'A direct message can only be created with one other member. Do not provide participants array for DM channels.'
+        });
+        return;
+      }
+
+      // For DM channels, check if channel already exists
+      if (scopeType === 'DM' && scopeId) {
+        const existingDM = await this.channelRepository.getDMChannel(userId, scopeId);
+        if (existingDM) {
+          res.status(200).json({
+            message: 'DM channel already exists',
+            id: existingDM.id,
+            name: existingDM.name,
+            scopeType: existingDM.scopeType,
+            createdAt: existingDM.createdAt,
+          });
+          return;
+        }
+      }
+
+      // For DM channels, auto-generate name from user IDs
+      let channelName: string;
+      if (scopeType === 'DM' && scopeId) {
+        channelName = [userId, scopeId].sort().join(",");
+      } else {
+        channelName = name!; // Already validated above
+      }
+
+      // Create channel
+      const channelData: CreateChannelInput = {
+        scopeType,
+        name: channelName,
+        description,
+        visibility: visibility || 'PUBLIC',
+        createdBy: userId,
+        projectId,
+      };
+
+      const channel = await this.channelRepository.create(channelData);
+
+      // Add creator as channel participant with admin role
+      await this.channelParticipantRepository.addParticipant(
+        channel.id,
+        userId,
+        'ADMIN'
+      );
+
+      // For DM channels, add the other user as participant
+      if (scopeType === 'DM' && scopeId) {
+        await this.channelParticipantRepository.addParticipant(
+          channel.id,
+          scopeId,
+          'MEMBER'
+        );
+      }
+
+      // Add additional participants if provided
+      const participantAddResults: Array<{ userId: string; success: boolean; error?: string }> = [];
+
+      if (participants && participants.length > 0) {
+        // Validate participants are valid user IDs
+        const validParticipants = participants.filter(p =>
+          typeof p === 'string' && p.trim().length > 0 && p !== userId
+        );
+
+        for (const participantId of validParticipants) {
+          try {
+            // Check if user exists before adding
+            const user = await this.userRepository.findById(participantId);
+            if (user && user.status === 'ACTIVE') {
+              await this.channelParticipantRepository.addParticipant(
+                channel.id,
+                participantId,
+                'MEMBER'
+              );
+              participantAddResults.push({ userId: participantId, success: true });
+            } else {
+              participantAddResults.push({
+                userId: participantId,
+                success: false,
+                error: 'User not found or inactive'
+              });
+            }
+          } catch (error) {
+            logger.warn(`Failed to add participant ${participantId}:`, error);
+            participantAddResults.push({
+              userId: participantId,
+              success: false,
+              error: 'Failed to add participant'
+            });
+          }
+        }
+      }
+
+      // Create activities for all channel members (excluding creator)
+      await createChannelCreatedActivity(channel.id, userId);
+
+      // Queue channel for Vespa ingestion AFTER participants are added
+      //await this.channelRepository.queueChannelForVespa(channel.id, 'feed');
+
+      // Response includes participant addition results
+      const response: CreateChannelResponse = {
+        channelId: channel.id,
+        id: channel.id,
+        name: channel.name,
+        scopeType: channel.scopeType,
+        description: channel.description,
+        visibility: channel.visibility,
+        projectId: channel.projectId,
+        createdAt: channel.createdAt,
+      };
+
+      // Include participant results if any were processed
+      if (participantAddResults.length > 0) {
+        response.participantResults = {
+          total: participantAddResults.length,
+          successful: participantAddResults.filter(r => r.success).length,
+          failed: participantAddResults.filter(r => !r.success).length,
+          details: participantAddResults
+        };
+      }
+
+      res.status(201).json(response);
+
+      // Queue Vespa job in background
+      const allParticipantIds = [userId]; // Creator
+      if (scopeType === 'DM' && scopeId) {
+        allParticipantIds.push(scopeId); // DM partner
+      }
+      participantAddResults.forEach(p => {
+        if (p.success) {
+          allParticipantIds.push(p.userId); // Additional participants
+        }
+      });
+
+      // Queue Vespa job in background - worker will handle all processing
+      vespaQueue.addJob({
+        schema: channelSchema,
+        jobType: "feed",
+        docId: channel.id,
+        userId: userId
+      }).catch(async (error) => {
+        logger.error('Error queuing Vespa job for channel:', error);
+        // Log failed insertion to Postgres for later retry
+        try {
+          const vespaLogs = db.vespaInsertionLogs;
+          if (vespaLogs) {
+            await vespaLogs.create({
+              data: {
+                status: "FAILED",
+                type: "INSERT",
+                entityId: channel.id,
+                entityType: channelSchema,
+                namespace: NAMESPACE,
+                errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+                errorDetails: JSON.stringify(error),
+                userId: userId,
+                createdAt: new Date(),
+              },
+            });
+          }
+        } catch (dbError) {
+          logger.error('Failed to log Vespa insertion error to database:', dbError);
+        }
+      });
+    } catch (error) {
+      logger.error('Error creating channel:', error);
+
+      // Handle specific duplicate channel error
+      if (error instanceof Error && error.message.includes('already exists in organization')) {
+        res.status(409).json({
+          error: 'DUPLICATE_CHANNEL_NAME',
+          message: error.message
+        });
+        return;
+      }
+
+      // Handle database unique constraint violation (if migration is applied)
+      if (error instanceof Error && error.message.includes('unique_channel_per_org_scope')) {
+        res.status(409).json({
+          error: 'DUPLICATE_CHANNEL_NAME',
+          message: 'A channel with this name already exists in this organization'
+        });
+        return;
+      }
+
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // POST /api/channels/check-duplicate - Check if channel name is duplicate
+  checkDuplicate = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { name, projectId }: { name: string; projectId: string } = req.body;
+
+      // Validate required fields
+      if (!name || !projectId) {
+        res.status(400).json({
+          error: 'Name and projectId are required',
+          details: {
+            name: !name ? 'Name is required' : undefined,
+            projectId: !projectId ? 'ProjectId is required' : undefined,
+          }
+        });
+        return;
+      }
+
+      // Check if channel name exists across all projects
+      const isDuplicate = await this.channelRepository.checkDuplicateName(name.trim());
+
+      const response: CheckDuplicateChannelResponse = {
+        isDuplicate,
+        name: name.trim(),
+        projectId,
+      };
+
+      res.status(200).json(response);
+    } catch (error) {
+      logger.error('Error checking channel duplicate:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+
+  // GET /api/channels/search - Unified search for users and groups
+  searchForMentions = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const { q, limit = '10', types = 'users,groups' } = req.query;
+
+      // Validate query parameter - allow 1+ characters for mentions
+      if (!q || typeof q !== 'string' || q.trim().length < 1) {
+        res.status(400).json({
+          error: 'Search query (q) is required and must be at least 1 character',
+          details: 'Provide a search term of minimum 1 character'
+        });
+        return;
+      }
+
+      // Parse and validate limit
+      const searchLimit = Math.min(parseInt(limit as string) || 10, 15); // Max 15 results
+
+      // Parse types parameter
+      const searchTypes = (types as string).split(',').map(type => type.trim());
+      const includeUsers = searchTypes.includes('users');
+      const includeGroups = searchTypes.includes('groups');
+
+      const results: any[] = [];
+
+      try {
+        // Parallel search promises
+        const searchPromises: Promise<any>[] = [];
+
+        // User search
+        if (includeUsers) {
+          const userSearchPromise = this.userRepository.findBySearch(q.trim(), {
+            page: 1,
+            pageSize: searchLimit
+          }).then(searchResults => {
+            const users = Array.isArray(searchResults) ? searchResults : searchResults.data;
+            return users
+              .filter(user => user.status === 'ACTIVE' && user.id !== userId)
+              .slice(0, searchLimit)
+              .map(user => ({
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                picture: user.picture,
+                type: 'user'
+              }));
+          });
+          searchPromises.push(userSearchPromise);
+        }
+
+        // Group search
+        if (includeGroups) {
+          const groupSearchPromise = this.userGroupRepository.findBySearch(q.trim(), {
+            page: 1,
+            pageSize: searchLimit
+          }).then(async searchResults => {
+            const groups = Array.isArray(searchResults) ? searchResults : searchResults.data;
+            return await Promise.all(
+              groups.slice(0, searchLimit).map(async group => {
+                try {
+                  const memberCount = await this.userGroupRepository.getUserCount(group.id);
+                  return {
+                    id: group.id,
+                    name: group.name,
+                    alias: group.alias,
+                    description: group.description,
+                    memberCount,
+                    type: 'group'
+                  };
+                } catch (error) {
+                  logger.warn(`Failed to get member count for group ${group.id}:`, error);
+                  return {
+                    id: group.id,
+                    name: group.name,
+                    alias: group.alias,
+                    description: group.description,
+                    memberCount: 0,
+                    type: 'group'
+                  };
+                }
+              })
+            );
+          });
+          searchPromises.push(groupSearchPromise);
+        }
+
+        // Execute searches in parallel and combine results
+        const searchResults = await Promise.all(searchPromises);
+        searchResults.forEach(searchResult => {
+          results.push(...searchResult);
+        });
+
+        // Limit total results
+        const limitedResults = results.slice(0, searchLimit);
+
+        res.status(200).json({
+          results: limitedResults,
+          total: limitedResults.length,
+          query: q,
+          limit: searchLimit,
+          types: searchTypes
+        });
+      } catch (searchError) {
+        logger.error('Error during unified search:', searchError);
+        res.status(500).json({ error: 'Search failed' });
+      }
+    } catch (error) {
+      logger.error('Error in unified search for mentions:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+
+  // GET /api/channels/publish-targets - Get channels where user can publish docs
+  // Returns DEFAULT scope channels (not DMs or GROUP_DMs)
+  getChannelsForDocs = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(403).json({ error: 'Unauthorized - user not authenticated' });
+        return;
+      }
+
+      const userParticipations = await this.channelParticipantRepository.getUserChannels(userId);
+      const channelIds = userParticipations.map(p => p.channelId);
+
+      if (channelIds.length === 0) {
+        res.status(200).json({ channels: [] });
+        return;
+      }
+
+      const allChannels = await this.channelRepository.getChannelsByIds(channelIds);
+
+      const docsChannels = allChannels.filter(channel =>
+        channel.scopeType === 'DEFAULT' || channel.scopeType === 'DOCUMENT'
+      );
+
+      res.status(200).json({
+        channels: docsChannels.map(c => ({
+          id: c.id,
+          name: c.name,
+          projectId: c.projectId,
+          scopeType: c.scopeType,
+        })),
+      });
+    } catch (error) {
+      logger.error('Error getting channels for docs:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // GET /api/users/me/dms - Get all user's DM channels
+  getUserDMs = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+
+      // Get user's channel participations for DM channels only
+      const userParticipations = await this.channelParticipantRepository.getUserChannels(userId);
+
+      // Get all DM channels where user is a participant
+      const dmChannelIds = userParticipations
+        .map(p => p.id);
+
+      if (dmChannelIds.length === 0) {
+        res.status(200).json({
+          channels: [],
+          total: 0,
+        });
+        return;
+      }
+
+      const allDMChannels = await this.channelRepository.getChannelsByIds(dmChannelIds);
+
+      // Filter to only include USER (1-on-1 DMs) and GROUP_DM scope types
+      const dmChannels = allDMChannels.filter(channel =>
+        channel.scopeType === 'DM' || channel.scopeType === 'GROUP_DM'
+      );
+
+      if (dmChannels.length === 0) {
+        res.status(200).json({
+          channels: [],
+          total: 0,
+        });
+        return;
+      }
+
+      const channelIds = dmChannels.map(c => c.id);
+
+      // Batch fetch all related data to avoid N+1 queries
+      const [allConversations, allParticipants, allUnreadCounts] = await Promise.all([
+        // Fetch all conversations for all channels in one query
+        this.conversationRepository.findMany({
+          where: { channelId: { in: channelIds } }
+        }),
+        // Fetch all participants for all channels in one query
+        this.channelParticipantRepository.findMany({
+          where: { channelId: { in: channelIds } }
+        }),
+        // Fetch all unread counts for all channels
+        Promise.all(channelIds.map(channelId =>
+          unreadService.getUnreadCountForChannel(channelId, userId)
+        ))
+      ]);
+
+      // Create maps for efficient lookup
+      const conversationsByChannel = new Map<string, any[]>();
+      allConversations.forEach(conv => {
+        if (!conversationsByChannel.has(conv.channelId)) {
+          conversationsByChannel.set(conv.channelId, []);
+        }
+        conversationsByChannel.get(conv.channelId)!.push(conv);
+      });
+
+      const participantsByChannel = new Map<string, any[]>();
+      allParticipants.forEach(participant => {
+        if (!participantsByChannel.has(participant.channelId)) {
+          participantsByChannel.set(participant.channelId, []);
+        }
+        participantsByChannel.get(participant.channelId)!.push(participant);
+      });
+
+      const unreadCountMap = new Map(channelIds.map((id, index) => [id, allUnreadCounts[index]]));
+
+      // Collect all unique user IDs for batch user fetch
+      const userIds = new Set<string>();
+      allParticipants.forEach(p => {
+        if (p.userId && p.userId !== userId) {
+          userIds.add(p.userId);
+        }
+      });
+
+      // Batch fetch all user info
+      const users = await this.userRepository.findMany({
+        where: { id: { in: Array.from(userIds) } }
+      });
+      const userMap = new Map(users.map(u => ({ id: u.id, name: u.name, email: u.email, picture: u.picture })).map(u => [u.id, u]));
+
+      // Assemble the response data
+      const dmChannelsWithCounts = dmChannels.map(channel => {
+        const conversations = conversationsByChannel.get(channel.id) || [];
+        const participants = participantsByChannel.get(channel.id) || [];
+        const participation = userParticipations.find(p => p.id === channel.id);
+        const unreadCount = unreadCountMap.get(channel.id) || 0;
+
+        // Get DM partner info - determine who the partner is relative to current user
+        let partnerInfo = null;
+        if (channel.scopeType === 'DM') {
+          const otherParticipant = participants.find(p => p.userId !== userId);
+          if (otherParticipant?.userId) {
+            partnerInfo = userMap.get(otherParticipant.userId) || null;
+          }
+        }
+
+        let participantsName = null;
+        if (channel.scopeType === 'GROUP_DM') {
+          const otherParticipants = participants.filter(p => p.userId !== userId);
+          participantsName = otherParticipants
+            .map(p => userMap.get(p.userId)?.name)
+            .filter(Boolean);
+        }
+
+        return {
+          id: channel.id,
+          name: channel.name,
+          scopeType: channel.scopeType,
+          description: channel.description,
+          visibility: channel.visibility,
+          projectId: channel.projectId,
+          createdBy: channel.createdBy,
+          conversationCount: conversations.length,
+          participantCount: participants.length,
+          unreadCount,
+          lastActivityAt: channel.lastActivityAt,
+          createdAt: channel.createdAt,
+          userRole: participation?.role,
+          isMember: true, // Always true for DMs
+          partner: partnerInfo, // Partner user info for frontend
+          participantsName: participantsName
+        };
+      });
+
+      // Sort DMs by last activity
+      dmChannelsWithCounts.sort((a, b) =>
+        new Date(b.lastActivityAt || b.createdAt).getTime() -
+        new Date(a.lastActivityAt || a.createdAt).getTime()
+      );
+
+      res.status(200).json({
+        channels: dmChannelsWithCounts,
+        total: dmChannelsWithCounts.length,
+      });
+    } catch (error) {
+      logger.error('Error getting user DMs:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // POST /api/users/me/dms - Create a new DM (1-on-1 or group)
+  createNewDM = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const currentUserId = req.user!.id;
+      const { participantIds, message, forwardedMessage }: {
+        participantIds: string[],
+        message?: string,
+        forwardedMessage?: { originalMessageId: string; optionalMessage?: string }
+      } = req.body;
+
+      // Validate participantIds
+      if (!participantIds || !Array.isArray(participantIds) || participantIds.length === 0) {
+        res.status(400).json({
+          error: 'participantIds array is required and cannot be empty',
+          details: 'Provide at least one participant ID'
+        });
+        return;
+      }
+
+      // Remove duplicates and filter out current user
+      const uniqueParticipantIds = [...new Set(participantIds)].filter(id => id !== currentUserId);
+
+      if (uniqueParticipantIds.length === 0) {
+        res.status(400).json({
+          error: 'No valid participants provided',
+          details: 'Cannot create DM with yourself or empty participant list'
+        });
+        return;
+      }
+
+      // Check participant limit (9 others + 1 creator = 10 max)
+      if (uniqueParticipantIds.length > 9) {
+        res.status(400).json({
+          error: 'Too many participants',
+          details: 'Maximum 9 participants allowed (10 total including creator)',
+          maxParticipants: 9
+        });
+        return;
+      }
+
+      // Validate all participants exist and are active
+      const participantUsers = [];
+      for (const participantId of uniqueParticipantIds) {
+        const user = await this.userRepository.findById(participantId);
+        if (!user || user.status !== 'ACTIVE') {
+          res.status(404).json({
+            error: 'Participant not found or inactive',
+            userId: participantId
+          });
+          return;
+        }
+        participantUsers.push(user);
+      }
+
+      // Determine scope type and handle accordingly
+      const isOneOnOne = uniqueParticipantIds.length === 1;
+
+      if (isOneOnOne) {
+        // Handle 1-on-1 DM (existing logic)
+        const targetUserId = uniqueParticipantIds[0];
+        const targetUser = participantUsers[0];
+
+        // Check if DM already exists
+        const existingDM = await this.channelRepository.getDMChannel(currentUserId, targetUserId);
+        if (existingDM) {
+          const conversations = await this.conversationRepository.getChannelConversations(existingDM.id);
+          const participants = await this.channelParticipantRepository.getChannelParticipants(existingDM.id);
+          const unreadCount = await unreadService.getUnreadCountForChannel(existingDM.id, currentUserId);
+
+          // Send message or forwarded message if provided, even for existing DM
+          let initialConversation = null;
+          if (forwardedMessage) {
+            initialConversation = await this.sendForwardedMessage(existingDM.id, currentUserId, forwardedMessage);
+          } else if (message && message.trim()) {
+            initialConversation = await this.sendInitialMessage(existingDM.id, currentUserId, message);
+          }
+
+          res.status(200).json({
+            message: 'DM channel already exists',
+            id: existingDM.id,
+            name: existingDM.name,
+            scopeType: existingDM.scopeType,
+            description: existingDM.description,
+            visibility: existingDM.visibility,
+            projectId: existingDM.projectId,
+            conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
+            participantCount: participants.length,
+            unreadCount,
+            lastActivityAt: existingDM.lastActivityAt,
+            createdAt: existingDM.createdAt,
+            isExisting: true,
+            targetUser: {
+              id: targetUser.id,
+              name: targetUser.name,
+              email: targetUser.email,
+              picture: targetUser.picture
+            },
+            initialConversation
+          });
+          return;
+        }
+
+        const v = [targetUserId, currentUserId];
+
+        // Create new 1-on-1 DM
+        const channelData: CreateChannelInput = {
+          scopeType: 'DM',
+          name: v.sort().join(","),
+          description: `Direct message between ${await this.getUserInfo(currentUserId).then(u => u.name)} and ${targetUser.name}`,
+          visibility: 'PRIVATE',
+          createdBy: currentUserId,
+          projectId: 'default',
+        };
+
+        const channel = await this.channelRepository.create(channelData);
+
+        // Add participants - creator sees DM immediately, recipient only sees it after first message
+        await this.channelParticipantRepository.addParticipant(channel.id, currentUserId, 'ADMIN');
+        await this.channelParticipantRepository.addParticipant(channel.id, targetUserId, 'MEMBER', true);
+
+        // If message or forwarded message is provided, create initial conversation and message using helper method
+        let initialConversation = null;
+        if (forwardedMessage) {
+          initialConversation = await this.sendForwardedMessage(channel.id, currentUserId, forwardedMessage);
+        } else if (message && message.trim()) {
+          initialConversation = await this.sendInitialMessage(channel.id, currentUserId, message);
+        }
+
+        const response = {
+          message: 'DM channel created successfully',
+          id: channel.id,
+          name: channel.name,
+          scopeType: channel.scopeType,
+          description: channel.description,
+          visibility: channel.visibility,
+          projectId: channel.projectId,
+          conversationCount: initialConversation ? 1 : 0,
+          participantCount: 2,
+          unreadCount: 0,
+          lastActivityAt: channel.lastActivityAt,
+          createdAt: channel.createdAt,
+          targetUser: {
+            id: targetUser.id,
+            name: targetUser.name,
+            email: targetUser.email,
+            picture: targetUser.picture
+          },
+          isExisting: false,
+          initialConversation
+        };
+
+        res.status(201).json(response);
+
+        // Queue Vespa job in background for DM - worker will handle all processing
+        vespaQueue.addJob({
+          schema: channelSchema,
+          jobType: "feed",
+          docId: channel.id,
+          userId: currentUserId
+        }).catch(error => {
+          logger.error('Error queuing Vespa job for DM:', error);
+        });
+      } else {
+        // Handle Group DM
+        const allMemberIds = [currentUserId, ...uniqueParticipantIds].sort();
+
+        // Check for existing group DM with same members
+        const existingGroupDM = await this.channelRepository.getGroupChannelByMembers(allMemberIds);
+        if (existingGroupDM) {
+          const conversations = await this.conversationRepository.getChannelConversations(existingGroupDM.id);
+          const participants = await this.channelParticipantRepository.getChannelParticipants(existingGroupDM.id);
+          const unreadCount = await unreadService.getUnreadCountForChannel(existingGroupDM.id, currentUserId);
+
+          // Get participant user info
+          const participantDetails = await Promise.all(
+            participants.map(async (p) => ({
+              userId: p.userId,
+              role: p.role,
+              joinedAt: p.joinedAt,
+              user: await this.getUserInfo(p.userId),
+            }))
+          );
+
+          // Send message or forwarded message if provided, even for existing Group DM
+          let initialConversation = null;
+          if (forwardedMessage) {
+            initialConversation = await this.sendForwardedMessage(existingGroupDM.id, currentUserId, forwardedMessage);
+          } else if (message && message.trim()) {
+            initialConversation = await this.sendInitialMessage(existingGroupDM.id, currentUserId, message);
+          }
+
+          res.status(200).json({
+            message: 'Group DM already exists',
+            id: existingGroupDM.id,
+            name: existingGroupDM.name,
+            scopeType: existingGroupDM.scopeType,
+            description: existingGroupDM.description,
+            visibility: existingGroupDM.visibility,
+            projectId: existingGroupDM.projectId,
+            conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
+            participantCount: participants.length,
+            unreadCount,
+            lastActivityAt: existingGroupDM.lastActivityAt,
+            createdAt: existingGroupDM.createdAt,
+            participants: participantDetails,
+            isExisting: true,
+            initialConversation
+          });
+          return;
+        }
+
+        const titleForGroupDms = allMemberIds.sort().join(",");
+
+        // Create new group DM
+        const channelData: CreateChannelInput = {
+          scopeType: 'GROUP_DM',
+          name: titleForGroupDms,
+          visibility: 'PRIVATE',
+          createdBy: currentUserId,
+          projectId: 'default',
+        };
+
+        const channel = await this.channelRepository.create(channelData);
+
+        // Add all participants - creator sees DM immediately, recipients only see it after first message
+        await this.channelParticipantRepository.addParticipant(channel.id, currentUserId, 'ADMIN');
+
+        const participantAddResults = [];
+        for (const participantId of uniqueParticipantIds) {
+          await this.channelParticipantRepository.addParticipant(channel.id, participantId, 'MEMBER', true);
+          participantAddResults.push({
+            userId: participantId,
+            user: participantUsers.find(u => u.id === participantId),
+            role: 'MEMBER'
+          });
+        }
+
+        // Add creator info
+        const allParticipantDetails = [
+          {
+            userId: currentUserId,
+            user: await this.getUserInfo(currentUserId),
+            role: 'ADMIN'
+          },
+          ...participantAddResults
+        ];
+
+        // If message or forwarded message is provided, create initial conversation and message using helper method
+        let initialConversation = null;
+        if (forwardedMessage) {
+          initialConversation = await this.sendForwardedMessage(channel.id, currentUserId, forwardedMessage);
+        } else if (message && message.trim()) {
+          initialConversation = await this.sendInitialMessage(channel.id, currentUserId, message);
+        }
+
+        const response = {
+          message: 'Group DM created successfully',
+          id: channel.id,
+          name: channel.name,
+          scopeType: channel.scopeType,
+          description: channel.description,
+          visibility: channel.visibility,
+          projectId: channel.projectId,
+          conversationCount: initialConversation ? 1 : 0,
+          participantCount: allMemberIds.length,
+          unreadCount: 0,
+          lastActivityAt: channel.lastActivityAt,
+          createdAt: channel.createdAt,
+          participants: allParticipantDetails,
+          isExisting: false,
+          initialConversation
+        };
+
+        res.status(201).json(response);
+
+        // Queue Vespa job in background for Group DM - worker will handle all processing
+        vespaQueue.addJob({
+          schema: channelSchema,
+          jobType: "feed",
+          docId: channel.id,
+          userId: currentUserId
+        }).catch(error => {
+          logger.error('Error queuing Vespa job for Group DM:', error);
+        });
+      }
+    } catch (error) {
+      logger.error('Error creating DM:', error);
+
+      if (error instanceof Error && error.message.includes('already exists in organization')) {
+        res.status(409).json({
+          error: 'DM_ALREADY_EXISTS',
+          message: 'A DM channel already exists'
+        });
+        return;
+      }
+
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // POST /api/users/me/dms/:channelId/add - Add participants to GROUP_DM
+  addGroupDmParticipants = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const currentUserId = req.user!.id;
+      const { channelId } = req.params;
+      const { userIds, includeHistory }: { userIds: string[], includeHistory: boolean } = req.body;
+
+      // Validate request body
+      if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+        res.status(400).json({
+          error: 'userIds array is required and cannot be empty'
+        });
+        return;
+      }
+
+      if (typeof includeHistory !== 'boolean') {
+        res.status(400).json({
+          error: 'includeHistory must be a boolean'
+        });
+        return;
+      }
+
+      // Remove duplicates and filter out current user
+      const uniqueUserIds = [...new Set(userIds)].filter(id => id !== currentUserId);
+
+      if (uniqueUserIds.length === 0) {
+        res.status(400).json({
+          error: 'No valid participants provided'
+        });
+        return;
+      }
+
+      // 1. Validate channel exists
+      const channel = await this.channelRepository.findById(channelId);
+      if (!channel) {
+        res.status(404).json({
+          error: 'Channel not found'
+        });
+        return;
+      }
+
+      // 2. Validate channel is GROUP_DM
+      if (channel.scopeType !== 'GROUP_DM') {
+        res.status(400).json({
+          error: 'This endpoint is only for GROUP_DM channels',
+          channelScopeType: channel.scopeType
+        });
+        return;
+      }
+
+      // 3. Validate requesting user is a participant
+      const currentParticipants = await this.channelParticipantRepository.getChannelParticipants(channelId);
+      const isParticipant = currentParticipants.some(p => p.userId === currentUserId);
+
+      if (!isParticipant) {
+        res.status(403).json({
+          error: 'You must be a participant to add others to this GROUP_DM'
+        });
+        return;
+      }
+
+      // 4. Validate all new userIds are valid, active users
+      const newUsers = [];
+      for (const userId of uniqueUserIds) {
+        const user = await this.userRepository.findById(userId);
+        if (!user || user.status !== 'ACTIVE') {
+          res.status(404).json({
+            error: 'One or more participants not found or inactive',
+            invalidUserId: userId
+          });
+          return;
+        }
+        newUsers.push(user);
+      }
+
+      // 5. Calculate combined participant list (current + new, sorted)
+      const currentUserIds = currentParticipants.map(p => p.userId);
+      const allParticipantIds = [...currentUserIds, ...uniqueUserIds].sort();
+
+      // 5.1 Validate total participant count doesn't exceed 10
+      if (allParticipantIds.length > 10) {
+        res.status(400).json({
+          error: 'Too many participants',
+          details: 'Maximum 10 participants allowed in a GROUP_DM',
+          currentParticipants: currentUserIds.length,
+          attemptingToAdd: uniqueUserIds.length,
+          totalWouldBe: allParticipantIds.length,
+          maxParticipants: 10
+        });
+        return;
+      }
+
+      // 6. Check for existing GROUP_DM with same participants
+      const existingGroupDM = await this.channelRepository.getGroupChannelByMembers(allParticipantIds);
+
+      // 7. Handle different scenarios
+      if (existingGroupDM) {
+        // Existing GROUP_DM found
+        let conversationsMigrated = 0;
+
+        if (includeHistory) {
+          // Migrate conversations to existing channel
+          const conversations = await this.conversationRepository.getChannelConversations(channelId);
+          const conversationIds = conversations.map(c => c.conversationId);
+
+          if (conversationIds.length > 0) {
+            conversationsMigrated = await this.conversationRepository.migrateConversationsToChannel(
+              conversationIds,
+              existingGroupDM.id
+            );
+          }
+
+          res.status(200).json({
+            channelId: existingGroupDM.id,
+            isExisting: true,
+            participantsAdded: 0,
+            conversationsMigrated,
+            message: conversationsMigrated > 0
+              ? `${conversationsMigrated} conversation(s) migrated to existing group DM`
+              : 'Navigated to existing group DM'
+          });
+        } else {
+          // Just navigate to existing channel, no migration
+          res.status(200).json({
+            channelId: existingGroupDM.id,
+            isExisting: true,
+            participantsAdded: 0,
+            conversationsMigrated: 0,
+            message: 'Navigated to existing group DM'
+          });
+        }
+      } else {
+        // No existing GROUP_DM with these participants
+        if (includeHistory) {
+          // Add participants to current channel
+          let participantsAdded = 0;
+          let participantsAddedList = [];
+          for (const userId of uniqueUserIds) {
+            // Check if already a participant
+            const alreadyParticipant = currentParticipants.some(p => p.userId === userId);
+            if (!alreadyParticipant) {
+              await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+              participantsAddedList.push(userId);
+              participantsAdded++;
+            }
+          }
+
+          // Get all participant user IDs (current + newly added)
+          const currentUserIds = currentParticipants.map(p => p.userId);
+          const allParticipantIds = [...currentUserIds, ...participantsAddedList].sort();
+
+          // Update channel name to reflect all participants (using user IDs)
+          const newChannelName = allParticipantIds.join(',');
+          
+          await this.channelRepository.update(channelId, {
+            name: newChannelName
+          });
+          
+          // Update current channel's last activity
+          await this.channelRepository.updateLastActivity(channelId);
+
+          // Send system message for added participants
+          if (participantsAddedList.length > 0) {
+            const validUsers = await Promise.all(
+              participantsAddedList.map(async (userId) => {
+                const user = await this.userRepository.findById(userId);
+                return user ? { userId: user.id, userName: user.name } : null;
+              })
+            );
+            const filteredUsers = validUsers.filter((u): u is { userId: string; userName: string } => u !== null);
+
+            if (filteredUsers.length > 0) {
+              const authData = await this.getUserInfo(currentUserId);
+              await this.sendAddAndRemoveParticipantsSystemMessage(
+                channelId,
+                filteredUsers,
+                authData,
+                'participants_added'
+              );
+            }
+          }
+
+          res.status(200).json({
+            channelId: channel.id,
+            isExisting: false,
+            participantsAdded,
+            conversationsMigrated: 0,
+            message: `${participantsAdded} participant(s) added to current group DM`
+          });
+        } else {
+          // Create new GROUP_DM with all participants
+          const channelData: CreateChannelInput = {
+            scopeType: 'GROUP_DM',
+            name: allParticipantIds.join(','),
+            visibility: 'PRIVATE',
+            createdBy: currentUserId,
+            projectId: 'default',
+          };
+
+          const newChannel = await this.channelRepository.create(channelData);
+
+          // Add all participants to the new channel
+          let participantsAdded = 0;
+          for (const participantId of allParticipantIds) {
+            const role = participantId === currentUserId ? 'ADMIN' : 'MEMBER';
+            await this.channelParticipantRepository.addParticipant(newChannel.id, participantId, role);
+            participantsAdded++;
+          }
+
+          res.status(201).json({
+            channelId: newChannel.id,
+            isExisting: false,
+            participantsAdded,
+            conversationsMigrated: 0,
+            message: 'New group DM created'
+          });
+        }
+      }
+    } catch (error) {
+      logger.error('Error adding GROUP_DM participants:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+}

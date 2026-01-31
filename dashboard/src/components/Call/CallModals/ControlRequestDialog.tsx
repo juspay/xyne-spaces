@@ -1,0 +1,56 @@
+import { Bot, Check, XCircle } from 'lucide-react';
+import { Dialog } from '../../ui/Dialog/Dialog';
+
+interface ControlRequestDialogProps {
+  isOpen: boolean;
+  requesterName: string;
+  onApprove: () => void;
+  onDeny: () => void;
+}
+
+export function ControlRequestDialog({
+  isOpen,
+  requesterName,
+  onApprove,
+  onDeny,
+}: ControlRequestDialogProps): React.ReactElement {
+  return (
+    <Dialog open={isOpen} onOpenChange={onDeny} title='Control Request'>
+      <div className='p-6'>
+        <div className='flex items-center gap-3 mb-6'>
+          <div className='w-12 h-12 bg-yellow-500/20 rounded-full flex items-center justify-center'>
+            <Bot className='w-6 h-6 text-yellow-500' />
+          </div>
+          <div>
+            <h3 className='text-lg font-semibold text-gray-900 dark:text-white'>
+              AI Control Request
+            </h3>
+            <p className='text-sm text-gray-500 dark:text-gray-400'>Xyne Automatic</p>
+          </div>
+        </div>
+
+        <p className='text-base text-gray-700 dark:text-gray-300 mb-6'>
+          <span className='font-semibold text-gray-900 dark:text-white'>{requesterName}</span> is
+          requesting control of the AI assistant.
+        </p>
+
+        <div className='flex gap-3'>
+          <button
+            onClick={onApprove}
+            className='flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white font-medium transition-all duration-200 shadow-lg hover:shadow-xl'
+          >
+            <Check className='w-5 h-5' />
+            Approve
+          </button>
+          <button
+            onClick={onDeny}
+            className='flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gray-600 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 text-white font-medium transition-all duration-200 shadow-lg hover:shadow-xl'
+          >
+            <XCircle className='w-5 h-5' />
+            Deny
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}

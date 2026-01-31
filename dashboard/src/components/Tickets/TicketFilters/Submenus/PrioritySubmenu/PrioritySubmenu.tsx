@@ -1,0 +1,73 @@
+import { ReactElement, useMemo } from 'react';
+import { Check } from 'lucide-react';
+import { TicketPriority } from '@xyne/shared';
+import { PRIORITY_CONFIG } from '../../Utils/filterConstants';
+import { getPriorityIcon } from '../../../TicketCard/TicketCard.utils';
+
+interface PrioritySubmenuProps {
+  selectedPriorities: TicketPriority[];
+  onChange: (priorities: TicketPriority[]) => void;
+  availablePriorities?: TicketPriority[];
+}
+
+export const PrioritySubmenu = ({
+  selectedPriorities,
+  onChange,
+  availablePriorities,
+}: PrioritySubmenuProps): ReactElement => {
+  const availablePrioritySet = useMemo(() => {
+    return availablePriorities && availablePriorities.length > 0
+      ? new Set(availablePriorities.map(p => String(p)))
+      : null;
+  }, [availablePriorities]);
+
+  const prioritiesToShow = useMemo(() => {
+    return Object.entries(PRIORITY_CONFIG).filter(([key]) => {
+      if (availablePrioritySet && !availablePrioritySet.has(key)) {
+        return false;
+      }
+      return true;
+    });
+  }, [availablePrioritySet]);
+
+  const handleToggle = (priority: TicketPriority): void => {
+    const isSelected = selectedPriorities.includes(priority);
+    if (isSelected) {
+      onChange(selectedPriorities.filter(p => p !== priority));
+    } else {
+      onChange([...selectedPriorities, priority]);
+    }
+  };
+
+  return (
+    <div className='py-1.5 px-1 flex flex-col gap-1'>
+      {prioritiesToShow.length > 0 ? (
+        prioritiesToShow.map(([priority, config]) => {
+          const isSelected = selectedPriorities.includes(priority as TicketPriority);
+
+          return (
+            <button
+              key={priority}
+              onClick={() => handleToggle(priority as TicketPriority)}
+              type='button'
+              className={`flex items-center justify-between w-full px-3 py-2 transition-colors rounded-md 
+                ${isSelected ? 'bg-[#F2F2F3] text-gray-900' : 'hover:bg-gray-50 text-gray-900'}
+              `}
+            >
+              <div className='flex items-center gap-2'>
+                <div className='flex items-center justify-center'>
+                  {getPriorityIcon(priority as TicketPriority)}
+                </div>
+                <span className='text-sm font-medium'>{config.label}</span>
+              </div>
+
+              {isSelected && <Check className='w-5 h-5 text-[#3B4145]' strokeWidth={2.5} />}
+            </button>
+          );
+        })
+      ) : (
+        <div className='px-4 py-3 text-sm text-gray-500'>No priority options available</div>
+      )}
+    </div>
+  );
+};

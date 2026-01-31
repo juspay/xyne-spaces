@@ -1,0 +1,980 @@
+import React, { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { AvatarSize, Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import * as Popover from '@radix-ui/react-popover';
+import { MessageType, parseForwardedMessageXml, isForwardedMessageXml } from '@xyne/shared';
+import {
+  formatFullTimestamp,
+  formatTimeAmPm,
+  formatThreadTimestamp,
+  formatTime12HourNoAmPm,
+  formatRelativeTimestamp,
+} from '../../../utils/dateUtils';
+import { QueryResultType } from '@rocicorp/zero';
+import { queries } from '../../../zero/queries';
+import UserAvatar from '../../UserAvatar/UserAvatar';
+import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
+import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
+import { useReactions } from '../../../hooks/useReaction';
+import { MessageBubbleProps } from './MessageBubble.types';
+import { useAuth } from '../../../hooks/useAuth';
+import { useDebugSettings } from '../../../hooks/useDebugSettings';
+import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
+import { usePlatform } from '../../../hooks/usePlatform';
+import { Bookmark, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
+import { MobileMessageMyBubble } from './MobileMessageMyBubble';
+import { Button } from '../Button/Button';
+import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
+import { BotBubble } from '../../Chat/BotBubble';
+import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
+import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
+import { MessageMetadata } from './MessageBubble.utils';
+import { NonParticipantActions } from './NonParticipantActions';
+import { PostedInLink } from './PostedInLink';
+import { MessageHeader } from './MessageHeader';
+import HuddleIcon from '../../icons/HuddleIcon';
+import workflowBotAvatar from './workflowBotAvatar.png';
+import { WorkflowBubble } from '../../Chat/WorkflowBubble/WorkflowBubble';
+import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
+import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
+import { useUsers, useUser } from '../../../hooks/useUsers';
+import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
+import { useRouteContext } from '../../../hooks/useRouteContext';
+import DOMPurify from 'dompurify';
+import { CallBubble } from './CallBubble';
+import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
+import { emojiActor } from '../../../machines/emojiMachine';
+import { useSelector } from '@xstate/react';
+
+// ================== ATTACHMENTS BLOCK ==================
+type AttachmentType = QueryResultType<
+  typeof queries.conversationMessages
+>[number]['attachments'][number];
+
+interface AttachmentsBlockProps {
+  attachments: readonly AttachmentType[];
+  isMobile: boolean;
+  separateVideos?: boolean;
+  className?: string;
+}
+
+/**
+ * AttachmentsBlock renders message attachments with expand/collapse functionality.
+ * Used for both regular messages and forwarded messages.
+ *
+ * @param attachments - Array of attachment objects
+ * @param isMobile - Whether the view is mobile
+ * @param separateVideos - Whether to render videos in separate rows (default: true for regular messages)
+ * @param className - Optional wrapper class name
+ */
+const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
+  attachments,
+  isMobile,
+  separateVideos = true,
+  className = '',
+}) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={className}>
+      <div className='flex items-center gap-3 text-xs font-medium'>
+        <div className='flex items-center gap-1'>
+          <span className='text-gray-500'>
+            {attachments.length > 1
+              ? `${attachments.length} files`
+              : attachments[0]?.originalFilename}
+          </span>
+          <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
+            {isExpanded ? (
+              <ChevronDown className='w-4 h-4 text-gray-500' />
+            ) : (
+              <ChevronRight className='w-4 h-4 text-gray-500' />
+            )}
+          </button>
+        </div>
+
+        {attachments.length > 1 && (
+          <>
+            <span className='text-gray-400'>|</span>
+            <button
+              type='button'
+              onClick={() => {
+                attachments.forEach(attachment => {
+                  void downloadAttachment(attachment.id, attachment.originalFilename);
+                });
+              }}
+              className='flex items-center gap-2 text-gray-600 hover:text-gray-900'
+            >
+              <span>Download all</span>
+            </button>
+          </>
+        )}
+      </div>
+
+      {isExpanded && (
+        <div className='flex flex-col gap-3'>
+          {separateVideos ? (
+            <>
+              {/* Videos first - each in separate row */}
+              {attachments
+                .filter(attachment => attachment.mimetype.startsWith('video/'))
+                .map(attachment => (
+                  <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
+                    <MessageAttachment attachment={attachment} />
+                  </div>
+                ))}
+
+              {/* Other attachments in one row */}
+              {attachments.filter(attachment => !attachment.mimetype.startsWith('video/')).length >
+                0 && (
+                <div
+                  className={`flex gap-3 ${isMobile ? 'overflow-x-auto flex-nowrap no-scrollbar' : 'flex-wrap'}`}
+                >
+                  {attachments
+                    .filter(attachment => !attachment.mimetype.startsWith('video/'))
+                    .map(attachment => {
+                      const isImageOrText =
+                        attachment.mimetype.startsWith('image/') ||
+                        attachment.mimetype === 'text/plain';
+
+                      return (
+                        <div
+                          key={attachment.id}
+                          className={`flex items-center gap-2 py-2 text-sm ${!isImageOrText ? 'w-[256px] aspect-square' : ''} ${isMobile ? 'flex-shrink-0' : ''}`}
+                        >
+                          <MessageAttachment attachment={attachment} />
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </>
+          ) : (
+            /* All attachments in one row (for forwarded messages) */
+            <div
+              className={`flex gap-3 ${isMobile ? 'overflow-x-auto flex-nowrap no-scrollbar' : 'flex-wrap'}`}
+            >
+              {attachments.map(attachment => (
+                <div
+                  key={attachment.id}
+                  className={`flex items-center gap-2 py-2 text-sm ${isMobile ? 'flex-shrink-0' : ''}`}
+                >
+                  <MessageAttachment attachment={attachment} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const getMessageBubbleClassName = (
+  isHovered: boolean,
+  variant?: MessageBubbleProps['variant'],
+  isPinned?: boolean,
+  isBookmarked?: boolean,
+  isHighlighted?: boolean,
+  isActiveCall?: boolean,
+  isXyneBot?: boolean,
+  isPrivateSystemNotice?: boolean,
+  contentOnly?: boolean,
+  isShowInChannel?: boolean,
+  context?: 'channel' | 'thread',
+  isFirstInThread?: boolean,
+): string => {
+  const classes = [
+    'group flex items-start justify-start gap-2 px-4 py-1 relative',
+    variant !== 'pinned' &&
+      !isActiveCall &&
+      !isPrivateSystemNotice &&
+      !isShowInChannel &&
+      'hover:bg-gray-100/50',
+    variant !== 'pinned' &&
+      !isActiveCall &&
+      !isPrivateSystemNotice &&
+      !isShowInChannel &&
+      'active:bg-gray-200/50 transition-colors',
+    variant !== 'pinned' &&
+      isHovered &&
+      !isActiveCall &&
+      !isPrivateSystemNotice &&
+      !isShowInChannel &&
+      'bg-gray-100/50',
+    isActiveCall && 'bg-green-50 rounded-md',
+    isShowInChannel &&
+      variant !== 'pinned' && [
+        'bg-green-50 rounded-sm',
+        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-green-400',
+      ],
+    isPinned &&
+      variant !== 'pinned' &&
+      !isShowInChannel &&
+      (context === 'channel' || (context === 'thread' && isFirstInThread)) && [
+        'bg-yellow-50 rounded-sm',
+        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-yellow-400',
+      ],
+    isBookmarked &&
+      variant !== 'pinned' &&
+      !isPinned &&
+      !isShowInChannel && [
+        'bg-blue-50 rounded-sm',
+        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-blue-400',
+      ],
+    variant === 'pinned' && 'bg-white border border-gray-200 shadow-sm rounded-xl',
+    isHighlighted && 'highlight-message',
+    isXyneBot && 'pt-5',
+    isPrivateSystemNotice && 'bg-gray-100 pt-3',
+    contentOnly && '!px-0',
+  ]
+    .flat()
+    .filter(Boolean)
+    .join(' ');
+
+  return classes;
+};
+
+/**
+ * MessageBubble component displays a single message in a conversation.
+ * Supports user avatars, reactions, attachments, and custom action buttons.
+ *
+ * @param isHovered - Optional flag to control the hover state externally.
+ * @param message - The message object to display (includes sender, content, reactions, attachments)
+ * @param onUserClick - Optional callback when user avatar/name is clicked
+ * @param renderActions - Optional function to render custom action buttons for the message
+ * @param showAvatar - Whether to display the sender's avatar and name (default: true)
+ * @returns Message bubble component with all message details
+ */
+
+export const MessageBubble: React.FC<MessageBubbleProps> = ({
+  isHovered = false,
+  message,
+  renderActions,
+  showAvatar = true,
+  isPinned,
+  isBookmarked,
+  variant = 'default',
+  context,
+  isHighlighted,
+  channelId,
+  conversation,
+  contentOnly = false,
+  onClick,
+  threadInfo,
+  channelScopeType,
+  isFirstInThread = false,
+}) => {
+  const navigate = useNavigate();
+  const { toggleReaction } = useReactions();
+  const reactions = message.reactions || [];
+  console.log('reactions ', message.reactions);
+  const attachments = message.attachments || [];
+
+  const isSystemMessage = message.msgType === MessageType.SYSTEM;
+  const isBotMessage = message.msgType === MessageType.BOT;
+  const isForwardedMessage = message.msgType === MessageType.FORWARDED;
+  const metadata = message.metadata as MessageMetadata | null;
+
+  // Parse forwarded message XML content
+  const forwardedMessageData = useMemo(() => {
+    if (isForwardedMessage && isForwardedMessageXml(message.content)) {
+      return parseForwardedMessageXml(message.content);
+    }
+    return null;
+  }, [isForwardedMessage, message.content]);
+  const systemMessageStyles: React.CSSProperties = {
+    color: '#868D95',
+  };
+  const isWorkflowMessage =
+    (isSystemMessage && metadata?.workflowId && metadata?.ticketId && !metadata?.messageSubtype) ||
+    (isBotMessage && metadata?.xyneId && metadata?.ticketId);
+  const isCallMessage = metadata?.isCallMessage === true;
+  const isActiveCall = isCallMessage && metadata?.operation === 'call_active';
+  const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
+  const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
+  const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
+  // Detect any message with markdown content format (call_summary, call_prd, etc.)
+  const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
+
+  const { user } = useAuth();
+  const { isMobile } = usePlatform();
+  const sender = useUser(message.senderId);
+  const isMe = user?.id === message.senderId;
+  const { baseRoute } = useRouteContext();
+
+  const handleUserClick = (userId: string): void => {
+    void navigate(`${baseRoute}/${channelId}/profile/${userId}`);
+  };
+
+  const { settings: debugSettings } = useDebugSettings();
+
+  const shouldShowPending = useMemo(() => {
+    return debugSettings.showSendIndicators && isMe && !message.isSent;
+  }, [debugSettings.showSendIndicators, isMe, message.isSent]);
+
+  if (!message) {
+    return null;
+  }
+
+  // For mobile "my" messages, use the specialized mobile component
+  if (isMobile && isMe) {
+    return (
+      <MobileMessageMyBubble
+        message={message}
+        showAvatar={showAvatar}
+        isPinned={isPinned ?? false}
+        isBookmarked={isBookmarked ?? false}
+        isHighlighted={isHighlighted ?? false}
+        channelId={channelId}
+        {...(conversation && { conversation })}
+        context={context}
+        threadInfo={threadInfo}
+        channelScopeType={channelScopeType}
+        isFirstInThread={isFirstInThread}
+      />
+    );
+  }
+
+  const isXyneBot = message.msgType === MessageType.BOT;
+  const isShowInChannelHighlight = context === 'thread' && message.showInChannel === true;
+
+  const messageBubbleClassName = getMessageBubbleClassName(
+    (isHovered = isHovered || shouldShowPending),
+    variant,
+    isPinned,
+    isBookmarked,
+    isHighlighted,
+    isActiveCall,
+    isXyneBot,
+    isPrivateSystemNotice,
+    contentOnly,
+    isShowInChannelHighlight,
+    context,
+    isFirstInThread,
+  );
+
+  return (
+    <>
+      {isPinned &&
+        variant !== 'pinned' &&
+        (context === 'channel' || (context === 'thread' && isFirstInThread)) && (
+          <div className='flex items-center gap-1 text-xs text-amber-600 font-medium mb-1 ml-12'>
+            <PinnedIcon className='w-4 h-4' />
+            <span>Pinned</span>
+          </div>
+        )}
+      {isBookmarked && variant !== 'pinned' && (
+        <div className='flex items-center gap-1 text-[11px] text-blue-600 font-normal mb-1 ml-12'>
+          <Bookmark className='w-3 h-3 fill-current' />
+          <span>Reminder Set</span>
+        </div>
+      )}
+      {/* eslint-disable jsx-a11y/no-static-element-interactions*/}
+
+      {isPrivateSystemNotice && (
+        <MessageHeader
+          svgBgColor='#F3F4F6'
+          icon='visibility'
+          text='Only Visible to you'
+          backgroundColor='bg-gray-100'
+          textColor='text-[#1D1E1F]'
+        />
+      )}
+
+      <div
+        data-component='MessageBubble'
+        className={messageBubbleClassName}
+        onClick={onClick}
+        onKeyDown={
+          onClick
+            ? (e): void => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onClick(e as unknown as React.MouseEvent<HTMLDivElement>);
+                }
+              }
+            : undefined
+        }
+        style={{ cursor: onClick ? 'pointer' : undefined }}
+      >
+        {/* eslint-enable jsx-a11y/no-static-element-interactions */}
+
+        {/* ================== LEFT AVATAR ================== */}
+        {!contentOnly && (
+          <div className='w-8 h-full flex items-start justify-center'>
+            {message.isDeleted ? (
+              <div className='w-8 h-8 rounded-md flex items-center justify-center bg-gray-100'>
+                <Trash2 className='w-4 h-4 text-gray-500' />
+              </div>
+            ) : isWorkflowMessage ? (
+              <img
+                src={workflowBotAvatar}
+                alt='No files shared in this channel yet.'
+                width={32}
+                height={32}
+              />
+            ) : showAvatar && isCallMessage ? (
+              <div
+                className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-green-100' : 'bg-gray-100'}`}
+              >
+                <HuddleIcon color={isActiveCall ? '#15803d' : '#4b5563'} />
+              </div>
+            ) : showAvatar && isXyneBot ? (
+              <div className='flex items-center justify-center'>
+                <svg
+                  width='30'
+                  height='30'
+                  viewBox='0 0 20 20'
+                  fill='none'
+                  xmlns='http://www.w3.org/2000/svg'
+                >
+                  <rect x='0.25' y='0.25' width='19.5' height='19.5' rx='9.75' fill='#0361E2' />
+                  <rect
+                    x='0.25'
+                    y='0.25'
+                    width='19.5'
+                    height='19.5'
+                    rx='9.75'
+                    stroke='#E4E6E7'
+                    strokeWidth='0.5'
+                  />
+                  <path
+                    d='M10.2727 15.1761L10.2667 15.1771L10.2312 15.1946L10.2212 15.1966L10.2142 15.1946L10.1787 15.1766C10.1733 15.1753 10.1693 15.1763 10.1667 15.1796L10.1647 15.1846L10.1562 15.3986L10.1587 15.4086L10.1637 15.4151L10.2157 15.4521L10.2232 15.4541L10.2292 15.4521L10.2812 15.4151L10.2872 15.4071L10.2892 15.3986L10.2807 15.1851C10.2793 15.1798 10.2767 15.1768 10.2727 15.1761ZM10.4047 15.1196L10.3977 15.1206L10.3057 15.1671L10.3007 15.1721L10.2992 15.1776L10.3082 15.3926L10.3107 15.3986L10.3147 15.4026L10.4152 15.4486C10.4215 15.4503 10.4263 15.4489 10.4297 15.4446L10.4317 15.4376L10.4147 15.1306C10.413 15.1243 10.4097 15.1206 10.4047 15.1196ZM10.0472 15.1206C10.045 15.1193 10.0423 15.1188 10.0398 15.1194C10.0373 15.1199 10.0351 15.1214 10.0337 15.1236L10.0307 15.1306L10.0137 15.4376C10.014 15.4436 10.0168 15.4476 10.0222 15.4496L10.0297 15.4486L10.1302 15.4021L10.1352 15.3981L10.1367 15.3926L10.1457 15.1776L10.1442 15.1716L10.1392 15.1666L10.0472 15.1206Z'
+                    fill='#A0A7AB'
+                  />
+                  <path
+                    d='M8.52963 6.27088C8.82863 5.39588 10.0376 5.36938 10.3921 6.19138L10.4221 6.27138L10.8256 7.45138C10.9181 7.72199 11.0675 7.96963 11.2638 8.17759C11.4602 8.38554 11.6988 8.54898 11.9636 8.65688L12.0721 8.69737L13.2521 9.10038C14.1271 9.39937 14.1536 10.6084 13.3321 10.9629L13.2521 10.9929L12.0721 11.3964C11.8014 11.4888 11.5537 11.6382 11.3456 11.8345C11.1376 12.0308 10.9741 12.2695 10.8661 12.5344L10.8256 12.6424L10.4226 13.8229C10.1236 14.6979 8.91463 14.7244 8.56063 13.9029L8.52963 13.8229L8.12663 12.6429C8.03422 12.3722 7.88481 12.1244 7.6885 11.9164C7.49218 11.7083 7.25352 11.5448 6.98863 11.4369L6.88063 11.3964L5.70063 10.9934C4.82513 10.6944 4.79863 9.48537 5.62063 9.13137L5.70063 9.10038L6.88063 8.69737C7.15124 8.6049 7.39888 8.45547 7.60684 8.25916C7.81479 8.06285 7.97823 7.82422 8.08613 7.55937L8.12663 7.45138L8.52963 6.27088ZM9.47613 6.59387L9.07313 7.77388C8.93232 8.18653 8.70326 8.56353 8.40189 8.87862C8.10053 9.19372 7.7341 9.43934 7.32813 9.59837L7.20313 9.64388L6.02313 10.0469L7.20313 10.4499C7.61578 10.5907 7.99278 10.8197 8.30787 11.1211C8.62297 11.4225 8.86859 11.7889 9.02763 12.1949L9.07313 12.3199L9.47613 13.4999L9.87913 12.3199C10.0199 11.9072 10.249 11.5302 10.5504 11.2151C10.8517 10.9 11.2182 10.6544 11.6241 10.4954L11.7491 10.4504L12.9291 10.0469L11.7491 9.64388C11.3365 9.50307 10.9595 9.27401 10.6444 8.97264C10.3293 8.67128 10.0837 8.30485 9.92463 7.89888L9.87963 7.77388L9.47613 6.59387ZM13.4761 4.54688C13.5697 4.54687 13.6613 4.57311 13.7407 4.62261C13.8201 4.67211 13.884 4.74288 13.9251 4.82688L13.9491 4.88538L14.1241 5.39838L14.6376 5.57338C14.7314 5.60522 14.8135 5.66418 14.8737 5.74278C14.9339 5.82138 14.9694 5.91608 14.9758 6.01489C14.9821 6.11369 14.9589 6.21214 14.9092 6.29777C14.8595 6.3834 14.7855 6.45234 14.6966 6.49588L14.6376 6.51988L14.1246 6.69488L13.9496 7.20837C13.9177 7.30209 13.8587 7.38422 13.7801 7.44437C13.7015 7.50452 13.6067 7.53997 13.5079 7.54624C13.4091 7.5525 13.3107 7.5293 13.2251 7.47956C13.1395 7.42983 13.0706 7.35581 13.0271 7.26688L13.0031 7.20837L12.8281 6.69537L12.3146 6.52038C12.2209 6.48853 12.1387 6.42957 12.0785 6.35097C12.0183 6.27237 11.9828 6.17767 11.9765 6.07886C11.9702 5.98006 11.9933 5.88161 12.043 5.79598C12.0927 5.71035 12.1667 5.64141 12.2556 5.59788L12.3146 5.57388L12.8276 5.39888L13.0026 4.88538C13.0363 4.78659 13.1001 4.70083 13.185 4.64012C13.27 4.57942 13.3717 4.54681 13.4761 4.54688Z'
+                    fill='white'
+                  />
+                  <defs>
+                    <linearGradient
+                      id='paint0_linear_6453_10193'
+                      x1='11.1905'
+                      y1='12'
+                      x2='1.16709'
+                      y2='1.73796'
+                      gradientUnits='userSpaceOnUse'
+                    >
+                      <stop stopColor='#FF4F4F' />
+                      <stop offset='1' stopColor='#D77F7F' />
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </div>
+            ) : isPrivateSystemNotice ? (
+              <div className={`w-8 h-8 flex items-center justify-center bg-gray-200 rounded-lg`}>
+                <svg
+                  width='16'
+                  height='16'
+                  viewBox='0 0 16 16'
+                  fill='none'
+                  xmlns='http://www.w3.org/2000/svg'
+                >
+                  <g clipPath='url(#clip0_1872_7937)'>
+                    <path
+                      d='M7.99967 10.6663C9.47243 10.6663 10.6663 9.47243 10.6663 7.99967C10.6663 6.52692 9.47243 5.33301 7.99967 5.33301C6.52692 5.33301 5.33301 6.52692 5.33301 7.99967C5.33301 9.47243 6.52692 10.6663 7.99967 10.6663Z'
+                      stroke='#1D1E1F'
+                      strokeWidth='1.33333'
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                    />
+                    <path
+                      d='M10.6663 5.33301V8.66635C10.6663 9.19678 10.8771 9.70549 11.2521 10.0806C11.6272 10.4556 12.1359 10.6663 12.6663 10.6663C13.1968 10.6663 13.7055 10.4556 14.0806 10.0806C14.4556 9.70549 14.6663 9.19678 14.6663 8.66635V7.99968C14.6663 6.49788 14.1593 5.04008 13.2273 3.86246C12.2953 2.68484 10.993 1.8564 9.53137 1.51135C8.06975 1.16631 6.53444 1.32488 5.17419 1.96138C3.81395 2.59788 2.70846 3.67501 2.03683 5.01826C1.36521 6.3615 1.1668 7.89217 1.47375 9.36227C1.7807 10.8324 2.57503 12.1558 3.72803 13.118C4.88104 14.0803 6.32518 14.6251 7.82647 14.6641C9.32776 14.7031 10.7982 14.2341 11.9997 13.333'
+                      stroke='#1D1E1F'
+                      strokeWidth='1.33333'
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                    />
+                  </g>
+                  <defs>
+                    <clipPath id='clip0_1872_7937'>
+                      <rect width='16' height='16' fill='white' />
+                    </clipPath>
+                  </defs>
+                </svg>
+              </div>
+            ) : showAvatar && sender ? (
+              <div
+                onClick={() => handleUserClick(sender.id)}
+                className='cursor-pointer'
+                role='button'
+                tabIndex={0}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleUserClick(sender.id);
+                  }
+                }}
+                aria-label={`View ${sender?.name || 'user'} profile`}
+              >
+                <UserHoverWrapper userId={sender.id}>
+                  <UserAvatar
+                    userId={sender.id}
+                    size={AvatarSize.REGULAR}
+                    showActiveStatus={false}
+                  />
+                </UserHoverWrapper>
+              </div>
+            ) : (
+              <div
+                className={`text-[10px] text-[#868D95] flex items-center gap-1 cursor-pointer hover:underline pt-[5px] ${shouldShowPending ? '' : 'opacity-0 group-hover:opacity-100'}`}
+              >
+                {formatTime12HourNoAmPm(message.createdAt)}
+                {shouldShowPending && (
+                  <Tooltip content={'Sending message..'} side={TooltipSide.TOP}>
+                    <div className='inline-flex items-center'>
+                      {' '}
+                      <PendingIcon size={12} className='cursor-pointer' />{' '}
+                    </div>
+                  </Tooltip>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================== RIGHT SIDE ================== */}
+        <div className='flex-1 flex flex-col gap-1 min-w-0'>
+          {showAvatar && !isWorkflowMessage && (
+            <div className='w-full flex items-baseline gap-2 min-h-4 '>
+              {isCallMessage ? (
+                <h3 className='text-sm font-medium text-[#1D1E1F]'>
+                  {isActiveCall ? 'A call is going on' : 'A call happened'}
+                </h3>
+              ) : isXyneBot ? (
+                <h3 className='text-sm font-medium text-[#1D1E1F]'>
+                  {sender?.name || 'AI Assistant'}
+                </h3>
+              ) : isPrivateSystemNotice ? (
+                <div className=''>
+                  <h3 className='text-sm font-medium text-[#1D1E1F]'>System</h3>
+                  {isMentionUserAddition && (
+                    <div className='gap-2 mt-1'>
+                      <NonParticipantActions
+                        messageId={message.messageId}
+                        content={message.content}
+                        metadata={metadata}
+                        conversationId={message.conversationId}
+                        showText={true}
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : isTicketNudge ? (
+                <h3 className='text-sm font-medium text-[#1D1E1F]'>System</h3>
+              ) : sender ? (
+                <UserHoverWrapper userId={sender.id}>
+                  <Button
+                    variant='ghost'
+                    onClick={() => handleUserClick(sender.id)}
+                    className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-[#1D1E1F] hover:underline p-0 h-auto min-w-0`}
+                    aria-label={`View ${sender?.name || 'user'} profile`}
+                  >
+                    {sender.name}
+                  </Button>
+                </UserHoverWrapper>
+              ) : (
+                <h3 className='text-sm font-medium text-[#1D1E1F] cursor-pointer hover:underline'>
+                  {'User'}
+                </h3>
+              )}
+
+              <Tooltip content={formatFullTimestamp(message.createdAt)} side={TooltipSide.TOP}>
+                <h3
+                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-[#868D95] cursor-pointer hover:underline transition-all duration-150`}
+                >
+                  {context === 'thread'
+                    ? formatThreadTimestamp(message.createdAt)
+                    : formatTimeAmPm(message.createdAt)}
+                </h3>
+              </Tooltip>
+            </div>
+          )}
+
+          {/* ================== THREAD INFO (replied to a thread) ================== */}
+          {threadInfo && channelId && (
+            <ThreadInfoIndicator
+              threadInfo={threadInfo}
+              channelId={channelId}
+              messageId={message.messageId}
+            />
+          )}
+
+          {/* Show "Also sent to channel/DM" indicator in thread view */}
+          {context === 'thread' &&
+            message.showInChannel &&
+            channelId &&
+            message.childConversationId && (
+              <AlsoSentToChannelIndicator
+                channelId={channelId}
+                childConversationId={message.childConversationId}
+                {...(channelScopeType && { channelScopeType })}
+              />
+            )}
+
+          {/* ================== MESSAGE CONTENT ================== */}
+          {isCallMessage && metadata?.callId ? (
+            <CallBubble
+              message={{
+                messageId: message.messageId,
+                content: message.content,
+                createdAt: message.createdAt,
+                hasAttachment: message.hasAttachment,
+                metadata,
+              }}
+              callId={metadata.callId}
+              isActiveCall={isActiveCall}
+              {...(channelId && { channelId })}
+              showAvatar={showAvatar}
+              {...(context && { context })}
+              attachments={attachments}
+            />
+          ) : (
+            <div className='w-full flex flex-col gap-1 '>
+              {message.isDeleted ? (
+                <div className='text-sm text-gray-500 italic'>This message was deleted</div>
+              ) : isMentionUserAddition ? (
+                <NonParticipantActions
+                  messageId={message.messageId}
+                  content={message.content}
+                  metadata={metadata}
+                  conversationId={message.conversationId}
+                  showButton={true}
+                />
+              ) : isMarkdownContent ? (
+                <div className='bot-markdown-content'>
+                  <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+                </div>
+              ) : isForwardedMessage && forwardedMessageData ? (
+                // Forwarded message display (parsed from XML)
+                <div className='flex flex-col gap-2'>
+                  {/* Optional message from forwarder */}
+                  {forwardedMessageData.optionalText && (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(forwardedMessageData.optionalText)}`}
+                    >
+                      {isMobile ? (
+                        <ExpandableMessage
+                          message={forwardedMessageData.optionalText}
+                          showEdited={message.edited}
+                          maxHeight={500}
+                        />
+                      ) : (
+                        <div className='jp-message-html inline-block'>
+                          <RenderMessageWithHTML
+                            message={DOMPurify.sanitize(forwardedMessageData.optionalText)}
+                            showEdited={message.edited}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* Forwarded message content with left border */}
+                  <div className='border-l-4 border-gray-300 pl-3'>
+                    <div className='flex items-center gap-2 mb-1'>
+                      {forwardedMessageData.originalSenderId && (
+                        <UserAvatar
+                          userId={forwardedMessageData.originalSenderId}
+                          size={AvatarSize.SM}
+                          showActiveStatus={false}
+                        />
+                      )}
+                      <span className='text-xs font-medium text-gray-700'>
+                        {forwardedMessageData.originalSenderName || 'Unknown User'}
+                      </span>
+                      {forwardedMessageData.originalCreatedAt && (
+                        <span className='text-xs text-gray-500'>
+                          {formatRelativeTimestamp(forwardedMessageData.originalCreatedAt)}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-gray-600 ${getEmojiFontSizeClass(forwardedMessageData.content)}`}
+                    >
+                      {isMobile ? (
+                        <ExpandableMessage
+                          message={forwardedMessageData.content}
+                          showEdited={false}
+                          maxHeight={500}
+                        />
+                      ) : (
+                        <div className='jp-message-html inline-block'>
+                          <RenderMessageWithHTML
+                            message={forwardedMessageData.content}
+                            showEdited={false}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    {/* Attachments inside the forwarded message border */}
+                    <AttachmentsBlock
+                      attachments={attachments}
+                      isMobile={isMobile}
+                      separateVideos={false}
+                      className='mt-2'
+                    />
+                    {/* Posted in link for forwarded messages */}
+                    {forwardedMessageData?.originalChannelId &&
+                      forwardedMessageData?.originalConversationId && (
+                        <PostedInLink
+                          originalChannelId={forwardedMessageData.originalChannelId}
+                          originalConversationId={forwardedMessageData.originalConversationId}
+                          originalMessageId={forwardedMessageData.originalMessageId}
+                        />
+                      )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div
+                    className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(message.content)}`}
+                    style={isSystemMessage ? systemMessageStyles : undefined}
+                  >
+                    {isMobile ? (
+                      <ExpandableMessage
+                        message={isWorkflowMessage ? 'Workflow created' : message.content}
+                        showEdited={message.edited}
+                        maxHeight={500}
+                        isSystemMessage={isSystemMessage}
+                      />
+                    ) : (
+                      <div className='jp-message-html inline-block'>
+                        <RenderMessageWithHTML
+                          message={isWorkflowMessage ? 'Workflow created' : message.content}
+                          showEdited={message.edited}
+                          isSystemMessage={isSystemMessage}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {conversation?.ticket && !isWorkflowMessage && (
+                <BotBubble
+                  ticket={conversation.ticket}
+                  context={context}
+                  messageId={message.messageId}
+                  {...(channelId && { channelId: channelId })}
+                  {...(conversation && { conversation: conversation })}
+                />
+              )}
+
+              {isWorkflowMessage && metadata?.workflowId && (
+                <WorkflowBubble
+                  workflowName={metadata.workflowName}
+                  workflowStatus={metadata.workflowStatus}
+                  createdAt={message.createdAt}
+                  ticketId={metadata.ticketId}
+                  metadata={metadata}
+                />
+              )}
+
+              {!isForwardedMessage && (
+                <AttachmentsBlock
+                  attachments={attachments}
+                  isMobile={isMobile}
+                  separateVideos={true}
+                />
+              )}
+              {!contentOnly && (
+                <ReactionView
+                  reactions={reactions}
+                  toggleReaction={toggleReaction}
+                  messageId={message.messageId}
+                />
+              )}
+            </div>
+          )}
+        </div>
+
+        {renderActions && (
+          <div className='absolute -top-2 right-4 flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1 shadow-lg z-10'>
+            {renderActions(message)}
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
+export type ReactionWithUser = QueryResultType<
+  typeof queries.conversationMessages
+>[number]['reactions'][number];
+
+export interface GroupedReaction {
+  emojiName: string;
+  count: number;
+  users: Array<{ userId: string; name: string }>;
+  userHasReacted: boolean;
+  earliestTimestamp: number;
+}
+
+/**
+ * Displays reaction emojis for a message with user tooltips.
+ * Each reaction is clickable to toggle the reaction.
+ * Reactions are grouped by emoji and show count + all users who reacted.
+ *
+ * @param reactions - Array of reaction objects with emoji and user info
+ * @param toggleReaction - Function to toggle a reaction on/off
+ * @param messageId - ID of the message these reactions belong to
+ * @returns Reaction buttons component or null if no reactions
+ *
+ * @todo can we make this into a standalone component that can support reactions for other use cases like comments, tickets, etc.
+ */
+export const ReactionView = ({
+  reactions,
+  toggleReaction,
+  messageId,
+}: {
+  reactions: readonly ReactionWithUser[];
+  toggleReaction: (params: { messageId: string; emoji: string; hasReacted: boolean }) => void;
+  messageId: string;
+}): React.ReactNode => {
+  const { user } = useAuth();
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const users = useUsers();
+  const customEmojis = useSelector(emojiActor, state => state.context.customEmojis);
+
+  const usersById = useMemo(() => {
+    const map = new Map<string, { name: string }>();
+    for (const u of users) {
+      map.set(u.id, { name: u.name });
+    }
+    return map;
+  }, [users]);
+
+  if (reactions.length === 0) {
+    return null;
+  }
+
+  // Group reactions by emoji
+  const groupedReactions = reactions.reduce(
+    (acc, reaction) => {
+      const emoji = reaction.emojiName;
+      if (!acc[emoji]) {
+        acc[emoji] = {
+          emojiName: emoji,
+          count: 0,
+          users: [],
+          userHasReacted: false,
+          earliestTimestamp: reaction.createdAt,
+        };
+      }
+      acc[emoji].count += 1;
+      const reactionUser = usersById.get(reaction.userId);
+      acc[emoji].users.push({
+        userId: reaction.userId,
+        name: reactionUser?.name || 'Unknown User',
+      });
+      // Track the earliest timestamp for this emoji
+      if (reaction.createdAt < acc[emoji].earliestTimestamp) {
+        acc[emoji].earliestTimestamp = reaction.createdAt;
+      }
+      if (user && reaction.userId === user.id) {
+        acc[emoji].userHasReacted = true;
+      }
+      return acc;
+    },
+    {} as Record<string, GroupedReaction>,
+  );
+
+  // Sort reactions by earliest timestamp to preserve order of addition
+  const groupedReactionsArray = Object.values(groupedReactions).sort(
+    (a, b) => a.earliestTimestamp - b.earliestTimestamp,
+  );
+
+  return (
+    <div className='flex items-center gap-1 flex-wrap'>
+      {groupedReactionsArray.map(reaction => {
+        const userNames = reaction.users.map(u => u.name).join(', ');
+        const verb = reaction.users.length === 1 ? 'has' : 'have';
+        // For custom emojis, show the emoji name instead of the full ID
+        const displayEmojiName = getEmojiDisplayName(reaction.emojiName);
+        const tooltipContent = `${userNames} ${verb} reacted with ${displayEmojiName}`;
+
+        return (
+          <Tooltip key={reaction.emojiName} content={tooltipContent} side={TooltipSide.TOP}>
+            <button
+              type='button'
+              className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
+                reaction.userHasReacted
+                  ? 'bg-blue-100 border border-blue-400 hover:bg-blue-200'
+                  : 'bg-[#F0F2F5] hover:bg-[#E5E7EB]'
+              }`}
+              onClick={e => {
+                toggleReaction({
+                  messageId: messageId,
+                  emoji: reaction.emojiName,
+                  hasReacted: reaction.userHasReacted,
+                });
+                e.stopPropagation();
+              }}
+            >
+              {renderEmoji(reaction.emojiName)}
+              {reaction.count > 1 && (
+                <span className='text-xs font-medium text-gray-700'>{reaction.count}</span>
+              )}
+            </button>
+          </Tooltip>
+        );
+      })}
+
+      {/* Add Reaction Button */}
+      <Popover.Root open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen} modal={true}>
+        <Popover.Trigger asChild>
+          <button
+            type='button'
+            className='inline-flex items-center justify-center w-6 h-6 rounded-full text-gray-500 bg-[#F0F2F5] hover:bg-[#E5E7EB] cursor-pointer transition-all duration-150'
+            onClick={e => e.stopPropagation()}
+          >
+            <span className='text-sm font-medium'>+</span>
+          </button>
+        </Popover.Trigger>
+        <Popover.Portal>
+          <>
+            {emojiPickerOpen && <div className='fixed inset-0 z-40' />}
+            <Popover.Content
+              side='top'
+              align='start'
+              sideOffset={4}
+              collisionPadding={16}
+              avoidCollisions={true}
+              className='z-50 bg-white rounded-lg shadow-lg'
+            >
+              <EmojiPicker
+                emojiStyle={EmojiStyle.NATIVE}
+                onEmojiClick={emoji => {
+                  // For custom emojis, store the emojiId with a prefix
+                  const emojiName = emoji.isCustom
+                    ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
+                    : emoji.emoji;
+                  // Check if the user has already reacted with this emoji
+                  const hasReacted =
+                    !!user &&
+                    reactions.some(r => r.emojiName === emojiName && r.userId === user.id);
+
+                  toggleReaction({
+                    messageId: messageId,
+                    emoji: emojiName,
+                    hasReacted,
+                  });
+                  setEmojiPickerOpen(false);
+                }}
+                customEmojis={customEmojis}
+              />
+            </Popover.Content>
+          </>
+        </Popover.Portal>
+      </Popover.Root>
+    </div>
+  );
+};

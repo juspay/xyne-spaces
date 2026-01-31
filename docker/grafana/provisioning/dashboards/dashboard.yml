@@ -1,0 +1,15 @@
+# Grafana Dashboard Provisioning Configuration
+# This tells Grafana where to find dashboard JSON files
+
+apiVersion: 1
+
+providers:
+  - name: 'Xyne API Dashboards'
+    orgId: 1
+    folder: 'API Monitoring'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

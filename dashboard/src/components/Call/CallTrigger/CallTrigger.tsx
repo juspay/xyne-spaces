@@ -1,0 +1,119 @@
+import React, { ReactElement } from 'react';
+import { PhoneOff } from 'lucide-react';
+import { useCallActions } from '../../../hooks/useCallActions';
+import { cn } from '../../../utils/classNames';
+import HuddleIcon from '../../icons/HuddleIcon';
+import Tooltip from '../../ui/Tooltip';
+import { ChannelScopeType } from '@xyne/shared';
+import { CallConfirmationModal } from '../CallConfirmationModal';
+import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
+import { useShortcutById } from '../../../shortcuts';
+
+interface CallTriggerProps {
+  channelId: string;
+  targetUserIds?: string[] | undefined;
+  children?: ReactElement;
+  className?: string;
+  scopeType?: ChannelScopeType | undefined;
+  channelName?: string | undefined;
+  participantCount?: number | undefined;
+  callDisplayName?: string; // Display name for CallKit (DM: participant name, Channel: channel name)
+}
+
+/**
+ * CallTrigger component
+ *
+ * A reusable component for triggering calls in a channel.
+ * Handles all call logic including joining, leaving, and initiating calls.
+ *
+ * @param channelId - The ID of the channel for which the call is being triggered
+ * @param targetUserIds - Optional array of target user IDs for inviting specific users
+ * @param children - Optional custom trigger element. If not provided, uses default Button
+ * @param className - Optional additional CSS classes for the trigger
+ * @param scopeType - The scope type of the channel (DM, GROUP_DM, DEFAULT, etc.)
+ */
+export const CallTrigger: React.FC<CallTriggerProps> = ({
+  channelId,
+  targetUserIds,
+  className,
+  scopeType,
+  channelName,
+  participantCount,
+  callDisplayName,
+}) => {
+  const { handleCallClick, hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } =
+    useCallActions({
+      channelId,
+      targetUserIds,
+      callDisplayName,
+    });
+
+  const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
+    useCallConfirmation({
+      scopeType,
+      channelName,
+      participantCount,
+      hasActiveCallInChannel,
+      isUserInCurrentChannelCall,
+      isInCall,
+    });
+
+  const handleButtonClick = (): void => {
+    handleCallAction(handleCallClick);
+  };
+
+  // Keyboard shortcut for huddle toggle (Cmd+Shift+H)
+  useShortcutById('huddle.toggle', handleButtonClick);
+
+  // Check if user is alone in the channel
+  const isAlone = participantCount === 1;
+
+  // Determine tooltip content based on call state
+  const tooltipContent = isAlone
+    ? 'You are the only one here'
+    : hasActiveCallInChannel
+      ? isUserInCurrentChannelCall
+        ? 'Leave call'
+        : 'Join ongoing call'
+      : isInCall
+        ? 'End current call and start new one'
+        : 'Start audio call';
+
+  // Default Button trigger
+  return (
+    <>
+      <Tooltip content={tooltipContent} side='left'>
+        <button
+          onClick={handleButtonClick}
+          disabled={isAlone}
+          className={cn(
+            'h-[35px] transition-colors rounded-lg w-8.5 !p-2',
+            'border border-border bg-white hover:bg-gray-50',
+            hasActiveCallInChannel && !isUserInCurrentChannelCall
+              ? 'bg-green-500 hover:bg-green-600 border-green-500'
+              : '',
+            isAlone ? 'opacity-50 cursor-not-allowed' : '',
+            className,
+          )}
+        >
+          {isUserInCurrentChannelCall ? (
+            <PhoneOff className='w-4 h-4 text-red-500' />
+          ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
+            <HuddleIcon color='#FFFFFF' />
+          ) : (
+            <HuddleIcon />
+          )}
+        </button>
+      </Tooltip>
+
+      <CallConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={closeModal}
+        onConfirm={() => handleConfirmCall(handleCallClick)}
+        title={modalContent.title}
+        subtitle={modalContent.subtitle}
+        description={modalContent.description}
+      />
+    </>
+  );
+};

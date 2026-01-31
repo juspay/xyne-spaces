@@ -1,0 +1,234 @@
+# Shared infrastructure for the multi-sandbox agent environment.
+# This runs ONE instance of each shared service. Per-sandbox services
+# (zero-cache, backend, dashboard) are in per-sandbox compose files.
+#
+# Usage: docker compose -f docker-compose.sandbox.yml up -d
+
+include:
+  - ./ysweet/docker-compose.yml
+
+services:
+  # Traefik Reverse Proxy — routes *.localhost subdomains to sandbox containers
+  traefik:
+    image: traefik:v2.11
+    container_name: xyne-sandbox-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+    networks:
+      - sandbox-net
+
+  # PostgreSQL Database (shared — multiple logical DBs, one per sandbox)
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.postgres
+    container_name: xyne-sandbox-postgres
+    shm_size: '512mb'
+    environment:
+      POSTGRES_USER: xyne
+      POSTGRES_PASSWORD: xyne123
+      POSTGRES_DB: xyne_dev_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - sandbox_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xyne -d xyne_dev_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sandbox-net
+
+  # Redis (shared)
+  redis:
+    image: public.ecr.aws/docker/library/redis:7-alpine
+    container_name: xyne-sandbox-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - sandbox_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sandbox-net
+
+  # LiveKit Server (shared)
+  livekit:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.livekit
+    container_name: xyne-sandbox-livekit
+    command: --config /etc/livekit.yaml --dev
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    environment:
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=devsecret
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sandbox-net
+
+  # Fake GCS Server (shared)
+  fake-gcs:
+    image: mirror.gcr.io/fsouza/fake-gcs-server:latest
+    container_name: xyne-sandbox-fake-gcs
+    ports:
+      - "4443:4443"
+    command:
+      - "-scheme"
+      - "http"
+      - "-port"
+      - "4443"
+      - "-external-url"
+      - "http://localhost:4443"
+    volumes:
+      - sandbox_fake_gcs_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sandbox-net
+
+  # Python Transcription Agent (shared)
+  transcription-agent:
+    build:
+      context: ./backend/python-agent
+      dockerfile: Dockerfile
+    container_name: xyne-sandbox-transcription-agent
+    shm_size: '512mb'
+    environment:
+      - LIVEKIT_URL=ws://xyne-sandbox-livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=devsecret
+      - REDIS_URL=redis://xyne-sandbox-redis:6379
+      - REDIS_HOST=xyne-sandbox-redis
+      - REDIS_PORT=6379
+      - STORAGE_EMULATOR_HOST=http://xyne-sandbox-fake-gcs:4443
+    ports:
+      - "8001:8080"
+    volumes:
+      - ./backend/python-agent:/app
+      - sandbox_transcription_agent_cache:/app/.cache/huggingface
+    depends_on:
+      - livekit
+      - redis
+    networks:
+      - sandbox-net
+    restart: unless-stopped
+
+  # OpenTelemetry Collector (shared) — opt-in via: docker compose --profile monitoring up -d
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: xyne-sandbox-otel-collector
+    profiles: ["monitoring"]
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otelCollector/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4318:4318"
+      - "4317:4317"
+      - "8888:8888"
+    depends_on:
+      - victoriametrics
+    restart: unless-stopped
+    networks:
+      - sandbox-net
+
+  # Victoria Metrics (shared) — opt-in via monitoring profile
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: xyne-sandbox-victoriametrics
+    profiles: ["monitoring"]
+    ports:
+      - "8428:8428"
+    command:
+      - '--storageDataPath=/storage'
+      - '--httpListenAddr=:8428'
+      - '--retentionPeriod=12'
+      - '--promscrape.config=/etc/victoriametrics/scrape.yml'
+    volumes:
+      - sandbox_victoriametrics_data:/storage
+      - ./scrape.yml:/etc/victoriametrics/scrape.yml
+    restart: unless-stopped
+    networks:
+      - sandbox-net
+
+  # Grafana (shared) — opt-in via monitoring profile
+  grafana:
+    image: grafana/grafana:latest
+    container_name: xyne-sandbox-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3333:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3333
+    volumes:
+      - sandbox_grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - victoriametrics
+    restart: unless-stopped
+    networks:
+      - sandbox-net
+
+  # Superposition — Feature Flags (shared)
+  superposition:
+    image: ghcr.io/juspay/superposition-demo:latest
+    container_name: xyne-sandbox-superposition
+    ports:
+      - "9999:8080"
+    environment:
+      - SUPERPOSITION_TOKEN=123456
+      - SUPERPOSITION_ORG_ID=localorg
+      - SUPERPOSITION_WORKSPACE_ID=test
+      - REDIS_URL=redis://xyne-sandbox-redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - sandbox-net
+
+volumes:
+  sandbox_postgres_data:
+    driver: local
+  sandbox_redis_data:
+    driver: local
+  sandbox_fake_gcs_data:
+    driver: local
+  sandbox_victoriametrics_data:
+    driver: local
+  sandbox_grafana_data:
+    driver: local
+  sandbox_transcription_agent_cache:
+    driver: local
+
+networks:
+  sandbox-net:
+    name: sandbox-net
+    driver: bridge

@@ -1,0 +1,776 @@
+/**
+ * Conversation Service
+ * Extracted common logic for creating conversations and messages
+ * Used by both ConversationController and external integrations
+ */
+
+import {
+  ConversationRepository,
+  CreateConversationInput,
+} from '@/database/repositories/conversationRepository';
+import { MessageRepository, CreateMessageInput } from '@/database/repositories/messageRepository';
+import {
+  MessageAttachmentRepository,
+  CreateMessageAttachmentInput,
+} from '@/database/repositories/messageAttachmentRepository';
+import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
+import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
+import { UserRepository } from '@/database/repositories/users';
+import {
+  Conversation,
+  ConversationParticipation,
+  Message,
+  MessageType,
+  AttachmentEntityType,
+} from '@prisma/client';
+import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
+import { websocketService } from './websocketService';
+import { redisService } from './redisService';
+import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
+import { config } from '@/config/env';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { messageSchema } from '@/vespa/src/types';
+import { db } from '@/database/client';
+import { NAMESPACE } from '@/vespa/vespaConfig';
+import { v4 as uuidv4 } from 'uuid';
+import {logger} from '@/utils/logger';
+
+interface UserInfo {
+  id: string;
+  name: string;
+  email: string;
+  picture?: string;
+}
+
+export function extractMentionedUserIdsFromContent(content?: string | null): string[] {
+  if (!content) return [];
+
+  const regex = /<span\b[^>]*\bdata-user-id="([^"]+)"[^>]*>/g;
+  const userIds: string[] = [];
+
+  for (const match of content.matchAll(regex)) {
+    const userId = match[1];
+    if (userId) userIds.push(userId);
+  }
+  logger.info('🔍 [MENTION-EXTRACT] Extracted user IDs:', userIds);
+
+  return [...new Set(userIds)];
+}
+
+export interface CreateConversationWithMessageParams {
+  channelId: string;
+  userId: string;
+  content?: string;
+  msgType?: MessageType;
+  files?: Express.Multer.File[];
+  uploadedFiles?: UploadedFileResult[]; // For pre-uploaded files (external sources)
+  metadata?: Record<string, unknown>;
+  messageMetadata?: Record<string, unknown>;
+  isBot?: boolean;
+  createdAt?: Date;
+}
+
+export interface AddMessageToConversationParams {
+  conversationId: string;
+  userId: string;
+  content?: string;
+  msgType?: MessageType;
+  files?: Express.Multer.File[];
+  uploadedFiles?: UploadedFileResult[]; // For pre-uploaded files (external sources)
+  metadata?: Record<string, unknown>;
+  replyBroadcast?: boolean;
+  lastActivityAt?: Date;
+  isBot?: boolean;
+  createdAt?: Date;
+}
+
+export interface UpdateMessageParams {
+  messageId: string;
+  content?: string;
+  files?: Express.Multer.File[];
+  uploadedFiles?: UploadedFileResult[]; // For pre-uploaded files (external sources)
+  metadata?: Record<string, unknown>;
+}
+
+export class ConversationService {
+  private conversationRepository: ConversationRepository;
+  private conversationParticipantRepository: ConversationParticipantRepository;
+  private messageRepository: MessageRepository;
+  private messageAttachmentRepository: MessageAttachmentRepository;
+  private channelRepository: ChannelRepository;
+  private channelParticipantRepository: ChannelParticipantRepository;
+  private userRepository: UserRepository;
+
+  constructor() {
+    this.conversationRepository = new ConversationRepository();
+    this.conversationParticipantRepository = new ConversationParticipantRepository();
+    this.messageRepository = new MessageRepository();
+    this.messageAttachmentRepository = new MessageAttachmentRepository();
+    this.channelRepository = new ChannelRepository();
+    this.channelParticipantRepository = new ChannelParticipantRepository();
+    this.userRepository = new UserRepository();
+  }
+
+  /**
+   * Get user info - checks bot registry first, then user table
+   * EXACT copy from conversationController.ts lines 34-65
+   */
+  async getUserInfo(userId: string): Promise<UserInfo> {
+    // Check if this is a registered bot
+    if (isRegisteredBot(userId)) {
+      const botInfo = getBotInfo(userId);
+      if (botInfo) {
+        return botInfo;
+      }
+    }
+
+    try {
+      const user = await this.userRepository.findById(userId);
+      if (user) {
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          picture: user.picture || undefined,
+        };
+      }
+    } catch (error) {
+      logger.warn(`Failed to lookup user ${userId}:`, error);
+    }
+
+    return {
+      id: userId,
+      name: 'User',
+      email: 'user@example.com',
+      picture: undefined,
+    };
+  }
+
+  private async pushVespaJobForMessage(
+    messageID: string,
+    userId: string
+  ): Promise<void> {
+   
+    vespaQueue.addJob({
+      schema: messageSchema,
+      jobType: "feed",
+      docId: messageID,
+    }).catch(async (error) => {
+      logger.error('Error queuing Vespa job for channel:', error);
+      // Log failed insertion to Postgres for later retry
+      try {
+        const vespaLogs = db.vespaInsertionLogs;
+        if (vespaLogs) {
+          await vespaLogs.create({
+            data: {
+              status: "FAILED",
+              type: "INSERT",
+              entityId: messageID,
+              entityType: messageSchema,
+              namespace: NAMESPACE,
+              errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+              errorDetails: JSON.stringify(error),
+              userId: userId,
+              createdAt: new Date(),
+            },
+          });
+        }
+      } catch (dbError) {
+        logger.error('Failed to log Vespa insertion error to database:', dbError);
+      }
+    });
+  }
+
+  /**
+   * Create new conversation with initial message
+   * EXACT extraction from conversationController.ts lines 82-179
+   */
+  async createConversationWithMessage(params: CreateConversationWithMessageParams) {
+    const {
+      channelId,
+      userId,
+      content,
+      msgType,
+      files = [],
+      uploadedFiles = [],
+      metadata,
+      messageMetadata,
+      isBot,
+      createdAt,
+    } = params;
+
+    // Check if channel exists
+    const channel = await this.channelRepository.findById(channelId);
+    if (!channel) {
+      throw new Error('Channel not found');
+    }
+
+    // Check if user is channel participant
+    const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
+    if (!isParticipant && !isBot) {
+      // Auto-add user as participant when they send first message
+      await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+    }
+
+    // Handle file uploads - either from raw files or pre-uploaded files
+    let processedFiles: UploadedFileResult[] = [];
+
+    // Validate that we don't have both files and pre-uploaded files
+    if (files.length > 0 && uploadedFiles.length > 0) {
+      throw new Error('Cannot provide both files and uploadedFiles parameters');
+    }
+
+    if (files.length > 0) {
+      // Upload new files
+      try {
+        let newFiles = await uploadFiles(files);
+        processedFiles.push(...newFiles);
+      } catch (error) {
+        logger.error('File upload failed:', error);
+        throw new Error('File upload failed');
+      }
+    } else if (uploadedFiles.length > 0) {
+      // Use pre-uploaded files from external sources
+      processedFiles.push(...uploadedFiles);
+    }
+
+    // First create the message
+    const messageData: CreateMessageInput = {
+      conversationId: 'temp', // Will be updated after conversation creation
+      senderId: userId,
+      content: content?.trim() || '',
+      msgType: msgType || MessageType.USER,
+      hasAttachment: processedFiles.length > 0,
+      metadata: messageMetadata,
+      ...(createdAt && { createdAt }),
+    };
+
+    // Create a placeholder conversation first
+    const conversationData: CreateConversationInput = {
+      channelId,
+      createdBy: userId,
+      initialMessageId: 'temp', // Will be updated after message creation
+      metadata,
+      ...(createdAt && { createdAt }),
+    };
+
+    const conversation = await this.conversationRepository.create(conversationData);
+
+    // Update message with real conversation ID
+    messageData.conversationId = conversation.conversationId;
+    const message = await this.messageRepository.create(messageData, true);
+
+    if (await this.userRepository.findById(userId)) {
+      await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
+        conversation.conversationId,
+        userId,
+        ConversationParticipation.MENTIONED
+      );
+    }
+
+    const mentionedUserIds = extractMentionedUserIdsFromContent(content);
+    for (const userId of mentionedUserIds) {
+      if (await this.userRepository.findById(userId)) {
+        await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
+          conversation.conversationId,
+          userId,
+          ConversationParticipation.MENTIONED
+        );
+      }
+    }
+
+    // Create attachment records if files were uploaded
+    if (processedFiles.length > 0) {
+      const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
+        entityId: message.messageId,
+        entityType: AttachmentEntityType.CHAT,
+        originalFilename: file.originalName,
+        size: file.fileSize,
+        mimetype: file.mimeType,
+        url: file.fileUrl,
+        thumbnailUrl: file.thumbnailUrl,
+        width: file.width,
+        height: file.height,
+        uploadedByUserId: userId,
+        createdBy: userId,
+        storageProvider: config.fileStorage.provider,
+        conversationId: conversation.conversationId,
+        metadata: file.metadata || {},
+      }));
+
+      await this.messageAttachmentRepository.createMany(attachmentData);
+    }
+
+    // Push Vespa job for message indexing
+    this.pushVespaJobForMessage(message.messageId, userId).catch(error => {
+      logger.error(`[ConversationService] Error pushing Vespa job for message ${message.messageId}:`, error);
+    });
+
+    // Update conversation with real initial message ID
+    await this.conversationRepository.update(conversation.conversationId, {
+      initialMessageId: message.messageId,
+    });
+
+    // Update channel last activity
+    await this.channelRepository.updateLastActivity(channelId);
+
+    // Get sender info
+    const senderInfo = await this.getUserInfo(message.senderId);
+
+    // Broadcast new conversation via WebSocket
+    // const conversationMessage = {
+    //   conversationId: conversation.conversationId,
+    //   channelId,
+    //   messageId: message.messageId,
+    //   senderId: senderInfo.id,
+    //   senderName: senderInfo.name,
+    //   senderPicture: senderInfo.picture,
+    //   content: message.content,
+    //   msgType: message.msgType,
+    //   hasAttachment: message.hasAttachment,
+    //   attachments: processedFiles,
+    //   createdAt: message.createdAt,
+    // };
+
+    // Real-time broadcast via WebSocket (using session method for now)
+    // await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
+
+    // Also broadcast via Redis for horizontal scaling (using session method for now)
+    // await redisService.broadcastMessageToSession(channelId, conversationMessage);
+
+    return {
+      conversation,
+      message,
+      channel,
+      senderInfo,
+      uploadedFiles: processedFiles,
+    };
+  }
+
+  /**
+   * Add message to existing conversation
+   * EXACT extraction from conversationController.ts lines 383-449
+   */
+  async addMessageToConversation(params: AddMessageToConversationParams) {
+    const {
+      conversationId,
+      userId,
+      content,
+      msgType,
+      files = [],
+      uploadedFiles = [],
+      metadata,
+      replyBroadcast = false,
+      lastActivityAt,
+      isBot,
+      createdAt,
+    } = params;
+
+    const conversation = await this.conversationRepository.findById(conversationId);
+    if (!conversation) {
+      throw new Error('Conversation not found');
+    }
+
+    // Check if user is channel participant
+    const isParticipant = await this.channelParticipantRepository.isParticipant(
+      conversation.channelId,
+      userId
+    );
+    if (!isParticipant && !isBot) {
+      // Auto-add user as participant when they reply
+      await this.channelParticipantRepository.addParticipant(
+        conversation.channelId,
+        userId,
+        'MEMBER'
+      );
+    }
+
+    // Handle file uploads - either from raw files or pre-uploaded files
+    let processedFiles: UploadedFileResult[] = [];
+
+    // Validate that we don't have both files and pre-uploaded files
+    if (files.length > 0 && uploadedFiles.length > 0) {
+      throw new Error('Cannot provide both files and uploadedFiles parameters');
+    }
+
+    if (files.length > 0) {
+      // Upload new files
+      try {
+        let newFiles = await uploadFiles(files);
+        processedFiles.push(...newFiles);
+      } catch (error) {
+        logger.error('File upload failed:', error);
+        throw new Error('File upload failed');
+      }
+    } else if (uploadedFiles.length > 0) {
+      // Use pre-uploaded files from external sources
+      processedFiles.push(...uploadedFiles);
+    }
+
+    // Create message
+    // Generate child conversation ID if replyBroadcast is true
+    const childConversationId = replyBroadcast ? uuidv4() : undefined;
+
+    const messageData: CreateMessageInput = {
+      conversationId,
+      senderId: userId,
+      content: content?.trim() || '',
+      msgType: msgType || MessageType.USER,
+      hasAttachment: processedFiles.length > 0,
+      showInChannel: replyBroadcast,
+      childConversationId: childConversationId,
+      metadata,
+      ...(createdAt && { createdAt }),
+    };
+
+    const message = await this.messageRepository.create(messageData, true);
+    if (await this.userRepository.findById(userId)) {
+      await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
+        conversationId,
+        userId,
+        ConversationParticipation.AUTHOR
+      );
+    }
+
+    const mentionedUserIds = extractMentionedUserIdsFromContent(content);
+    for (const userId of mentionedUserIds) {
+      if (
+        (await this.userRepository.findById(userId)) &&
+        (await this.conversationParticipantRepository.findByConversationIdAndUserId(
+          conversationId,
+          userId
+        )) != ConversationParticipation.AUTHOR
+      ) {
+        await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
+          conversationId,
+          userId,
+          ConversationParticipation.MENTIONED
+        );
+      }
+    }
+
+    // Create attachment records if files were uploaded
+    if (processedFiles.length > 0) {
+      const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
+        entityId: message.messageId,
+        entityType: AttachmentEntityType.CHAT,
+        originalFilename: file.originalName,
+        size: file.fileSize,
+        mimetype: file.mimeType,
+        url: file.fileUrl,
+        thumbnailUrl: file.thumbnailUrl,
+        width: file.width,
+        height: file.height,
+        uploadedByUserId: userId,
+        createdBy: userId,
+        storageProvider: config.fileStorage.provider,
+        conversationId: conversationId,
+        metadata: file.metadata || {},
+      }));
+
+      await this.messageAttachmentRepository.createMany(attachmentData);
+    }
+
+    // Push Vespa job for message indexing
+    this.pushVespaJobForMessage(message.messageId, userId).catch(error => {
+      logger.error(`[ConversationService] Error pushing Vespa job for message ${message.messageId}:`, error);
+    });
+
+    // Create child conversation if replyBroadcast is true (similar to mutator logic)
+    if (replyBroadcast && childConversationId) {
+      // Create a new conversation for this message in the channel
+      await this.conversationRepository.create({
+        conversationId: childConversationId,
+        channelId: conversation.channelId,
+        createdBy: userId,
+        createdAt: message.createdAt,
+        initialMessageId: message.messageId,
+        parentMessageId: conversation.initialMessageId,
+        pinned: false,
+      });
+    }
+
+    // Update conversation reply count and last activity
+    await this.conversationRepository.incrementReplyCount(conversationId);
+
+    // Update reply count for previous message's child conversation if it exists
+    // This matches the mutator logic - get the most recent previous message and check if it has showInChannel
+    const mostRecentPrevMsg = await this.messageRepository.getMostRecentPreviousMessage(
+      conversationId,
+      message.createdAt
+    );
+    
+    // Check if it has showInChannel and childConversationId
+    if (mostRecentPrevMsg?.showInChannel && mostRecentPrevMsg.childConversationId) {
+      await this.conversationRepository.update(mostRecentPrevMsg.childConversationId, {
+        replyCount: 1,
+      });
+    }
+
+    // Update last activity for the conversation
+    if (lastActivityAt) {
+      await this.conversationRepository.update(conversationId, {
+        lastActivityAt: lastActivityAt,
+      });
+    }
+
+    // Update channel last activity
+    await this.channelRepository.updateLastActivity(conversation.channelId);
+
+    // Get sender info
+    const senderInfo = await this.getUserInfo(message.senderId);
+
+    // Broadcast message via WebSocket
+    // const chatMessage = {
+    //   messageId: message.messageId,
+    //   conversationId: message.conversationId,
+    //   channelId: conversation.channelId,
+    //   senderId: senderInfo.id,
+    //   senderName: senderInfo.name,
+    //   senderPicture: senderInfo.picture,
+    //   content: message.content,
+    //   msgType: message.msgType,
+    //   hasAttachment: message.hasAttachment,
+    //   showInChannel: replyBroadcast,
+    //   attachments: processedFiles,
+    //   createdAt: message.createdAt,
+    // };
+
+    // Real-time broadcast via WebSocket (using session method for now)
+    // await websocketService.broadcastToSession(conversationId, 'new_message', chatMessage);
+
+    // Also broadcast via Redis for horizontal scaling (using session method for now)
+    // await redisService.broadcastMessageToSession(conversationId, chatMessage);
+
+    return {
+      conversation,
+      message,
+      senderInfo,
+      uploadedFiles: processedFiles,
+    };
+  }
+
+  /**
+   * Update existing message with new content/attachments
+   * Used for handling duplicate webhooks or message edits
+   * Similar to addMessageToConversation but updates instead of creating
+   */
+  async updateMessageContent(params: UpdateMessageParams) {
+    const { messageId, content, files = [], uploadedFiles = [], metadata } = params;
+
+    // 1. Validate message exists
+    const message = await this.messageRepository.findById(messageId);
+    if (!message) {
+      throw new Error(`Message not found: ${messageId}`);
+    }
+
+    // 2. Validate conversation exists
+    const conversation = await this.conversationRepository.findById(message.conversationId);
+    if (!conversation) {
+      throw new Error(`Conversation not found: ${message.conversationId}`);
+    }
+
+    // 3. Handle file uploads - either from raw files or pre-uploaded files
+    let processedFiles: UploadedFileResult[] = [];
+
+    // Validate that we don't have both files and pre-uploaded files
+    if (files.length > 0 && uploadedFiles.length > 0) {
+      throw new Error('Cannot provide both files and uploadedFiles parameters');
+    }
+
+    if (files.length > 0) {
+      // Upload new files
+      try {
+        let newFiles = await uploadFiles(files);
+        processedFiles.push(...newFiles);
+        logger.info(`[ConversationService] Uploaded ${processedFiles.length} files for message ${messageId}`);
+      } catch (error) {
+        logger.error(`[ConversationService] File upload failed for message ${messageId}:`, error);
+        throw new Error('File upload failed');
+      }
+    } else if (uploadedFiles.length > 0) {
+      // Use pre-uploaded files from external sources
+      processedFiles.push(...uploadedFiles);
+    }
+
+    // 4. Build update data object
+    interface UpdateData {
+      content?: string;
+      metadata?: Record<string, unknown>;
+      hasAttachment?: boolean;
+    }
+
+    const updateData: UpdateData = {};
+
+    if (content !== undefined) {
+      updateData.content = content.trim();
+    }
+
+    if (metadata !== undefined) {
+      const existingMetadata = (message.metadata as Record<string, unknown>) || {};
+      updateData.metadata = { ...existingMetadata, ...metadata };
+    }
+
+    // 5. Handle attachment replacement if new files provided
+    if (processedFiles.length > 0) {
+      updateData.hasAttachment = true;
+
+      // Delete old attachments only if we have new ones to replace them
+      // This prevents losing attachments when just updating text
+      logger.info(`[ConversationService] Replacing attachments for message ${messageId}`);
+      await this.messageAttachmentRepository.deleteByMessageId(message.messageId);
+
+      // Create new attachment records
+      const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
+        entityId: message.messageId,
+        entityType: AttachmentEntityType.CHAT,
+        originalFilename: file.originalName,
+        size: file.fileSize,
+        mimetype: file.mimeType,
+        url: file.fileUrl,
+        thumbnailUrl: file.thumbnailUrl,
+        width: file.width,
+        height: file.height,
+        uploadedByUserId: message.senderId,
+        createdBy: message.senderId,
+        storageProvider: config.fileStorage.provider,
+        conversationId: message.conversationId,
+        metadata: file.metadata || {},
+      }));
+
+      await this.messageAttachmentRepository.createMany(attachmentData);
+      logger.info(`[ConversationService] Created ${attachmentData.length} new attachments for message ${messageId}`);
+    }
+    // If no new files provided, keep existing attachments (don't delete)
+
+    // 6. Update message in database
+    const updatedMessage = await this.messageRepository.update(messageId, updateData);
+    logger.info(`[ConversationService] Updated message ${messageId} in conversation ${conversation.conversationId}`);
+
+    // Push Vespa job for message update indexing
+    this.pushVespaJobForMessage(updatedMessage.messageId, message.senderId).catch(error => {
+      logger.error(`[ConversationService] Error pushing Vespa job for message ${updatedMessage.messageId}:`, error);
+    });
+
+    // 7. Update channel last activity
+    await this.channelRepository.updateLastActivity(conversation.channelId);
+
+    // 8. Get sender info
+    const senderInfo = await this.getUserInfo(message.senderId);
+
+    // 9. Broadcast updated message via WebSocket
+    const chatMessage = {
+      messageId: updatedMessage.messageId,
+      conversationId: updatedMessage.conversationId,
+      channelId: conversation.channelId,
+      senderId: senderInfo.id,
+      senderName: senderInfo.name,
+      senderPicture: senderInfo.picture,
+      content: updatedMessage.content,
+      msgType: updatedMessage.msgType,
+      hasAttachment: updatedMessage.hasAttachment,
+      attachments: processedFiles,
+      createdAt: updatedMessage.createdAt,
+    };
+
+    logger.info(
+      '[ConversationService] Broadcasting message_updated to conversation:',
+      updatedMessage.conversationId,
+      chatMessage
+    );
+
+    // // Real-time broadcast via WebSocket (using session method for now)
+    // await websocketService.broadcastToSession(message.conversationId, 'message_updated', chatMessage);
+
+    // // Also broadcast via Redis for horizontal scaling (using session method for now)
+    // await redisService.broadcastMessageToSession(message.conversationId, chatMessage);
+
+    return {
+      conversation,
+      message: updatedMessage,
+      senderInfo,
+      uploadedFiles: processedFiles,
+    };
+  }
+
+  /**
+   * Broadcast new conversation to channel
+   * EXACT extraction from conversationController.ts lines 178-200
+   */
+  async broadcastNewConversation(
+    channelId: string,
+    conversation: Conversation,
+    message: Message,
+    senderInfo: UserInfo,
+    uploadedFiles: UploadedFileResult[]
+  ): Promise<void> {
+    // Build conversation message object
+    const conversationMessage = {
+      conversationId: conversation.conversationId,
+      channelId,
+      messageId: message.messageId,
+      senderId: message.senderId,
+      senderName: senderInfo.name,
+      senderPicture: senderInfo.picture,
+      content: message.content,
+      msgType: message.msgType,
+      hasAttachment: message.hasAttachment,
+      attachments: uploadedFiles,
+      createdAt: message.createdAt,
+    };
+
+    logger.info(
+      '[ConversationService] Broadcasting new_conversation to channel:',
+      channelId,
+      conversationMessage
+    );
+
+    // Real-time broadcast via WebSocket (using session method for now)
+    await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
+
+    // Also broadcast via Redis for horizontal scaling (using session method for now)
+    await redisService.broadcastMessageToSession(channelId, conversationMessage);
+  }
+
+  /**
+   * Broadcast new message to conversation
+   * EXACT extraction from conversationController.ts lines 448-470
+   */
+  async broadcastNewMessage(
+    conversation: Conversation,
+    message: Message,
+    senderInfo: UserInfo,
+    uploadedFiles: UploadedFileResult[]
+  ): Promise<void> {
+    // Build chat message object
+    const chatMessage = {
+      messageId: message.messageId,
+      conversationId: message.conversationId,
+      channelId: conversation.channelId,
+      senderId: message.senderId,
+      senderName: senderInfo.name,
+      senderPicture: senderInfo.picture,
+      content: message.content,
+      msgType: message.msgType,
+      hasAttachment: message.hasAttachment,
+      attachments: uploadedFiles,
+      createdAt: message.createdAt,
+    };
+
+    logger.info(
+      '[ConversationService] Broadcasting new_message to conversation:',
+      message.conversationId,
+      chatMessage
+    );
+
+    // Real-time broadcast via WebSocket (using session method for now)
+    await websocketService.broadcastToSession(message.conversationId, 'new_message', chatMessage);
+
+    // Also broadcast via Redis for horizontal scaling (using session method for now)
+    await redisService.broadcastMessageToSession(message.conversationId, chatMessage);
+  }
+}
+
+// Export singleton instance
+export const conversationService = new ConversationService();

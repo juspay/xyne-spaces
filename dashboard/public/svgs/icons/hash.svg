@@ -1,0 +1,36 @@
+<svg
+  xmlns='http://www.w3.org/2000/svg'
+  width='16'
+  height='16'
+  viewBox='0 0 16 16'
+  fill='none'
+>
+  <path
+    d='M2.66406 6H13.3307'
+    stroke='#181B1D'
+    strokeWidth='1.33333'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  />
+  <path
+    d='M2.66406 10H13.3307'
+    stroke='#181B1D'
+    strokeWidth='1.33333'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  />
+  <path
+    d='M6.66927 2L5.33594 14'
+    stroke='#181B1D'
+    strokeWidth='1.33333'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  />
+  <path
+    d='M10.6693 2L9.33594 14'
+    stroke='#181B1D'
+    strokeWidth='1.33333'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  />
+</svg>

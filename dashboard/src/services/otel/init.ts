@@ -1,0 +1,1 @@
+export { initializeTelemetry } from './telemetry';

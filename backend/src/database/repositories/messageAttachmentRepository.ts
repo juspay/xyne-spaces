@@ -1,0 +1,130 @@
+import { DatabaseClient } from '../client';
+import { MessageAttachment, AttachmentEntityType } from '@prisma/client';
+import { websocketService } from '@/services/websocketService';
+import {logger} from '@/utils/logger';
+
+export interface CreateMessageAttachmentInput {
+  entityId: string; // Message ID or Ticket ID
+  entityType: AttachmentEntityType; // CHAT or TICKET
+  originalFilename: string;
+  size: number;
+  mimetype: string;
+  url: string;
+  thumbnailUrl?: string;
+  width?: number; // Width in pixels (for images/videos)
+  height?: number; // Height in pixels (for images/videos)
+  uploadedByUserId: string;
+  createdBy: string;
+  storageProvider: string;
+  conversationId: string;
+  metadata?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+}
+
+export class MessageAttachmentRepository {
+  private db = DatabaseClient.getInstance();
+
+  async create(data: CreateMessageAttachmentInput): Promise<MessageAttachment> {
+    const attachment = await this.db.messageAttachment.create({
+      data: {
+        entityId: data.entityId,
+        entityType: data.entityType,
+        originalFilename: data.originalFilename,
+        size: data.size,
+        mimetype: data.mimetype,
+        url: data.url,
+        thumbnailUrl: data.thumbnailUrl,
+        width: data.width,
+        height: data.height,
+        uploadedByUserId: data.uploadedByUserId,
+        createdBy: data.createdBy,
+        storageProvider: data.storageProvider,
+        conversationId: data.conversationId,
+        metadata: data.metadata || {}
+      }
+    });
+
+    // Track user activity using Redis Set - O(1) operation, no DB query
+    websocketService.trackUserActivity(data.createdBy)
+      .catch(err => logger.error('Failed to track user activity after attachment creation:', err));
+
+    return attachment;
+  }
+
+  async findById(id: string): Promise<MessageAttachment | null> {
+    return await this.db.messageAttachment.findUnique({
+      where: { id }
+    });
+  }
+
+  async findByMessageId(messageId: string): Promise<MessageAttachment[]> {
+    return await this.db.messageAttachment.findMany({
+      where: {
+        entityId: messageId,
+        entityType: AttachmentEntityType.CHAT
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+  }
+
+  async findTranscriptByMessageId(messageId: string): Promise<MessageAttachment | null> {
+    return await this.db.messageAttachment.findFirst({
+      where: {
+        entityId: messageId,
+        entityType: AttachmentEntityType.CHAT,
+        metadata: {
+          path: ['type'],
+          equals: 'transcript'
+        }
+      }
+    });
+  }
+
+  async createMany(attachments: CreateMessageAttachmentInput[]): Promise<void> {
+    await this.db.messageAttachment.createMany({
+      data: attachments
+    });
+
+    // Track user activity for all unique users using Redis Set - O(1) per user
+    if (attachments.length > 0) {
+      const uniqueUserIds = [...new Set(attachments.map(a => a.createdBy))];
+      for (const userId of uniqueUserIds) {
+        websocketService.trackUserActivity(userId)
+          .catch(err => logger.error('Failed to track user activity after bulk attachment creation:', err));
+      }
+    }
+  }
+
+  async deleteByMessageId(messageId: string): Promise<void> {
+    await this.db.messageAttachment.deleteMany({
+      where: {
+        entityId: messageId,
+        entityType: AttachmentEntityType.CHAT
+      }
+    });
+  }
+  
+  async findByTicketId(ticketId: string): Promise<MessageAttachment[]> {
+    return await this.db.messageAttachment.findMany({
+      where: {
+        entityId: ticketId,
+        entityType: AttachmentEntityType.TICKET
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+  }
+
+  async updateManyEntityTypeAndId(attachmentIds: string[], entityType: AttachmentEntityType, entityId: string): Promise<void> {
+    await this.db.messageAttachment.updateMany({
+      where: {
+        id: {
+          in: attachmentIds
+        }
+      },
+      data: {
+        entityType,
+        entityId,
+      }
+    });
+  }
+
+}

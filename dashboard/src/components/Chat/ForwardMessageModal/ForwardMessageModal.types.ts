@@ -1,0 +1,31 @@
+import { QueryResultType } from '@rocicorp/zero';
+import { queries } from '../../../zero/queries';
+import { Channel } from '../../../machines/stateMachine';
+import { User } from '@xyne/shared';
+
+export type MessageType = QueryResultType<typeof queries.conversationMessages>[number];
+
+export interface ForwardTarget {
+  type: 'channel' | 'user';
+  id: string;
+  name: string;
+}
+
+export interface ForwardMessageFormProps {
+  message: MessageType;
+  channelId: string;
+  onCancel: () => void;
+  onSuccess?: () => void;
+}
+
+export interface SearchResultItem {
+  type: 'channel' | 'user';
+  id: string;
+  name: string;
+  description?: string | null;
+  channel?: Channel;
+  user?: User;
+}
+
+/** Selection mode determines what type of targets can be selected */
+export type SelectionMode = 'none' | 'channel' | 'users';

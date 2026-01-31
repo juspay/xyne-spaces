@@ -1,0 +1,172 @@
+/**
+ * Simple File Fetch Service with React Query Caching
+ * Uses apiClient.ts for authenticated file operations
+ * Provides automatic caching for ALL callers (hooks, direct calls, etc.)
+ */
+
+import { apiInstance } from './apiClient';
+import { queryClient } from './queryClient';
+import { AxiosResponse } from 'axios';
+import { reactNativeBridge } from '../../utils/reactNativeBridge';
+
+export interface FetchOptions {
+  abortController?: AbortController;
+}
+
+const resolveUrl = (source: string): string => {
+  if (source.startsWith('http') || source.startsWith('/')) {
+    return source;
+  }
+  return `/attachments/${source}/download`;
+};
+
+/**
+ * Fetch file and return as File object
+ */
+export const fetchFile = async (
+  source: string,
+  fileName: string,
+  mimeType: string,
+): Promise<File> => {
+  const url = resolveUrl(source);
+  const queryKey = ['file', url, fileName, mimeType];
+
+  return queryClient.fetchQuery<File>({
+    queryKey,
+    queryFn: async ({ signal }) => {
+      const response = await apiInstance.get<Blob>(url, {
+        responseType: 'blob',
+        signal,
+      });
+
+      const blob: Blob = response.data;
+      return new File([blob], fileName, { type: mimeType });
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+};
+
+/**
+ * Download file to user's computer
+ */
+export const downloadFile = async (
+  source: string,
+  fileName: string,
+  options?: FetchOptions,
+): Promise<void> => {
+  const url = resolveUrl(source);
+
+  const response: AxiosResponse<Blob> = await apiInstance.get(url, {
+    responseType: 'blob',
+    ...(options?.abortController && { signal: options.abortController.signal }),
+  });
+
+  const blob: Blob = response.data; // 👈 typed
+
+  if (reactNativeBridge.isAvailable()) {
+    try {
+      const base64Data = await blobToBase64(blob);
+      const mimeType =
+        (response.headers?.['content-type'] as string | undefined) ||
+        blob.type ||
+        'application/octet-stream';
+      const dispatched = reactNativeBridge.saveFileToDevice({
+        fileName,
+        mimeType,
+        base64Data,
+      });
+
+      if (dispatched) {
+        return;
+      }
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[FileDownload] Failed to hand off file to native layer, falling back.', error);
+    }
+  }
+
+  const blobUrl = URL.createObjectURL(blob); // 👈 blob is safe
+
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  URL.revokeObjectURL(blobUrl);
+};
+
+/**
+ * Create blob URL for preview
+ */
+export const createPreviewUrl = async (source: string): Promise<Blob> => {
+  const url = resolveUrl(source);
+
+  return queryClient.fetchQuery<Blob>({
+    queryKey: ['preview-blob', url],
+    queryFn: async ({ signal }) => {
+      const response = await apiInstance.get(url, {
+        responseType: 'blob',
+        signal,
+      });
+      return response.data as Blob;
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+};
+
+const blobToBase64 = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      if (typeof result === 'string') {
+        const [, base64 = ''] = result.split(',');
+        resolve(base64);
+      } else {
+        reject(new Error('Unable to convert blob to base64'));
+      }
+    };
+    reader.onerror = () => {
+      reader.abort();
+      reject(new Error('Failed to read blob data'));
+    };
+    reader.readAsDataURL(blob);
+  });
+};
+
+/**
+ * Fetch emoji images with credentials and return blob URLs
+ * Used for custom emoji display in emoji picker
+ */
+export const fetchEmojiBlobUrls = async (
+  emojis: { id: string }[],
+): Promise<Record<string, string>> => {
+  const urls: Record<string, string> = {};
+
+  await Promise.all(
+    emojis.map(async emoji => {
+      try {
+        const queryKey = ['emoji-blob', emoji.id];
+        const blob = await queryClient.fetchQuery<Blob>({
+          queryKey,
+          queryFn: async ({ signal }) => {
+            const response = await apiInstance.get(`/emojis/${emoji.id}/stream`, {
+              responseType: 'blob',
+              signal,
+            });
+            return response.data as Blob;
+          },
+          staleTime: 10 * 60 * 1000,
+        });
+        urls[emoji.id] = URL.createObjectURL(blob);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error(`Failed to fetch emoji ${emoji.id}:`, error);
+      }
+    }),
+  );
+
+  return urls;
+};

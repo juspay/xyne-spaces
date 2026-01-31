@@ -1,0 +1,98 @@
+import { TicketStatusV2, TicketPriority } from '@prisma/client';
+
+export interface CreateTicketRequest {
+  // Required fields
+  title: string;
+  description: string;
+  createdBy: string;
+  updatedBy: string;
+  projectId: string; // Project to which the ticket is linked
+  userGroupId?: string; // User group to which the ticket belongs
+  boardId: string; // Board to which the ticket belongs (required)
+
+  // Conversation/Channel (at least one required)
+  conversationId?: string; // Existing conversation (if creating from chat)
+  channelId?: string; // Channel to create conversation in (if creating from form)
+
+  // Optional fields with defaults in DB
+  statusV2?: TicketStatusV2; // Default: TODO
+  priority?: TicketPriority; // Default: LOW
+
+  // Optional fields
+  assignedTo?: string;
+  eta?: Date;
+  createdAt?: string; // Optional createdAt for backdated tickets
+  metadata?: Record<string, unknown>; // Additional metadata - external source tracking, domain-specific context
+  closedAt?: Date;
+  closedBy?: string;
+  sourceConversationId?: string;
+  excludedChatAttachmentIds?: string[]; // IDs of chat attachments to exclude when creating from conversation
+  dynamicFields?: Record<string, string>; // Dynamic form field values for the ticket
+  workflowType?: string; // Optional workflow type for automation
+  stageName?: string; // Optional stage name for the ticket
+  tags?: string[]; // Optional tags for categorization
+  merchantId?: string; // Merchant ID to which the ticket is linked
+
+  // Note: xyneId is auto-generated using format XYNE-{sequence_number}
+  // Note: stageName is auto-assigned from first stage (sequenceNumber=1) of the board
+}
+
+export interface CreateTicketResponse {
+  ticketId: string;
+  status: string;
+}
+
+export interface GetTicketDetailsResponse {
+  id: string;
+  title: string;
+  description: string;
+  status: TicketStatusV2;
+  createdBy: string;
+  updatedBy: string;
+  assignedTo?: string | null;
+  conversationId: string;
+  eta?: Date | null;
+  priority: TicketPriority;
+  metadata?: Record<string, unknown> | null;
+  closedAt?: Date | null;
+  closedBy?: string | null;
+  xyneId: string;
+  projectId: string;
+  boardId: string;
+  stageName: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface TicketDuplicateCheckRequest {
+  title: string;
+  description: string;
+  projectId: string;
+  limit?: number;
+}
+
+export interface TicketDuplicateCandidate {
+  id: string;
+  title: string;
+  description: string;
+  boardId?: string;
+  status?: string;
+  stage?: string;
+  relevanceScore?: number;
+  channelId?: string;
+  conversationId?: string;
+  createdAt?: string;
+}
+
+export interface TicketDuplicateCheckAnalysis {
+  isDuplicate: boolean;
+  duplicateTicketId?: string | null;
+  confidence?: number;
+  reason?: string;
+  error?: string;
+}
+
+export interface TicketDuplicateCheckResponse {
+  candidates: TicketDuplicateCandidate[];
+  analysis: TicketDuplicateCheckAnalysis;
+}

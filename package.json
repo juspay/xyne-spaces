@@ -1,0 +1,152 @@
+{
+  "name": "xyne-spaces",
+  "version": "1.20.1",
+  "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
+  "scripts": {
+    "prepare": "husky",
+    "services": "chmod +x scripts/start-services.sh && ./scripts/start-services.sh",
+    "services:stop": "command -v podman-compose > /dev/null && podman-compose -f docker-compose.dev.yml down || docker-compose -f docker-compose.dev.yml down",
+    "cleanup": "chmod +x scripts/cleanup-storage.sh && ./scripts/cleanup-storage.sh",
+    "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.0.0",
+    "@semantic-release/changelog": "^6.0.1",
+    "@semantic-release/commit-analyzer": "^9.0.2",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/npm": "^11.0.0",
+    "@semantic-release/release-notes-generator": "^10.0.3",
+    "commitizen": "^4.3.1",
+    "cz-conventional-changelog": "^3.3.0",
+    "husky": "^9.0.11",
+    "semantic-release": "^22.0.5"
+  },
+  "dependencies": {
+    "@juspay/yama": "^2.1.0",
+    "html-to-text": "^9.0.5"
+  },
+  "release": {
+    "branches": [
+      "main",
+      {
+        "name": "release-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]",
+        "prerelease": true
+      }
+    ],
+    "repositoryUrl": "ssh://git@github.com/example-org/xyne-spaces.git",
+    "tagFormat": "v${version}",
+    "plugins": [
+      [
+        "@semantic-release/commit-analyzer",
+        {
+          "preset": "conventionalcommits",
+          "parserOpts": {
+            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(XYNE-\\d+):?\\s*(.+)$",
+            "headerCorrespondence": [
+              "type",
+              "ticket",
+              "subject"
+            ],
+            "revertPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?Revert\\s+\"(.+)\"",
+            "revertCorrespondence": [
+              "header"
+            ]
+          },
+          "releaseRules": [
+            {
+              "type": "feat",
+              "release": "minor"
+            },
+            {
+              "type": "feature",
+              "release": "minor"
+            },
+            {
+              "type": "fix",
+              "release": "patch"
+            },
+            {
+              "type": "perf",
+              "release": "patch"
+            },
+            {
+              "type": "revert",
+              "release": "patch"
+            },
+            {
+              "revert": true,
+              "release": "patch"
+            },
+            {
+              "type": "docs",
+              "release": "patch"
+            },
+            {
+              "type": "style",
+              "release": "patch"
+            },
+            {
+              "type": "refactor",
+              "release": "patch"
+            },
+            {
+              "type": "test",
+              "release": "patch"
+            },
+            {
+              "type": "build",
+              "release": "patch"
+            },
+            {
+              "type": "ci",
+              "release": "patch"
+            },
+            {
+              "type": "chore",
+              "release": false
+            }
+          ]
+        }
+      ],
+      [
+        "@semantic-release/release-notes-generator",
+        {
+          "preset": "conventionalcommits",
+          "parserOpts": {
+            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(XYNE-\\d+):?\\s*(.+)$",
+            "headerCorrespondence": [
+              "type",
+              "ticket",
+              "subject"
+            ],
+            "revertPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?Revert\\s+\"(.+)\"",
+            "revertCorrespondence": [
+              "header"
+            ]
+          }
+        }
+      ],
+      [
+        "@semantic-release/npm",
+        {
+          "npmPublish": false
+        }
+      ],
+      "@semantic-release/changelog",
+      [
+        "@semantic-release/git",
+        {
+          "assets": [
+            "package.json",
+            "CHANGELOG.md"
+          ],
+          "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
+          "gitArgs": [
+            "--no-verify"
+          ]
+        }
+      ]
+    ]
+  }
+}

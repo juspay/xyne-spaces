@@ -1,0 +1,290 @@
+{
+    "id": "wf-bug-fix",
+    "name": "Bug Fixing Workflow",
+    "nodes": [
+        {
+            "id": "Bug_Reported",
+            "type": "start",
+            "data": {
+                "label": "Bug Reported",
+                "status": "completed"
+            }
+        },
+        {
+            "id": "Expand_Problem_statement",
+            "type": "task",
+            "data": {
+                "label": "Expand Problem statement",
+                "status": "completed"
+            }
+        },
+        {
+            "id": "Xyne_Notion",
+            "type": "task",
+            "data": {
+                "label": "Xyne Notion",
+                "status": "completed"
+            }
+        },
+        {
+            "id": "RCA",
+            "type": "task",
+            "data": {
+                "label": "RCA + Validation",
+                "status": "completed"
+            }
+        },
+        {
+            "id": "Impact_Analysis",
+            "type": "task",
+            "data": {
+                "label": "Impact Analysis",
+                "status": "completed"
+            }
+        },
+        {
+            "id": "Access_Wiki",
+            "type": "task",
+            "data": {
+                "label": "Access Info from WIKI",
+                "status": "completed"
+            }
+        },
+        {
+            "id": "Agent_Orchestrator",
+            "type": "task",
+            "data": {
+                "label": "Agent Orchestrator",
+                "status": "running"
+            }
+        },
+        {
+            "id": "COE_1",
+            "type": "task",
+            "data": {
+                "label": "COE-1",
+                "status": "running"
+            }
+        },
+        {
+            "id": "COE_2",
+            "type": "task",
+            "data": {
+                "label": "COE-2",
+                "status": "running"
+            }
+        },
+        {
+            "id": "COE_3",
+            "type": "task",
+            "data": {
+                "label": "COE-3",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Agent_Junction",
+            "type": "task",
+            "data": {
+                "label": "Agent Junction",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Restore_State",
+            "type": "task",
+            "data": {
+                "label": "Restore to acceptable state",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "config_code_change",
+            "type": "task",
+            "data": {
+                "label": "config / code change",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Human_Approval_config",
+            "type": "task",
+            "data": {
+                "label": "Human Approval",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Config_Change",
+            "type": "task",
+            "data": {
+                "label": "Config Change/ A/B testing & deployment",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Short_long_term",
+            "type": "task",
+            "data": {
+                "label": "Find Short/long term",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Cross_repo_orchestrator",
+            "type": "task",
+            "data": {
+                "label": "Cross repo orchestrator",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Code_Change_repo_A",
+            "type": "task",
+            "data": {
+                "label": "Code Change Repo-A",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Code_Change_repo_B",
+            "type": "task",
+            "data": {
+                "label": "Code Change REPO-B",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "ART_A",
+            "type": "task",
+            "data": {
+                "label": "ART/micro ART",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "ART_B",
+            "type": "task",
+            "data": {
+                "label": "ART/micro ART",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Git_PR_A",
+            "type": "task",
+            "data": {
+                "label": "Raise Pull Request",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Git_PR_B",
+            "type": "task",
+            "data": {
+                "label": "Raise Pull Request",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Human_Approval_release",
+            "type": "task",
+            "data": {
+                "label": "Human Approval-release",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Deployment_A",
+            "type": "task",
+            "data": {
+                "label": "Deployment-1",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "AB_Testing_A",
+            "type": "task",
+            "data": {
+                "label": "A/B Testing 1",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "ABORT",
+            "type": "end",
+            "data": {
+                "label": "Reject All",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Deployment_B",
+            "type": "task",
+            "data": {
+                "label": "Deployment-2",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "AB_Testing_B",
+            "type": "task",
+            "data": {
+                "label": "A/B Testing 2",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Exit_on_N",
+            "type": "end",
+            "data": {
+                "label": "Exit on N retries",
+                "status": "pending"
+            }
+        },
+        {
+            "id": "Release_Completed",
+            "type": "end",
+            "data": {
+                "label": "Release Completed",
+                "status": "pending"
+            }
+        }
+    ],
+    "edges": [
+        { "id": "e-Bug-Reported-Expand", "source": "Bug_Reported", "target": "Expand_Problem_statement", "animated": true },
+        { "id": "e-Expand-Notion", "source": "Expand_Problem_statement", "target": "Xyne_Notion", "animated": true },
+        { "id": "e-Notion-RCA", "source": "Xyne_Notion", "target": "RCA", "animated": true },
+        { "id": "e-RCA-Impact", "source": "RCA", "target": "Impact_Analysis", "animated": true },
+        { "id": "e-Impact-Wiki", "source": "Impact_Analysis", "target": "Access_Wiki", "animated": true },
+        { "id": "e-Wiki-Orchestrator", "source": "Access_Wiki", "target": "Agent_Orchestrator", "animated": true },
+        { "id": "e-orchestrator-coe1", "source": "Agent_Orchestrator", "target": "COE_1", "animated": true },
+        { "id": "e-orchestrator-coe2", "source": "Agent_Orchestrator", "target": "COE_2", "animated": true },
+        { "id": "e-orchestrator-coe3", "source": "Agent_Orchestrator", "target": "COE_3", "animated": true },
+        { "id": "e-coe1-Agent_Junction", "source": "COE_1", "target": "Agent_Junction", "animated": true },
+        { "id": "e-coe2-Agent_Junction", "source": "COE_2", "target": "Agent_Junction", "animated": true },
+        { "id": "e-coe3-Agent_Junction", "source": "COE_3", "target": "Agent_Junction", "animated": true },
+        { "id": "e-Agent_Junction-State", "source": "Agent_Junction", "target": "Restore_State", "animated": true },
+        { "id": "e-State-config_code_change", "source": "Restore_State", "target": "config_code_change", "animated": true },
+        { "id": "e-config_code_change-Human", "source": "config_code_change", "target": "Human_Approval_config", "animated": true },
+        { "id": "e-Human-config-deploy", "source": "Human_Approval_config", "target": "Config_Change", "animated": true },
+        { "id": "e-config-short-long", "source": "config_code_change", "target": "Short_long_term", "animated": true },
+        { "id": "e-short-long-cross-repo", "source": "Short_long_term", "target": "Cross_repo_orchestrator", "animated": true },
+        { "id": "e-cross-repo-repoA", "source": "Cross_repo_orchestrator", "target": "Code_Change_repo_A", "animated": true },
+        { "id": "e-cross-repo-repoB", "source": "Cross_repo_orchestrator", "target": "Code_Change_repo_B", "animated": true },
+        { "id": "e-repoA-art", "source": "Code_Change_repo_A", "target": "ART_A", "animated": true },
+        { "id": "e-repoB-art", "source": "Code_Change_repo_B", "target": "ART_B", "animated": true },
+        { "id": "e-art-pr-A", "source": "ART_A", "target": "Git_PR_A", "animated": true },
+        { "id": "e-art-pr-B", "source": "ART_B", "target": "Git_PR_B", "animated": true },
+        { "id": "e-prA-human", "source": "Git_PR_A", "target": "Human_Approval_release", "animated": true },
+        { "id": "e-Human-abort", "source": "Human_Approval_release", "target": "ABORT", "animated": true },
+        { "id": "e-human-deployment-A", "source": "Human_Approval_release", "target": "Deployment_A", "animated": true },
+        { "id": "e-human-deployment-B", "source": "Human_Approval_release", "target": "Deployment_B", "animated": true },
+        { "id": "e-deploy-AB-A", "source": "Deployment_A", "target": "AB_Testing_A", "animated": true },
+        { "id": "e-deploy-AB-B", "source": "Deployment_B", "target": "AB_Testing_B", "animated": true },
+        { "id": "e-AB-A-Exit", "source": "AB_Testing_A", "target": "Exit_on_N", "animated": true },
+        { "id": "e-AB-B-Exit", "source": "AB_Testing_B", "target": "Exit_on_N", "animated": true },
+        { "id": "e-AB-A-release", "source": "AB_Testing_A", "target": "Release_Completed", "animated": true },
+        { "id": "e-AB-B-release", "source": "AB_Testing_B", "target": "Release_Completed", "animated": true }
+    ]
+}

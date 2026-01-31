@@ -1,0 +1,36 @@
+import { Router } from 'express';
+import { callController } from '@/controllers/callController';
+
+const router = Router();
+
+// Call management endpoints
+router.post('/initiate', callController.initiateCall);
+router.post('/join', callController.joinCall);
+router.post('/validate-rooms', callController.validateRooms);
+
+// Recordings endpoints (HEADLESS calls)
+router.get('/recordings', callController.getRecordings);
+router.get('/recordings/:callId', callController.getRecordingDetail);
+router.patch('/recordings/:callId', callController.updateRecordingTitle);
+router.delete('/recordings/:callId', callController.deleteRecording);
+
+// Manual endpoint to process transcript (triggered by user clicking "View Transcript" button)
+router.post('/:callId/process-transcript', callController.processTranscript);
+
+// PRD Generation endpoint (generates PRD canvas from call transcript)
+router.post('/:callId/generate-prd', callController.generatePRD);
+
+// Detailed Summary Generation endpoint (generates comprehensive summary from call transcript)
+router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);
+
+// Invite users to call (creates call_participants for notifications)
+router.post('/:callId/invite', callController.inviteUsers);
+
+// Decline call endpoint
+router.post('/:callId/decline', callController.declineCall);
+
+// Leave call endpoint
+router.post('/:callId/leave', callController.leaveCall);
+
+export default router;
+

@@ -1,0 +1,12 @@
+This is a test text file for file upload functionality.
+
+It contains multiple lines of text to test the file upload feature in the chat module.
+
+The file includes:
+- Plain text content
+- Multiple paragraphs
+- Special characters: !@#$%^&*()
+- Numbers: 123456789
+- Mixed content for comprehensive testing
+
+This file will be used to verify that TXT files can be successfully uploaded and processed by the chat system.

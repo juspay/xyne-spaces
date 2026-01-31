@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.debug {
+  outline: 1px solid red;
+}
+
+.debug-blue {
+  outline: 1px solid blue;
+}
+
+.debug-green {
+  outline: 1px solid green;
+}
+
+.wmde-markdown {
+  font-size: 12px;
+}
+
+.wmde-markdown > h1 {
+  font-size: 18px !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.wmde-markdown > h2,
+.wmde-markdown > h3,
+.wmde-markdown > h4,
+.wmde-markdown > h5,
+.wmde-markdown > h6 {
+  font-size: 16px !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.wmde-markdown > p {
+  font-size: 14px !important;
+  color: hsl(var(--foreground)) !important;
+}

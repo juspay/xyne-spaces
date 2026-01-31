@@ -1,0 +1,81 @@
+
+<!DOCTYPE html>
+<html>
+​
+<head>
+    <meta charset="UTF-8">
+    <title>Connection Error</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+​
+        .container {
+            text-align: center;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
+        }
+​
+        h1 {
+            font-size: 24px;
+            margin-bottom: 1rem;
+        }
+​
+        p {
+            margin-bottom: 1.5rem;
+            line-height: 1.5;
+            color: #666;
+        }
+​
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+​
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+​
+<body>
+    <div class="container">
+        <h1>Failed to Load</h1>
+        <p>Something went wrong while connecting to the application. This might be due to a temporary network issue or
+            certificate check failure.</p>
+        <button id="reloadBtn">Reload Application</button>
+        <p style="margin-top: 1.5rem; font-size: 0.9em;">
+            If it still doesn't work, please report it in<br>
+            the <a target="_blank" rel="noopener noreferrer" href="https://juspay.slack.com/archives/C0A473SV8CC"
+                style="font-weight: bold;">#xyne-app-issues</a> Slack channel.
+        </p>
+    </div>
+    <script>
+        document.getElementById('reloadBtn').addEventListener('click', () => {
+            if (window.electronAPI && window.electronAPI.reloadApp) {
+	                window.electronAPI.reloadApp();
+            } else {
+                location.reload();
+            }
+        });
+    </script>
+</body>
+​
+</html>

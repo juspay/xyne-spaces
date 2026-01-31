@@ -1,0 +1,2762 @@
+import { DatabaseClient } from '../client';
+import { WorkflowType, getWorkflowTypeDisplayName } from '@/workflows/types/workflow-enums';
+import { getTodayISTDateRange } from '@/utils/dateUtils';
+import {logger} from '@/utils/logger';
+
+export interface AnalyticsFilters {
+  timeRange?: string; // 'today', '7d', '30d', '90d', 'custom'
+  workflowType?: string; // 'all' or any value from WorkflowType enum
+  startDate?: string; // ISO date string for custom range start
+  endDate?: string; // ISO date string for custom range end
+  repoName?: string; // Repository filter
+  userId?: string; // User filter - 'all' or specific user ID
+}
+
+// New optimized types for execution stats
+export interface ExecutionTimeStats {
+  p50: number;
+  p90: number;
+  p95: number;
+  p99: number;
+}
+
+export interface ExecutionStatsItem {
+  type: string;              // "BUG_WORKFLOW", "FEATURE_IMPLEMENTATION", etc.
+  executionCount: number;    // Total completed executions
+  successCount: number;      // Successful executions
+  failedCount: number;       // Failed executions
+  successRate: number;       // Percentage (0-100)
+  timeStats: ExecutionTimeStats;
+}
+
+export interface SuccessRateTimePoint {
+  date: string;              // "2024-11-01"
+  totalExecutions: number;
+  successfulExecutions: number;
+  successRate: number;       // Percentage (0-100)
+}
+
+export interface ExecutionStats {
+  overallTimeStats: ExecutionTimeStats;
+  successRateTimeSeries: SuccessRateTimePoint[];
+  workflowTypes: ExecutionStatsItem[];
+}
+
+export interface ExecutionStatusStats {
+  status: string;
+  count: number;
+  percentage: number;
+}
+
+export interface StepFailureStats {
+  stepName: string;
+  failures: number;
+  totalRuns: number;
+  rate: number;
+}
+
+export interface StepFunnelStats {
+  stepName: string;
+  stepOrder: number;
+  totalStarted: number;
+  totalCompleted: number;
+  completionRate: number;
+  dropoffRate: number;
+}
+
+export interface RecentActivityItem {
+  time: string;
+  event: string;
+}
+
+export interface WorkflowTypeOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface PRStatValue {
+  count: number
+  trend: string // e.g., "+22%", "-42%", "0%"
+}
+
+export interface PRStats {
+  xyneMerged: PRStatValue
+  xyneDeclined: PRStatValue
+  xyneOpen: PRStatValue
+  nonXyneMerged: PRStatValue
+  raised: PRStatValue
+  successRate: number
+  coverage: number
+}
+
+export interface PRStatsLegacy {
+  xyneMerged: number
+  xyneDeclined: number
+  xyneOpen: number
+  nonXyneMerged: number
+  raised: number
+  successRate: number,
+  coverage: number
+}
+
+export interface TimeSeriesDataPoint {
+  date: string
+  stats: PRStatsLegacy
+}
+
+
+/**
+ * Helper method to get date filter SQL condition
+ * ALL DATE OPERATIONS USE UTC TO AVOID TIMEZONE ISSUES
+ */
+export function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lte?: Date } {
+  const now = new Date();
+
+  // Handle custom date range
+  if (filters.timeRange === 'custom' && filters.startDate) {
+    const startDate = new Date(filters.startDate);
+    const endDate = filters.endDate ? new Date(filters.endDate) : now;
+    return { gte: startDate, lte: endDate };
+  }
+
+  // Handle date range in format "YYYY-MM-DD_YYYY-MM-DD" from frontend calendar
+  const timeRange = filters.timeRange || '7d';
+  if (timeRange.includes('_')) {
+    const [startDateStr, endDateStr] = timeRange.split('_');
+    const startDate = new Date(startDateStr);
+    const endDate = new Date(endDateStr);
+
+    // Set end date to end of day using UTC to include the entire end date
+    endDate.setUTCHours(23, 59, 59, 999);
+
+    return { gte: startDate, lte: endDate };
+  }
+
+  // Handle preset ranges with proper end dates using UTC
+  switch (timeRange) {
+    case 'today':
+      // Return start of today using UTC to now
+      const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      return { gte: startOfToday, lte: now };
+      
+    case '7d':
+      const start7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      return { gte: start7d, lte: now };
+      
+    case '30d':
+      const start30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      return { gte: start30d, lte: now };
+      
+    case '90d':
+      const start90d = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      return { gte: start90d, lte: now };
+      
+    default:
+      const startDefault = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      return { gte: startDefault, lte: now };
+  }
+}
+
+
+export class AnalyticsRepository {
+  private prisma = DatabaseClient.getInstance();
+
+  /**
+   * Get IDs of real users (userType: 'USER'), excludes bots
+   */
+  private async getUsersId(): Promise<string[]> {
+    const users = await this.prisma.user.findMany({
+      where: { userType: 'USER' },
+      select: { id: true }
+    });
+    return users.map(u => u.id);
+  }
+
+  /**
+   * Helper method to extract start and end dates from date condition
+   * Centralizes the logic to avoid code duplication across time-series methods
+   */
+  private getDateRange(dateCondition: Date | { gte: Date; lte?: Date }): { startDate: Date; endDate: Date } {
+    const startDate = typeof dateCondition === 'object' && 'gte' in dateCondition 
+      ? dateCondition.gte 
+      : dateCondition;
+    const endDate = typeof dateCondition === 'object' && 'lte' in dateCondition && dateCondition.lte 
+      ? dateCondition.lte 
+      : new Date();
+    
+    return { startDate, endDate };
+  }
+
+  /**
+   * Calculate percentage change between current and previous period
+   */
+  private calculateTrend(currentValue: number, previousValue: number): string {
+    if (previousValue === 0) {
+      return currentValue > 0 ? "+100%" : "0%";
+    }
+
+    const change = ((currentValue - previousValue) / previousValue) * 100;
+    const sign = change >= 0 ? "+" : "";
+    return `${sign}${Math.round(change)}%`;
+  }
+
+  /**
+   * Convert legacy PR stats to new format with trends
+   */
+  private convertToTrendStats(currentStats: PRStatsLegacy, previousStats: PRStatsLegacy): PRStats {
+    return {
+      xyneMerged: {
+        count: currentStats.xyneMerged,
+        trend: this.calculateTrend(currentStats.xyneMerged, previousStats.xyneMerged)
+      },
+      xyneDeclined: {
+        count: currentStats.xyneDeclined,
+        trend: this.calculateTrend(currentStats.xyneDeclined, previousStats.xyneDeclined)
+      },
+      xyneOpen: {
+        count: currentStats.xyneOpen,
+        trend: this.calculateTrend(currentStats.xyneOpen, previousStats.xyneOpen)
+      },
+      nonXyneMerged: {
+        count: currentStats.nonXyneMerged,
+        trend: this.calculateTrend(currentStats.nonXyneMerged, previousStats.nonXyneMerged)
+      },
+      raised: {
+        count: currentStats.raised,
+        trend: this.calculateTrend(currentStats.raised, previousStats.raised)
+      },
+      successRate: currentStats.successRate,
+      coverage: currentStats.coverage
+    };
+  }
+
+  /**
+   * Calculate date range for previous period of same length
+   */
+  private getPreviousPeriodDates(currentStartDate: Date, currentEndDate: Date): { startDate: Date, endDate: Date } {
+    const periodLength = currentEndDate.getTime() - currentStartDate.getTime();
+    const previousEndDate = new Date(currentStartDate.getTime() - 1); // One day before current period starts
+    const previousStartDate = new Date(previousEndDate.getTime() - periodLength);
+
+    return {
+      startDate: previousStartDate,
+      endDate: previousEndDate
+    };
+  }
+
+  /**
+   * Calculate raw PR stats for a given date range
+   */
+  private async calculateRawPRStats(filters: AnalyticsFilters, startDate: Date, endDate: Date): Promise<PRStatsLegacy> {
+    const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+
+    // Build base where clause for pull requests
+    let prWhereClause: any = {
+      date: {
+        gte: startDate,
+        lte: endDate
+      },
+      ...(filters.repoName && filters.repoName !== 'all' ? {repoName: filters.repoName} : {})
+    };
+
+    // If workflow type filter is specified, we need to filter by workflow execution IDs
+    if (workflowTypeFilter.workflowType) {
+      // First, get all workflow execution IDs for the specified workflow type
+      const workflowExecutions = await this.prisma.workflowExecution.findMany({
+        where: {
+          workflow: {
+            workflowType: workflowTypeFilter.workflowType as any
+          }
+        },
+        select: {
+          id: true
+        }
+      });
+
+      const workflowExecutionIds = workflowExecutions.map(we => we.id);
+
+      // Add filter for workflow execution IDs
+      prWhereClause.workflowExecutionId = {
+        in: workflowExecutionIds
+      };
+    }
+
+    const prs = await this.prisma.pullRequests.findMany({
+      where: prWhereClause
+    });
+
+    const initialStats: PRStatsLegacy = {
+      xyneOpen: 0,
+      xyneDeclined: 0,
+      xyneMerged: 0,
+      nonXyneMerged: 0,
+      raised: 0,
+      successRate: 0,
+      coverage: 0
+    };
+
+    const stats = prs.reduce((acc, curr) => {
+      // Track if this is a Xyne PR (only workflowExecutionId needed now)
+      const isXynePR = !!curr.workflowExecutionId;
+
+      if (curr.status === 'MERGED') {
+        if (isXynePR) {
+          acc.xyneMerged += 1;
+        } else {
+          acc.nonXyneMerged += 1;
+        }
+      } else if (curr.status === 'DECLINED' && isXynePR) {
+        acc.xyneDeclined += 1;
+      } else if (curr.status === 'OPEN' && isXynePR) {
+        acc.xyneOpen += 1;
+      }
+
+      // Increment raised count for all Xyne PRs
+      if (isXynePR) {
+        acc.raised += 1;
+      }
+
+      return acc;
+    }, initialStats);
+
+    // Calculate success rate
+    const totalXynePRs = stats.xyneMerged + stats.xyneDeclined;
+    stats.successRate = totalXynePRs > 0
+      ? (stats.xyneMerged / totalXynePRs) * 100
+      : 0;
+
+    return stats;
+  }
+
+  /**
+   * Helper method to calculate execution time percentiles
+   */
+  private calculateExecutionTimeStats(values: number[]): ExecutionTimeStats {
+    if (values.length === 0) {
+      return { p50: 0, p90: 0, p95: 0, p99: 0 };
+    }
+
+    const sorted = [...values].sort((a, b) => a - b);
+    const getPercentile = (p: number): number => {
+      const index = Math.ceil((p / 100) * sorted.length) - 1;
+      return sorted[Math.max(0, index)];
+    };
+
+    return {
+      p50: Math.round(getPercentile(50)),
+      p90: Math.round(getPercentile(90)),
+      p95: Math.round(getPercentile(95)),
+      p99: Math.round(getPercentile(99))
+    };
+  }
+
+  /**
+   * Helper method to build workflow type filter
+   */
+  private getWorkflowTypeFilter(workflowType?: string) {
+    if (!workflowType || workflowType === 'all') {
+      return {};
+    }
+    return { workflowType };
+  }
+
+  /**
+   * Helper method to build user filter (filters by ticket creator)
+   */
+  private getUserFilter(userId?: string) {
+    if (!userId || userId === 'all') {
+      // For 'all' users, don't apply any user filter (include all data)
+      return {};
+    }
+    return {
+      ticket: {
+        createdBy: userId
+      }
+    };
+  }
+
+  /**
+   * Get overview statistics
+   */
+  async getOverviewStats(filters: AnalyticsFilters): Promise<any> {
+    const dateFilter = getDateFilter(filters);
+    const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Total workflows in time period
+    const totalWorkflows = await this.prisma.workflow.count({
+      where: {
+        createdAt: dateCondition,
+        ...workflowTypeFilter
+      }
+    });
+
+    // Currently running executions (real-time, filtered by workflow type only)
+    const runningExecutions = await this.prisma.workflowExecution.count({
+      where: {
+        status: { in: ['NEW', 'PENDING', 'RUNNING'] },
+        workflow: workflowTypeFilter
+      }
+    });
+
+    // Success rate and average execution time
+    const executions = await this.prisma.workflowExecution.findMany({
+      where: {
+        createdAt: dateCondition,
+        workflow: workflowTypeFilter
+      },
+      select: {
+        status: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    const totalExecutions = executions.length;
+    const successfulExecutions = executions.filter(e => e.status === 'SUCCESS').length;
+    const successRate = totalExecutions > 0 ? (successfulExecutions / totalExecutions) * 100 : 0;
+
+    // Calculate average execution time for completed workflows
+    const completedExecutions = executions.filter(e => e.status === 'SUCCESS');
+    const avgExecutionTime = completedExecutions.length > 0
+      ? completedExecutions.reduce((sum, e) => {
+          const duration = (new Date(e.updatedAt).getTime() - new Date(e.createdAt).getTime()) / 1000;
+          return sum + duration;
+        }, 0) / completedExecutions.length
+      : 0;
+
+    return {
+      totalWorkflows,
+      runningExecutions,
+      successRate: Math.round(successRate * 10) / 10, // Round to 1 decimal
+      avgExecutionTime: Math.round(avgExecutionTime)
+    };
+  }
+
+  /**
+     * Get overview statistics
+     */
+  async getPRMetrics(filters: AnalyticsFilters): Promise<any> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract dates for current period
+    const currentStartDate = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter.gte
+      : dateFilter;
+    const currentEndDate = typeof dateFilter === 'object' && 'lte' in dateFilter && dateFilter.lte
+      ? dateFilter.lte
+      : new Date(); // Use lte if available, otherwise now
+
+    // Calculate previous period dates
+    const { startDate: previousStartDate, endDate: previousEndDate } =
+      this.getPreviousPeriodDates(currentStartDate, currentEndDate);
+
+    logger.info(`📊 [PR-METRICS] Date ranges:`, {
+      currentPeriod: { start: currentStartDate.toISOString(), end: currentEndDate.toISOString() },
+      previousPeriod: { start: previousStartDate.toISOString(), end: previousEndDate.toISOString() }
+    });
+
+    // Get current period stats
+    const currentStats = await this.calculateRawPRStats(filters, currentStartDate, currentEndDate);
+
+    // Get previous period stats for trend calculation
+    const previousStats = await this.calculateRawPRStats(filters, previousStartDate, previousEndDate);
+
+    // Convert current stats to trend format with comparisons
+    const overallMetricsWithTrends = this.convertToTrendStats(currentStats, previousStats);
+
+    // Build time series data using the original logic (but with correct types)
+    const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+
+    // Build base where clause for pull requests
+    let prWhereClause: any = {
+      date: dateCondition,
+      ...(filters.repoName && filters.repoName !== 'all' ? {repoName: filters.repoName} : {})
+    };
+
+    // If workflow type filter is specified, we need to filter by workflow execution IDs
+    if (workflowTypeFilter.workflowType) {
+      // First, get all workflow execution IDs for the specified workflow type
+      const workflowExecutions = await this.prisma.workflowExecution.findMany({
+        where: {
+          workflow: {
+            workflowType: workflowTypeFilter.workflowType as any
+          }
+        },
+        select: {
+          id: true
+        }
+      });
+
+      const workflowExecutionIds = workflowExecutions.map(we => we.id);
+
+      // Add filter for workflow execution IDs
+      prWhereClause.workflowExecutionId = {
+        in: workflowExecutionIds
+      };
+    }
+
+    const prs = await this.prisma.pullRequests.findMany({
+      where: prWhereClause
+    });
+
+    let initialStats: PRStatsLegacy = {
+      xyneOpen: 0,
+      xyneDeclined: 0,
+      xyneMerged: 0,
+      nonXyneMerged: 0,
+      raised: 0,
+      successRate: 0,
+      coverage: 0
+    };
+
+    // Build repository metrics (without trends)
+    const repoMetrics: { [repoName: string]: PRStatsLegacy } = {};
+
+    prs.forEach(curr => {
+      if (!(curr.repoName in repoMetrics)) {
+        repoMetrics[curr.repoName] = { ...initialStats };
+      }
+
+      // Track if this is a Xyne PR (only workflowExecutionId needed now)
+      const isXynePR = !!curr.workflowExecutionId;
+
+      if (curr.status === 'MERGED') {
+        if (isXynePR) {
+          repoMetrics[curr.repoName].xyneMerged += 1;
+        } else {
+          repoMetrics[curr.repoName].nonXyneMerged += 1;
+        }
+      } else if (curr.status === 'DECLINED' && isXynePR) {
+        repoMetrics[curr.repoName].xyneDeclined += 1;
+      } else if (curr.status === 'OPEN' && isXynePR) {
+        repoMetrics[curr.repoName].xyneOpen += 1;
+      }
+
+      // Increment raised count for all Xyne PRs
+      if (isXynePR) {
+        repoMetrics[curr.repoName].raised += 1;
+      }
+    });
+
+    // Calculate success rate for each repo
+    for (const key of Object.keys(repoMetrics)) {
+      const repoStats = repoMetrics[key];
+      const repoTotalXynePRs = repoStats.xyneMerged + repoStats.xyneDeclined;
+      repoStats.successRate = repoTotalXynePRs > 0
+        ? (repoStats.xyneMerged / repoTotalXynePRs) * 100
+        : 0;
+      repoStats.coverage = (repoStats.xyneMerged + repoStats.nonXyneMerged) > 0
+        ? (repoStats.xyneMerged / (repoStats.xyneMerged + repoStats.nonXyneMerged)) * 100
+        : 0;
+    }
+
+    // Sort repoMetrics by total PRs
+    const sortedRepoMetrics = Object.entries(repoMetrics)
+      .sort(([, a], [, b]) => {
+        const totalA = a.xyneDeclined + a.xyneMerged + a.xyneOpen;
+        const totalB = b.xyneDeclined + b.xyneMerged + b.xyneOpen;
+        return totalB - totalA;
+      })
+      .reduce((acc, [key, value]) => {
+        acc[key] = value;
+        return acc;
+      }, {} as { [repoName: string]: PRStatsLegacy });
+
+    // Build time series data - group PRs by date
+    const timeSeriesMap = new Map<string, PRStatsLegacy>();
+
+    prs.forEach(pr => {
+      // Format date as YYYY-MM-DD
+      const dateKey = pr.date.toISOString().split('T')[0];
+
+      if (!timeSeriesMap.has(dateKey)) {
+        timeSeriesMap.set(dateKey, { ...initialStats });
+      }
+
+      const dayStats = timeSeriesMap.get(dateKey)!;
+      const isXynePR = !!pr.workflowExecutionId;
+
+      if (pr.status === 'MERGED') {
+        if (isXynePR) {
+          dayStats.xyneMerged += 1;
+        } else {
+          dayStats.nonXyneMerged += 1;
+        }
+      } else if (pr.status === 'DECLINED' && isXynePR) {
+        dayStats.xyneDeclined += 1;
+      } else if (pr.status === 'OPEN' && isXynePR) {
+        dayStats.xyneOpen += 1;
+      }
+
+      // Increment raised count for all Xyne PRs
+      if (isXynePR) {
+        dayStats.raised += 1;
+      }
+    });
+
+    // Calculate success rate and coverage for each day
+    timeSeriesMap.forEach((stats) => {
+      const dayTotalXynePRs = stats.xyneMerged + stats.xyneDeclined;
+      stats.successRate = dayTotalXynePRs > 0
+        ? (stats.xyneMerged / dayTotalXynePRs) * 100
+        : 0;
+      stats.coverage = (stats.xyneMerged + stats.nonXyneMerged) > 0
+        ? (stats.xyneMerged / (stats.xyneMerged + stats.nonXyneMerged)) * 100
+        : 0;
+    });
+
+    // Convert to array and sort by date
+    const timeSeries = Array.from(timeSeriesMap.entries())
+      .map(([date, stats]) => ({ date, stats }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      overallMetrics: overallMetricsWithTrends,
+      repoMetrics: sortedRepoMetrics,
+      timeSeries: timeSeries
+    };
+  }
+
+  /**
+   * Get optimized execution statistics for all 3 UI components
+   */
+  async getExecutionStats(filters: AnalyticsFilters): Promise<ExecutionStats> {
+    const dateFilter = getDateFilter(filters);
+    const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+    const userFilter = this.getUserFilter(filters.userId);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Get all completed workflow executions
+    const result = await this.prisma.workflow.findMany({
+      where: {
+        createdAt: dateCondition,
+        ...workflowTypeFilter,
+        ...userFilter
+        // Note: repoName filter not applicable to workflows (only to PRs)
+      },
+      include: {
+        workflowExecutions: {
+          select: {
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            ignoreDuration: true
+          },
+          where: {
+            parentWorkflowExecutionId: null,
+            status: { in: ['SUCCESS', 'FAILURE'] }  // Only completed executions
+          }
+        }
+      }
+    });
+
+    // Collect data for all calculations
+    const allExecutionTimes: number[] = [];
+    const workflowTypeStats = new Map<string, {
+      executionTimes: number[];
+      successCount: number;
+      failedCount: number;
+    }>();
+    const dailyStats = new Map<string, {
+      totalExecutions: number;
+      successfulExecutions: number;
+    }>();
+
+    result.forEach(workflow => {
+      const type = workflow.workflowType || 'UNKNOWN';
+
+      if (!workflowTypeStats.has(type)) {
+        workflowTypeStats.set(type, {
+          executionTimes: [],
+          successCount: 0,
+          failedCount: 0
+        });
+      }
+
+      const typeStats = workflowTypeStats.get(type)!;
+
+      workflow.workflowExecutions.forEach(execution => {
+        const executionTime = execution.updatedAt.getTime() - execution.createdAt.getTime() - execution.ignoreDuration;
+        const executionDate = execution.updatedAt.toISOString().split('T')[0];
+
+        // Collect for overall time stats
+        allExecutionTimes.push(executionTime);
+
+        // Collect for per-type stats
+        typeStats.executionTimes.push(executionTime);
+        if (execution.status === 'SUCCESS') {
+          typeStats.successCount++;
+        } else {
+          typeStats.failedCount++;
+        }
+
+        // Collect for daily success rate
+        if (!dailyStats.has(executionDate)) {
+          dailyStats.set(executionDate, {
+            totalExecutions: 0,
+            successfulExecutions: 0
+          });
+        }
+        const dayStats = dailyStats.get(executionDate)!;
+        dayStats.totalExecutions++;
+        if (execution.status === 'SUCCESS') {
+          dayStats.successfulExecutions++;
+        }
+      });
+    });
+
+    // Calculate overall time stats
+    const overallTimeStats = this.calculateExecutionTimeStats(allExecutionTimes);
+
+    // Calculate per-workflow-type stats
+    const workflowTypes: ExecutionStatsItem[] = [];
+    workflowTypeStats.forEach((stats, type) => {
+      const totalExecutions = stats.successCount + stats.failedCount;
+      const successRate = totalExecutions > 0 ? (stats.successCount / totalExecutions) * 100 : 0;
+
+      workflowTypes.push({
+        type,
+        executionCount: totalExecutions,
+        successCount: stats.successCount,
+        failedCount: stats.failedCount,
+        successRate: Math.round(successRate * 10) / 10, // Round to 1 decimal
+        timeStats: this.calculateExecutionTimeStats(stats.executionTimes)
+      });
+    });
+
+    // Calculate success rate time series
+    const successRateTimeSeries: SuccessRateTimePoint[] = [];
+    Array.from(dailyStats.entries())
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .forEach(([date, stats]) => {
+        const successRate = stats.totalExecutions > 0
+          ? (stats.successfulExecutions / stats.totalExecutions) * 100
+          : 0;
+
+        successRateTimeSeries.push({
+          date,
+          totalExecutions: stats.totalExecutions,
+          successfulExecutions: stats.successfulExecutions,
+          successRate: Math.round(successRate * 10) / 10 // Round to 1 decimal
+        });
+      });
+
+    return {
+      overallTimeStats,
+      successRateTimeSeries,
+      workflowTypes: workflowTypes.sort((a, b) => b.executionCount - a.executionCount)
+    };
+  }
+
+  /**
+   * Get workflow type statistics (legacy method - now delegates to new method)
+   */
+  async getWorkflowTypeStats(filters: AnalyticsFilters) {
+    const executionStats = await this.getExecutionStats(filters);
+
+    // Transform new format back to legacy format for backwards compatibility
+    const workflowTypes = executionStats.workflowTypes.map(item => ({
+      type: item.type,
+      count: item.executionCount,
+      success: item.successCount,
+      failed: item.failedCount,
+      timeStats: item.timeStats,
+      successTime: { p50: 0, p90: 0, p95: 0, p99: 0 }, // Not calculated in new method
+      failureTime: { p50: 0, p90: 0, p95: 0, p99: 0 }  // Not calculated in new method
+    }));
+
+    return {
+      workflowTypes,
+      overallTimeStats: executionStats.overallTimeStats
+    };
+  }
+
+  /**
+   * Get execution status distribution
+   */
+  async getExecutionStatusStats(filters: AnalyticsFilters): Promise<ExecutionStatusStats[]> {
+    const dateFilter = getDateFilter(filters);
+    const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    const executions = await this.prisma.workflowExecution.findMany({
+      where: {
+        createdAt: dateCondition,
+        workflow: workflowTypeFilter
+      },
+      select: {
+        status: true
+      }
+    });
+
+    const totalCount = executions.length;
+    const statusCounts = new Map<string, number>();
+
+    executions.forEach(execution => {
+      const status = execution.status || 'UNKNOWN';
+      statusCounts.set(status, (statusCounts.get(status) || 0) + 1);
+    });
+
+    const result: ExecutionStatusStats[] = [];
+    statusCounts.forEach((count, status) => {
+      result.push({
+        status,
+        count,
+        percentage: totalCount > 0 ? Math.round((count / totalCount) * 1000) / 10 : 0 // Round to 1 decimal
+      });
+    });
+
+    return result.sort((a, b) => b.count - a.count);
+  }
+
+  /**
+   * Get most failing steps
+   */
+  async getStepFailureStats(filters: AnalyticsFilters): Promise<StepFailureStats[]> {
+    const dateFilter = getDateFilter(filters);
+    const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    const steps = await this.prisma.workflowStep.findMany({
+      where: {
+        createdAt: dateCondition,
+        stepName: { not: null },
+        workflowExecution: {
+          workflow: workflowTypeFilter
+        }
+      },
+      select: {
+        stepName: true,
+        status: true
+      }
+    });
+
+    // Group by step name
+    const stepStatsMap = new Map<string, { failures: number; totalRuns: number }>();
+
+    steps.forEach(step => {
+      const stepName = step.stepName!;
+
+      if (!stepStatsMap.has(stepName)) {
+        stepStatsMap.set(stepName, { failures: 0, totalRuns: 0 });
+      }
+
+      const stats = stepStatsMap.get(stepName)!;
+      stats.totalRuns++;
+
+      if (step.status === 'FAILURE') {
+        stats.failures++;
+      }
+    });
+
+    const result: StepFailureStats[] = [];
+    stepStatsMap.forEach((stats, stepName) => {
+      if (stats.totalRuns >= 5) { // Only include steps with meaningful sample size
+        const rate = Math.round((stats.failures / stats.totalRuns) * 1000) / 10; // Round to 1 decimal
+        result.push({
+          stepName,
+          failures: stats.failures,
+          totalRuns: stats.totalRuns,
+          rate
+        });
+      }
+    });
+
+    return result.sort((a, b) => b.rate - a.rate || b.failures - a.failures).slice(0, 5);
+  }
+
+  /**
+   * Get step funnel data - sequential completion rates
+   */
+  async getStepFunnelStats(filters: AnalyticsFilters): Promise<StepFunnelStats[]> {
+    try {
+      const dateFilter = getDateFilter(filters);
+      const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+
+      // Build date condition for Prisma query
+      const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+        ? dateFilter
+        : { gte: dateFilter };
+
+      // Get all workflow executions with their steps
+      const executions = await this.prisma.workflowExecution.findMany({
+        where: {
+          createdAt: dateCondition,
+          workflow: workflowTypeFilter
+        },
+        include: {
+          workflowSteps: {
+            where: {
+              stepName: { not: null },
+              type: { not: null }
+            },
+            orderBy: {
+              createdAt: 'asc'
+            },
+            select: {
+              stepName: true,
+              type: true,
+              createdAt: true
+            }
+          }
+        },
+        // Add pagination to prevent memory issues
+        take: 1000
+      });
+
+    if (executions.length === 0) {
+      return [];
+    }
+
+    // Build step sequence and calculate funnel metrics
+    const stepSequenceMap = new Map<string, number>();
+    const stepStatsMap = new Map<string, { started: number; completed: number }>();
+
+    // First pass: determine step sequence order by finding first input occurrence
+    executions.forEach(execution => {
+      const inputSteps = execution.workflowSteps.filter(step => step.type === 'input');
+      inputSteps.forEach((step, index) => {
+        const stepName = step.stepName!;
+        if (!stepSequenceMap.has(stepName)) {
+          stepSequenceMap.set(stepName, index);
+        } else {
+          // Use the minimum index to ensure proper ordering
+          stepSequenceMap.set(stepName, Math.min(stepSequenceMap.get(stepName)!, index));
+        }
+      });
+    });
+
+    // Sort steps by their sequence order
+    const orderedSteps = Array.from(stepSequenceMap.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([stepName]) => stepName);
+
+    // Second pass: calculate funnel metrics
+    executions.forEach(execution => {
+      // Group steps by name and type for this execution
+      const stepsByName = new Map<string, { hasInput: boolean; hasOutput: boolean }>();
+
+      execution.workflowSteps.forEach(step => {
+        const stepName = step.stepName!;
+        if (!stepsByName.has(stepName)) {
+          stepsByName.set(stepName, { hasInput: false, hasOutput: false });
+        }
+
+        const stepData = stepsByName.get(stepName)!;
+        if (step.type === 'input') {
+          stepData.hasInput = true;
+        } else if (step.type === 'output') {
+          stepData.hasOutput = true;
+        }
+      });
+
+      orderedSteps.forEach((stepName) => {
+        if (!stepStatsMap.has(stepName)) {
+          stepStatsMap.set(stepName, { started: 0, completed: 0 });
+        }
+
+        const stats = stepStatsMap.get(stepName)!;
+        const stepData = stepsByName.get(stepName);
+
+        // A step is "started" if this execution has an input for this step
+        if (stepData && stepData.hasInput) {
+          stats.started++;
+
+          // A step is "completed" if it has both input AND output
+          if (stepData.hasInput && stepData.hasOutput) {
+            stats.completed++;
+          }
+        }
+      });
+    });
+
+    // Build funnel result
+    const result: StepFunnelStats[] = [];
+    orderedSteps.forEach((stepName, index) => {
+      const stats = stepStatsMap.get(stepName);
+      if (stats && stats.started > 0) {
+        const completionRate = Math.round((stats.completed / stats.started) * 1000) / 10;
+        const dropoffRate = Math.round((1 - (stats.completed / stats.started)) * 1000) / 10;
+
+        result.push({
+          stepName,
+          stepOrder: index + 1,
+          totalStarted: stats.started,
+          totalCompleted: stats.completed,
+          completionRate,
+          dropoffRate
+        });
+      }
+    });
+
+      return result;
+    } catch (error) {
+      logger.error('Error fetching step funnel stats:', error);
+
+      // Log specific details for debugging
+      if (error instanceof Error) {
+        logger.error('Error message:', error.message);
+        logger.error('Error stack:', error.stack);
+      }
+
+      // Return empty array as fallback
+      return [];
+    }
+  }
+
+  /**
+   * Get recent activity
+   */
+  async getRecentActivity(filters: AnalyticsFilters): Promise<RecentActivityItem[]> {
+    const dateFilter = getDateFilter(filters);
+    const workflowTypeFilter = this.getWorkflowTypeFilter(filters.workflowType);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    const executions = await this.prisma.workflowExecution.findMany({
+      where: {
+        updatedAt: dateCondition,
+        workflow: workflowTypeFilter
+      },
+      include: {
+        workflow: {
+          select: {
+            workflowType: true
+          }
+        }
+      },
+      orderBy: {
+        updatedAt: 'desc'
+      },
+      take: 5
+    });
+
+    return executions.map(execution => {
+      const workflowType = execution.workflow.workflowType || 'UNKNOWN';
+      let eventDescription = '';
+
+      switch (execution.status) {
+        case 'SUCCESS':
+          eventDescription = `${workflowType} workflow completed successfully`;
+          break;
+        case 'FAILURE':
+          eventDescription = `${workflowType} workflow failed`;
+          break;
+        case 'RUNNING':
+          eventDescription = `${workflowType} workflow started`;
+          break;
+        case 'PENDING':
+          eventDescription = `${workflowType} workflow is pending`;
+          break;
+        case 'CANCELLED':
+          eventDescription = `${workflowType} workflow was cancelled`;
+          break;
+        default:
+          eventDescription = `${workflowType} workflow ${execution.status?.toLowerCase()}`;
+      }
+
+      return {
+        time: this.formatTimeAgo(execution.updatedAt),
+        event: eventDescription
+      };
+    });
+  }
+
+  /**
+   * Get available users for filter dropdown
+   */
+  async getAvailableUsers(): Promise<{ value: string; label: string; email: string; count: number }[]> {
+    // 1. Get distinct user IDs from tickets with their counts
+    const ticketCreators = await this.prisma.ticket.groupBy({
+      by: ['createdBy'],
+      _count: {
+        createdBy: true
+      }
+    });
+
+    // Filter out null values and extract user IDs
+    const userIds = ticketCreators
+      .filter(t => t.createdBy !== null)
+      .map(t => t.createdBy as string);
+
+    // Return early if no users found
+    if (userIds.length === 0) {
+      return [
+        {
+          value: 'all',
+          label: 'All Users',
+          email: '',
+          count: 0
+        }
+      ];
+    }
+
+    // 2. Fetch only the relevant users
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { in: userIds }
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true
+      }
+    });
+
+    // 3. Create a map of user ID to ticket count
+    const countMap = new Map(
+      ticketCreators
+        .filter(t => t.createdBy !== null)
+        .map(t => [t.createdBy as string, t._count.createdBy])
+    );
+
+    // 4. Map users with their ticket counts and sort by count
+    const usersWithTickets = users
+      .map(user => ({
+        ...user,
+        count: countMap.get(user.id) || 0
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // 5. Build the options array
+    const options = [
+      {
+        value: 'all',
+        label: 'All Users',
+        email: '',
+        count: usersWithTickets.reduce((sum, user) => sum + user.count, 0)
+      }
+    ];
+
+    // Add user options sorted by ticket count
+    usersWithTickets.forEach(user => {
+      options.push({
+        value: user.id,
+        label: user.name,
+        email: user.email,
+        count: user.count
+      });
+    });
+
+    return options;
+  }
+
+  /**
+   * Get available repositories for filter dropdown
+   */
+  async getAvailableRepositories(): Promise<{ value: string; label: string; count: number }[]> {
+    // Get distinct repository names with their PR counts
+    const repositories = await this.prisma.pullRequests.groupBy({
+      by: ['repoName'],
+      _count: {
+        repoName: true
+      },
+      orderBy: {
+        _count: {
+          repoName: 'desc'
+        }
+      }
+    });
+
+    // Build the options array
+    const options = [
+      {
+        value: 'all',
+        label: 'All Repository',
+        count: repositories.reduce((sum, repo) => sum + repo._count.repoName, 0)
+      }
+    ];
+
+    // Add repository options sorted by usage count
+    repositories.forEach(repo => {
+      if (repo.repoName) {
+        options.push({
+          value: repo.repoName,
+          label: repo.repoName,
+          count: repo._count.repoName
+        });
+      }
+    });
+
+    return options;
+  }
+
+  /**
+   * Get available workflow types from enum
+   */
+  async getAvailableWorkflowTypes(): Promise<WorkflowTypeOption[]> {
+    // Get workflow types from the enum
+    const workflowTypes = Object.values(WorkflowType);
+
+    // Build the options array
+    const options: WorkflowTypeOption[] = [
+      {
+        value: 'all',
+        label: 'All Workflows',
+        description: 'Show data for all workflow types'
+      }
+    ];
+
+    // Add enum-defined workflow types
+    workflowTypes.forEach(workflowType => {
+      options.push({
+        value: workflowType,
+        label: getWorkflowTypeDisplayName(workflowType),
+        description: `Show data for ${getWorkflowTypeDisplayName(workflowType)} workflows`
+      });
+    });
+
+    return options;
+  }
+
+  /**
+   * Helper method to format time ago
+   */
+  private formatTimeAgo(date: Date): string {
+    const now = new Date();
+    const diffInMinutes = Math.floor((now.getTime() - new Date(date).getTime()) / (1000 * 60));
+
+    if (diffInMinutes < 1) {
+      return 'Just now';
+    } else if (diffInMinutes < 60) {
+      return `${diffInMinutes} min ago`;
+    } else if (diffInMinutes < 1440) {
+      const hours = Math.floor(diffInMinutes / 60);
+      return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    } else {
+      const days = Math.floor(diffInMinutes / 1440);
+      return `${days} day${days > 1 ? 's' : ''} ago`;
+    }
+  }
+
+  /**
+   * UNIFIED: Get messages exchanged statistics - ALWAYS returns time-series data
+   * This replaces the old getMessagesExchanged() and ensures consistency
+   */
+  async getMessagesExchanged(filters: AnalyticsFilters): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
+    // Always use day groupby for consistency - no more "none" option
+    return this.getMessagesExchangedTimeSeries(filters);
+  }
+
+  /**
+   * Get active users statistics
+   * Counts distinct users who performed any activity (messages, reactions, file uploads)
+   */
+  async getActiveUsers(filters: AnalyticsFilters): Promise<number> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Get all user IDs from different activity types using Promise.all for parallel execution
+    const [messageUsers, reactionUsers, attachmentUsers] = await Promise.all([
+      // Users who sent messages
+      this.prisma.message.findMany({
+        where: { 
+          createdAt: dateCondition,
+          msgType: 'USER' // Only count user messages, exclude bot messages
+        },
+        select: { senderId: true },
+        distinct: ['senderId'],
+      }),
+
+      // Users who posted reactions
+      this.prisma.reaction.findMany({
+        where: { createdAt: dateCondition },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
+
+      // Users who uploaded files
+      this.prisma.messageAttachment.findMany({
+        where: { createdAt: dateCondition },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+
+      // Users who created tickets
+      this.prisma.ticket.findMany({
+        where: { createdAt: dateCondition},
+        select: { createdBy: true},
+        distinct: ['createdBy'],
+      }),
+
+      // Users who update ticket_activities
+      this.prisma.ticketActivity.findMany({
+        where: { timestamp: dateCondition},
+        select: { updatedBy: true},
+        distinct: ['updatedBy'],
+      }),
+
+      // Users who created canvas
+      this.prisma.canvas.findMany({
+        where: { createdAt: dateCondition},
+        select: { createdBy: true},
+        distinct: ['createdBy'],
+      }),
+
+      // Users who edited canvas
+      this.prisma.canvasParticipant.findMany({
+        where: { updatedAt: dateCondition},
+        select: { userId: true},
+        distinct: ['userId'],
+      })
+    ]);
+
+    // Combine all user IDs and get unique count
+    const allActiveUserIds = new Set<string>();
+
+    // Add message senders
+    messageUsers.forEach(user => {
+      if (user.senderId) {
+        allActiveUserIds.add(user.senderId);
+      }
+    });
+
+    // Add reaction users
+    reactionUsers.forEach(user => {
+      if (user.userId) {
+        allActiveUserIds.add(user.userId);
+      }
+    });
+
+    // Add file uploaders
+    attachmentUsers.forEach(user => {
+      if (user.createdBy) {
+        allActiveUserIds.add(user.createdBy);
+      }
+    });
+
+    return allActiveUserIds.size;
+  }
+
+  /**
+   * Get overall messages per user average for the entire time period
+   */
+  async getOverallMessagesPerUser(filters: AnalyticsFilters): Promise<number> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Get total message count and unique user count
+    const [totalMessages, uniqueUsers] = await Promise.all([
+      this.prisma.message.count({
+        where: { 
+          createdAt: dateCondition,
+          senderId: { not: undefined }, // Only count messages with valid senders
+          msgType: 'USER' // Only count user messages, exclude bot messages
+        },
+      }),
+
+      this.prisma.message.findMany({
+        where: { 
+          createdAt: dateCondition,
+          senderId: { not: undefined },
+          msgType: 'USER' // Only count user messages, exclude bot messages
+        },
+        select: { senderId: true },
+        distinct: ['senderId'],
+      })
+    ]);
+
+    // Calculate overall average
+    const uniqueUserCount = uniqueUsers.length;
+    return uniqueUserCount > 0
+      ? Math.round((totalMessages / uniqueUserCount) * 100) / 100 // Round to 2 decimal places
+      : 0;
+  }
+
+
+  /**
+   * Get current active users grouped by presence status
+   */
+  async getCurrentActiveUsers(): Promise<{ userStatus: string; userCount: number; percentage: number }[]> {
+    // Get users grouped by their presence status
+    const userPresenceStats = await this.prisma.userPresence.groupBy({
+      by: ['status'],
+      _count: {
+        status: true,
+      },
+    });
+
+    // Get total user count
+    const totalUsers = await this.prisma.userPresence.count();
+
+    // Transform the data and calculate percentages
+    const results = userPresenceStats.map(stat => ({
+      userStatus: stat.status,
+      userCount: stat._count.status,
+      percentage: totalUsers > 0 ? Math.round((stat._count.status / totalUsers) * 100) : 0,
+    }));
+
+    return results;
+  }
+
+  /**
+   * Get files shared statistics
+   * Counts the number of file attachments shared in the selected time period
+   */
+  async getFilesShared(filters: AnalyticsFilters): Promise<number> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Count file attachments in the selected time period
+    const filesSharedCount = await this.prisma.messageAttachment.count({
+      where: {
+        createdAt: dateCondition,
+        createdBy: {
+          notIn: ['Unified Alerts', 'system']
+        }
+      }
+    });
+
+    return filesSharedCount;
+  }
+
+  /**
+   * Get messages exchanged time-series data using optimized Prisma ORM aggregation
+   * Fetches all messages within date range and processes aggregation in application memory
+   */
+  async getMessagesExchangedTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
+    const dateFilter = getDateFilter(filters);
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter ? dateFilter : { gte: dateFilter };
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    // Use Prisma with includes to get message counts by scope type and date
+    const messages = await this.prisma.message.findMany({
+      where: {
+        createdAt: dateCondition,
+        msgType: 'USER'
+      },
+      select: {
+        createdAt: true,
+        conversationId: true
+      }
+    });
+
+    // Get conversations and channels in separate queries for better performance
+    const conversationIds = Array.from(new Set(messages.map(m => m.conversationId)));
+    const conversations = await this.prisma.conversation.findMany({
+      where: { conversationId: { in: conversationIds } },
+      select: { conversationId: true, channelId: true }
+    });
+
+    const channelIds = conversations.map(c => c.channelId);
+    const channels = await this.prisma.channel.findMany({
+      where: { id: { in: channelIds } },
+      select: { id: true, scopeType: true }
+    });
+
+    // Create lookup maps for efficient processing
+    const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
+    const channelToScopeMap = new Map(channels.map(c => [c.id, c.scopeType]));
+
+    // Generate complete time buckets for the date range
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, { total: number; channel: number; dm: number; groupDm: number }>();
+
+    // Initialize all buckets with zero values
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, { total: 0, channel: 0, dm: 0, groupDm: 0 });
+    });
+
+    // Aggregate messages by date and scope type
+    messages.forEach(message => {
+      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+      const istTime = new Date(message.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+      const dateKey = istTime.toISOString().split('T')[0];
+      const channelId = conversationToChannelMap.get(message.conversationId);
+      const scopeType = channelId ? channelToScopeMap.get(channelId) : null;
+      
+      if (bucketData.has(dateKey)) {
+        const bucket = bucketData.get(dateKey)!;
+        bucket.total += 1;
+        
+        if (scopeType === 'DEFAULT') {
+          bucket.channel += 1;
+        } else if (scopeType === 'DM') {
+          bucket.dm += 1;
+        } else if (scopeType === 'GROUP_DM') {
+          bucket.groupDm += 1;
+        }
+      }
+    });
+
+    // Convert to final format
+    return timeBuckets.map(dateKey => ({
+      date: dateKey,
+      value: bucketData.get(dateKey)!.total,
+      channelMessages: bucketData.get(dateKey)!.channel,
+      dmMessages: bucketData.get(dateKey)!.dm,
+      groupDmMessages: bucketData.get(dateKey)!.groupDm
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Generate daily time buckets for a date range
+   * Converts to IST timezone for proper day bucketing in Indian timezone
+   */
+  private generateDailyTimeBuckets(startDate: Date, endDate: Date): string[] {
+    const buckets: string[] = [];
+    
+    // Convert start and end dates to IST for proper bucket generation
+    const istStartDate = new Date(startDate.getTime() + (5.5 * 60 * 60 * 1000));
+    const istEndDate = new Date(endDate.getTime() + (5.5 * 60 * 60 * 1000));
+    
+    // Initialize currentDate properly in IST
+    const currentDate = new Date(istStartDate.toISOString().split('T')[0] + 'T00:00:00.000Z');
+
+    while (currentDate <= istEndDate) {
+      buckets.push(currentDate.toISOString().split('T')[0]);
+      // Use UTC date operations to ensure consistent behavior
+      currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+    }
+
+    return buckets;
+  }
+
+  /**
+   * Get all-time unique active users count
+   * Counts all unique users who have been active since Dec 15, 2025
+   */
+  async getAllTimeActiveUsersCount(): Promise<number> {
+    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
+    // IST midnight = UTC 18:30 previous day
+    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
+
+    // Get all user IDs from different activity types using Promise.all for parallel execution
+    const [messageUsers, reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
+      // Users who sent messages
+      this.prisma.message.findMany({
+        where: { 
+          msgType: 'USER',
+          createdAt: { gte: allTimeStartDate }
+        },
+        select: { senderId: true },
+        distinct: ['senderId'],
+      }),
+
+      // Users who posted reactions
+      this.prisma.reaction.findMany({
+        where: { createdAt: { gte: allTimeStartDate } },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
+
+      // Users who uploaded files
+      this.prisma.messageAttachment.findMany({
+        where: { createdAt: { gte: allTimeStartDate } },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+
+      // Users who created tickets
+      this.prisma.ticket.findMany({
+        where: { createdAt: { gte: allTimeStartDate } },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+
+      // Users who updated ticket activities
+      this.prisma.ticketActivity.findMany({
+        where: { timestamp: { gte: allTimeStartDate } },
+        select: { updatedBy: true },
+        distinct: ['updatedBy'],
+      }),
+
+      // Users who created canvas
+      this.prisma.canvas.findMany({
+        where: { createdAt: { gte: allTimeStartDate } },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+
+      // Users who edited canvas
+      this.prisma.canvasParticipant.findMany({
+        where: { joinedAt: { gte: allTimeStartDate } },
+        select: { userId: true },
+        distinct: ['userId'],
+      })
+    ]);
+
+    // Combine all user IDs and get unique count
+    const allActiveUserIds = new Set<string>();
+
+    messageUsers.forEach(user => { if (user.senderId) allActiveUserIds.add(user.senderId); });
+    reactionUsers.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
+    attachmentUsers.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
+    ticketCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
+    ticketActivityUsers.forEach(user => { if (user.updatedBy) allActiveUserIds.add(user.updatedBy); });
+    canvasCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
+    canvasParticipants.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
+
+    return allActiveUserIds.size;
+  }
+
+  /**
+   * Get all-time active user IDs as an array
+   * Used for Redis Set initialization
+   */
+  async getAllTimeActiveUserIds(): Promise<string[]> {
+    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
+    // IST midnight = UTC 18:30 previous day
+    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
+
+    // Get all user IDs from different activity types using Promise.all for parallel execution
+    const [messageUsers, reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
+      this.prisma.message.findMany({
+        where: { 
+          msgType: 'USER',
+          createdAt: { gte: allTimeStartDate }
+        },
+        select: { senderId: true },
+        distinct: ['senderId'],
+      }),
+      this.prisma.reaction.findMany({
+        where: { createdAt: { gte: allTimeStartDate } },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
+      this.prisma.messageAttachment.findMany({
+        where: { createdAt: { gte: allTimeStartDate } },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+      this.prisma.ticket.findMany({
+        where: { createdAt: { gte: allTimeStartDate } },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+      this.prisma.ticketActivity.findMany({
+        where: { timestamp: { gte: allTimeStartDate } },
+        select: { updatedBy: true },
+        distinct: ['updatedBy'],
+      }),
+      this.prisma.canvas.findMany({
+        where: { createdAt: { gte: allTimeStartDate } },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+      this.prisma.canvasParticipant.findMany({
+        where: { updatedAt: { gte: allTimeStartDate } },
+        select: { userId: true },
+        distinct: ['userId'],
+      })
+    ]);
+
+    // Combine all user IDs into a Set (deduplicates)
+    const allActiveUserIds = new Set<string>();
+    messageUsers.forEach(user => { if (user.senderId) allActiveUserIds.add(user.senderId); });
+    reactionUsers.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
+    attachmentUsers.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
+    ticketCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
+    ticketActivityUsers.forEach(user => { if (user.updatedBy) allActiveUserIds.add(user.updatedBy); });
+    canvasCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
+    canvasParticipants.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
+
+    return Array.from(allActiveUserIds);
+  }
+
+  /**
+   * Get active user IDs for a given time period
+   * Used for Redis Set initialization
+   */
+  async getActiveUserIds(filters: AnalyticsFilters): Promise<string[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Get all user IDs from different activity types
+    const [messageUsers, reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
+      this.prisma.message.findMany({
+        where: { 
+          createdAt: dateCondition,
+          msgType: 'USER'
+        },
+        select: { senderId: true },
+        distinct: ['senderId'],
+      }),
+      this.prisma.reaction.findMany({
+        where: { createdAt: dateCondition },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
+      this.prisma.messageAttachment.findMany({
+        where: { createdAt: dateCondition },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+      this.prisma.ticket.findMany({
+        where: { createdAt: dateCondition },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+      this.prisma.ticketActivity.findMany({
+        where: { timestamp: dateCondition },
+        select: { updatedBy: true },
+        distinct: ['updatedBy'],
+      }),
+      this.prisma.canvas.findMany({
+        where: { createdAt: dateCondition },
+        select: { createdBy: true },
+        distinct: ['createdBy'],
+      }),
+      this.prisma.canvasParticipant.findMany({
+        where: { updatedAt: dateCondition },
+        select: { userId: true },
+        distinct: ['userId'],
+      })
+    ]);
+
+    // Combine all user IDs into a Set (deduplicates)
+    const allActiveUserIds = new Set<string>();
+    messageUsers.forEach(user => { if (user.senderId) allActiveUserIds.add(user.senderId); });
+    reactionUsers.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
+    attachmentUsers.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
+    ticketCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
+    ticketActivityUsers.forEach(user => { if (user.updatedBy) allActiveUserIds.add(user.updatedBy); });
+    canvasCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
+    canvasParticipants.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
+
+    return Array.from(allActiveUserIds);
+  }
+
+  /**
+   * Get active users with both aggregate and time-series data in single call
+   */
+  async getActiveUsersWithChart(filters: AnalyticsFilters): Promise<{
+    uniqueUsers: number;
+    timeSeries: { date: string; value: number }[];
+  }> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract start and end dates using centralized helper method
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    // Get all users' activities in the date range
+    const [messageUsers, reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
+      this.prisma.message.findMany({
+        where: { 
+          createdAt: dateCondition,
+          msgType: 'USER' // Only count user messages, exclude bot messages
+        },
+        select: { senderId: true, createdAt: true },
+      }),
+      this.prisma.reaction.findMany({
+        where: { createdAt: dateCondition },
+        select: { userId: true, createdAt: true },
+      }),
+      this.prisma.messageAttachment.findMany({
+        where: { createdAt: dateCondition },
+        select: { createdBy: true, createdAt: true },
+      }),
+
+      // Users who created tickets
+      this.prisma.ticket.findMany({
+        where: { createdAt: dateCondition},
+        select: { createdBy: true, createdAt: true },
+      }),
+
+      // Users who update ticket_activities
+      this.prisma.ticketActivity.findMany({
+        where: { timestamp: dateCondition},
+        select: { updatedBy: true, timestamp: true },
+      }),
+
+      // Users who created canvas
+      this.prisma.canvas.findMany({
+        where: { createdAt: dateCondition},
+        select: { createdBy: true, createdAt: true },
+      }),
+
+      // Users who edited canvas
+      this.prisma.canvasParticipant.findMany({
+        where: { updatedAt: dateCondition},
+        select: { userId: true, updatedAt: true },
+      })
+    ]);
+
+    // Generate time buckets
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, Set<string>>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, new Set<string>());
+    });
+
+    // Group user activities by time buckets
+    const allActivities = [
+      ...messageUsers,
+      ...reactionUsers,
+      ...attachmentUsers,
+      ...ticketCreators,
+      ...ticketActivityUsers,
+      ...canvasCreators,
+      ...canvasParticipants
+    ];
+    
+    allActivities.forEach(activity => {
+      const userId = ('senderId' in activity && activity.senderId) ||
+                    ('userId' in activity && activity.userId) ||
+                    ('createdBy' in activity && activity.createdBy) ||
+                    ('updatedBy' in activity && activity.updatedBy);
+      
+      if (userId) {
+        // Get the appropriate timestamp field based on activity type
+        const timestamp = ('createdAt' in activity && activity.createdAt) ||
+                         ('updatedAt' in activity && activity.updatedAt) ||
+                         ('timestamp' in activity && activity.timestamp);
+        
+        if (timestamp) {
+          // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+          const istTime = new Date(timestamp.getTime() + (5.5 * 60 * 60 * 1000));
+          const bucketKey = istTime.toISOString().split('T')[0];
+          if (bucketData.has(bucketKey)) {
+            bucketData.get(bucketKey)!.add(userId);
+          }
+        }
+      }
+    });
+
+    // Calculate unique users across entire period
+    const allUniqueUsers = new Set<string>();
+    allActivities.forEach(activity => {
+      const userId = ('senderId' in activity && activity.senderId) || 
+                    ('userId' in activity && activity.userId) || 
+                    ('createdBy' in activity && activity.createdBy) ||
+                    ('updatedBy' in activity && activity.updatedBy);
+      if (userId) {
+        allUniqueUsers.add(userId);
+      }
+    });
+
+    // Convert time series to array format
+    const timeSeries = timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey)?.size || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      uniqueUsers: allUniqueUsers.size,
+      timeSeries: timeSeries
+    };
+  }
+
+  /**
+   * Get messages per user time-series data
+   */
+  async getMessagesPerUserTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract start and end dates using centralized helper method
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    // Get messages with sender info
+    const messages = await this.prisma.message.findMany({
+      where: { 
+        createdAt: dateCondition,
+        senderId: { not: undefined },
+        msgType: 'USER' // Only count user messages, exclude bot messages
+      },
+      select: { senderId: true, createdAt: true },
+    });
+
+    // Generate time buckets
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, { totalMessages: number; uniqueUsers: Set<string> }>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, { totalMessages: 0, uniqueUsers: new Set<string>() });
+    });
+
+    // Group messages by time buckets
+    messages.forEach(message => {
+      if (message.senderId) {
+        // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+        const istTime = new Date(message.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+        const bucketKey = istTime.toISOString().split('T')[0];
+        if (bucketData.has(bucketKey)) {
+          const bucket = bucketData.get(bucketKey)!;
+          bucket.totalMessages += 1;
+          bucket.uniqueUsers.add(message.senderId);
+        }
+      }
+    });
+
+    // Convert to array format with average calculation
+    return timeBuckets.map(bucketKey => {
+      const data = bucketData.get(bucketKey)!;
+      const avgMessagesPerUser = data.uniqueUsers.size > 0 
+        ? Math.round((data.totalMessages / data.uniqueUsers.size) * 100) / 100 
+        : 0;
+      
+      return {
+        date: bucketKey,
+        value: avgMessagesPerUser
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Get active channels aggregate count (efficient database query)
+   * Returns unique channels that had activity based on messages over the entire period
+   * Uses the same logic as the time-series to ensure consistency
+   */
+  async getActiveChannels(filters: AnalyticsFilters): Promise<number> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Get messages in date range
+    const messages = await this.prisma.message.findMany({
+      where: {
+        createdAt: dateCondition,
+        msgType: 'USER'
+      },
+      select: {
+        conversationId: true
+      },
+      distinct: ['conversationId']
+    });
+
+    // Get conversation IDs from messages
+    const conversationIds = messages.map(m => m.conversationId);
+
+    if (conversationIds.length === 0) {
+      return 0;
+    }
+
+    // Get conversations with their channels
+    const conversations = await this.prisma.conversation.findMany({
+      where: {
+        conversationId: { in: conversationIds }
+      },
+      select: {
+        channelId: true
+      }
+    });
+
+    // Get channel IDs from conversations
+    const channelIds = conversations.map(c => c.channelId).filter((id): id is string => id !== null);
+
+    if (channelIds.length === 0) {
+      return 0;
+    }
+
+    // Get channels with DEFAULT scope type
+    const channels = await this.prisma.channel.findMany({
+      where: {
+        id: { in: channelIds },
+        scopeType: 'DEFAULT'
+      },
+      select: {
+        id: true
+      }
+    });
+
+    return channels.length;
+  }
+
+  /**
+   * Get active channels time-series data
+   */
+  async getActiveChannelsTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract start and end dates using centralized helper method
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    // Get messages in date range
+    const messages = await this.prisma.message.findMany({
+      where: {
+        createdAt: dateCondition,
+        msgType: 'USER'
+      },
+      select: {
+        createdAt: true,
+        conversationId: true
+      }
+    });
+
+    // Get conversations and channels in separate queries
+    const conversationIds = Array.from(new Set(messages.map(m => m.conversationId)));
+    const conversations = await this.prisma.conversation.findMany({
+      where: { conversationId: { in: conversationIds } },
+      select: { conversationId: true, channelId: true }
+    });
+
+    const channelIds = conversations.map(c => c.channelId).filter((id): id is string => id !== null);
+    const channels = await this.prisma.channel.findMany({
+      where: { 
+        id: { in: channelIds },
+        scopeType: 'DEFAULT'
+      },
+      select: { id: true }
+    });
+
+    // Create lookup maps for efficient processing
+    const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
+    const defaultChannelIds = new Set(channels.map(c => c.id));
+
+    // Generate time buckets
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, Set<string>>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, new Set<string>());
+    });
+
+    // Group channels by time buckets based on message activity
+    messages.forEach(message => {
+      const channelId = conversationToChannelMap.get(message.conversationId);
+      if (channelId && defaultChannelIds.has(channelId)) {
+        // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+        const istTime = new Date(message.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+        const bucketKey = istTime.toISOString().split('T')[0];
+        if (bucketData.has(bucketKey)) {
+          bucketData.get(bucketKey)!.add(channelId);
+        }
+      }
+    });
+
+    // Convert to array format
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey)?.size || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Get users onboarded count
+   * Counts the number of users who were onboarded (created in user_presence table) in the selected time period
+   */
+  async getUsersOnboarded(filters: AnalyticsFilters): Promise<number> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Count users onboarded in the selected time period
+    const usersOnboardedCount = await this.prisma.userPresence.count({
+      where: {
+        createdAt: dateCondition
+      }
+    });
+
+    return usersOnboardedCount;
+  }
+
+  /**
+   * Get users onboarded time-series data
+   */
+  async getUsersOnboardedTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract start and end dates using centralized helper method
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    // Get user presence records
+    const userPresenceRecords = await this.prisma.userPresence.findMany({
+      where: { createdAt: dateCondition },
+      select: { createdAt: true },
+    });
+
+    // Generate time buckets
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, number>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, 0);
+    });
+
+    // Group user onboarding by time buckets
+    userPresenceRecords.forEach(record => {
+      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+      const istTime = new Date(record.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+      const bucketKey = istTime.toISOString().split('T')[0];
+      if (bucketData.has(bucketKey)) {
+        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
+      }
+    });
+
+    // Convert to array format
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey) || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Get messages today count
+   * Counts the number of messages sent today (in IST timezone)
+   */
+  async getMessagesToday(): Promise<number> {
+    // Get current time in IST (UTC+5:30)
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    
+    // Get start of today in IST
+    const startOfTodayIST = new Date(Date.UTC(
+      istTime.getUTCFullYear(),
+      istTime.getUTCMonth(),
+      istTime.getUTCDate()
+    ));
+    
+    // Subtract IST offset to get UTC time for start of today IST
+    const startOfTodayUTC = new Date(startOfTodayIST.getTime() - (5.5 * 60 * 60 * 1000));
+
+    // Count messages from start of today (IST) to now
+    const messagesTodayCount = await this.prisma.message.count({
+      where: {
+        createdAt: {
+          gte: startOfTodayUTC,
+          lte: now
+        },
+        msgType: 'USER' // Only count user messages, exclude bot messages
+      }
+    });
+
+    return messagesTodayCount;
+  }
+
+  /**
+   * Get all-time message count
+   * Counts all user messages since Dec 15, 2025
+   */
+  async getAllTimeMessageCount(): Promise<number> {
+    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
+    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
+
+    const count = await this.prisma.message.count({
+      where: {
+        msgType: 'USER', // Only count user messages, exclude bot messages
+        createdAt: {
+          gte: allTimeStartDate
+        }
+      }
+    });
+
+    return count;
+  }
+
+  /**
+   * Get messages today time-series data (hourly breakdown for today)
+   */
+  async getMessagesTodayTimeSeries(): Promise<{ date: string; value: number }[]> {
+    // Get current time in IST (UTC+5:30)
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+
+    // Get start of today in IST
+    const startOfTodayIST = new Date(Date.UTC(
+      istTime.getUTCFullYear(),
+      istTime.getUTCMonth(),
+      istTime.getUTCDate()
+    ));
+
+    // Subtract IST offset to get UTC time for start of today IST
+    const startOfTodayUTC = new Date(startOfTodayIST.getTime() - (5.5 * 60 * 60 * 1000));
+
+    // Get messages from today
+    const messageCount = await this.prisma.message.count({
+      where: {
+        createdAt: {
+          gte: startOfTodayUTC,
+          lte: now
+        },
+        msgType: 'USER' // Only count user messages, exclude bot messages
+      },
+    });
+
+    // Return single data point for today (not hourly breakdown)
+    return [{
+      date: startOfTodayIST.toISOString().split('T')[0],
+      value: messageCount
+    }];
+  }
+
+  /**
+   * Get number of tickets created
+   * Counts the number of tickets created in the selected time period
+   * Only counts tickets created by (userType: 'USER')
+   */
+  async getNumberOfTickets(filters: AnalyticsFilters): Promise<number> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    const userIds = await this.getUsersId();
+
+    // Count tickets created in the selected time period by users only
+    const ticketsCount = await this.prisma.ticket.count({
+      where: {
+        createdAt: dateCondition,
+        createdBy: { in: userIds }
+      }
+    });
+
+    return ticketsCount;
+  }
+
+  /**
+   * Get number of tickets time-series data
+   * Only counts tickets created by real users (userType: 'USER'), excludes bot-created tickets
+   */
+  async getNumberOfTicketsTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract start and end dates using centralized helper method
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    const userIds = await this.getUsersId();
+
+    // Get tickets created by real users only
+    const tickets = await this.prisma.ticket.findMany({
+      where: {
+        createdAt: dateCondition,
+        createdBy: { in: userIds }
+      },
+      select: { createdAt: true },
+    });
+
+    // Generate time buckets
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, number>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, 0);
+    });
+
+    // Group tickets by time buckets
+    tickets.forEach(ticket => {
+      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+      const istTime = new Date(ticket.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+      const bucketKey = istTime.toISOString().split('T')[0];
+      if (bucketData.has(bucketKey)) {
+        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
+      }
+    });
+
+    // Convert to array format
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey) || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Get number of active canvases
+   * Counts the number of canvases that were edited in the selected time period
+   * Only counts canvases created by real users (userType: 'USER'), excludes bot-created canvases
+   */
+  async getNumberOfCanvases(filters: AnalyticsFilters): Promise<number> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    const userIds = await this.getUsersId();
+
+    // Count canvases edited in the selected time period by real users only
+    const canvasesCount = await this.prisma.canvas.count({
+      where: {
+        lastEditedAt: dateCondition,
+        createdBy: { in: userIds }
+      }
+    });
+
+    return canvasesCount;
+  }
+
+  /**
+   * Get number of canvases time-series data
+   * Only counts canvases created by real users (userType: 'USER'), excludes bot-created canvases
+   */
+  async getNumberOfCanvasesTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract start and end dates using centralized helper method
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    const userIds = await this.getUsersId();
+
+    // Get canvases created by real users only
+    const canvases = await this.prisma.canvas.findMany({
+      where: {
+        lastEditedAt: dateCondition,
+        createdBy: { in: userIds }
+      },
+      select: { lastEditedAt: true },
+    });
+
+    // Generate time buckets
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, number>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, 0);
+    });
+
+    // Group canvases by time buckets
+    canvases.forEach(canvas => {
+      if (canvas.lastEditedAt) {
+        // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+        const istTime = new Date(canvas.lastEditedAt.getTime() + (5.5 * 60 * 60 * 1000));
+        const bucketKey = istTime.toISOString().split('T')[0];
+        if (bucketData.has(bucketKey)) {
+          bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
+        }
+      }
+    });
+
+    // Convert to array format
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey) || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Get number of calls
+   * Counts the number of calls started in the selected time period
+   */
+  async getNumberOfCalls(filters: AnalyticsFilters): Promise<number> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Get all calls in the date range
+    const calls = await this.prisma.call.findMany({
+      where: {
+        startedAt: dateCondition
+      },
+      select: {
+        startedAt: true,
+        endedAt: true
+      }
+    });
+
+    // Filter for calls that lasted more than 60 seconds
+    const validCalls = calls.filter(call => {
+      if (!call.endedAt) return false;
+      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
+      return duration > 60;
+    });
+
+    return validCalls.length;
+  }
+
+  /**
+   * Get number of calls time-series data
+   */
+  async getNumberOfCallsTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract start and end dates using centralized helper method
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    // Get calls
+    const calls = await this.prisma.call.findMany({
+      where: {
+        startedAt: dateCondition
+      },
+      select: {
+        startedAt: true,
+        endedAt: true
+      }
+    });
+
+    // Filter for calls that lasted more than 60 seconds
+    const validCalls = calls.filter(call => {
+      if (!call.endedAt) return false;
+      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
+      return duration > 60;
+    });
+
+    // Generate time buckets
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, number>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, 0);
+    });
+
+    // Group calls by time buckets
+    validCalls.forEach(call => {
+      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+      const istTime = new Date(call.startedAt.getTime() + (5.5 * 60 * 60 * 1000));
+      const bucketKey = istTime.toISOString().split('T')[0];
+      if (bucketData.has(bucketKey)) {
+        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
+      }
+    });
+
+    // Convert to array format
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey) || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Get total duration of calls in the selected time period (in minutes)
+   * Only counts calls that lasted more than 60 seconds
+   */
+  async getTotalCallsDuration(filters: AnalyticsFilters): Promise<number> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Get calls that have both start and end times
+    const calls = await this.prisma.call.findMany({
+      where: {
+        startedAt: dateCondition,
+        endedAt: { not: null } 
+      },
+      select: {
+        startedAt: true,
+        endedAt: true
+      }
+    });
+
+    // Filter for calls that lasted more than 60 seconds and sum their durations
+    let totalDurationSeconds = 0;
+    calls.forEach(call => {
+      if (!call.endedAt) return;
+      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
+      if (duration <= 60) return;
+
+      totalDurationSeconds += duration;
+    });
+
+    // Return total duration in minutes (rounded to 1 decimal place)
+    return Math.round((totalDurationSeconds / 60) * 10) / 10;
+  }
+
+  /**
+   * Get total duration of calls time-series data (in minutes per day)
+   * Only counts calls that lasted more than 60 seconds
+   */
+  async getTotalCallsDurationTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract start and end dates using centralized helper method
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    // Get calls that have both start and end times
+    const calls = await this.prisma.call.findMany({
+      where: {
+        startedAt: dateCondition,
+        endedAt: { not: null } 
+      },
+      select: {
+        startedAt: true,
+        endedAt: true
+      }
+    });
+
+    // Generate time buckets
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, number>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, 0);
+    });
+
+    // Group calls by time buckets and sum durations (in seconds initially)
+    calls.forEach(call => {
+      if (!call.endedAt) return;
+      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
+      if (duration <= 60) return;
+
+      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+      const istTime = new Date(call.startedAt.getTime() + (5.5 * 60 * 60 * 1000));
+      const bucketKey = istTime.toISOString().split('T')[0];
+      if (bucketData.has(bucketKey)) {
+        bucketData.set(bucketKey, bucketData.get(bucketKey)! + duration);
+      }
+    });
+
+    // Convert to array format with values in minutes
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: Math.round((bucketData.get(bucketKey) || 0) / 60 * 10) / 10 // Convert to minutes with 1 decimal
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Get top users by message count
+   * Returns the top N users who sent the most messages in the selected time period
+   * Uses database aggregation for optimal performance
+   */
+  async getTopUsersByMessages(filters: AnalyticsFilters, limit: number = 10): Promise<{ userId: string; userName: string; messageCount: number }[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Use groupBy to aggregate message counts directly in the database
+    const topSenders = await this.prisma.message.groupBy({
+      by: ['senderId'],
+      where: {
+        createdAt: dateCondition,
+        msgType: 'USER', // Only count user messages, exclude bot messages
+        senderId: { not: undefined }, // Filter out null/undefined senders
+      },
+      _count: {
+        senderId: true,
+      },
+      orderBy: {
+        _count: {
+          senderId: 'desc',
+        },
+      },
+      take: limit,
+    });
+
+    // Extract user IDs from the aggregated results (filter out null/undefined)
+    const topUserIds = topSenders
+      .map(sender => sender.senderId)
+      .filter((id): id is string => id !== null && id !== undefined);
+
+    // Fetch user details for the top senders
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { in: topUserIds }
+      },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    // Create a map of userId to userName for efficient lookup
+    const userMap = new Map(users.map(u => [u.id, u.name]));
+    
+    // Create a map of userId to message count
+    const countMap = new Map(topSenders.map(sender => [sender.senderId, sender._count.senderId]));
+
+    // Build result with user names, maintaining the sort order from the database
+    return topUserIds.map(userId => ({
+      userId,
+      userName: userMap.get(userId) || 'Unknown User',
+      messageCount: countMap.get(userId) || 0
+    }));
+  }
+
+  /**
+   * Get files shared time-series data
+   */
+  async getFilesSharedTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+    const dateFilter = getDateFilter(filters);
+
+    // Build date condition for Prisma query
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    // Extract start and end dates using centralized helper method
+    const { startDate, endDate } = this.getDateRange(dateCondition);
+
+    // Get file attachments
+    const attachments = await this.prisma.messageAttachment.findMany({
+      where: { 
+        createdAt: dateCondition,
+        createdBy: {
+          notIn: ['Unified Alerts', 'system']
+        }
+      },
+      select: { createdAt: true },
+    });
+
+    // Generate time buckets
+    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    const bucketData = new Map<string, number>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, 0);
+    });
+
+    // Group attachments by time buckets
+    attachments.forEach(attachment => {
+      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
+      const istTime = new Date(attachment.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+      const bucketKey = istTime.toISOString().split('T')[0];
+      if (bucketData.has(bucketKey)) {
+        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
+      }
+    });
+
+    // Convert to array format
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey) || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Get calls count for today (IST)
+   * Only counts calls that lasted more than 60 seconds
+   * Uses IST-based date range to match frontend/analytics section behavior
+   */
+  async getCallsToday(): Promise<number> {
+    const { startDate, endDate } = getTodayISTDateRange();
+    return this.getNumberOfCalls({ 
+      timeRange: 'custom',
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+  }
+
+  /**
+   * Get all-time call count
+   * Counts all calls since Dec 15, 2025 that lasted more than 60 seconds
+   * Reuses getNumberOfCalls with custom date range
+   */
+  async getAllTimeCallCount(): Promise<number> {
+    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
+    // IST midnight = UTC 18:30 previous day
+    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
+    return this.getNumberOfCalls({
+      timeRange: 'custom',
+      startDate: allTimeStartDate.toISOString(),
+      endDate: new Date().toISOString()
+    });
+  }
+
+  /**
+   * Get total call duration for today (IST) in minutes
+   * Only counts calls that lasted more than 60 seconds
+   * Uses IST-based date range to match frontend/analytics section behavior
+   */
+  async getCallDurationToday(): Promise<number> {
+    const { startDate, endDate } = getTodayISTDateRange();
+    return this.getTotalCallsDuration({ 
+      timeRange: 'custom',
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
+  }
+
+  /**
+   * Get all-time total call duration in minutes
+   * Counts all calls since Dec 15, 2025 that lasted more than 60 seconds
+   * Reuses getTotalCallsDuration with custom date range
+   */
+  async getAllTimeCallDuration(): Promise<number> {
+    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
+    // IST midnight = UTC 18:30 previous day
+    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
+    return this.getTotalCallsDuration({
+      timeRange: 'custom',
+      startDate: allTimeStartDate.toISOString(),
+      endDate: new Date().toISOString()
+    });
+  }
+
+}

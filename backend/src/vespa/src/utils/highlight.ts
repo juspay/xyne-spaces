@@ -1,0 +1,213 @@
+const getLevenshteinDistance = (a: string, b: string): number => {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  const matrix: number[][] = [];
+
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      const cost = b.charAt(i - 1) === a.charAt(j - 1) ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j - 1] + cost,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j] + 1
+      );
+    }
+  }
+  return matrix[b.length][a.length];
+};
+
+/**
+ * Check if two words match by dynamic prefix
+ * Prefix length = Max(4, queryWordLength - 4)
+ */
+const isPrefixMatch = (queryWord: string, documentWord: string): boolean => {
+  const prefixLength = Math.max(4 , Math.max(queryWord.length - 4, documentWord.length - 4));
+
+  // Document word must be at least as long as the prefix
+  if (documentWord.length < prefixLength) return false;
+  
+  const queryPrefix = queryWord.slice(0, prefixLength);
+  const docPrefix = documentWord.slice(0, prefixLength);
+  
+  return queryPrefix === docPrefix;
+};
+
+export const highlightFuzzyText = (text: string, query: string): string => {
+  if (!query || !text) return text;
+
+  const queryWords = [...new Set(
+    query.toLowerCase()
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+  )];
+
+  if (queryWords.length === 0) return text;
+
+  return text.split(/(\b)/).map((token) => {
+    if (!/\w/.test(token)) return token;
+
+    const lowerToken = token.toLowerCase();
+
+    const isMatch = queryWords.some(qWord => {
+      // 1. Exact match
+      if (lowerToken === qWord) return true;
+     const maxDist = qWord.length <= 6 ? 1 : 2;
+
+      // 2. Fuzzy match (Levenshtein distance <= maxDist)
+      if (Math.abs(lowerToken.length - qWord.length) <= maxDist) {
+        if (getLevenshteinDistance(lowerToken, qWord) <= maxDist) {
+          return true;
+        }
+      }
+
+      if (isPrefixMatch(qWord, lowerToken)) {
+        return true;
+      }
+
+      return false;
+    });
+
+    return isMatch ? `<hi>${token}</hi>` : token;
+  }).join('');
+};
+
+/**
+ * Calculate prefix boost score based on 3-letter prefix matching
+ * Returns ratio of matched query prefixes (0.0 to 1.0)
+ * 
+ * @param text - Document text to analyze
+ * @param query - Search query
+ * @returns Boost score (0.0 to 1.0)
+ */
+export const calculatePrefixBoost = (text: string, query: string): number => {
+    if (!text || !query) return 0;
+    const queryWords = [...new Set(query.toLowerCase().split(/\s+/).filter(w => w.length >= 3))];
+    if (queryWords.length === 0) return 0;
+    const documentWords = [...new Set(text.toLowerCase().split(/\s+/).filter(w => w.length >= 3))];
+    if (documentWords.length === 0) return 0;
+    let totalBoost = 0;
+    for (const qWord of queryWords) {
+        let bestScore = 0;
+        const maxDist = qWord.length <= 6 ? 1 : 2;
+        for (const docWord of documentWords) {
+            if (docWord === qWord) {
+                bestScore = 1.0;
+                break;
+            }
+            if (Math.abs(docWord.length - qWord.length) <= maxDist) {
+                const distance = getLevenshteinDistance(docWord, qWord);
+                if (distance <= maxDist) {
+                    const score = distance === 1 ? 0.7 : 0.4;
+                    bestScore = Math.max(bestScore, score);
+                }
+            }
+            if (isPrefixMatch(qWord, docWord)) {
+                bestScore += 0.3;
+            }
+        }
+        totalBoost += bestScore;
+    }
+    return totalBoost / queryWords.length;
+};
+
+/**
+ * Calculate Levenshtein distance from each query word to each message word
+ * Returns detailed matrix of distances and best matches
+ * 
+ * @param text - Document/message text to analyze
+ * @param query - Search query
+ * @returns Object with distance matrix and match summary
+ */
+export const calculateLevenshteinMatrix = (
+  text: string,
+  query: string
+): {
+  matrix: { queryWord: string; docWord: string; distance: number }[]; matchScore: number;
+} => {
+  if (!text || !query) {
+    return { matrix: [], matchScore: 0 };
+  }
+
+  // Extract query words (length >= 2)
+  const queryWords = [...new Set(
+    query.toLowerCase()
+      .split(/\s+/)
+      .filter(w => w.length >= 2)
+  )];
+
+  if (queryWords.length === 0) {
+    return { matrix: [], matchScore: 0 };
+  }
+
+  // Extract document words (length >= 2)
+  const documentWords = [...new Set(
+    text.toLowerCase()
+      .split(/\s+/)
+      .filter(w => w.length >= 2)
+  )];
+
+  if (documentWords.length === 0) {
+    return {
+      matrix: [],
+      matchScore: 0,
+    };
+  }
+
+  // Build full distance matrix
+  const matrix: { queryWord: string; docWord: string; distance: number }[] = [];
+
+  for (const queryWord of queryWords) {
+    for (const docWord of documentWords) {
+      const distance = getLevenshteinDistance(queryWord, docWord);
+      matrix.push({ queryWord, docWord, distance });
+    }
+  }
+
+  // Find best match for each query word
+  const maxDistance = 2;
+  const bestMatches = queryWords.map(queryWord => {
+    let bestMatch: string | null = null;
+    let bestDistance = Infinity;
+
+    for (const docWord of documentWords) {
+      // Exact match - return immediately
+      if (queryWord === docWord) {
+        return {
+          queryWord,
+          bestMatch: docWord,
+          distance: 0,
+          isMatch: true,
+        };
+      }
+
+      // Skip if length difference is too large
+      if (Math.abs(queryWord.length - docWord.length) > maxDistance) {
+        continue;
+      }
+
+      const distance = getLevenshteinDistance(queryWord, docWord);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestMatch = docWord;
+      }
+    }
+
+    return {
+      queryWord,
+      bestMatch,
+      distance: bestDistance,
+      isMatch: bestDistance <= maxDistance,
+    };
+  });
+
+  // Calculate match score (ratio of matched query words)
+  const matchedCount = bestMatches.filter(m => m.isMatch).length;
+  const matchScore = matchedCount / queryWords.length;
+
+  return { matrix, matchScore };
+};

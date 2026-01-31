@@ -1,0 +1,57 @@
+const isElectronBundled = window.location.protocol === 'xyne-spaces:';
+
+const hostname = window.location.hostname;
+const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+export const isTestEnv = hostname === 'dashboard';
+
+export const isSandBox = hostname.includes('sandbox');
+export const isProd = !isLocalhost && !isSandBox;
+
+const protocol = isLocalhost || isTestEnv ? 'http' : 'https';
+
+const ELECTRON_BACKEND_URL = isProd
+  ? 'https://app.spaces.xyne.juspay.net'
+  : isSandBox
+    ? 'https://app.spaces.sandbox.xyne.juspay.net'
+    : 'http://localhost:3001';
+const ELECTRON_BACKEND_ZERO_URL = isProd
+  ? 'https://app.spaces.xyne.juspay.net'
+  : isSandBox
+    ? 'https://app.spaces.sandbox.xyne.juspay.net'
+    : 'http://localhost:4848';
+const backendPort = isLocalhost ? ':3001' : isTestEnv ? ':5173' : '';
+
+export const API_BASE_URL = isElectronBundled
+  ? `${ELECTRON_BACKEND_URL}/api`
+  : `${protocol}://${hostname}${backendPort}/api`;
+
+// Zero Cache
+const zeroCachePort = isLocalhost ? ':4848' : isTestEnv ? ':5173' : '';
+export const VITE_ZERO_SERVER = isElectronBundled
+  ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
+  : `${protocol}://${hostname}${zeroCachePort}/zero`;
+
+// OpenTelemetry
+const otelHost = isTestEnv ? 'otel-collector' : hostname;
+const otelPort = isLocalhost || isTestEnv ? ':4318' : '';
+export const OTEL_METRICS_ENDPOINT = isElectronBundled
+  ? `${ELECTRON_BACKEND_URL}/godel/v1/metrics`
+  : `${protocol}://${otelHost}${otelPort}/godel/v1/metrics`;
+export const OTEL_SERVICE_NAME =
+  (import.meta.env['VITE_OTEL_SERVICE_NAME'] as string) || 'xyne-spaces-frontend';
+export const OTEL_EXPORT_INTERVAL_MS: number = parseInt(
+  (import.meta.env['VITE_OTEL_EXPORT_INTERVAL_MS'] as string) || '60000',
+  10,
+);
+
+export const SEARCH_VERSION = import.meta.env['VITE_SEARCH_VERSION'] as string;
+
+export const FLUSH_INTERVAL_IN_MS = 60000;
+export const MAX_BATCH_SIZE = 10;
+export const LOGGER_BASE_URL = isElectronBundled
+  ? `${ELECTRON_BACKEND_URL}/godel/events`
+  : `${protocol}://${hostname}/godel/events`;
+
+export const MAX_RETRIES = 3;
+
+export const SHAREABLE_ORIGIN = isProd ? 'https://xyne-spaces.web.app' : window.location.origin;

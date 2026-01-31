@@ -1,0 +1,132 @@
+/**
+ * Zoho Desk Service
+ * Sends email replies via Zoho API with sourceId to prevent webhook loops
+ */
+
+import axios, { AxiosInstance } from 'axios';
+import { decrypt } from './encryptionService';
+import { logger } from '@/utils/logger';
+
+interface ZohoCredentials {
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+  orgId: string;
+}
+
+interface SendReplyParams {
+  ticketId: string;
+  content: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  fromEmailAddress: string;
+}
+
+interface SendReplyResponse {
+  threadId: string;
+}
+
+export class ZohoService {
+  private client: AxiosInstance;
+  private credentials: ZohoCredentials;
+
+  constructor(
+    credentials: ZohoCredentials,
+    private sourceId: string
+  ) {
+    this.credentials = credentials;
+    this.client = axios.create({
+      baseURL: 'https://desk.zoho.com/api/v1',
+      headers: {
+        'Content-Type': 'application/json',
+        'orgId': credentials.orgId,
+        'sourceId': sourceId, // Prevents webhook loop
+      },
+    });
+  }
+
+  /**
+   * Exchange refresh token for access token
+   */
+  private async getAccessToken(): Promise<string> {
+    try {
+      logger.info('[ZohoService] Exchanging refresh token for access token');
+      
+      const params = new URLSearchParams();
+      params.append('refresh_token', this.credentials.refreshToken);
+      params.append('client_id', this.credentials.clientId);
+      params.append('client_secret', this.credentials.clientSecret);
+      params.append('grant_type', 'refresh_token');
+      params.append('scope', 'Desk.tickets.UPDATE');
+
+      const response = await axios.post(
+        'https://accounts.zoho.com/oauth/v2/token',
+        params,
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        }
+      );
+
+      logger.info('[ZohoService] Access token obtained successfully');
+      return response.data.access_token;
+    } catch (error) {
+      logger.error('[ZohoService] Failed to get access token', { error });
+      throw new Error('Failed to refresh Zoho access token');
+    }
+  }
+
+  /**
+   * Create ZohoService from encrypted credentials
+   */
+  static fromEncryptedCredentials(
+    encryptedCredentials: string,
+    sourceId: string
+  ): ZohoService {
+    const decrypted = decrypt(encryptedCredentials);
+    const credentials = JSON.parse(decrypted) as ZohoCredentials;
+    return new ZohoService(credentials, sourceId);
+  }
+
+  /**
+   * Send email reply via Zoho API
+   */
+  async sendReply(params: SendReplyParams): Promise<SendReplyResponse> {
+    const { ticketId, content, to, cc = [], bcc = [], fromEmailAddress } = params;
+
+    logger.info(`[ZohoService] Sending reply to ticket ${ticketId} with sourceId: ${this.sourceId}`);
+
+    // Get fresh access token
+    const accessToken = await this.getAccessToken();
+
+    const payload: any = {
+      channel: 'EMAIL',
+      content,
+      contentType: 'html',
+      fromEmailAddress,
+      to: to.join(','),
+    };
+
+    if (cc.length > 0) {
+      payload.cc = cc.join(',');
+    }
+
+    if (bcc.length > 0) {
+      payload.bcc = bcc.join(',');
+    }
+
+    const response = await this.client.post(`/tickets/${ticketId}/sendReply`, payload, {
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${accessToken}`,
+      },
+    });
+
+    logger.info(`[ZohoService] Reply sent. Thread ID: ${response.data.id}`);
+
+    return {
+      threadId: response.data.id,
+    };
+  }
+}

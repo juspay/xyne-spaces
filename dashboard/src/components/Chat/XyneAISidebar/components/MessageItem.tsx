@@ -1,0 +1,629 @@
+import { ReactElement, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  SingleStat,
+  Table,
+  Highchart,
+  HighBarChart1D,
+  VolumeChartRenderer,
+  type ToolOutput as GeniusToolOutput,
+} from 'cosmic-ai-genius';
+import { Tooltip } from '../../../ui/Tooltip';
+import type {
+  Message,
+  SummarizerCitation,
+  StreamingParsedContent,
+  SummarizerKeyPoint,
+} from '../utils/XyneAITypes';
+
+// Sanitize text to prevent XSS attacks
+const sanitizeText = (text: string): string => {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/\//g, '&#x2F;');
+};
+
+// Interfaces for component props
+interface MessageContentProps {
+  message: Message;
+  displayContent: string;
+  hasKeypoints: boolean | undefined;
+  parsedContent: StreamingParsedContent | undefined;
+  visibleChars: number;
+  onCitationClick: (
+    messageNumber: number,
+    conversationIdMapping: Record<string, string>,
+    messageIdMapping: Record<string, string>,
+    channelIdMapping?: Record<string, string>,
+  ) => void;
+  onSummarizerCitationClick: (citation: SummarizerCitation) => void;
+}
+
+interface SingleStatObject {
+  metric: string;
+  value: string | number;
+}
+
+interface SingleStatSectionProps {
+  singleStat: SingleStatObject | SingleStatObject[] | Record<string, string | number>[];
+}
+
+interface SummarizerContentProps {
+  message: Message;
+  visibleChars: number;
+  onSummarizerCitationClick: (citation: SummarizerCitation) => void;
+}
+
+interface GeniusKeyPointsProps {
+  parsedContent: StreamingParsedContent;
+  message: Message;
+  onCitationClick: (
+    messageNumber: number,
+    conversationIdMapping: Record<string, string>,
+    messageIdMapping: Record<string, string>,
+    channelIdMapping?: Record<string, string>,
+  ) => void;
+}
+
+interface MessageActionsProps {
+  message: Message;
+  copied: boolean;
+  onCopy: () => void;
+  onFeedback: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
+  feedbackValue: 'LIKE' | 'DISLIKE' | null;
+}
+
+interface MessageItemProps {
+  message: Message;
+  visibleChars: number;
+  onFeedback: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
+  onCitationClick: (
+    messageNumber: number,
+    conversationIdMapping: Record<string, string>,
+    messageIdMapping: Record<string, string>,
+    channelIdMapping?: Record<string, string>,
+  ) => void;
+  onSummarizerCitationClick: (citation: SummarizerCitation) => void;
+  feedbackValue: 'LIKE' | 'DISLIKE' | null;
+}
+
+export const MessageItem = ({
+  message,
+  visibleChars,
+  onFeedback,
+  onCitationClick,
+  onSummarizerCitationClick,
+  feedbackValue,
+}: MessageItemProps): ReactElement => {
+  const [copied, setCopied] = useState(false);
+
+  // Calculate display content for bot messages
+  const displayContent =
+    message.type === 'bot' && message.isStreaming && message.streamingContent
+      ? message.streamingContent.slice(0, visibleChars || 0)
+      : message.content || message.streamingContent || '';
+
+  const parsedContent = message.parsedContent;
+  const hasKeypoints = parsedContent && parsedContent.keypoints.length > 0;
+
+  const handleCopy = (): void => {
+    let textToCopy = '';
+
+    // Get summary/content
+    if (message.agentType === 'summarizer' && message.summarizerOutput?.summary) {
+      textToCopy = message.summarizerOutput.summary;
+      // Add key points
+      if (message.summarizerOutput.keyPoints && message.summarizerOutput.keyPoints.length > 0) {
+        textToCopy += '\n\nKey Points:\n';
+        textToCopy += message.summarizerOutput.keyPoints.map(kp => `• ${kp.point}`).join('\n');
+      }
+    } else {
+      // Genius or generic message
+      textToCopy = message.content || message.streamingContent || '';
+      // Add key points from parsed content
+      if (message.parsedContent && message.parsedContent.keypoints.length > 0) {
+        textToCopy += '\n\nKey Points:\n';
+        textToCopy += message.parsedContent.keypoints.map(point => `• ${point}`).join('\n');
+      }
+    }
+
+    void navigator.clipboard.writeText(textToCopy).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className={`flex gap-3 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+      {message.type === 'bot' && (
+        <div className='flex-shrink-0 mt-1'>
+          <img src='/svgs/icons/ai-bot-gradient-star.svg' alt='AI' width='16' height='16' />
+        </div>
+      )}
+
+      <div
+        className={
+          message.type === 'user'
+            ? 'max-w-[80%] overflow-hidden'
+            : 'flex-1 max-w-full overflow-hidden'
+        }
+      >
+        {/* Streaming status indicator - shows inline with icon when no content */}
+        {message.type === 'bot' &&
+        message.isStreaming &&
+        message.statusMessage &&
+        !displayContent ? (
+          <div className='flex items-center gap-0.5 mt-1'>
+            <span className="text-xs text-gray-500 font-['Inter'] italic">
+              {sanitizeText(message.statusMessage)}
+            </span>
+            <span className='inline-flex gap-0.5'>
+              <span
+                className='animate-bounce text-xs text-gray-500'
+                style={{ animationDelay: '0ms', animationDuration: '1s' }}
+              >
+                .
+              </span>
+              <span
+                className='animate-bounce text-xs text-gray-500'
+                style={{ animationDelay: '200ms', animationDuration: '1s' }}
+              >
+                .
+              </span>
+              <span
+                className='animate-bounce text-xs text-gray-500'
+                style={{ animationDelay: '400ms', animationDuration: '1s' }}
+              >
+                .
+              </span>
+            </span>
+          </div>
+        ) : (
+          <>
+            <div
+              className={`rounded-2xl ${
+                message.type === 'user'
+                  ? 'bg-[#F5F5F5] text-gray-900 px-4 py-2 w-fit'
+                  : 'bg-transparent text-gray-900 max-w-full'
+              }`}
+            >
+              {message.type === 'user' ? (
+                <p className="text-sm font-['Inter'] leading-relaxed whitespace-pre-wrap break-words">
+                  {displayContent}
+                </p>
+              ) : (
+                <MessageContent
+                  message={message}
+                  displayContent={displayContent}
+                  hasKeypoints={hasKeypoints}
+                  parsedContent={parsedContent}
+                  visibleChars={visibleChars}
+                  onCitationClick={onCitationClick}
+                  onSummarizerCitationClick={onSummarizerCitationClick}
+                />
+              )}
+            </div>
+
+            {/* Streaming status indicator - shows below content when there's content */}
+            {message.type === 'bot' &&
+              message.isStreaming &&
+              message.statusMessage &&
+              displayContent && (
+                <div className='mt-2'>
+                  <span className="text-xs text-gray-500 font-['Inter'] italic flex items-center gap-0.5">
+                    {sanitizeText(message.statusMessage)}
+                    <span className='inline-flex gap-0.5'>
+                      <span
+                        className='animate-bounce'
+                        style={{ animationDelay: '0ms', animationDuration: '1s' }}
+                      >
+                        .
+                      </span>
+                      <span
+                        className='animate-bounce'
+                        style={{ animationDelay: '200ms', animationDuration: '1s' }}
+                      >
+                        .
+                      </span>
+                      <span
+                        className='animate-bounce'
+                        style={{ animationDelay: '400ms', animationDuration: '1s' }}
+                      >
+                        .
+                      </span>
+                    </span>
+                  </span>
+                </div>
+              )}
+
+            {/* Copy/Like/Dislike Buttons */}
+            {message.type === 'bot' && !message.isStreaming && !message.isAborted && (
+              <MessageActions
+                message={message}
+                copied={copied}
+                onCopy={handleCopy}
+                onFeedback={onFeedback}
+                feedbackValue={feedbackValue}
+              />
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Message content rendering component
+const MessageContent = ({
+  message,
+  displayContent,
+  hasKeypoints,
+  parsedContent,
+  visibleChars,
+  onCitationClick,
+  onSummarizerCitationClick,
+}: MessageContentProps): ReactElement => (
+  <div className='space-y-4 max-w-full'>
+    {/* Tool Outputs */}
+    {message.toolOutputs && message.toolOutputs.length > 0 && (
+      <ToolOutputsSection toolOutputs={message.toolOutputs} />
+    )}
+
+    {/* Genius: Summary text */}
+    {(!message.agentType || message.agentType === 'genius') && displayContent && (
+      <div className="text-sm font-['Inter'] leading-6 font-normal">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+      </div>
+    )}
+
+    {/* Summarizer: Summary and Key Points */}
+    {message.agentType === 'summarizer' && message.summarizerOutput && (
+      <SummarizerContent
+        message={message}
+        visibleChars={visibleChars}
+        onSummarizerCitationClick={onSummarizerCitationClick}
+      />
+    )}
+
+    {/* Genius: Key points with citations */}
+    {(!message.agentType || message.agentType === 'genius') && hasKeypoints && parsedContent && (
+      <GeniusKeyPoints
+        parsedContent={parsedContent}
+        message={message}
+        onCitationClick={onCitationClick}
+      />
+    )}
+  </div>
+);
+
+// Tool outputs rendering
+const ToolOutputsSection = ({ toolOutputs }: { toolOutputs: GeniusToolOutput[] }): ReactElement => (
+  <div className='space-y-4 max-w-full'>
+    {toolOutputs.map((toolOutput, index) => (
+      <div key={index} className='space-y-4 max-w-full'>
+        {/* Time-Series Chart */}
+
+        {toolOutput.rawChartData && toolOutput.groupbyConfig && toolOutput.selectedMetrics && (
+          <div className='w-full max-w-full overflow-hidden'>
+            <Highchart
+              options={{}}
+              enableGroupby={true}
+              rawChartData={toolOutput.rawChartData}
+              groupbyConfig={toolOutput.groupbyConfig}
+              selectedMetrics={toolOutput.selectedMetrics}
+              showCardinalityControl={true}
+              dimensionLabelMapper={(label: string) =>
+                label.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+              }
+              isMobile={true}
+              isExpanded={false}
+            />
+          </div>
+        )}
+
+        {/* Bar Chart */}
+
+        {toolOutput.barChartData && (
+          <div className='w-full max-w-full overflow-hidden'>
+            <HighBarChart1D
+              rawData={toolOutput.barChartData.rawData}
+              groupKey={toolOutput.barChartData.groupKey}
+              selectedMetrics={toolOutput.barChartData.selectedMetrics}
+              isHorizontalBar={toolOutput.barChartData.isHorizontalBar ?? true}
+            />
+          </div>
+        )}
+
+        {/* Volume Chart */}
+
+        {toolOutput.volumeChartData && (
+          <div className='w-full max-w-full overflow-hidden'>
+            <VolumeChartRenderer
+              rawData={toolOutput.volumeChartData.rawData}
+              groupKey={toolOutput.volumeChartData.groupKey}
+              selectedMetrics={toolOutput.volumeChartData.selectedMetrics}
+              defaultChartType={toolOutput.volumeChartData.defaultChartType ?? 'bar'}
+              showToggle={toolOutput.volumeChartData.showToggle ?? true}
+              {...(toolOutput.volumeChartData.title && { title: toolOutput.volumeChartData.title })}
+            />
+          </div>
+        )}
+
+        {/* Single Stat */}
+
+        {toolOutput.singleStat && <SingleStatSection singleStat={toolOutput.singleStat} />}
+
+        {/* Table Data */}
+
+        {toolOutput.tableData && Array.isArray(toolOutput.tableData) && (
+          <div className='w-full max-w-full overflow-x-auto'>
+            <Table data={toolOutput.tableData} />
+          </div>
+        )}
+      </div>
+    ))}
+  </div>
+);
+
+// Single stat rendering logic
+const SingleStatSection = ({ singleStat }: SingleStatSectionProps): ReactElement | null => {
+  if (Array.isArray(singleStat) && singleStat.length === 1) {
+    const statsObject = singleStat[0];
+    if (!statsObject) return null;
+    const statEntries = Object.entries(statsObject) as [string, string | number][];
+
+    return (
+      <div className='flex flex-wrap gap-4 max-w-full'>
+        {statEntries.map(([metric, value]: [string, string | number]) => (
+          <div key={metric} className='flex-1 min-w-[150px] max-w-[250px]'>
+            <SingleStat metric={metric} value={value} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (
+    typeof singleStat === 'object' &&
+    !Array.isArray(singleStat) &&
+    'metric' in singleStat &&
+    'value' in singleStat
+  ) {
+    return (
+      <div className='w-full max-w-[250px]'>
+        <SingleStat metric={singleStat.metric} value={singleStat.value} />
+      </div>
+    );
+  }
+  return null;
+};
+
+// Summarizer content rendering
+const SummarizerContent = ({
+  message,
+  visibleChars,
+  onSummarizerCitationClick,
+}: SummarizerContentProps): ReactElement => (
+  <>
+    {/* Summary */}
+    {message.summarizerOutput?.summary && (
+      <div className='relative'>
+        <div className="text-sm font-['Inter'] leading-6 font-normal">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {message.isStreaming
+              ? message.summarizerOutput.summary.slice(0, visibleChars || 0)
+              : message.summarizerOutput.summary}
+          </ReactMarkdown>
+        </div>
+        {message.isStreaming && <span className='animate-pulse ml-1'>▋</span>}
+      </div>
+    )}
+
+    {/* Key Points */}
+    {message.summarizerOutput?.keyPoints && message.summarizerOutput.keyPoints.length > 0 && (
+      <div className='space-y-2'>
+        <h3 className='text-sm font-semibold text-gray-600'>Key Points</h3>
+        <ul className='space-y-1.5'>
+          {message.summarizerOutput.keyPoints.map((keyPoint: SummarizerKeyPoint, index: number) => (
+            <li key={index} className='flex items-start'>
+              <span className='text-gray-700 text-sm inline prose prose-sm max-w-none'>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    p: ({ children }) => <span>{children}</span>,
+                  }}
+                >
+                  {keyPoint.point}
+                </ReactMarkdown>
+                {keyPoint.citation?.conversationId && !message.isStreaming && (
+                  <>
+                    {' '}
+                    <button
+                      type='button'
+                      onClick={(): void => {
+                        if (keyPoint.citation) {
+                          onSummarizerCitationClick(keyPoint.citation);
+                        }
+                      }}
+                      className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
+                      title={`Jump to message ${keyPoint.citation.messageIndex}`}
+                    >
+                      {keyPoint.citation.messageIndex}
+                    </button>
+                  </>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+  </>
+);
+
+// Genius key points rendering
+const GeniusKeyPoints = ({
+  parsedContent,
+  message,
+  onCitationClick,
+}: GeniusKeyPointsProps): ReactElement => (
+  <div className='space-y-2'>
+    <h3 className='text-sm font-semibold text-gray-600'>Key Points</h3>
+    <ul className='space-y-1.5'>
+      {parsedContent.keypoints.map((point: string, index: number) => {
+        const keypointNum = index + 1;
+        const messageNumber = parsedContent.citations[keypointNum];
+        const hasValidCitation =
+          messageNumber &&
+          message.conversationIdMapping &&
+          (message.conversationIdMapping[String(messageNumber)] ||
+            message.messageIdMapping?.[String(messageNumber)]);
+
+        return (
+          <li key={index} className='flex items-start'>
+            <span className='text-gray-700 text-sm'>
+              <span
+                dangerouslySetInnerHTML={{
+                  __html: point.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'),
+                }}
+              />
+              {hasValidCitation && messageNumber && !message.isStreaming && (
+                <button
+                  type='button'
+                  onClick={(): void =>
+                    onCitationClick(
+                      messageNumber,
+                      message.conversationIdMapping ?? {},
+                      message.messageIdMapping ?? {},
+                      message.channelIdMapping,
+                    )
+                  }
+                  className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
+                  title={`Jump to message ${keypointNum}`}
+                >
+                  {keypointNum}
+                </button>
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  </div>
+);
+
+// Message action buttons
+const MessageActions = ({
+  message,
+  copied,
+  onCopy,
+  onFeedback,
+  feedbackValue,
+}: MessageActionsProps): ReactElement => (
+  <div className='flex justify-between items-center mt-4'>
+    <div className='flex items-center gap-1'>
+      {/* Copy Button */}
+      <button
+        onClick={onCopy}
+        className='p-1.5 rounded transition-colors hover:bg-gray-100'
+        title={copied ? 'Copied!' : 'Copy'}
+      >
+        {copied ? (
+          <img src='/svgs/icons/check-success.svg' alt='Copied' width='16' height='16' />
+        ) : (
+          <img src='/svgs/icons/copy.svg' alt='Copy' width='16' height='16' />
+        )}
+      </button>
+
+      {/* Like Button */}
+      <button
+        onClick={() => onFeedback(message.id, 'LIKE')}
+        className='p-1.5 rounded transition-colors hover:bg-gray-100'
+        title='Like'
+      >
+        <svg
+          xmlns='http://www.w3.org/2000/svg'
+          width='16'
+          height='16'
+          viewBox='0 0 16 16'
+          fill='none'
+        >
+          <g clipPath='url(#clip0_9950_23975)'>
+            <path
+              d='M9.99479 3.9187L9.32813 6.66536H13.2148C13.4218 6.66536 13.6259 6.71356 13.8111 6.80613C13.9962 6.8987 14.1573 7.0331 14.2815 7.1987C14.4057 7.36429 14.4896 7.55653 14.5266 7.76018C14.5636 7.96384 14.5528 8.17332 14.4948 8.37203L12.9415 13.7054C12.8607 13.9823 12.6923 14.2256 12.4615 14.3987C12.2307 14.5718 11.95 14.6654 11.6615 14.6654H2.66146C2.30784 14.6654 1.9687 14.5249 1.71865 14.2748C1.4686 14.0248 1.32813 13.6857 1.32812 13.332V7.9987C1.32812 7.64508 1.4686 7.30594 1.71865 7.05589C1.9687 6.80584 2.30784 6.66536 2.66146 6.66536H4.50146C4.74951 6.66523 4.99262 6.59591 5.20343 6.46518C5.41424 6.33445 5.58441 6.14751 5.69479 5.92536L7.99479 1.33203C8.30918 1.33592 8.61862 1.41081 8.89999 1.5511C9.18137 1.69138 9.42741 1.89344 9.61973 2.14217C9.81205 2.3909 9.94567 2.67987 10.0106 2.9875C10.0756 3.29513 10.0702 3.61345 9.99479 3.9187Z'
+              stroke={feedbackValue === 'LIKE' ? '#788187' : '#788187'}
+              fill={feedbackValue === 'LIKE' ? '#D1D5DB' : 'none'}
+              strokeWidth='1.33333'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            />
+            <path
+              d='M4.67188 6.66797V14.668'
+              stroke={feedbackValue === 'LIKE' ? '#788187' : '#788187'}
+              strokeWidth='1.33333'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            />
+          </g>
+          <defs>
+            <clipPath id='clip0_9950_23975'>
+              <rect width='16' height='16' fill='white' />
+            </clipPath>
+          </defs>
+        </svg>
+      </button>
+
+      {/* Dislike Button */}
+      <button
+        onClick={() => onFeedback(message.id, 'DISLIKE')}
+        className='p-1.5 rounded transition-colors hover:bg-gray-100'
+        title='Dislike'
+      >
+        <svg
+          xmlns='http://www.w3.org/2000/svg'
+          width='16'
+          height='16'
+          viewBox='0 0 16 16'
+          fill='none'
+        >
+          <g clipPath='url(#clip0_9950_23979)'>
+            <path
+              d='M6.00521 12.0813L6.67188 9.33464L2.78521 9.33464C2.57822 9.33464 2.37406 9.28644 2.18892 9.19387C2.00378 9.1013 1.84274 8.9669 1.71854 8.8013C1.59435 8.63571 1.51041 8.44347 1.47338 8.23982C1.43635 8.03616 1.44725 7.82668 1.50521 7.62797L3.05854 2.29464C3.13932 2.01768 3.30775 1.7744 3.53854 1.6013C3.76934 1.42821 4.05005 1.33464 4.33854 1.33464L13.3385 1.33464C13.6922 1.33464 14.0313 1.47511 14.2814 1.72516C14.5314 1.97521 14.6719 2.31435 14.6719 2.66797L14.6719 8.0013C14.6719 8.35493 14.5314 8.69406 14.2814 8.94411C14.0313 9.19416 13.6922 9.33464 13.3385 9.33464L11.4985 9.33464C11.2505 9.33477 11.0074 9.4041 10.7966 9.53482C10.5858 9.66555 10.4156 9.85249 10.3052 10.0746L8.00521 14.668C7.69082 14.6641 7.38138 14.5892 7.10001 14.4489C6.81863 14.3086 6.57259 14.1066 6.38027 13.8578C6.18795 13.6091 6.05433 13.3201 5.98938 13.0125C5.92444 12.7049 5.92985 12.3865 6.00521 12.0813Z'
+              stroke={feedbackValue === 'DISLIKE' ? '#788187' : '#788187'}
+              fill={feedbackValue === 'DISLIKE' ? '#D1D5DB' : 'none'}
+              strokeWidth='1.33333'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            />
+            <path
+              d='M11.3359 9.33203L11.3359 1.33203'
+              stroke={feedbackValue === 'DISLIKE' ? '#788187' : '#788187'}
+              strokeWidth='1.33333'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            />
+          </g>
+          <defs>
+            <clipPath id='clip0_9950_23979'>
+              <rect width='16' height='16' fill='white' transform='translate(16 16) rotate(-180)' />
+            </clipPath>
+          </defs>
+        </svg>
+      </button>
+    </div>
+
+    {/* Genius Icon */}
+    {message.isGeniusResponse && (
+      <Tooltip content='Powered By Genius' side='left'>
+        <div className='flex items-center gap-[2.521px] p-[4.51px] rounded-[11.345px] bg-gradient-to-br from-[#9747FF] to-[#1B85FF]'>
+          <img src='/svgs/icons/genius-star-white.svg' alt='Genius' width='8' height='8' />
+        </div>
+      </Tooltip>
+    )}
+  </div>
+);

@@ -1,0 +1,351 @@
+import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
+import { v4 as uuidv4 } from 'uuid';
+import { reactNativeBridge } from '../../utils/reactNativeBridge';
+import { websocketService } from './socketClient';
+import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanelService';
+import { API_BASE_URL } from '../../config';
+import { logger, Logger } from '../../utils/logger';
+import {
+  httpRequestDuration,
+  httpRequestTotal,
+  httpRequestErrors,
+  safeRecordMetric,
+  authRefreshDuration,
+  authRefreshTotal,
+  clearAuthTokenTotal,
+} from '../otel';
+
+// Define the base URL
+export const BASE_URL = API_BASE_URL;
+
+// Cache regex patterns to avoid recompilation on each call
+const URL_SANITIZATION_PATTERNS = [
+  {
+    regex: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+    replacement: '{uuid}',
+  },
+  { regex: /\/\d+(?=\/|$|\?)/g, replacement: '/{id}' },
+  { regex: /\b[a-zA-Z0-9_-]{20,}\b/g, replacement: '{token}' },
+  { regex: /([?&][^=]+=)[^&]+/g, replacement: '$1{param}' },
+];
+
+function sanitizeUrl(url: string): string {
+  return URL_SANITIZATION_PATTERNS.reduce(
+    (sanitized, { regex, replacement }) => sanitized.replace(regex, replacement),
+    url,
+  );
+}
+
+/**
+ * Helper function to track API latency with mixpanel
+ * @param config - The axios request config
+ * @param statusCode - The HTTP status code
+ * @param success - Whether the request was successful
+ * @param errorMessage - Optional error message for failed requests
+ */
+const trackApiLatency = (
+  config: InternalAxiosRequestConfig & { metadata?: { startTime: number } },
+  statusCode: number | undefined,
+  success: boolean,
+  errorMessage?: string,
+): void => {
+  try {
+    const startTime = config.metadata?.startTime;
+
+    if (startTime) {
+      const latency = Date.now() - startTime;
+      const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url || 'unknown';
+      const sanitizedUrl = sanitizeUrl(fullUrl);
+
+      mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
+        type: EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.API_LATENCY,
+        apiUrl: sanitizedUrl,
+        method: config.method?.toUpperCase() || 'unknown',
+        statusCode,
+        latency,
+        success,
+        ...(errorMessage && { errorMessage }),
+      });
+    }
+  } catch {
+    // Silently fail if tracking fails
+  }
+};
+
+// Create the main Axios instance with interceptors
+const apiConfig: AxiosInstance = axios.create({
+  baseURL: BASE_URL,
+  withCredentials: true,
+});
+
+// Add a request interceptor
+apiConfig.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    // Tokens are now in HTTP-only cookies and sent automatically by the browser
+    // No need to manually set Authorization header - backend reads from cookie
+
+    const requestId = uuidv4();
+
+    // Capture request start time for latency tracking
+    (
+      config as InternalAxiosRequestConfig & { metadata?: { startTime: number; requestId: string } }
+    ).metadata = {
+      startTime: Date.now(),
+      requestId,
+    };
+
+    if (config.headers) {
+      config.headers.Accept = '*/*';
+      config.headers['Access-Control-Allow-Credentials'] = 'true';
+      config.headers['x-request-id'] = requestId;
+
+      const zeroClientId = logger.zeroClientID;
+      if (zeroClientId) {
+        config.headers['x-client-id'] = zeroClientId;
+      }
+      const zeroClientGroupID = logger.zeroClientGroupID;
+      if (zeroClientGroupID) {
+        config.headers['x-zero-client-group-id'] = zeroClientGroupID;
+      }
+      const userEmail = logger.emailId;
+      if (userEmail) {
+        config.headers['x-user-email'] = userEmail;
+      }
+    }
+    return config;
+  },
+  (error: unknown) =>
+    Promise.reject(new Error(error instanceof Error ? error.message : 'Request interceptor error')),
+);
+
+// Add a response interceptor
+apiConfig.interceptors.response.use(
+  (response: AxiosResponse) => {
+    // Token refresh is now handled by backend via HTTP-only cookies
+    // No need to manually update tokens from frontend
+
+    // Track API latency for successful requests
+    const config = response.config as InternalAxiosRequestConfig & {
+      metadata?: { startTime: number; requestId: string };
+    };
+    trackApiLatency(config, response.status, true);
+    const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url || 'unknown';
+    const latency = config.metadata?.startTime ? Date.now() - config.metadata.startTime : 0;
+    const sanitizedUrl = sanitizeUrl(fullUrl);
+    const method = config.method?.toUpperCase() || 'unknown';
+
+    logger.info(Logger.Event.API_CALL_SUCCESSFUL, {
+      api_url: sanitizedUrl,
+      method,
+      status_code: response.status,
+      latency,
+      requestId: config.metadata?.requestId,
+    });
+
+    safeRecordMetric(() => {
+      httpRequestDuration.record(latency, {
+        method,
+        route: sanitizedUrl,
+        status_code: String(response.status),
+      });
+      httpRequestTotal.add(1, {
+        method,
+        route: sanitizedUrl,
+        status_code: String(response.status),
+      });
+    });
+
+    return response;
+  },
+  async (error: unknown) => {
+    // Type guard to ensure error has the expected structure
+    if (!error || typeof error !== 'object' || !('config' in error)) {
+      return Promise.reject(new Error('Unknown error occurred'));
+    }
+
+    const axiosError = error as AxiosError & {
+      config: InternalAxiosRequestConfig & { _retry?: boolean };
+      response?: { status: number; data?: { needsReauth?: boolean; needsRefresh?: boolean } };
+    };
+
+    // Track API latency for failed requests
+    const config = axiosError.config as InternalAxiosRequestConfig & {
+      metadata?: { startTime: number; requestId: string };
+    };
+    trackApiLatency(config, axiosError.response?.status, false, axiosError.message);
+
+    const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url || 'unknown';
+    const latency = config.metadata?.startTime ? Date.now() - config.metadata.startTime : 0;
+    const sanitizedUrl = sanitizeUrl(fullUrl);
+    const method = config.method?.toUpperCase() || 'unknown';
+    const statusCode = axiosError.response?.status || 0;
+
+    logger.error(Logger.Event.API_CALL_FAILED, {
+      api_url: sanitizedUrl,
+      method,
+      status_code: statusCode,
+      latency,
+      error_message: axiosError.message,
+      requestId: config.metadata?.requestId,
+    });
+
+    safeRecordMetric(() => {
+      httpRequestDuration.record(latency, {
+        method,
+        route: sanitizedUrl,
+        status_code: String(statusCode),
+      });
+      httpRequestTotal.add(1, {
+        method,
+        route: sanitizedUrl,
+        status_code: String(statusCode),
+      });
+      httpRequestErrors.add(1, {
+        method,
+        route: sanitizedUrl,
+        status_code: String(statusCode),
+        error_type: axiosError.code || 'unknown',
+      });
+    });
+
+    if (axiosError.response?.status === 401) {
+      const responseData = axiosError.response.data;
+
+      if (responseData?.needsRefresh && !axiosError.config._retry) {
+        axiosError.config._retry = true;
+        try {
+          const refreshStartTime = Date.now();
+          // Note: Using direct axios call instead of apiInstance
+          const refreshHeaders: Record<string, string> = {};
+          refreshHeaders['x-request-id'] = uuidv4();
+          if (logger.zeroClientID) {
+            refreshHeaders['x-client-id'] = logger.zeroClientID;
+          }
+          if (logger.zeroClientGroupID) {
+            refreshHeaders['x-zero-client-group-id'] = logger.zeroClientGroupID;
+          }
+          await axios.get(`${BASE_URL}/auth/refresh-session`, {
+            withCredentials: true,
+            headers: refreshHeaders,
+          });
+          // Reconnect WebSocket with new token
+
+          const refreshLatency = Date.now() - refreshStartTime;
+
+          logger.info(Logger.Event.AUTH_REFRESH_SUCCESS, {
+            refresh_latency_ms: refreshLatency,
+            trigger: 'API_SESSION_EXPIRED',
+          });
+
+          safeRecordMetric(() => {
+            authRefreshDuration.record(refreshLatency, {
+              trigger: 'api_session_expired',
+              platformName: logger.platformName,
+            });
+            authRefreshTotal.add(1, {
+              trigger: 'api_session_expired',
+              platformName: logger.platformName,
+              status: 'success',
+            });
+          });
+
+          if (websocketService.isConnectedToServer()) {
+            websocketService.reconnect();
+          }
+
+          return apiConfig.request(axiosError.config);
+        } catch (error) {
+          logger.error(Logger.Event.AUTH_REFRESH_FAILED, {
+            errorMessage: error instanceof Error ? error.message : 'Unknown error',
+            sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
+          });
+          safeRecordMetric(() => {
+            authRefreshTotal.add(1, {
+              trigger: 'api_session_expired',
+              platformName: logger.platformName,
+              status: 'error',
+              reason: error instanceof Error ? error.message : 'Unknown error',
+            });
+          });
+        }
+      }
+
+      // Track app refresh before reload
+      mixpanelService.track(EVENTS.APP_REFRESH, {
+        trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.API_SESSION_EXPIRED,
+        errorMessage: 'Session refresh failed - please re-authenticate',
+        url: window.location.href,
+        sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
+      });
+
+      clearAuthTokens();
+
+      window.location.href = '/auth';
+      window.location.reload();
+
+      return Promise.reject(new Error('Session refresh failed - please re-authenticate'));
+    } else if (!axiosError.response) {
+      // Network error (backend down) - log but don't redirect
+      // console.error('🌐 [AUTH] Network error - backend server may be down:', error);
+    }
+
+    // Create a custom error with status code preservation for important HTTP codes
+    const createErrorWithStatus = (message: string, status: number) => {
+      const errorWithStatus = new Error(message) as Error & { status?: number };
+      errorWithStatus.status = status;
+      return errorWithStatus;
+    };
+
+    if (axios.isAxiosError(error) && error.response) {
+      const status = error.response.status;
+
+      // Handle specific error responses with custom data
+      if (error.response.data) {
+        const data = error.response.data as {
+          error?: string;
+          errors?: { message?: string }[];
+        };
+
+        if (typeof data.error === 'string') {
+          return Promise.reject(createErrorWithStatus(data.error, status));
+        }
+        if (Array.isArray(data.errors) && data.errors[0]?.message) {
+          return Promise.reject(createErrorWithStatus(data.errors[0].message, status));
+        }
+      }
+
+      // Always preserve status codes for important HTTP errors (429, 403, etc.)
+      const errorMessage = error.message || `HTTP ${status} error`;
+      return Promise.reject(createErrorWithStatus(errorMessage, status));
+    }
+
+    return Promise.reject(new Error(error instanceof Error ? error.message : 'API request failed'));
+  },
+);
+
+/**
+ * Clear all authentication tokens and user data
+ */
+export function clearAuthTokens(): void {
+  if (typeof window.electronAPI?.clearAllCookies === 'function') {
+    window.electronAPI.clearAllCookies();
+  } else {
+    document.cookie = 'user_email=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    document.cookie = 'user_name=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    document.cookie = 'user_data=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+  }
+  logger.info(Logger.Event.CLEAR_AUTH_TOKEN_CALLED);
+
+  safeRecordMetric(() => {
+    clearAuthTokenTotal.add(1, {
+      platformName: logger.platformName,
+    });
+  });
+
+  localStorage.removeItem('user_id');
+
+  reactNativeBridge.notifySignOut('Session cleared by API client');
+}
+
+// Export the configured Axios instance
+export const apiInstance: AxiosInstance = apiConfig;

@@ -1,0 +1,687 @@
+import { Request, Response } from 'express';
+import { ApiResponse } from '@/types/express';
+import { logger } from '@/utils/logger';
+import { db } from '@/database/client';
+import { vespaQueue } from '@/queues/vespaQueue';
+import {
+  messageSchema,
+  channelSchema,
+  projectSchema,
+  ticketSchema,
+} from '@/vespa/src/types';
+
+/**
+ * Admin controller for Vespa backfill operations
+ * Provides endpoints to trigger data ingestion into Vespa
+ */
+export class AdminBackfillController {
+  private static readonly BATCH_SIZE = 100;
+
+  /**
+   * Backfill messages to Vespa - Transform-at-queue-time approach
+   * Only backfills messages updated within the specified time range
+   * If no timeframe is provided, backfills all messages
+   */
+  private static async backfillMessages(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: any = {};
+
+    // Build where clause based on provided timeframe
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(created between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          createdAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(created before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          createdAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      // No timeframe provided - get all messages
+      timeRange = "all messages (no timeframe limit)";
+      whereClause = {}; // No time filter
+    }
+
+    logger.info(`🔄 Backfilling messages ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching messages batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const messages = await db.message.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderBy: { createdAt: 'asc' }, // Oldest first based on createdAt
+        select: { messageId: true } // Only select ID initially
+      });
+
+      if (messages.length === 0) {
+        logger.debug('[Backfill] No more messages found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${messages.length} messages. Transforming and queueing...`);
+
+      // Transform and queue each message
+      for (const messageRef of messages) {
+        try {
+          // Queue only the ID - worker will handle the processing
+      await vespaQueue.addJob({
+        schema: messageSchema,
+        jobType: 'feed',
+        docId: messageRef.messageId,
+        userId: undefined // backfill jobs don't have a specific user
+      });
+      totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to transform message ${messageRef.messageId}:`, error);
+          // Continue with other messages
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Transformed and queued ${totalQueued} messages...`);
+    }
+
+    logger.info(`✓ Transformed and queued ${totalQueued} messages for ingestion`);
+    return totalQueued;
+  }
+
+  /**
+   * Backfill channels to Vespa - Transform-at-queue-time approach
+   * Only backfills channels updated within the specified time range
+   * If no timeframe is provided, backfills all channels
+   */
+  private static async backfillChannels(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: any = {};
+
+    // Build where clause based on provided timeframe
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      // No timeframe provided - get all channels
+      timeRange = "all channels (no timeframe limit)";
+      whereClause = {}; // No time filter
+    }
+
+    logger.info(`🔄 Backfilling channels ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching channels batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const channels = await db.channel.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' }, // Use updatedAt if filtering by time, otherwise createdAt
+        select: { id: true } // Only select ID initially
+      });
+
+      if (channels.length === 0) {
+        logger.debug('[Backfill] No more channels found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${channels.length} channels. Transforming and queueing...`);
+
+      // Transform and queue each channel
+      for (const channelRef of channels) {
+        try {
+          // Queue only the ID - worker will handle the processing
+        await vespaQueue.addJob({
+          schema: channelSchema,
+          jobType: 'feed',
+          docId: channelRef.id,
+          userId: undefined // backfill jobs don't have a specific user
+        });
+        totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to transform channel ${channelRef.id}:`, error);
+          // Continue with other channels
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Transformed and queued ${totalQueued} channels...`);
+    }
+
+    logger.info(`✓ Transformed and queued ${totalQueued} channels for ingestion`);
+    return totalQueued;
+  }
+
+  /**
+   * Backfill projects to Vespa - Transform-at-queue-time approach
+   * Only backfills projects updated within the specified time range
+   * If no timeframe is provided, backfills all projects
+   */
+  private static async backfillProjects(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: any = {};
+
+    // Build where clause based on provided timeframe
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      // No timeframe provided - get all projects
+      timeRange = "all projects (no timeframe limit)";
+      whereClause = {}; // No time filter
+    }
+
+    logger.info(`🔄 Backfilling projects ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching projects batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const projects = await db.project.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' }, // Use updatedAt if filtering by time, otherwise createdAt
+        select: { id: true } // Only select ID initially
+      });
+
+      if (projects.length === 0) {
+        logger.debug('[Backfill] No more projects found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${projects.length} projects. Transforming and queueing...`);
+
+      // Transform and queue each project
+      for (const projectRef of projects) {
+        try {
+          // Queue only the ID - worker will handle the processing
+        await vespaQueue.addJob({
+          schema: projectSchema,
+          jobType: 'feed',
+          docId: projectRef.id,
+          userId: undefined // backfill jobs don't have a specific user
+        });
+        totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to transform project ${projectRef.id}:`, error);
+          // Continue with other projects
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Transformed and queued ${totalQueued} projects...`);
+    }
+
+    logger.info(`✓ Transformed and queued ${totalQueued} projects for ingestion`);
+    return totalQueued;
+  }
+
+  /**
+   * Backfill tickets to Vespa - Transform-at-queue-time approach
+   * Only backfills tickets updated within the specified time range
+   * If no timeframe is provided, backfills all tickets
+   */
+  private static async backfillTickets(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: any = {};
+
+    // Build where clause based on provided timeframe
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      // No timeframe provided - get all tickets
+      timeRange = "all tickets (no timeframe limit)";
+      whereClause = {}; // No time filter
+    }
+
+    logger.info(`🔄 Backfilling tickets ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching tickets batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const tickets = await db.ticket.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' }, // Use updatedAt if filtering by time, otherwise createdAt
+        select: { id: true } // Only select ID initially
+      });
+
+      if (tickets.length === 0) {
+        logger.debug('[Backfill] No more tickets found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${tickets.length} tickets. Transforming and queueing...`);
+
+      // Transform and queue each ticket
+      for (const ticketRef of tickets) {
+        try {
+          // Queue only the ID - worker will handle the processing
+        await vespaQueue.addJob({
+          schema: ticketSchema,
+          jobType: 'feed',
+          docId: ticketRef.id,
+          userId: undefined // backfill jobs don't have a specific user
+        });
+        totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to transform ticket ${ticketRef.id}:`, error);
+          // Continue with other tickets
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Transformed and queued ${totalQueued} tickets...`);
+    }
+
+    logger.info(`✓ Transformed and queued ${totalQueued} tickets for ingestion`);
+    return totalQueued;
+  }
+
+  /**
+   * Trigger Vespa backfill for all or specific schemas
+   * This endpoint returns immediately after starting the backfill process in the background
+   * Example: POST /api/admin/vespa-backfill?schemas=messages,channels
+   */
+  public static async triggerBackfill(req: Request, res: Response): Promise<void> {
+    try {
+      const user = (req as any).user;
+      logger.info(`🚀 Admin backfill endpoint triggered by user: ${user?.email || 'unknown'}`);
+      logger.debug(`[Backfill] Query params: ${JSON.stringify(req.query)}`);
+
+      // Get query parameters
+      const schemasParam = req.query.schemas as string | undefined;
+      const fromTimestampParam = req.query.fromTimestamp as string | undefined;
+
+      // Determine which schemas to backfill
+      const requestedSchemas = schemasParam
+        ? schemasParam.split(',').map(s => s.trim().toLowerCase())
+        : ['messages', 'channels', 'tickets', 'projects'];
+
+      // Parse fromTimestamp if provided, otherwise start from the beginning
+      let fromTime: Date | null = null;
+      if (fromTimestampParam) {
+        try {
+          fromTime = new Date(fromTimestampParam);
+          if (isNaN(fromTime.getTime())) {
+            throw new Error('Invalid timestamp format');
+          }
+          logger.info(`📅 Using provided fromTimestamp: ${fromTime.toISOString()}`);
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid fromTimestamp parameter',
+            message: 'fromTimestamp must be a valid ISO 8601 date string',
+            timestamp: new Date().toISOString(),
+          } as ApiResponse);
+          return;
+        }
+      } else {
+        logger.info(`📅 No fromTimestamp provided - will backfill from the beginning`);
+      }
+
+      const validSchemas = ['messages', 'channels', 'tickets', 'projects'];
+      const schemasToBackfill = requestedSchemas.filter(s => validSchemas.includes(s));
+
+      if (schemasToBackfill.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid schemas parameter',
+          message: `Valid schemas: ${validSchemas.join(', ')}`,
+          timestamp: new Date().toISOString(),
+        } as ApiResponse);
+        return;
+      }
+
+      logger.info(`📊 Backfilling schemas: ${schemasToBackfill.join(', ')}`);
+
+      // Get initial queue stats
+      const initialStats = await vespaQueue.getStats();
+
+      // Generate a unique job ID for tracking
+      const backfillJobId = `backfill-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+
+      // Capture cutoff time NOW only if a fromTime is provided
+      // If no fromTime is provided, we will backfill all records
+      const cutoffTime = fromTime ? new Date() : undefined;
+
+      // Prepare response data
+      const responseData: any = {
+        message: 'Backfill started in background',
+        backfillJobId,
+        schemasToBackfill,
+        fromTimestamp: fromTime ? fromTime.toISOString() : null,
+        initialQueueStats: initialStats,
+        statusEndpoint: '/api/admin/vespa-backfill/stats',
+      };
+
+      // Add time info based on whether we have a timeframe
+      if (cutoffTime) {
+        responseData.toTimestamp = cutoffTime.toISOString();
+        responseData.timeRange = fromTime
+          ? `${fromTime.toISOString()} to ${cutoffTime.toISOString()}`
+          : `beginning to ${cutoffTime.toISOString()}`;
+      } else {
+        responseData.toTimestamp = null;
+        responseData.timeRange = 'All records (no timeframe limit)';
+      }
+
+      // Return immediately - backfill will run in background
+      res.status(202).json({
+        success: true,
+        data: responseData,
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+
+      // Execute backfill asynchronously in the background (fire and forget)
+      // No await here - let it run independently
+      AdminBackfillController.executeBackfillInBackground(schemasToBackfill, backfillJobId, cutoffTime, fromTime)
+        .catch((error) => {
+          logger.error(`❌ Background backfill failed for job ${backfillJobId}:`, error);
+        });
+
+    } catch (error) {
+      logger.error('❌ Backfill trigger failed:', error);
+
+      res.status(500).json({
+        success: false,
+        error: 'Failed to trigger backfill operation',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+    }
+  }
+
+  /**
+   * Execute backfill in the background without blocking the API response
+   * This method is called asynchronously and runs independently
+   */
+  private static async executeBackfillInBackground(
+    schemasToBackfill: string[],
+    backfillJobId: string,
+    cutoffTime?: Date,
+    fromTime?: Date | null
+  ): Promise<void> {
+    try {
+      const timeRangeStr = cutoffTime
+        ? `${fromTime ? fromTime.toISOString() : 'beginning'} to ${cutoffTime.toISOString()}`
+        : 'no time limit (all records)';
+
+      logger.info(`🔄 Starting background backfill job: ${backfillJobId}`);
+      logger.info(`📅 Time range: ${timeRangeStr}`);
+
+      const stats: Record<string, number> = {};
+
+      if (schemasToBackfill.includes('projects')) {
+        stats.projects = await AdminBackfillController.backfillProjects(cutoffTime, fromTime);
+      }
+
+      if (schemasToBackfill.includes('channels')) {
+        stats.channels = await AdminBackfillController.backfillChannels(cutoffTime, fromTime);
+      }
+
+      if (schemasToBackfill.includes('messages')) {
+        stats.messages = await AdminBackfillController.backfillMessages(cutoffTime, fromTime);
+      }
+
+      if (schemasToBackfill.includes('tickets')) {
+        stats.tickets = await AdminBackfillController.backfillTickets(cutoffTime, fromTime);
+      }
+
+      const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);
+      const finalStats = await vespaQueue.getStats();
+
+      logger.info(`✅ Background backfill job ${backfillJobId} completed successfully`);
+      logger.info(`📊 Total jobs queued: ${totalQueued}`);
+      logger.info(`📊 Final queue stats: ${JSON.stringify(finalStats)}`);
+    } catch (error) {
+      logger.error(`❌ Background backfill job ${backfillJobId} failed:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get Vespa queue statistics
+   *
+   * @route GET /api/admin/vespa-backfill/stats
+   * @access Authenticated users
+   */
+  public static async getQueueStats(_req: Request, res: Response): Promise<void> {
+    try {
+      logger.debug('[Backfill] Fetching queue stats...');
+      const stats = await vespaQueue.getStats();
+      logger.debug(`[Backfill] Queue stats: ${JSON.stringify(stats)}`);
+
+      res.status(200).json({
+        success: true,
+        data: stats,
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+    } catch (error) {
+      logger.error('Failed to get queue stats:', error);
+
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get queue statistics',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+    }
+  }
+
+  
+  /**
+   * Get queue jobs with pagination and state filter
+   * Query params: page, limit, state (waiting|active|delayed|completed|failed|all)
+   */
+  public static async getJobsWithState(req: Request, res: Response): Promise<void> {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 100;
+      const state = (req.query.state as string) || 'failed';
+
+      // Validate state parameter
+      const validStates = ['waiting', 'active', 'delayed', 'completed', 'failed', 'all'];
+      if (!validStates.includes(state)) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid state parameter',
+          message: `State must be one of: ${validStates.join(', ')}`,
+          timestamp: new Date().toISOString(),
+        } as ApiResponse);
+        return;
+      }
+
+      const result = await vespaQueue.getJobs(
+        page,
+        limit,
+        state as 'waiting' | 'active' | 'delayed' | 'completed' | 'failed' | 'all'
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+    } catch (error) {
+      logger.error('Failed to get queue jobs:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get queue jobs',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+    }
+  }
+
+  /**
+   * Retry all failed jobs
+   *
+   * @route POST /api/admin/vespa-backfill/retry-failed
+   * @access Authenticated users
+   */
+  public static async retryFailedJobs(_req: Request, res: Response): Promise<void> {
+    try {
+      // Use the centralized retryAllFailedJobs function from vespaBullQueue
+      const result = await vespaQueue.retryAllFailedJobs();
+
+      res.status(200).json({
+        success: true,
+        message: `Retried ${result.success} out of ${result.total} failed jobs`,
+        details: {
+          total: result.total,
+          succeeded: result.success,
+          failed: result.failed,
+          errors: result.errors.length > 0 ? result.errors : undefined,
+        },
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+    } catch (error) {
+      logger.error('Failed to retry jobs:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to retry jobs',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      } as ApiResponse);
+    }
+  }
+
+  /**
+   * Clear jobs by state
+   *
+   * @route DELETE /api/admin/vespa-backfill/jobs
+   * @access Authenticated users
+   * @query state - Job state to clear: waiting, active, delayed, completed, failed, or all (required)
+   */
+  public static async clearJobsByState(req: Request, res: Response): Promise<void> {
+    try {
+      const state = req.query.state as string;
+
+      // Validate state parameter
+      const validStates: readonly string[] = ['wait', 'active', 'delayed', 'completed', 'failed', 'all'];
+      if (!state || !validStates.includes(state)) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid or missing state parameter',
+          message: `State must be one of: ${validStates.join(', ')}`,
+          timestamp: new Date().toISOString(),
+        } as ApiResponse);
+        return;
+      }
+
+      const queue = vespaQueue.getQueue();
+      if (!queue) {
+        res.status(500).json({
+          success: false,
+          error: 'Vespa queue not initialized',
+          timestamp: new Date().toISOString(),
+        } as ApiResponse);
+        return;
+      }
+
+      // Get stats before clearing for reporting
+      const statsBefore = await vespaQueue.getStats();
+
+      if (state === 'all') {
+        // Clear all states
+        // Use queue.clean for states it supports
+        await Promise.all([
+          queue.clean(0, 'completed'),
+          queue.clean(0, 'failed'), 
+          queue.clean(0, 'wait'), 
+          queue.clean(0, 'active') ,  
+          queue.clean(0, 'delayed'),
+         
+        ]);
+      } else {
+        // queue.clean supports 'completed' and 'failed'
+        await queue.clean(0, state as 'completed' | 'failed' | 'wait' | 'active' | 'delayed');
+      } 
+
+      const statsAfter = await vespaQueue.getStats();
+
+      res.status(200).json({
+        success: true,
+        message: `Cleared all ${state} jobs`,
+        details: {
+          state,
+          jobsRemovedCount: statsBefore.total - statsAfter.total,
+          statsBefore,
+          statsAfter,
+        },
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+    } catch (error) {
+      logger.error(`Failed to clear jobs:`, error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to clear jobs',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      } as ApiResponse);
+    }
+  }
+  
+}

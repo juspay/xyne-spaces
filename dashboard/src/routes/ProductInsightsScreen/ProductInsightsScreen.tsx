@@ -1,0 +1,659 @@
+import { ReactElement, useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Ticket as TicketIcon,
+  Layers,
+  ChevronRight,
+  PieChart as PieChartIcon,
+  Circle,
+  Hash,
+  Loader2,
+  AlertCircle,
+} from 'lucide-react';
+import {
+  productInsightsService,
+  Scope,
+  TimeRange,
+  MetaTheme,
+  Cluster,
+  Ticket,
+  ProductInsightsData as Data,
+} from '../../services/Analytics/productInsightsService';
+import { useQuery } from '@tanstack/react-query';
+import { queries } from '../../zero/queries';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+
+// --- Colors & Utilities ---
+// Use HSL to generate distinct colors dynamically based on the number of items
+const getThemeColor = (index: number, total: number): string => {
+  const hue = (index * 360) / total;
+  return `hsl(${hue}, 70%, 60%)`;
+};
+
+// --- Pie Chart Component (Custom SVG) ---
+interface PieSlice {
+  color: string;
+  value: number;
+  label: string;
+  metaTheme: MetaTheme;
+}
+
+const SimplePieChart = ({
+  slices,
+  onSelect,
+  selectedTheme,
+  data,
+}: {
+  slices: PieSlice[];
+  onSelect: (theme: MetaTheme) => void;
+  selectedTheme: MetaTheme | null;
+  data: Data;
+}): ReactElement => {
+  const [hoveredSlice, setHoveredSlice] = useState<PieSlice | null>(null);
+
+  const total = slices.reduce((acc, item) => acc + item.value, 0);
+  let cumulativePercent = 0;
+
+  // Determine what to show in the center
+  const activeSlice = (): PieSlice | null => {
+    // If a theme is selected, show that.
+    // If no theme is selected but one is hovered, show the hovered one.
+    if (selectedTheme) {
+      return slices.find(p => p.metaTheme.meta_theme === selectedTheme.meta_theme) ?? null;
+    }
+    return hoveredSlice;
+  };
+
+  const currentSlice = activeSlice();
+
+  const getCoordinatesForPercent = (percent: number): [number, number] => {
+    const x = Math.cos(2 * Math.PI * percent);
+    const y = Math.sin(2 * Math.PI * percent);
+    return [x, y];
+  };
+
+  return (
+    <div className='relative w-full aspect-square max-w-[340px] mx-auto my-8'>
+      <svg viewBox='-1.2 -1.2 2.4 2.4' className='w-full h-full transform -rotate-90'>
+        {slices.map((slice, i) => {
+          const startPercent = cumulativePercent;
+          const endPercent = cumulativePercent + slice.value / total;
+          cumulativePercent = endPercent;
+
+          const [startX, startY] = getCoordinatesForPercent(startPercent);
+          const [endX, endY] = getCoordinatesForPercent(endPercent);
+
+          const largeArcFlag = slice.value / total > 0.5 ? 1 : 0;
+
+          const isSelected = selectedTheme?.meta_theme === slice.metaTheme.meta_theme;
+          const isHovered = hoveredSlice?.metaTheme.meta_theme === slice.metaTheme.meta_theme;
+          const isActive = isSelected || isHovered;
+
+          // Path for the slice
+          const pathData = `
+            M 0 0
+            L ${startX} ${startY}
+            A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY}
+            Z
+          `;
+
+          return (
+            <path
+              key={i}
+              d={pathData}
+              fill={slice.color}
+              stroke={isActive ? '#fff' : 'transparent'}
+              strokeWidth={isActive ? 0.05 : 0}
+              onMouseEnter={() => setHoveredSlice(slice)}
+              onMouseLeave={() => setHoveredSlice(null)}
+              className={`cursor-pointer transition-all duration-300 ${
+                isActive
+                  ? 'scale-110 drop-shadow-lg opacity-100'
+                  : selectedTheme || hoveredSlice
+                    ? 'opacity-40'
+                    : 'opacity-90 hover:scale-105'
+              }`}
+              style={{ transformOrigin: 'center', transformBox: 'fill-box' }}
+              onClick={() => onSelect(slice.metaTheme)}
+            >
+              <title>{`${slice.label} (${slice.value} clusters)`}</title>
+            </path>
+          );
+        })}
+        {/* Inner Circle for Donut Effect */}
+        <circle
+          cx='0'
+          cy='0'
+          r='0.75'
+          fill='var(--bg-card, #fff)'
+          className='dark:fill-[#1E1E1E]'
+        />
+      </svg>
+      <div className='absolute inset-0 flex items-center justify-center pointer-events-none'>
+        <div
+          className='text-center flex flex-col items-center justify-center animate-in fade-in duration-200 w-[55%] mx-auto'
+          key={currentSlice ? currentSlice.label : 'total'}
+        >
+          {currentSlice ? (
+            <>
+              <div className='text-3xl font-bold text-gray-800 dark:text-gray-100 leading-none mb-1'>
+                {currentSlice.value}
+              </div>
+              <div className='text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1'>
+                Clusters
+              </div>
+
+              <div className='h-px w-12 bg-gray-200 dark:bg-gray-700 my-2' />
+
+              <div className='text-xl font-bold text-gray-800 dark:text-gray-100 leading-none mb-1'>
+                {currentSlice.metaTheme.impacted_clusters.reduce(
+                  (acc, cid) => acc + (data.cluster_details[cid]?.length || 0),
+                  0,
+                )}
+              </div>
+              <div className='text-[10px] font-bold text-gray-400 uppercase tracking-widest'>
+                Tickets
+              </div>
+            </>
+          ) : (
+            <>
+              <div className='text-4xl font-bold text-gray-800 dark:text-gray-100 leading-tight'>
+                {slices.length}
+              </div>
+              <div className='text-xs font-bold text-gray-500 uppercase tracking-widest mt-1'>
+                Meta
+                <br />
+                Themes
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Components ---
+
+const MetaThemeItem = ({
+  theme,
+  color,
+  isSelected,
+  onClick,
+}: {
+  theme: MetaTheme;
+  color: string;
+  isSelected: boolean;
+  onClick: () => void;
+}): ReactElement => (
+  <div
+    role='button'
+    tabIndex={0}
+    onClick={onClick}
+    onKeyDown={e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onClick();
+      }
+    }}
+    className={`p-4 rounded-lg cursor-pointer transition-all duration-200 mb-2 group ${
+      isSelected
+        ? 'bg-blue-50/80 dark:bg-blue-900/10 shadow-sm ring-1 ring-blue-100 dark:ring-blue-800'
+        : 'hover:bg-gray-100/80 dark:hover:bg-[#2A2A2A]'
+    }`}
+  >
+    <div className='flex items-start gap-3'>
+      <div
+        className={`w-2.5 h-2.5 rounded-full flex-shrink-0 transition-transform duration-300 mt-1.5 ${isSelected ? 'scale-110' : 'group-hover:scale-110'}`}
+        style={{ backgroundColor: color }}
+      />
+      <div className='flex-1 min-w-0'>
+        <div className='flex justify-between items-center mb-0.5'>
+          <h3
+            className={`text-sm font-medium truncate pr-2 ${isSelected ? 'text-gray-900 dark:text-blue-100' : 'text-gray-700 dark:text-gray-300'}`}
+          >
+            {theme.meta_theme}
+          </h3>
+          {isSelected && <ChevronRight size={14} className='text-gray-400' />}
+        </div>
+        <div
+          className={`transition-all duration-300 ease-in-out overflow-hidden ${isSelected ? 'max-h-40' : 'max-h-[1.4em]'}`}
+        >
+          <p
+            className={`text-xs leading-relaxed ${isSelected ? 'text-gray-600 dark:text-gray-400' : 'text-gray-500'}`}
+          >
+            {theme.description}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const ClusterBarItem = ({
+  cluster,
+  isSelected,
+  onClick,
+  count,
+  maxCount,
+}: {
+  cluster: Cluster;
+  isSelected: boolean;
+  onClick: () => void;
+  count: number;
+  maxCount: number;
+}): ReactElement => {
+  const widthPercentage = maxCount > 0 ? (count / maxCount) * 100 : 0;
+
+  return (
+    <div
+      role='button'
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className={`group mb-6 cursor-pointer select-none`}
+    >
+      <div className='flex justify-between items-center mb-2'>
+        <h4
+          className={`text-sm font-medium pr-3 truncate transition-colors ${isSelected ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-200'}`}
+        >
+          {cluster.theme_title}
+        </h4>
+        <span
+          className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded transition-colors ${isSelected ? 'bg-gray-800 text-white dark:bg-white dark:text-black' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'}`}
+        >
+          {count}
+        </span>
+      </div>
+
+      <div className='relative h-2 w-full bg-gray-100 dark:bg-[#252525] rounded-full overflow-hidden'>
+        <div
+          className='h-full rounded-full transition-all duration-500 ease-out relative'
+          style={{
+            width: `${Math.max(widthPercentage, 2)}%`,
+            backgroundColor: isSelected ? '#000000' : '#2C2C2C',
+            opacity: isSelected ? 1 : 0.6,
+          }}
+        />
+      </div>
+
+      <p
+        className={`text-xs mt-2 text-gray-500 dark:text-gray-400 leading-relaxed overflow-hidden transition-all duration-300 ${
+          isSelected ? 'opacity-100 max-h-20 mb-4' : 'opacity-0 max-h-0'
+        }`}
+      >
+        {cluster.theme_description}
+      </p>
+    </div>
+  );
+};
+
+interface TicketDataFromZero {
+  id: string;
+  projectId: string | null;
+  boardId: string | null;
+}
+
+const TicketItem = ({
+  ticket,
+  ticketData,
+}: {
+  ticket: Ticket;
+  ticketData: TicketDataFromZero | undefined;
+}): ReactElement => {
+  const navigate = useNavigate();
+
+  return (
+    <div
+      role='button'
+      tabIndex={0}
+      onClick={() => {
+        // Navigate to ticket detail page using the ticket's projectId, boardId, and docId
+        if (ticketData?.projectId && ticketData?.boardId) {
+          void navigate(`/projects/${ticketData.projectId}/${ticketData.boardId}/${ticket.docId}`);
+        }
+      }}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (ticketData?.projectId && ticketData?.boardId) {
+            void navigate(
+              `/projects/${ticketData.projectId}/${ticketData.boardId}/${ticket.docId}`,
+            );
+          }
+        }
+      }}
+      className='p-5 rounded-lg bg-white dark:bg-[#1E1E1E] mb-3 border border-transparent shadow-sm hover:shadow-md hover:border-blue-100 dark:hover:border-blue-900 transition-all duration-200 group cursor-pointer'
+    >
+      <div className='flex items-start gap-3 mb-2'>
+        <div className='mt-0.5 p-1.5 rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity'>
+          <TicketIcon size={14} />
+        </div>
+        <h5 className='text-sm font-medium text-gray-900 dark:text-gray-100 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
+          {ticket.title}
+        </h5>
+      </div>
+      <div className='pl-[38px]'>
+        <p className='text-xs text-gray-500 dark:text-gray-400 whitespace-pre-line leading-relaxed'>
+          {ticket.description}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+const EmptyState = ({
+  icon: IconComponent,
+  message,
+}: {
+  icon: React.ComponentType<{ size: number }>;
+  message: string;
+}): ReactElement => (
+  <div className='flex flex-col items-center justify-center h-64 text-gray-400'>
+    <div className='p-4 rounded-full bg-gray-50 dark:bg-gray-800 mb-3'>
+      <IconComponent size={24} />
+    </div>
+    <p className='text-sm'>{message}</p>
+  </div>
+);
+
+// --- Main Screen ---
+
+const ProductInsightsScreen = (): ReactElement => {
+  const [selectedMetaTheme, setSelectedMetaTheme] = useState<MetaTheme | null>(null);
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
+
+  const [scope, setScope] = useState<Scope>(Scope.INTERNAL);
+  const [timeRange, setTimeRange] = useState<TimeRange>(TimeRange.ALL);
+
+  const {
+    data,
+    isLoading: loading,
+    error: queryError,
+  } = useQuery({
+    queryKey: ['productInsights', scope, timeRange],
+    queryFn: () => productInsightsService.getProductInsights({ scope, timeRange }),
+  });
+
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : 'Failed to fetch insights'
+    : null;
+
+  useEffect(() => {
+    setSelectedMetaTheme(null);
+    setSelectedClusterId(null);
+  }, [data]);
+
+  // Prepare Pie Chart Data
+  const pieData: PieSlice[] = useMemo(() => {
+    if (!data) return [];
+    return data.meta_themes.map((theme, index) => ({
+      color: getThemeColor(index, data.meta_themes.length),
+      value: theme.impacted_clusters.length,
+      label: theme.meta_theme,
+      metaTheme: theme,
+    }));
+  }, [data]);
+
+  const allTicketIds = useMemo(() => {
+    if (!data) return [];
+    const ids = new Set<string>();
+    Object.values(data.cluster_details).forEach(tickets => {
+      tickets.forEach(ticket => ids.add(ticket.docId));
+    });
+    return Array.from(ids);
+  }, [data]);
+
+  const [ticketsFromZero] = useCachedQuery(queries.ticketsByIds({ ticketIds: allTicketIds }));
+
+  const ticketDataMap = useMemo(() => {
+    const map = new Map<string, TicketDataFromZero>();
+    ticketsFromZero?.forEach(ticket => {
+      map.set(ticket.id, {
+        id: ticket.id,
+        projectId: ticket.projectId,
+        boardId: ticket.boardId,
+      });
+    });
+    return map;
+  }, [ticketsFromZero]);
+
+  const handleMetaThemeSelect = (theme: MetaTheme): void => {
+    if (selectedMetaTheme?.meta_theme === theme.meta_theme) {
+      setSelectedMetaTheme(null);
+      setSelectedClusterId(null);
+    } else {
+      setSelectedMetaTheme(theme);
+      setSelectedClusterId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+        <div className='flex flex-col items-center gap-3'>
+          <Loader2 size={32} className='animate-spin text-blue-500' />
+          <p className='text-sm text-gray-500'>Loading insights...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+        <div className='flex flex-col items-center gap-3 max-w-md text-center p-6'>
+          <AlertCircle size={32} className='text-red-500' />
+          <p className='text-sm text-gray-900 dark:text-gray-100 font-medium'>
+            Failed to load insights
+          </p>
+          <p className='text-xs text-gray-500'>{error || 'No data available'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex flex-col h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+      {/* Header */}
+      <div className='px-6 py-5 bg-white dark:bg-[#1E1E1E] border-b border-gray-200 dark:border-gray-800'>
+        <div className='flex justify-between items-center mb-4'>
+          <div className='flex items-center gap-3'>
+            <div className='p-2 rounded-lg'>
+              <PieChartIcon size={24} />
+            </div>
+            <div>
+              <h1 className='text-lg font-sf-pro-expanded font-bold text-gray-900 dark:text-white'>
+                Product Insights
+              </h1>
+              <p className='text-xs text-gray-500 dark:text-gray-400'>
+                Analyze feedback clusters and themes
+              </p>
+            </div>
+          </div>
+          <div className='flex items-center gap-4 text-xs text-gray-500'>
+            <div className='flex items-center gap-1.5'>
+              <Circle size={8} className='fill-current text-gray-300' />
+              <span>{data.meta_themes.length} Meta Themes</span>
+            </div>
+            <div className='flex items-center gap-1.5'>
+              <Layers size={12} />
+              <span>{Object.keys(data.cluster_themes).length} Clusters</span>
+            </div>
+            <div className='flex items-center gap-1.5'>
+              <Hash size={12} />
+              <span>
+                {Object.values(data.cluster_details).reduce(
+                  (sum, tickets) => sum + tickets.length,
+                  0,
+                )}{' '}
+                Tickets
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Selectors */}
+        <div className='flex items-center gap-4'>
+          <div className='flex items-center gap-2'>
+            <label
+              htmlFor='scope-select'
+              className='text-xs font-medium text-gray-600 dark:text-gray-400'
+            >
+              Scope:
+            </label>
+            <select
+              id='scope-select'
+              value={scope}
+              onChange={e => setScope(e.target.value as Scope)}
+              className='px-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2A2A2A] text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500'
+            >
+              <option value={Scope.INTERNAL}>Internal</option>
+              <option value={Scope.EXTERNAL}>External</option>
+            </select>
+          </div>
+
+          <div className='flex items-center gap-2'>
+            <label
+              htmlFor='time-range-select'
+              className='text-xs font-medium text-gray-600 dark:text-gray-400'
+            >
+              Time Range:
+            </label>
+            <select
+              id='time-range-select'
+              value={timeRange}
+              onChange={e => setTimeRange(e.target.value as TimeRange)}
+              className='px-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2A2A2A] text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500'
+            >
+              <option value={TimeRange.ALL}>All</option>
+              <option value={TimeRange.YESTERDAY}>Yesterday</option>
+              <option value={TimeRange.LAST_7_DAYS}>Last 7 Days</option>
+              <option value={TimeRange.LAST_30_DAYS}>Last 30 Days</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* 3-Column Layout */}
+      <div className='flex-1 flex overflow-hidden'>
+        {/* Column 1: Meta Themes (Fixed Width) */}
+        <div className='w-[420px] flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E]'>
+          <div className='p-6 border-b border-gray-100 dark:border-gray-800'>
+            <SimplePieChart
+              slices={pieData}
+              onSelect={handleMetaThemeSelect}
+              selectedTheme={selectedMetaTheme}
+              data={data}
+            />
+            <div className='text-center mt-2'>
+              <p className='text-xs font-medium text-gray-400 uppercase tracking-widest'>
+                Select a Theme
+              </p>
+            </div>
+          </div>
+          <div className='flex-1 overflow-y-auto p-4 scrollbar-sleek bg-gray-50/50 dark:bg-[#1E1E1E]'>
+            {data.meta_themes.map((theme, index) => (
+              <MetaThemeItem
+                key={index}
+                theme={theme}
+                color={getThemeColor(index, data.meta_themes.length)}
+                isSelected={selectedMetaTheme?.meta_theme === theme.meta_theme}
+                onClick={() => handleMetaThemeSelect(theme)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Column 2: Clusters (Fixed Width) */}
+        <div className='w-[480px] flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#1a1a1a]'>
+          <div className='p-[18.5px] border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E] sticky top-0 z-10 flex justify-between items-center'>
+            <h2 className='text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2'>
+              <Layers size={14} />
+              <span>Impacted Clusters</span>
+            </h2>
+            {selectedMetaTheme && (
+              <span className='text-[10px] bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-gray-500'>
+                {selectedMetaTheme.impacted_clusters.length}
+              </span>
+            )}
+          </div>
+          <div className='flex-1 overflow-y-auto p-6 scrollbar-sleek'>
+            {selectedMetaTheme ? (
+              ((): ReactElement[] => {
+                const maxCount = selectedMetaTheme.impacted_clusters.reduce(
+                  (max, cid) => Math.max(max, data.cluster_details[cid]?.length || 0),
+                  0,
+                );
+                const sortedClusters = [...selectedMetaTheme.impacted_clusters].sort((a, b) => {
+                  const countA = data.cluster_details[a]?.length || 0;
+                  const countB = data.cluster_details[b]?.length || 0;
+                  return countB - countA;
+                });
+                return sortedClusters
+                  .map(clusterId => {
+                    const cluster = data.cluster_themes[clusterId];
+                    if (!cluster) return null;
+                    const count = data.cluster_details[clusterId]?.length || 0;
+                    return (
+                      <ClusterBarItem
+                        key={clusterId}
+                        cluster={cluster}
+                        isSelected={selectedClusterId === clusterId}
+                        onClick={() => setSelectedClusterId(clusterId)}
+                        count={count}
+                        maxCount={maxCount}
+                      />
+                    );
+                  })
+                  .filter((item): item is ReactElement => item !== null);
+              })()
+            ) : (
+              <EmptyState icon={PieChartIcon} message='Select a theme to view clusters' />
+            )}
+          </div>
+        </div>
+
+        {/* Column 3: Tickets (Flexible Width) */}
+        <div className='flex-1 flex flex-col bg-gray-100 dark:bg-[#141414]'>
+          <div className='p-5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E] sticky top-0 z-10 min-h-[57px] flex items-center'>
+            <h2 className='text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2'>
+              <TicketIcon size={14} />
+              <span>Associated Tickets</span>
+            </h2>
+          </div>
+          <div className='flex-1 overflow-y-auto p-6 scrollbar-sleek'>
+            {selectedClusterId ? (
+              <div className='max-w-3xl mx-auto w-full'>
+                {data.cluster_details[selectedClusterId]?.map(ticket => (
+                  <TicketItem
+                    key={ticket.docId}
+                    ticket={ticket}
+                    ticketData={ticketDataMap.get(ticket.docId)}
+                  />
+                ))}
+                {(!data.cluster_details[selectedClusterId] ||
+                  data.cluster_details[selectedClusterId]?.length === 0) && (
+                  <div className='text-center p-8 text-gray-500'>
+                    No tickets found for this cluster.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <EmptyState icon={Layers} message='Select a cluster to view tickets' />
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ProductInsightsScreen;

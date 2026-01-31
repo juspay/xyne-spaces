@@ -1,0 +1,1 @@
+export { CollaborativeCanvasEditor } from './CollaborativeCanvasEditor';

@@ -1,0 +1,173 @@
+import React, { useState } from 'react';
+import { useForm } from '@tanstack/react-form';
+import { Button } from '../../ui/Button';
+import { cn } from '../../../utils/classNames';
+import { SearchUser } from '../../ui/SearchUser/SearchUser';
+import Textarea from '../../ui/Textarea';
+import { User } from '@xyne/shared';
+import { useAuthContextValues } from '../../../hooks/useAuth';
+
+export interface CreateDmFormData {
+  participants: User[];
+  message: string;
+}
+
+interface AddDmFormProps {
+  onSubmit: (data: CreateDmFormData) => void;
+  onCancel: () => void;
+  loading?: boolean;
+}
+
+export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCancel }) => {
+  const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
+  const context = useAuthContextValues();
+
+  const form = useForm({
+    defaultValues: {
+      message: '',
+    },
+    onSubmit: ({ value }) => {
+      onSubmit?.({
+        participants: selectedUsers,
+        message: value.message,
+      });
+    },
+  });
+
+  const handleUsersChange = (users: User[]): void => {
+    setSelectedUsers(users);
+  };
+
+  const getConversationTitle = (): string => {
+    if (selectedUsers.length === 0) return 'Select people to message';
+    if (selectedUsers.length === 1) return `Message ${selectedUsers[0]?.name || 'Unknown'}`;
+    if (selectedUsers.length <= 3) {
+      return selectedUsers.map(u => u.name).join(', ');
+    }
+    const firstTwo = selectedUsers
+      .slice(0, 2)
+      .map(u => u.name)
+      .join(', ');
+    const remaining = selectedUsers.length - 2;
+    return `${firstTwo} + ${remaining} others`;
+  };
+
+  return (
+    <form
+      onSubmit={e => {
+        e.preventDefault();
+        e.stopPropagation();
+        void form.handleSubmit();
+      }}
+    >
+      <div className='space-y-6  mx-auto bg-white'>
+        {/* Conversation Preview */}
+        <div>
+          <div className='text-base font-medium text-foreground mb-1'>{getConversationTitle()}</div>
+          {selectedUsers.length > 0 && (
+            <div className='text-xs text-muted-foreground'>
+              {selectedUsers.length === 1
+                ? 'Direct message'
+                : `Group conversation with ${selectedUsers.length} people`}
+            </div>
+          )}
+        </div>
+
+        {/* User Search */}
+        <div>
+          <SearchUser
+            excludeUserIds={[context.userID]}
+            selectedUsers={selectedUsers}
+            onUsersChange={handleUsersChange}
+            placeholder='Type to find people...'
+            label={`Add people (${selectedUsers.length}/9)`}
+            hintText='Search user by email or name'
+          />
+          {selectedUsers.length === 0 && (
+            <div className='text-sm text-red-600 mt-1'>
+              Please select at least one person to message
+            </div>
+          )}
+          {selectedUsers.length > 9 && (
+            <div className='text-sm text-red-600 mt-1'>Maximum 9 recipients allowed</div>
+          )}
+        </div>
+
+        {/* Message Input */}
+        <form.Field
+          name='message'
+          validators={{
+            onChange: ({ value }) => {
+              if (value.length > 1000) return 'Message must be 1000 characters or less';
+              return undefined;
+            },
+          }}
+        >
+          {field => (
+            <div className='space-y-1.5'>
+              <label htmlFor='dm-message' className='text-sm font-medium text-gray-700'>
+                Message (optional)
+              </label>
+              <Textarea
+                id='dm-message'
+                value={field.state.value}
+                onChange={e => field.handleChange(e.target.value)}
+                placeholder='Say something to start the conversation...'
+                rows={4}
+                className={cn(
+                  field.state.meta.errors.length > 0 &&
+                    'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
+                )}
+                aria-invalid={field.state.meta.errors.length > 0}
+              />
+              <div className='flex justify-end mt-1'>
+                <span className='text-sm text-gray-500'>{`${field.state.value.length}/1000 characters`}</span>
+              </div>
+              {field.state.meta.errors.length > 0 && field.state.meta.errors[0] && (
+                <p className='text-sm text-red-600'>{field.state.meta.errors[0]}</p>
+              )}
+            </div>
+          )}
+        </form.Field>
+
+        {/* Participant Limit Notice */}
+        {selectedUsers.length >= 9 && (
+          <div className='p-3 bg-yellow-50 border border-yellow-200 rounded-lg'>
+            <p className='text-sm text-yellow-700'>
+              Maximum of 9 people can be added to a conversation.
+            </p>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className='flex justify-end space-x-3 pt-4'>
+          {onCancel && (
+            <Button
+              variant='ghost'
+              size='default'
+              type='button'
+              onClick={e => {
+                e.preventDefault();
+                onCancel();
+              }}
+            >
+              Cancel
+            </Button>
+          )}
+          <Button
+            type='submit'
+            variant='default'
+            size='default'
+            className='bg-blue-600 hover:bg-blue-700'
+            loading={loading || false}
+            disabled={selectedUsers.length === 0}
+          >
+            Start DM
+          </Button>
+        </div>
+      </div>
+    </form>
+  );
+};
+
+export default AddDmForm;
