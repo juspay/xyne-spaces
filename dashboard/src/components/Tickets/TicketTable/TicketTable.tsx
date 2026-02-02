@@ -325,7 +325,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             year: 'numeric',
           });
 
-          const isUrgent = isEtaUrgent(params.data?.eta);
+          const isUrgent = isEtaUrgent(params.data?.eta, params.data?.statusV2);
 
           return (
             <div
