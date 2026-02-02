@@ -120,6 +120,9 @@ async function initializeApp(): Promise<void> {
   // Auto-start docs publish server in the background
   startDocsPublishServerInBackground();
 
+  // setup app state listners 
+  setupAppStateListeners();
+
   app.on('activate', async () => {
     const mainWindow = getMainWindow();
     if (mainWindow) {
@@ -171,6 +174,23 @@ function startDocsPublishServerInBackground(): void {
     .catch((error) => {
       log.error('[App] Failed to start docs publish server:', error);
     });
+}
+
+function setupAppStateListeners(): void {
+  // Monitor window focus/blur events
+  app.on('browser-window-focus', (_event, window) => {
+    Logger.info(EnrollmentEvent.APP_TRANSITION_TO_FOREGROUND, {
+      windowId: window.id,
+      windowTitle: window.getTitle(),
+    });
+  });
+
+  app.on('browser-window-blur', (_event, window) => {
+    Logger.info(EnrollmentEvent.APP_TRANSITION_TO_BACKGROUND, {
+      windowId: window.id,
+      windowTitle: window.getTitle(),
+    });
+  });
 }
 
 void app.whenReady().then(initializeApp);
