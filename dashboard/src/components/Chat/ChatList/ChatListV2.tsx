@@ -11,7 +11,7 @@ import { formatDatePill } from '../../../utils/dateUtils';
 import { ChatListItem } from '../ChatListItem/ChatListItem';
 import { useNavigate, useLocation } from 'react-router-dom';
 import LoadingAnimation from '../Loader/Loader';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
 import { ArrowDown } from 'lucide-react';
 import { useGetChannelConversations } from '../../../hooks/useChannels';
@@ -325,18 +325,28 @@ const ChatListV2: React.FC<ChatListProps> = ({
 
   // Find the index of the first message created after lastViewedAt (for positioning the indicator)
   // Only consider messages from other users, not the current user
+  // Exclude all system messages except ticket creation messages
   const lastViewedConversationIndex = useMemo(() => {
     if (!hasShownNewMessagesIndicator || !lastViewedAt) {
       return -1;
     }
 
-    return combinedMessages.findIndex(
-      item =>
-        item.type === 'conversation' &&
-        item.createdAt.getTime() > lastViewedAt &&
-        item.data.createdBy !== user?.id &&
-        item.data.initialMessage?.senderId !== user?.id,
-    );
+    return combinedMessages.findIndex(item => {
+      if (item.type !== 'conversation') return false;
+      if (item.createdAt.getTime() <= lastViewedAt) return false;
+      if (item.data.createdBy === user?.id) return false;
+      if (item.data.initialMessage?.senderId === user?.id) return false;
+
+      const message = item.data.initialMessage;
+
+      // For system messages, only show indicator for ticket creation messages
+      if (message?.msgType === MessageType.SYSTEM) {
+        const isTicketMessage = item.data.ticketId !== null;
+        if (!isTicketMessage) return false;
+      }
+
+      return true;
+    });
   }, [combinedMessages, lastViewedAt, hasShownNewMessagesIndicator, user?.id]);
 
   // Scroll to initialItem on mount dsf sd
