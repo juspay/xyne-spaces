@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { ActivityClassification, Prisma, TicketStatus } from '@prisma/client';
+import { ActivityClassification, Prisma, TicketStatusV2 } from '@prisma/client';
 import { MessageType } from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { db } from '@/database/client';
@@ -122,16 +122,16 @@ class EtaDeadlineQueue {
     const BREACH_REMIND_DAYS = [1, 3, 7, 15, 31, 63, 127, 255];
 
     try {
-      // Get all open tickets with eta
+      // Get all non-terminal tickets with eta using statusV2
       const openStatuses = [
-        TicketStatus.NEW,
-        TicketStatus.IN_PROGRESS,
-        TicketStatus.WAIT_FOR_APPROVAL,
+        TicketStatusV2.TODO,
+        TicketStatusV2.STARTED,
+        TicketStatusV2.PAUSED,
       ];
       const tickets = await db.ticket.findMany({
         where: {
           eta: { not: null },
-          status: { in: openStatuses },
+          statusV2: { in: openStatuses },
         },
         select: {
           id: true,

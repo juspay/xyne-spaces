@@ -1,5 +1,5 @@
 import React from 'react';
-import { TicketPriority } from '@xyne/shared';
+import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 
 export const getPriorityIcon = (priority: TicketPriority): React.ReactNode => {
   if (priority === TicketPriority.CRITICAL) {
@@ -96,7 +96,7 @@ export const formatEta = (eta?: number | null): string => {
   return `${day} ${monthNames[date.getMonth()]}`;
 };
 
-export const isEtaUrgent = (eta?: number | null): boolean => {
+export const isEtaUrgent = (eta?: number | null, status?: TicketStatusV2): boolean => {
   if (!eta) return false;
 
   const today = new Date();
@@ -105,5 +105,10 @@ export const isEtaUrgent = (eta?: number | null): boolean => {
   today.setHours(0, 0, 0, 0);
   etaDate.setHours(0, 0, 0, 0);
 
-  return etaDate.getTime() < today.getTime();
+  const isOverdue = etaDate.getTime() < today.getTime();
+  const isTerminalState =
+    status === TicketStatusV2.CANCELLED || status === TicketStatusV2.COMPLETED;
+
+  // Only show as urgent if ETA has passed AND ticket is NOT in a terminal state
+  return isOverdue && !isTerminalState;
 };

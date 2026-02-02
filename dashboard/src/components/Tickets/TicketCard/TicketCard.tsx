@@ -200,7 +200,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
 
   const DueDateDisplay: React.FC<DueDateDisplayProps> = ({ eta, showBorder = true, className }) => {
     const etaText = formatEta(eta);
-    const isUrgent = isEtaUrgent(eta);
+    const isUrgent = isEtaUrgent(eta, ticket.statusV2);
     const hasDueDate = !!eta;
 
     if (!hasDueDate) {
