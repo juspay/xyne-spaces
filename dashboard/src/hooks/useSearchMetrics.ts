@@ -141,7 +141,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       lastQueryTextRef.current = '';
 
       if (user?.id) {
-        searchMetricsService.trackSessionStart(newSessionId, String(user.id));
+        searchMetricsService.trackSessionStart(newSessionId, String(user.id), user.email || '');
       }
 
       return newSessionId;
@@ -177,6 +177,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         searchMetricsService.trackSessionEnd({
           searchSessionId,
           userId: String(user.id),
+          userEmail: user.email || '',
           queryText: lastQueryTextRef.current || '',
           totalImpressions: impressionCountRef.current,
           dwellTimeMs,
@@ -213,6 +214,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       searchMetricsService.trackImpression({
         searchSessionId,
         userId: String(user.id),
+        userEmail: user.email || '',
         queryText: params.queryText,
         totalHits: params.totalHits,
         latencyMs,
@@ -281,6 +283,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       searchMetricsService.trackClick({
         searchSessionId,
         userId: String(user.id),
+        userEmail: user.email || '',
         queryText: params.queryText,
         clickedDocId: params.clickedDocId,
         clickedDocType: params.clickedDocType,

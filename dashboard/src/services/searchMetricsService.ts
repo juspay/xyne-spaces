@@ -14,12 +14,13 @@ import type {
 import * as otelMetrics from './otel/searchMetrics';
 import { SEARCH_VERSION } from '../config';
 import { logger, Event } from '../utils/logger';
+import { detectPlatform } from '../hooks/usePlatform';
 
 class SearchMetricsService {
   /**
    * Track when a new search session starts
    */
-  trackSessionStart(searchSessionId: string, userId: string): void {
+  trackSessionStart(searchSessionId: string, userId: string, userEmail: string): void {
     // Log structured event
     const event: SearchSessionStartEvent = {
       event_name: 'vespa_search_session_start',
@@ -31,9 +32,12 @@ class SearchMetricsService {
     logger.info(Event.VESPA_SEARCH_SESSION_START, { event });
 
     // Record metrics
+    const platform = detectPlatform();
     otelMetrics.safeRecordMetric(() => {
       otelMetrics.searchSessionsStarted.add(1, {
         version: SEARCH_VERSION,
+        user_email: userEmail,
+        platform: platform,
       });
     });
   }
@@ -44,6 +48,7 @@ class SearchMetricsService {
   trackImpression(params: {
     searchSessionId: string;
     userId: string;
+    userEmail: string;
     queryText: string;
     totalHits: number;
     latencyMs: number;
@@ -68,6 +73,7 @@ class SearchMetricsService {
     };
     logger.info(Event.VESPA_SEARCH_IMPRESSION, { event });
     // Record metrics - increment impressions counter for each doc_type in facet_counts
+    const platform = detectPlatform();
     Object.entries(params.facetCounts).forEach(([docType, count]) => {
       const resultStatus = count > 0 ? 'success' : 'zero';
 
@@ -76,6 +82,8 @@ class SearchMetricsService {
           doc_type: docType,
           result_status: resultStatus,
           version: SEARCH_VERSION,
+          user_email: params.userEmail,
+          platform: platform,
         });
       });
     });
@@ -87,6 +95,7 @@ class SearchMetricsService {
   trackClick(params: {
     searchSessionId: string;
     userId: string;
+    userEmail: string;
     queryText: string;
     clickedDocId: string;
     clickedDocType: string;
@@ -112,11 +121,14 @@ class SearchMetricsService {
     };
     logger.info(Event.VESPA_SEARCH_CLICK, { event });
     // Record metrics - increment click counter
+    const platform = detectPlatform();
     otelMetrics.safeRecordMetric(() => {
       otelMetrics.searchClicks.add(1, {
         doc_type: params.clickedDocType,
         rank: String(params.rankPosition),
         version: SEARCH_VERSION,
+        user_email: params.userEmail,
+        platform: platform,
       });
     });
 
@@ -128,6 +140,8 @@ class SearchMetricsService {
       otelMetrics.searchRankScore.add(mrrScore, {
         doc_type: params.clickedDocType,
         version: SEARCH_VERSION,
+        user_email: params.userEmail,
+        platform: platform,
       });
     });
   }
@@ -138,6 +152,7 @@ class SearchMetricsService {
   trackSessionEnd(params: {
     searchSessionId: string;
     userId: string;
+    userEmail: string;
     queryText: string;
     totalImpressions: number;
     dwellTimeMs: number;
@@ -160,10 +175,13 @@ class SearchMetricsService {
     logger.info(Event.VESPA_SEARCH_SESSION_END, { event });
 
     // Record metrics - increment session end counter
+    const platform = detectPlatform();
     otelMetrics.safeRecordMetric(() => {
       otelMetrics.searchSessionsEnded.add(1, {
         end_reason: params.endReason,
         version: SEARCH_VERSION,
+        user_email: params.userEmail,
+        platform: platform,
       });
     });
 
@@ -172,6 +190,8 @@ class SearchMetricsService {
       otelMetrics.searchDwellTime.record(params.dwellTimeMs, {
         end_reason: params.endReason,
         version: SEARCH_VERSION,
+        user_email: params.userEmail,
+        platform: platform,
       });
     });
 
@@ -179,6 +199,8 @@ class SearchMetricsService {
     otelMetrics.safeRecordMetric(() => {
       otelMetrics.searchSessionDuration.record(params.totalSessionDurationMs, {
         version: SEARCH_VERSION,
+        user_email: params.userEmail,
+        platform: platform,
       });
     });
   }
