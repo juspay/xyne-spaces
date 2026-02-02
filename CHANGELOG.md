@@ -1,3 +1,11 @@
+## [1.21.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.21.0...v1.21.1) (2026-02-02)
+
+
+### Bug Fixes
+
+* add logs on app focus and blur ([4ae6feb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4ae6feb4e9d4a02f299ddcbb0c0359d550dbf38f)), closes [#2634](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2634)
+* handle certificate revoke errors in electron ([f2d22aa](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f2d22aab006ef82538e8e58bfbb51e36b5ec0911)), closes [#2588](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2588)
+
 ## [1.21.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.20.1...v1.21.0) (2026-02-02)
 
 
