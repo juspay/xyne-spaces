@@ -3277,7 +3277,7 @@ export const mutators = defineMutators({
           )
           .optional(),
         timestamp: z.number(),
-        fieldIds: z.record(z.number(), z.string()).optional(), // Map field array index -> fieldId
+        fieldIds: z.record(z.string(), z.string()).optional(), // Map field array index -> fieldId
       }),
       async ({ tx, ctx, args: { formId, formDescription, fields, timestamp, fieldIds = {} } }) => {
         // Validate form exists
@@ -3316,37 +3316,76 @@ export const mutators = defineMutators({
 
           for (const [index, field] of fields.entries()) {
             if (field.id) {
-              // Update existing field
-              const updateData: {
-                id: string;
-                formId: string;
-                fieldName: string;
-                fieldType: FormFieldType;
-                updatedAt: number;
-                fieldEnum?: ReadonlyJSONValue;
-                isOptional?: boolean;
-              } = {
-                id: field.id,
-                formId,
-                fieldName: field.fieldName.trim(),
-                fieldType: field.fieldType,
-                updatedAt: timestamp,
-              };
+              // Check if field actually exists in the database
+              const existingField = existingFields.find(f => f.id === field.id);
 
-              // Add fieldEnum if present
-              if (field.fieldEnum && field.fieldEnum.length > 0) {
-                const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
-                if (nonEmptyOptions.length > 0) {
-                  updateData.fieldEnum = nonEmptyOptions;
+              if (existingField) {
+                // Update existing field
+                const updateData: {
+                  id: string;
+                  formId: string;
+                  fieldName: string;
+                  fieldType: FormFieldType;
+                  updatedAt: number;
+                  fieldEnum?: ReadonlyJSONValue;
+                  isOptional?: boolean;
+                } = {
+                  id: field.id,
+                  formId,
+                  fieldName: field.fieldName.trim(),
+                  fieldType: field.fieldType,
+                  updatedAt: timestamp,
+                };
+
+                // Add fieldEnum if present
+                if (field.fieldEnum && field.fieldEnum.length > 0) {
+                  const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
+                  if (nonEmptyOptions.length > 0) {
+                    updateData.fieldEnum = nonEmptyOptions;
+                  }
                 }
-              }
 
-              // Add isOptional if defined
-              if (field.isOptional !== undefined) {
-                updateData.isOptional = field.isOptional;
-              }
+                // Add isOptional if defined
+                if (field.isOptional !== undefined) {
+                  updateData.isOptional = field.isOptional;
+                }
 
-              await tx.mutate.form_fields.update(updateData);
+                await tx.mutate.form_fields.update(updateData);
+              } else {
+                // Field has ID but doesn't exist in DB - treat as new field
+                const insertData: {
+                  id: string;
+                  formId: string;
+                  fieldName: string;
+                  fieldType: FormFieldType;
+                  createdAt: number;
+                  updatedAt: number;
+                  fieldEnum?: ReadonlyJSONValue;
+                  isOptional?: boolean;
+                } = {
+                  id: field.id,
+                  formId,
+                  fieldName: field.fieldName.trim(),
+                  fieldType: field.fieldType,
+                  createdAt: timestamp,
+                  updatedAt: timestamp,
+                };
+
+                // Add fieldEnum if present
+                if (field.fieldEnum && field.fieldEnum.length > 0) {
+                  const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
+                  if (nonEmptyOptions.length > 0) {
+                    insertData.fieldEnum = nonEmptyOptions;
+                  }
+                }
+
+                // Add isOptional if defined
+                if (field.isOptional !== undefined) {
+                  insertData.isOptional = field.isOptional;
+                }
+
+                await tx.mutate.form_fields.insert(insertData);
+              }
             } else {
               // Create new field
               const newFieldId = fieldIds[index];
