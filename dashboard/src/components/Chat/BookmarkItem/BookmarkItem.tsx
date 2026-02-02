@@ -431,7 +431,7 @@ export const BookmarkItem = ({
                 </div>
 
                 {/* Message preview */}
-                <div className='text-sm text-gray-700 line-clamp-2'>
+                <div className='text-sm text-gray-700 whitespace-normal break-all'>
                   <RenderMessageWithHTML message={message.content} />
                 </div>
               </div>
