@@ -12,6 +12,7 @@ import { getBundledUIUrl } from '../services/custom-protocol';
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/pre-enrollment-logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
+import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
 
 let mainWindow: BrowserWindow | null = null;
 let isCompactMode = false;
@@ -54,10 +55,43 @@ export async function loadApp(window: BrowserWindow) {
         Logger.logError(EnrollmentEvent.MTLS_FRONTEND_LOAD_FAILED, error);
       }
     } else {
-      // Certificate exists, logging successful authentication
-      Logger.info(EnrollmentEvent.MTLS_AUTH_SUCCESS, {
-        certifcate_exists: true,
+      // Certificate exists, validate it before loading dashboard
+      log.info('[WindowManager] Validating certificate health');
+      const validationWindow = new BrowserWindow({
+        show: false,  // Keep it hidden
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          preload: path.join(__dirname, '..', 'preload.js'),
+        },
       });
+
+      try {
+        const healthUrl = `${config.BACKEND_URL}/api/health`;
+        log.info('[WindowManager] Loading health check URL for certificate validation:', healthUrl);
+        await validationWindow.loadURL(healthUrl);
+        
+        Logger.info(EnrollmentEvent.HEALTH_CHECK_SUCCESS, {
+          certificate_exists: true,
+          validation_passed: true,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        if (isCertificateError(errorMessage)) {
+          Logger.logError(EnrollmentEvent.CERTIFICATE_REVOKED, error, {
+            error_at: 'certificate_validation',
+          });
+          await handleCertificateError({ errorDescription: errorMessage });
+          return; // Don't load dashboard if certificate is invalid
+        } else {
+          Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, {
+            error_at: 'handleCertificateError in loadApp',
+          });
+        }
+      } finally {
+        validationWindow.destroy();
+      }
     }
   }
 

@@ -39,6 +39,8 @@ export const EnrollmentEvent = {
   AUTH_EXCHANGE_SUCCESS: 'auth_exchange_success',
   AUTH_EXCHANGE_FAILED: 'auth_exchange_failed',
 
+  HEALTH_CHECK_SUCCESS: 'health_check_success',
+
   DEEP_LINK_OPENED: 'deep_link_opened',
   DEEP_LINK_HANDLING_FAILED: 'deep_link_handling_failed',
 
@@ -52,6 +54,7 @@ export const EnrollmentEvent = {
   CERTIFICATE_INVALID: 'certificate_invalid',
   CERTIFICATE_REVOKED: 'certificate_revoked',
   SSL_ERROR: 'ssl_error',
+  NETWORK_ERROR: 'network_error',
   UNKNOWN_ERROR: 'unknown_error',
 
   //app went to background 
