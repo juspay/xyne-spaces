@@ -5,6 +5,7 @@ import {
   TicketReferenceRelation,
   type TicketActivity as TicketActivityType,
   type User,
+  type UserGroup,
   type PRActivityValue,
   type ReferenceTicketActivityValue,
   type SubticketActivityValue,
@@ -21,6 +22,7 @@ interface TicketActivityProps {
   activities: TicketActivityType[] | undefined;
   users: User[] | undefined;
   boards?: { id: string; name: string }[];
+  userGroups: UserGroup[] | undefined;
 }
 
 /**
@@ -47,6 +49,7 @@ const getActivityDescription = (
   activity: TicketActivityType,
   users: User[] | undefined,
   boards?: { id: string; name: string }[],
+  userGroups?: UserGroup[],
 ): { description: string; details: ReactNode } => {
   const value = activity.value as ActivityValue | null;
   const referenceTitle =
@@ -124,6 +127,37 @@ const getActivityDescription = (
           </>
         ),
       };
+
+    case ActivityType.USER_GROUP_ID: {
+      const oldGroup = userGroups?.find(g => g.id === value?.oldValue);
+      const newGroup = userGroups?.find(g => g.id === value?.newValue);
+
+      if (value?.newValue && value?.oldValue) {
+        return {
+          description: 'transferred ticket',
+          details: (
+            <>
+              from <span className='font-semibold'>{oldGroup?.name || 'Unknown'}</span> to{' '}
+              <span className='font-semibold'>{newGroup?.name || 'Unknown'}</span>
+            </>
+          ),
+        };
+      } else if (value?.newValue) {
+        return {
+          description: 'transferred ticket',
+          details: (
+            <>
+              to <span className='font-semibold'>{newGroup?.name || 'Unknown'}</span>
+            </>
+          ),
+        };
+      } else {
+        return {
+          description: 'removed user group',
+          details: oldGroup ? <span className='font-semibold'>{oldGroup.name}</span> : <span />,
+        };
+      }
+    }
 
     case ActivityType.METADATA:
       return {
@@ -273,6 +307,7 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
 export const TicketActivity = ({
   activities,
   users,
+  userGroups,
   boards,
 }: TicketActivityProps): ReactElement => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
@@ -316,6 +351,7 @@ export const TicketActivity = ({
               activity={activity}
               index={index}
               users={users}
+              userGroups={userGroups}
               {...(boards !== undefined ? { boards } : {})}
               activities={sortedActivities}
             />
@@ -336,16 +372,18 @@ export const ActivityComponent = ({
   index,
   users,
   boards,
+  userGroups,
   activities,
 }: {
   activity: TicketActivityType;
   index: number;
   users: User[] | undefined;
   boards?: { id: string; name: string }[];
+  userGroups: UserGroup[] | undefined;
   activities: TicketActivityType[];
 }) => {
   const activityUser = users?.find(u => u.id === activity.updatedBy);
-  const { description, details } = getActivityDescription(activity, users, boards);
+  const { description, details } = getActivityDescription(activity, users, boards, userGroups);
   const isLast = index === activities.length - 1;
 
   return (

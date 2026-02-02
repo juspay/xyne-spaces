@@ -76,6 +76,13 @@ enum TicketReferenceRelation {
   @@schema("public")
 }
 
+enum UserResponsibility {
+  MANAGER
+  TEAM_LEAD
+  MEMBER
+  @@schema("public")
+}
+
 enum EntityType {
   MERCHANT
   GATEWAY
@@ -99,6 +106,7 @@ enum ActivityType {
   PR
   SUBTICKET_CREATED
   BOARD
+  USER_GROUP_ID
   @@schema("public")
 }
 
@@ -707,11 +715,12 @@ model User {
 
 // User-Team membership (many-to-many, no FK constraints)
 model UserGroupMapping {
-  id          String   @id @default(cuid())
-  userId      String // No FK constraint
-  userGroupId String // No FK constraint
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String              @id @default(cuid())
+  userId         String              // No FK constraint
+  userGroupId    String              // No FK constraint
+  responsibility UserResponsibility  @default(MEMBER) // User responsibility level within this group
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   @@unique([userId, userGroupId])
   @@map("user_group_mappings")

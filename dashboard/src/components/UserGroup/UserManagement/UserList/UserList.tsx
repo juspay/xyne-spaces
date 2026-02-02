@@ -2,14 +2,17 @@ import { ReactElement, useState } from 'react';
 import { useZero } from '@rocicorp/zero/react';
 import { toast } from 'sonner';
 import { Search } from 'lucide-react';
+import { SingleSelect } from '@juspay/blend-design-system';
 import { Button } from '../../../ui/Button/Button';
 import Avatar from '../../../ui/Avatar/Avatar';
 import Input from '../../../ui/Input/Input';
 import type { User } from '@xyne/shared';
+import { UserResponsibility } from '@xyne/shared';
 import { mutators } from '../../../../zero/mutators';
 
 interface UserListProps {
   users: User[];
+  responsibilities: Map<string, UserResponsibility>;
   onUserRemove?: () => void;
   disabled?: boolean;
   userGroupId: string;
@@ -17,12 +20,21 @@ interface UserListProps {
 
 export const UserList = ({
   users,
+  responsibilities,
   onUserRemove,
   disabled = false,
   userGroupId,
 }: UserListProps): ReactElement => {
   const zero = useZero();
   const [searchTerm, setSearchTerm] = useState('');
+  const [, forceUpdate] = useState(0);
+
+  // Responsibility options for SingleSelect
+  const responsibilityOptions = [
+    { label: 'Manager', value: UserResponsibility.MANAGER },
+    { label: 'Team Lead', value: UserResponsibility.TEAM_LEAD },
+    { label: 'Member', value: UserResponsibility.MEMBER },
+  ];
 
   // Filter users based on search term
   const filteredUsers = users.filter(
@@ -102,11 +114,33 @@ export const UserList = ({
                 </div>
               </div>
 
-              {!disabled && (
-                <Button variant='outline' onClick={() => void handleRemoveUser(user.id)}>
-                  Remove
-                </Button>
-              )}
+              <div className='flex items-center'>
+                {/* Responsibility Selector */}
+                {!disabled && (
+                  <div className='w-[130px] [&>div]:h-9 [&_button]:h-9 [&_button]:rounded-md'>
+                    <SingleSelect
+                      placeholder='Select role'
+                      items={[{ items: responsibilityOptions }]}
+                      selected={responsibilities.get(user.id) || UserResponsibility.MEMBER}
+                      onSelect={selected => {
+                        responsibilities.set(user.id, selected as UserResponsibility);
+                        forceUpdate(n => n + 1);
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Remove Button */}
+                {!disabled && (
+                  <Button
+                    variant='outline'
+                    onClick={() => void handleRemoveUser(user.id)}
+                    className='-ml-2'
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
             </div>
           ))
         )}

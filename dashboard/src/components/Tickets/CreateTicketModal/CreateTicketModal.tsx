@@ -62,7 +62,7 @@ import { TextShimmer } from './ShimmerText';
 import { UserMultiSelect } from './UserMultiSelect';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
+import type { BoardMetadata } from '@xyne/shared';
 
 interface CreateTicketModalProps {
   isOpen: boolean;

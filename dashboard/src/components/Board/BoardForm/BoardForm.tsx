@@ -7,15 +7,16 @@ import { Button } from '../../../components/ui/Button';
 import { MultiSelect } from '../../../components/ui/MultiSelect';
 import { type BoardFormProps } from './types';
 import BoardFormSelector from '../BoardFormSelector/BoardFormSelector';
-import { FormContextType, TicketStatusV2, PRStatusEvent } from '@xyne/shared';
-import { DEFAULT_STAGES_TEMPLATE } from './templates/defaultStagesTemplate';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import {
-  BoardTicketFormConfig,
+  FormContextType,
+  TicketStatusV2,
+  PRStatusEvent,
   type BoardMetadata,
   type TicketFormConfig,
-  DEFAULT_CONFIG,
-} from '../BoardTicketFormConfig';
+} from '@xyne/shared';
+import { DEFAULT_STAGES_TEMPLATE } from './templates/defaultStagesTemplate';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { BoardTicketFormConfig, DEFAULT_CONFIG } from '../BoardTicketFormConfig';
 
 interface Stage {
   id?: string;
@@ -75,6 +76,11 @@ export const BoardForm = ({
   };
   const [ticketFormConfig, setTicketFormConfig] =
     useState<Required<TicketFormConfig>>(initialConfig);
+
+  // Initialize transfer flag from board metadata
+  const [isAllowedToTransfer, setIsAllowedToTransfer] = useState<boolean>(
+    boardMetadata?.isAllowedToTransfer ?? false,
+  );
 
   // Fetch all BOARD context forms
   const [forms] = useCachedQuery(
@@ -344,10 +350,11 @@ export const BoardForm = ({
             updateData.projectId = projectId;
           }
 
-          // Always include metadata with ticket form config
+          // Always include metadata with ticket form config and transfer flag
           updateData.metadata = {
             ...boardMetadata,
             ticketFormConfig: ticketFormConfig,
+            isAllowedToTransfer: isAllowedToTransfer,
           } as ReadonlyJSONValue;
 
           // Always include stages for update
@@ -591,6 +598,8 @@ export const BoardForm = ({
           <BoardTicketFormConfig
             config={ticketFormConfig}
             onChange={setTicketFormConfig}
+            isAllowedToTransfer={isAllowedToTransfer}
+            onTransferToggle={setIsAllowedToTransfer}
             disabled={isLoading}
           />
         </div>

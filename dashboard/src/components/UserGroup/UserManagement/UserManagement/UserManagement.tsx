@@ -4,18 +4,21 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { UserList } from '../UserList/UserList';
 import { UserSelector } from '../UserSelector/UserSelector';
 import type { User } from '@xyne/shared';
+import { UserResponsibility } from '@xyne/shared';
 import { useUsers } from '../../../../hooks/useUsers';
 
 interface UserManagementProps {
   userGroupId: string;
   disabled?: boolean;
   onUsersChange?: () => void;
+  responsibilities: Map<string, UserResponsibility>;
 }
 
 export const UserManagement = ({
   userGroupId,
   disabled = false,
   onUsersChange,
+  responsibilities,
 }: UserManagementProps): ReactElement => {
   const [userGroupMembers] = useCachedQuery(
     queries.getUserGroupMembers({ userGroupId: userGroupId }),
@@ -53,6 +56,7 @@ export const UserManagement = ({
         <UserList
           userGroupId={userGroupId}
           users={currentUsers}
+          responsibilities={responsibilities}
           onUserRemove={handleUserRemoved}
           disabled={disabled}
         />
