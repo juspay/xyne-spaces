@@ -1,4 +1,5 @@
-import { ReactElement, useState, useRef, useMemo, useEffect } from 'react';
+import { ReactElement, useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ListFilter,
   ChevronRight,
@@ -8,6 +9,8 @@ import {
   Calendar,
   ChevronDown,
   BarChart4Icon,
+  Search,
+  Loader2,
   Tag,
   FileText,
   Hash,
@@ -25,13 +28,17 @@ import {
 } from './Submenus';
 import { TicketFiltersProps, DateRange } from './types';
 import type { TicketFilters } from './types';
-import type { TicketPriority, FormFields } from '@xyne/shared';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
-import { cn } from '../../../utils/classNames';
-import * as Popover from '@radix-ui/react-popover';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useNavigate } from 'react-router-dom';
+import type { TicketPriority, FormFields } from '@xyne/shared';
+import { cn } from '../../../utils/classNames';
+import * as Popover from '@radix-ui/react-popover';
+import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
+import { DisplaySearchResult } from '../../../types/search';
+import SearchResultItem from '../../Chat/ChatDirectory/SearchResultItem';
+import { TabType } from '../../Chat/ChatDirectory/ChannelCommandMenu.types';
+import { Command } from 'cmdk';
 
 interface FilterMenuItem {
   id: string;
@@ -71,13 +78,14 @@ export const TicketFiltersDropdown = ({
   const [boardOpen, setBoardOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const selectedBoards = useMemo(() => filters.boards || [], [filters.boards]);
-  const navigate = useNavigate();
 
   // Close submenu when main popover closes
   useEffect(() => {
@@ -85,6 +93,22 @@ export const TicketFiltersDropdown = ({
       setActiveSubmenu(null);
     }
   }, [isOpen]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+  const {
+    searchResults,
+    setText,
+    isSearching,
+    setActiveTab,
+    paginationState,
+    loadMoreRef,
+    setUseVespaSearch,
+  } = useSearchMetrics({ allChannels: [] });
+
+  useEffect(() => {
+    setActiveTab(TabType.TICKETS);
+    setUseVespaSearch(false);
+  }, [setActiveTab, setUseVespaSearch]);
 
   const boardLabel =
     selectedBoards.length === 0
@@ -187,6 +211,27 @@ export const TicketFiltersDropdown = ({
   const allFilterItems = useMemo(() => {
     return [...FILTER_MENU_ITEMS, ...dynamicFilterItems];
   }, [dynamicFilterItems]);
+  const handleTicketSelect = (result: DisplaySearchResult): Promise<void> => {
+    const ticketId = result.searchContext?.ticketId || result.id;
+    const channelId = result.searchContext?.channelId;
+    void navigate(`/chat/${channelId}/tickets/${ticketId}`);
+    return Promise.resolve();
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchTerm(value);
+    setText(value);
+    if (value.trim().length > 0 && !searchOpen) {
+      setSearchOpen(true);
+    }
+  };
+
+  useEffect(() => {
+    if (searchResults.length > 0 && searchOpen) {
+      inputRef.current?.focus();
+    }
+  }, [searchResults, searchOpen]);
 
   const handleFilterChange = (key: keyof TicketFilters, value: unknown): void => {
     const newFilters = {
@@ -612,6 +657,77 @@ export const TicketFiltersDropdown = ({
           <BarChart3 className='w-4 h-4' />
           <span>Analytics</span>
         </Button>
+
+        {/* ticket search */}
+
+        <div className='flex-1 max-w-sm'>
+          <Command label='Ticket Search' shouldFilter={false} className='flex flex-col'>
+            <Popover.Root open={searchOpen} onOpenChange={setSearchOpen}>
+              <Popover.Trigger asChild>
+                <div className='relative'>
+                  <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
+                  <input
+                    ref={inputRef}
+                    type='text'
+                    placeholder='Search Ticket'
+                    value={searchTerm}
+                    onChange={handleInputChange}
+                    onKeyDown={e => {
+                      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                        inputRef.current?.focus();
+                      }
+                    }}
+                    className='w-full text-sm bg-white border border-gray-200 text-gray-900 rounded-lg pl-10 pr-3 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
+                  />
+                  {isSearching && (
+                    <Loader2 className='absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 animate-spin text-gray-400' />
+                  )}
+                </div>
+              </Popover.Trigger>
+              {searchTerm.trim().length > 0 && (
+                <Popover.Content
+                  side='bottom'
+                  align='start'
+                  sideOffset={6}
+                  onOpenAutoFocus={e => e.preventDefault()}
+                  onCloseAutoFocus={e => e.preventDefault()}
+                  className='z-[60] max-w-[350px] bg-white border border-gray-200 rounded-lg shadow-xl max-h-[400px] flex flex-col overflow-hidden'
+                >
+                  <div className='p-1 overflow-y-auto'>
+                    {searchResults.length > 0 ? (
+                      <Command.List>
+                        {searchResults.map((result: DisplaySearchResult) => (
+                          <SearchResultItem
+                            key={result.id}
+                            result={result}
+                            onSelect={() => handleTicketSelect(result)}
+                          />
+                        ))}
+
+                        {paginationState[TabType.TICKETS]?.hasMore && (
+                          <div
+                            ref={loadMoreRef}
+                            className='py-2 flex justify-center items-center gap-2'
+                          >
+                            <Loader2 className='w-3 h-3 animate-spin text-gray-400' />
+                            <span className='text-[10px] text-gray-400'>Loading more...</span>
+                          </div>
+                        )}
+                      </Command.List>
+                    ) : (
+                      !isSearching &&
+                      searchTerm.trim() !== '' && (
+                        <div className='p-6 text-center'>
+                          <p className='text-xs text-gray-500'>No tickets found</p>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </Popover.Content>
+              )}
+            </Popover.Root>
+          </Command>
+        </div>
       </div>
     </div>
   );
