@@ -23,6 +23,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
+import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 
 interface ConversationHeaderProps {
   channelId: string;
@@ -144,6 +145,9 @@ const ConversationHeader = ({
             <Button
               variant='outline'
               onClick={() => {
+                // Track Ask AI opened event via OTel metrics
+                trackAskAIOpened(channel.scopeType);
+
                 // Trigger xstate machine to open XyneAI
                 xyneAIActor.send({ type: 'OPEN', channelId });
               }}

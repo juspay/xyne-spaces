@@ -5,6 +5,7 @@ import { getOtelTraceId } from '@xynehq/jaf';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
+import { metrics } from '@/services/otel/pull/metrics';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
@@ -117,7 +118,26 @@ export class XyneAIController {
         userInfo,
       };
 
-      await this.streamResponse(res, agentRequest);
+      // Track metrics: context channels count
+      metrics.askAIContextChannels.observe(channel_ids.length);
+
+      const startTime = Date.now();
+      let status = 'success';
+
+      try {
+        await this.streamResponse(res, agentRequest);
+      } catch (streamError) {
+        status = 'error';
+        throw streamError;
+      } finally {
+        try {
+          const duration = Date.now() - startTime;
+          metrics.askAIQueryDuration.labels(status).observe(duration);
+          metrics.askAIQueriesTotal.labels(status).inc();
+        } catch (metricsError) {
+          logger.error('[XyneAI] Error recording metrics:', metricsError);
+        }
+      }
 
     } catch (error) {
       this.handleError(res, error, 'xyne-ai query');
@@ -202,6 +222,9 @@ export class XyneAIController {
         res.status(response.status).json({ error: 'Failed to submit feedback' });
         return;
       }
+
+      // Track feedback metric
+      metrics.askAIFeedbackTotal.labels(value).inc();
 
       logger.info(`[XyneAI] Feedback submitted successfully for traceId: ${otelTraceId}`);
       res.json({ success: true });

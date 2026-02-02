@@ -119,6 +119,44 @@ const notificationJobsExpected = getOrCreateMetric("notification_jobs_expected_t
   registers: [register],
 }));
 
+// ============================================
+// Ask AI Metrics
+// ============================================
+
+// Counter: Total Ask AI queries
+const askAIQueriesTotal = getOrCreateMetric("ask_ai_queries_total", () => new client.Counter({
+  name: "ask_ai_queries_total",
+  help: 'Total number of Ask AI queries',
+  labelNames: ['status'], // success, error
+  registers: [register],
+}));
+
+// Histogram: Ask AI query duration
+const askAIQueryDuration = getOrCreateMetric("ask_ai_query_duration", () => new client.Histogram({
+  name: "ask_ai_query_duration",
+  help: 'Duration of Ask AI queries in milliseconds',
+  labelNames: ['status'],
+  buckets: [100, 500, 1000, 2500, 5000, 10000, 25000, 60000],
+  registers: [register],
+}));
+
+// Histogram: Number of context channels used per query
+const askAIContextChannels = getOrCreateMetric("ask_ai_context_channels_count", () => new client.Histogram({
+  name: "ask_ai_context_channels_count",
+  help: 'Number of channels used as context in Ask AI queries',
+  buckets: [0, 1, 2, 3, 4, 5], // Max 5 channels allowed
+  registers: [register],
+}));
+
+// Counter: Ask AI feedback received
+const askAIFeedbackTotal = getOrCreateMetric("ask_ai_feedback_total", () => new client.Counter({
+  name: "ask_ai_feedback_total",
+  help: 'Total number of Ask AI feedback submissions',
+  labelNames: ['value'], // LIKE, DISLIKE
+  registers: [register],
+}));
+
+
 // Metrics endpoint
 export const metricsEndpoint = async (_req: Request, res: Response) => {
   try {
@@ -155,4 +193,9 @@ export const metrics = {
   notificationJobQueueTime,
   notificationJobsExpected,
   callJobs,
+  // Ask AI metrics
+  askAIQueriesTotal,
+  askAIQueryDuration,
+  askAIContextChannels,
+  askAIFeedbackTotal,
 };
