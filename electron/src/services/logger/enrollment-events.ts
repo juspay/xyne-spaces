@@ -53,6 +53,13 @@ export const EnrollmentEvent = {
   CERTIFICATE_REVOKED: 'certificate_revoked',
   SSL_ERROR: 'ssl_error',
   UNKNOWN_ERROR: 'unknown_error',
+
+  //app went to background 
+  APP_TRANSITION_TO_BACKGROUND: 'app_transition_to_background',
+  
+  //app came to foreground
+  APP_TRANSITION_TO_FOREGROUND: 'app_transition_to_foreground',
+  
 } as const;
 
 export type EnrollmentEventType = (typeof EnrollmentEvent)[keyof typeof EnrollmentEvent];
