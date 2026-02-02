@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { xyneAIStream, type XyneAIStreamRequest, type UserInfo } from '@/agents/xyne-ai';
+import { getOtelTraceId } from '@xynehq/jaf';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
@@ -127,7 +128,7 @@ export class XyneAIController {
    * POST /api/xyne-ai/feedback
    *
    * Body:
-   * - traceId: string (required) - the trace ID from the AI response
+   * - traceId: string (required) - the JAF trace ID from the AI response
    * - value: 'LIKE' | 'DISLIKE' (required) - user feedback
    *
    * Sends feedback to Langfuse/Periscope
@@ -142,7 +143,7 @@ export class XyneAIController {
       return;
     }
 
-    const { traceId, value } = parseResult.data;
+    const { traceId: jafTraceId, value } = parseResult.data;
 
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -159,12 +160,13 @@ export class XyneAIController {
         return;
       }
 
-      // Validate trace ID format (32 hex characters for Langfuse)
-      if (!/^[a-f0-9]{32}$/i.test(traceId)) {
-        logger.warn(`[XyneAI] Invalid trace ID format: ${traceId}. Expected 32 hex characters.`);
-        res.status(400).json({ 
-          error: 'Invalid trace ID format',
-          details: 'traceId must be a 32-character hexadecimal string'
+      const otelTraceId = getOtelTraceId(jafTraceId);
+      
+      if (!otelTraceId) {
+        logger.warn(`[XyneAI] Could not find OTEL trace ID for JAF traceId: ${jafTraceId}`);
+        res.status(404).json({ 
+          error: 'Trace not found',
+          details: 'Could not find the corresponding OTEL trace ID. The trace may have expired.'
         });
         return;
       }
@@ -176,7 +178,7 @@ export class XyneAIController {
         : `${baseUrl}/api/public/scores`;
       const authKey = `${publicKey}:${secretKey}`;
 
-      logger.info(`[XyneAI] Submitting feedback to: ${periscopeUrl}, traceId: ${traceId}, value: ${value}`);
+      logger.info(`[XyneAI] Submitting feedback to: ${periscopeUrl}, traceId: ${otelTraceId}, value: ${value}`);
       
       const response = await fetch(periscopeUrl, {
         method: 'POST',
@@ -185,12 +187,12 @@ export class XyneAIController {
           'Authorization': `Basic ${Buffer.from(authKey).toString('base64')}`,
         },
         body: JSON.stringify({
-          traceId,
+          traceId: otelTraceId,
           name: 'XYNE_AI_FEEDBACK',
           value,
           dataType: 'CATEGORICAL',
           comment: 'Evaluation from the user',
-          id: traceId,
+          id: otelTraceId,
         }),
       });
       
@@ -201,7 +203,7 @@ export class XyneAIController {
         return;
       }
 
-      logger.info(`[XyneAI] Feedback submitted successfully for traceId: ${traceId}`);
+      logger.info(`[XyneAI] Feedback submitted successfully for traceId: ${otelTraceId}`);
       res.json({ success: true });
 
     } catch (error) {

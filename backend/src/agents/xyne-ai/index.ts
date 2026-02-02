@@ -80,7 +80,6 @@ export {
 // Langfuse exports
 export {
   initializeLangfuseTracing,
-  shutdownLangfuseTracing,
   isLangfuseEnabled,
   createOnEventHandler,
   getLangfuseConfig,
