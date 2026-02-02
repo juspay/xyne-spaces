@@ -1,3 +1,16 @@
+## [1.22.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.21.1...v1.22.0) (2026-02-02)
+
+
+### Features
+
+* Added Ask AI metrics to Grafana ([22d916f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/22d916fd83cdd07ec0e7d3c7bd6a7e4ed504580b)), closes [#2489](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2489)
+* added schema public to new tables to fix builds ([54207fa](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/54207fa15b77ee713e9b04b80b4ac2695fbfc653))
+
+
+### Bug Fixes
+
+* Fixed removing listeners only on socket disconnect ([50633dc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/50633dcf58f5872a2bab093587f4673d4d69da08))
+
 ## [1.21.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.21.0...v1.21.1) (2026-02-02)
 
 
