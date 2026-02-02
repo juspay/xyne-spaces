@@ -13,6 +13,8 @@ import { MessageItem } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
 import { useXyneAIStream } from './hooks/useXyneAIStream';
+import { usePlatform } from '../../../hooks/usePlatform';
+import { xyneAIActor } from '../../../machines/xyneAIMachine';
 
 interface XyneAISidebarProps {
   channelId: string | null;
@@ -31,6 +33,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const { isMobile } = usePlatform();
 
   const channel = useChannel(channelId || '');
 
@@ -124,6 +127,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
           }, 100);
         }
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.error('[XyneAISidebar] Failed to load most recent conversation:', error);
       } finally {
         setIsLoadingConversation(false);
@@ -147,7 +151,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
     };
 
     void loadConversations();
-  }, [showHistorySidebar, channelId]);
+  }, [showHistorySidebar]);
 
   // Save conversation history to IndexedDB whenever messages change
   useEffect(() => {
@@ -430,6 +434,11 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
       } else {
         void navigate(`/chat/dir/${citationChannelId}/${convId}`);
       }
+
+      // Close XyneAI modal on mobile after navigation
+      if (isMobile) {
+        xyneAIActor.send({ type: 'CLOSE' });
+      }
     },
     [channelId, navigate],
   );
@@ -453,6 +462,10 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
         void navigate(
           `/chat/dir/${targetChannelId}?tab=tickets&ticketId=${convId}&conversationId=${convId}`,
         );
+        // Close XyneAI modal on mobile
+        if (isMobile) {
+          xyneAIActor.send({ type: 'CLOSE' });
+        }
         return;
       }
 
@@ -461,6 +474,11 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
         void navigate(`/chat/dir/${targetChannelId}/${convId}#origin=${convId}&messageId=${msgId}`);
       } else {
         void navigate(`/chat/dir/${targetChannelId}/${convId}`);
+      }
+
+      // Close XyneAI modal on mobile after navigation
+      if (isMobile) {
+        xyneAIActor.send({ type: 'CLOSE' });
       }
     },
     [channelId, navigate],
@@ -480,7 +498,9 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
   }, [inputValue, submitQuery, scrollToBottom]);
 
   return (
-    <div className='w-full h-full rounded-xl bg-white flex flex-col overflow-hidden'>
+    <div
+      className={`w-full ${isMobile ? 'h-[95vh] pb-4' : 'h-full rounded-xl'} bg-white flex flex-col min-h-0`}
+    >
       {/* Header */}
       {showHistorySidebar ? (
         <ConversationHistory
@@ -494,16 +514,18 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
         />
       ) : (
         <>
+          {/* Header - Fixed at Top */}
           <XyneAIHeader
             onNewChat={handleNewChat}
             onShowHistory={() => setShowHistorySidebar(true)}
+            isMobile={isMobile}
           />
 
-          {/* Content - Centered or Messages */}
-          <div className='flex-1 overflow-auto flex flex-col'>
+          {/* Content - Scrollable Area */}
+          <div className='flex-1 overflow-y-auto overflow-x-hidden min-h-0'>
             {isLoadingConversation ? (
               // Shimmer loading state
-              <div className='flex-1 px-4 py-4'>
+              <div className='px-4 py-4'>
                 <div className='space-y-4'>
                   {/* User message shimmer */}
                   <div className='flex justify-end'>
@@ -525,7 +547,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
                 onSuggestionClick={handleSuggestionClick}
               />
             ) : (
-              <div className='flex-1 overflow-y-auto overflow-x-hidden px-4 py-4'>
+              <div className='px-4 py-4'>
                 <div className='space-y-4 max-w-full'>
                   {messages.map(message => (
                     <MessageItem
@@ -542,22 +564,22 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
                 </div>
               </div>
             )}
-
-            {/* Input Box at Bottom */}
-            <XyneAIInputBox
-              channelId={channelId}
-              channelName={channelName}
-              channelDescription={channelDescription}
-              scopeType={scopeType}
-              showChannelTag={true}
-              inputValue={inputValue}
-              onInputChange={setInputValue}
-              onSubmit={() => void handleSubmit()}
-              onSelectedChannelsChange={setSelectedChannelIds}
-              isStreaming={messages.some(m => m.isStreaming)}
-              onAbort={abortCurrentRequest}
-            />
           </div>
+
+          {/* Input Box - Fixed at Bottom */}
+          <XyneAIInputBox
+            channelId={channelId}
+            channelName={channelName}
+            channelDescription={channelDescription}
+            scopeType={scopeType}
+            showChannelTag={true}
+            inputValue={inputValue}
+            onInputChange={setInputValue}
+            onSubmit={() => void handleSubmit()}
+            onSelectedChannelsChange={setSelectedChannelIds}
+            isStreaming={messages.some(m => m.isStreaming)}
+            onAbort={abortCurrentRequest}
+          />
         </>
       )}
     </div>

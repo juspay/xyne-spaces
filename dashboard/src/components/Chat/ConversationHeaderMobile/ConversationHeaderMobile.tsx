@@ -27,6 +27,7 @@ import { useLocation } from 'react-router-dom';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { xyneAIActor } from '../../../machines/xyneAIMachine';
 
 interface ConversationHeaderMobileProps {
   channelId: string;
@@ -99,7 +100,7 @@ const ConversationHeaderMobile = ({
       left: ROOT_SIZE + GAP_SIZE,
       top: 0,
       height: ROOT_SIZE,
-      width: `calc(100% - ${(ROOT_SIZE + GAP_SIZE) * 2}px)`,
+      width: `calc(100% - ${(ROOT_SIZE + GAP_SIZE) * 3}px)`,
       borderRadius: 44,
     },
     expanded: {
@@ -256,8 +257,8 @@ const ConversationHeaderMobile = ({
         </motion.div>
         <button
           onClick={handleCallButtonClick}
-          style={{ width: ROOT_SIZE, height: ROOT_SIZE }}
-          className='absolute right-0 top-0 rounded-full flex items-center justify-center border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
+          style={{ width: ROOT_SIZE, height: ROOT_SIZE, right: ROOT_SIZE + GAP_SIZE }}
+          className='absolute top-0 rounded-full flex items-center justify-center border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
         >
           <svg
             width='16'
@@ -273,6 +274,72 @@ const ConversationHeaderMobile = ({
               strokeLinecap='round'
               strokeLinejoin='round'
             />
+          </svg>
+        </button>
+        <button
+          onClick={() => {
+            xyneAIActor.send({ type: 'OPEN', channelId: channel.id });
+          }}
+          style={{ width: ROOT_SIZE, height: ROOT_SIZE }}
+          className='absolute right-0 top-0 rounded-full flex items-center justify-center border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
+        >
+          <svg
+            xmlns='http://www.w3.org/2000/svg'
+            width='17'
+            height='17'
+            viewBox='0 0 17 17'
+            fill='none'
+          >
+            <g filter='url(#filter0_ii_2440_92537)'>
+              <path
+                d='M7.57441 15.8759C7.57287 13.1907 7.18228 11.5734 6.26007 10.5931C5.34838 9.62413 3.73528 9.09014 0.756805 9.09014C0.33862 9.09014 0.000354246 8.75144 0 8.33333C0 7.91493 0.338401 7.57441 0.756805 7.57441C3.73531 7.57441 5.34839 7.04044 6.26007 6.0714C7.18206 5.09108 7.57292 3.47374 7.57441 0.788603C7.57441 0.778162 7.57441 0.767274 7.57441 0.756805C7.57465 0.33857 7.9151 0 8.33333 0C8.75127 0.000354114 9.0899 0.338789 9.09014 0.756805C9.09014 0.767828 9.09014 0.779725 9.09014 0.790723C9.0918 3.47445 9.48295 5.09125 10.4045 6.0714C11.3161 7.04035 12.9298 7.57431 15.9077 7.57441C16.3261 7.57441 16.6667 7.91493 16.6667 8.33333C16.6663 8.75144 16.3259 9.09014 15.9077 9.09014C12.9298 9.09023 11.3161 9.6242 10.4045 10.5931C9.48252 11.5734 9.09167 13.191 9.09014 15.8759C9.09013 15.8865 9.09013 15.8993 9.09014 15.9099C9.08943 16.3275 8.75097 16.6663 8.33333 16.6667C7.91539 16.6667 7.57512 16.3277 7.57441 15.9099C7.57441 15.8993 7.57441 15.8865 7.57441 15.8759Z'
+                fill='white'
+              />
+              <path
+                d='M7.57441 15.8759C7.57287 13.1907 7.18228 11.5734 6.26007 10.5931C5.34838 9.62413 3.73528 9.09014 0.756805 9.09014C0.33862 9.09014 0.000354246 8.75144 0 8.33333C0 7.91493 0.338401 7.57441 0.756805 7.57441C3.73531 7.57441 5.34839 7.04044 6.26007 6.0714C7.18206 5.09108 7.57292 3.47374 7.57441 0.788603C7.57441 0.778162 7.57441 0.767274 7.57441 0.756805C7.57465 0.33857 7.9151 0 8.33333 0C8.75127 0.000354114 9.0899 0.338789 9.09014 0.756805C9.09014 0.767828 9.09014 0.779725 9.09014 0.790723C9.0918 3.47445 9.48295 5.09125 10.4045 6.0714C11.3161 7.04035 12.9298 7.57431 15.9077 7.57441C16.3261 7.57441 16.6667 7.91493 16.6667 8.33333C16.6663 8.75144 16.3259 9.09014 15.9077 9.09014C12.9298 9.09023 11.3161 9.6242 10.4045 10.5931C9.48252 11.5734 9.09167 13.191 9.09014 15.8759C9.09013 15.8865 9.09013 15.8993 9.09014 15.9099C9.08943 16.3275 8.75097 16.6663 8.33333 16.6667C7.91539 16.6667 7.57512 16.3277 7.57441 15.9099C7.57441 15.8993 7.57441 15.8865 7.57441 15.8759Z'
+                fill='#FF4E4F'
+              />
+            </g>
+            <defs>
+              <filter
+                id='filter0_ii_2440_92537'
+                x='0'
+                y='0'
+                width='16.666'
+                height='17.4396'
+                filterUnits='userSpaceOnUse'
+                colorInterpolationFilters='sRGB'
+              >
+                <feFlood floodOpacity='0' result='BackgroundImageFix' />
+                <feBlend mode='normal' in='SourceGraphic' in2='BackgroundImageFix' result='shape' />
+                <feColorMatrix
+                  in='SourceAlpha'
+                  type='matrix'
+                  values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0'
+                  result='hardAlpha'
+                />
+                <feOffset dy='0.386471' />
+                <feGaussianBlur stdDeviation='0.378362' />
+                <feComposite in2='hardAlpha' operator='arithmetic' k2='-1' k3='1' />
+                <feColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0' />
+                <feBlend mode='normal' in2='shape' result='effect1_innerShadow_2440_92537' />
+                <feColorMatrix
+                  in='SourceAlpha'
+                  type='matrix'
+                  values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0'
+                  result='hardAlpha'
+                />
+                <feOffset dy='0.772943' />
+                <feGaussianBlur stdDeviation='1.26121' />
+                <feComposite in2='hardAlpha' operator='arithmetic' k2='-1' k3='1' />
+                <feColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0' />
+                <feBlend
+                  mode='normal'
+                  in2='effect1_innerShadow_2440_92537'
+                  result='effect2_innerShadow_2440_92537'
+                />
+              </filter>
+            </defs>
           </svg>
         </button>
       </div>
