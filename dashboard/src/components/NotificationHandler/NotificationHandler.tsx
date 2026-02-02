@@ -377,6 +377,16 @@ export const NotificationHandler: React.FC = () => {
     return undefined;
   }, [navigate, isElectron, location.pathname]);
 
+  const handleNotificationRef = useRef(handleNotification);
+  const handleNotificationAckConfirmedRef = useRef(handleNotificationAckConfirmed);
+  const handleNotificationUpdateRef = useRef(handleNotificationUpdate);
+
+  useEffect(() => {
+    handleNotificationRef.current = handleNotification;
+    handleNotificationAckConfirmedRef.current = handleNotificationAckConfirmed;
+    handleNotificationUpdateRef.current = handleNotificationUpdate;
+  }, [handleNotification, handleNotificationAckConfirmed, handleNotificationUpdate]);
+
   useEffect(() => {
     if (user && !isConnectedRef.current) {
       websocketService
@@ -385,9 +395,13 @@ export const NotificationHandler: React.FC = () => {
           isConnectedRef.current = true;
 
           // Set up notification listeners after connection is established
-          websocketService.on('notification_received', handleNotification);
-          websocketService.on('notification_ack_confirmed', handleNotificationAckConfirmed);
-          websocketService.on('notification_updated', handleNotificationUpdate);
+          websocketService.on('notification_received', (n: NotificationData) =>
+            handleNotificationRef.current(n),
+          );
+          websocketService.on('notification_ack_confirmed', () =>
+            handleNotificationAckConfirmedRef.current(),
+          );
+          websocketService.on('notification_updated', () => handleNotificationUpdateRef.current());
 
           // Notify backend that user is online to deliver pending notifications
           const socket = websocketService.getSocket();
@@ -403,14 +417,6 @@ export const NotificationHandler: React.FC = () => {
           // WebSocket connection failed - will retry on next user state change
           isConnectedRef.current = false;
         });
-    } else if (!user && isConnectedRef.current) {
-      // Stop heartbeat service
-      heartbeatService.stop();
-
-      // Remove listeners before disconnecting
-      websocketService.removeListener('notification_received', handleNotification);
-      websocketService.removeListener('notification_ack_confirmed', handleNotificationAckConfirmed);
-      websocketService.removeListener('notification_updated', handleNotificationUpdate);
     }
 
     return (): void => {
@@ -418,21 +424,21 @@ export const NotificationHandler: React.FC = () => {
       heartbeatService.stop();
 
       if (isConnectedRef.current) {
-        websocketService.removeListener('notification_received', handleNotification);
+        websocketService.removeListener('notification_received', handleNotificationRef.current);
         websocketService.removeListener(
           'notification_ack_confirmed',
-          handleNotificationAckConfirmed,
+          handleNotificationAckConfirmedRef.current,
         );
-        websocketService.removeListener('notification_updated', handleNotificationUpdate);
+        websocketService.removeListener(
+          'notification_updated',
+          handleNotificationUpdateRef.current,
+        );
       }
-    };
-  }, [user, handleNotification, handleNotificationAckConfirmed, handleNotificationUpdate]);
 
-  useEffect(() => {
-    return (): void => {
       websocketService.disconnect();
+      isConnectedRef.current = false;
     };
-  }, []);
+  }, [user]);
 
   // This component doesn't render anything visible
   return null;
