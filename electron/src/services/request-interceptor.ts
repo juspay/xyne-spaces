@@ -3,6 +3,8 @@ import { config } from '../app/config';
 import { clearAllCookies } from './cookies';
 import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import Logger from 'electron-log';
+import { EnrollmentEvent } from './logger/enrollment-events';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -76,4 +78,14 @@ export function setupRequestInterceptor(): void {
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
     callback({ video: true, audio: true, useSystemPicker: true } as unknown as Electron.Streams);
   }, { useSystemPicker: true });
+
+  session.defaultSession.webRequest.onErrorOccurred(
+    { urls: [`${config.BACKEND_URL}/*`] },
+    (details) => {
+      Logger.error(EnrollmentEvent.NETWORK_ERROR, {
+        url: details.url,
+        error: details.error,
+      });
+    }
+  );
 }
