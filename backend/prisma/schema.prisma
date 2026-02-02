@@ -922,6 +922,7 @@ enum PRStatusEvent {
   UPDATED
   MERGED
   DECLINED
+  @@schema("public")
 }
 
 // PR Analytics models
@@ -1034,6 +1035,7 @@ model StagePRStatusMapping {
 
   @@unique([stageId, prStatus])
   @@map("stage_pr_status_mappings")
+  @@schema("public")
 }
 
 // Channel Models
