@@ -186,14 +186,14 @@ export const MessageItem = ({
         ) : (
           <>
             <div
-              className={`rounded-2xl ${
+              className={`${
                 message.type === 'user'
-                  ? 'bg-[#F5F5F5] text-gray-900 px-4 py-2 w-fit'
-                  : 'bg-transparent text-gray-900 max-w-full'
+                  ? 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[#E4E8F4] text-[#181B1D] md:block md:rounded-2xl md:bg-[#F5F5F5] md:text-gray-900 md:px-4 md:py-2 md:w-fit'
+                  : 'rounded-2xl bg-transparent text-gray-900 max-w-full'
               }`}
             >
               {message.type === 'user' ? (
-                <p className="text-sm font-['Inter'] leading-relaxed whitespace-pre-wrap break-words">
+                <p className="text-sm font-['Inter'] whitespace-pre-wrap break-words  font-[450]  tracking-[0] md:leading-relaxed">
                   {displayContent}
                 </p>
               ) : (

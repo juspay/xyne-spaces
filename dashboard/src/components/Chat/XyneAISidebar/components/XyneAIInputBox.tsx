@@ -11,6 +11,7 @@ import type { Channel } from '../../../../machines/stateMachine';
 import { ChannelMentionExtension, channelMentionPluginKey } from '../../../ui/TipTapExtensions';
 import { MentionSelector } from '../../../ui/Selectors';
 import type { MentionResult } from '../../../ui/Selectors/Selectors.types';
+import { usePlatform } from '../../../../hooks/usePlatform';
 
 // Hash icon component
 const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
@@ -51,6 +52,7 @@ export const XyneAIInputBox = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const hasInitializedDefaultChannel = useRef(false);
+  const { isMobile } = usePlatform();
 
   // Get all visible channels
   const allChannels = useAllVisibleChannels();
@@ -337,7 +339,7 @@ export const XyneAIInputBox = ({
   }, [showChannelDropdown]);
 
   return (
-    <div className='px-4 pb-4 relative'>
+    <div className='px-4 relative'>
       {/* MentionSelector for "#" trigger in editor */}
       <MentionSelector
         editor={editor}
@@ -347,14 +349,16 @@ export const XyneAIInputBox = ({
         {...(handleChannelMentionSelect && { onMentionSelect: handleChannelMentionSelect })}
       />
 
-      <div className='bg-card border border-input focus-within:border-ring rounded-2xl py-2 px-2 flex flex-col gap-3 transition-colors relative'>
+      <div
+        className={`bg-card border border-input focus-within:border-ring ${isMobile ? 'rounded-[26px]' : 'rounded-2xl'} py-2 px-2 flex flex-col gap-3 transition-colors relative`}
+      >
         {/* "/" Button and Channel Pills Row */}
         <div className='flex items-center gap-2 overflow-x-auto scrollbar-hide flex-nowrap'>
           {/* "/" Button to open channel selector */}
           <button
             type='button'
             onClick={handleSlashButtonClick}
-            className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-[#F2F2F3] hover:bg-[#E8EAED] transition-all duration-200 ease-in-out flex-shrink-0'
+            className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-[#E4E6E7] hover:bg-[#E8EAED] transition-all duration-200 ease-in-out flex-shrink-0`}
             aria-label='Select channels'
             title='Select channels'
           >
@@ -365,7 +369,7 @@ export const XyneAIInputBox = ({
           {selectedChannels.map(channel => (
             <div
               key={channel.id}
-              className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] flex-shrink-0'
+              className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
             >
               <div className='flex items-center gap-1'>
                 <div className='flex-shrink-0'>
@@ -399,7 +403,7 @@ export const XyneAIInputBox = ({
           <button
             onClick={isStreaming ? onAbort : onSubmit}
             disabled={!isStreaming && !inputValue.trim()}
-            className={`absolute bottom-2 right-2 p-2 rounded-full transition-colors ${
+            className={`absolute ${isMobile ? 'bottom-[5px]' : 'bottom-2'} right-2 p-2 rounded-full transition-colors ${
               isStreaming
                 ? 'bg-[#FF4F4F] text-white hover:bg-[#E64545]'
                 : inputValue.trim()

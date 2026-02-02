@@ -73,6 +73,7 @@ import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import DashboardCreation from './DashboardCreation/DashboardCreation';
 import QueryBuilderScreen from './QueryBuilderScreen/QueryBuilderScreen.tsx';
+import Drawer from '../components/ui/Drawer';
 
 const AppRoot = (): ReactElement => {
   // Create panel refs for WebView
@@ -103,7 +104,7 @@ const AppRoot = (): ReactElement => {
   useGlobalShortcuts({ leftPanelRef });
 
   const webviewState = useSelector(webviewActor, state => state.context.webviewState);
-  const xyneAIState = useSelector(xyneAIActor, state => state.context.xyneAIState);
+  const xyneAIState = useSelector(xyneAIActor, state => state);
   const xyneAIChannelId = useSelector(xyneAIActor, state => state.context.channelId);
   const { isMobile } = usePlatform();
 
@@ -137,7 +138,7 @@ const AppRoot = (): ReactElement => {
 
   // Monitor for pathname changes to update XyneAI context when navigating
   useEffect(() => {
-    if (xyneAIState === 'open') {
+    if (xyneAIState.matches('open')) {
       const pathParts = location.pathname.split('/').filter(Boolean);
 
       // Check for chat route and extract channelId
@@ -197,8 +198,8 @@ const AppRoot = (): ReactElement => {
               <EditWarningModal />
               <Outlet />
             </main>
-          ) : xyneAIState === 'open' ? (
-            // XyneAI is open - show panel layout with XyneAI
+          ) : xyneAIState.matches('open') && !isMobile ? (
+            // XyneAI is open on desktop - show panel layout with XyneAI
             <div className='flex flex-col h-screen'>
               {!isMobile && <GlobalTopBar />}
               <PanelGroup
@@ -301,6 +302,17 @@ const AppRoot = (): ReactElement => {
             isOpen={isShortcutsModalOpen}
             onClose={() => setIsShortcutsModalOpen(false)}
           />
+          {/* XyneAI Mobile Drawer */}
+          {isMobile && (
+            <Drawer
+              open={xyneAIState.matches('open')}
+              onOpenChange={open => xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' })}
+              title='Xyne AI'
+              description='Ask questions about your channel'
+            >
+              <XyneAISidebar channelId={xyneAIChannelId} />
+            </Drawer>
+          )}
         </EditProvider>
       </InitialStateLoader>
     </ZeroProvider>

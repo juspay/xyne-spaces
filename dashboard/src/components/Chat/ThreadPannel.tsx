@@ -12,7 +12,6 @@ import {
   FileText,
   Ticket,
   Play,
-  Sparkles,
   CornerDownRight,
   MessageCircle,
   File,
@@ -49,7 +48,9 @@ import { SHAREABLE_ORIGIN } from '../../config';
 import { isElectronApp, isStandaloneWindow, standaloneNavigate } from '../../utils/electronApp';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { logger, Event } from '../../utils/logger';
+import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
+import { xyneAIActor } from '../../machines/xyneAIMachine';
 
 type TabType = 'thread' | 'details' | 'files' | 'workflows';
 type UnderTicketTabType = 'replies' | 'workflows';
@@ -73,7 +74,6 @@ export const ThreadMessages = ({
   showHeader = false,
   underTicketView = false,
   simpleView = false,
-  onSummaryClick,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -623,19 +623,15 @@ export const ThreadMessages = ({
               </Button>
             </Tooltip>
             {!isStandaloneWindow() && (
-              <Tooltip content='Summarize thread'>
+              <Tooltip content='Ask AI'>
                 <Button
-                  variant='ghost'
-                  size='sm'
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  variant='outline'
                   onClick={() => {
-                    void navigate(
-                      `${baseRoute}/${derivedChannelId}/${derivedConversationId}#thread-summary`,
-                    );
+                    xyneAIActor.send({ type: 'OPEN', channelId: derivedChannelId });
                   }}
-                  title='Summarize thread'
+                  className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
                 >
-                  <Sparkles size={20} />
+                  <XyneAIStar />
                 </Button>
               </Tooltip>
             )}
@@ -909,17 +905,17 @@ export const ThreadMessages = ({
 
                   {/* Action Buttons */}
                   <div className='flex items-center gap-2'>
-                    {/* Summarize Thread Button */}
-                    {onSummaryClick && !isStandaloneWindow() && (
-                      <Tooltip content='Summarize thread'>
+                    {/* Ask AI Button */}
+                    {!isStandaloneWindow() && (
+                      <Tooltip content='Ask AI'>
                         <Button
-                          variant='ghost'
-                          size='sm'
-                          className='text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-all duration-100'
-                          onClick={onSummaryClick}
-                          title='Summarize thread'
+                          variant='outline'
+                          onClick={() => {
+                            xyneAIActor.send({ type: 'OPEN', channelId: derivedChannelId });
+                          }}
+                          className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
                         >
-                          <Sparkles size={18} fill='none' stroke='currentColor' />
+                          <XyneAIStar />
                         </Button>
                       </Tooltip>
                     )}
@@ -958,20 +954,17 @@ export const ThreadMessages = ({
                   {/* Action Buttons */}
                   {!underTicketView && (
                     <div className='flex items-center gap-2'>
-                      {/* Summarize Thread Button - hide when summary is already open */}
-                      {!isThreadSummaryActive && !isStandaloneWindow() && (
-                        <Tooltip content='Summarize thread'>
+                      {/* Ask AI Button */}
+                      {!isStandaloneWindow() && (
+                        <Tooltip content='Ask AI'>
                           <Button
-                            variant='ghost'
-                            size='sm'
-                            className='text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-all duration-100'
+                            variant='outline'
                             onClick={(): void => {
-                              void navigate(
-                                `${baseRoute}/${derivedChannelId}/${derivedConversationId}#thread-summary`,
-                              );
+                              xyneAIActor.send({ type: 'OPEN', channelId: derivedChannelId });
                             }}
+                            className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
                           >
-                            <Sparkles size={18} fill='none' stroke='currentColor' />
+                            <XyneAIStar />
                           </Button>
                         </Tooltip>
                       )}

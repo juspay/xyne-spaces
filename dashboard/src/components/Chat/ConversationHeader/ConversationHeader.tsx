@@ -22,6 +22,7 @@ import { isDMChannel, isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { XyneAIStar } from '../../icons/xyne-ai';
 
 interface ConversationHeaderProps {
   channelId: string;
@@ -148,7 +149,7 @@ const ConversationHeader = ({
               }}
               className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
             >
-              <img src='/svgs/icons/xyne-ai-star.svg' alt='Ask AI' width='16' height='16' />
+              <XyneAIStar />
             </Button>
           </Tooltip>
           <CallTrigger
