@@ -166,13 +166,16 @@ export const navigateToMessage = (
 export const navigateToTicket = (result: DisplaySearchResult, navigate: NavigateFunction): void => {
   const ticketId = result.searchContext?.ticketId || result.id;
   const channelId = result.searchContext?.channelId;
+  const conversationId = result.searchContext?.conversationId;
 
   if (!channelId) {
     toast.error('Cannot navigate to ticket: missing channel information');
     return;
   }
 
-  void navigate(`/chat/dir/${channelId}/tickets/${ticketId}`);
+  void navigate(
+    `/chat/dir/${channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${conversationId}`,
+  );
 };
 
 /**
