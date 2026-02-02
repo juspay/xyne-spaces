@@ -40,6 +40,7 @@ import { UserAssignmentStatesACL } from '../tables/user-assignment-states-acl';
 import { BoardComplexityScoresACL } from '../tables/board-complexity-scores-acl';
 import { UserWorkloadMappingsACL } from '../tables/user-workload-mappings-acl';
 import { UserExpertiseMappingsACL } from '../tables/user-expertise-mappings-acl';
+import { StagePRStatusMappingsACL } from '../tables/stage-pr-status-mappings-acl';
 
 export class ACLFactory {
   /**
@@ -106,6 +107,8 @@ export class ACLFactory {
         return new ReactionsACL(ctx);
       case 'stages':
         return new StageAcl(ctx);
+      case 'stage_pr_status_mappings':
+        return new StagePRStatusMappingsACL(ctx);
       case 'sub_tickets':
         return new SubTicketsACL(ctx);
       case 'ticket_activities':

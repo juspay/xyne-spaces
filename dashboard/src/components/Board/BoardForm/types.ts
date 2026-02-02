@@ -4,11 +4,16 @@
 
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 
+import type { TicketStatusV2, PRStatusEvent } from '@xyne/shared';
+
 // Export types for external use
 export interface BoardStageData {
+  id?: string;
   name: string;
   eta: number;
   sequenceNumber: number;
+  defaultTicketStatusV2?: TicketStatusV2;
+  prStatuses?: PRStatusEvent[];
 }
 
 export interface CreateBoardFormData {

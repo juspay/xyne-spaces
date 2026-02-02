@@ -80,11 +80,12 @@ export class BoardController {
           projectId: board.projectId,
           createdBy: board.createdBy,
           createdAt: board.createdAt,
-          stages: board.stages?.map(stage => ({
+          stages: board.stages?.map((stage) => ({
             id: stage.id,
             name: stage.name,
             eta: stage.eta,
             sequenceNumber: stage.sequenceNumber,
+            prStatuses: stage.prStatuses || [],
             createdAt: stage.createdAt,
           })),
         },

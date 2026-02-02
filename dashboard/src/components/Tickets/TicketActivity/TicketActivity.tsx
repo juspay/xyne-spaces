@@ -5,12 +5,17 @@ import {
   TicketReferenceRelation,
   type TicketActivity as TicketActivityType,
   type User,
+  type PRActivityValue,
+  type ReferenceTicketActivityValue,
+  type SubticketActivityValue,
+  type BaseActivityValue,
 } from '@xyne/shared';
 import { formatReferenceLabel } from '../../../hooks/useTicketReferences';
 import { formatDistanceToNow } from 'date-fns';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import { TicketStatusIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
+import { formatPRActivityParts } from '../../../utils/activityFormatter';
 
 interface TicketActivityProps {
   activities: TicketActivityType[] | undefined;
@@ -18,20 +23,14 @@ interface TicketActivityProps {
   boards?: { id: string; name: string }[];
 }
 
-interface ActivityValue {
-  field?: string;
-  oldValue?: string;
-  newValue?: string;
-  action?: 'created' | 'updated' | 'removed';
-  relationType?: TicketReferenceRelation;
-  oldRelationType?: TicketReferenceRelation;
-  targetTicketId?: string;
-  targetTicketTitle?: string | null;
-  targetTicketXyneId?: string | null;
-  subTicketId?: string;
-  subTicketTitle?: string;
-  subTicketXyneId?: string;
-}
+/**
+ * Combined activity value type for all activity types.
+ * Derived from imported types in @xyne/shared to avoid redundancy.
+ * All fields are optional for safe access across different activity types.
+ */
+type ActivityValue = Partial<
+  BaseActivityValue & PRActivityValue & ReferenceTicketActivityValue & SubticketActivityValue
+>;
 
 type SortOrder = 'newest' | 'oldest';
 
@@ -72,6 +71,7 @@ const getActivityDescription = (
       };
 
     case ActivityType.STATUS:
+    case ActivityType.STAGE_NAME:
       if (value?.field === 'stageName') {
         return {
           description: 'moved ticket',
@@ -205,6 +205,42 @@ const getActivityDescription = (
       };
     }
 
+    case ActivityType.PR: {
+      const parts = formatPRActivityParts(value as PRActivityValue);
+
+      return {
+        description: '',
+        details: (
+          <span>
+            {parts.map((part, i) => {
+              switch (part.type) {
+                case 'text':
+                  return <span key={i}>{part.value}</span>;
+                case 'strong':
+                  return (
+                    <span key={i} className='font-semibold'>
+                      {part.value}
+                    </span>
+                  );
+                case 'link':
+                  return (
+                    <a
+                      key={i}
+                      href={part.href}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      className='font-semibold text-blue-600 hover:underline'
+                    >
+                      {part.value}
+                    </a>
+                  );
+              }
+            })}
+          </span>
+        ),
+      };
+    }
+
     default:
       return {
         description: 'made a change',
@@ -219,6 +255,7 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
       return <TicketPriorityIcon />;
     case ActivityType.STATUS:
     case ActivityType.STAGE_NAME:
+    case ActivityType.PR:
       return <TicketStatusIcon />;
     case ActivityType.TAGS:
       return <Tag />;
@@ -323,7 +360,8 @@ export const ActivityComponent = ({
       <div className='flex-1 min-w-0 mt-1 pb-6'>
         <div className='flex items-center gap-2'>
           <p className='text-sm text-[#838383]'>
-            {activityUser?.name || 'Someone'} {description}
+            {activity.activityType !== ActivityType.PR && (activityUser?.name || 'Someone')}{' '}
+            {description}
             {details && <span className='text-[#646464]'> {details}</span>}
           </p>
           <span className='text-xs text-gray-400 whitespace-nowrap'>

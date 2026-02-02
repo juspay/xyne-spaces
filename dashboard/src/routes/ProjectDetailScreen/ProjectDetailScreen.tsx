@@ -12,7 +12,7 @@ import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { apiInstance } from '../../services/clients/apiClient';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
-import { FormContextType } from '@xyne/shared';
+import { FormContextType, PRStatusEvent } from '@xyne/shared';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -67,7 +67,13 @@ const ProjectDetailScreen = (): ReactElement => {
       name?: string;
       projectId?: string;
       metadata?: ReadonlyJSONValue;
-      stages?: Array<{ name: string; eta: number; sequenceNumber: number }>;
+      stages?: Array<{
+        name: string;
+        eta: number;
+        sequenceNumber: number;
+        defaultTicketStatusV2?: string;
+        prStatuses?: PRStatusEvent[];
+      }>;
       formIds?: string[] | null;
     },
   ): Promise<void> => {
@@ -78,6 +84,18 @@ const ProjectDetailScreen = (): ReactElement => {
       },
       {} as Record<string, string>,
     );
+
+    // Generate IDs for PR status mappings
+    const prStatusMappingIds = data.stages?.reduce(
+      (acc, stage) => {
+        stage.prStatuses?.forEach(prStatus => {
+          acc[`${stage.sequenceNumber}-${prStatus}`] = uuidv4();
+        });
+        return acc;
+      },
+      {} as Record<string, string>,
+    );
+
     const boardMutation = zero.mutate(
       mutators.board.update({
         boardId,
@@ -86,6 +104,7 @@ const ProjectDetailScreen = (): ReactElement => {
         ...(data.metadata !== undefined && { metadata: data.metadata }),
         ...(data.stages !== undefined && { stages: data.stages }),
         ...(stageIds !== undefined && { stageIds }),
+        ...(prStatusMappingIds !== undefined && { prStatusMappingIds }),
         timestamp: Date.now(),
       }),
     );

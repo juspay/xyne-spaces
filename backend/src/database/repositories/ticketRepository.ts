@@ -1,9 +1,10 @@
-import { TicketStatusV2, TicketPriority, Prisma, ActivityType } from '@prisma/client';
-import { CreateTicketRequest } from '../../types/ticket';
+import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PRStatusEvent } from '@prisma/client';
+import { CreateTicketRequest, ActivitySource } from '../../types/ticket';
 import { websocketService } from '@/services/websocketService';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
+import { PRActivityValue } from '@xyne/shared';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -140,12 +141,32 @@ export class TicketRepository {
 
   /**
    * Update ticket stage
+   * @param ticketId - The ticket ID to update
+   * @param newStageName - The new stage name
+   * @param updatedBy - User ID who triggered the update
+   * @param source - Source of the update (INTERNAL or WEBHOOK)
+   * @param prActivityData - Optional PR activity data (only used when source is WEBHOOK)
    */
-  async updateTicketStage(ticketId: string, newStageName: string, updatedBy: string) {
-    // Get current ticket to capture old stage name
+  async updateTicketStage(
+    ticketId: string, 
+    newStageName: string, 
+    updatedBy: string, 
+    source: ActivitySource = ActivitySource.INTERNAL,
+    prActivityData?: {
+      prEvent: PRStatusEvent;
+      prId: number;
+      prUrl: string;
+      repoName: string;
+      sourceBranchName: string;
+      destinationBranchName: string;
+      prAuthor?: string;
+      remainingOpenPRs?: number;
+    }
+  ) {
+    // Get current ticket to capture old stage name, boardId, and statusV2
     const currentTicket = await prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { stageName: true }
+      select: { stageName: true, boardId: true, statusV2: true, conversationId: true }
     });
 
     if (!currentTicket) {
@@ -153,30 +174,143 @@ export class TicketRepository {
     }
 
     const oldStageName = currentTicket.stageName;
+    const oldStatusV2 = currentTicket.statusV2;
+    const stageChanged = oldStageName !== newStageName;
 
-    // Update the ticket stage
+    // Fetch the target stage to get its defaultTicketStatusV2
+    const targetStage = await prisma.stage.findFirst({
+      where: {
+        boardId: currentTicket.boardId,
+        name: newStageName
+      },
+      select: { defaultTicketStatusV2: true }
+    });
+
+    const newStatusV2 = targetStage?.defaultTicketStatusV2;
+    const statusChanged = newStatusV2 && newStatusV2 !== oldStatusV2;
+
+    // Update the ticket stage and status (synced with stage's default status)
     const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
       data: {
         stageName: newStageName,
+        ...(newStatusV2 && { statusV2: newStatusV2 }),
         updatedBy: updatedBy,
         updatedAt: new Date()
       }
     });
 
     // Create activity record for the stage change
-    await prisma.ticketActivity.create({
-      data: {
-        ticketId: ticketId,
-        updatedBy: updatedBy,
-        activityType: ActivityType.STAGE_NAME,
-        value: {
+    if (source === ActivitySource.WEBHOOK && prActivityData) {
+      // For WEBHOOK source: Create PR activity with stage change info
+      // Align stage change with base activity structure (field, oldValue, newValue)
+      const activityValue: PRActivityValue = {
+        action: this.getActionTextForPREvent(prActivityData.prEvent),
+        prId: prActivityData.prId,
+        prUrl: prActivityData.prUrl,
+        repoName: prActivityData.repoName,
+        sourceBranch: prActivityData.sourceBranchName,
+        destinationBranch: prActivityData.destinationBranchName,
+        ...(prActivityData.prAuthor ? { authorName: prActivityData.prAuthor } : {}),
+        ...(stageChanged ? {
+          // Stage change info - aligned with base activity structure
           field: 'stageName',
-          oldValue: oldStageName,
-          newValue: newStageName
-        } as Prisma.InputJsonValue
+          oldValue: oldStageName ?? undefined,
+          newValue: newStageName,
+        } : {}),
+        ...(prActivityData.remainingOpenPRs && prActivityData.remainingOpenPRs > 0 ? {
+          remainingOpenPRs: prActivityData.remainingOpenPRs
+        } : {})
+      };
+
+      await prisma.ticketActivity.create({
+        data: {
+          ticketId: ticketId,
+          updatedBy: updatedBy,
+          activityType: ActivityType.PR,
+          value: activityValue as Prisma.InputJsonValue
+        }
+      });
+
+      logger.info(
+        `[TicketRepository] Created PR activity for ticket ${ticketId}, PR ${prActivityData.prId} ` +
+        `(action: ${prActivityData.prEvent}, author: ${prActivityData.prAuthor || 'unknown'})`
+      );
+    } else if (source === ActivitySource.INTERNAL) {
+      // For INTERNAL source: Create STAGE_NAME activity
+      await prisma.ticketActivity.create({
+        data: {
+          ticketId: ticketId,
+          updatedBy: updatedBy,
+          activityType: ActivityType.STAGE_NAME,
+          value: {
+            field: 'stageName',
+            oldValue: oldStageName,
+            newValue: newStageName,
+            source: source  // Store source for audit trail
+          } as Prisma.InputJsonValue
+        }
+      });
+
+      logger.info(
+        `[TicketRepository] Created STAGE_NAME activity for ticket ${ticketId}: ${oldStageName} → ${newStageName}`
+      );
+    }
+
+    // Create STATUS activity if status changed (for both WEBHOOK and INTERNAL sources)
+    if (statusChanged) {
+      await prisma.ticketActivity.create({
+        data: {
+          ticketId: ticketId,
+          updatedBy: updatedBy,
+          activityType: ActivityType.STATUS,
+          value: {
+            field: 'statusV2',
+            oldValue: oldStatusV2,
+            newValue: newStatusV2,
+            source: source
+          } as Prisma.InputJsonValue
+        }
+      });
+
+      logger.info(
+        `[TicketRepository] Created STATUS activity for ticket ${ticketId}: ${oldStatusV2} → ${newStatusV2}`
+      );
+
+      // Create system message for status change
+      if (currentTicket.conversationId) {
+        // Get user name for the message
+        const user = await prisma.user.findUnique({
+          where: { id: updatedBy },
+          select: { name: true }
+        });
+
+        const userName = user?.name || 'System';
+        const statusMessage = `${userName} changed status from ${oldStatusV2} to ${newStatusV2}`;
+
+        await prisma.message.create({
+          data: {
+            conversationId: currentTicket.conversationId,
+            senderId: updatedBy,
+            content: statusMessage,
+            msgType: 'SYSTEM',
+            hasAttachment: false,
+            edited: false,
+            isDeleted: false,
+            isSent: true,
+            showInChannel: false,
+            metadata: {
+              activityType: 'STATUS',
+              isTicketActivity: true
+            } as Prisma.InputJsonValue
+          }
+        });
+
+        logger.info(
+          `[TicketRepository] Created status change message for ticket ${ticketId} in conversation ${currentTicket.conversationId}`
+        );
       }
-    });
+    }
 
     // Track user activity using Redis Set - O(1) operation, no DB query
     websocketService.trackUserActivity(updatedBy)
@@ -240,5 +374,24 @@ export class TicketRepository {
         updatedBy: true
       }
     });
+  }
+  async getTicketByXyneId(xyneId: string) {
+    return await prisma.ticket.findFirst({
+      where: { xyneId }
+    });
+  }
+
+  /**
+   * Get human-readable action text for PR event
+   * @private
+   */
+  private getActionTextForPREvent(event: PRStatusEvent): string {
+    const actionMap: Record<PRStatusEvent, string> = {
+      [PRStatusEvent.CREATED]: 'raised',
+      [PRStatusEvent.UPDATED]: 'updated',
+      [PRStatusEvent.MERGED]: 'merged',
+      [PRStatusEvent.DECLINED]: 'declined',
+     };
+    return actionMap[event] || 'updated';
   }
 }

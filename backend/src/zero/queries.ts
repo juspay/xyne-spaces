@@ -500,11 +500,15 @@ export const queries = defineQueries({
     zql.boards
       .where('projectId', projectId)
       .orderBy('createdAt', 'asc')
-      .related('stages', (stagesQuery) => stagesQuery.orderBy('sequenceNumber', 'asc'))
+      .related('stages', (stagesQuery) =>
+        stagesQuery.orderBy('sequenceNumber', 'asc').related('prStatusMappings')
+      )
   ),
 
   stagesByBoard: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) =>
-    zql.stages.where('boardId', boardId).orderBy('sequenceNumber', 'asc')
+    zql.stages
+      .where('boardId', boardId)
+      .orderBy('sequenceNumber', 'asc')
   ),
 
   stagesByBoards: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) =>
@@ -606,7 +610,9 @@ export const queries = defineQueries({
     return zql.boards
       .orderBy('createdAt', 'desc')
       .related('project')
-      .related('stages', (stagesQuery) => stagesQuery.orderBy('sequenceNumber', 'asc'));
+      .related('stages', (stagesQuery) =>
+        stagesQuery.orderBy('sequenceNumber', 'asc')
+      );
   }),
 
   searchChannelParticipants: defineQuery(
@@ -863,7 +869,9 @@ export const queries = defineQueries({
       if (boardIds.length === 0) {
         return zql.stages.where('id', 'nonexistent').limit(0);
       }
-      return zql.stages.where('boardId', 'IN', boardIds).orderBy('sequenceNumber', 'asc');
+      return zql.stages
+        .where('boardId', 'IN', boardIds)
+        .orderBy('sequenceNumber', 'asc')
     }
   ),
 

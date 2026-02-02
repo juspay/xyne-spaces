@@ -1,9 +1,11 @@
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository';
-import { AI_STAGES, ImageAttachment } from '@/workflows/types/workflow-enums';
+import { ImageAttachment } from '@/workflows/types/workflow-enums';
+import { ActivitySource } from '@/types/ticket';
 import { DatabaseClient } from '@/database/client';
 import { gcsService } from '@/services/gcsService';
 import { logger } from '@/utils/logger';
+import { PRStatusEvent } from '@prisma/client';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -26,12 +28,30 @@ export class TicketService {
   }
 
   /**
-   * Update ticket stage to AI_PICKED_UP when a workflow is created
+   * Update ticket stage when a workflow is created or PR status changes
    * This method validates that the stage exists before updating
    * @param ticketId - The ticket ID to update
    * @param userId - The user who initiated the workflow (for activity tracking)
+   * @param stage - The stage name (can be AI_STAGES, PR_STAGES, or any custom stage)
+   * @param source - The source/origin of the update (INTERNAL or WEBHOOK)
+   * @param prActivityData - Optional PR activity data (only used when source is WEBHOOK)
    */
-  async updateTicketStageForWorkflow(ticketId: string, userId: string, stage: AI_STAGES): Promise<void> {
+  async updateTicketStageForWorkflow(
+    ticketId: string,
+    userId: string,
+    stage: string,
+    source: ActivitySource = ActivitySource.INTERNAL,
+    prActivityData?: {
+      prEvent: PRStatusEvent;
+      prId: number;
+      prUrl: string;
+      repoName: string;
+      sourceBranchName: string;
+      destinationBranchName: string;
+      prAuthor?: string;
+      remainingOpenPRs?: number;
+    }
+  ): Promise<void> {
     try {
       // Get ticket with board information
       const ticket = await this.ticketRepository.getTicketWithBoard(ticketId);
@@ -47,8 +67,8 @@ export class TicketService {
       const targetStage = await prisma.stage.findFirst({
         where: {
           boardId: boardId,
-          name: stage
-        }
+          name: stage,
+        },
       });
 
       // If stage doesn't exist in this board, skip the update
@@ -61,17 +81,28 @@ export class TicketService {
 
       // Check if ticket is already in the target stage
       if (ticket.stageName === stage) {
-        logger.debug(
-          `[TicketService] Ticket ${ticketId} is already in "${stage}" stage. Skipping update.`
-        );
-        return;
+        // For WEBHOOK source with PR data, we still need to call repository to create PR activity
+        // even if the stage hasn't changed
+        if (source === ActivitySource.WEBHOOK && prActivityData) {
+          console.info(
+            `[TicketService] Ticket ${ticketId} is already in "${stage}" stage. Creating PR activity only.`
+          );
+          // Proceed to create PR activity without stage change
+        } else {
+          console.info(
+            `[TicketService] Ticket ${ticketId} is already in "${stage}" stage. Skipping update.`
+          );
+          return;
+        }
       }
 
-      // Update the ticket stage
+      // Update the ticket stage (this will also create the appropriate activity)
       await this.ticketRepository.updateTicketStage(
         ticketId,
         stage,
-        userId
+        userId,
+        source,
+        prActivityData
       );
 
       logger.debug(

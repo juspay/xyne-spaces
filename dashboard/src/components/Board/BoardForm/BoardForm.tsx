@@ -4,9 +4,10 @@ import { X } from 'lucide-react';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { Button } from '../../../components/ui/Button';
+import { MultiSelect } from '../../../components/ui/MultiSelect';
 import { type BoardFormProps } from './types';
 import BoardFormSelector from '../BoardFormSelector/BoardFormSelector';
-import { FormContextType, TicketStatusV2 } from '@xyne/shared';
+import { FormContextType, TicketStatusV2, PRStatusEvent } from '@xyne/shared';
 import { DEFAULT_STAGES_TEMPLATE } from './templates/defaultStagesTemplate';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import {
@@ -23,9 +24,21 @@ interface Stage {
   eta: string;
   sequenceNumber: string;
   defaultTicketStatusV2: TicketStatusV2;
+  prStatuses?: PRStatusEvent[];
 }
 
 type StageTemplateType = 'none' | 'default';
+
+// PR status options for MultiSelect
+const PR_STATUS_OPTIONS = Object.values(PRStatusEvent).map(status => ({
+  value: status,
+  label: status
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' '),
+}));
 
 // Helper function to create an empty stage
 const createEmptyStage = (sequenceNumber: number): Stage => ({
@@ -34,6 +47,7 @@ const createEmptyStage = (sequenceNumber: number): Stage => ({
   eta: '',
   sequenceNumber: String(sequenceNumber),
   defaultTicketStatusV2: TicketStatusV2.STARTED,
+  prStatuses: [],
 });
 
 export const BoardForm = ({
@@ -130,6 +144,12 @@ export const BoardForm = ({
           readonly eta: number;
           readonly sequenceNumber: number;
           readonly defaultTicketStatusV2: TicketStatusV2;
+          readonly prStatusMappings?: readonly {
+            readonly id: string;
+            readonly stageId: string;
+            readonly prStatus: PRStatusEvent;
+            readonly createdAt: number;
+          }[];
         }[])
       : [];
 
@@ -148,6 +168,10 @@ export const BoardForm = ({
           eta: String(s.eta),
           sequenceNumber: String(s.sequenceNumber),
           defaultTicketStatusV2: s.defaultTicketStatusV2 || TicketStatusV2.STARTED,
+          // Transform prStatusMappings to prStatuses array
+          prStatuses: s.prStatusMappings
+            ? s.prStatusMappings.map((m: { prStatus: PRStatusEvent }) => m.prStatus)
+            : [],
         }))
       : [
           {
@@ -156,6 +180,7 @@ export const BoardForm = ({
             eta: '',
             sequenceNumber: '1',
             defaultTicketStatusV2: TicketStatusV2.STARTED,
+            prStatuses: [],
           },
         ];
 
@@ -205,6 +230,9 @@ export const BoardForm = ({
       },
     ]);
   };
+  useEffect(() => {
+    console.log(stages);
+  }, [stages]);
 
   const removeStage = (index: number): void => {
     if (stages.length === 1) return;
@@ -212,7 +240,11 @@ export const BoardForm = ({
     setStages(newStages);
   };
 
-  const updateStage = (index: number, field: keyof Stage, value: string | TicketStatusV2): void => {
+  const updateStage = (
+    index: number,
+    field: keyof Stage,
+    value: string | TicketStatusV2 | PRStatusEvent[],
+  ): void => {
     const newStages = [...stages];
     const currentStage = newStages[index];
     if (currentStage) {
@@ -261,6 +293,23 @@ export const BoardForm = ({
       setError('At least one stage must have TODO, STARTED, and COMPLETED status');
       return;
     }
+
+    // Validate PR status uniqueness across stages
+    const prStatusUsage = new Map<PRStatusEvent, string>();
+    for (const stage of stages) {
+      if (stage.prStatuses) {
+        for (const status of stage.prStatuses) {
+          if (prStatusUsage.has(status)) {
+            setError(
+              `PR status "${status}" cannot be used in multiple stages. ` +
+                `Already used in "${prStatusUsage.get(status)}", cannot use in "${stage.name}".`,
+            );
+            return;
+          }
+          prStatusUsage.set(status, stage.name);
+        }
+      }
+    }
     if (stages.length < 3) {
       setError('Board must have at least 3 stages');
       return;
@@ -278,10 +327,12 @@ export const BoardForm = ({
             projectId?: string;
             metadata?: ReadonlyJSONValue;
             stages?: Array<{
+              id?: string;
               name: string;
               eta: number;
               sequenceNumber: number;
               defaultTicketStatusV2: TicketStatusV2;
+              prStatuses?: PRStatusEvent[];
             }>;
             formIds?: string[] | null;
           } = {};
@@ -301,11 +352,12 @@ export const BoardForm = ({
 
           // Always include stages for update
           updateData.stages = stages.map(stage => ({
-            id: stage.id,
+            ...(stage.id && { id: stage.id }),
             name: stage.name.trim(),
             eta: parseInt(stage.eta),
             sequenceNumber: parseInt(stage.sequenceNumber),
             defaultTicketStatusV2: stage.defaultTicketStatusV2,
+            prStatuses: stage.prStatuses || [],
           }));
 
           // Include form IDs if they changed
@@ -339,6 +391,7 @@ export const BoardForm = ({
               eta: parseInt(stage.eta),
               sequenceNumber: parseInt(stage.sequenceNumber),
               defaultTicketStatusV2: stage.defaultTicketStatusV2,
+              prStatuses: stage.prStatuses || [],
             })),
           });
         }
@@ -484,6 +537,21 @@ export const BoardForm = ({
                         <option value={TicketStatusV2.CANCELLED}>CANCELLED</option>
                         <option value={TicketStatusV2.COMPLETED}>COMPLETED</option>
                       </select>
+                    </div>
+                    {/* PR Status Triggers */}
+                    <div className='mt-2'>
+                      <MultiSelect
+                        label='PR Status Triggers'
+                        placeholder='Select PR statuses...'
+                        options={PR_STATUS_OPTIONS}
+                        selectedValues={stage.prStatuses || []}
+                        onChange={values =>
+                          updateStage(index, 'prStatuses', values as PRStatusEvent[])
+                        }
+                        disabled={isLoading}
+                        helperText='Tickets will move to this stage when these PR events occur'
+                        className='text-xs'
+                      />
                     </div>
                   </div>
                   {stages.length > 1 && (

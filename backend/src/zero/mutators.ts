@@ -20,6 +20,7 @@ import {
   FormEntityType,
   DocType,
   ActivityClassification,
+  PRStatusEvent,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationController } from "@/controllers/conversationController";
@@ -3452,13 +3453,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           name: z.string().optional(),
           projectId: z.string().optional(),
           metadata: z.any().optional(),
-          stages: z.array(z.object({
-            id: z.string().optional(),
-            name: z.string(),
-            eta: z.number(),
-            sequenceNumber: z.number(),
-            defaultTicketStatusV2: z.string().optional(),
-          })).optional(),
+          stages: z
+            .array(
+              z.object({
+                id: z.string().optional(),
+                name: z.string(),
+                eta: z.number(),
+                sequenceNumber: z.number(),
+                defaultTicketStatusV2: z.string().optional(),
+                prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
+              })
+            )
+            .optional(),
           timestamp: z.number(),
           stageIds: z.record(z.string(), z.string()).optional(),
         }),
@@ -3521,10 +3527,50 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     name: stage.name,
                     eta: stage.eta,
                     sequenceNumber: stage.sequenceNumber,
-                    defaultTicketStatusV2: stage.defaultTicketStatusV2 as TicketStatusV2 || undefined,
+                    defaultTicketStatusV2:
+                      (stage.defaultTicketStatusV2 as TicketStatusV2) || undefined,
                     updatedBy: authData.sub,
                     updatedAt: now,
                   });
+                }
+
+                // Sync PR status mappings for this stage
+                if (stage.prStatuses !== undefined) {
+                  // Fetch existing mappings for this stage
+                  const existingMappings = await tx.run(
+                    zql.stage_pr_status_mappings.where('stageId', stage.id)
+                  );
+
+                  // Create sets for comparison
+                  const existingPRStatuses = new Set(existingMappings.map(m => m.prStatus));
+                  const newPRStatuses = new Set(stage.prStatuses);
+
+                  // Find mappings to delete (exist in DB but not in new array)
+                  const mappingsToDelete = existingMappings.filter(
+                    mapping => !newPRStatuses.has(mapping.prStatus)
+                  );
+
+                  // Find PR statuses to add (exist in new array but not in DB)
+                  const prStatusesToAdd = stage.prStatuses.filter(
+                    prStatus => !existingPRStatuses.has(prStatus)
+                  );
+
+                  // Delete only removed mappings
+                  for (const mapping of mappingsToDelete) {
+                    await tx.mutate.stage_pr_status_mappings.delete({
+                      id: mapping.id,
+                    });
+                  }
+
+                  // Insert only new mappings
+                  for (const prStatus of prStatusesToAdd) {
+                    await tx.mutate.stage_pr_status_mappings.insert({
+                      id: uuidv4(),
+                      stageId: stage.id,
+                      prStatus: prStatus,
+                      createdAt: now,
+                    });
+                  }
                 }
               } else {
                 // Insert new stage
@@ -3537,26 +3583,50 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   name: stage.name,
                   eta: stage.eta,
                   sequenceNumber: stage.sequenceNumber,
-                  defaultTicketStatusV2: (stage.defaultTicketStatusV2 as TicketStatusV2) || TicketStatusV2.STARTED,
+                  defaultTicketStatusV2:
+                    (stage.defaultTicketStatusV2 as TicketStatusV2) || TicketStatusV2.STARTED,
                   boardId: boardId,
                   createdBy: authData.sub,
                   updatedBy: authData.sub,
                   createdAt: now,
                   updatedAt: now,
                 });
+
+                // Create PR status mappings for new stage
+                if (stage.prStatuses && stage.prStatuses.length > 0) {
+                  for (const prStatus of stage.prStatuses) {
+                    await tx.mutate.stage_pr_status_mappings.insert({
+                      id: uuidv4(),
+                      stageId: stage.id || uuidv4(),
+                      prStatus: prStatus,
+                      createdAt: now,
+                    });
+                  }
+                }
               }
             }
 
             // 2. Delete stages that are no longer present
             for (const existingStage of existingStages) {
               if (!incomingStageIds.has(existingStage.id)) {
+                // Delete PR status mappings first
+                const existingMappings = await tx.run(
+                  zql.stage_pr_status_mappings.where('stageId', existingStage.id)
+                );
+                for (const mapping of existingMappings) {
+                  await tx.mutate.stage_pr_status_mappings.delete({
+                    id: mapping.id,
+                  });
+                }
+
+                // Then delete the stage
                 await tx.mutate.stages.delete({
                   id: existingStage.id,
                 });
               }
             }
           }
-        },
+        }
       ),
       delete: defineMutator(
         z.object({boardId: z.string()}),
@@ -3586,6 +3656,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Delete all stages first
           const stages = await tx.run(zql.stages.where('boardId', boardId));
           for (const stage of stages) {
+            // Delete PR status mappings for this stage
+            const mappings = await tx.run(zql.stage_pr_status_mappings.where('stageId', stage.id));
+            for (const mapping of mappings) {
+              await tx.mutate.stage_pr_status_mappings.delete({
+                id: mapping.id,
+              });
+            }
+
+            // Delete the stage
             await tx.mutate.stages.delete({
               id: stage.id,
             });

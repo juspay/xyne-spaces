@@ -96,3 +96,22 @@ export interface TicketDuplicateCheckResponse {
   candidates: TicketDuplicateCandidate[];
   analysis: TicketDuplicateCheckAnalysis;
 }
+
+/**
+ * Source/origin of ticket stage updates
+ * Used to determine activity creation behavior and provide audit trail
+ */
+export enum ActivitySource {
+  INTERNAL = 'INTERNAL', // All internal updates (manual user actions + AI workflows) - creates STAGE_NAME activity
+  WEBHOOK = 'WEBHOOK', // External PR webhook events - skips STAGE_NAME activity (handled separately)
+}
+
+/**
+ * PR-specific stage enums
+ * These stages are used for tracking ticket progress through the PR lifecycle
+ */
+export enum PR_STAGES {
+  REVIEW = 'Review',
+  COMPLETED = 'Completed',
+  IN_PROGRESS = 'In Progress',
+}

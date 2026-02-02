@@ -17,7 +17,10 @@ export interface BitbucketCommentsResponse {
   nextPageStart: number | null;
 }
 
-// Pull Request Data Types
+/**
+ * Bitbucket Server (self-hosted) API pull request format
+ * Used for API responses from Bitbucket Server installations
+ */
 export interface PullRequestData {
   id: number;
   version: number;
@@ -140,6 +143,7 @@ export interface PullRequestDataWithRepo {
   status: string;
   projectKey: string;
   repositorySlug: string;
+  ticketId?: string;
 }
 
 export interface PullRequestDataPartial {
@@ -151,6 +155,7 @@ export interface PullRequestDataPartial {
   numberOfComments: number;
   repositoryURL: string;
   status: string;
+  ticketId?: string;
 }
 
 // Comment Data Types

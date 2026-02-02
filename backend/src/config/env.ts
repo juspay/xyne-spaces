@@ -92,6 +92,10 @@ const envSchema = Joi.object({
   OTEL_BASE_URL: Joi.string().default(''),
   OTEL_SERVICE_NAME: Joi.string().default(''),
   OTEL_EXPORT_INTERVAL_MS: Joi.number().default(60000),
+  BITBUCKET_WEBHOOK_SECRET: Joi.string().default(''),
+  BITBUCKET_AUTH: Joi.string().allow('').default(''),
+  BITBUCKET_USERNAME: Joi.string().allow('').default(''),
+  BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -114,8 +118,12 @@ export const config = {
   port: envVars.PORT,
   host: envVars.HOST,
   cors: {
-    origin: envVars.CORS_ORIGIN.split(',').map((origin: string) => origin.trim()).filter(Boolean),
-    allowedMediaOrigins: envVars.ALLOWED_MEDIA_ORIGINS.split(',').map((origin: string) => origin.trim()).filter(Boolean),
+    origin: envVars.CORS_ORIGIN.split(',')
+      .map((origin: string) => origin.trim())
+      .filter(Boolean),
+    allowedMediaOrigins: envVars.ALLOWED_MEDIA_ORIGINS.split(',')
+      .map((origin: string) => origin.trim())
+      .filter(Boolean),
   },
   rateLimit: {
     windowMs: envVars.RATE_LIMIT_WINDOW_MS,
@@ -201,6 +209,12 @@ export const config = {
     queryRoutingKey: envVars.QUERY_ROUTING_KEY,
   },
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
+  bitbucket: {
+    webhookSecret: envVars.BITBUCKET_WEBHOOK_SECRET,
+    apiToken: envVars.BITBUCKET_AUTH,
+    apiUsername: envVars.BITBUCKET_USERNAME,
+    sshBaseUrl: envVars.BITBUCKET_SSH_BASE_URL,
+  },
   workingHours: {
     start: envVars.WORKING_HOUR_START,
     end: envVars.WORKING_HOUR_END,

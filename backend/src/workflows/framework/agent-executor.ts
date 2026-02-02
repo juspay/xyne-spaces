@@ -14,6 +14,7 @@ import { FullAgenticCheckpointConfig, WorkflowState, BaseWorkflowContext, GitInf
 import { WorkflowExecutionStatus } from '../types/workflow-enums'
 import { WorkflowPausedException, WorkflowCancelledException } from '../exceptions/workflow-exceptions'
 import { BitbucketManager } from '@/bitbucket/apis'
+import { TicketRepository, WorkflowRepository } from '@/database/repositories/workflows'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import {logger} from '@/utils/logger';
@@ -62,7 +63,7 @@ interface AgentTracker {
 }
 
 export class AgentExecutor {
-  constructor(private storage: WorkflowStorage, private bitbucketManager = new BitbucketManager()) { }
+  constructor(private storage: WorkflowStorage, private bitbucketManager = new BitbucketManager(), private workflowRepo = new WorkflowRepository(), private ticketRepo = new TicketRepository()) {}
 
   /**
    * Execute framework agent with pause/resume support
@@ -477,7 +478,16 @@ export class AgentExecutor {
         }
       } else {
         // Traditional PR scenario: Create PR at the end
-        const ticketTitle: string | undefined = ('title' in parentState.context ? parentState.context.title : null) as string | undefined
+        // Fetch workflow to get ticketId
+       
+        const workflow = await this.workflowRepo.findById(parentState.workflowId)
+        const ticketId = workflow?.ticketId || ''
+        
+        // Get ticket details using ticketId from workflow
+        const ticket = ticketId ? await this.ticketRepo.findById(ticketId) : null
+        const xyneId = ticket?.xyneId
+        const ticketTitle: string | undefined = ticket?.title
+        
         const ticketDescription = await this.generatePRDescription(
           agent,
           conversationRequest,
@@ -485,8 +495,7 @@ export class AgentExecutor {
         );
 
         try {
-          const prTargetBranch = baseBranch || 'main';
-          await this.bitbucketManager.raisePr(repoUrl, childExecutionId, prTargetBranch, branchName, projectName, repoName, ticketTitle, ticketDescription)
+          await this.bitbucketManager.raisePr(repoUrl, childExecutionId, baseBranch, repoBranch, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId);
         } catch (error) {
           logger.error(`Failed to create PR:`, error);
         }

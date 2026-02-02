@@ -128,7 +128,8 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'ticket_reference_mappings':
     case 'dashboards':
     case 'queries':
-    case 'dashboard_queries_mapping': {
+    case 'dashboard_queries_mapping':
+    case 'stage_pr_status_mappings': {
       const typedArgs = args as { id: string };
       return typedArgs.id;
     }

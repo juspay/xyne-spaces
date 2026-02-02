@@ -8,6 +8,7 @@ import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
+import { PRStatusEvent } from '@xyne/shared';
 
 const BoardsScreen = (): ReactElement => {
   const zero = useZero();
@@ -35,7 +36,13 @@ const BoardsScreen = (): ReactElement => {
       name?: string;
       projectId?: string;
       metadata?: ReadonlyJSONValue;
-      stages?: Array<{ name: string; eta: number; sequenceNumber: number }>;
+      stages?: Array<{
+        name: string;
+        eta: number;
+        sequenceNumber: number;
+        defaultTicketStatusV2?: string;
+        prStatuses?: PRStatusEvent[];
+      }>;
       formIds?: string[] | null;
     },
   ): void => {
@@ -46,6 +53,18 @@ const BoardsScreen = (): ReactElement => {
       },
       {} as Record<string, string>,
     );
+
+    // Generate IDs for PR status mappings
+    const prStatusMappingIds = data.stages?.reduce(
+      (acc, stage) => {
+        stage.prStatuses?.forEach(prStatus => {
+          acc[`${stage.sequenceNumber}-${prStatus}`] = uuidv4();
+        });
+        return acc;
+      },
+      {} as Record<string, string>,
+    );
+
     const mutatorArgs = {
       boardId,
       ...(data.name !== undefined && { name: data.name }),
@@ -53,6 +72,7 @@ const BoardsScreen = (): ReactElement => {
       ...(data.metadata !== undefined && { metadata: data.metadata }),
       ...(data.stages !== undefined && { stages: data.stages }),
       ...(stageIds !== undefined && { stageIds }),
+      ...(prStatusMappingIds !== undefined && { prStatusMappingIds }),
       timestamp: Date.now(),
     };
 
