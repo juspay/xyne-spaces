@@ -96,6 +96,7 @@ enum ActivityType {
   STAGE_NAME
   TAGS
   ENTITY
+  PR
   SUBTICKET_CREATED
   BOARD
   @@schema("public")
@@ -916,6 +917,13 @@ enum PRStatus {
   @@schema("public")
 }
 
+enum PRStatusEvent {
+  CREATED
+  UPDATED
+  MERGED
+  DECLINED
+}
+
 // PR Analytics models
 model PullRequests {
   id                      String    @id @default(cuid())
@@ -930,6 +938,7 @@ model PullRequests {
   prUrl                   String
   updatedAt               DateTime  @updatedAt
   status                  PRStatus
+  ticketId                String?   // Ticket reference for prs raised by devs
 
   @@unique([prId, prUrl])
   @@index([date])
@@ -1014,6 +1023,17 @@ model Stage {
   @@index([boardId])
   @@map("stages")
   @@schema("public")
+}
+
+// Stage to PR Status mapping table - maps which PR statuses trigger stage transitions
+model StagePRStatusMapping {
+  id        String        @id @default(cuid())
+  stageId   String        // Stage ID (no FK constraint)
+  prStatus  PRStatusEvent
+  createdAt DateTime      @default(now())
+
+  @@unique([stageId, prStatus])
+  @@map("stage_pr_status_mappings")
 }
 
 // Channel Models

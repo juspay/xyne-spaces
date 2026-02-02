@@ -26,6 +26,7 @@ import {
   ReactionCountsACL,
   ReactionsACL,
   StagesACL,
+  StagePRStatusMappingsACL,
   SubTicketsACL,
   TicketActivitiesACL,
   TicketEntityMappingsACL,
@@ -104,6 +105,8 @@ export class QueryACLFactory {
         return new ReactionsACL(ctx) as BaseQueryACL<TTable>;
       case 'stages':
         return new StagesACL(ctx) as BaseQueryACL<TTable>;
+      case 'stage_pr_status_mappings':
+        return new StagePRStatusMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'sub_tickets':
         return new SubTicketsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_activities':

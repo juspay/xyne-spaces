@@ -22,6 +22,7 @@ export { ReactionCountsACL } from './reaction-counts-acl';
 export { ReactionsACL } from './reactions-acl';
 export { ReposACL } from './repos-acl';
 export { StagesACL } from './stages-acl';
+export { StagePRStatusMappingsACL } from './stage-pr-status-mappings-acl';
 export { SubTicketsACL } from './sub-tickets-acl';
 export { TicketActivitiesACL } from './ticket-activities-acl';
 export { TicketEntityMappingsACL } from './ticket-entity-mappings-acl';

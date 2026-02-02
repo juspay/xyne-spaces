@@ -205,7 +205,6 @@ export class WorkflowController {
   createWorkflow = async (req: Request, res: Response): Promise<void> => {
     try {
       const { title, workflowType, description, ticketId, ...customFields } = req.body;
-
       // Validate required fields
       if (!title) {
         res.status(400).json({ error: 'title is required' });
@@ -303,7 +302,7 @@ export class WorkflowController {
       await ticketService.updateTicketStageForWorkflow(ticketId, userId, AI_STAGES.AI_PICKED_UP);
 
       // Check if conversationId is provided and create bot message
-      const { conversationId, xyneId } = req.body;
+      const { conversationId} = req.body;
 
       if (conversationId) {
         const prisma = DatabaseClient.getInstance();
@@ -315,7 +314,7 @@ export class WorkflowController {
             workflowName: title,
             workflowType: workflowTypeValue,
             ticketId: ticketId,
-            xyneId: xyneId || ticketId,
+            xyneId: ticketId,
           };
 
           await prisma.message.create({

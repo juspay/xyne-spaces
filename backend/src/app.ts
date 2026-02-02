@@ -86,6 +86,7 @@ import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
+import { bitbucketWebhookMiddleware } from './middleware/bitbucketWebhookValidator';
 import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
 import emojiRoutes from '@/routes/emojis';
@@ -167,7 +168,11 @@ export class App {
     this.app.use('/migrate/api/migration', migrationRoutes);
 
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
-    this.app.use('/api/webhooks', webhookLimiter, webhookRoutes);
+    this.app.use('/api/webhooks',
+      express.raw({ type: 'application/json' }),
+      webhookLimiter,
+      bitbucketWebhookMiddleware.verify, 
+      webhookRoutes);
 
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));

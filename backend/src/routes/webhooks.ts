@@ -1,108 +1,142 @@
 import { Router, Request, Response } from 'express';
-import { PRMetricsRepository } from "../database/repositories/pullRequestsRepository.js";
-import {logger} from '@/utils/logger';
+import { bitbucketWebhookService } from "@/services/bitbucketWebhookService";
+import { logger } from "@/utils/logger";
 
 const router = Router();
-const prMetricsRepo = new PRMetricsRepository();
+export interface BitbucketWebhookEnvelope {
+  eventKey: string; // derived from header: X-Event-Key
+  receivedAt: string; // ISO timestamp (you add this)
 
-export interface BitbucketWebhook {
-    pullrequest: {
-        comment_count: number
-        state: 'MERGE' | 'OPEN' | 'DECLINED' | string
-        source: {
-            branch: {
-                name: string
-            }
-        },
-        destination: {
-            branch: {
-                name: string
-            }
-        },
-        id: number,
-        links: {
-            html: {
-                href: string
-            }
-        },
-    }
-    repository: {
-        full_name: string,
-        name: string
-        project: {
-            key: string
-        }
-    }
+  repository: BitbucketRepository;
+  actor?: BitbucketActor;
+
+  pullrequest?: BitbucketPullRequest;
+  //ts-ignore
+  push?: any; // event defined for limited type safety, can be expanded later
+  //ts-ignore
+  issue?: any;// event defined for limited type safety, can be expanded later
+  commit_status?: BitbucketCommitStatus;
+
+  // allow future Bitbucket additions
+  raw?: unknown; //bitbucket may send or change fields anytime
+}
+export interface BitbucketRepository {
+  uuid: string;
+  name: string;
+  full_name: string;
+  is_private: boolean;
+
+  project?: {
+    key: string;
+    name: string;
+    uuid: string;
+  };
+
+  workspace?: {
+    uuid: string;
+    slug: string;
+  };
+
+  links?: {
+    html?: { href: string };
+  };
+}
+export interface BitbucketActor {
+  uuid: string;
+  display_name: string;
+  nickname?: string;
+  account_id?: string;
+  email?: string;
+  type: 'user' | 'team';
+}
+export interface BitbucketCommitStatus {
+  state: 'SUCCESSFUL' | 'FAILED' | 'INPROGRESS' | 'STOPPED';
+  key: string;
+  name: string;
+  url?: string;
+  description?: string;
+}
+
+/**
+ * Bitbucket Cloud webhook pull request format
+ * Used for webhook payloads from bitbucket.org
+ */
+export interface BitbucketPullRequest {
+  id: number;
+  title: string;
+  description?: string;
+
+  state: 'OPEN' | 'MERGED' | 'DECLINED';
+  draft: boolean;
+
+  comment_count: number;
+  task_count?: number;
+
+  created_on: string;
+  updated_on: string;
+
+  source: {
+    branch: {
+      name: string;
+    };
+    commit: {
+      hash: string;
+    };
+  };
+
+  destination: {
+    branch: {
+      name: string;
+    };
+  };
+
+  merge_commit?: {
+    hash: string;
+  } | null;
+
+  author?: BitbucketActor;
+
+  links: {
+    html: { href: string };
+    commits?: { href: string };
+    activity?: { href: string };
+    merge?: { href: string };
+    decline?: { href: string };
+    statuses?: { href: string };
+  };
 }
 
 async function handleBitbucketWebhook(req: Request, res: Response): Promise<void> {
     try {
-        const data: BitbucketWebhook = req.body;
-        if (!data) {
+        const payload: BitbucketWebhookEnvelope = req.body;
+        if (!payload) {
             res.status(400).json({
                 success: false,
                 error: 'No data provided'
             });
             return;
         }
-        const isPr = 'pullrequest' in data;
 
-        if (isPr) {
-            const pr = data.pullrequest;
-            const sourceBranchName: string = pr.source.branch.name;
-            const destinationBranchName: string = pr.destination.branch.name
-            const repoName = 'repository' in data ? data.repository.name : 'undefined';
-            const prUrl = pr.links.html.href
-            const prId = pr.id
-            const numberOfComments = pr.comment_count
-            const projectName = data.repository.project.key
-            const repoUrl = `ssh://git@github.com/example-org/${repoName}.git`.toLowerCase()
-            const prArgs = {
-                repoName,
-                sourceBranchName,
-                destinationBranchName,
-                prId,
-                prUrl,
-                repoUrl,
-                numberOfComments
-            }
-            if (pr.state === 'MERGED') {
-                const result = await prMetricsRepo.markMergedPr(prArgs);
-                if (result) {
-                    logger.info(`✅ Updated Xyne PR to MERGED: ${prUrl}`);
-                } else {
-                    logger.info(`ℹ️ Ignored manual PR webhook: ${prUrl} (not created by Xyne)`);
-                }
-            } else if (pr.state === 'DECLINED') {
-                const result = await prMetricsRepo.markDeclinedPr(prArgs);
-                if (result) {
-                    logger.info(`✅ Updated Xyne PR to DECLINED: ${prUrl}`);
-                } else {
-                    logger.info(`ℹ️ Ignored manual PR webhook: ${prUrl} (not created by Xyne)`);
-                }
-            }
-            // Ignore open PRs webhooks. If it is raised through xyne spaces, then it will be inserted into db when it is raised. So, safe to ignore that webhook and no need of other open prs.
-            // else if (pr.state === 'OPEN' && 'destination' in pr) {
-            //     prMetricsRepo.markOrCreateOpenPr(prArgs)
-            // } 
-
+        // Require X-Event-Key header
+        const eventKey = req.headers['x-event-key'] as string;
+        if (!eventKey) {
+            logger.warn('[Bitbucket-Webhook] Missing X-Event-Key header');
+            res.status(400).json({ success: false, error: 'Missing X-Event-Key' });
+            return;
         }
 
-        res.status(200).json({
-            success: true,
-            message: 'Webhook received successfully'
-        });
+        payload.eventKey = eventKey;
+        payload.receivedAt = new Date().toISOString();
+
+        const result = await bitbucketWebhookService.handleWebhookEvent(eventKey, payload);
+        res.status(200).json(result);
     } catch (error) {
-        logger.error('Error processing webhook:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to process webhook'
-        });
+        logger.error('[Bitbucket-Webhook] Error:', error);
+        res.status(200).json({ success: true, message: 'Acknowledged' });
     }
 }
 
 // Get bitbucket webhook via bitbot
 router.post('/bitbucket', handleBitbucketWebhook);
-
 
 export default router;

@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, PRStatusEvent } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { Board, Stage } from '@prisma/client';
 
@@ -6,6 +6,7 @@ export interface CreateStageInput {
   name: string;
   eta: number;
   sequenceNumber: number;
+  prStatuses?: PRStatusEvent[];
 }
 
 export interface CreateBoardInput {
@@ -18,8 +19,12 @@ export interface CreateBoardWithStagesInput extends CreateBoardInput {
   stages?: Omit<CreateStageInput, 'boardId' | 'createdBy'>[];
 }
 
+export type StageWithPRStatuses = Stage & {
+  prStatuses?: PRStatusEvent[];
+};
+
 export type BoardWithStages = Board & {
-  stages?: Stage[];
+  stages?: StageWithPRStatuses[];
 };
 
 export class BoardRepository {
@@ -54,6 +59,11 @@ export class BoardRepository {
 
     await this.validateNameUnique(data.name);
 
+    // Validate PR status uniqueness across stages
+    if (data.stages && data.stages.length > 0) {
+      await this.validatePRStatusUniqueness(data.stages);
+    }
+
     // Use transaction to create board and stages together
     return await this.db.$transaction(async (tx) => {
       const board = await tx.board.create({
@@ -64,20 +74,50 @@ export class BoardRepository {
         },
       });
 
-      let stages: Stage[] = [];
+      let stages: Array<Stage & { prStatuses?: PRStatusEvent[] }> = [];
       if (data.stages && data.stages.length > 0) {
         await tx.stage.createMany({
           data: data.stages.map(stage => ({
-            ...stage,
+            name: stage.name,
+            eta: stage.eta,
+            sequenceNumber: stage.sequenceNumber,
             boardId: board.id,
             createdBy: data.createdBy,
           })),
         });
 
-        stages = await tx.stage.findMany({
+        const rawStages = await tx.stage.findMany({
           where: { boardId: board.id },
           orderBy: { sequenceNumber: 'asc' },
         });
+
+        // Fetch PR status mappings for each stage
+        const stageIds = rawStages.map(s => s.id);
+        const prStatusMappings = await tx.stagePRStatusMapping.findMany({
+          where: { stageId: { in: stageIds } },
+        });
+
+        // Map stages with their PR statuses
+        const prStatusMap = new Map<string, PRStatusEvent[]>();
+        for (const mapping of prStatusMappings) {
+          if (!prStatusMap.has(mapping.stageId)) {
+            prStatusMap.set(mapping.stageId, []);
+          }
+          prStatusMap.get(mapping.stageId)!.push(mapping.prStatus);
+        }
+
+        stages = rawStages.map(stage => ({
+          ...stage,
+          prStatuses: prStatusMap.get(stage.id) || [],
+        }));
+
+        // Sync PR status mappings for each stage (in case input had them)
+        for (let i = 0; i < stages.length; i++) {
+          const inputStage = data.stages[i];
+          if (inputStage.prStatuses && inputStage.prStatuses.length > 0) {
+            await this.syncStagePRStatusMappings(tx, stages[i].id, inputStage.prStatuses);
+          }
+        }
       }
 
       return {
@@ -85,6 +125,74 @@ export class BoardRepository {
         stages,
       };
     });
+  }
+
+  /**
+   * Sync PR status mappings for a stage - differential update (only add/remove changed mappings)
+   * Uses transaction for atomicity
+   */
+  async syncStagePRStatusMappings(
+    tx: any,
+    stageId: string,
+    prStatuses: PRStatusEvent[]
+  ): Promise<void> {
+    // Fetch existing mappings
+    const existingMappings = await tx.stagePRStatusMapping.findMany({
+      where: { stageId },
+    });
+
+    // Create sets for comparison
+    const existingPRStatuses = new Set(existingMappings.map((m: any) => m.prStatus));
+    const newPRStatuses = new Set(prStatuses);
+
+    // Find mappings to delete (exist in DB but not in new array)
+    const mappingIdsToDelete = existingMappings
+      .filter((mapping: any) => !newPRStatuses.has(mapping.prStatus))
+      .map((mapping: any) => mapping.id);
+
+    // Find PR statuses to add (exist in new array but not in DB)
+    const prStatusesToAdd = prStatuses.filter(
+      prStatus => !existingPRStatuses.has(prStatus)
+    );
+
+    // Delete only removed mappings
+    if (mappingIdsToDelete.length > 0) {
+      await tx.stagePRStatusMapping.deleteMany({
+        where: {
+          id: { in: mappingIdsToDelete },
+        },
+      });
+    }
+
+    // Insert only new mappings
+    if (prStatusesToAdd.length > 0) {
+      await tx.stagePRStatusMapping.createMany({
+        data: prStatusesToAdd.map(prStatus => ({
+          stageId,
+          prStatus,
+        })),
+      });
+    }
+  }
+
+  /**
+   * Validate that each PR status is only used in one stage
+   */
+  async validatePRStatusUniqueness(stages: Array<{ name: string; prStatuses?: PRStatusEvent[] }>): Promise<void> {
+    const prStatusUsage = new Map<PRStatusEvent, string>();
+
+    for (const stage of stages) {
+      if (stage.prStatuses) {
+        for (const status of stage.prStatuses) {
+          if (prStatusUsage.has(status)) {
+            throw new Error(
+              `PR status '${status}' is used in multiple stages: '${prStatusUsage.get(status)}' and '${stage.name}'`
+            );
+          }
+          prStatusUsage.set(status, stage.name);
+        }
+      }
+    }
   }
 
   async validateNameUnique(name: string, excludeId?: string): Promise<void> {

@@ -5,6 +5,7 @@ import { TicketStatusIcon } from '../../../assets/icons';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
 import { Calendar, Tag } from 'lucide-react';
+import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 
 interface TicketActivityMessageProps {
   message: QueryResultType<typeof queries.conversationMessages>[number];
@@ -18,6 +19,7 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ me
         return <TicketPriorityIcon />;
       case 'STATUS':
       case 'STAGE_NAME':
+      case 'PR':
         return <TicketStatusIcon />;
       case 'TAGS':
         return <Tag />;
@@ -32,7 +34,9 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ me
     <div className='flex justify-start min-[500px]:px-4 px-2 my-3'>
       <div className='flex items-center gap-2 text-sm text-gray-400 px-10 py-0.5'>
         {getIcon()}
-        {message.content}
+        <div>
+          <RenderMessageWithHTML message={message.content} />
+        </div>
       </div>
     </div>
   );

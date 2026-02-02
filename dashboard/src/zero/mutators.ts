@@ -19,6 +19,7 @@ import {
   FormContextType,
   FormEntityType,
   DocType,
+  PRStatusEvent,
   createForwardedMessageXml,
   parseForwardedMessageXml,
   ActivityClassification,
@@ -2307,16 +2308,27 @@ export const mutators = defineMutators({
               eta: z.number(),
               sequenceNumber: z.number(),
               defaultTicketStatusV2: z.string().optional(),
+              prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
             }),
           )
           .optional(),
         timestamp: z.number(),
         stageIds: z.record(z.string(), z.string()).optional(),
+        prStatusMappingIds: z.record(z.string(), z.string()).optional(), // Map "stageSeq-prStatus" -> mappingId
       }),
       async ({
         tx,
         ctx,
-        args: { boardId, name, projectId, metadata, stages, timestamp, stageIds = {} },
+        args: {
+          boardId,
+          name,
+          projectId,
+          metadata,
+          stages,
+          timestamp,
+          stageIds = {},
+          prStatusMappingIds = {},
+        },
       }) => {
         // Validate board exists
         const board = await tx.run(zql.boards.where('id', boardId).one());
@@ -2352,32 +2364,113 @@ export const mutators = defineMutators({
 
         // Update stages if provided
         if (stages) {
-          // Delete all existing stages
+          // Fetch existing stages
           const existingStages = await tx.run(zql.stages.where('boardId', boardId));
-          for (const stage of existingStages) {
-            await tx.mutate.stages.delete({
-              id: stage.id,
-            });
-          }
+          const existingStagesMap = new Map(existingStages.map(s => [s.id, s]));
 
-          // Create new stages
+          // Track which stage IDs we've processed
+          const processedStageIds = new Set<string>();
+
+          // Update or create stages
           for (const stage of stages) {
             const stageId = stageIds[stage.sequenceNumber];
             if (!stageId) {
               throw new Error(`stageId is required for stage at sequence ${stage.sequenceNumber}`);
             }
-            await tx.mutate.stages.insert({
-              id: stageId,
-              name: stage.name,
-              eta: stage.eta,
-              sequenceNumber: stage.sequenceNumber,
-              boardId: boardId,
-              createdBy: ctx.userID,
-              updatedBy: ctx.userID,
-              createdAt: timestamp,
-              updatedAt: timestamp,
-              defaultTicketStatusV2:
-                (stage.defaultTicketStatusV2 as TicketStatusV2) || TicketStatusV2.STARTED,
+
+            processedStageIds.add(stageId);
+
+            if (existingStagesMap.has(stageId)) {
+              // Update existing stage
+              await tx.mutate.stages.update({
+                id: stageId,
+                name: stage.name,
+                eta: stage.eta,
+                sequenceNumber: stage.sequenceNumber,
+                defaultTicketStatusV2:
+                  (stage.defaultTicketStatusV2 as TicketStatusV2) || TicketStatusV2.STARTED,
+                updatedBy: ctx.userID,
+                updatedAt: timestamp,
+              });
+            } else {
+              // Insert new stage
+              await tx.mutate.stages.insert({
+                id: stageId,
+                name: stage.name,
+                eta: stage.eta,
+                sequenceNumber: stage.sequenceNumber,
+                boardId: boardId,
+                createdBy: ctx.userID,
+                updatedBy: ctx.userID,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                defaultTicketStatusV2:
+                  (stage.defaultTicketStatusV2 as TicketStatusV2) || TicketStatusV2.STARTED,
+              });
+            }
+
+            // Differential PR status mapping sync
+            if (stage.prStatuses !== undefined) {
+              // Fetch existing mappings for this stage
+              const existingMappings = await tx.run(
+                zql.stage_pr_status_mappings.where('stageId', stageId),
+              );
+
+              // Create sets for comparison
+              const existingPRStatuses = new Set(existingMappings.map(m => m.prStatus));
+              const newPRStatuses = new Set(stage.prStatuses);
+
+              // Find mappings to delete (exist in DB but not in new array)
+              const mappingsToDelete = existingMappings.filter(
+                mapping => !newPRStatuses.has(mapping.prStatus),
+              );
+
+              // Find PR statuses to add (exist in new array but not in DB)
+              const prStatusesToAdd = stage.prStatuses.filter(
+                prStatus => !existingPRStatuses.has(prStatus),
+              );
+
+              // Delete only removed mappings
+              for (const mapping of mappingsToDelete) {
+                await tx.mutate.stage_pr_status_mappings.delete({
+                  id: mapping.id,
+                });
+              }
+
+              // Insert only new mappings
+              for (const prStatus of prStatusesToAdd) {
+                const mappingKey = `${stage.sequenceNumber}-${prStatus}`;
+                const mappingId = prStatusMappingIds[mappingKey];
+                if (!mappingId) {
+                  throw new Error(
+                    `prStatusMappingId is required for stage ${stage.sequenceNumber} and PR status ${prStatus}`,
+                  );
+                }
+                await tx.mutate.stage_pr_status_mappings.insert({
+                  id: mappingId,
+                  stageId: stageId,
+                  prStatus: prStatus,
+                  createdAt: timestamp,
+                });
+              }
+            }
+          }
+
+          // Delete stages that were removed (not in the new stages array)
+          const stagesToDelete = existingStages.filter(stage => !processedStageIds.has(stage.id));
+
+          for (const stage of stagesToDelete) {
+            // Delete PR status mappings for this stage
+            const mappings = await tx.run(zql.stage_pr_status_mappings.where('stageId', stage.id));
+            for (const mapping of mappings) {
+              await tx.mutate.stage_pr_status_mappings.delete({
+                id: mapping.id,
+              });
+            }
+
+            // Delete the stage
+            await tx.mutate.stages.delete({
+              id: stage.id,
             });
           }
         }
@@ -2411,6 +2504,15 @@ export const mutators = defineMutators({
       // Delete all stages first
       const stages = await tx.run(zql.stages.where('boardId', boardId));
       for (const stage of stages) {
+        // Delete PR status mappings for this stage
+        const mappings = await tx.run(zql.stage_pr_status_mappings.where('stageId', stage.id));
+        for (const mapping of mappings) {
+          await tx.mutate.stage_pr_status_mappings.delete({
+            id: mapping.id,
+          });
+        }
+
+        // Delete the stage
         await tx.mutate.stages.delete({
           id: stage.id,
         });

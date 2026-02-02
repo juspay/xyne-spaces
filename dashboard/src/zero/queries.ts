@@ -414,6 +414,7 @@ export const queries = defineQueries({
     return zql.projects.orderBy('createdAt', 'desc').related('boards');
   }),
   getAllBoards: defineQuery(() => {
+    console.log('Fetching all boards');
     return zql.boards
       .orderBy('createdAt', 'desc')
       .related('project')
@@ -495,7 +496,9 @@ export const queries = defineQueries({
     return zql.boards
       .where('projectId', projectId)
       .orderBy('createdAt', 'asc')
-      .related('stages', stagesQuery => stagesQuery.orderBy('sequenceNumber', 'asc'));
+      .related('stages', stagesQuery =>
+        stagesQuery.orderBy('sequenceNumber', 'asc').related('prStatusMappings'),
+      );
   }),
   stagesByBoard: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
     return zql.stages.where('boardId', boardId).orderBy('sequenceNumber', 'asc');

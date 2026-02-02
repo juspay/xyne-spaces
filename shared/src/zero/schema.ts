@@ -151,6 +151,7 @@ export enum ActivityType {
   ENTITY = 'ENTITY',
   SUBTICKET_CREATED = 'SUBTICKET_CREATED',
   BOARD = 'BOARD',
+  PR = 'PR',
 }
 
 // @ts-ignore TS1294
@@ -262,6 +263,14 @@ export enum PRStatus {
   OPEN = 'OPEN',
   DECLINED = 'DECLINED',
   MERGED = 'MERGED',
+}
+
+// @ts-ignore TS1294
+export enum PRStatusEvent {
+  CREATED = 'CREATED',
+  UPDATED = 'UPDATED',
+  MERGED = 'MERGED',
+  DECLINED = 'DECLINED',
 }
 
 // @ts-ignore TS1294
@@ -548,6 +557,15 @@ export const stageTable = table('stages')
     updatedAt: number().optional(),
     defaultTicketStatus: enumeration<TicketStatus>().optional(),  // Deprecated - use defaultTicketStatusV2
     defaultTicketStatusV2: enumeration<TicketStatusV2>(),
+  })
+  .primaryKey('id');
+
+export const stagePRStatusMappingTable = table('stage_pr_status_mappings')
+  .columns({
+    id: string(),
+    stageId: string(),
+    prStatus: enumeration<PRStatusEvent>(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -1446,7 +1464,7 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
   }),
 }));
 
-export const stageTableRelationships = relationships(stageTable, ({ one }) => ({
+export const stageTableRelationships = relationships(stageTable, ({ one, many }) => ({
   board: one({
     sourceField: ['boardId'],
     destField: ['id'],
@@ -1462,7 +1480,23 @@ export const stageTableRelationships = relationships(stageTable, ({ one }) => ({
     destField: ['id'],
     destSchema: userTable,
   }),
+  prStatusMappings: many({
+    sourceField: ['id'],
+    destField: ['stageId'],
+    destSchema: stagePRStatusMappingTable,
+  }),
 }));
+
+export const stagePRStatusMappingTableRelationships = relationships(
+  stagePRStatusMappingTable,
+  ({ one }) => ({
+    stage: one({
+      sourceField: ['stageId'],
+      destField: ['id'],
+      destSchema: stageTable,
+    }),
+  })
+);
 
 export const userGroupMappingTableRelationships = relationships(
   userGroupMappingTable,
@@ -2124,6 +2158,7 @@ export const schema = createSchema({
     projectTable,
     boardTable,
     stageTable,
+    stagePRStatusMappingTable,
     userGroupMappingTable,
     userAssignmentStateTable,
     boardComplexityScoreTable,
@@ -2183,6 +2218,7 @@ export const schema = createSchema({
     attachementTableRelationShips,
     boardTableRelationships,
     stageTableRelationships,
+    stagePRStatusMappingTableRelationships,
     userGroupMappingTableRelationships,
     userAssignmentStateTableRelationships,
     boardComplexityScoreTableRelationships,
@@ -2239,6 +2275,7 @@ export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_m
 export type Project = Row<typeof schema.tables.projects>;
 export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
+export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type Workflow = Row<typeof schema.tables.workflows>;
 export type WorkflowExecution = Row<typeof schema.tables.workflow_executions>;
 export type UserGroup = Row<typeof schema.tables.user_groups>;

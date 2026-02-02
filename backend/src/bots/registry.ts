@@ -31,6 +31,9 @@ import '@/bots/implementations/xyne-automatic/xyne-automatic.js';
 
 import {logger} from '@/utils/logger';
 
+// Bitbucket Bot - system bot for Bitbucket webhook events
+import '@/bots/implementations/bitbucket-bot/bitbucket-bot.js';
+
 // Add more internal bot imports here...
 // import '@/bots/implementations/my-bot/my-bot.js';
 
