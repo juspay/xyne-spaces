@@ -76,12 +76,12 @@ const BoardsScreen = (): ReactElement => {
       timestamp: Date.now(),
     };
 
-    void zero.mutate(mutators.board.update(mutatorArgs)).client;
+    void zero.mutate(mutators.board.update(mutatorArgs));
     setEditingBoard(null);
   };
 
   const handleDeleteBoard = (boardId: string): void => {
-    void zero.mutate(mutators.board.delete({ boardId })).client;
+    void zero.mutate(mutators.board.delete({ boardId }));
   };
 
   if (loading) {

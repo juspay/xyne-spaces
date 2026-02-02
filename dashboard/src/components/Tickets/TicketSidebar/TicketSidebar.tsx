@@ -26,6 +26,7 @@ import UserAvatar from '../../UserAvatar/UserAvatar';
 import { TicketActivity } from '../TicketActivity';
 import { useChannelsByProjectId } from '../../../hooks/useChannels';
 import { useUsers } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 import { mutators } from '../../../zero/mutators';
 
 type TabType = 'overview' | 'threads';
@@ -257,6 +258,9 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
   }, [ticket, form]);
 
   const users = useUsers();
+
+  // Query all user groups for activity display
+  const userGroups = useUserGroups();
 
   // Filter users based on search
   const filteredUsers = useMemo(() => {
@@ -717,7 +721,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
             )}
 
             {/* Activity Section */}
-            <TicketActivity activities={activities} users={users} />
+            <TicketActivity activities={activities} users={users} userGroups={userGroups} />
           </div>
         )}
 

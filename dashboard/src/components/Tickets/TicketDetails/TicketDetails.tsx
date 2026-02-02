@@ -30,6 +30,7 @@ import {
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { TicketActivity } from '../TicketActivity';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
+import { UserGroupSelector } from '../CreateTicketModal/UserGroupSelector';
 import { SubTicketModal } from '../SubTicketModal/SubTicketModal';
 import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { MappedTicketModal } from '../MappedTicketModal/MappedTicketModal';
@@ -43,6 +44,7 @@ import { Selector } from './Selector';
 import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
 import { mutators } from '../../../zero/mutators';
 import { useUsers } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import {
@@ -191,6 +193,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query all users for assignee dropdown
   const users = useUsers();
 
+  // Query all user groups for activity display
+  const userGroups = useUserGroups();
+
   // Query stages if ticket has a boardId
   const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: ticket?.boardId ?? '' }), {
     enabled: !!ticket?.boardId,
@@ -199,12 +204,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query channel if ticket has conversation with channelId
   const channelId = ticket?.conversation?.channelId;
   const channel = useChannel(channelId || '');
-
-  // Query user group if ticket has userGroupId
-  const [userGroup] = useCachedQuery(
-    queries.getUserGroupById({ userGroupId: ticket?.userGroupId ?? '' }),
-    { enabled: !!ticket?.userGroupId },
-  );
 
   // Query all tickets in the project to extract available tags
   const [projectTickets] = useCachedQuery(
@@ -560,6 +559,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       mutators.ticket.update({
         id: ticket.id,
         assignedTo: userId,
+        updatedAt: Date.now(),
+      }),
+    );
+  };
+
+  const handleUserGroupChange = (groupId: string | null): void => {
+    void zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        userGroupId: groupId ?? undefined,
         updatedAt: Date.now(),
       }),
     );
@@ -1321,12 +1330,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           />
 
           {/* User Group */}
-          {ticket?.userGroupId && (
-            <TicketKeyValuePair
-              ticketKey='User Group'
-              value={<p>{userGroup ? `${userGroup.name}` : '—'}</p>}
-            />
-          )}
+          <TicketKeyValuePair
+            ticketKey='User Group'
+            value={
+              <UserGroupSelector
+                selectedGroupId={ticket.userGroupId ?? null}
+                onGroupSelect={handleUserGroupChange}
+              />
+            }
+          />
         </div>
       </div>
 
@@ -1598,7 +1610,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         </div>
       </div>
-      <TicketActivity activities={activities} users={users} boards={boards} />
+      <TicketActivity
+        activities={activities}
+        users={users}
+        userGroups={userGroups}
+        boards={boards}
+      />
       {/* SubTicket Modal */}
       {ticket?.conversationId && (
         <SubTicketModal

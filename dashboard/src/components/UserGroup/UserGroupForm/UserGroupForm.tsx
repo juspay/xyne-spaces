@@ -1,4 +1,4 @@
-import { ReactElement, useState } from 'react';
+import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input/Input';
@@ -6,6 +6,9 @@ import Textarea from '../../ui/Textarea/Textarea';
 import { UserManagement } from '../UserManagement';
 import { UserSelector } from '../UserManagement/UserSelector/UserSelector';
 import type { UserGroup, User } from '@xyne/shared';
+import { UserResponsibility } from '@xyne/shared';
+import { queries } from '../../../zero/queries';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 interface UserGroupFormData {
   name: string;
@@ -20,7 +23,8 @@ interface UserGroupFormProps {
     alias?: string;
     description?: string;
     userIds?: string[];
-  }) => Promise<{ id: string }> | void;
+    responsibilities?: Record<string, UserResponsibility>; // Send ALL, not just updates
+  }) => Promise<{ id: string }> | Promise<void> | void;
   onCancel: () => void;
   loading?: boolean;
 }
@@ -34,6 +38,28 @@ export const UserGroupForm = ({
   const isEdit = !!userGroup;
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // ONE Map - mutate directly
+  const responsibilitiesRef = useRef<Map<string, UserResponsibility>>(new Map());
+  const responsibilities = responsibilitiesRef.current;
+
+  // Load server data
+  const [userGroupMembers] = useCachedQuery(
+    userGroup
+      ? queries.getUserGroupMembers({ userGroupId: userGroup.id })
+      : queries.getUserGroupMembers({ userGroupId: '' }),
+    { enabled: isEdit && !!userGroup },
+  );
+
+  // Initialize from server data
+  useEffect(() => {
+    if (isEdit && userGroupMembers) {
+      responsibilitiesRef.current.clear();
+      userGroupMembers.forEach(mapping => {
+        responsibilitiesRef.current.set(mapping.userId, mapping.responsibility);
+      });
+    }
+  }, [isEdit, userGroupMembers]);
 
   const {
     control,
@@ -65,6 +91,7 @@ export const UserGroupForm = ({
           alias?: string;
           description?: string;
           userIds?: string[];
+          userResponsibilityUpdates?: Record<string, UserResponsibility>;
         } = {};
 
         if (name.trim() !== userGroup.name) {
@@ -85,6 +112,11 @@ export const UserGroupForm = ({
 
         // Always include userIds for update
         updateData.userIds = selectedUsers.map(user => user.id);
+
+        // Send ALL responsibilities (like form sends all fields)
+        if (responsibilities.size > 0) {
+          updateData.userResponsibilityUpdates = Object.fromEntries(responsibilities);
+        }
 
         await onSubmit(updateData);
       } else {
@@ -203,6 +235,7 @@ export const UserGroupForm = ({
           <UserManagement
             userGroupId={userGroup.id}
             disabled={isLoading}
+            responsibilities={responsibilities}
             onUsersChange={() => {
               // Force re-render if needed
             }}

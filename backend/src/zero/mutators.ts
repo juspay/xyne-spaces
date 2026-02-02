@@ -21,6 +21,7 @@ import {
   DocType,
   ActivityClassification,
   PRStatusEvent,
+  UserResponsibility,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationController } from "@/controllers/conversationController";
@@ -33,8 +34,10 @@ import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/ch
 import { convert } from 'html-to-text';
 import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
+import { ticketAssignmentService } from '@/services/ticketAssignmentService';
 import { logger } from '@/utils/logger';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
+import { syncUserWorkload } from '@/utils/workloadUtils';
 import {
   executionOrchestrator,
   unifiedDMService,
@@ -42,7 +45,7 @@ import {
 } from '@/bots/unified/index.js';
 import { z } from 'zod';
 import { zql } from './queries';
-import { FormFieldType, MessageAttachment, createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
+import { FormFieldType, MessageAttachment, createForwardedMessageXml, parseForwardedMessageXml, type BoardMetadata } from '@xyne/shared';
 
 export type AuthData = {
   sub: string;
@@ -2918,6 +2921,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           priority: z.string().optional(),
           stageName: z.string().optional(),
           assignedTo: z.string().nullable().optional(),
+          userGroupId: z.string().nullable().optional(),
           eta: z.number().optional(),
           boardId: z.string().optional(),
           metadata: z.any().optional(),
@@ -2927,9 +2931,43 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const ticket = await tx.run(zql.tickets.where("id", params.id).one());
           if (!ticket) throw new Error("Ticket not found");
 
+          // ACL Business Logic: Check ticket transfer permission for assignedTo or userGroupId changes
+          const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
+          const isUserGroupChanging = params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId;
+          
+          if ((isAssigneeChanging || isUserGroupChanging) && ticket.userGroupId) {
+            // Get board to check if transfer is restricted
+            const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
+            
+            if (board?.metadata && typeof board.metadata === 'object') {
+              const metadata = board.metadata as BoardMetadata;
+              
+              // If board has transfer restriction enabled
+              if (metadata.isAllowedToTransfer === true) {
+                // User must be part of the current user group with proper responsibility
+                const userGroupMapping = await tx.run(
+                  zql.user_group_mappings
+                    .where("userId", authData.sub)
+                    .where("userGroupId", ticket.userGroupId)
+                    .one()
+                );
+                
+                if (!userGroupMapping) {
+                  throw new Error('You must be a member of the current user group to modify this ticket');
+                }
+                
+                // Check responsibility from the mapping
+                const responsibility = userGroupMapping.responsibility;
+                if (responsibility !== UserResponsibility.MANAGER && responsibility !== UserResponsibility.TEAM_LEAD) {
+                  throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can modify ticket assignment or transfer tickets on this board');
+                }
+              }
+            }
+          }
+
           const updateData: any = { updatedAt: params.updatedAt, updatedBy: authData.sub };
           const activities: any[] = [];
-          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'eta', 'boardId', 'metadata'] as const;
+          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata'] as const;
           const oldAssignedTo = ticket.assignedTo;
           const oldBoardId = ticket.boardId;
 
@@ -2940,6 +2978,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               if (field === 'stageName') activityType = 'STATUS';
               if (field === 'statusV2') activityType = 'STATUS';
               if (field === 'assignedTo') activityType = 'ASSIGNED_TO';
+              if (field === 'userGroupId') activityType = 'USER_GROUP_ID';
               if (field === 'eta') activityType = 'ETA';
               if (field === 'boardId') activityType = 'BOARD';
 
@@ -3016,6 +3055,81 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
 
+          // Auto-assign ticket when userGroupId changes
+          if (params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId && params.userGroupId !== null) {
+            // Generate IDs and use timestamp outside async task (common pattern)
+            const activityId = uuidv4();
+            const messageId = uuidv4();
+            const timestamp = params.updatedAt;
+            
+            asyncTasks.push(async () => {
+              try {
+                const assignmentResult = await ticketAssignmentService.assignTicket({
+                  userGroupId: params.userGroupId!,
+                });
+
+                if (assignmentResult) {
+                  await tx.mutate.tickets.update({
+                    id: params.id,
+                    assignedTo: assignmentResult.assignedUserId,
+                    updatedBy: authData.sub,
+                    updatedAt: timestamp,
+                  });
+
+                  // Add to activities for tracking
+                  await tx.mutate.ticket_activities.insert({
+                    id: activityId,
+                    ticketId: params.id,
+                    updatedBy: authData.sub,
+                    timestamp: timestamp,
+                    activityType: ActivityType.ASSIGNED_TO,
+                    value: { oldValue: ticket.assignedTo, newValue: assignmentResult.assignedUserId },
+                  });
+
+                  // Create system message if conversation exists
+                  if (ticket.conversationId) {
+                    const user = await tx.run(zql.users.where('id', authData.sub).one());
+                    const assignedUser = await tx.run(zql.users.where('id', assignmentResult.assignedUserId).one());
+                    
+                    if (user && assignedUser) {
+                      await tx.mutate.messages.insert({
+                        messageId: messageId,
+                        conversationId: ticket.conversationId,
+                        senderId: authData.sub,
+                        content: `${user.name} auto-assigned ticket to ${assignedUser.name}`,
+                        msgType: MessageType.SYSTEM,
+                        hasAttachment: false,
+                        edited: false,
+                        isDeleted: false,
+                        isSent: true,
+                        showInChannel: false,
+                        createdAt: timestamp,
+                        metadata: {
+                          activityType: ActivityType.ASSIGNED_TO,
+                          isTicketActivity: true,
+                        },
+                      });
+                    }
+                  }
+
+                  // Sync workload mapping using Prisma (like Zoho tickets do)
+                  if (ticket.boardId) {
+                    await syncUserWorkload(
+                      assignmentResult.assignedUserId,
+                      params.userGroupId!,
+                      ticket.boardId,
+                      authData.sub
+                    );
+                  }
+
+                  logger.info(`[AUTO-ASSIGN] Ticket ${params.id} assigned to ${assignmentResult.assignedUserId}: ${assignmentResult.reason}`);
+                }
+              } catch (error) {
+                logger.error(`[AUTO-ASSIGN] Failed to auto-assign ticket ${params.id}:`, error);
+              }
+            });
+          }
+
           // Track user activity using Redis Set - O(1) operation, no DB query
           asyncTasks.push(async () => {
             try {
@@ -3069,6 +3183,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               const oldBoard = await tx.run(zql.boards.where('id', activity.value.oldValue).one());
               const newBoard = await tx.run(zql.boards.where('id', activity.value.newValue).one());
               activityMessage = `${userName} moved ticket from board "${oldBoard?.name || activity.value.oldValue}" to "${newBoard?.name || activity.value.newValue}"`;
+            } else if (activity.activityType === 'USER_GROUP_ID') {
+              if (activity.value.newValue) {
+                const newGroup = await tx.run(zql.user_groups.where('id', activity.value.newValue).one());
+                activityMessage = `${userName} transferred the ticket to ${newGroup?.name || 'Unknown'}`;
+              } else {
+                const oldGroup = activity.value.oldValue ? await tx.run(zql.user_groups.where('id', activity.value.oldValue).one()) : null;
+                activityMessage = `${userName} removed user group${oldGroup ? ` ${oldGroup.name}` : ''}`;
+              }
             }
 
             if (activityMessage && ticket.conversationId) {
@@ -3287,8 +3409,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
     userGroup: {
       update: defineMutator(
-        z.object({userGroupId: z.string(), name: z.string().optional(), alias: z.string().optional(), description: z.string().optional(), timestamp: z.number()}),
-        async ({tx, args: { userGroupId, name, alias, description, timestamp }}) => {
+        z.object({userGroupId: z.string(), name: z.string().optional(), alias: z.string().optional(), description: z.string().optional(), userResponsibilityUpdates: z.record(z.string(), z.nativeEnum(UserResponsibility)).optional(), timestamp: z.number()}),
+        async ({tx, args: { userGroupId, name, alias, description, userResponsibilityUpdates, timestamp }}) => {
           // Get all user groups to check for duplicates in a single query
           const allUserGroups = await tx.run(zql.user_groups);
           
@@ -3325,6 +3447,45 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(description !== undefined && { description }),
             updatedAt: timestamp,
           });
+
+          // Update user responsibilities if provided
+          if (userResponsibilityUpdates) {
+            // Check if current user has permission to update responsibilities
+            const currentUserMapping = await tx.run(
+              zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', authData.sub).one(),
+            );
+            
+            if (!currentUserMapping) {
+              throw new Error('You must be a member of this group to update responsibilities');
+            }
+            
+            if (currentUserMapping.responsibility !== 'MANAGER' && currentUserMapping.responsibility !== 'TEAM_LEAD') {
+              throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can update user responsibilities');
+            }
+
+            for (const [userId, responsibility] of Object.entries(userResponsibilityUpdates)) {
+              const mapping = await tx.run(
+                zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', userId).one(),
+              );
+              if (mapping) {
+                await tx.mutate.user_group_mappings.update({
+                  id: mapping.id,
+                  responsibility,
+                  updatedAt: timestamp,
+                });
+              }
+            }
+            
+            // Verify at least one MANAGER or TEAM_LEAD remains after updates
+            const updatedMappings = await tx.run(zql.user_group_mappings.where('userGroupId', userGroupId));
+            const hasLeadership = updatedMappings.some(
+              m => m.responsibility === 'MANAGER' || m.responsibility === 'TEAM_LEAD'
+            );
+            
+            if (!hasLeadership) {
+              throw new Error('User group must have at least one MANAGER or TEAM_LEAD');
+            }
+          }
         },
       ),
       delete: defineMutator(
@@ -3410,6 +3571,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               id: uuidv4(),
               userGroupId,
               userId,
+              responsibility: UserResponsibility.MEMBER,
               createdAt: timestamp,
               updatedAt: timestamp,
             });

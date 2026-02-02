@@ -1,40 +1,14 @@
 import { ReactElement } from 'react';
 import { Switch } from '../../ui/Switch';
+import type { TicketFormConfig, BoardMetadata } from '@xyne/shared';
 
-export interface TicketFormConfig {
-  userGroupsOnly?: {
-    enabled: boolean;
-    mandatory?: boolean;
-  };
-  dueDate?: {
-    enabled: boolean;
-    mandatory?: boolean;
-  };
-  todo?: {
-    enabled: boolean;
-    mandatory?: boolean;
-  };
-  workflows?: {
-    enabled: boolean;
-    mandatory?: boolean;
-  };
-  labels?: {
-    enabled: boolean;
-    mandatory?: boolean;
-  };
-  merchantId?: {
-    enabled: boolean;
-    mandatory?: boolean;
-  };
-}
-
-export interface BoardMetadata {
-  ticketFormConfig?: TicketFormConfig;
-}
+export type { TicketFormConfig, BoardMetadata };
 
 interface BoardTicketFormConfigProps {
   config: Required<TicketFormConfig>;
   onChange: (config: Required<TicketFormConfig>) => void;
+  isAllowedToTransfer: boolean;
+  onTransferToggle: (enabled: boolean) => void;
   disabled?: boolean;
 }
 
@@ -50,6 +24,8 @@ export const DEFAULT_CONFIG: Required<TicketFormConfig> = {
 export const BoardTicketFormConfig = ({
   config,
   onChange,
+  isAllowedToTransfer,
+  onTransferToggle,
   disabled = false,
 }: BoardTicketFormConfigProps): ReactElement => {
   const handleToggle = (field: keyof TicketFormConfig, property: 'enabled' | 'mandatory'): void => {
@@ -268,6 +244,28 @@ export const BoardTicketFormConfig = ({
               />
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Ticket Transfer Configuration */}
+      <div className='space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-4'>
+        <div className='py-2'>
+          <div className='flex items-center justify-between'>
+            <div className='flex-1'>
+              <label htmlFor='isAllowedToTransfer' className='text-sm font-medium text-gray-700'>
+                Allow Ticket Transfer
+              </label>
+              <p className='text-xs text-gray-500 mt-0.5'>
+                Only Manager and Team Lead can transfer tickets
+              </p>
+            </div>
+            <Switch
+              id='isAllowedToTransfer'
+              checked={isAllowedToTransfer}
+              onCheckedChange={onTransferToggle}
+              disabled={disabled}
+            />
+          </div>
         </div>
       </div>
 

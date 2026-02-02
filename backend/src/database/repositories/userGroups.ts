@@ -64,7 +64,18 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
           data: data.userIds.map(userId => ({
             userGroupId: userGroup.id,
             userId,
+            // Set creator as MANAGER, others as MEMBER (default)
+            responsibility: actorUserId && userId === actorUserId ? 'MANAGER' : 'MEMBER',
           })),
+        });
+      } else if (actorUserId) {
+        // If no userIds provided, add creator as MANAGER
+        await tx.userGroupMapping.create({
+          data: {
+            userGroupId: userGroup.id,
+            userId: actorUserId,
+            responsibility: 'MANAGER',
+          },
         });
       }
 

@@ -72,6 +72,13 @@ export enum TicketReferenceRelation {
 }
 
 // @ts-ignore TS1294
+export enum UserResponsibility {
+  MANAGER = 'MANAGER',
+  TEAM_LEAD = 'TEAM_LEAD',
+  MEMBER = 'MEMBER',
+}
+
+// @ts-ignore TS1294
 export enum EntityType {
   MERCHANT = 'MERCHANT',
   GATEWAY = 'GATEWAY',
@@ -152,6 +159,7 @@ export enum ActivityType {
   SUBTICKET_CREATED = 'SUBTICKET_CREATED',
   BOARD = 'BOARD',
   PR = 'PR',
+  USER_GROUP_ID = 'USER_GROUP_ID',
 }
 
 // @ts-ignore TS1294
@@ -574,6 +582,7 @@ export const userGroupMappingTable = table('user_group_mappings')
     id: string(),
     userId: string(),
     userGroupId: string(),
+    responsibility: enumeration<UserResponsibility>(),
     createdAt: number(),
     updatedAt: number(),
   })

@@ -18,6 +18,7 @@ import {
   FormFieldType,
   FormContextType,
   FormEntityType,
+  UserResponsibility,
   DocType,
   PRStatusEvent,
   createForwardedMessageXml,
@@ -1922,6 +1923,7 @@ export const mutators = defineMutators({
         priority: z.string().optional(),
         stageName: z.string().optional(),
         assignedTo: z.string().nullable().optional(),
+        userGroupId: z.string().nullable().optional(),
         eta: z.number().optional(),
         boardId: z.string().optional(),
         metadata: z.any().optional(),
@@ -1938,6 +1940,7 @@ export const mutators = defineMutators({
           priority,
           stageName,
           assignedTo,
+          userGroupId,
           eta,
           boardId,
           metadata,
@@ -1953,6 +1956,7 @@ export const mutators = defineMutators({
           priority?: TicketPriority;
           stageName?: string;
           assignedTo?: string | null;
+          userGroupId?: string;
           eta?: number;
           boardId?: string;
           metadata?: ReadonlyJSONValue;
@@ -1971,6 +1975,9 @@ export const mutators = defineMutators({
         if (priority !== undefined) updateData.priority = priority as TicketPriority;
         if (stageName !== undefined) updateData.stageName = stageName;
         if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
+        if (userGroupId !== undefined && userGroupId !== null) {
+          updateData.userGroupId = userGroupId;
+        }
         if (eta !== undefined) updateData.eta = eta;
         if (boardId !== undefined) updateData.boardId = boardId;
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -2115,9 +2122,16 @@ export const mutators = defineMutators({
         name: z.string().optional(),
         alias: z.string().optional(),
         description: z.string().optional(),
+        userResponsibilityUpdates: z
+          .record(z.string(), z.nativeEnum(UserResponsibility))
+          .optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, args: { userGroupId, name, alias, description, timestamp } }) => {
+      async ({
+        tx,
+        ctx,
+        args: { userGroupId, name, alias, description, userResponsibilityUpdates, timestamp },
+      }) => {
         // Get all user groups to check for duplicates in a single query
         const allUserGroups = await tx.run(zql.user_groups);
 
@@ -2156,6 +2170,61 @@ export const mutators = defineMutators({
           ...(description !== undefined && { description }),
           updatedAt: timestamp,
         });
+
+        // Update user responsibilities if provided
+        if (userResponsibilityUpdates) {
+          // Check if current user has permission to update responsibilities
+          const currentUserMapping = await tx.run(
+            zql.user_group_mappings
+              .where('userGroupId', userGroupId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+
+          if (!currentUserMapping) {
+            throw new Error('You must be a member of this group to update responsibilities');
+          }
+
+          if (
+            currentUserMapping.responsibility !== UserResponsibility.MANAGER &&
+            currentUserMapping.responsibility !== UserResponsibility.TEAM_LEAD
+          ) {
+            throw new Error(
+              'Only users with MANAGER or TEAM_LEAD responsibility can update user responsibilities',
+            );
+          }
+
+          // Apply updates
+          for (const [userId, responsibility] of Object.entries(userResponsibilityUpdates)) {
+            const mapping = await tx.run(
+              zql.user_group_mappings
+                .where('userGroupId', userGroupId)
+                .where('userId', userId)
+                .one(),
+            );
+            if (mapping) {
+              await tx.mutate.user_group_mappings.update({
+                id: mapping.id,
+                responsibility,
+                updatedAt: timestamp,
+              });
+            }
+          }
+
+          // Verify at least one MANAGER or TEAM_LEAD remains after updates
+          const updatedMappings = await tx.run(
+            zql.user_group_mappings.where('userGroupId', userGroupId),
+          );
+          const hasLeadership = updatedMappings.some(
+            m =>
+              m.responsibility === UserResponsibility.MANAGER ||
+              m.responsibility === UserResponsibility.TEAM_LEAD,
+          );
+
+          if (!hasLeadership) {
+            throw new Error('User group must have at least one MANAGER or TEAM_LEAD');
+          }
+        }
       },
     ),
     delete: defineMutator(
@@ -2254,6 +2323,7 @@ export const mutators = defineMutators({
             id: mappingId,
             userGroupId,
             userId,
+            responsibility: UserResponsibility.MEMBER, // New users added get MEMBER role by default
             createdAt: timestamp,
             updatedAt: timestamp,
           });

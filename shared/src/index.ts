@@ -6,4 +6,5 @@ export * from './types/activity';
 export * from './forwardedMessage';
 export * from './activity';
 export * from './types';
+export * from './board-types';
 export * from './types/workflowApproval';

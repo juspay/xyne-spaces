@@ -1,6 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { useZero } from '@rocicorp/zero/react';
 import { useMutation } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { UserGroupListItem } from '../../components/UserGroup/UserGroupListItem/UserGroupListItem';
@@ -8,6 +9,7 @@ import { UserGroupForm } from '../../components/UserGroup/UserGroupForm/UserGrou
 import { apiInstance } from '../../services/clients/apiClient';
 import { queries } from '../../zero/queries';
 import type { UserGroup as ZeroUserGroup } from '@xyne/shared';
+import { UserResponsibility } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 
@@ -46,20 +48,40 @@ const UserGroupsScreen = (): ReactElement => {
     return await createUserGroupMutation.mutateAsync(data);
   };
 
-  const handleUpdateUserGroup = (
+  const handleUpdateUserGroup = async (
     userGroupId: string,
-    data: { name?: string; alias?: string; description?: string },
-  ): void => {
-    void zero.mutate(
+    data: {
+      name?: string;
+      alias?: string;
+      description?: string;
+      userResponsibilityUpdates?: Record<string, UserResponsibility>;
+    },
+  ): Promise<void> => {
+    const result = zero.mutate(
       mutators.userGroup.update({
         userGroupId,
         ...(data.name !== undefined && { name: data.name }),
         ...(data.alias !== undefined && { alias: data.alias }),
         ...(data.description !== undefined && { description: data.description }),
+        ...(data.userResponsibilityUpdates !== undefined && {
+          userResponsibilityUpdates: data.userResponsibilityUpdates,
+        }),
         timestamp: Date.now(),
       }),
     );
-    setEditingUserGroup(null);
+    const res = await result.server;
+    if (res.type === 'error') {
+      toast.error('Update Failed', {
+        description: res.error.message || 'Failed to update user group',
+        duration: 5000,
+      });
+    } else {
+      toast.success('User Group Updated', {
+        description: 'User group has been successfully updated',
+        duration: 3000,
+      });
+      setEditingUserGroup(null);
+    }
   };
 
   const handleDeleteUserGroup = (userGroupId: string): void => {
@@ -116,6 +138,7 @@ const UserGroupsScreen = (): ReactElement => {
         open={showCreateModal}
         onOpenChange={setShowCreateModal}
         title='Create New User Group'
+        className='max-w-xl'
       >
         <UserGroupForm
           onSubmit={handleCreateUserGroup}
@@ -130,6 +153,7 @@ const UserGroupsScreen = (): ReactElement => {
           if (!open) setEditingUserGroup(null);
         }}
         title='Edit User Group'
+        className='max-w-xl'
       >
         {editingUserGroup && (
           <UserGroupForm
