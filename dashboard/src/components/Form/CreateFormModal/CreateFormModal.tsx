@@ -266,7 +266,7 @@ export const CreateFormModal = ({
           isOptional?: boolean;
         }> = [];
 
-        const fieldIds: Record<number, string> = {};
+        const fieldIds: Record<string, string> = {};
 
         fields
           .filter(field => field.fieldName.trim() !== '')
@@ -315,7 +315,7 @@ export const CreateFormModal = ({
         const processedFields = validFields.map((field, index) => {
           if (!field.id) {
             const newFieldId = uuidv4();
-            fieldIds[index] = newFieldId;
+            fieldIds[index.toString()] = newFieldId;
             return { ...field, id: newFieldId };
           }
           return field;
@@ -332,7 +332,7 @@ export const CreateFormModal = ({
             fieldEnum?: string[];
             isOptional?: boolean;
           }>;
-          fieldIds?: Record<number, string>;
+          fieldIds?: Record<string, string>;
         } = {
           formId: form.id,
           timestamp: Date.now(),

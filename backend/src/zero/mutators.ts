@@ -4598,7 +4598,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             )
             .optional(),
           timestamp: z.number(),
-          fieldIds: z.record(z.number(), z.string()).optional(),
+          fieldIds: z.record(z.string(), z.string()).optional(),
         }),
         async ({ tx, ctx, args: { formId, formDescription, fields, timestamp, fieldIds = {} } }) => {
           // Validate form exists
@@ -4632,12 +4632,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   // Delete the field
                   await tx.mutate.form_fields.delete({
                     id: field.id,
-                  }); 
+                  });
               }
     
               for (const field of fields) {
                 if (field.id) {
-                  // Update existing field
+                  // Check if field actually exists in the database
+                  const existingField = existingFields.find(f => f.id === field.id);
+                  
+                  if (existingField) {
+                    // Update existing field
                   const updateData: {
                     id: string;
                     formId: string;
@@ -4668,6 +4672,41 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   }
 
                   await tx.mutate.form_fields.update(updateData);
+                  } else {
+                    // Field has ID but doesn't exist in DB - treat as new field
+                    const insertData: {
+                      id: string;
+                      formId: string;
+                      fieldName: string;
+                      fieldType: FormFieldType;
+                      createdAt: number;
+                      updatedAt: number;
+                      fieldEnum?: ReadonlyJSONValue;
+                      isOptional?: boolean;
+                    } = {
+                      id: field.id,
+                      formId: formId,
+                      fieldName: field.fieldName.trim(),
+                      fieldType: field.fieldType,
+                      createdAt: now,
+                      updatedAt: now,
+                    };
+
+                    // Add fieldEnum if present
+                    if (field.fieldEnum && field.fieldEnum.length > 0) {
+                      const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
+                      if (nonEmptyOptions.length > 0) {
+                        insertData.fieldEnum = nonEmptyOptions;
+                      }
+                    }
+
+                    // Add isOptional if defined
+                    if (field.isOptional !== undefined) {
+                      insertData.isOptional = field.isOptional;
+                    }
+
+                    await tx.mutate.form_fields.insert(insertData);
+                  }
 
                 } else {
                   // Create new field
