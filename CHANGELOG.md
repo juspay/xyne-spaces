@@ -1,3 +1,29 @@
+## [1.21.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.20.1...v1.21.0) (2026-02-02)
+
+
+### Features
+
+* changing schema ([e84e096](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e84e09614ffe3fd2ff19009eb6cba388db567454)), closes [#2557](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2557)
+* Fixed config values ([4cc6860](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4cc6860bc9e22afccc2ab99220dc198d670f5e55))
+* Implement ticket search in kanban board view ([7be2af8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7be2af8a69531c7b200db9b791d18252873f5267)), closes [#2308](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2308)
+* logging fixes ([1ed3b3b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1ed3b3b303ee08b311793855c33ca6056e8b6954)), closes [#2511](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2511)
+
+
+### Bug Fixes
+
+* Add user id as dimension in Metrics ([d0ca94a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d0ca94a7f15ebcae4e34760d883653f489db6d8d)), closes [#2510](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2510)
+* added the global package into the test docker containers ([b5c1707](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b5c170761545773918071f56108d04e176e5c939)), closes [#2629](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2629)
+* exclude system messages except ticket ([349aba1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/349aba1a03d8ef41050c24a2df9b9cc78a42d226)), closes [#2567](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2567)
+* Fix redundant socket connections on channel switch ([1f6a077](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1f6a07711b100d5dfa721cfb300a8a2bede46abb))
+* fix route for detailed ticket view in search ([a03667e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a03667eafa46c15dd1f234c863c15c483302cb29))
+* fix the bookmark bug ([60a34f7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/60a34f7969ea7131c6ff87eb5f38837743d7b9dc))
+* Fix ticket ETA activity notification routing ([234b106](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/234b1069bdb76c1a6f5f54519fa04e1272169cbf))
+* fixed the logo signature ([d39c7b5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d39c7b5c2d4dbd461e7ebda2b1e5e52670ea6690))
+* fixed xyneAI tracing ([02c2367](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/02c236728bef525d1d50dfb4d367ddced90a06d0))
+* Groupdm not coming in dm search in mobile ([6c6a847](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6c6a84722e7f910b6d234481ce5d72f08b069e92)), closes [#2507](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2507)
+* reload on zero error automatically ([de3f598](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/de3f598d52afa340759f41db041ff6dec81aa6f3)), closes [#2568](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2568)
+* removed abs positioning of callControls buttons ([bfee13d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bfee13dc11f6bc20d99ecc72e1308e212f0eb748)), closes [#2531](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2531)
+
 ## [1.20.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.20.0...v1.20.1) (2026-01-30)
 
 
