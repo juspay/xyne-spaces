@@ -91,7 +91,7 @@ const prodConfig: AppConfig = {
     title: 'Xyne Spaces',
   },
   enableMtls: true,
-  useBundledUI: true,
+  useBundledUI: false,
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
   UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod

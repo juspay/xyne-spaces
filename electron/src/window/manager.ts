@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, dialog } from 'electron';
+import { BrowserWindow, shell, dialog, Menu, MenuItem } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
@@ -95,6 +95,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       webviewTag: true,
       preload: path.join(__dirname, '..', 'preload.js'),
       backgroundThrottling: false,
+      spellcheck: true,
     },
   });
 
@@ -126,6 +127,9 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 });
 
   console.log('✅ setWindowOpenHandler configured for main window');
+
+  // Setup spellchecker context menu
+  setupSpellcheckerContextMenu(mainWindow);
 
   if (process.env.NODE_ENV === 'development') {
     mainWindow?.webContents.openDevTools();
@@ -243,6 +247,54 @@ export function toggleWindowCompactMode(): void {
     
     mainWindow.webContents.send('window-mode-changed', { compact: false });
   }
+}
+
+/**
+ * Setup spellchecker context menu with spelling suggestions
+ */
+function setupSpellcheckerContextMenu(window: BrowserWindow): void {
+
+  if (process.platform !== 'darwin') {
+    const availableLanguages = window.webContents.session.availableSpellCheckerLanguages;
+    const preferredLanguages = ['en-US', 'en-GB'].filter(lang => 
+      availableLanguages.includes(lang)
+    );
+    
+    if (preferredLanguages.length > 0) {
+      window.webContents.session.setSpellCheckerLanguages(preferredLanguages);
+      log.info('[WindowManager] Spellchecker languages set:', preferredLanguages);
+    }
+  }
+
+  window.webContents.on('context-menu', (event, params) => {
+    if (params.dictionarySuggestions.length === 0 && !params.misspelledWord) {
+      return; // Let the default context menu show
+    }
+
+    const menu = new Menu();
+
+    for (const suggestion of params.dictionarySuggestions) {
+      menu.append(new MenuItem({
+        label: suggestion,
+        click: () => window.webContents.replaceMisspelling(suggestion)
+      }));
+    }
+
+    if (params.dictionarySuggestions.length > 0 && params.misspelledWord) {
+      menu.append(new MenuItem({ type: 'separator' }));
+    }
+
+    if (params.misspelledWord) {
+      menu.append(new MenuItem({
+        label: `Add "${params.misspelledWord}" to dictionary`,
+        click: () => window.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+      }));
+    }
+
+    menu.popup();
+  });
+
+  log.info('[WindowManager] Spellchecker context menu configured');
 }
 
 export async function loadUrl(window: BrowserWindow, url: string): Promise<void> {
