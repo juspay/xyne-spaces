@@ -507,10 +507,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           addFilesWithLimit(selectedFiles);
         }
         e.target.value = '';
-        // Focus the editor after file selection
-        editor?.commands.focus();
+        // Focus the editor after file selection (but not on mobile to prevent keyboard popup)
+        if (!isMobile) {
+          editor?.commands.focus();
+        }
       },
-      [addFilesWithLimit, editor],
+      [addFilesWithLimit, editor, isMobile],
     );
 
     const handleAttachClick = useCallback(() => {

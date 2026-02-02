@@ -179,6 +179,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       clearTimeout(pressTimerRef.current);
       pressTimerRef.current = null;
     }
+
+    // Dismiss keyboard when opening the drawer on mobile
+    if (open && isMobile) {
+      // Blur any active input/textarea to dismiss keyboard
+      const activeElement = document.activeElement as HTMLElement;
+      if (
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.isContentEditable)
+      ) {
+        activeElement.blur();
+      }
+    }
   };
 
   const handleCreateTicket = (): void => {
