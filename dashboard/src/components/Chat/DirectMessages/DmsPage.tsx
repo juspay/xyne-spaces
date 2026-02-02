@@ -20,6 +20,8 @@ import {
   PanelResizeHandle,
   type ImperativePanelHandle,
 } from 'react-resizable-panels';
+import { useUsers } from '../../../hooks/useUsers';
+import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
 
 const DmsPage = (): ReactElement => {
   const navigate = useNavigate();
@@ -46,6 +48,7 @@ const DmsPage = (): ReactElement => {
   });
 
   const unreadCounts = useAllUnreadCount();
+  const allUsers = useUsers();
 
   const displayUnreadCounts: Record<string, number> = {
     ...unreadCounts,
@@ -67,19 +70,29 @@ const DmsPage = (): ReactElement => {
       );
   }, [channelData]);
 
+  // Create userId -> name map for O(1) lookups
+  const userMap = useMemo(() => {
+    const map = new Map<string, string>();
+    allUsers.forEach(user => {
+      if (user.name) map.set(user.id, user.name.toLowerCase());
+    });
+    return map;
+  }, [allUsers]);
+
   const filteredDms = useMemo(() => {
     if (!searchQuery) return directMessages;
 
     const query = searchQuery.toLowerCase().trim();
 
     return directMessages.filter(dm => {
-      const descriptionToSearch = dm.description ? dm.description.toLowerCase() : '';
-      const matchesDescription = descriptionToSearch.includes(query);
-      const matchesChannelName = dm.name.toLowerCase().includes(query);
-
-      return matchesDescription || matchesChannelName;
+      // For DM/GROUP_DM channels, search by participant names
+      const participantIds = parseDMParticipantIds(dm);
+      const participantNames = participantIds
+        .map(id => userMap.get(id))
+        .filter((name): name is string => Boolean(name));
+      return participantNames.some(name => name.includes(query));
     });
-  }, [directMessages, searchQuery]);
+  }, [directMessages, searchQuery, userMap]);
 
   const handleAddDirectMessage = (): void => {
     setShowAddDmForm(true);
