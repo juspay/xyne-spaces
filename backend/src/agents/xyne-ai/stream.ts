@@ -15,7 +15,7 @@ import {
 } from './storage/index.js';
 
 import { getAndClearSessionMappings, type MessageMappings, type StreamProvider, type StreamEventCallback } from './tools.js';
-import { createOnEventHandler, getLangfuseTraceId } from './langfuse/index.js';
+import { createOnEventHandler } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
 
 import type {
@@ -210,12 +210,7 @@ export async function* xyneAIStream(
       switch (event.type) {
         case 'run_start':
           currentTraceId = event.data.traceId;
-          const runId = event.data.runId;
-          // Get the actual Langfuse trace ID using runId
-          const langfuseTraceId = getLangfuseTraceId(runId);
-          // Emit both traceIds in start event for frontend
-          yield { type: 'start', sessionId: session.sessionId, isNewSession, traceId: langfuseTraceId || currentTraceId };
-          // logger.info(`[XyneAI] [${session.sessionId}] Emitted traceId: ${langfuseTraceId || currentTraceId}`);
+          yield { type: 'start', sessionId: session.sessionId, isNewSession, traceId: currentTraceId };
           break;
         
         case 'before_tool_execution':

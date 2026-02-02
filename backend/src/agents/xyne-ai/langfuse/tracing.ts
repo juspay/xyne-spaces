@@ -3,15 +3,11 @@
  */
 
 import {
-  startObservation,
-  type LangfuseSpan,
-  type LangfuseGeneration,
-  type LangfuseTool,
-} from '@langfuse/tracing';
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { LangfuseSpanProcessor } from '@langfuse/otel';
+  createCompositeTraceCollector,
+  type TraceCollector,
+  type TraceEvent,
+} from '@xynehq/jaf';
 import { logger } from '../../../utils/logger.js';
-import type { TraceEvent } from '@xynehq/jaf';
 
 export interface LangfuseConfig {
   secretKey: string;
@@ -40,8 +36,21 @@ export function isLangfuseEnabled(): boolean {
   return getLangfuseConfig().enabled;
 }
 
-let nodeSDK: NodeSDK | null = null;
+let traceCollector: TraceCollector | null = null;
 let isInitialized = false;
+
+function getTraceCollector(): TraceCollector {
+  if (!traceCollector) {
+
+    traceCollector = createCompositeTraceCollector();
+  }
+  
+  return traceCollector;
+}
+
+// ============================================================================
+// Initialization
+// ============================================================================
 
 export function initializeLangfuseTracing(): void {
   if (isInitialized) {
@@ -56,43 +65,12 @@ export function initializeLangfuseTracing(): void {
   }
   
   try {
-    nodeSDK = new NodeSDK({
-      spanProcessors: [new LangfuseSpanProcessor()],
-      serviceName: 'xyne-ai-agent',
-    });
-    
-    nodeSDK.start();
+    getTraceCollector();
     isInitialized = true;
-    
     logger.info('[Langfuse] Tracing initialized successfully');
-    logger.info(`[Langfuse] Base URL: ${config.baseUrl}`);
   } catch (error) {
     logger.error('[Langfuse] Failed to initialize tracing:', error);
   }
-}
-
-export async function shutdownLangfuseTracing(): Promise<void> {
-  if (nodeSDK) {
-    try {
-      await nodeSDK.shutdown();
-      logger.info('[Langfuse] Tracing shut down successfully');
-    } catch (error) {
-      logger.error('[Langfuse] Error shutting down:', error);
-    }
-    nodeSDK = null;
-    isInitialized = false;
-  }
-}
-
-const activeObservations = new Map<string, {
-  runSpan: LangfuseSpan;
-  generations: Map<string, LangfuseGeneration>;
-  tools: Map<string, LangfuseTool>;
-  langfuseTraceId?: string; // Store the actual Langfuse trace ID
-}>();
-
-export function getLangfuseTraceId(runId: string): string | undefined {
-  return activeObservations.get(runId)?.langfuseTraceId;
 }
 
 export function createOnEventHandler(): (event: TraceEvent) => void {
@@ -102,156 +80,84 @@ export function createOnEventHandler(): (event: TraceEvent) => void {
     return () => {};
   }
   
+  const collector = getTraceCollector();
+  
   return (event: TraceEvent) => {
     try {
-      handleLangfuseEvent(event);
+      handleEventWithEnrichment(event, collector);
     } catch (error) {
       logger.error('[Langfuse] Error handling event:', error);
     }
   };
 }
 
-function handleLangfuseEvent(event: TraceEvent): void {
+
+const SKIP_EVENTS = new Set([
+  'agent_processing',
+  'before_tool_execution', 
+  'assistant_message',
+  'turn_start',
+  'turn_end',
+]);
+
+/**
+ * Handle event with session/user enrichment
+ */
+function handleEventWithEnrichment(event: TraceEvent, collector: TraceCollector): void {
+  if (SKIP_EVENTS.has(event.type)) {
+    return;
+  }
+
   switch (event.type) {
     case 'run_start': {
-      const { runId, traceId, context, messages } = event.data;
-      const sessionId = context?.sessionId || 'unknown';
+      const { runId, traceId, context } = event.data;
       
-      const runSpan = startObservation('xyne-ai-run', {
-        input: messages ? JSON.stringify(messages) : undefined,
-        metadata: {
-          runId,
-          traceId,
-          sessionId,
-          channelId: context?.channelId,
-          conversationId: context?.conversationId,
-          userId: context?.userId,
-          source: context?.source,
-          userInfo: context?.userInfo ? {
-            userId: context.userInfo.userId,
-            userName: context.userInfo.userName,
-            userEmail: context.userInfo.userEmail,
-          } : undefined,
+      // Extract session and user info from context
+      const sessionId = context?.sessionId || context?.session_id;
+      const userInfo = context?.userInfo;
+      const userId = userInfo?.userId || context?.userId || context?.user_id;
+      const userEmail = userInfo?.userEmail;
+      const userName = userInfo?.userName;
+      
+      const enrichedEvent = {
+        type: 'run_start' as const,
+        data: {
+          ...event.data,
+          sessionId: sessionId,
+          userId: userEmail || userId,
+          agentName: 'ask-ai-agent',
+          context: {
+            ...context,
+            agentName: 'ask-ai-agent',
+            sessionId,
+            userId: userEmail || userId,
+            userInfo: {
+              userId: userId,
+              userName: userName,
+              userEmail: userEmail,
+            },
+          },
         },
-      });
+      };
       
-      // Capture the actual Langfuse trace ID from the span
-      const langfuseTraceId = (runSpan as any).traceId;
+      collector.collect(enrichedEvent);
       
-      activeObservations.set(runId, {
-        runSpan,
-        generations: new Map(),
-        tools: new Map(),
-        langfuseTraceId,
-      });
-      
-      logger.info(`[Langfuse] [${sessionId}] Started trace. runId: ${runId}, langfuseTraceId: ${langfuseTraceId}`);
-      break;
-    }
-    
-    case 'llm_call_start': {
-      const { runId, agentName, model, messages } = event.data;
-      const state = activeObservations.get(runId);
-      
-      if (state?.runSpan) {
-        const generation = state.runSpan.startObservation(`${agentName}-generation`, {
-          input: messages ? JSON.stringify(messages) : undefined,
-          metadata: { model },
-        }, { asType: 'generation' });
-        
-        const genId = `gen-${Date.now()}`;
-        state.generations.set(genId, generation);
-      }
-      break;
-    }
-    
-    case 'llm_call_end': {
-      const { runId, choice, usage } = event.data;
-      const state = activeObservations.get(runId);
-      
-      if (state) {
-        const genEntries = Array.from(state.generations.entries());
-        const lastEntry = genEntries.find(([key]) => key.startsWith('gen-'));
-        
-        if (lastEntry) {
-          const [genId, observation] = lastEntry;
-          const generation = observation as LangfuseGeneration;
-          
-          const usageDetails: Record<string, number> = {};
-          if (usage?.prompt_tokens) usageDetails.input = usage.prompt_tokens;
-          if (usage?.completion_tokens) usageDetails.output = usage.completion_tokens;
-          if (usage?.total_tokens) usageDetails.total = usage.total_tokens;
-          
-          generation.update({
-            output: choice?.message?.content,
-            usageDetails: Object.keys(usageDetails).length > 0 ? usageDetails : undefined,
-          });
-          
-          generation.end();
-          state.generations.delete(genId);
-        }
-      }
-      break;
-    }
-    
-    case 'tool_call_start': {
-      const { runId, toolName, args } = event.data;
-      const state = activeObservations.get(runId);
-      
-      if (state?.runSpan) {
-        const toolObs = state.runSpan.startObservation(`tool-${toolName}`, {
-          input: JSON.stringify(args),
-          metadata: { toolName },
-        }, { asType: 'tool' });
-        
-        state.tools.set(`tool-${toolName}-${Date.now()}`, toolObs);
-      }
-      break;
-    }
-    
-    case 'tool_call_end': {
-      const { runId, toolName, result, executionTime } = event.data;
-      const state = activeObservations.get(runId);
-      
-      if (state) {
-        for (const [key, tool] of state.tools.entries()) {
-          if (key.startsWith(`tool-${toolName}`)) {
-            tool.update({
-              output: result,
-              metadata: { executionTime },
-            });
-            tool.end();
-            state.tools.delete(key);
-            break;
-          }
-        }
-      }
+      logger.info(`[Langfuse] [${sessionId || 'no-session'}] Started trace. runId: ${runId}, langfuseTraceId: ${traceId}`);
       break;
     }
     
     case 'run_end': {
-      const { runId, outcome } = event.data;
-      const state = activeObservations.get(runId);
+      const { runId } = event.data;
       
-      if (state?.runSpan) {
-        state.runSpan.update({
-          output: outcome.status === 'completed' 
-            ? JSON.stringify(outcome.output)
-            : outcome.status === 'error'
-              ? JSON.stringify({ error: outcome.error })
-              : undefined,
-          metadata: { status: outcome.status },
-        });
-        
-        state.runSpan.end();
-        activeObservations.delete(runId);
-        
-        logger.info(`[Langfuse] Ended trace. runId: ${runId}, status: ${outcome.status}`);
-      }
+      collector.collect(event);
+      
+      const outcome = event.data.outcome;
+      logger.info(`[Langfuse] Ended trace. runId: ${runId}, status: ${outcome.status}`);
       break;
     }
     
     default:
+      collector.collect(event);
       break;
   }
 }

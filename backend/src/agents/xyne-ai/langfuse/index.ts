@@ -7,11 +7,9 @@
 
 export {
   initializeLangfuseTracing,
-  shutdownLangfuseTracing,
   isLangfuseEnabled,
   createOnEventHandler,
   getLangfuseConfig,
-  getLangfuseTraceId,
   type LangfuseConfig,
 } from './tracing.js';
 
