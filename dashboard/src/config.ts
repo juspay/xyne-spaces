@@ -54,4 +54,4 @@ export const LOGGER_BASE_URL = isElectronBundled
 
 export const MAX_RETRIES = 3;
 
-export const SHAREABLE_ORIGIN = isProd ? 'https://xyne-spaces.web.app' : window.location.origin;
+export const SHAREABLE_ORIGIN = window.location.origin;
