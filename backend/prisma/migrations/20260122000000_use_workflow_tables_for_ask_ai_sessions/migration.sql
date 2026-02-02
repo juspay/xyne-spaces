@@ -9,7 +9,7 @@ CREATE TABLE "workflow_execution_users" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "workflow_execution_users_pkey" PRIMARY KEY ("id") s
+    CONSTRAINT "workflow_execution_users_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
