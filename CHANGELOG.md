@@ -1,3 +1,15 @@
+## [1.24.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.23.0...v1.24.0) (2026-02-03)
+
+
+### Features
+
+* add participants icon to show the list of participants in call ([eacf2f2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/eacf2f2114f2afa832c58c136182605dd226eccc)), closes [#2669](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2669)
+
+
+### Bug Fixes
+
+* correctly parsing html for copy message functionality rather than plain text ([e18ae78](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e18ae78415903e36a0e7523a136b406221282222)), closes [#2709](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2709)
+
 ## [1.23.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.22.0...v1.23.0) (2026-02-03)
 
 
