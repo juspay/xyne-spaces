@@ -100,6 +100,8 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'users':
     case 'user_presence':
     case 'user_profiles':
+    case 'resources':
+    case 'resource_access':
     case 'pull_requests':
     case 'channels':
     case 'channel_participants':

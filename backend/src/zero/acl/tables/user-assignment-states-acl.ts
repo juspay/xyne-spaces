@@ -4,13 +4,14 @@ import {
   type TableSchema,
 } from '../core/types';
 import { Schema } from '@xyne/shared';
+import { hasUserGroupsAdminAccess } from '../core/admin-access';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 
 export class UserAssignmentStatesACL extends BaseACL<'user_assignment_states'> {
 
   async canInsert(args: InsertValue<TableSchema<'user_assignment_states'>>, tx: Transaction<Schema>): Promise<void> {
-    // Only group members can create assignment states
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', args.userGroupId)
@@ -18,8 +19,10 @@ export class UserAssignmentStatesACL extends BaseACL<'user_assignment_states'> {
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('User assignment state insert failed: you must be a group member', 'user_assignment_states');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('User assignment state insert failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_assignment_states');
     }
   }
 
@@ -30,7 +33,7 @@ export class UserAssignmentStatesACL extends BaseACL<'user_assignment_states'> {
       throw new MutationACLError('User assignment state update failed: state does not exist', 'user_assignment_states');
     }
 
-    // Only group members can update
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', state.userGroupId)
@@ -38,13 +41,15 @@ export class UserAssignmentStatesACL extends BaseACL<'user_assignment_states'> {
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('User assignment state update failed: you must be a group member', 'user_assignment_states');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('User assignment state update failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_assignment_states');
     }
   }
 
   async canUpsert(args: any, tx: Transaction<Schema>): Promise<void> {
-    // Only group members can upsert
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', args.userGroupId)
@@ -52,8 +57,10 @@ export class UserAssignmentStatesACL extends BaseACL<'user_assignment_states'> {
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('User assignment state upsert failed: you must be a group member', 'user_assignment_states');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('User assignment state upsert failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_assignment_states');
     }
   }
 }

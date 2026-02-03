@@ -739,6 +739,28 @@ export const userProfileTable = table('user_profiles')
   })
   .primaryKey('id');
 
+export const resourceTable = table('resources')
+  .columns({
+    id: string(),
+    name: string(),
+    description: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const resourceAccessTable = table('resource_access')
+  .columns({
+    id: string(),
+    groupId: string().optional(),
+    userId: string().optional(),
+    resourceId: string(),
+    accessType: enumeration<AccessType>(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const pullRequestsTable = table('pull_requests')
   .columns({
     id: string(),
@@ -1706,6 +1728,32 @@ export const userPresenceTableRelationships = relationships(userPresenceTable, (
   }),
 }));
 
+export const resourceTableRelationships = relationships(resourceTable, ({ many }) => ({
+  resourceAccess: many({
+    sourceField: ['id'],
+    destField: ['resourceId'],
+    destSchema: resourceAccessTable,
+  }),
+}));
+
+export const resourceAccessTableRelationships = relationships(resourceAccessTable, ({ one }) => ({
+  userGroup: one({
+    sourceField: ['groupId'],
+    destField: ['id'],
+    destSchema: userGroupTable,
+  }),
+  user: one({
+    sourceField: ['userId'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+  resource: one({
+    sourceField: ['resourceId'],
+    destField: ['id'],
+    destSchema: resourceTable,
+  }),
+}));
+
 // MANUAL RELATIONS WRITTEN BELOW
 
 export const conversationTableRelationships = relationships(conversationTable, ({ one, many }) => ({
@@ -2179,6 +2227,8 @@ export const schema = createSchema({
     userTable,
     userPresenceTable,
     userProfileTable,
+    resourceTable,
+    resourceAccessTable,
     pullRequestsTable,
     organizationTable,
     orgMemberTable,
@@ -2238,6 +2288,8 @@ export const schema = createSchema({
     userGroupTableRelationships,
     userTableRelationships,
     userPresenceTableRelationships,
+    resourceTableRelationships,
+    resourceAccessTableRelationships,
     conversationTableRelationships,
     conversationParticipantTableRelationships,
     channelTableRelationships,
@@ -2295,6 +2347,8 @@ export type BoardComplexityScore = Row<typeof schema.tables.board_complexity_sco
 export type UserWorkloadMapping = Row<typeof schema.tables.user_workload_mappings>;
 export type UserExpertiseMapping = Row<typeof schema.tables.user_expertise_mappings>;
 export type UserPresence = Row<typeof schema.tables.user_presence>;
+export type Resource = Row<typeof schema.tables.resources>;
+export type ResourceAccess = Row<typeof schema.tables.resource_access>;
 export type PullRequests = Row<typeof schema.tables.pull_requests>;
 export type Organization = Row<typeof schema.tables.organizations>;
 export type OrgMember = Row<typeof schema.tables.org_members>;
