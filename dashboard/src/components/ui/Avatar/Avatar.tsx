@@ -157,7 +157,7 @@ const Avatar = ({
               return (
                 <span
                   className={cn(
-                    'absolute bottom-0 right-0 block rounded-full ring-2 ring-background',
+                    'absolute bottom-[1px] right-[1px] block rounded-full ring-1 ring-background',
                     'bg-green-500',
                     size === 'sm' ? 'size-1.5 ring-1' : 'size-2.5',
                     size === 'lg' || size === 'xl' ? 'size-3.5' : '',
@@ -171,7 +171,7 @@ const Avatar = ({
               return (
                 <span
                   className={cn(
-                    'absolute bottom-0 right-0 block rounded-full ring-2 ring-background',
+                    'absolute bottom-[1px] right-[1px] block rounded-full ring-1 ring-background',
                     'bg-gray-300', // Solid grey
                     size === 'sm' ? 'size-1.5 ring-1' : 'size-2.5',
                     size === 'lg' || size === 'xl' ? 'size-3.5' : '',
