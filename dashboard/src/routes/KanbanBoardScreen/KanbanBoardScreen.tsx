@@ -588,6 +588,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     formFieldsById,
   ]);
 
+  useEffect(() => {
+    if (!isDraggingRef.current && filteredTickets) {
+      setLocalTickets(filteredTickets); // 🔄 SYNC!
+    }
+  }, [filteredTickets]);
+
   const availableTags = useMemo(() => {
     if (!allTags || allTags.length === 0) return undefined;
     const uniqueTags = new Set(allTags.map(tag => tag.name));
@@ -691,7 +697,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [boardId, allBoards]);
 
   const processedGroups = useMemo(() => {
-    const groupedRows = groupTickets(filteredTickets, groupBy);
+    const groupedRows = groupTickets(localTickets, groupBy);
     const shouldGroupByStatus =
       (!filteredSingleBoardId && ['project', 'all', 'my-tickets'].includes(viewMode)) ||
       (channelId && viewMode === 'project' && channelViewType !== 'stage');
@@ -753,7 +759,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       };
     });
   }, [
-    filteredTickets,
+    localTickets,
     groupBy,
     stages,
     filteredSingleBoardId,
