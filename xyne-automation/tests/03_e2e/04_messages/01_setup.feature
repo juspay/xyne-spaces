@@ -1,4 +1,4 @@
-@e2e @messaging @setup @dm @group-chat @channel
+@e2e @messaging @setup @dm @group-chat @channel @canvas
 Feature: Messages Test Setup
   Initialize browser instances, login users, and complete onboarding
   This feature must run before other messaging tests

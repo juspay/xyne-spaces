@@ -1,4 +1,4 @@
-@e2e @messaging @dm
+@e2e @messaging @dm @canvas
 Feature: DM Creation E2E Flow
   As a user
   I want to create a direct message conversation with another user

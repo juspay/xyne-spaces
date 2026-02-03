@@ -215,7 +215,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
 
   return (
     <>
-      <div className='w-full max-w-md p-6'>
+      <div className='w-full max-w-md p-6' data-testid='canvas-share-modal'>
         {/* Make Visible to Channel Toggle */}
         <div className='flex items-center justify-between py-4'>
           <div className='flex items-center gap-3'>
@@ -231,6 +231,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
             className={`relative w-12 h-6 rounded-full transition-all duration-200 ${
               isPublic ? 'bg-green-500' : 'bg-gray-300'
             } ${!isOwner ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            data-testid='canvas-visibility-toggle'
           >
             <span
               aria-hidden='true'
@@ -263,6 +264,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
             <button
               onClick={handleCopyLink}
               className='px-3 py-2 text-sm text-gray-500 hover:text-gray-700 font-medium border border-gray-300 rounded-md bg-white hover:bg-gray-50'
+              data-testid='canvas-copy-link-button'
             >
               Copy
             </button>
@@ -284,6 +286,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
               label=''
               hintText=''
               {...(channelId && { channelId })}
+              data-testid='canvas-user-search-input'
             />
 
             {/* Role Selection Buttons */}

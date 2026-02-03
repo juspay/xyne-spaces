@@ -184,7 +184,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   }
 
   return (
-    <div className='flex flex-col h-full bg-white'>
+    <div className='flex flex-col h-full bg-white' data-testid='canvas-list'>
       <div className='px-4 md:px-6 py-4 border-b border-gray-100'>
         <div className='flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0'>
           <div className='flex items-center gap-2'>
@@ -195,6 +195,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   ? 'bg-gray-100 text-gray-900'
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
+              data-testid='canvas-filter-all'
             >
               All
             </button>
@@ -205,6 +206,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   ? 'bg-gray-100 text-gray-900'
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
+              data-testid='canvas-filter-created-by-me'
             >
               Created by me
             </button>
@@ -216,6 +218,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                     ? 'bg-blue-100 text-blue-700'
                     : 'text-gray-600 hover:bg-gray-50'
                 }`}
+                data-testid='canvas-filter-quarto-docs'
               >
                 <BookMarked className='w-3.5 h-3.5' />
                 Quarto Docs
@@ -272,6 +275,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   tabIndex={0}
                   className='group flex items-center px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer'
                   onClick={() => (isQuartoDoc ? handleQuartoDocClick(canvas) : onSelect(canvas))}
+                  data-testid={`canvas-item-${canvas.id}`}
                   onKeyDown={(e: React.KeyboardEvent) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
@@ -423,6 +427,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                                 setDeletingCanvasId(canvas.id);
                               }}
                               className='flex items-center gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50'
+                              data-testid='canvas-delete-button'
                             >
                               <Trash2 className='w-4 h-4' />
                               Delete
