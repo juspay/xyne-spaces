@@ -252,6 +252,33 @@ export class CallController {
         return;
       }
 
+      // Create participant record if it doesn't exist
+      if (call) {
+        const existingParticipant = await db.callParticipant.findFirst({
+          where: {
+            callId: call.id,
+            userId: user.id,
+          },
+        });
+
+        if (!existingParticipant) {
+          // Create new participant record
+          await db.callParticipant.create({
+            data: {
+              id: uuidv4(),
+              callId: call.id,
+              userId: user.id,
+              invitedBy: user.id,
+              invitedAt: new Date(),
+              response: InvitationResponse.ACCEPTED,
+              respondedAt: new Date(),
+              joinedAt: new Date(),
+            },
+          });
+          logger.info(`Created participant record for user ${user.id} joining call ${callId}`);
+        }
+      }
+
       // Generate access token
       const token = await livekitService.generateAccessToken({
         userIdentity: user.id,

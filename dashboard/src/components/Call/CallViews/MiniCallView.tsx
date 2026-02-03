@@ -11,6 +11,7 @@ import { CallStateTransition } from '../CallStateTransition/CallStateTransition'
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
+import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 
 interface MiniCallViewProps {
   participants: ParticipantInfo[];
@@ -76,6 +77,16 @@ export function MiniCallView({
     startWidth: number;
     startHeight: number;
   } | null>(null);
+
+  // State for participants sidebar
+  const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
+
+  // Close participants sidebar when chat opens
+  useEffect(() => {
+    if (isChatOpen && isParticipantsSidebarOpen) {
+      setIsParticipantsSidebarOpen(false);
+    }
+  }, [isChatOpen, isParticipantsSidebarOpen]);
 
   // Calculate dynamic icon size based on width
   const iconSize = Math.max(12, Math.min(20, size.width / 25));
@@ -302,6 +313,7 @@ export function MiniCallView({
                     isCameraEnabled={isCameraEnabled}
                     isScreenSharing={isScreenSharing}
                     isChatOpen={isChatOpen}
+                    isParticipantsSidebarOpen={isParticipantsSidebarOpen}
                     isAIAssistantEnabled={isAIAssistantEnabled}
                     aiController={aiController}
                     localParticipantId={localParticipantId}
@@ -313,6 +325,15 @@ export function MiniCallView({
                     onDisconnect={onDisconnect}
                     onToggleView={onExpand}
                     onToggleChat={onToggleThread}
+                    onToggleParticipantsSidebar={() => {
+                      setIsParticipantsSidebarOpen(prev => {
+                        // If opening participants sidebar, close chat
+                        if (!prev && isChatOpen) {
+                          onToggleThread();
+                        }
+                        return !prev;
+                      });
+                    }}
                     onToggleAIAssistant={() => roomActor.send({ type: 'TOGGLE_AI_ASSISTANT' })}
                     onRequestControl={onRequestControl}
                     viewMode='mini'
@@ -340,6 +361,21 @@ export function MiniCallView({
                 channelId={channelId}
                 conversationId={conversationId}
                 onClose={onToggleThread}
+              />
+
+              <ResizeHandles showCorner={true} />
+            </div>
+          )}
+
+          {/* Participants Sidebar - Below Call */}
+          {isParticipantsSidebarOpen && (
+            <div
+              className='bg-white shadow-2xl border-2 border-gray-200 border-t-0 overflow-hidden relative h-[400px] rounded-b-xl'
+              style={{ width: `${size.width}px` }}
+            >
+              <ParticipantsSidebar
+                callId={callId}
+                onClose={() => setIsParticipantsSidebarOpen(false)}
               />
 
               <ResizeHandles showCorner={true} />

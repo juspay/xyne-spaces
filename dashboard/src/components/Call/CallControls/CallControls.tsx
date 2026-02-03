@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  UserPlus,
+  Users,
   Share2,
   Mic,
   MicOff,
@@ -16,7 +16,6 @@ import {
   Bot,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
-import { InviteToCallModal } from '../CallModals/InviteToCallModal';
 import { cn } from '../../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../../../machines/roomMachine';
@@ -29,6 +28,7 @@ interface CallControlsProps {
   isCameraEnabled: boolean;
   isScreenSharing: boolean;
   isChatOpen: boolean;
+  isParticipantsSidebarOpen: boolean;
   isAIAssistantEnabled: boolean;
   aiController: { id: string; name: string } | null;
   localParticipantId: string | null;
@@ -40,6 +40,7 @@ interface CallControlsProps {
   onDisconnect: () => void;
   onToggleView: () => void;
   onToggleChat: () => void;
+  onToggleParticipantsSidebar: () => void;
   onToggleAIAssistant: () => void;
   onRequestControl?: (() => void) | undefined;
   viewMode?: 'mini' | 'full';
@@ -56,10 +57,11 @@ export function CallControls({
   isCameraEnabled,
   isScreenSharing,
   isChatOpen,
+  isParticipantsSidebarOpen,
   isAIAssistantEnabled,
   aiController,
   localParticipantId,
-  callId,
+  callId: _callId,
   roomLink,
   onToggleMic,
   onToggleCamera,
@@ -67,6 +69,7 @@ export function CallControls({
   onDisconnect,
   onToggleView,
   onToggleChat,
+  onToggleParticipantsSidebar,
   onToggleAIAssistant,
   onRequestControl,
   viewMode = 'full',
@@ -75,7 +78,6 @@ export function CallControls({
   pendingControlRequest,
   requestedAiController,
 }: CallControlsProps): React.ReactElement {
-  const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCopied, setShowCopied] = useState(false);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
   const [showMicMenu, setShowMicMenu] = useState(false);
@@ -393,14 +395,19 @@ export function CallControls({
 
         {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-gray-700/50 mx-0.5'></div>}
 
-        {/* Invite Button */}
+        {/* Participants Button */}
         <button
-          onClick={() => setShowInviteModal(true)}
-          className={cn(buttonClasses, 'bg-gray-700 hover:bg-gray-600 text-white')}
+          onClick={onToggleParticipantsSidebar}
+          className={cn(
+            buttonClasses,
+            isParticipantsSidebarOpen
+              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+              : 'bg-gray-700 hover:bg-gray-600 text-white',
+          )}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-          title='Invite users to call'
+          title='Participants'
         >
-          <UserPlus
+          <Users
             className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
             style={
               hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
@@ -511,13 +518,6 @@ export function CallControls({
           />
         </button>
       </div>
-
-      {/* Invite Modal */}
-      <InviteToCallModal
-        isOpen={showInviteModal}
-        onClose={() => setShowInviteModal(false)}
-        callId={callId}
-      />
     </>
   );
 }
