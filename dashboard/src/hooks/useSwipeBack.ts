@@ -75,6 +75,9 @@ export const useSwipeBack = (
 
       touchStartX = touch.clientX;
       touchStartY = touch.clientY;
+      // Reset end coordinates to prevent false positives from previous touches
+      touchEndX = 0;
+      touchEndY = 0;
     };
 
     const handleTouchMove = (event: Event): void => {
@@ -89,6 +92,11 @@ export const useSwipeBack = (
     const handleTouchEnd = (): void => {
       // Check if swipe started from left edge
       if (touchStartX > edgeThreshold) {
+        return;
+      }
+
+      // If touchmove never fired (e.g., a tap), touchEndX will be 0 - ignore these
+      if (touchEndX === 0) {
         return;
       }
 
