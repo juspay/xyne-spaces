@@ -9,6 +9,7 @@ import { CallStateTransition } from '../CallStateTransition/CallStateTransition'
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
+import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { roomActor } from '../../../machines/roomMachine';
 
 interface FullCallViewProps {
@@ -66,6 +67,7 @@ export function FullCallView({
   // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
   // UI state
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
+  const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
 
   // Get all participants sharing screen
   // In native mode, use isScreenShareEnabled flag; in web mode, check the actual track publication
@@ -107,6 +109,27 @@ export function FullCallView({
     setFocusedScreenShareIdentity(identity);
   }, []);
 
+  // Handle toggling participants sidebar (closes chat if open)
+  const handleToggleParticipantsSidebar = useCallback((): void => {
+    setIsParticipantsSidebarOpen(prev => {
+      // If opening participants sidebar, close chat
+      if (!prev && isChatOpen) {
+        onToggleThread();
+      }
+      return !prev;
+    });
+  }, [isChatOpen, onToggleThread]);
+
+  // Close participants sidebar when chat opens
+  useEffect(() => {
+    if (isChatOpen && isParticipantsSidebarOpen) {
+      setIsParticipantsSidebarOpen(false);
+    }
+  }, [isChatOpen, isParticipantsSidebarOpen]);
+
+  // Determine if any sidebar is open (for layout adjustments)
+  const isSidebarOpen = isChatOpen || isParticipantsSidebarOpen;
+
   return (
     <div
       className={cn(
@@ -118,7 +141,7 @@ export function FullCallView({
           // Screen share layout with sidebar
           <div
             className='h-full w-full pb-32 sm:pb-36 transition-all duration-300'
-            style={{ paddingRight: isChatOpen ? 'min(500px, 100vw)' : '0' }}
+            style={{ paddingRight: isSidebarOpen ? 'min(500px, 100vw)' : '0' }}
           >
             <ScreenShareView
               focusedScreenShare={focusedScreenShare}
@@ -135,7 +158,7 @@ export function FullCallView({
           // Normal grid layout when no screen share
           <div
             className='h-full w-full p-2 sm:p-4 pb-32 sm:pb-36 transition-all duration-300'
-            style={{ paddingRight: isChatOpen ? 'min(500px, 100vw)' : '0' }}
+            style={{ paddingRight: isSidebarOpen ? 'min(500px, 100vw)' : '0' }}
           >
             <ParticipantGrid
               participants={participants}
@@ -149,7 +172,7 @@ export function FullCallView({
         <div
           className='absolute bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-1rem)] sm:w-auto max-w-[calc(100%-1rem)] transition-transform duration-300'
           style={{
-            transform: isChatOpen
+            transform: isSidebarOpen
               ? 'translateX(calc(-50% - min(250px, 50vw)))'
               : 'translateX(-50%)',
           }}
@@ -159,6 +182,7 @@ export function FullCallView({
             isCameraEnabled={isCameraEnabled}
             isScreenSharing={isScreenSharing}
             isChatOpen={isChatOpen}
+            isParticipantsSidebarOpen={isParticipantsSidebarOpen}
             isAIAssistantEnabled={isAIAssistantEnabled}
             aiController={aiController}
             localParticipantId={localParticipantId}
@@ -170,6 +194,7 @@ export function FullCallView({
             onDisconnect={onDisconnect}
             onToggleView={onMinimize}
             onToggleChat={onToggleThread}
+            onToggleParticipantsSidebar={handleToggleParticipantsSidebar}
             onToggleAIAssistant={() => roomActor.send({ type: 'TOGGLE_AI_ASSISTANT' })}
             onRequestControl={onRequestControl}
             viewMode='full'
@@ -187,6 +212,13 @@ export function FullCallView({
             conversationId={conversationId}
             onClose={onToggleThread}
           />
+        </div>
+      )}
+
+      {/* Participants Sidebar */}
+      {isParticipantsSidebarOpen && (
+        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-white shadow-xl z-[60]'>
+          <ParticipantsSidebar callId={callId} onClose={handleToggleParticipantsSidebar} />
         </div>
       )}
 
