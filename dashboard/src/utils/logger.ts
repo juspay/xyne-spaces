@@ -2,7 +2,6 @@ import { type Platform } from '../hooks/usePlatform';
 import { detectPlatform } from '../hooks/usePlatform';
 import { FLUSH_INTERVAL_IN_MS, LOGGER_BASE_URL, MAX_BATCH_SIZE, MAX_RETRIES } from '../config';
 import type { WorkerMessage } from './logger.worker';
-import packageJson from '../../../package.json';
 import { v4 as uuidv4 } from 'uuid';
 
 export const LogLevel = {
@@ -101,7 +100,7 @@ export class Logger implements LoggerConfig {
         flushIntervalInMs: FLUSH_INTERVAL_IN_MS,
         maxBatchSize: MAX_BATCH_SIZE,
         maxRetries: MAX_RETRIES,
-        version: packageJson.version,
+        version: '1.0',
       };
       if (this.emailId !== null) {
         payload.emailId = this.emailId;
