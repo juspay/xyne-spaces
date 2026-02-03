@@ -33,7 +33,7 @@ When('I open the Xyne-Space at {string}', async function (this: CustomWorld, end
     if (!channelId) {
       throw new Error(`Path "${endpoint}" not found in storage. Make sure it was created first.`);
     }
-    url = `${this.config.dashboard.baseUrl}/chat/${channelId}`;
+    url = `${this.config.dashboard.baseUrl}/chat/dir/${channelId}`;
   }
 
   await this.page.goto(url);

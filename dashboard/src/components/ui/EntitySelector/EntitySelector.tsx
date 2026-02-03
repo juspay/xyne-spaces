@@ -36,6 +36,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   isOpen,
   onOpenChange,
   showIndicator = true,
+  testId,
 }) => {
   // ==================== STATE ====================
   const [internalOpen, setInternalOpen] = useState(false);
@@ -134,6 +135,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
     return (
       <button
         type='button'
+        data-testid={testId}
         className={cn(
           'group flex items-center gap-1.5 text-sm rounded-lg transition-colors bg-white',
           noBorder ? 'border-none' : 'border border-gray-200 hover:bg-gray-50 px-2 py-0.5 ',
@@ -182,6 +184,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         aria-expanded={open}
         aria-controls='entity-selector-listbox'
         aria-haspopup='listbox'
+        data-testid={testId}
         style={{ width }}
         onPointerDown={e => {
           if (e.target !== inputRef.current) {
@@ -206,6 +209,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         <input
           ref={inputRef}
           type='text'
+          data-testid={testId ? `${testId}-input` : undefined}
           style={{ fieldSizing: 'content' }}
           className={cn(
             'border-none focus-visible:ring-0 text-[13px] placeholder:text-gray-700 outline-none bg-gray-50 max-w-40 min-w-9 truncate',
@@ -291,6 +295,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                 <Search className='absolute left-1 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400' />
                 <input
                   type='text'
+                  data-testid={testId ? `${testId}-search` : undefined}
                   placeholder={searchPlaceholder}
                   value={searchValue}
                   onChange={e => {
@@ -314,7 +319,11 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
               <div className='p-4 text-center text-sm text-gray-500'>Loading...</div>
             ) : filteredOptions.length > 0 ? (
               // Options list
-              <ul role='listbox' className='p-1 space-y-1'>
+              <ul
+                role='listbox'
+                data-testid={testId ? `${testId}-options` : undefined}
+                className='p-1 space-y-1'
+              >
                 {filteredOptions.map(option => (
                   <li
                     role='option'

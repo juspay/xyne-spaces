@@ -251,6 +251,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     <button
       type='button'
       onClick={onClick}
+      data-testid={`ticket-card-${ticket.id}`}
       className={cn(
         width,
         'text-left bg-[#FDFDFD] rounded-xl border w-full max-w-lg hover:shadow-sm transition-all cursor-pointer group shadow-sm relative container-type-inline overflow-hidden',

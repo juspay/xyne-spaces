@@ -1371,16 +1371,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </div>
       )}
       {/* Sub-Tickets Section */}
-      <div className='mt-6 space-y-6'>
+      <div className='mt-6 space-y-6' data-testid='sub-tickets-section'>
         <div>
           <div className='flex items-center gap-3'>
             <p className='text-base font-semibold text-gray-900'>Sub-Tickets</p>
-            <span className='inline-flex items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'>
+            <span
+              className='inline-flex items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'
+              data-testid='sub-tickets-count'
+            >
               {subTickets.length}
             </span>
           </div>
 
-          <div className='mt-4 space-y-3'>
+          <div className='mt-4 space-y-3' data-testid='sub-tickets-list'>
             {subTickets.length > 0 ? (
               <div className='space-y-2'>
                 {subTickets.map(subTicket => {
@@ -1428,6 +1431,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           handleClick();
                         }
                       }}
+                      data-testid={`sub-ticket-item-${subTicket.id}`}
                       className='flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer'
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
@@ -1469,6 +1473,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             ) : null}
             <button
               onClick={() => setIsSubTicketModalOpen(true)}
+              data-testid='create-sub-ticket-button'
               className='flex items-center gap-2 mt-3 text-sm text-gray-600 hover:text-gray-900 transition-colors'
             >
               <Plus size={16} />

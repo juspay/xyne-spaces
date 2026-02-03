@@ -88,4 +88,7 @@ export interface EntitySelectorProps {
   inputIcon?: React.ReactNode;
 
   inputClassName?: string;
+
+  /** Optional: data-testid for automation testing */
+  testId?: string;
 }

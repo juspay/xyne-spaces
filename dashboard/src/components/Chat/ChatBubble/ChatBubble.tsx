@@ -488,6 +488,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         containerRef.current = el;
         // (observerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
       }}
+      data-testid={`chat-message-${message.messageId}`}
       data-show-avatar={showAvatar}
       className='no-select-mobile relative transition-all duration-200 ease-in-out'
       style={{ touchAction: 'pan-y' }}

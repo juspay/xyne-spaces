@@ -37,6 +37,8 @@ export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): Re
       }}
       role='button'
       tabIndex={0}
+      data-testid={`project-card-${project.id}`}
+      data-project-name={project.name}
       className='bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer'
     >
       <div className='flex items-start justify-between mb-4'>

@@ -989,6 +989,7 @@ export const ThreadMessages = ({
                           className='px-3 py-1.5 text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors duration-200 flex items-center gap-2'
                           onClick={handleCreateTicket}
                           title='Create ticket'
+                          data-testid='thread-create-ticket-button'
                         >
                           <Ticket size={18} />
                           <span className='text-sm font-medium'>Create Ticket</span>

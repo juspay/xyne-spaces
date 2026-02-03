@@ -26,7 +26,11 @@ const ProjectItem = ({
   const boardCount = project.boards?.length || 0;
 
   return (
-    <div className='mb-1'>
+    <div
+      className='mb-1'
+      data-testid={`project-item-${project.id}`}
+      data-project-name={project.name}
+    >
       <SidebarItem
         label={project.name}
         onClick={onToggle}
@@ -38,7 +42,7 @@ const ProjectItem = ({
 
       {/* Nested Boards */}
       {isExpanded && project.boards && project.boards.length > 0 && (
-        <div className='ml-6 mt-1'>
+        <div className='ml-6 mt-1' data-testid={`project-boards-${project.id}`}>
           {project.boards.map(board => (
             <SidebarItem
               key={board.id}
@@ -46,6 +50,7 @@ const ProjectItem = ({
               variant='nested'
               isActive={activeBoardId === board.id}
               onClick={() => onBoardClick(board.id)}
+              dataTestId={`board-item-${board.id}`}
             />
           ))}
         </div>

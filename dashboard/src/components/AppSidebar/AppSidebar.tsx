@@ -280,6 +280,8 @@ const AppSidebar = (): ReactElement => {
               const isActive = activeRoute === item.path;
               const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
 
+              const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
+
               return (
                 <li
                   key={item.path}
@@ -292,6 +294,7 @@ const AppSidebar = (): ReactElement => {
                     <Link
                       to={item.path}
                       onClick={() => handleNavigationClick(item.label)}
+                      data-testid={testId}
                       className={`size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
                         isActive ? 'text-white' : 'bg-transparent text-gray-700'
                       }`}
