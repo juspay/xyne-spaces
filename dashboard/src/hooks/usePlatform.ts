@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { detectReactNativeWebView } from '../utils/reactNativeBridge';
 
 export interface UsePlatformReturn {
   platform: Platform;
@@ -112,7 +113,12 @@ export const detectPlatform = (): Platform => {
     return 'electron';
   }
 
-  // Mobile detection should only be based on window width.
+  // React Native WebView is always mobile (handles display/font scaling edge cases)
+  if (detectReactNativeWebView()) {
+    return 'mobile';
+  }
+
+  // Fallback to viewport-based detection for standalone browsers
   if (window.innerWidth < 700) {
     return 'mobile';
   }
