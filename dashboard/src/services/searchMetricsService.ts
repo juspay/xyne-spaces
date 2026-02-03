@@ -20,7 +20,7 @@ class SearchMetricsService {
   /**
    * Track when a new search session starts
    */
-  trackSessionStart(searchSessionId: string, userId: string, userEmail: string): void {
+  trackSessionStart(searchSessionId: string, userId: string): void {
     // Log structured event
     const event: SearchSessionStartEvent = {
       event_name: 'vespa_search_session_start',
@@ -36,7 +36,7 @@ class SearchMetricsService {
     otelMetrics.safeRecordMetric(() => {
       otelMetrics.searchSessionsStarted.add(1, {
         version: SEARCH_VERSION,
-        user_email: userEmail,
+        user_id: userId,
         platform: platform,
       });
     });
@@ -48,7 +48,6 @@ class SearchMetricsService {
   trackImpression(params: {
     searchSessionId: string;
     userId: string;
-    userEmail: string;
     queryText: string;
     totalHits: number;
     latencyMs: number;
@@ -82,7 +81,7 @@ class SearchMetricsService {
           doc_type: docType,
           result_status: resultStatus,
           version: SEARCH_VERSION,
-          user_email: params.userEmail,
+          user_id: params.userId,
           platform: platform,
         });
       });
@@ -95,7 +94,6 @@ class SearchMetricsService {
   trackClick(params: {
     searchSessionId: string;
     userId: string;
-    userEmail: string;
     queryText: string;
     clickedDocId: string;
     clickedDocType: string;
@@ -127,7 +125,7 @@ class SearchMetricsService {
         doc_type: params.clickedDocType,
         rank: String(params.rankPosition),
         version: SEARCH_VERSION,
-        user_email: params.userEmail,
+        user_id: params.userId,
         platform: platform,
       });
     });
@@ -140,7 +138,7 @@ class SearchMetricsService {
       otelMetrics.searchRankScore.add(mrrScore, {
         doc_type: params.clickedDocType,
         version: SEARCH_VERSION,
-        user_email: params.userEmail,
+        user_id: params.userId,
         platform: platform,
       });
     });
@@ -152,7 +150,6 @@ class SearchMetricsService {
   trackSessionEnd(params: {
     searchSessionId: string;
     userId: string;
-    userEmail: string;
     queryText: string;
     totalImpressions: number;
     dwellTimeMs: number;
@@ -180,7 +177,7 @@ class SearchMetricsService {
       otelMetrics.searchSessionsEnded.add(1, {
         end_reason: params.endReason,
         version: SEARCH_VERSION,
-        user_email: params.userEmail,
+        user_id: params.userId,
         platform: platform,
       });
     });
@@ -190,7 +187,7 @@ class SearchMetricsService {
       otelMetrics.searchDwellTime.record(params.dwellTimeMs, {
         end_reason: params.endReason,
         version: SEARCH_VERSION,
-        user_email: params.userEmail,
+        user_id: params.userId,
         platform: platform,
       });
     });
@@ -199,7 +196,7 @@ class SearchMetricsService {
     otelMetrics.safeRecordMetric(() => {
       otelMetrics.searchSessionDuration.record(params.totalSessionDurationMs, {
         version: SEARCH_VERSION,
-        user_email: params.userEmail,
+        user_id: params.userId,
         platform: platform,
       });
     });

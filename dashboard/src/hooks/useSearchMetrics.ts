@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { searchMetricsService } from '../services/searchMetricsService';
-import { useAuthContext } from '../providers/AuthProvider';
+import { useAuthContextValues } from './useAuth';
 import { searchService } from '../services/searchService';
 import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
 import {
@@ -31,7 +31,7 @@ interface UseSearchMetricsOptions {
 const BACKEND_RESULTS_LIMIT = 25;
 
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
-  const { user } = useAuthContext();
+  const context = useAuthContextValues();
   const [searchSessionId, setSearchSessionId] = useState<string | null>(null);
   const searchTriggerRef = useRef<SearchTrigger | null>(null);
   const impressionStartTimeRef = useRef<number>(0);
@@ -140,13 +140,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       impressionCountRef.current = 0;
       lastQueryTextRef.current = '';
 
-      if (user?.id) {
-        searchMetricsService.trackSessionStart(newSessionId, String(user.id), user.email || '');
-      }
+      searchMetricsService.trackSessionStart(newSessionId, String(context.userID));
 
       return newSessionId;
     },
-    [generateSearchSessionId, user?.id],
+    [generateSearchSessionId, context.userID],
   );
 
   /**
@@ -155,7 +153,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    */
   const endSession = useCallback(
     (endReason: 'click' | 'abandon' | 'clear' | 'blur' = 'abandon') => {
-      if (!searchSessionId || !user?.id) {
+      if (!searchSessionId) {
         setSearchSessionId(null);
         searchTriggerRef.current = null;
         impressionStartTimeRef.current = 0;
@@ -176,8 +174,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       if (lastQueryTextRef.current || endReason === 'click' || endReason === 'abandon') {
         searchMetricsService.trackSessionEnd({
           searchSessionId,
-          userId: String(user.id),
-          userEmail: user.email || '',
+          userId: String(context.userID),
           queryText: lastQueryTextRef.current || '',
           totalImpressions: impressionCountRef.current,
           dwellTimeMs,
@@ -195,7 +192,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       impressionCountRef.current = 0;
       lastQueryTextRef.current = '';
     },
-    [searchSessionId, user?.id],
+    [searchSessionId, context.userID],
   );
 
   /**
@@ -203,7 +200,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    */
   const trackImpression = useCallback(
     (params: { queryText: string; totalHits: number; facetCounts: Record<string, number> }) => {
-      if (!searchSessionId || !user?.id || !searchTriggerRef.current) {
+      if (!searchSessionId || !searchTriggerRef.current) {
         return;
       }
 
@@ -213,8 +210,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
       searchMetricsService.trackImpression({
         searchSessionId,
-        userId: String(user.id),
-        userEmail: user.email || '',
+        userId: String(context.userID),
         queryText: params.queryText,
         totalHits: params.totalHits,
         latencyMs,
@@ -231,7 +227,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       // Reset for next search
       impressionStartTimeRef.current = 0;
     },
-    [searchSessionId, user?.id, options.searchLocation],
+    [searchSessionId, context.userID, options.searchLocation],
   );
 
   /**
@@ -274,7 +270,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       channel?: string;
       resultUrl?: string;
     }) => {
-      if (!searchSessionId || !user?.id) {
+      if (!searchSessionId) {
         return;
       }
 
@@ -282,8 +278,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
       searchMetricsService.trackClick({
         searchSessionId,
-        userId: String(user.id),
-        userEmail: user.email || '',
+        userId: String(context.userID),
         queryText: params.queryText,
         clickedDocId: params.clickedDocId,
         clickedDocType: params.clickedDocType,
@@ -296,7 +291,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       // End the session with 'click' reason after tracking the click
       endSession('click');
     },
-    [searchSessionId, user?.id, calculateScrollDepth, endSession],
+    [searchSessionId, context.userID, calculateScrollDepth, endSession],
   );
 
   /**
