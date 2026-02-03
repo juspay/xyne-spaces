@@ -23,7 +23,7 @@
     "semantic-release": "^22.0.5"
   },
   "dependencies": {
-    "@juspay/yama": "^2.1.0",
+    "@juspay/yama": "^2.2.0",
     "html-to-text": "^9.0.5"
   },
   "release": {
