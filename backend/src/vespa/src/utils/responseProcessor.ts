@@ -90,7 +90,27 @@ const stripHighlightTags = (text: string): string => {
 
     return { ...response, root: updatedRoot };
   }
+  const highlightField = (
+  value: string | undefined | null,
+  query: string
+  ): { highlighted: string; wasHighlighted: boolean } => {
+    if (typeof value !== 'string' || !value) {
+      return { highlighted: value || '', wasHighlighted: false };
+    }
 
+    // Already has highlight tags
+    if (value.includes('<hi>')) {
+      return { highlighted: value, wasHighlighted: true };
+    }
+
+    // Try to highlight
+    const highlighted = highlightFuzzyText(value, query);
+    if (highlighted.includes('<hi>')) {
+      return { highlighted, wasHighlighted: true };
+    }
+
+    return { highlighted: value, wasHighlighted: false };
+};
   /**
    * Filter by native rank threshold
    */
@@ -136,21 +156,21 @@ const stripHighlightTags = (text: string): string => {
     const newFields = { ...node.fields };
     let wasHighlighted = false;
 
-      const value = newFields.text;
+      const value = highlightField(newFields.text, query);
+      newFields.text = value.highlighted;
+      wasHighlighted = wasHighlighted || value.wasHighlighted;
 
-      // Handle string fields
-      if (typeof value === 'string' && value) {
-        if (!value.includes('<hi>')) {
-          const highlighted = highlightFuzzyText(value, query);
-          if (highlighted.includes('<hi>')) {
-            newFields.text = highlighted;
-            wasHighlighted = true;
-          }
-        } else {
-          wasHighlighted = true;
-        }
-      }
+      const ticket_title = highlightField(newFields.title, query);
+      newFields.title = ticket_title.highlighted;
+      wasHighlighted = wasHighlighted || ticket_title.wasHighlighted;
 
+      const description = highlightField(newFields.description, query);
+      newFields.description = description.highlighted;
+      wasHighlighted = wasHighlighted || description.wasHighlighted;
+
+      const initialMessage = highlightField(newFields.initialMessage, query);
+      newFields.initialMessage = initialMessage.highlighted;
+      wasHighlighted = wasHighlighted || initialMessage.wasHighlighted;
 
     // // Filter out results with no highlighting
     if (!wasHighlighted) {
@@ -186,11 +206,25 @@ const stripHighlightTags = (text: string): string => {
     const result = processNodesRecursively(response.root.children, (node) => {
       const originalScore = node.relevance || 0;
       const textValue = node.fields.text;
-
+      const ticket_title = node.fields.title;
+      const description = node.fields.description;
+      const initialMessage = node.fields.initialMessage;
       let maxPrefixBoost = 0;
       if (typeof textValue === 'string' && textValue) {
         const cleanText = stripHighlightTags(textValue);
         maxPrefixBoost = calculatePrefixBoost(cleanText, query);
+      }
+      if (typeof ticket_title === 'string' && ticket_title) {
+        const cleanTitle = stripHighlightTags(ticket_title);
+        maxPrefixBoost = calculatePrefixBoost(cleanTitle, query);
+      }
+      if (typeof description === 'string' && description) {
+        const cleanDescription = stripHighlightTags(description);
+        maxPrefixBoost = calculatePrefixBoost(cleanDescription, query);
+      }
+      if (typeof initialMessage === 'string' && initialMessage) {
+        const cleanInitialMessage = stripHighlightTags(initialMessage);
+        maxPrefixBoost = calculatePrefixBoost(cleanInitialMessage, query);
       }
 
       // Filter out results with no prefix match

@@ -1,9 +1,8 @@
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { channelSchema, InsertDocument, messageSchema, projectSchema, schemaToDocType, ticketSchema, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaProjectDocument, VespaSchema, VespaTicketDocument } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
-import type { InsertValue, UpdateValue } from '@rocicorp/zero';
+import type { InsertValue } from '@rocicorp/zero';
 import { ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
-import { convert } from 'html-to-text';
 import { VespaJob, VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
 import { Conversation, Channel, Message, Project, Ticket, VespaOperationType as VespaOpType } from '@prisma/client';
@@ -27,6 +26,21 @@ const toTimestamp = (timestamp: Date | string | number | null | undefined): numb
   if (!timestamp) return 0;
   return typeof timestamp === 'number' ? timestamp : new Date(timestamp).getTime();
 }
+const toDateString = (date: Date | string | number | null | undefined): string => {
+  if (!date) return '';
+  
+  const d = typeof date === 'object' && date instanceof Date 
+    ? date 
+    : new Date(date);
+  
+  if (isNaN(d.getTime())) return '';
+  
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+  const year = d.getFullYear();
+  
+  return `${day}/${month}/${year}`;
+};
 
 /**
  * Map old TicketStatus to new TicketStatusV2
@@ -43,6 +57,169 @@ const mapStatusToStatusV2 = (status: TicketStatus): TicketStatusV2 => {
   return mapping[status] || TicketStatusV2.TODO;
 }
 
+/**
+ * Resolve channel name by converting DM/GROUP_DM user IDs to user names
+ */
+const resolveChannelName = async (channelName: string, scopeType: string | null | undefined): Promise<string> => {
+  if (!scopeType || !channelName) {
+    return channelName;
+  }
+
+  if (scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM) {
+    const userIds = channelName.split(",");
+    const usernames = await db.user.findMany({
+      where: { id: { in: userIds }},
+      select: { name: true }
+    });
+    return usernames.map(u => u.name).join(",");
+  }
+
+  return channelName;
+}
+
+/**
+ * Resolve parent and child ticket xyneIds for a given ticket
+ */
+const resolveTicketRelationships = async (ticketId: string): Promise<{
+  parentTicketXyneId: string;
+  childTicketXyneIds: string[];
+}> => {
+  // find parent ticket xyneId
+  let parentTicketXyneId = '';
+  const subTicket = await db.subTicket.findFirst({
+    where: { mappedTicketId: ticketId }
+  });
+
+  if (subTicket) {
+    const parentMapping = await db.ticketSubTicketMapping.findFirst({
+      where: { subTicketId: subTicket.id }
+    });
+
+    if (parentMapping) {
+      const parentTicket = await db.ticket.findUnique({
+        where: { id: parentMapping.ticketId },
+        select: { xyneId: true }
+      });
+      parentTicketXyneId = parentTicket?.xyneId || '';
+    }
+  }
+  // find child ticket xyneIds
+  let childTicketXyneIds: string[] = [];
+  const childMappings = await db.ticketSubTicketMapping.findMany({
+    where: { ticketId: ticketId }
+  });
+
+  if (childMappings.length > 0) {
+    const subTicketIds = childMappings.map(m => m.subTicketId);
+
+    const subTickets = await db.subTicket.findMany({
+      where: { id: { in: subTicketIds }},
+      select: { mappedTicketId: true }
+    });
+
+    const mappedTicketIds = subTickets
+      .map(st => st.mappedTicketId)
+      .filter((id): id is string => id !== null);
+
+    if (mappedTicketIds.length > 0) {
+      const childTickets = await db.ticket.findMany({
+        where: { id: { in: mappedTicketIds }},
+        select: { xyneId: true }
+      });
+      childTicketXyneIds = childTickets.map(t => t.xyneId);
+    }
+  }
+  return { parentTicketXyneId, childTicketXyneIds };
+};
+
+export const getThreadInfo = async (
+  conversationId: string
+): Promise<{
+  messages: Message[],
+  threadMentions: string[],
+  threadSenders: string[]
+}> => {
+  const messages = await db.message.findMany({
+    where: { conversationId }
+  }) || [];
+
+  if (messages.length === 0) {
+    return { messages: [], threadMentions: [], threadSenders: [] };
+  }
+
+  // Extract mentions from all messages
+  const mentionsPerMessage = await Promise.all(
+    messages.map(m => extractMentionsFromContent(m.content))
+  ) || [];
+  const threadMentions = mentionsPerMessage.flatMap(mentions => mentions?.map(v => v.username) || []);
+
+  // Get sender names
+  const senderIds = [...new Set(messages.map(msg => msg.senderId))];
+  const senders = await db.user.findMany({
+    where: { id: { in: senderIds } },
+  }) || [];
+  const threadSenders = senders.map(s => s.name).filter(Boolean) as string[];
+
+  return { messages, threadMentions, threadSenders };
+};
+/**
+ * Update ticket thread fields in Vespa when messages change
+ * Called by message mutations to keep ticket search synchronized with conversation state
+ */
+export const updateTicketThreadFields = async (conversationId: string): Promise<void> => {
+  // Find ticket for this conversation
+  const ticket = await db.ticket.findFirst({
+    where: { conversationId }
+  });
+
+  if (!ticket) return; // Not a ticket conversation
+
+  const { messages, threadMentions, threadSenders } = await getThreadInfo(conversationId);
+
+  if (messages.length === 0) {
+    // All messages deleted - clear thread fields
+    await vespaClient.crudService.update(
+      ticket.id,
+      {
+        docType: VespaDocType.TICKET,
+        docId: ticket.id,
+        threadMentions: [],
+        threadSenders: [],
+        initialMessage: '',
+        initialMessageSender: ''
+      },
+      ticketSchema
+    );
+    return;
+  }
+
+  // Get initial message
+  const initialMsg = messages.reduce((earliest, msg) =>
+    msg.createdAt < earliest.createdAt ? msg : earliest
+  );
+  const initialMessage = extractPlainTextFromHtml(initialMsg.content || '');
+  const initialSender = await db.user.findUnique({
+    where: { id: initialMsg.senderId },
+    select: { name: true }
+  });
+
+  logger.info(`[TICKET THREAD FIELDS UPDATE] Updating thread fields for ticket ${ticket.id}, conversationId: ${conversationId}`);
+
+  // Update ticket in Vespa
+  await vespaClient.crudService.update(
+    ticket.id,
+    {
+      docType: VespaDocType.TICKET,
+      docId: ticket.id,
+      threadMentions,
+      threadSenders,
+      initialMessage,
+      initialMessageSender: initialSender?.name || ''
+    },
+    ticketSchema
+  );
+};
+
 export const mapChannel = async (
   args: InsertValue<ChannelsSchema> | Channel,
   participants?: string[]
@@ -54,19 +231,7 @@ export const mapChannel = async (
     })).map(v => v.userId)
   }
 
-  let channelName = args.name
-  if (args.scopeType === ChannelScopeType.DM || args.scopeType === ChannelScopeType.GROUP_DM) {
-    const userIds = args.name.split(",")
-    const usernames = await db.user.findMany({
-      where: {
-        id: {
-          in: userIds,
-        },
-      },
-    });
-
-    channelName = usernames.map(u => u.name).join(",")
-  }
+  const channelName = await resolveChannelName(args.name, args.scopeType);
   return {
     docType: VespaDocType.CHANNEL,
     docId: args.id,
@@ -89,60 +254,6 @@ export const mapChannel = async (
     topic: "",// TODO: handle topic,
     memberCount: channelParticipants.length,
     isArchived: false, // TODO: handle archived state
-  };
-}
-
-export const mapUpdateChannel = async (
-  args: UpdateValue<ChannelsSchema>,
-): Promise<Partial<VespaChatContainerDocument>> => {
-  const channelParticipants = await db.channelParticipant.findMany({
-    where: { channelId: args.id }
-  });
-  let channelName = args.name
-  if (args.scopeType && args.name && (args.scopeType === ChannelScopeType.DM || args.scopeType === ChannelScopeType.GROUP_DM)) {
-    const userIds = args.name.split(",")
-    const usernames = await db.user.findMany({
-      where: {
-        id: {
-          in: userIds,
-        },
-      },
-    });
-
-    channelName = usernames.map(u => u.name).join(",")
-  }
-
-  const existingChannel = await db.channel.findUnique({
-    where: { id: args.id },
-    select: { name: true },
-  });
-
-  if (channelName !== undefined && existingChannel?.name !== channelName) {
-      await updateChannelNameInPreviousMessages(args.id, channelName);
-  }
-
-  return {
-    ...(args.name !== undefined && { channelName }),
-    ...(args.description !== undefined && args.description !== null && { description: args.description }),
-    ...(args.updatedAt !== undefined && { updatedAt: args.updatedAt }),
-    ...(args.visibility !== undefined && {
-      visibility: args.visibility,
-      isPrivate: args.visibility === ChannelVisibility.PRIVATE
-    }),
-    ...(args.scopeType !== undefined && {
-      scopeType: args.scopeType,
-      isIm: args.scopeType === ChannelScopeType.DM,
-      isMpim: args.scopeType === ChannelScopeType.GROUP_DM
-    }),
-    ...(args.metadata !== undefined && { metadata: JSON.stringify(args.metadata) }),
-    ...(args.lastActivityAt !== undefined && {
-      lastActivityAt: toTimestamp(args.lastActivityAt),
-      lastSyncedAt: toTimestamp(args.lastActivityAt)
-    }),
-    ...(channelParticipants.length > 0 && {
-      permissions: channelParticipants.map(p => p.userId),
-      memberCount: channelParticipants.length
-    })
   };
 }
 
@@ -220,55 +331,13 @@ export const updateChannelNameInPreviousMessages = async (
 };
 
 export const mapAndUpdatePreviousMessagesMentions = async (
-  args: InsertValue<MessagesSchema> | UpdateValue<MessagesSchema>,
-  msgMentions: string[],
-): Promise<{ aggregatedMentions: string[], threadSenderNames: string[] }> => {
-
-  const senderId = args.senderId || '';
-
-  const messages = await db.message.findMany({
-    where: { conversationId: args.conversationId },
-  });
-
-  const filteredMessages = messages.filter(m => m.messageId !== args.messageId);
-  if (filteredMessages.length === 0) {
-    const sender = await db.user.findUnique({
-      where: { id: senderId }
-    })
-    return { aggregatedMentions: [...msgMentions], threadSenderNames: sender ? [sender.name] : [] };
-  }
-
-  const mentionsPerMessage = await Promise.all(
-    filteredMessages.map(m => extractMentionsFromContent(m.content))
-  );
-
-  const aggregatedMentions = mentionsPerMessage.flatMap(
-    mentions => mentions?.map(v => v.username) || []
-  );
-
-  aggregatedMentions.push(...msgMentions);
-
-  const senderIds = filteredMessages.flatMap(
-    msg => msg.senderId).concat(senderId)
-    ;
-
-  const senders = await db.user.findMany({
-    where: {
-      id: {
-        in: senderIds,
-      },
-    },
-  });
-
-  const threadSenderNames = filteredMessages.flatMap(message => {
-    const sender = senders.find(user => user.id === message.senderId);
-    return sender ? sender.name : [];
-  });
-
-  const currentSender = senders.find(user => user.id === senderId);
-  if (currentSender) {
-    threadSenderNames.push(currentSender.name);
-  }
+  messageId: string,
+  conversationId: string,
+): Promise<{ threadMentions: string[], threadSenders: string[] }> => {
+  const { messages, threadMentions, threadSenders } = await getThreadInfo(conversationId);
+ 
+  const filteredMessages = messages.filter(m => m.messageId !== messageId);
+  logger.info(`[MESSAGE THREAD MENTIONS UPDATE] Updating messages for conversationId: ${conversationId}`);
 
   await Promise.all(
     filteredMessages.map(message =>
@@ -277,16 +346,14 @@ export const mapAndUpdatePreviousMessagesMentions = async (
         {
           docType: VespaDocType.MESSAGE,
           docId: message.messageId,
-          threadMentions: aggregatedMentions,
-          threadSenders: threadSenderNames,
+          threadMentions,
+          threadSenders,
         },
         messageSchema,
-
       )
     )
   );
-
-  return { aggregatedMentions, threadSenderNames };
+  return { threadMentions, threadSenders };
 };
 
 export const mapMessage = async (
@@ -304,20 +371,9 @@ export const mapMessage = async (
     where: { id: conversation.channelId }
   });
 
-  let msgChannelName = msgChannel?.name;
   let channelScopeType = msgChannel?.scopeType;
-  if (channelScopeType && msgChannelName && (channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM)) {
-    const userIds = msgChannelName.split(",")
-    const usernames = await db.user.findMany({
-      where: {
-        id: {
-          in: userIds,
-        },
-      },
-    });
+  let msgChannelName = await resolveChannelName(msgChannel?.name || '', msgChannel?.scopeType);
 
-    msgChannelName = usernames.map(u => u.name).join(",")
-  }
 
   const [
     mentions,
@@ -336,7 +392,10 @@ export const mapMessage = async (
   const messageContent =
     extractPlainTextFromHtml(args.content || '') || ''
 
-  const threadInfo = await mapAndUpdatePreviousMessagesMentions(args, mentions?.map(v => v.username) || []);
+  const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
+
+  // Update parent ticket thread fields if this is a ticket conversation
+  await updateTicketThreadFields(args.conversationId);
 
   // Capturing signal for a new message  
   messageSignalService.captureCreateMessage({
@@ -377,64 +436,11 @@ export const mapMessage = async (
     replyUsersCount: 0, // TODO
     mentions: mentions?.map(v => v.username) || [],
     metadata: JSON.stringify(args.metadata || {}),
-    threadMentions: threadInfo.aggregatedMentions,
-    threadSenders: threadInfo.threadSenderNames,
+    threadMentions: threadInfo.threadMentions,
+    threadSenders: threadInfo.threadSenders,
     messageChannelName: msgChannelName || '',
     messageType: args.msgType || 'USER',
   }
-}
-
-export const mapUpdateMessage = async (
-  args: UpdateValue<MessagesSchema>
-): Promise<Partial<VespaChatMessageDocument>> => {
-  const updates: Partial<VespaChatMessageDocument> = {
-    docType: VespaDocType.MESSAGE,
-    docId: args.messageId,
-  }
-
-  // Handle content update - need to regenerate text and mentions
-  if (args.content !== undefined) {
-    const mentions = await extractMentionsFromContent(args.content)
-    const messageContent = convert(args.content || '', { wordwrap: false }) || ''
-
-    updates.text = messageContent
-    updates.mentions = mentions?.map(v => v.username) || []
-  }
-
-  // Handle metadata updates
-  if (args.metadata !== undefined) {
-    updates.metadata = JSON.stringify(args.metadata)
-  }
-
-  // Handle conversationId change (if messages can be moved between conversations)
-  if (args.conversationId !== undefined) {
-    const conversation = await db.conversation.findUnique({
-      where: { conversationId: args.conversationId }
-    });
-
-    if (conversation?.channelId) {
-      updates.channelRef = getRef(channelSchema, conversation.channelId)
-      updates.threadId = args.conversationId
-      updates.replyCount = conversation.replyCount || 0
-    }
-  }
-
-  // Handle attachment updates
-  if (args.conversationId && args.conversationId !== undefined) {
-    const attachments = await db.messageAttachment.findMany({
-      where: { conversationId: args.conversationId }
-    });
-
-    if (attachments.length > 0) {
-      updates.attachmentIds = attachments.map(a => a.entityId)
-    }
-  }
-
-  const threadInfo = await mapAndUpdatePreviousMessagesMentions(args, updates.threadMentions || []);
-  updates.threadMentions = threadInfo.aggregatedMentions;
-  updates.threadSenders = threadInfo.threadSenderNames;
-
-  return updates
 }
 
 
@@ -449,38 +455,20 @@ export const mapProject = (args: InsertValue<ProjectsSchema>): VespaProjectDocum
   updatedBy: args.updatedBy || ""
 })
 
-export const mapUpdateProject = (
-  args: UpdateValue<ProjectsSchema>,
-): Partial<VespaProjectDocument> => {
-  const updates: Partial<VespaProjectDocument> = {
-    docType: VespaDocType.PROJECT,
-    docId: args.id,
-  }
-
-  if (args.name !== undefined) {
-    updates.name = args.name
-  }
-
-  if (args.description !== undefined) {
-    updates.description = args.description || ""
-  }
-
-  if (args.updatedAt !== undefined) {
-    updates.updatedAt = toTimestamp(args.updatedAt)
-  }
-
-  if (args.updatedBy !== undefined) {
-    updates.updatedBy = args.updatedBy || ""
-  }
-
-  return updates
-}
 
 export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<VespaTicketDocument> => {
   const [
     conversation,
     attachments,
-    parentTicket
+    parentTicket,
+    tags,
+    board,
+    channel,
+    project,
+    createdByUser,
+    assignedToUser,
+    closedByUser,
+    descriptionMentions
   ] = await Promise.all([
     db.conversation.findUnique({
       where: { conversationId: args.conversationId }
@@ -490,9 +478,59 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     }),
     db.subTicket.findFirst({
       where: { mappedTicketId: args.id }
-    })
+    }),
+    db.ticketTag.findMany({
+      where: { ticketId: args.id },
+      select: { name: true }
+    }),
+    db.board.findUnique({
+      where: { id: args.boardId },
+      select: { name: true }
+    }),
+    db.channel.findUnique({
+      where: { id: args.channelId },
+      select: { name: true, scopeType: true }
+    }),
+    db.project.findUnique({
+      where: { id: args.projectId },
+      select: { name: true }
+    }),
+    db.user.findUnique({
+      where: { id: args.createdBy },
+      select: { name: true }
+    }),
+    args.assignedTo ? db.user.findUnique({
+      where: { id: args.assignedTo },
+      select: { name: true }
+    }) : Promise.resolve(null),
+    args.closedBy ? db.user.findUnique({
+      where: { id: args.closedBy },
+      select: { name: true }
+    }) : Promise.resolve(null),
+    extractMentionsFromContent(args.description)
   ])
 
+  // Resolve parent/child ticket relationships
+  const { parentTicketXyneId, childTicketXyneIds } = await resolveTicketRelationships(args.id);
+  const { messages, threadMentions, threadSenders } = await getThreadInfo(args.conversationId);
+
+  // Get initial message (first message in conversation)
+  let initialMessage = '';
+  let initialMessageSender = '';
+
+  if (messages.length > 0) {
+    const initialMsg = messages.reduce((earliest, msg) =>
+      msg.createdAt < earliest.createdAt ? msg : earliest
+    );
+    initialMessage = extractPlainTextFromHtml(initialMsg.content || '');
+    const sender = await db.user.findUnique({
+      where: { id: initialMsg.senderId },
+      select: { name: true }
+    });
+    initialMessageSender = sender?.name || '';
+  }
+
+  const resolvedChannelName = await resolveChannelName(channel?.name || '', channel?.scopeType);
   return {
     docId: args.id,
     docType: VespaDocType.TICKET,
@@ -512,134 +550,43 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     ticketType: "", // later we should populate ticket type
     priority: args.priority,
     stage: args.stageName,
-    createdAt: toTimestamp(args.createdAt),
-    updatedAt: toTimestamp(args.updatedAt),
-    closedAt: toTimestamp(args.closedAt),
-    deletedAt: toTimestamp(args.closedAt), // TODO get the deletedAT
+    createdAtTimestamp: toTimestamp(args.createdAt),
+    createdAt: toDateString(args.createdAt),
+    updatedAt: toDateString(args.updatedAt),
+    closedAt: toDateString(args.closedAt),
+    deletedAt: toDateString(args.closedAt), // TODO get the deletedAT
     parentTicketId: parentTicket?.mappedTicketId || "",
     boardId: args.boardId,
     attachmentIds: attachments.map(a => a.id),
-    metadata: JSON.stringify(args.metadata)
+    metadata: JSON.stringify(args.metadata),
+    eta: toDateString(args.eta),
+    channelName: resolvedChannelName,
+    boardName: board?.name || '',
+    xyneId: args.xyneId,
+    tags: tags.map(t => t.name),
+    createdByName: createdByUser?.name || '',
+    assignedToName: assignedToUser?.name || '',
+    closedByName: closedByUser?.name || '',
+    projectName: project?.name || '',
+    ticketMentions: descriptionMentions?.map(v => v.username) || [],
+    threadMentions: threadMentions,
+    threadSenders: threadSenders,
+    initialMessage: initialMessage,
+    initialMessageSender: initialMessageSender,
+    parentTicketXyneId: parentTicketXyneId,
+    childTicketXyneIds: childTicketXyneIds
   }
-}
-
-export const mapUpdateTicket = async (
-  args: UpdateValue<TicketsSchema>
-): Promise<Partial<VespaTicketDocument>> => {
-  const updates: Partial<VespaTicketDocument> = {
-    docType: VespaDocType.TICKET,
-    docId: args.id,
-  }
-
-  if (args.conversationId !== undefined) {
-    const [conversation, attachments] = await Promise.all([
-      db.conversation.findUnique({
-        where: { conversationId: args.conversationId }
-      }),
-      db.messageAttachment.findMany({
-        where: { conversationId: args.conversationId }
-      }),
-    ])
-
-    updates.convId = args.conversationId
-    updates.threadId = args.conversationId
-    if (conversation?.channelId) {
-      updates.channelRef = getRef(channelSchema, conversation.channelId)
-    }
-    updates.attachmentIds = attachments.map(a => a.id)
-  }
-
-  if (args.userGroupId !== undefined) {
-    updates.userGroupId = args.userGroupId
-  }
-
-  if (args.projectId !== undefined) {
-    updates.projectRef = getRef(projectSchema, args.projectId)
-  }
-
-  if (args.statusV2 !== undefined) {
-    updates.status = args.statusV2 as TicketStatusV2
-  } else if (args.status !== undefined) {
-    // Fallback: map old status to new statusV2
-    updates.status = mapStatusToStatusV2(args.status as TicketStatus)
-  }
-
-  if (args.assignedTo !== undefined) {
-    updates.assignedTo = args.assignedTo || ""
-  }
-
-  if (args.closedBy !== undefined) {
-    updates.closedBy = args.closedBy || ""
-  }
-
-  if (args.title !== undefined) {
-    updates.title = args.title
-  }
-
-  if (args.description !== undefined) {
-    updates.description = args.description
-  }
-
-  if (args.priority !== undefined) {
-    updates.priority = args.priority
-  }
-
-  if (args.stageName !== undefined) {
-    updates.stage = args.stageName
-  }
-
-  if (args.updatedAt !== undefined) {
-    updates.updatedAt = toTimestamp(args.updatedAt)
-  }
-
-  if (args.closedAt !== undefined) {
-    updates.closedAt = toTimestamp(args.closedAt)
-    updates.deletedAt = toTimestamp(args.closedAt)
-  }
-
-  if (args.boardId !== undefined) {
-    updates.boardId = args.boardId
-  }
-
-  if (args.metadata !== undefined) {
-    updates.metadata = JSON.stringify(args.metadata)
-  }
-
-  // Check if parent ticket relationship changed
-  const parentTicket = await db.subTicket.findFirst({
-    where: { mappedTicketId: args.id }
-  });
-
-  if (parentTicket) {
-    updates.parentTicketId = parentTicket.mappedTicketId || ""
-  }
-
-  return updates
 }
 
 
 export const mapBySchema = async (
   schemaName: VespaSchema,
   args: VespaPayload,
-  jobType: VespaJobType
+  jobType: VespaJobType,
 ): Promise<InsertDocument | Partial<InsertDocument>> => {
   const docType = schemaToDocType[schemaName];
   if (!docType) {
     throw new Error(`Unknown schema: ${schemaName}`);
-  }
-
-  if (jobType === 'delete') {
-    const docId = schemaName === messageSchema && 'messageId' in args
-      ? args.messageId
-      : 'id' in args
-        ? args.id
-        : undefined;
-
-    if (!docId) {
-      throw new Error(`Missing docId for delete operation on ${schemaName}`);
-    }
-
-    return { docType, docId } as Partial<InsertDocument>
   }
 
   if (jobType === 'feed') {
@@ -658,20 +605,19 @@ export const mapBySchema = async (
   }
 
   if (jobType === 'update') {
-    switch (schemaName) {
+    switch(schemaName){
       case channelSchema:
-        return mapUpdateChannel(args as UpdateValue<ChannelsSchema>);
+        throw new Error(`${schemaName}:Schema not defined for update`);
       case messageSchema:
-        return mapUpdateMessage(args as UpdateValue<MessagesSchema>);
+        throw new Error(`${schemaName}:Schema not defined for update`);
       case projectSchema:
-        return mapUpdateProject(args as UpdateValue<ProjectsSchema>);
+        throw new Error(`${schemaName}:Schema not defined for update`);
       case ticketSchema:
-        return mapUpdateTicket(args as UpdateValue<TicketsSchema>);
+        throw new Error(`${schemaName}:Schema not defined for update`);
       default:
         throw new Error(`Unknown schema: ${schemaName}`);
     }
   }
-
   throw new Error(`Unknown job type: ${jobType}`);
 }
 
@@ -717,10 +663,25 @@ export const fetchAndMapBySchema = async (
   docId: string,
   jobType: VespaJobType
 ): Promise<InsertDocument | Partial<InsertDocument>> => {
+
   if (jobType === 'delete') {
     const docType = schemaToDocType[schema];
     if (!docType) {
       throw new Error(`Unknown schema: ${schema}`);
+    }
+    if (schema === messageSchema) {
+      try {
+        const vespaDoc = await vespaClient.crudService.getDocument(docId, messageSchema);
+        const conversationId = vespaDoc?.fields?.threadId;
+        if (conversationId) {
+          await updateTicketThreadFields(conversationId);
+          await mapAndUpdatePreviousMessagesMentions(docId, conversationId);
+        } else {
+          throw new Error(`conversationId not found for message ${docId} in Vespa`);
+        }
+      } catch (error) {
+        throw new Error(`Failed to fetch message ${docId} from Vespa: ${error}`);
+      }
     }
     return { docType, docId } as Partial<InsertDocument>;
   }
