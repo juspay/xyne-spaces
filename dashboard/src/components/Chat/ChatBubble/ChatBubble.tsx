@@ -27,6 +27,7 @@ import { mutators } from '../../../zero/mutators';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import { cn } from '../../../utils/classNames';
+import { copyHtmlToClipboard } from '../../../utils/clipboardUtils';
 import { DraftMessage } from '../ChatDirectory/ChatDirectory.types';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
@@ -342,12 +343,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleCopyMessage = (): void => {
     if (message?.content) {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(message.content, 'text/html');
-      const plainText = doc.body.textContent || doc.body.innerText || '';
-
-      navigator.clipboard
-        .writeText(plainText)
+      copyHtmlToClipboard(message.content)
         .then(() => {
           toast.success('Message copied to clipboard');
         })
@@ -387,6 +383,22 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const canEditMessage = user?.id ? isMessageEditable(message, user.id) : false;
 
+  // Check if message has meaningful text content (not just attachments)
+  const hasTextContent = (() => {
+    if (!message?.content) return false;
+
+    // Parse HTML and get text content
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(message.content, 'text/html');
+    const textContent = (doc.body.textContent || '').trim();
+
+    // Consider it text content only if there's actual text
+    return textContent.length > 0;
+  })();
+
+  // Only show copy button if there's text content to copy
+  const shouldShowCopyButton = hasTextContent;
+
   // Keyboard shortcuts for message actions - only enabled when message is hovered/focused
   useShortcutById('message.edit', handleEditMessage, {
     enabled: showHoverActions && canEditMessage,
@@ -412,12 +424,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     'message.copyContent',
     () => {
       if (message?.content) {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(message.content, 'text/html');
-        const plainText = doc.body.textContent || doc.body.innerText || '';
-
-        navigator.clipboard
-          .writeText(plainText)
+        copyHtmlToClipboard(message.content)
           .then(() => {
             toast.success('Message content copied to clipboard');
           })
@@ -587,7 +594,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               messageId={message.messageId}
               reactions={isMessageDeleted ? [] : (message.reactions ?? [])}
               onCopyLink={onCopyLink}
-              {...(!isMessageDeleted && { onCopyMessage: handleCopyMessage })}
+              {...(!isMessageDeleted &&
+                shouldShowCopyButton && { onCopyMessage: handleCopyMessage })}
               {...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen })}
               {...(!isMessageDeleted && !hasTicket && { onEditInCanvas: handleEditInCanvas })}
               {...(context === 'channel' &&
@@ -638,7 +646,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               isBookmarked={isBookmarked}
               isPinned={conversation?.pinned || false}
               onCopyLink={onCopyLink}
-              {...(!isMessageDeleted && { onCopyMessage: handleCopyMessage })}
+              {...(!isMessageDeleted &&
+                shouldShowCopyButton && { onCopyMessage: handleCopyMessage })}
               {...(context === 'channel' &&
                 !isSystemMessage &&
                 !isMessageDeleted &&
