@@ -1,4 +1,4 @@
-@e2e @project @setup
+@e2e @project @setup @messaging @canvas
 Feature: Project Test Setup
   Initialize admin browser instance and login
   This feature must run before other project tests

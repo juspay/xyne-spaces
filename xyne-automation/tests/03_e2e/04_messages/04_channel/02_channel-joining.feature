@@ -1,4 +1,4 @@
-@e2e @messaging @channel
+@e2e @messaging @channel @canvas
 Feature: Channel Joining E2E Flow
   As a user
   I want to add other users to a channel

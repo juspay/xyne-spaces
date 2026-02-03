@@ -29,11 +29,16 @@ When('I open the Xyne-Space at {string}', async function (this: CustomWorld, end
   if (endpoint.startsWith('/')) {
     url = `${this.config.dashboard.baseUrl}${endpoint}`;
   } else {
-    const channelId = scope.pathData.get(endpoint);
-    if (!channelId) {
+    const storedPath = scope.pathData.get(endpoint);
+    if (!storedPath) {
       throw new Error(`Path "${endpoint}" not found in storage. Make sure it was created first.`);
     }
-    url = `${this.config.dashboard.baseUrl}/chat/dir/${channelId}`;
+    // If stored path starts with /, use it as-is; otherwise treat as channel ID for backward compatibility
+    if (storedPath.startsWith('/')) {
+      url = `${this.config.dashboard.baseUrl}${storedPath}`;
+    } else {
+      url = `${this.config.dashboard.baseUrl}/chat/${storedPath}`;
+    }
   }
 
   await this.page.goto(url);
@@ -47,17 +52,10 @@ Then('I store the current path as {string}', async function (this: CustomWorld, 
 
   const currentUrl = this.page.url();
   const urlPath = new URL(currentUrl).pathname;
-  const segments = urlPath.split('/').filter(Boolean);
-  const lastSegment = segments[segments.length - 1];
 
-  if (!lastSegment) {
-    throw new Error(`Could not extract path segment from URL: ${currentUrl}`);
-  }
+  scope.pathData.set(pathName, urlPath);
 
-  const { scope } = await import('@/fixtures/cucumber.world');
-  scope.pathData.set(pathName, lastSegment);
-
-  uiLogger.info(`[Navigation] Stored path "${pathName}" with value: ${lastSegment}`);
+  uiLogger.info(`[Navigation] Stored path "${pathName}" with value: ${urlPath}`);
 });
 
 // ============================================
@@ -68,6 +66,29 @@ Then('I store the current path as {string}', async function (this: CustomWorld, 
 When('I click on {string}', async function (this: CustomWorld, selector: string) {
   if (!this.page) throw new Error('Browser not initialized');
   await this.page.click(selector);
+});
+
+When('I force click on text {string}', async function (this: CustomWorld, text: string) {
+  if (!this.page) throw new Error('Browser not initialized');
+
+  let resolvedText = text;
+
+  const userMatch = text.match(/^user:([^.]+)\.(.+)$/);
+  if (userMatch) {
+    const [, browserSession, field] = userMatch;
+    for (const [, userData] of this.userData) {
+      if (userData.browserSession === browserSession) {
+        resolvedText = userData[field as keyof typeof userData] as string;
+        break;
+      }
+    }
+    if (resolvedText === text) {
+      throw new Error(`No user found logged in browser session "${browserSession}"`);
+    }
+  }
+
+  await this.page.click(`text="${resolvedText}"`, { force: true });
+  uiLogger.info(`[UI] Force clicked on text: "${resolvedText}"`);
 });
 
 When('I click on text {string}', async function (this: CustomWorld, text: string) {
@@ -148,6 +169,14 @@ When(
   }
 );
 
+When('I clear the text in {string}', async function (this: CustomWorld, selector: string) {
+  if (!this.page) throw new Error('Browser not initialized');
+  const element = this.page.locator(selector).first();
+  await element.waitFor({ state: 'visible' });
+  await element.clear();
+  uiLogger.info(`[UI] Cleared text in element "${selector}"`);
+});
+
 // ============================================
 // UI Assertion Steps
 // ============================================
@@ -210,3 +239,45 @@ Then(
     uiLogger.info(`[UI] Verified text "${resolvedText}" is visible in element "${selector}"`);
   }
 );
+
+Then(
+  'I should not see {string} in the element {string}',
+  async function (this: CustomWorld, text: string, selector: string) {
+    if (!this.page) throw new Error('Browser not initialized');
+
+    const resolvedText = text.replace(
+      /user:([^.,\s]+)\.([^,\s]+)/g,
+      (match, browserSession, field) => {
+        for (const [, userData] of this.userData) {
+          if (userData.browserSession === browserSession) {
+            return userData[field as keyof typeof userData] as string;
+          }
+        }
+        throw new Error(`No user found logged in browser session "${browserSession}"`);
+      }
+    );
+
+    const container = this.page.locator(selector).first();
+    await container.waitFor({ state: 'visible' });
+
+    const messageElement = container.locator(`text="${resolvedText}"`).first();
+
+    // Wait a short time and check it's not visible
+    const isVisible = await messageElement.isVisible().catch(() => false);
+
+    expect(isVisible).to.be.false;
+
+    uiLogger.info(`[UI] Verified text "${resolvedText}" is NOT visible in element "${selector}"`);
+  }
+);
+
+// Selector-based negation
+Then('I do not see {string}', async function (this: CustomWorld, selector: string) {
+  if (!this.page) throw new Error('Browser not initialized');
+
+  const element = this.page.locator(selector).first();
+  const isVisible = await element.isVisible().catch(() => false);
+
+  expect(isVisible).to.be.false;
+  uiLogger.info(`[UI] Verified element "${selector}" is NOT visible`);
+});

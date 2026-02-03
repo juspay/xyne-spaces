@@ -1,4 +1,4 @@
-@e2e @messaging @channel
+@e2e @messaging @channel @canvas
 Feature: Channel Creation E2E Flow
   As users
   I want to create channels and add members

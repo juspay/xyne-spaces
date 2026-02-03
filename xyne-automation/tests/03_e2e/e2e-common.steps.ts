@@ -77,52 +77,6 @@ Then('I wait for {string} to disappear', async function (this: CustomWorld, sele
   e2eLogger.info(`[UI] Element "${selector}" disappeared`);
 });
 
-When(
-  'I click on the project with name {string}',
-  async function (this: CustomWorld, projectName: string) {
-    if (!this.page) throw new Error('Browser not initialized');
-
-    let resolvedName = projectName;
-    const userMatch = projectName.match(/user:([^.]+)\.([^,\s-]+)/);
-    if (userMatch) {
-      const [fullMatch, browserSession, field] = userMatch;
-      for (const [, userData] of this.userData) {
-        if (userData.browserSession === browserSession) {
-          resolvedName = projectName.replace(
-            fullMatch,
-            userData[field as keyof typeof userData] as string
-          );
-          break;
-        }
-      }
-      if (resolvedName === projectName) {
-        throw new Error(`No user found logged in browser session "${browserSession}"`);
-      }
-    }
-
-    e2eLogger.info(`[Project] Looking for project with name: "${resolvedName}"`);
-
-    const projectItem = this.page.locator(`[data-project-name="${resolvedName}"]`);
-
-    await projectItem.waitFor({ state: 'visible', timeout: 10000 });
-    await projectItem.click();
-
-    e2eLogger.info(`[Project] Clicked on project "${resolvedName}"`);
-  }
-);
-
-When('I click on the first board in the expanded project', async function (this: CustomWorld) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  // Wait for board items to be visible (they appear after project is expanded)
-  const boardItem = this.page.locator('[data-testid^="board-item-"]').first();
-  await boardItem.waitFor({ state: 'visible', timeout: 10000 });
-
-  await boardItem.click();
-
-  e2eLogger.info('[Project] Clicked on the first board in the expanded project');
-});
-
 // ============================================
 // API Response Steps
 // ============================================
