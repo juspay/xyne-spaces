@@ -70,7 +70,7 @@ export const detectMentionTrigger = (editor: Editor): TriggerMatch | null => {
 };
 
 export const detectCommandTrigger = (editor: Editor): TriggerMatch | null => {
-  return detectTrigger(editor, /\/(\w*)$/);
+  return detectTrigger(editor, /(?:^|[\s\u200B])\/(\w*)$/);
 };
 
 export const detectChannelTrigger = (editor: Editor): TriggerMatch | null => {
