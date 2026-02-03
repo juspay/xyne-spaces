@@ -1,3 +1,21 @@
+## [1.23.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.22.0...v1.23.0) (2026-02-03)
+
+
+### Features
+
+* command trigger regex fix ([cce9a59](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cce9a5935006fdffb3d3f876129e962ca7eb1c6b)), closes [#2497](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2497)
+* Fix KanbanBoard drag and drop ([5bf9f83](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5bf9f832c4e0a94c6cd2dbeea720fa732fa17455))
+* removed version import ([26299a5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/26299a57824703048b44ee40fbc1503dde7daf41)), closes [#2666](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2666)
+
+
+### Bug Fixes
+
+* Fix filter retention ([26a9267](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/26a926745b6c0a274164979d18b1fbf591c000be))
+* Fix ticket search loader movement ([8562b0c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8562b0c0a70a9c3e1b7316bf8a27f0bf6922fa7a))
+* platform issue for smaller displays ([34dfd1a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/34dfd1a40c78efa39f9c2559c5d5318c77516fe9)), closes [#2703](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2703)
+* replace user_email with user_id in search metrics ([74fd175](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/74fd1759c7b88b1166ec879bc8e2fa79dadfd46a)), closes [#2689](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2689)
+* swipe back bug fix ([7ebc102](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7ebc10242768bcdcfa30365fa3f51480e3f0c5eb)), closes [#2537](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2537)
+
 ## [1.22.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.21.1...v1.22.0) (2026-02-02)
 
 
