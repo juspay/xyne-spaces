@@ -783,19 +783,32 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   //detects when switching back to kanban
   useEffect(() => {
+    // Safety Checks
+    if (!state.matches('initialized')) return;
     if (!allBoards || allBoards.length === 0) return;
+
     const isAllBoardsSelected =
       !filters.boards || filters.boards.length === 0 || filters.boards.length === allBoards.length;
+
     if (layoutView === 'kanban' && isAllBoardsSelected) {
       const firstBoard = allBoards[0];
-      if (firstBoard) {
+      if (!firstBoard) return;
+
+      const firstBoardId = firstBoard.id;
+
+      // Check if this specific board ID is ALREADY the only one selected.
+      //  to stop infinite re-renders due to url change
+      const isAlreadySet = filters.boards?.length === 1 && filters.boards[0] === firstBoardId;
+
+      // Only update if it's NOT already set
+      if (!isAlreadySet) {
         setFilters({
           ...filters,
-          boards: [firstBoard.id],
+          boards: [firstBoardId],
         });
       }
     }
-  }, [layoutView]);
+  }, [layoutView, state.value, filters, allBoards, setFilters]);
 
   return (
     <div className='flex flex-col h-full w-full bg-gray-50 relative'>

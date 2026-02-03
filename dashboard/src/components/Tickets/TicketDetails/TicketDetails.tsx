@@ -687,17 +687,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       ? `?selectedTab=${encodeURIComponent(state.activeTab)}`
       : '';
     if (isFromMyTickets) {
-      // Take them back to the My Tickets list
-      void navigate(`/chat/my-tickets`);
+      void navigate(`/chat/my-tickets`, { replace: true });
     }
-    // If user comes from project->board
+    //restores Kanban Board filters
     else if (returnToUrl) {
-      void navigate(returnToUrl);
+      void navigate(returnToUrl, { replace: true });
       return;
     } else {
       // Standard chat navigation
       void navigate(
         `/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}${activeTabParam}`,
+        { replace: true },
       );
     }
   };
