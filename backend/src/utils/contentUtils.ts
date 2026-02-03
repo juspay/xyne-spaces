@@ -47,16 +47,64 @@ export function extractPlainTextFromHtml(htmlContent: string): string {
         },
         // Handle headings
         { 
-          selector: 'h1, h2, h3, h4, h5, h6', 
+          selector: 'h1', 
           format: 'block',
           options: { 
             leadingLineBreaks: 1, 
             trailingLineBreaks: 1 
           } 
         },
-        // Handle lists
         { 
-          selector: 'ul, ol', 
+          selector: 'h2', 
+          format: 'block',
+          options: { 
+            leadingLineBreaks: 1, 
+            trailingLineBreaks: 1 
+          } 
+        },
+        { 
+          selector: 'h3', 
+          format: 'block',
+          options: { 
+            leadingLineBreaks: 1, 
+            trailingLineBreaks: 1 
+          } 
+        },
+        { 
+          selector: 'h4', 
+          format: 'block',
+          options: { 
+            leadingLineBreaks: 1, 
+            trailingLineBreaks: 1 
+          } 
+        },
+        { 
+          selector: 'h5', 
+          format: 'block',
+          options: { 
+            leadingLineBreaks: 1, 
+            trailingLineBreaks: 1 
+          } 
+        },
+        { 
+          selector: 'h6', 
+          format: 'block',
+          options: { 
+            leadingLineBreaks: 1, 
+            trailingLineBreaks: 1 
+          } 
+        },
+        // Handle lists - split into individual selectors
+        { 
+          selector: 'ul', 
+          format: 'block',
+          options: { 
+            leadingLineBreaks: 1, 
+            trailingLineBreaks: 1 
+          } 
+        },
+        { 
+          selector: 'ol', 
           format: 'block',
           options: { 
             leadingLineBreaks: 1, 

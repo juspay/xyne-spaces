@@ -162,14 +162,31 @@ export interface VespaTicketDocument extends VespaDocument {
   ticketType: string;
   priority: TicketPriority;
   stage: string;
-  createdAt: number;
-  updatedAt: number;
-  closedAt: number;
-  deletedAt: number;
+  createdAtTimestamp: number;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string;
+  deletedAt: string;
   parentTicketId: string;
   boardId: string;
   attachmentIds: string[];
   metadata: string;
+  eta: string;
+  channelName: string;
+  boardName: string;
+  xyneId: string;
+  tags: string[];
+  createdByName: string;
+  assignedToName: string;
+  closedByName: string;
+  projectName: string;
+  ticketMentions: string[];
+  threadMentions: string[];
+  threadSenders: string[];
+  initialMessage: string;
+  initialMessageSender: string;
+  parentTicketXyneId: string;
+  childTicketXyneIds: string[];
 }
 
 export interface VespaUserDocument extends VespaDocument {
