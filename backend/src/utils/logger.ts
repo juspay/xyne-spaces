@@ -1,7 +1,6 @@
 import winston from 'winston';
 import { AsyncLocalStorage } from 'async_hooks';
 import { config } from '@/config/env';
-import packageJson from '../../../package.json';
 
 export interface LogContext {
   requestId?: string;
@@ -57,7 +56,7 @@ export const logger = winston.createLogger({
   transports: [new winston.transports.Console()],
   exitOnError: false,
   defaultMeta: {
-    version: packageJson.version,
+    version: '1.0',
   },
 });
 
