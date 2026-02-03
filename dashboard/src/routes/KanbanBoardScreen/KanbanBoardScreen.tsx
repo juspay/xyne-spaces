@@ -838,6 +838,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         <div className='flex lg:flex-col md:items-end gap-3 ml-auto md:ml-0'>
           {canCreateTicket && channel && (
             <button
+              data-testid='kanban-create-ticket-button'
               onClick={() => setIsCreateModalOpen(true)}
               className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-sidebar-badge-accent rounded-lg transition-colors flex-shrink-0'
             >

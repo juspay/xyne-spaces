@@ -327,7 +327,7 @@ export const TicketActivity = ({
     setSortOrder(prev => (prev === 'newest' ? 'oldest' : 'newest'));
   };
   return (
-    <div className='mt-8'>
+    <div className='mt-8' data-testid='ticket-activity-section'>
       <div className='flex items-center justify-between'>
         <h3 className='text-base font-semibold text-gray-900 mb-4 flex items-center gap-2'>
           Activity
@@ -344,7 +344,7 @@ export const TicketActivity = ({
       </div>
 
       {sortedActivities.length > 0 ? (
-        <div className='relative'>
+        <div className='relative' data-testid='ticket-activity-list'>
           {sortedActivities.map((activity, index) => (
             <ActivityComponent
               key={activity.id}
@@ -387,7 +387,11 @@ export const ActivityComponent = ({
   const isLast = index === activities.length - 1;
 
   return (
-    <div key={activity.id} className='relative flex items-start gap-3'>
+    <div
+      key={activity.id}
+      className='relative flex items-start gap-3'
+      data-testid={`ticket-activity-item-${activity.activityType}`}
+    >
       {/* Icon */}
       <div className='flex flex-col items-center self-stretch mt-2'>
         {getActivityIcon(activity)}

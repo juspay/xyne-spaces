@@ -939,6 +939,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               type='button'
                               disabled={disabled || isSending}
                               className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              data-testid='send-options-menu'
                             >
                               <ChevronDown className='h-3 w-3' />
                             </button>

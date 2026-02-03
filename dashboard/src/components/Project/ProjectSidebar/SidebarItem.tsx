@@ -18,6 +18,7 @@ interface SidebarItemProps {
   isExpanded?: boolean;
   variant?: 'default' | 'nested';
   isActive?: boolean;
+  dataTestId?: string;
 }
 
 const SidebarItem = ({
@@ -30,6 +31,7 @@ const SidebarItem = ({
   isExpanded = false,
   variant = 'default',
   isActive = false,
+  dataTestId,
 }: SidebarItemProps): ReactElement => {
   // Determine what icon/avatar to render
   const renderLeadingElement = (): ReactElement | null => {
@@ -74,6 +76,7 @@ const SidebarItem = ({
   return (
     <button
       onClick={onClick}
+      data-testid={dataTestId}
       className={cn(
         'w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors group',
         'hover:bg-gray-100',

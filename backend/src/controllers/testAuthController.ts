@@ -102,6 +102,25 @@ export class TestAuthController {
                         logger.warn(`[${requestId}] Default organization not found`);
                     }
 
+                    
+                    const essentialResources = [
+                        { name: 'TICKETS', description: 'Ticket management endpoints' },
+                        { name: 'PROJECTS', description: 'Project management endpoints' },
+                    ];
+
+                    for (const resourceData of essentialResources) {
+                        const existingResource = await db.resource.findUnique({
+                            where: { name: resourceData.name }
+                        });
+
+                        if (!existingResource) {
+                            await db.resource.create({
+                                data: resourceData
+                            });
+                            logger.info(`[${requestId}] Created essential resource: ${resourceData.name}`);
+                        }
+                    }
+
                     const resources = await db.resource.findMany();
                     for (const resource of resources) {
                         const existingAccess = await db.resourceAccess.findFirst({

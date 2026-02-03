@@ -1001,6 +1001,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     }}
                     aria-label='Ticket Title'
                     placeholder='Issue'
+                    data-testid='ticket-title-input'
                     className={cn(
                       '!text-xl !leading-tight truncate',
                       'px-0 border-none focus-visible:ring-0',
@@ -1036,6 +1037,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   aria-invalid={field.state.meta.errors.length > 0}
                   placeholder='Add description ...'
                   aria-label='Ticket Description'
+                  data-testid='ticket-description-input'
                   onChange={e => {
                     const newValue = e.target.value;
                     field.handleChange(newValue);
@@ -1103,6 +1105,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
                   inputClassName='!h-8 rounded-md'
                   showIndicator={false}
+                  testId='ticket-board-selector'
                 />
               )}
             </form.Field>
@@ -1502,6 +1505,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   }
                   disableClientFiltering={true}
                   showIndicator={false}
+                  testId='ticket-assignee-selector'
                 />
               )}
             </form.Field>
@@ -1541,6 +1545,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     inputClassName='rounded-md h-7 bg-gray-50'
                     showClearButton={true}
                     showIndicator={false}
+                    testId='ticket-status-selector'
                   />
                 )}
               </form.Field>
@@ -1563,6 +1568,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     inputClassName='rounded-md h-7 bg-gray-50'
                     showClearButton={true}
                     showIndicator={false}
+                    testId='ticket-priority-selector'
                   />
                 );
               }}
@@ -1590,6 +1596,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         <WorkflowIcon strokeWidth={2.33} className='size-[14px] text-gray-700' />
                       }
                       showIndicator={false}
+                      testId='ticket-workflow-selector'
                     />
                   );
                 }}
@@ -1642,6 +1649,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               title='Attach files'
               disabled={form.state.isSubmitting}
               className='size-6'
+              data-testid='ticket-attachment-button'
             >
               <Paperclip strokeWidth={2.33} className='size-3.5 text-gray-500' />
             </Button>
@@ -1654,6 +1662,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   'px-3 rounded-lg h-8',
                   'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
                 )}
+                data-testid='ticket-submit-button'
               >
                 {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
               </Button>
@@ -1664,6 +1673,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 multiple
                 onChange={handleFileInputChange}
                 className='hidden'
+                data-testid='ticket-attachment-input'
               />
             </div>
           </div>

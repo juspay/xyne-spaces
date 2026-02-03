@@ -147,6 +147,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={e => onReplyInThread(e)}
             title='Reply in thread'
+            data-testid='hover-action-reply-in-thread'
           >
             <MessageCircleMore className='w-4 h-4' />
           </Button>
@@ -174,6 +175,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onCreateTicket}
             title='Create ticket'
+            data-testid='hover-action-create-ticket'
           >
             <Ticket className='w-4 h-4' />
           </Button>

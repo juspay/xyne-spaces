@@ -172,6 +172,7 @@ const ConversationHeader = ({
             {channelTabs?.map(tab => (
               <Tabs.Trigger key={tab.value} value={tab.value} asChild>
                 <button
+                  data-testid={`channel-tab-${tab.value}`}
                   onClick={e => setActiveTab?.(tab.value || '', e)}
                   className={cn(
                     'h-8 flex items-center justify-start gap-1.5 px-2 transition-all duration-100 cursor-pointer',
