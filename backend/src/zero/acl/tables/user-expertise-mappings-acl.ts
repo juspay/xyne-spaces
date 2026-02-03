@@ -4,13 +4,14 @@ import {
   type TableSchema,
 } from '../core/types';
 import { Schema } from '@xyne/shared';
+import { hasUserGroupsAdminAccess } from '../core/admin-access';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 
 export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'> {
 
   async canInsert(args: InsertValue<TableSchema<'user_expertise_mappings'>>, tx: Transaction<Schema>): Promise<void> {
-    // Only group members can set expertise
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', args.userGroupId)
@@ -18,8 +19,10 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('User expertise mapping insert failed: you must be a group member', 'user_expertise_mappings');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping insert failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
     }
   }
 
@@ -30,7 +33,7 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
       throw new MutationACLError('User expertise mapping update failed: mapping does not exist', 'user_expertise_mappings');
     }
 
-    // Only group members can update
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', mapping.userGroupId)
@@ -38,8 +41,10 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('User expertise mapping update failed: you must be a group member', 'user_expertise_mappings');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping update failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
     }
   }
 
@@ -50,7 +55,7 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
       throw new MutationACLError('User expertise mapping delete failed: mapping does not exist', 'user_expertise_mappings');
     }
 
-    // Only group members can delete
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', mapping.userGroupId)
@@ -58,13 +63,15 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('User expertise mapping delete failed: you must be a group member', 'user_expertise_mappings');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping delete failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
     }
   }
 
   async canUpsert(args: any, tx: Transaction<Schema>): Promise<void> {
-    // Only group members can upsert
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', args.userGroupId)
@@ -72,8 +79,10 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('User expertise mapping upsert failed: you must be a group member', 'user_expertise_mappings');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping upsert failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
     }
   }
 }

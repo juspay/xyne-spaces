@@ -4,13 +4,14 @@ import {
   type TableSchema,
 } from '../core/types';
 import { Schema } from '@xyne/shared';
+import { hasUserGroupsAdminAccess } from '../core/admin-access';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 
 export class BoardComplexityScoresACL extends BaseACL<'board_complexity_scores'> {
 
   async canInsert(args: InsertValue<TableSchema<'board_complexity_scores'>>, tx: Transaction<Schema>): Promise<void> {
-    // Only group members can set board weights
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', args.userGroupId)
@@ -18,8 +19,10 @@ export class BoardComplexityScoresACL extends BaseACL<'board_complexity_scores'>
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('Board complexity score insert failed: you must be a group member', 'board_complexity_scores');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('Board complexity score insert failed: you must be a group member or have ADMIN access to USER-GROUPS', 'board_complexity_scores');
     }
   }
 
@@ -30,7 +33,7 @@ export class BoardComplexityScoresACL extends BaseACL<'board_complexity_scores'>
       throw new MutationACLError('Board complexity score update failed: score does not exist', 'board_complexity_scores');
     }
 
-    // Only group members can update
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', score.userGroupId)
@@ -38,13 +41,15 @@ export class BoardComplexityScoresACL extends BaseACL<'board_complexity_scores'>
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('Board complexity score update failed: you must be a group member', 'board_complexity_scores');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('Board complexity score update failed: you must be a group member or have ADMIN access to USER-GROUPS', 'board_complexity_scores');
     }
   }
 
   async canUpsert(args: any, tx: Transaction<Schema>): Promise<void> {
-    // Only group members can upsert
+    // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
         .where('userGroupId', args.userGroupId)
@@ -52,8 +57,10 @@ export class BoardComplexityScoresACL extends BaseACL<'board_complexity_scores'>
         .one()
     );
     
-    if (!membership) {
-      throw new MutationACLError('Board complexity score upsert failed: you must be a group member', 'board_complexity_scores');
+    // OR check if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (!membership && !hasAdminAccess) {
+      throw new MutationACLError('Board complexity score upsert failed: you must be a group member or have ADMIN access to USER-GROUPS', 'board_complexity_scores');
     }
   }
 }

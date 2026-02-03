@@ -10,11 +10,7 @@ export class UserAssignmentStatesACL extends BaseQueryACL<'user_assignment_state
   canSelect<TReturn>(
     query: Query<'user_assignment_states', Schema, TReturn>,
   ): Query<'user_assignment_states', Schema, TReturn> {
-    // Users can only see assignment states for groups they belong to
-    return query.whereExists('userGroup', (userGroupQuery) => {
-      return userGroupQuery.whereExists('userGroupMappings', (mappingQuery) => {
-        return mappingQuery.where('userId', this.ctx.userID);
-      });
-    });
+    // Allow anyone to query user assignment states
+    return query;
   }
 }

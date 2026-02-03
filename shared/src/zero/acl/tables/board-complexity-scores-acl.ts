@@ -10,11 +10,7 @@ export class BoardComplexityScoresACL extends BaseQueryACL<'board_complexity_sco
   canSelect<TReturn>(
     query: Query<'board_complexity_scores', Schema, TReturn>,
   ): Query<'board_complexity_scores', Schema, TReturn> {
-    // Users can only see board weights for groups they belong to
-    return query.whereExists('userGroup', (userGroupQuery) => {
-      return userGroupQuery.whereExists('userGroupMappings', (mappingQuery) => {
-        return mappingQuery.where('userId', this.ctx.userID);
-      });
-    });
+    // Allow anyone to query board complexity scores
+    return query;
   }
 }
