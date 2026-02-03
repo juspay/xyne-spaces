@@ -680,7 +680,9 @@ export const TicketFiltersDropdown = ({
                     className='w-full text-sm bg-white border border-gray-200 text-gray-900 rounded-lg pl-10 pr-3 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
                   />
                   {isSearching && (
-                    <Loader2 className='absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 animate-spin text-gray-400' />
+                    <div className='absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center justify-center'>
+                      <Loader2 className='w-3 h-3 animate-spin text-gray-400' />
+                    </div>
                   )}
                 </div>
               </Popover.Trigger>
