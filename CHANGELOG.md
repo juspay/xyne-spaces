@@ -1,3 +1,10 @@
+## [1.24.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.24.0...v1.24.1) (2026-02-04)
+
+
+### Bug Fixes
+
+* online indicator position fix for sidebar and chat list ([fe61854](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fe618544d9ab241ef1e3fc355b3e19da41dd53b9))
+
 ## [1.24.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.23.0...v1.24.0) (2026-02-03)
 
 
