@@ -239,7 +239,7 @@ class MultiUserTranscriber:
     def _create_stt(self) -> ResilientSTT:
         """Create or reuse shared resilient STT instance."""
         if self._shared_stt is None:
-            stt_prompt = "Vocabulary: Xyne Calls, Xyne Chats, Xyne Tickets, Xyne Support, Xyne Spaces, Xyne Code, Xyne Training, Xyne Automatic, Xyne AI, Xyne Assistant, Xyne Agent, Xyne Bot, Xyne"
+            stt_prompt = "The following technical discussion includes terms like Xyne Calls, Juspay Euler, Namma Cloud, Xyne Chats, Xyne Tickets, Juspay Hyperswitch, Xyne Support, Namma Yatri, Xyne Spaces, Juspay,  Xyne Code, Xyne Training, Namma Bengaluru, Xyne Automatic, Juspay Payments Operating System, Xyne AI, Xyne Assistant, Namma Shuttle, Xyne Agent, Xyne Bot, Juspay Technologies, Namma Switch, Xyne The speaker begins by saying:"
             inner_stt = openai.STT.with_azure(
                 azure_endpoint=self._azure_endpoint,
                 azure_deployment=self._azure_deployment,
