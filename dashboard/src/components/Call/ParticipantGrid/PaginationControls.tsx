@@ -30,7 +30,7 @@ export function PaginationControls({
           onClick={onPrevPage}
           className={cn(
             'absolute z-10',
-            'bg-gray-900/80 hover:bg-gray-900 text-white rounded-full',
+            'bg-white hover:bg-gray-100 text-gray-900 rounded-full',
             'transition-all backdrop-blur-sm',
             compact ? 'p-1' : 'p-2',
             vertical ? 'left-1/2 -translate-x-1/2 top-2' : 'left-2 top-1/2 -translate-y-1/2',
@@ -45,7 +45,7 @@ export function PaginationControls({
           onClick={onNextPage}
           className={cn(
             'absolute z-10',
-            'bg-gray-900/80 hover:bg-gray-900 text-white rounded-full',
+            'bg-white hover:bg-gray-100 text-gray-900 rounded-full',
             'transition-all backdrop-blur-sm',
             compact ? 'p-1' : 'p-2',
             vertical ? 'left-1/2 -translate-x-1/2 bottom-2' : 'right-2 top-1/2 -translate-y-1/2',
