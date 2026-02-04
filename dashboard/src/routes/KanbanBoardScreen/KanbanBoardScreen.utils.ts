@@ -7,7 +7,7 @@ import type {
 } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, type FormFields } from '@xyne/shared';
 
 /**
  * Returns the color for a given stage name
@@ -275,6 +275,33 @@ export const applyTicketFilters = (
       if (!ticket.userGroupId || !filters.userGroups.includes(ticket.userGroupId)) return false;
     }
 
+    // PR Reviewer filter (from ticket_assignments with responsibility PR_REVIEWER)
+    if (filters.prReviewers && filters.prReviewers.length > 0) {
+      const assignments = (
+        ticket as Ticket & { assignments?: Array<{ userId: string; userResponsibility: string }> }
+      ).assignments;
+      const prReviewerAssignments =
+        assignments?.filter(a => a.userResponsibility === 'PR_REVIEWER') || [];
+      const prReviewerIds = prReviewerAssignments.map(a => a.userId);
+      const hasMatchingPRReviewer = filters.prReviewers.some(id => prReviewerIds.includes(id));
+      if (!hasMatchingPRReviewer) {
+        return false;
+      }
+    }
+
+    // QA filter (from ticket_assignments with responsibility QA)
+    if (filters.qaAssigned && filters.qaAssigned.length > 0) {
+      const assignments = (
+        ticket as Ticket & { assignments?: Array<{ userId: string; userResponsibility: string }> }
+      ).assignments;
+      const qaAssignments = assignments?.filter(a => a.userResponsibility === 'QA') || [];
+      const qaIds = qaAssignments.map(a => a.userId);
+      const hasMatchingQA = filters.qaAssigned.some(id => qaIds.includes(id));
+      if (!hasMatchingQA) {
+        return false;
+      }
+    }
+
     // Due date filter (filters use timestamps)
     if (filters.dueDateStart || filters.dueDateEnd) {
       if (!ticket.eta) {
@@ -402,4 +429,119 @@ export const applyTicketFilters = (
 
     return true;
   });
+};
+
+interface FormFieldGroup {
+  type: 'formField';
+  fieldId: string;
+  fieldName: string;
+  fieldType: FormFieldType;
+}
+
+/**
+ * Groups tickets by form field values
+ */
+export const groupTicketsByFormField = (
+  tickets: Ticket[],
+  criterion: FormFieldGroup,
+  formValuesByTicketId: Map<string, FormEntityValues[]>,
+  userNamesById: Map<string, string>,
+): Record<string, Ticket[]> => {
+  const { fieldId, fieldType } = criterion;
+  const groups: Record<string, Ticket[]> = {};
+
+  tickets.forEach(ticket => {
+    const formValues = formValuesByTicketId.get(ticket.id) || [];
+    const fieldEntry = formValues.find(v => v.fieldId === fieldId);
+
+    // Use actualFieldValue which contains the properly typed value
+    const actualValue = fieldEntry?.actualFieldValue;
+
+    if (fieldType === FormFieldType.MULTI_SELECT && actualValue) {
+      // Multi-select: actualFieldValue is already an array of strings
+      const values = Array.isArray(actualValue) ? actualValue : [];
+      if (values.length === 0) {
+        const groupKey = 'No Value';
+        if (!groups[groupKey]) groups[groupKey] = [];
+        groups[groupKey].push(ticket);
+      } else {
+        values.forEach(val => {
+          const groupKey = typeof val === 'string' ? val : String(val);
+          if (!groups[groupKey]) groups[groupKey] = [];
+          groups[groupKey].push(ticket);
+        });
+      }
+    } else {
+      if (fieldType === FormFieldType.USER) {
+        // User field: actualFieldValue is an array of user IDs
+        const userIds = Array.isArray(actualValue) ? actualValue : [];
+        if (userIds.length === 0) {
+          const groupKey = 'Unassigned';
+          if (!groups[groupKey]) groups[groupKey] = [];
+          groups[groupKey].push(ticket);
+        } else {
+          userIds.forEach(userId => {
+            const groupKey =
+              typeof userId === 'string' ? userNamesById.get(userId) || userId : 'Unassigned';
+            if (!groups[groupKey]) groups[groupKey] = [];
+            groups[groupKey].push(ticket);
+          });
+        }
+      } else {
+        // Single select and others: actualFieldValue is the value
+        let val: string | null = null;
+        if (actualValue !== undefined && actualValue !== null) {
+          if (typeof actualValue === 'string') {
+            val = actualValue;
+          } else if (typeof actualValue === 'number' || typeof actualValue === 'boolean') {
+            val = String(actualValue);
+          }
+          // For objects/arrays, use JSON serialization or ignore
+        }
+        const groupKey = val || 'No Value';
+        if (!groups[groupKey]) groups[groupKey] = [];
+        groups[groupKey].push(ticket);
+      }
+    }
+  });
+
+  return groups;
+};
+
+/**
+ * Extracts form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
+ */
+export const extractGroupableFormFields = (
+  filters: TicketFilters,
+  allBoards: ReadonlyArray<{ id: string; formContextMappings?: readonly unknown[] }> | undefined,
+): Array<{ id: string; fieldName: string; fieldType: FormFieldType }> => {
+  if (filters.boards?.length !== 1 || !allBoards) return [];
+
+  const selectedBoard = allBoards.find(b => b.id === filters.boards?.[0]);
+  const formMappings = selectedBoard?.formContextMappings || [];
+  if (!formMappings.length) return [];
+
+  const fieldsMap = new Map<string, { id: string; fieldName: string; fieldType: FormFieldType }>();
+
+  formMappings.forEach(mapping => {
+    const mappingWithFields = mapping as { formFields?: readonly FormFields[] };
+    const fields = mappingWithFields.formFields;
+    fields?.forEach(field => {
+      if (
+        field.fieldType === FormFieldType.SINGLE_SELECT ||
+        field.fieldType === FormFieldType.MULTI_SELECT ||
+        field.fieldType === FormFieldType.USER
+      ) {
+        if (!fieldsMap.has(field.id)) {
+          fieldsMap.set(field.id, {
+            id: field.id,
+            fieldName: field.fieldName,
+            fieldType: field.fieldType,
+          });
+        }
+      }
+    });
+  });
+
+  return Array.from(fieldsMap.values());
 };

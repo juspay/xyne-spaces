@@ -1356,6 +1356,16 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: workflowTable,
   }),
+  formEntityValues: many({
+    sourceField: ['id'],
+    destField: ['entityId'],
+    destSchema: formEntityValuesTable,
+  }),
+  assignments: many({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: ticketAssignmentTable,
+  }),
 }));
 
 export const subTicketTableRelationships = relationships(subTicketTable, ({ one, many }) => ({
@@ -1519,6 +1529,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ['id'],
     destField: ['boardId'],
     destSchema: ticketTable,
+  }),
+  formContextMappings: many({
+    sourceField: ['id'],
+    destField: ['contextId'],
+    destSchema: formContextMappingTable,
   }),
 }));
 
@@ -2361,6 +2376,7 @@ export type TicketSubTicketMapping = Row<typeof schema.tables.ticket_sub_ticket_
 export type TicketActivity = Row<typeof schema.tables.ticket_activities>;
 export type TicketEntityMapping = Row<typeof schema.tables.ticket_entity_mappings>;
 export type TicketTag = Row<typeof schema.tables.ticket_tags>;
+export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;
 export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_mappings>;
 export type Project = Row<typeof schema.tables.projects>;
 export type Board = Row<typeof schema.tables.boards>;

@@ -20,6 +20,7 @@ import {
   X,
   Clock,
   TextAlignJustify,
+  BarChart3,
 } from 'lucide-react';
 import {
   DndContext,
@@ -41,7 +42,7 @@ import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColu
 import { useDragAndDrop } from '../../hooks/useDragAndDrop';
 import { useChannel } from '../../hooks/useChannels';
 import { queries } from '../../zero/queries';
-import type { Ticket, FormEntityValues, FormFieldType } from '@xyne/shared';
+import { Ticket, FormEntityValues, FormFieldType } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
@@ -52,6 +53,8 @@ import {
   groupTicketsByStage,
   groupTicketsByStatus,
   applyTicketFilters,
+  groupTicketsByFormField,
+  extractGroupableFormFields,
 } from './KanbanBoardScreen.utils';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -72,7 +75,20 @@ interface BoardKanbanScreenProps {
   filterByGroupId?: string;
 }
 
-type GroupByType = 'none' | 'assignee' | 'status' | 'priority';
+type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | FormFieldGroup;
+
+interface FormFieldGroup {
+  type: 'formField';
+  fieldId: string;
+  fieldName: string;
+  fieldType: FormFieldType;
+}
+
+function isFormFieldGroup(value: GroupByType): value is FormFieldGroup {
+  return (
+    typeof value === 'object' && value !== null && 'type' in value && value.type === 'formField'
+  );
+}
 
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   viewMode: viewModeProp,
@@ -100,18 +116,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
   const [isComfortView, setIsComfortView] = useState(false);
 
-  const GROUPING_OPTIONS = [
-    { value: 'none', label: 'None', icon: <X className='h-4 w-4' /> },
-    { value: 'assignee', label: 'Group by: Assignee', icon: <User className='h-4 w-4' /> },
-    { value: 'status', label: 'Group by: Status', icon: <CircleCheckBig className='h-4 w-4' /> },
-    { value: 'priority', label: 'Group by: Priority', icon: <Vote className='h-4 w-4' /> },
-  ] as const;
-
+  // Dynamic grouping options based on form fields
   const groupTickets = (tickets: Ticket[], criterion: GroupByType) => {
     if (criterion === 'none') {
       return { 'All Tickets': tickets };
     }
 
+    // Handle form field grouping
+    if (isFormFieldGroup(criterion)) {
+      return groupTicketsByFormField(tickets, criterion, formValuesByTicketId, userNamesById);
+    }
+
+    // Original logic for assignee, status, priority
     return tickets.reduce(
       (acc, ticket) => {
         const key =
@@ -291,6 +307,52 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       enabled: !!effectiveProjectId,
     },
   );
+
+  // Create memo of form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
+  const groupByFormFields = useMemo(
+    () => extractGroupableFormFields(filters, allBoards),
+    [filters.boards, allBoards],
+  );
+
+  // Dynamic grouping options based on form fields
+  const groupingOptions = useMemo(() => {
+    const baseOptions = [
+      { value: 'none' as const, label: 'None', icon: <X className='h-4 w-4' /> },
+      {
+        value: 'assignee' as const,
+        label: 'Group by: Assignee',
+        icon: <User className='h-4 w-4' />,
+      },
+      {
+        value: 'status' as const,
+        label: 'Group by: Status',
+        icon: <CircleCheckBig className='h-4 w-4' />,
+      },
+      {
+        value: 'priority' as const,
+        label: 'Group by: Priority',
+        icon: <Vote className='h-4 w-4' />,
+      },
+    ];
+
+    const formFieldOptions = groupByFormFields.map(field => ({
+      value: {
+        type: 'formField' as const,
+        fieldId: field.id,
+        fieldName: field.fieldName,
+        fieldType: field.fieldType,
+      },
+      label: `Group by: ${field.fieldName}`,
+      icon:
+        field.fieldType === FormFieldType.USER ? (
+          <User className='h-4 w-4' />
+        ) : (
+          <BarChart3 className='h-4 w-4' />
+        ),
+    }));
+
+    return [...baseOptions, ...formFieldOptions];
+  }, [groupByFormFields]);
 
   const stagesDataForFilteredBoard = useMemo(
     () => allBoards.find(b => b.id === filteredSingleBoardId)?.stages,
@@ -497,6 +559,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         userIds.add(ticket.assignedTo);
       }
       userIds.add(ticket.createdBy);
+      // Collect from ticket.assignments (PR reviewers, QA, etc.)
+      const assignments = (ticket as Ticket & { assignments?: Array<{ userId: string }> })
+        .assignments;
+      if (Array.isArray(assignments)) {
+        assignments.forEach(assignment => {
+          if (assignment.userId) {
+            userIds.add(assignment.userId);
+          }
+        });
+      }
     });
     return Array.from(userIds);
   }, [allProjectTickets]);
@@ -836,6 +908,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               selectedBoard={selectedBoard}
               availableTags={availableTags}
               hideAssigneeFilter={viewMode === 'my-tickets' ? true : false}
+              formMappings={
+                filters.boards?.length === 1 && allBoards
+                  ? allBoards.find(b => b.id === filters.boards?.[0])?.formContextMappings || []
+                  : []
+              }
             />
           </div>
         )}
@@ -990,10 +1067,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 <button className='flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-sm font-medium outline-none hover:bg-gray-50 transition-all min-w-[160px]'>
                   <div className='flex items-center gap-2 flex-1'>
                     <span className='text-gray-500 font-normal'>Group by:</span>
-                    {GROUPING_OPTIONS.find(opt => opt.value === groupBy)?.label.replace(
-                      'Group by: ',
-                      '',
-                    ) || 'None'}
+                    {typeof groupBy === 'object' && groupBy.type === 'formField'
+                      ? groupBy.fieldName
+                      : groupingOptions
+                          .find(opt => typeof opt.value === 'string' && opt.value === groupBy)
+                          ?.label.replace('Group by: ', '') || 'None'}
                   </div>
                   <ChevronDownIcon className='w-3.5 h-3.5 text-gray-400' />
                 </button>
@@ -1016,14 +1094,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   </div>
 
                   {/* Grouping Options */}
-                  {GROUPING_OPTIONS.map(({ value, label, icon }) => (
+                  {groupingOptions.map(({ value, label, icon }) => (
                     <DropdownMenu.CheckboxItem
-                      key={value}
-                      className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-gray-700 cursor-pointer outline-none select-none 
+                      key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
+                      className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-gray-700 cursor-pointer outline-none select-none
       transition-colors
-      data-[highlighted]:bg-gray-100 data-[highlighted]:text-gray-900 
+      data-[highlighted]:bg-gray-100 data-[highlighted]:text-gray-900
       data-[state=checked]:bg-[#F2F2F3] data-[state=checked]:text-black data-[state=checked]:font-semibold'
-                      checked={groupBy === value}
+                      checked={
+                        typeof value === 'string'
+                          ? groupBy === value
+                          : typeof groupBy === 'object' &&
+                            groupBy.type === 'formField' &&
+                            groupBy.fieldId === value.fieldId
+                      }
                       onCheckedChange={() => setGroupBy(value as GroupByType)}
                     >
                       <div className='flex items-center gap-3'>
