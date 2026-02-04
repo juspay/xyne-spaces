@@ -9,7 +9,6 @@ router.use(authMiddleware.authenticate);
 
 // User status routes
 router.get('/status', userStatusController.getCurrentUserStatus);
-router.put('/status', userStatusController.updateCurrentUserStatus);
 router.post('/activity', userStatusController.updateActivity);
 
 // Public status routes (for displaying online users)

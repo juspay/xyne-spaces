@@ -3,7 +3,7 @@ import { Server as HttpServer } from 'http';
 
 import { redisService, ChatMessage, WorkflowEvent } from './redisService';
 import { typingService, TypingUser } from './typingService';
-import { userStatusService, OnlineUser } from './userStatusService';
+import { userStatusService } from './userStatusService';
 import { workspaceEventService, WorkspaceEvent } from './workspaceEventService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -235,9 +235,10 @@ class WebSocketService {
       // Only auto-set ONLINE if user is not AWAY
       if (!currentPresence || currentPresence.status !== 'AWAY') {
         const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
-        const allOnlineUsers = await userStatusService.setUserStatus(
+        await userStatusService.setUserStatus(
           userId,
           'ONLINE',
+          currentPresence?.status || null,
           {
             userName: userName || userEmail.split('@')[0],
             userEmail,
@@ -245,10 +246,6 @@ class WebSocketService {
           }
         );
 
-        // Broadcast user online status to all relevant sessions
-        await this.broadcastUserStatusUpdate(userId, 'ONLINE', allOnlineUsers);
-
-        logger.info(`👤 [USER-STATUS] User ${userName || userEmail} is now ONLINE (${allOnlineUsers.length} total online users)`);
       } else {
         logger.info(`👤 [USER-STATUS] User ${userName || userEmail} remains AWAY on connect`);
       }
@@ -638,18 +635,16 @@ class WebSocketService {
       logger.info(`👤 [USER-STATUS] User ${userName || userEmail} manually updating status to ${status}`);
 
       const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
-      const allOnlineUsers = await userStatusService.setUserStatus(
+      await userStatusService.setUserStatus(
         userId,
         status,
+        null,
         {
           userName: userName || userEmail.split('@')[0],
           userEmail,
           deviceInfo
         }
       );
-
-      // Broadcast user status update to all relevant sessions
-      await this.broadcastUserStatusUpdate(userId, status, allOnlineUsers);
 
       // Confirm status update to user
       socket.emit('status_updated', {
@@ -770,27 +765,7 @@ class WebSocketService {
     }
   }
 
-  private async broadcastUserStatusUpdate(userId: string, status: 'ONLINE' | 'AWAY' | 'OFFLINE', allOnlineUsers: OnlineUser[]): Promise<void> {
-    try {
-      if (!this.io) return;
 
-      // Broadcast to all connected clients
-      this.io.emit('user_status_updated', {
-        userId,
-        status,
-        onlineUsers: allOnlineUsers,
-        timestamp: new Date()
-      });
-
-      // Also broadcast to specific user's connections
-      await this.broadcastToUser(userId, 'own_status_updated', {
-        status,
-        timestamp: new Date()
-      });
-    } catch (error) {
-      logger.error('❌ [USER-STATUS] Error broadcasting user status update:', error);
-    }
-  }
 
   // Setup user event subscription (once per user)
   private async setupUserEventSubscription(userId: string): Promise<void> {

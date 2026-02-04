@@ -3,6 +3,7 @@
 import { ReactElement, KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Channel } from '@xyne/shared';
+import { ChannelScopeType } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 
 import { cn } from '../../ui/Dialog';
@@ -93,7 +94,12 @@ export const DmListItem = ({
       >
         {/* Avatar */}
         <div className='relative shrink-0 size-[48px] rounded-[8px]'>
-          <Avatar userId={avatarUserId} size='lg' className='size-full rounded-[8px]' />
+          <Avatar
+            userId={avatarUserId}
+            size='lg'
+            className='size-full rounded-[8px]'
+            showActiveStatus={channel.scopeType === ChannelScopeType.DM}
+          />
         </div>
 
         {/* Content Container */}

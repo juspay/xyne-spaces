@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { userStatusService } from '../services/userStatusService';
-import { websocketService } from '../services/websocketService';
 import { logger } from '../utils/logger';
 import { UserPresenceStatus } from '@prisma/client';
 
@@ -26,57 +25,7 @@ export class UserStatusController {
     }
   }
 
-  // Update current user's status
-  async updateCurrentUserStatus(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.user?.id;
-      const userName = req.user?.name;
-      const userEmail = req.user?.email;
 
-      if (!userId || !userName || !userEmail) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      const { status } = req.body;
-
-      // Validate status
-      if (!status || !['ONLINE', 'AWAY', 'OFFLINE'].includes(status)) {
-        res.status(400).json({ error: 'Invalid status. Must be ONLINE, AWAY, or OFFLINE' });
-        return;
-      }
-
-      const deviceInfo = req.headers['user-agent']?.substring(0, 100) || 'Unknown';
-      const allOnlineUsers = await userStatusService.setUserStatus(
-        userId,
-        status as UserPresenceStatus,
-        {
-          userName,
-          userEmail,
-          deviceInfo
-        }
-      );
-
-      // Broadcast status update via WebSocket
-      await websocketService.broadcastToUser(userId, 'status_updated', {
-        userId,
-        status,
-        timestamp: new Date()
-      });
-
-      res.json({
-        success: true,
-        status,
-        onlineUsers: allOnlineUsers.length,
-        timestamp: new Date()
-      });
-
-      logger.info(`👤 [USER-STATUS-API] User ${userName} (${userId}) status updated to ${status} via API`);
-    } catch (error) {
-      logger.error('❌ [USER-STATUS-API] Error updating user status:', error);
-      res.status(500).json({ error: 'Failed to update user status' });
-    }
-  }
 
   // Get all online users
   async getOnlineUsers(_req: Request, res: Response): Promise<void> {
