@@ -11,8 +11,8 @@ import { db } from '../../../database/client.js';
 import { logger } from '../../../utils/logger.js';
 import { findBestMatches } from '../utils/sequenceMatcher.js';
 import { discoverUserByName, type UserDiscoveryResult } from '../utils/userDiscovery.js';
-import type { XyneAIAgentContext } from '../tools.js';
-import { getDescription } from '../tools.js';
+import type { XyneAIAgentContext } from './types.js';
+import { getDescription } from './helpers.js';
 
 // ============================================================================
 // Types

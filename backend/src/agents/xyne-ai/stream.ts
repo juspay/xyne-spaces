@@ -14,7 +14,7 @@ import {
   type SessionContext,
 } from './storage/index.js';
 
-import { getAndClearSessionMappings, type MessageMappings, type StreamProvider, type StreamEventCallback } from './tools.js';
+import { getAndClearSessionMappings, type MessageMappings, type StreamProvider, type StreamEventCallback } from './tools/index.js';
 import { createOnEventHandler } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
 

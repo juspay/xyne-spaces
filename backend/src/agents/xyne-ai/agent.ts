@@ -17,7 +17,7 @@ import {
 import { config } from '../../config/env.js';
 import { db } from '../../database/client.js';
 
-import { getXyneAITools, type XyneAIAgentContext, type UserInfo } from './tools.js';
+import { getXyneAITools, type XyneAIAgentContext, type UserInfo } from './tools/index.js';
 
 import {
   getPromptFromLangfuse,

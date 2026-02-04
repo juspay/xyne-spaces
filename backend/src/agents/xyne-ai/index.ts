@@ -4,7 +4,7 @@
  */
 
 import { initializeLangfuseTracing } from './langfuse/index.js';
-import { initializeTools } from './tools.js';
+import { initializeTools } from './tools/index.js';
 import { initializeSessionStore, shutdownSessionStore } from './storage/index.js';
 import { logger } from '../../utils/logger.js';
 
@@ -75,7 +75,7 @@ export {
   type ToolMessage,
   type ToolResult,
   type MessageMappings,
-} from './tools.js';
+} from './tools/index.js';
 
 // Langfuse exports
 export {
