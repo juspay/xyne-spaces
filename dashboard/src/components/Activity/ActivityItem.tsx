@@ -5,6 +5,7 @@ import { MessageRepliedActivity } from './MessageRepliedActivity';
 import { ReactionAddedActivity } from './ReactionAddedActivity';
 import { DirectMessageActivity } from './DirectMessageActivity';
 import { EtaActivity } from './EtaActivity';
+import { AssignmentPauseActivity } from './AssignmentPauseActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -32,6 +33,9 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
     case 'eta_warning':
     case 'eta_breach':
       return <EtaActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'paused_from_assignment':
+      return <AssignmentPauseActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;

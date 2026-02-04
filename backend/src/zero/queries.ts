@@ -904,6 +904,13 @@ export const queries = defineQueries({
       return zql.user_assignment_states.where('userGroupId', userGroupId);
     }
   ),
+  // Query for all assignment states for a user across all groups
+  getUserAssignmentStatesByUserId: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ args: { userId } }) => {
+      return zql.user_assignment_states.where('userId', userId);
+    }
+  ),
 
   // Repository queries
   getAllRepos: defineQuery(() => {

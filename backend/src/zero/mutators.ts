@@ -4548,10 +4548,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           statusEmoji: z.string().nullable().optional(),
           statusContent: z.string().nullable().optional(),
           statusExpiryAt: z.number().nullable().optional(),
+          assignmentUnavailableUntil: z.number().nullable().optional(),
           timestamp: z.number(),
           presenceId: z.string(),
         }),
-        async ({tx, args: { statusEmoji, statusContent, statusExpiryAt, timestamp, presenceId }}) => {
+        async ({tx, args: { statusEmoji, statusContent, statusExpiryAt, assignmentUnavailableUntil, timestamp, presenceId }}) => {
           // Decode and validate emoji if provided
           let validatedEmoji: string | undefined;
           if (statusEmoji) {
@@ -4590,6 +4591,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(statusEmoji !== undefined && { statusEmoji: validatedEmoji || null }),
             ...(statusContent !== undefined && { statusContent: statusContent }),
             ...(statusExpiryAt !== undefined && { statusExpiryAt: statusExpiryAt }),
+            ...(assignmentUnavailableUntil !== undefined && { assignmentUnavailableUntil: assignmentUnavailableUntil }),
             updatedAt: now,
             createdAt: existingPresence ? existingPresence.createdAt || now : now,
           };

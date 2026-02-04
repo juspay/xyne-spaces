@@ -732,6 +732,7 @@ export const userPresenceTable = table('user_presence')
     statusEmoji: string().optional(), // Current status emoji 
     statusContent: string().optional(), // Current status text
     statusExpiryAt: number().optional(), // Status expiry timestamp
+    assignmentUnavailableUntil: number().optional(), // When user will be available for ticket assignment again
     createdAt: number(),
     updatedAt: number(),
   })

@@ -27,6 +27,7 @@ interface ActivityItemCardProps {
   targetPath: string;
   children: ReactNode;
   className?: string;
+  actorAction?: string;
 }
 
 export const ActivityItemCard = ({
@@ -41,6 +42,7 @@ export const ActivityItemCard = ({
   targetPath,
   children,
   className,
+  actorAction,
 }: ActivityItemCardProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
@@ -107,20 +109,22 @@ export const ActivityItemCard = ({
 
             <span className='text-[#505B62]'>{description}</span>
 
-            <GenericMentionHoverPopover
-              data={{
-                icon: '#',
-                title: channelDisplayName,
-                subtitle: channel?.description || 'Channel',
-              }}
-            >
-              <button
-                className='font-semibold text-[#3B4145] hover:underline cursor-pointer'
-                onClick={e => e.stopPropagation()}
+            {actorAction !== 'paused_from_assignment' && (
+              <GenericMentionHoverPopover
+                data={{
+                  icon: '#',
+                  title: channelDisplayName,
+                  subtitle: channel?.description || 'Channel',
+                }}
               >
-                {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
-              </button>
-            </GenericMentionHoverPopover>
+                <button
+                  className='font-semibold text-[#3B4145] hover:underline cursor-pointer'
+                  onClick={e => e.stopPropagation()}
+                >
+                  {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
+                </button>
+              </GenericMentionHoverPopover>
+            )}
           </div>
 
           <span className='flex-shrink-0 whitespace-nowrap text-xs text-[#505B62]'>
