@@ -9,7 +9,7 @@ import { logger } from '../../../../utils/logger.js';
 /**
  * Validate and resolve search path (accepts both relative and absolute paths  )
  */
-export function validateSearchPath(inputPath?: string): string {
+export function validateSearchPath(inputPath?: string, cwd?: string): string {
   const resolvedPath = inputPath || '.';
   
   // Check for path traversal attempts in relative paths only
@@ -20,7 +20,7 @@ export function validateSearchPath(inputPath?: string): string {
   // Convert to absolute path for processing
   const absolutePath = path.isAbsolute(resolvedPath) 
     ? path.normalize(resolvedPath)
-    : path.resolve(resolvedPath);
+    : path.resolve(cwd || process.cwd(), resolvedPath);
 
   return absolutePath;
 }

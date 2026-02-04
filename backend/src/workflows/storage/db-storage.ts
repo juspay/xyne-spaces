@@ -2320,7 +2320,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
   // Agent creation methods
 
-  async getAgentConfigFromDb(name: string, agentConfigVersions?: AgentConfigVersions): Promise<Agent> {
+  async getAgentConfigFromDb(name: string, agentConfigVersions?: AgentConfigVersions, maxTurns?: number): Promise<Agent> {
     let preferredVersion: number | undefined;
     if (agentConfigVersions && agentConfigVersions[name]) {
       preferredVersion = agentConfigVersions[name];
@@ -2353,7 +2353,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
       throw new Error(`Agent with name '${name}' not found`);
     }
 
-    const agentConfig = this.convertDbToAgentConfig(fullAgent);
+    const agentConfig = this.convertDbToAgentConfig(fullAgent, maxTurns);
     return Agent.create(agentConfig);
   }
 
@@ -2382,7 +2382,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
   /**
    * Private: Convert DB agent to framework AgentConfig
    */
-  private convertDbToAgentConfig(dbAgent: FullAgent): AgentConfig {
+  private convertDbToAgentConfig(dbAgent: FullAgent, maxTurns?: number): AgentConfig {
     // Start with framework defaults
     const defaultConfig = createDefaultAgentConfig();
 
@@ -2424,8 +2424,8 @@ export class DBWorkflowStorage implements WorkflowStorage {
         execution: defaultConfig.tools.execution,
       },
 
-      // Use framework defaults for execution
-      execution: {...defaultConfig.execution,toolAuthorization: async (
+      // Use framework defaults for execution, override maxTurns if specified
+      execution: {...defaultConfig.execution,...(maxTurns !== undefined && { maxTurns }),toolAuthorization: async (
         _toolName: string,
         _parameters: Record<string, unknown>,
         _context: ToolAuthorizationContext
