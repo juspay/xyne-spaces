@@ -1,3 +1,17 @@
+## [1.27.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.26.0...v1.27.0) (2026-02-04)
+
+
+### Features
+
+* add ticket assignment availability ([7fadd83](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7fadd8331ffb9a9bd49e3c63237c36b2ee370718)), closes [#2694](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2694)
+
+
+### Bug Fixes
+
+* add more metrics in search ([52ee42d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/52ee42d03a85ffdde9c938664f9fc059a37e0d8b)), closes [#2716](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2716)
+* Fix navigation button colors on call participants screen ([1dff9d2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1dff9d276b59f4400eb3c73bafddf044d4f9e91f))
+* stop trying to send logs in local environment ([28a36d6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/28a36d65bb152eb0cbd09e1fa3e0216f34ed0366)), closes [#2682](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2682)
+
 ## [1.26.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.25.0...v1.26.0) (2026-02-04)
 
 
