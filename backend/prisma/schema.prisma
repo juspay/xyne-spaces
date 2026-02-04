@@ -829,6 +829,7 @@ model UserPresence {
   statusEmoji   String?           // Current status emoji
   statusContent String?           // Current status text
   statusExpiryAt DateTime?         // Status expiry timestamp
+  assignmentUnavailableUntil DateTime?  // When user will be available for ticket assignment again
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 

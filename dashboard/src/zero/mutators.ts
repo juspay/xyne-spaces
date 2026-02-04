@@ -3123,6 +3123,7 @@ export const mutators = defineMutators({
         statusEmoji: z.string().nullable().optional(),
         statusContent: z.string().nullable().optional(),
         statusExpiryAt: z.number().nullable().optional(),
+        assignmentUnavailableUntil: z.number().nullable().optional(),
         timestamp: z.number(),
         presenceId: z.string(),
       }),
@@ -3133,6 +3134,7 @@ export const mutators = defineMutators({
           statusEmoji,
           statusContent,
           statusExpiryAt,
+          assignmentUnavailableUntil,
           timestamp,
           presenceId: inputPresenceId,
         },
@@ -3173,6 +3175,7 @@ export const mutators = defineMutators({
           ...(statusEmoji !== undefined && { statusEmoji: validatedEmoji || null }),
           ...(statusContent !== undefined && { statusContent }),
           ...(statusExpiryAt !== undefined && { statusExpiryAt }),
+          ...(assignmentUnavailableUntil !== undefined && { assignmentUnavailableUntil }),
           updatedAt: now,
           createdAt: existingPresence ? existingPresence.createdAt || now : now,
         };

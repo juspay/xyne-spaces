@@ -33,6 +33,7 @@ import conversationRoutes from '@/routes/conversations';
 import organizationRoutes from '@/routes/organizations';
 import reactionRoutes from '@/routes/reactionRoutes';
 import userStatusRoutes from '@/routes/userStatus';
+import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
@@ -85,6 +86,7 @@ import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
+import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
 import { bitbucketWebhookMiddleware } from './middleware/bitbucketWebhookValidator';
 import queryRoutes from '@/routes/query';
@@ -324,6 +326,7 @@ export class App {
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
     this.app.use('/api/user-status', userStatusRoutes); // User status routes (auth handled in route file)
+    this.app.use('/api/user-assignment-state', userAssignmentStateRoutes); // User assignment state routes (auth handled in route file)
     // this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes); // Reactions routes
     this.app.use('/api/notifications', notificationRoutes); // Notification routes
 
@@ -407,6 +410,10 @@ export class App {
     logger.info('Initializing ETA deadline queue...');
     await etaDeadlineQueue.initialize();
 
+    // Initialize assignment reactivation queue (Bull-based scheduling)
+    logger.info('Initializing assignment reactivation queue...');
+    await assignmentReactivationQueue.initialize();
+
     // Initialize WebSocket server
     logger.info('Initializing WebSocket server...');
     websocketService.initialize(this.httpServer);
@@ -484,6 +491,9 @@ export class App {
 
       // Close ETA deadline queue
       await etaDeadlineQueue.close();
+
+      // Close assignment reactivation queue
+      await assignmentReactivationQueue.close();
 
       // Shutdown notification service
       await notificationService.shutdown();

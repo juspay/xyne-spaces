@@ -692,6 +692,50 @@ class RedisService {
     if (!this.redis) throw new Error('Redis not initialized');
     return this.redis;
   }
+
+  // Assignment state backup management
+  /**
+   * Store user's assignment state backup in Redis
+   * Stores state per group: { groupId: { onCall, isActiveForAssignment } }
+   * Only stores groups where onCall === true OR isActiveForAssignment === true
+   */
+  async storeAssignmentStateBackup(
+    userId: string,
+    stateBackup: Record<string, { onCall: boolean; isActiveForAssignment: boolean }>
+  ): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const key = `assignment:state:backup:${userId}`;
+    await this.redis.set(key, JSON.stringify(stateBackup));
+    // No TTL - will be deleted manually when restored
+  }
+
+  /**
+   * Get user's assignment state backup from Redis
+   */
+  async getAssignmentStateBackup(
+    userId: string
+  ): Promise<Record<string, { onCall: boolean; isActiveForAssignment: boolean }> | null> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const key = `assignment:state:backup:${userId}`;
+    const data = await this.redis.get(key);
+    if (!data) return null;
+    logger.info(`📦 [ASSIGNMENT-STATE] Retrieved assignment state backup for user ${userId}:`, data);
+    // logging for each group
+    const parsedData = JSON.parse(data) as Record<string, { onCall: boolean; isActiveForAssignment: boolean }>;
+    // for (const [groupId, state] of Object.entries(parsedData)) {
+    //   logger.info(`   - Group ${groupId}: onCall=${state.onCall}, isActiveForAssignment=${state.isActiveForAssignment}`);
+    // }
+    return parsedData;
+  }
+
+  /**
+   * Delete user's assignment state backup from Redis
+   */
+  async deleteAssignmentStateBackup(userId: string): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const key = `assignment:state:backup:${userId}`;
+    await this.redis.del(key);
+  }
 }
 
 // Export singleton instance

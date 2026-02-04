@@ -1,16 +1,20 @@
 import { ReactElement, useState, useEffect } from 'react';
 import { useZero } from '@rocicorp/zero/react';
 import { useNavigate } from 'react-router-dom';
+import { PauseCircle } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Switch } from '../../ui/Switch';
 import Input from '../../ui/Input/Input';
+import { Tooltip } from '../../ui/Tooltip';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useUsers } from '../../../hooks/useUsers';
-import type { User, Board, UserAssignmentState } from '@xyne/shared';
+import type { Board, UserAssignmentState } from '@xyne/shared';
+import type { User } from '../../../machines/stateMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
+import { formatExpiryTime } from '../../../utils/statusUtils';
 
 interface AssignmentConfigScreenProps {
   userGroupId: string;
@@ -523,13 +527,31 @@ export const AssignmentConfigScreen = ({
                   <tbody className='bg-white divide-y divide-gray-200'>
                     {users.map((user: User) => {
                       const localState = getUserLocalState(user.id);
+                      const assignmentUnavailableUntil = (
+                        user?.presenceStatus as { assignmentUnavailableUntil?: number } | undefined
+                      )?.assignmentUnavailableUntil;
+                      const isUnavailable = assignmentUnavailableUntil
+                        ? assignmentUnavailableUntil > Date.now()
+                        : false;
+                      const unavailableTooltip = assignmentUnavailableUntil
+                        ? `Unavailable until ${formatExpiryTime(assignmentUnavailableUntil, false)}`
+                        : 'Unavailable for ticket assignment';
                       return (
                         <tr key={user.id} className='hover:bg-gray-50'>
                           <td className='px-6 py-4 whitespace-nowrap'>
                             <div className='flex items-center'>
                               <Avatar userId={user.id} size='sm' showActiveStatus={false} />
-                              <div className='ml-4'>
-                                <div className='text-sm font-medium text-gray-900'>{user.name}</div>
+                              <div className='ml-4 flex-1'>
+                                <div className='flex items-center gap-2'>
+                                  <div className='text-sm font-medium text-gray-900'>
+                                    {user.name}
+                                  </div>
+                                  {isUnavailable && (
+                                    <Tooltip content={unavailableTooltip}>
+                                      <PauseCircle className='size-3.5 text-gray-500 flex-shrink-0 cursor-help' />
+                                    </Tooltip>
+                                  )}
+                                </div>
                                 <div className='text-sm text-gray-500'>{user.email}</div>
                               </div>
                             </div>

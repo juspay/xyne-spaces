@@ -1,12 +1,14 @@
 import { ReactElement, useState } from 'react';
-import { X, User, SmilePlus, ChevronDown, Check } from 'lucide-react';
+import { X, User, SmilePlus, ChevronDown, Check, PauseCircle } from 'lucide-react';
 import { useZero } from '@rocicorp/zero/react';
 import { useAuth } from '../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
 import Avatar from '../ui/Avatar/Avatar';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { UpdateStatusModal } from '../AppSidebar/UpdateStatusModal';
+import { UpdateAssignmentStatusModal } from '../AppSidebar/UpdateAssignmentStatusModal';
 import { Button } from '../ui/Button/Button';
+import { useCurrentUserAssignmentState } from '../../hooks/useAssignmentState';
 import { useTheme } from '../../hooks/useTheme';
 import { useDebugSettings } from '../../hooks/useDebugSettings';
 import { cn } from '../ui/Drawer';
@@ -19,6 +21,7 @@ import { mutators } from '../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { Popover } from '../ui/Popover/Popover';
 import { websocketService } from '../../services/clients/socketClient';
+import { apiInstance } from '../../services/clients/apiClient';
 
 const Settings = (): ReactElement => {
   const { logout } = useAuth();
@@ -26,7 +29,12 @@ const Settings = (): ReactElement => {
   const { theme, changeTheme } = useTheme();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const zero = useZero();
+
+  // Get assignment availability for current user
+  const { isCurrentlyUnavailable, unavailableUntil, isActiveInAtLeastOneGroup } =
+    useCurrentUserAssignmentState();
   const generalChannel = useChannelByName('general');
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId?: string }>();
@@ -34,6 +42,22 @@ const Settings = (): ReactElement => {
   const userPresence = userData?.presenceStatus;
   const handleLogout = (): void => {
     logout();
+  };
+
+  const handleResumeAssignment = (e: React.MouseEvent<HTMLButtonElement>): void => {
+    e.stopPropagation();
+    if (!user?.id) return;
+
+    void apiInstance.post('/user-assignment-state/toggle', { isUnavailable: false }).then(() => {
+      // Update Zero immediately so UI is in sync
+      zero.mutate(
+        mutators.userPresence.upsert({
+          assignmentUnavailableUntil: null,
+          timestamp: Date.now(),
+          presenceId: uuidv4(),
+        }),
+      );
+    });
   };
 
   // Check if user has a valid (non-expired) status
@@ -219,6 +243,67 @@ const Settings = (): ReactElement => {
         )}
       </div>
 
+      {/* Assignment Status Section */}
+      {(isActiveInAtLeastOneGroup || isCurrentlyUnavailable) && (
+        <div className='mt-2 space-y-1'>
+          <div
+            className={cn(
+              'px-2 py-1 rounded-lg border transition-colors w-full flex items-center justify-between gap-2',
+              isCurrentlyUnavailable
+                ? 'border-gray-200 bg-transparent hover:bg-gray-100'
+                : 'border-gray-200 bg-gray-50 hover:bg-gray-200 cursor-pointer',
+            )}
+            onClick={() => {
+              if (!isCurrentlyUnavailable) {
+                setIsAssignmentModalOpen(true);
+              }
+            }}
+            onKeyDown={e => {
+              if (!isCurrentlyUnavailable && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                setIsAssignmentModalOpen(true);
+              }
+            }}
+            role='button'
+            tabIndex={0}
+            title={
+              isCurrentlyUnavailable ? 'Paused from assignment' : 'Click to pause from assignment'
+            }
+          >
+            {isCurrentlyUnavailable ? (
+              <div className='flex items-center gap-2 min-w-0 flex-1'>
+                <PauseCircle className='size-4 flex-shrink-0 text-gray-600' />
+                <div className='text-sm font-medium text-gray-900 truncate'>
+                  Paused from ticket assignment
+                </div>
+              </div>
+            ) : (
+              <div className='flex items-center p-1 gap-2 text-gray-600'>
+                <PauseCircle className='size-4 flex-shrink-0' />
+                <span className='text-xs truncate'>Pause from ticket assignment</span>
+              </div>
+            )}
+
+            {isCurrentlyUnavailable && (
+              <Button
+                variant='ghost'
+                size='lg'
+                className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
+                title='Resume ticket assignment'
+                onClick={handleResumeAssignment}
+              >
+                <X className='size-3 text-gray-600' />
+              </Button>
+            )}
+          </div>
+          {isCurrentlyUnavailable && unavailableUntil && (
+            <div className='text-xs text-gray-500'>
+              Unavailable until {new Date(unavailableUntil).toLocaleString()}
+            </div>
+          )}
+        </div>
+      )}
+
       <Button
         type='button'
         variant='ghost'
@@ -307,6 +392,14 @@ const Settings = (): ReactElement => {
             : null
         }
       />
+
+      {/* Assignment Status Modal */}
+      {(isActiveInAtLeastOneGroup || isCurrentlyUnavailable) && (
+        <UpdateAssignmentStatusModal
+          isOpen={isAssignmentModalOpen}
+          onClose={() => setIsAssignmentModalOpen(false)}
+        />
+      )}
     </div>
   );
 };
