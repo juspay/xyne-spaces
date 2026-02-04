@@ -34,6 +34,8 @@ export const UserList = ({
     { label: 'Manager', value: UserResponsibility.MANAGER },
     { label: 'Team Lead', value: UserResponsibility.TEAM_LEAD },
     { label: 'Member', value: UserResponsibility.MEMBER },
+    { label: 'PR Reviewer', value: UserResponsibility.PR_REVIEWER },
+    { label: 'QA', value: UserResponsibility.QA },
   ];
 
   // Filter users based on search term

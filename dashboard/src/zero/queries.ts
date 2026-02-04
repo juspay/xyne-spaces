@@ -175,6 +175,12 @@ export const queries = defineQueries({
       return zql.sub_tickets.where('mappedTicketId', mappedTicketId).related('ticketMappings');
     },
   ),
+  ticketAssignmentsByTicketId: defineQuery(
+    z.object({ ticketId: z.string() }),
+    ({ args: { ticketId } }) => {
+      return zql.ticket_assignments.where('ticketId', ticketId);
+    },
+  ),
   userAllChannels: defineQuery(() => {
     return zql.channels;
   }),

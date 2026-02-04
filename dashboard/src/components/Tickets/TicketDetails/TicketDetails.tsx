@@ -190,6 +190,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId }));
 
+  // Query all assignments for this ticket
+  const [ticketAssignments] = useCachedQuery(
+    queries.ticketAssignmentsByTicketId({ ticketId: ticketId }),
+  );
+
+  // Filter PR reviewers and QA from assignments
+  const prReviewerIds =
+    ticketAssignments
+      ?.filter(a => a.userResponsibility === 'PR_REVIEWER')
+      .map(a => a.userId)
+      .filter(Boolean) || [];
+
+  const qaId = ticketAssignments?.find(a => a.userResponsibility === 'QA')?.userId || null;
+
   // Query all users for assignee dropdown
   const users = useUsers();
 
@@ -1059,6 +1073,54 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               />
             }
           />
+
+          {/* PR Reviewers - Only show if assigned */}
+          {prReviewerIds && prReviewerIds.length > 0 && (
+            <TicketKeyValuePair
+              ticketKey={prReviewerIds.length > 1 ? 'PR Reviewers' : 'PR Reviewer'}
+              value={
+                <div className='flex flex-col gap-2'>
+                  {prReviewerIds.map((reviewerId: string) => {
+                    const reviewer = users?.find(
+                      (u: { id: string; name: string }) => u.id === reviewerId,
+                    );
+                    return (
+                      <div key={reviewerId} className='flex items-center gap-2'>
+                        <UserAvatar
+                          userId={reviewerId}
+                          size={AvatarSize.SM}
+                          shape={AvatarShape.CIRCULAR}
+                          showActiveStatus={false}
+                        />
+                        <span className='text-sm text-gray-700'>{reviewer?.name || 'Unknown'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              }
+            />
+          )}
+
+          {/* QA - Only show if assigned */}
+          {qaId && (
+            <TicketKeyValuePair
+              ticketKey='QA'
+              value={
+                <div className='flex items-center gap-2'>
+                  <UserAvatar
+                    userId={qaId}
+                    size={AvatarSize.SM}
+                    shape={AvatarShape.CIRCULAR}
+                    showActiveStatus={false}
+                  />
+                  <span className='text-sm text-gray-700'>
+                    {users?.find((u: { id: string; name: string }) => u.id === qaId)?.name ||
+                      'Unknown'}
+                  </span>
+                </div>
+              }
+            />
+          )}
 
           {/* Created At */}
           <TicketKeyValuePair

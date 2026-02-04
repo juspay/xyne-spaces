@@ -183,6 +183,13 @@ export const queries = defineQueries({
     }
   ),
 
+  ticketAssignmentsByTicketId: defineQuery(
+    z.object({ ticketId: z.string() }),
+    ({ args: { ticketId } }) => {
+      return zql.ticket_assignments.where('ticketId', ticketId);
+    },
+  ),
+
   userAllChannels: defineQuery(() => {
     return zql.channels;
   }),
