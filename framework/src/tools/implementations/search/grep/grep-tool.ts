@@ -215,7 +215,7 @@ export class GrepTool extends BaseTool<GrepToolInput, GrepToolOutput, GrepToolLL
 
     try {
       // Validate all inputs
-      const resolvedPath = validateSearchPath(searchPath);
+      const resolvedPath = validateSearchPath(searchPath, this.getEffectiveCwd(context));
       validatePattern(pattern);
       validateGlobPattern(glob);
       validateContextOptions(input);

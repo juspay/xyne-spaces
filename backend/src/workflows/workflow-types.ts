@@ -156,6 +156,8 @@ export type AgenticCheckpointConfig = {
   agentConfigVersions?: AgentConfigVersions
   /** When true, captures learnings from the checkpoint for the knowledge base */
   captureKnowledge?: boolean
+  /** Override the agent's default maxTurns execution limit */
+  maxTurns?: number
 }
 
 // Continuation override for resuming agentic steps with user input

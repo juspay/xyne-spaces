@@ -45,8 +45,10 @@ import {
   XyneSpacesWorkflowSteps,
   getPlanningConfig,
   getImplementationConfig,
+  getValidationConfig,
   loadRootGuidelines,
 } from './utils';
+import { runDeterministicValidation } from './validation-helpers';
 import {logger} from '@/utils/logger';
 
 // =============================================================================
@@ -195,6 +197,57 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
 
     logger.info('Implementation completed successfully');
 
+    // =========================================================================
+    // PHASE 3: VALIDATION PHASE
+    // =========================================================================
+
+    const workspaceName = workflow.getWorkflowExecutionId();
+    const repoPath = `/tmp/${workspaceName}`;
+    const deterministicResult = await runDeterministicValidation(repoPath, gitInfo);
+    
+    if (deterministicResult.formatCommitHash) {
+      gitInfo = { ...gitInfo, commitHash: deterministicResult.formatCommitHash };
+    }
+
+    let validationPassed = deterministicResult.passed;
+
+    if (!validationPassed) {
+      logger.warn('Validation failed with errors, starting agentic error fixing...');
+
+      const validationErrors = deterministicResult.errorLines.length > 0 
+        ? deterministicResult.errorLines.join('\n')
+        : deterministicResult.validationOutput.stderr || deterministicResult.validationOutput.stdout || '';
+
+      const validationConfig = getValidationConfig(
+        validationErrors,
+        workspaceName,
+        validRepoUrl,
+        gitInfo.branch,
+        context.baseBranch || 'main',
+        context.checkoutCommit,
+        projectGuidelines
+      );
+
+      const validationResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(
+        XyneSpacesWorkflowSteps.VALIDATION,
+        'xyne-cli-validator',
+        validationConfig
+      );
+
+      gitInfo = { ...gitInfo, ...validationResult.gitInfo };
+
+      const lastMessageContent = extractLastMessageContent(validationResult.result).toLowerCase();
+      validationPassed = lastMessageContent.includes('validation passed');
+
+      if (validationPassed) {
+        logger.info('Validation errors fixed by agent!');
+      } else {
+        logger.warn('Agent could not fix all validation errors. Manual intervention required.');
+      }
+    } else {
+      logger.info('Validation passed on first try!');
+    }
+
     // Add preview configuration for live preview in dashboard
     const previewConfig = gitInfo.branch ? {
       type: 'loadUrlWithUserAgent' as const,
@@ -204,15 +257,17 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
 
     return {
       ticketId,
-      status: 'completed' as const,
+      status: validationPassed ? 'completed' : 'failed' as const,
       implementationDetails: {
         filesChanged: [],
         commitHash: gitInfo.commitHash,
         branch: gitInfo.branch,
-        verificationPassed: true,
+        verificationPassed: validationPassed,
         iterationsCompleted: 1,
       },
-      summary: 'Feature implementation completed successfully with guideline compliance',
+      summary: validationPassed
+        ? 'Feature implementation completed and validated successfully'
+        : 'Feature implementation completed but validation encountered issues',
       gitInfo: {
         ...gitInfo,
         preview: previewConfig

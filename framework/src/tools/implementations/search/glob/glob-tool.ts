@@ -110,7 +110,7 @@ export class GlobTool extends BaseTool<GlobToolInput, GlobToolOutput, GlobToolLL
 
     try {
       // Validate inputs
-      const resolvedPath = validateGlobPath(searchPath);
+      const resolvedPath = validateGlobPath(searchPath, this.getEffectiveCwd(context));
       validateGlobPattern(pattern);
       // No complex option validation needed for simplified interface
 

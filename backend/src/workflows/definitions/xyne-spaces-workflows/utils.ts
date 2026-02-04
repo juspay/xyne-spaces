@@ -27,7 +27,8 @@ export const createXyneSpacesAgentConfig = (
   _temperature: number = 0.1,
   repoBranch?: string,
   baseBranch?: string,
-  checkoutCommit?: string
+  checkoutCommit?: string,
+  maxTurns?: number
 ): AgenticCheckpointConfig => {
 
   const repoInfo: { repoUrl: string; repoBranch?: string; baseBranch?: string; checkoutCommit?: string } = { repoUrl, baseBranch }
@@ -47,8 +48,9 @@ export const createXyneSpacesAgentConfig = (
       ]
     },
     repoInfo,
-    captureKnowledge: true  // Enable knowledge capture by default for all Xyne Spaces workflows
-  }
+    captureKnowledge: true,  // Enable knowledge capture by default for all Xyne Spaces workflows
+    ...(maxTurns !== undefined && { maxTurns })
+  };
 }
 
 /**
@@ -204,7 +206,63 @@ Implementation requirements:
 - Follow the exact file paths specified in the plan
 - Reuse existing code where possible
 
-CRITICAL: Follow the guidelines provided. Quality over speed.`
+CRITICAL: Follow the guidelines provided. Quality over speed.`,
+
+  VALIDATOR: `You are a strict validation error fixer for the Xyne Spaces platform.
+
+CRITICAL RULES - VIOLATING ANY OF THESE IS UNACCEPTABLE:
+1. **ONLY FIX ERRORS** - COMPLETELY IGNORE ALL WARNINGS
+2. **DO NOT CHANGE FUNCTIONALITY** - Only fix what's broken, nothing more
+3. **NO REFACTORING** - Don't improve code, don't optimize, don't restructure
+4. **NO FEATURE CHANGES** - Don't add anything new, don't modify behavior
+5. **MINIMAL CHANGES ONLY** - Make the smallest possible change to fix each error
+
+YOUR ONLY JOB:
+- Fix TypeScript/ESLint/Build ERRORS (not warnings)
+- Test the fix with: cd /tmp/{workspace}/dashboard && npm run validate
+- Repeat until ZERO ERRORS remain
+- COMMIT fixes after each successful validation
+
+WHAT YOU MUST IGNORE:
+- Warnings (yellow text, "warning:", etc.) - SKIP THESE COMPLETELY
+- Suggestions or best practices - NOT YOUR JOB
+- Code quality improvements - NOT YOUR JOB
+- Optimizations or refactoring - NOT YOUR JOB
+
+FIXING PROTOCOL:
+1. Read ONLY the ERROR lines from validation output (ignore warnings)
+2. For EACH error:
+   a. Quote the exact error message
+   b. Identify the minimal fix (smallest change possible)
+   c. Apply ONLY that fix - change nothing else
+   d. DO NOT touch any working code
+3. Re-run: cd /tmp/{workspace}/dashboard && npm run validate
+4. If errors remain, repeat from step 1
+5. If ZERO errors, commit and report "VALIDATION PASSED"
+
+EXAMPLES OF WHAT TO FIX:
+"error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'"
+"error: 'useState' is not defined"
+"Build failed with 3 errors"
+
+EXAMPLES OF WHAT TO IGNORE:
+"warning: 'useEffect' has a missing dependency"
+"warning: Consider using const instead of let"
+"suggestion: This code could be simplified"
+
+FORBIDDEN ACTIONS:
+Changing variable names
+Adding new features or logic
+Restructuring code organization
+Fixing warnings (only errors)
+Improving code style beyond what's required
+Modifying working functionality
+
+Your output must end with one of:
+- "VALIDATION PASSED: All errors fixed, zero errors remaining" - when npm run validate shows NO ERRORS (warnings are OK)
+- "VALIDATION FAILED: Max attempts reached, manual intervention required" - only when hitting limits
+
+REMEMBER: You are a surgical error fixer, not a code improver. Fix errors. Change nothing else.`
 } as const
 
 /**
@@ -239,6 +297,9 @@ export enum XyneSpacesWorkflowSteps {
 
   // Phase 2: Implementation
   IMPLEMENTATION = 'implementation',
+
+  // Phase 3: Validation with iterative error fixing
+  VALIDATION = 'validation',
 }
 
 
@@ -334,4 +395,61 @@ Remember: Quality over speed. Follow the guidelines strictly.`,
   repoBranch,
   baseBranch,
   checkoutCommit
+)
+
+/**
+ * Creates agent configuration for validation error fixing
+ * Should only be called if validation errors exist
+ */
+export const getValidationConfig = (
+  validationErrors: string,
+  workspaceName: string,
+  repoUrl: string,
+  repoBranch?: string,
+  baseBranch?: string,
+  checkoutCommit?: string,
+  guidelines?: string
+) => createXyneSpacesAgentConfig(
+  'xyne-validator',
+  SYSTEM_PROMPTS.VALIDATOR,
+  `You are fixing ONLY validation ERRORS (not warnings) for the Xyne Spaces platform.
+
+# Project Guidelines
+
+${guidelines}
+
+# VALIDATION OUTPUT (ERRORS + WARNINGS)
+
+\`\`\`
+${validationErrors}
+\`\`\`
+
+# YOUR TASK - READ CAREFULLY
+
+1. **IGNORE ALL WARNINGS** - Only look at lines that say "error" or "Error"
+2. **FIX ONLY ERRORS** - Don't touch anything related to warnings
+3. **DON'T CHANGE FUNCTIONALITY** - Make minimal fixes only
+4. **TEST AFTER EACH FIX**: cd /tmp/${workspaceName}/dashboard && npm run validate
+
+CRITICAL RULES:
+DO NOT fix warnings (yellow text, "warning:", etc.)
+DO NOT refactor or improve code
+DO NOT change functionality
+DO NOT rename variables or restructure code
+ONLY fix actual errors (red text, "error:", build failures)
+Make the smallest possible change to fix each error
+Test with npm run validate after each fix
+Commit after fixing all errors
+
+Your response must end with:
+- "VALIDATION PASSED: All errors fixed, zero errors remaining" (warnings are OK to have)
+- OR "VALIDATION FAILED: Cannot fix errors, manual intervention needed"`,
+  repoUrl,
+  undefined,
+  ['read', 'grep', 'bash', 'write', 'ls', 'edit'],
+  0.05,
+  repoBranch,
+  baseBranch,
+  checkoutCommit,
+  50
 )
