@@ -154,6 +154,7 @@ export const PROMPT_NAMES = {
   SEARCH_RELEVANT_TICKETS: 'search_relevant_tickets',
   GENIUS: 'genius_as_tool',
   FIELD_VALUE_DISCOVERY: 'field_value_discovery',
+  RESEARCH_AGENT: 'research_agent',
 } as const;
 
 export type PromptName = typeof PROMPT_NAMES[keyof typeof PROMPT_NAMES];

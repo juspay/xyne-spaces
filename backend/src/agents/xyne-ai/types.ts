@@ -4,7 +4,7 @@
  * API request, streaming chunks, and output types.
  */
 
-import type { UserInfo } from './tools.js';
+import type { UserInfo } from './tools/index.js';
 
 // ============================================================================
 // Request Types

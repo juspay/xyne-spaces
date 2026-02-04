@@ -2,7 +2,7 @@
  * Template Variables for Langfuse Prompts
  */
 
-import type { UserInfo } from '../tools.js';
+import type { UserInfo } from '../tools/index.js';
 
 export type SourceType = 'thread' | 'channel';
 

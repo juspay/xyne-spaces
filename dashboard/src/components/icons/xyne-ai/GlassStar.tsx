@@ -1,11 +1,4 @@
-import { ReactElement } from 'react';
-
-interface GlassStarProps {
-  shouldRotate?: boolean;
-  size?: number;
-}
-
-const GlassStar = ({ shouldRotate = true, size = 72 }: GlassStarProps): ReactElement => {
+export default function GlassStar({ shouldRotate = true }) {
   const starPath =
     'M32.7214 68.5841C32.7148 56.9838 31.0275 49.997 27.0435 45.7624C23.105 41.5762 16.1364 39.2694 3.2694 39.2694C1.46284 39.2694 0.00153034 37.8062 0 36C0 34.1925 1.46189 32.7214 3.2694 32.7214C16.1365 32.7214 23.105 30.4147 27.0435 26.2284C31.0265 21.9935 32.715 15.0066 32.7214 3.40677C32.7215 3.36166 32.7215 3.31462 32.7214 3.2694C32.7225 1.46262 34.1932 0 36 0C37.8055 0.00152977 39.2684 1.46357 39.2694 3.2694C39.2694 3.31702 39.2694 3.36841 39.2694 3.41592C39.2766 15.0096 40.9664 21.9942 44.9473 26.2284C48.8855 30.4143 55.8565 32.721 68.7214 32.7214C70.529 32.7214 72 34.1925 72 36C71.9985 37.8062 70.528 39.2694 68.7214 39.2694C55.8565 39.2698 48.8855 41.5765 44.9473 45.7624C40.9645 49.9972 39.276 56.9853 39.2694 68.5841C39.2694 68.6297 39.2694 68.6849 39.2694 68.7306C39.2663 70.5347 37.8042 71.9985 36 72C34.1945 72 32.7245 70.5356 32.7214 68.7306C32.7215 68.6849 32.7215 68.6297 32.7214 68.5841Z';
 
@@ -13,8 +6,8 @@ const GlassStar = ({ shouldRotate = true, size = 72 }: GlassStarProps): ReactEle
     <div
       style={{
         position: 'relative',
-        width: `${size}px`,
-        height: `${size}px`,
+        width: '72px',
+        height: '72px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -120,8 +113,8 @@ const GlassStar = ({ shouldRotate = true, size = 72 }: GlassStarProps): ReactEle
       </style>
       <div className='star-container'>
         <svg
-          width={size}
-          height={size}
+          width='72'
+          height='72'
           viewBox='0 0 72 72'
           fill='none'
           xmlns='http://www.w3.org/2000/svg'
@@ -230,6 +223,7 @@ const GlassStar = ({ shouldRotate = true, size = 72 }: GlassStarProps): ReactEle
               fill='#FFEEDD'
               style={{
                 transformOrigin: '36px 36px',
+                opacity: 0,
                 animation: 'sparkleFloat1 5s linear infinite',
               }}
             />
@@ -240,6 +234,7 @@ const GlassStar = ({ shouldRotate = true, size = 72 }: GlassStarProps): ReactEle
               fill='#FFE0CC'
               style={{
                 transformOrigin: '36px 36px',
+                opacity: 0,
                 animation: 'sparkleFloat2 5s linear infinite 1.25s',
               }}
             />
@@ -250,6 +245,7 @@ const GlassStar = ({ shouldRotate = true, size = 72 }: GlassStarProps): ReactEle
               fill='#FFF5EA'
               style={{
                 transformOrigin: '36px 36px',
+                opacity: 0,
                 animation: 'sparkleFloat5 5s linear infinite 2.5s',
               }}
             />
@@ -260,6 +256,7 @@ const GlassStar = ({ shouldRotate = true, size = 72 }: GlassStarProps): ReactEle
               fill='#FFEADD'
               style={{
                 transformOrigin: '36px 36px',
+                opacity: 0,
                 animation: 'sparkleFloat6 5s linear infinite 3.75s',
               }}
             />
@@ -268,6 +265,4 @@ const GlassStar = ({ shouldRotate = true, size = 72 }: GlassStarProps): ReactEle
       </div>
     </div>
   );
-};
-
-export default GlassStar;
+}

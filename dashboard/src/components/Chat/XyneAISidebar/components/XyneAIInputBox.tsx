@@ -123,6 +123,13 @@ export const XyneAIInputBox = ({
             return false;
           }
 
+          // Prevent submission if already streaming or input is empty
+          const text = view.state.doc.textContent.trim();
+          if (isStreaming || !text) {
+            event.preventDefault();
+            return true;
+          }
+
           // Otherwise, submit the message
           event.preventDefault();
           onSubmit();
@@ -339,7 +346,7 @@ export const XyneAIInputBox = ({
   }, [showChannelDropdown]);
 
   return (
-    <div className='px-4 relative'>
+    <div className={`px-4 ${isMobile ? '' : 'mb-4'} relative`}>
       {/* MentionSelector for "#" trigger in editor */}
       <MentionSelector
         editor={editor}
