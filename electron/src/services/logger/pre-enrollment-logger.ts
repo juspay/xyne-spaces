@@ -190,7 +190,6 @@ class PreEnrollmentLogger {
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
         await this.sendLogs(logs);
-        log.info(`[EnrollmentLogger] sent logs to backend url: ${this.loggerUrl}`);
         return;
       } catch (error) {
         lastError = error;
@@ -208,8 +207,15 @@ class PreEnrollmentLogger {
 
   /**
    * Send logs to backend
-   */
-  private async sendLogs(logs: LogEntry[]): Promise<void> {
+  */
+ private async sendLogs(logs: LogEntry[]): Promise<void> {
+   // In local/dev environment, only send logs if explicitly allowed via env variable
+   if (process.env.NODE_ENV === 'development') {
+     if (!config.sendLogs) {
+       return;
+      }
+    }
+    
     const response = await net.fetch(this.loggerUrl, {
       method: 'POST',
       headers: {
@@ -222,6 +228,7 @@ class PreEnrollmentLogger {
       const text = await response.text();
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
+    log.info(`[EnrollmentLogger] sent logs to backend url: ${this.loggerUrl}`);
   }
 
   /**

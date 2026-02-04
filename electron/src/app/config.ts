@@ -30,6 +30,7 @@ export interface AppConfig {
   };
   enableMtls: boolean;
   useBundledUI: boolean;
+  sendLogs: boolean;
   RELEASE_CONFIG_URL: string;
   UI_ZIP_URL: string;
   uiUpdateCheckIntervalMs: number;
@@ -56,6 +57,7 @@ const devConfig: AppConfig = {
   },
   enableMtls: false,
   useBundledUI: false,
+  sendLogs: false,
   RELEASE_CONFIG_URL: 'http://localhost:3456',
   UI_ZIP_URL: 'http://localhost:8888/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 60 * 1000, // 1 minute for dev
@@ -92,6 +94,7 @@ const prodConfig: AppConfig = {
   },
   enableMtls: true,
   useBundledUI: false,
+  sendLogs: true,
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
   UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
