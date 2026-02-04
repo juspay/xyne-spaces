@@ -32,8 +32,9 @@ export class UserStatusService {
   async setUserStatus(
     userId: string,
     status: UserPresenceStatus,
+    currentPresence: UserPresenceStatus | null,
     user: { userName: string; userEmail?: string; deviceInfo?: string }
-  ): Promise<OnlineUser[]> {
+  ): Promise<void> {
     try {
       const timestamp = new Date().toISOString();
 
@@ -65,28 +66,27 @@ export class UserStatusService {
         await redisService.hdel(onlineUsersKey, userId);
       }
 
-      // Update database (upsert)
-      await this.prisma.userPresence.upsert({
-        where: { userId },
-        update: {
-          status,
-          lastActiveAt: new Date(timestamp),
-          lastSeenAt: new Date(timestamp),
-          deviceInfo: user.deviceInfo,
-          updatedAt: new Date()
-        },
-        create: {
-          userId,
-          status,
-          lastActiveAt: new Date(timestamp),
-          lastSeenAt: new Date(timestamp),
-          deviceInfo: user.deviceInfo
-        }
-      });
+      if(currentPresence !== status) {  
+
+        // Update database (upsert)
+        await this.prisma.userPresence.upsert({
+          where: { userId },
+          update: {
+            status,
+            deviceInfo: user.deviceInfo,
+          },
+          create: {
+            userId,
+            status,
+            lastActiveAt: new Date(timestamp),
+            lastSeenAt: new Date(timestamp),
+            deviceInfo: user.deviceInfo
+          }
+        });
+      }
 
       logger.info(`👤 [USER-STATUS] User ${user.userName} (${userId}) status updated to ${status}`);
 
-      return await this.getOnlineUsers();
     } catch (error) {
       logger.error('❌ [USER-STATUS] Error setting user status:', error);
       throw error;
@@ -247,7 +247,7 @@ export class UserStatusService {
       };
       
       // Set user back to ONLINE (this will add to Redis and update DB)
-      await this.setUserStatus(userId, 'ONLINE', userInfo);
+      await this.setUserStatus(userId, 'ONLINE', dbPresence.status, userInfo);
       
     } catch (error) {
       logger.error('❌ [USER-STATUS] Error updating user activity:', error);
