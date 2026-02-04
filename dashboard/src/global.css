@@ -1266,58 +1266,105 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   margin: 0;
 }
 
-/* Markdown Call Summary - Figma style with left accent border */
+/* Base markdown content styling */
 .bot-markdown-content {
-  border-left: 3px solid #9ca3af;
-  padding-left: 16px;
   margin: 8px 0;
 }
 
-.bot-markdown-content .wmde-markdown {
+/* Markdown Call Summary - Figma style with section dividers */
+.bot-markdown-content-call-summary {
+  border-left: 2px solid #d1d5db;
+  padding-left: 16px;
+  margin: 8px 0 8px -24px;
+  position: relative;
+}
+
+/* Remove default top border, handle via h2 pseudo-elements instead */
+.bot-markdown-content-call-summary::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 0;
+  width: 2px;
+  height: 12px;
+  background: #d1d5db;
+}
+
+.bot-markdown-content .wmde-markdown,
+.bot-markdown-content-call-summary .wmde-markdown {
   background: transparent !important;
   font-size: 14px;
   line-height: 1.6;
 }
 
-.bot-markdown-content h2 {
-  font-size: 13px !important;
-  font-weight: 600 !important;
-  color: #525866 !important;
+.bot-markdown-content h2,
+.bot-markdown-content-call-summary h2 {
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: #1d1e1f !important;
   margin: 16px 0 8px 0 !important;
   border-bottom: none !important;
   padding-bottom: 0 !important;
+  padding-left: 6px !important;
+  position: relative;
 }
 
-.bot-markdown-content h2:first-child {
+/* Horizontal line extending from vertical border to heading */
+.bot-markdown-content-call-summary h2::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 10px;
+  width: 12px;
+  height: 2px;
+  background: #d1d5db;
+  border-bottom: 2px solid #d1d5db;
+  border-bottom-left-radius: 6px;
+}
+
+.bot-markdown-content h2:first-child,
+.bot-markdown-content-call-summary h2:first-child {
   margin-top: 0 !important;
 }
 
-.bot-markdown-content p {
+.bot-markdown-content p,
+.bot-markdown-content-call-summary p {
   margin: 0 0 8px 0 !important;
   line-height: 1.5;
-  color: #1d1e1f;
+  color: #788187 !important;
+  font-size: 14px !important;
+  padding-left: 6px !important;
 }
 
-.bot-markdown-content ol {
+.bot-markdown-content ol,
+.bot-markdown-content-call-summary ol {
   padding-left: 20px !important;
   margin: 8px 0 !important;
   list-style-type: decimal !important;
+  color: #788187 !important;
+  font-size: 14px !important;
 }
 
-.bot-markdown-content ol li {
+.bot-markdown-content ol li,
+.bot-markdown-content-call-summary ol li {
   margin: 4px 0 !important;
-  color: #1d1e1f;
+  color: #788187 !important;
 }
 
-.bot-markdown-content ul {
+.bot-markdown-content ul,
+.bot-markdown-content-call-summary ul {
   padding-left: 16px !important;
   margin: 8px 0 !important;
   list-style-type: disc !important;
+  color: #788187 !important;
+  font-size: 14px !important;
 }
 
-.bot-markdown-content ul li {
+.bot-markdown-content ul li,
+.bot-markdown-content-call-summary ul li {
   margin: 4px 0 !important;
-  color: #1d1e1f;
+  color: #788187 !important;
+  font-size: 14px !important;
 }
 
 .ag-center-cols-viewport,

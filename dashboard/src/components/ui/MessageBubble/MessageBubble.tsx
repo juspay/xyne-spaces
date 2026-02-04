@@ -48,6 +48,8 @@ import { CallBubble } from './CallBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { emojiActor } from '../../../machines/emojiMachine';
 import { useSelector } from '@xstate/react';
+import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
+import { TicketSuggestions } from './TicketSuggestions';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -275,7 +277,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
   const reactions = message.reactions || [];
-  console.log('reactions ', message.reactions);
   const attachments = message.attachments || [];
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
@@ -303,6 +304,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
   // Detect any message with markdown content format (call_summary, call_prd, etc.)
   const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
+  const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
+  const parsedMarkdown = useMemo(() => {
+    if (isMarkdownContent && hasSuggestedTickets) {
+      return parseMarkdownWithTicketSuggestions(message.content);
+    }
+    return { ticketSuggestions: [], ticketsCreated: [], content: message.content };
+  }, [isMarkdownContent, hasSuggestedTickets, message.content]);
+
+  const ticketSuggestions = parsedMarkdown.ticketSuggestions;
+  const ticketsCreated = parsedMarkdown.ticketsCreated;
 
   const { user } = useAuth();
   const { isMobile } = usePlatform();
@@ -650,9 +661,26 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   showButton={true}
                 />
               ) : isMarkdownContent ? (
-                <div className='bot-markdown-content'>
-                  <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
-                </div>
+                <>
+                  <div
+                    className={
+                      metadata?.messageSubtype === 'call_summary'
+                        ? 'bot-markdown-content-call-summary'
+                        : 'bot-markdown-content'
+                    }
+                  >
+                    <Markdown remarkPlugins={[remarkGfm]}>{parsedMarkdown.content}</Markdown>
+                  </div>
+                  {(ticketSuggestions.length > 0 || ticketsCreated.length > 0) && channelId && (
+                    <TicketSuggestions
+                      suggestions={ticketSuggestions}
+                      ticketsCreated={ticketsCreated}
+                      channelId={channelId}
+                      messageId={message.messageId}
+                      conversationId={message.conversationId}
+                    />
+                  )}
+                </>
               ) : isForwardedMessage && forwardedMessageData ? (
                 // Forwarded message display (parsed from XML)
                 <div className='flex flex-col gap-2'>

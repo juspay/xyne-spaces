@@ -6,6 +6,9 @@ import { Storage, Bucket } from '@google-cloud/storage';
 import { Agent, createUserMessage, createSystemMessage } from '@framework';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessageType } from '@xyne/shared';
+import { db } from '@/database/client';
+import { randomUUID } from 'crypto';
+import * as yaml from 'js-yaml';
 
 interface TranscriptEntry {
   user: string;
@@ -54,10 +57,80 @@ TRANSCRIPT:
 {transcript}
 `;
 
+// AI Title prompt for call transcripts - Concise, 50 char max
+const CALL_TITLE_PROMPT = `
+You are generating a concise title for a call based on its transcript.
+
+CRITICAL RULES:
+- Output ONLY the title text (no quotes, no explanations)
+- Maximum 50 characters
+- Use title case (capitalize first letter of main words)
+- Be specific and descriptive
+- Focus on the main topic or outcome
+
+Examples:
+- "Project Roadmap Discussion"
+- "Q1 Sales Review"
+- "Bug Fix Planning"
+- "Client Onboarding Call"
+- "Sprint Planning Session"
+
+Generate a title for this call:
+{transcript}
+`;
+
+// AI Ticket Suggestions prompt - analyzes transcript for actionable work items
+const TICKET_SUGGESTIONS_PROMPT = `
+You are analyzing a call transcript to identify actionable work items that should be tracked as tickets.
+
+CRITICAL RULES:
+- Output ONLY valid JSON
+- Generate 1-10 actionable ticket suggestions based on the call content
+- Each suggestion must be a concrete task mentioned or implied in the call
+- Extract assignee names ONLY if explicitly mentioned in the transcript (e.g., "John will handle this")
+- Use "unassigned" if no specific person is mentioned
+- Prioritize based on urgency indicators in the call
+- Keep titles concise and action-oriented (5-10 words)
+- Keep descriptions clear and context-rich (2-3 sentences)
+
+JSON STRUCTURE (FOLLOW EXACTLY):
+{
+  "suggestions": [
+    {
+      "title": "[Action-oriented title]",
+      "description": "[Detailed description with context from the call]",
+      "priority": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+      "suggestedAssignee": "[Name from transcript]" or "unassigned"
+    }
+  ]
+}
+
+Only output valid JSON.
+No explanations.
+
+TRANSCRIPT:
+{transcript}
+
+SUMMARY:
+{summary}
+`;
+
+export interface TicketSuggestion {
+  id: string;
+  title: string;
+  description: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  suggestedAssignee: string;
+  status: 'pending' | 'created' | 'dismissed';
+  createdTicketId?: string;
+}
+
 export class TranscriptService {
   private transcriptBucket: Bucket;
   private storage: Storage;
-  private agent: Agent | null = null;
+  private summaryAgent: Agent | null = null;
+  private titleAgent: Agent | null = null;
+  private ticketAgent: Agent | null = null;
 
   constructor() {
     // Initialize dedicated GCS storage for transcripts
@@ -76,31 +149,31 @@ export class TranscriptService {
       `TranscriptService initialized with transcript bucket: ${config.gcs.transcriptionBucketName}`
     );
 
-    // Initialize Agent for AI summary generation
-    this.initializeAgent();
+    // Initialize separate agents for parallel execution
+    this.initializeAgents();
   }
 
   /**
-   * Initialize Agent using framework's factory pattern
+   * Initialize three separate agents for parallel AI generation
    */
-  private initializeAgent(): void {
+  private initializeAgents(): void {
     try {
       const apiKey = config.llm.litellmApiKey;
       const baseUrl = config.llm.litellmBaseUrl;
 
       if (!apiKey || !baseUrl) {
-        logger.warn('LiteLLM credentials not configured. AI summary generation will be disabled.');
+        logger.warn('LiteLLM credentials not configured. AI features will be disabled.');
         return;
       }
 
-      this.agent = Agent.create({
+      const agentConfig = {
         model: {
           provider: {
-            type: 'litellm',
+            type: 'litellm' as const,
             config: {
               apiKey,
               baseUrl,
-              timeout: 120000, // 2 minutes timeout
+              timeout: 120000,
             },
           },
           defaultModel: config.llm.litellmModel || 'glm-latest',
@@ -112,22 +185,24 @@ export class TranscriptService {
         },
         execution: {
           maxTurns: 1,
-          mode: 'single',
+          mode: 'single' as const,
           timeouts: { llm: 120000 },
           limits: {},
           errorHandling: {},
         },
         events: {
-          logging: 'error', // Minimal logging for transcript service
+          logging: 'error' as const,
         },
-      });
+      };
 
-      logger.info(
-        `Agent initialized for AI summary generation (model: ${config.llm.litellmModel || 'glm-latest'})`
-      );
+      // Create three independent agents for parallel execution
+      this.summaryAgent = Agent.create(agentConfig);
+      this.titleAgent = Agent.create(agentConfig);
+      this.ticketAgent = Agent.create(agentConfig);
+
+      logger.info(`Initialized 3 AI agents for parallel execution (model: ${config.llm.litellmModel || 'glm-latest'})`);
     } catch (error) {
-      logger.error('Failed to initialize Agent:', error);
-      this.agent = null;
+      logger.error('Failed to initialize AI agents:', error);
     }
   }
 
@@ -445,7 +520,7 @@ export class TranscriptService {
    * @returns Post-processed transcript or original if processing fails
    */
   async postProcessTranscript(transcript: string): Promise<string> {
-    if (!this.agent) {
+    if (!this.summaryAgent) {
       logger.warn('Agent not initialized. Skipping transcript post-processing.');
       return transcript;
     }
@@ -464,16 +539,13 @@ IMPORTANT:
 Output ONLY the processed transcript, nothing else.`;
 
     try {
-      const result = await this.agent.execute({
-        messages: [
-          createSystemMessage(systemInstructions),
-          createUserMessage(transcript)
-        ],
+      const result = await this.summaryAgent.execute({
+        messages: [createSystemMessage(systemInstructions),
+          createUserMessage(transcript)],
       });
 
-      // Early exit if agent didn't complete successfully (allow both 'completed' and 'max_turns')
-      if (result.status !== 'completed' && result.status !== 'max_turns') {
-        logger.warn(`Post-processing not completed (status: ${result.status}), using original`);
+      if (!['completed', 'max_turns'].includes(result.status as string)) {
+        logger.warn('Failed to post-processed transcript, using original');
         return transcript;
       }
 
@@ -498,15 +570,15 @@ Output ONLY the processed transcript, nothing else.`;
    * @returns AI-generated Markdown summary or null if generation fails
    */
   async generateCallSummary(transcript: string): Promise<string | null> {
-    if (!this.agent) return null;
+    if (!this.summaryAgent) return null;
 
     const prompt = CALL_SUMMARY_PROMPT.replace('{transcript}', transcript);
 
-    const result = await this.agent.execute({
+    const result = await this.summaryAgent.execute({
       messages: [createUserMessage(prompt)],
     });
 
-    if (result.status === 'error' || !result.messages.length) {
+    if (!['completed', 'max_turns'].includes(result.status as string)) {
       return null;
     }
 
@@ -521,18 +593,119 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
+   * Generate a short AI title from transcript
+   * @param transcript - The formatted transcript text
+   * @returns AI-generated title (max 100 chars) or null if generation fails
+   */
+  async generateCallTitle(transcript: string): Promise<string | null> {
+    if (!this.titleAgent) return null;
+
+    const prompt = CALL_TITLE_PROMPT.replace('{transcript}', transcript);
+
+    const result = await this.titleAgent.execute({
+      messages: [createUserMessage(prompt)],
+    });
+
+    if (!['completed', 'max_turns'].includes(result.status as string)) {
+      return null;
+    }
+
+    const last = result.messages.at(-1);
+    if (!last || !('content' in last)) return null;
+
+    const title = last.content?.trim() || null;
+    
+    // Truncate to 100 chars max
+    return title ? title.substring(0, 100) : null;
+  }
+
+  /**
+   * Generate ticket suggestions from call transcript and summary
+   * @param transcript - The formatted transcript text
+   * @param summary - The AI-generated call summary
+   * @returns Array of ticket suggestions or empty array if generation fails
+   */
+  async generateTicketSuggestions(
+    transcript: string
+  ): Promise<TicketSuggestion[]> {
+    if (!this.ticketAgent) {
+      logger.warn('Agent not initialized. Skipping ticket suggestions generation.');
+      return [];
+    }
+
+    const prompt = TICKET_SUGGESTIONS_PROMPT
+      .replace('{transcript}', transcript)
+      .replace('{summary}', 'Summary not available (analyze transcript directly)');
+
+    try {
+      const result = await this.ticketAgent.execute({
+        messages: [createUserMessage(prompt)],
+      });
+
+      if (!['completed', 'max_turns'].includes(result.status as string)) {
+        logger.warn('Failed to generate ticket suggestions: Agent returned error or no messages');
+        return [];
+      }
+
+      const last = result.messages.at(-1);
+      if (!last || !('content' in last) || !last.content) {
+        logger.warn('Failed to generate ticket suggestions: No content in agent response');
+        return [];
+      }
+
+      let jsonContent = last.content.trim();
+      
+      // Strip markdown code fences if present (```json...``` or ```...```)
+      const codeBlockMatch = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
+      if (codeBlockMatch) {
+        jsonContent = codeBlockMatch[1].trim();
+      }
+      
+      // Parse JSON response
+      const parsed = JSON.parse(jsonContent);
+      
+      if (!parsed.suggestions || !Array.isArray(parsed.suggestions)) {
+        logger.warn('Invalid ticket suggestions format: missing or invalid suggestions array');
+        return [];
+      }
+
+      // Transform and validate suggestions
+      const suggestions: TicketSuggestion[] = parsed.suggestions
+        .slice(0, 10) // Limit to 10 suggestions
+        .map((s: any, index: number) => ({
+          id: `suggestion-${Date.now()}-${index}`,
+          title: s.title || 'Untitled Task',
+          description: s.description || '',
+          priority: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(s.priority) 
+            ? s.priority 
+            : 'MEDIUM',
+          suggestedAssignee: s.suggestedAssignee || 'unassigned',
+          status: 'pending' as const,
+        }));
+
+      logger.info(`Generated ${suggestions.length} ticket suggestions`);
+      return suggestions;
+    } catch (error) {
+      logger.error('Failed to generate ticket suggestions:', error);
+      return [];
+    }
+  }
+
+  /**
    * Post AI summary as a reply to the call message in the same conversation
    * @param conversationId - The conversation ID of the call message
    * @param callId - The external call ID
    * @param markdownSummary - The AI-generated Markdown summary
    * @param _createdByUserId - The user who initiated the call (no longer used as sender)
+   * @param ticketSuggestions - Optional array of ticket suggestions to append as markdown
    */
   async postSummaryAsReply(
     conversationId: string,
     callId: string,
     markdownSummary: string,
-    _createdByUserId: string
-  ) {
+    _createdByUserId: string,
+    ticketSuggestions?: TicketSuggestion[]
+  ) {    
     logger.info(`[postSummaryAsReply] Starting for callId: ${callId}, conversationId: ${conversationId}`);
 
     let xyneAutomaticBot;
@@ -550,11 +723,32 @@ Output ONLY the processed transcript, nothing else.`;
 
     logger.info(`[postSummaryAsReply] Bot found: ${xyneAutomaticBot.id} (${xyneAutomaticBot.email})`);
 
+    // Build markdown content with ticket suggestions in YAML frontmatter
+    let fullMarkdownContent = '';
+    
+    if (ticketSuggestions && ticketSuggestions.length > 0) {
+      const frontmatterData = {
+        suggestions: ticketSuggestions.map((suggestion) => ({
+          suggestionId: randomUUID(),
+          title: suggestion.title,
+          priority: suggestion.priority,
+          description: suggestion.description,
+          assignee: suggestion.suggestedAssignee,
+        })),
+      };
+      
+      fullMarkdownContent = '---\n' + yaml.dump(frontmatterData) + '---\n\n';
+      logger.info(`Added ${ticketSuggestions.length} ticket suggestions in YAML frontmatter`);
+    }
+    
+    // Append the markdown summary after frontmatter
+    fullMarkdownContent += markdownSummary;
+
     // Use repository pattern for database operations
     const message = await repositories.messages.create({
       conversationId,
       senderId: xyneAutomaticBot.id,
-      content: markdownSummary,
+      content: fullMarkdownContent,
       msgType: MessageType.BOT,
       showInChannel: false,
       metadata: {
@@ -562,6 +756,8 @@ Output ONLY the processed transcript, nothing else.`;
         callId,
         isAiGenerated: true,
         contentFormat: 'markdown',
+        hasSuggestedTickets: ticketSuggestions && ticketSuggestions.length > 0,
+        suggestedTicketsCount: ticketSuggestions?.length || 0,
       },
     });
 
@@ -582,7 +778,7 @@ Output ONLY the processed transcript, nothing else.`;
   async processCallWithSummary(callId: string, messageId: string): Promise<void> {
     try {
       // First, process the transcript (existing functionality)
-      await this.postCallTranscript(callId, messageId);
+      // await this.postCallTranscript(callId, messageId);
 
       // Get call details for summary generation
       const call = await repositories.calls.findByExternalId(callId);
@@ -613,25 +809,80 @@ Output ONLY the processed transcript, nothing else.`;
 
       const formattedTranscript = this.formatTranscript(entries);
 
-      // Generate AI summary
-      const summary = await this.generateCallSummary(formattedTranscript);
+      const startTime = Date.now();
+      const [summary, title, ticketSuggestions] = await Promise.all([
+        this.generateCallSummary(formattedTranscript).catch(err => {
+          logger.error(`Failed to generate summary: ${err}`);
+          return null;
+        }),
+        this.generateCallTitle(formattedTranscript).catch(err => {
+          logger.error(`Failed to generate title: ${err}`);
+          return null;
+        }),
+        this.generateTicketSuggestions(formattedTranscript).catch(err => {
+          logger.error(`Failed to generate ticket suggestions: ${err}`);
+          return [];
+        })
+      ]);
+
+      const duration = Date.now() - startTime;
+      logger.info(`AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`);
 
       if (summary) {
-        // Save summary to call record
+        // Save summary and title to call record
         await repositories.calls.update(call.id, {
           aiSummary: summary,
+          title: title || undefined,  // Update title if generated
         });
-        logger.info(`Saved AI summary to call record: ${callId}`);
+        logger.info(`Saved AI summary${title ? ' and title' : ''} to call record: ${callId}`);
 
-        // Post summary as reply to the call message
+        // Update the call system message with the title (if generated)
+        if (title) {
+          try {
+            // Use Prisma transaction for atomic message update
+            await db.$transaction(async (tx) => {
+              // Fetch the message within the transaction
+              const message = await tx.message.findUnique({
+                where: { messageId },
+              });
+              
+              if (message) {
+                const currentContent = message.content || '';
+                const updatedContent = `${title} • ${currentContent}`;
+                
+                // Update message with title
+                await tx.message.update({
+                  where: { messageId },
+                  data: {
+                    content: updatedContent,
+                    metadata: {
+                      ...(message.metadata as any),
+                      callTitle: title,
+                    },
+                  },
+                });
+                
+                logger.info(`Updated call message ${messageId} with title: ${title}`);
+              } else {
+                logger.warn(`Call message ${messageId} not found for title update`);
+              }
+            });
+          } catch (error) {
+            logger.error(`Failed to update call message with title:`, error);
+            // Don't fail the whole process if message update fails
+          }
+        }
+
+        // Post summary as reply to the call message with ticket suggestions
         await this.postSummaryAsReply(
           callMessage.conversationId,
           callId,
           summary,
-          call.createdByUserId
+          call.createdByUserId,
+          ticketSuggestions
         );
       } else {
-        logger.warn(`AI summary generation skipped or failed for call: ${callId}`);
+        logger.warn(`AI summary generation returned null for call: ${callId}`);
       }
     } catch (error) {
       logger.error(`Failed to process call with summary for ${callId}:`, error);

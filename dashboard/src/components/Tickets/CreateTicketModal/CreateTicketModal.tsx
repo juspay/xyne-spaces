@@ -3,6 +3,7 @@ import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import {
   AttachmentEntityType,
+  ChannelScopeType,
   FormContextType,
   FormEntityType,
   FormFieldType,
@@ -79,6 +80,7 @@ interface CreateTicketModalProps {
   sourceConversation?: ConversationWithTicket | undefined;
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
+  ticketSequence?: { current: number; total: number };
   onBeforeCreate?: (description: string, files: File[]) => Promise<void>;
   onTicketCreated?: (ticket: {
     id: string;
@@ -126,6 +128,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   initialEta = null,
   isFromSubTicket = false,
   isFromAI = false,
+  ticketSequence,
   sourceConversation,
   onBeforeCreate,
   onTicketCreated,
@@ -175,7 +178,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const [isDraggingOverModal, setIsDraggingOverModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const channels = useAllVisibleChannels();
+  const channels = useAllVisibleChannels().filter(c => c.scopeType === ChannelScopeType.DEFAULT);
 
   // Track if title has been auto-generated for this modal session
   const [hasTitleBeenGenerated, setHasTitleBeenGenerated] = useState(false);
@@ -710,7 +713,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
       // Clear shared attachments after successful creation
       clearAttachments(sourceId);
-      onClose();
+
+      // Don't auto-close if part of a sequence - let the parent handle it
+      if (!ticketSequence || ticketSequence.current === ticketSequence.total) {
+        onClose();
+      }
     } catch (error) {
       // Handle file upload failures and other API errors
       console.error('Failed to create ticket:', error);
@@ -950,7 +957,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         )}
 
         <div className='w-full px-4 pt-4 pb-3 flex items-center justify-between'>
-          <h2 className='text-sm leading-5 font-medium text-gray-400 select-none'>New Ticket</h2>
+          <h2 className='text-sm leading-5 font-medium text-gray-400 select-none'>
+            {ticketSequence
+              ? `New Ticket (${ticketSequence.current}/${ticketSequence.total})`
+              : 'New Ticket'}
+          </h2>
           <Button
             variant='ghost'
             size='icon'
