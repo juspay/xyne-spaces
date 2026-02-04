@@ -76,6 +76,8 @@ export enum UserResponsibility {
   MANAGER = 'MANAGER',
   TEAM_LEAD = 'TEAM_LEAD',
   MEMBER = 'MEMBER',
+  PR_REVIEWER = 'PR_REVIEWER',
+  QA = 'QA',
 }
 
 // @ts-ignore TS1294
@@ -160,6 +162,8 @@ export enum ActivityType {
   BOARD = 'BOARD',
   PR = 'PR',
   USER_GROUP_ID = 'USER_GROUP_ID',
+  PR_REVIEWER = 'PR_REVIEWER',
+  QA = 'QA',
 }
 
 // @ts-ignore TS1294
@@ -484,6 +488,17 @@ export const ticketSubTicketMappingTable = table('ticket_sub_ticket_mappings')
     id: string(),
     ticketId: string(),
     subTicketId: string(),
+  })
+  .primaryKey('id');
+
+export const ticketAssignmentTable = table('ticket_assignments')
+  .columns({
+    id: string(),
+    ticketId: string(),
+    userId: string(),
+    userResponsibility: string(),
+    createdAt: number(),
+    createdBy: string(),
   })
   .primaryKey('id');
 
@@ -1391,6 +1406,17 @@ export const ticketSubTicketMappingTableRelationships = relationships(
   }),
 );
 
+export const ticketAssignmentTableRelationships = relationships(
+  ticketAssignmentTable,
+  ({ one }) => ({
+    ticket: one({
+      sourceField: ['ticketId'],
+      destField: ['id'],
+      destSchema: ticketTable,
+    }),
+  }),
+);
+
 export const ticketActivityTableRelationships = relationships(ticketActivityTable, ({ one }) => ({
   ticket: one({
     sourceField: ['ticketId'],
@@ -2208,6 +2234,7 @@ export const schema = createSchema({
     ticketTable,
     subTicketTable,
     ticketSubTicketMappingTable,
+    ticketAssignmentTable,
     ticketActivityTable,
     ticketEntityMappingTable,
     ticketTagTable,
@@ -2269,6 +2296,7 @@ export const schema = createSchema({
     ticketTableRelationships,
     subTicketTableRelationships,
     ticketSubTicketMappingTableRelationships,
+    ticketAssignmentTableRelationships,
     ticketActivityTableRelationships,
     ticketEntityMappingTableRelationships,
     ticketTagTableRelationships,

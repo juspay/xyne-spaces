@@ -16,10 +16,26 @@ export async function syncUserWorkload(
   createdBy: string
 ): Promise<void> {
   // Count tickets directly in the database for better performance
+  // Include tickets where user is assignee, PR reviewer (via TicketAssignment), or QA (via TicketAssignment)
+  
+  // Get ticket IDs where user is PR reviewer or QA from TicketAssignment table
+  const ticketAssignments = await db.ticketAssignment.findMany({
+    where: {
+      userId: userId,
+      userResponsibility: { in: ['PR_REVIEWER', 'QA'] },
+    },
+    select: { ticketId: true },
+  });
+  
+  const assignmentTicketIds = ticketAssignments.map(ta => ta.ticketId);
+  
   const [activeTasks, totalTasks] = await Promise.all([
     db.ticket.count({
       where: {
-        assignedTo: userId,
+        OR: [
+          { assignedTo: userId },
+          { id: { in: assignmentTicketIds } },
+        ],
         boardId: boardId,
         userGroupId: userGroupId,
         statusV2: { in: [TicketStatusV2.TODO, TicketStatusV2.STARTED] },
@@ -27,7 +43,10 @@ export async function syncUserWorkload(
     }),
     db.ticket.count({
       where: {
-        assignedTo: userId,
+        OR: [
+          { assignedTo: userId },
+          { id: { in: assignmentTicketIds } },
+        ],
         boardId: boardId,
         userGroupId: userGroupId,
       },

@@ -96,6 +96,44 @@ const getActivityDescription = (
         ),
       };
 
+    case ActivityType.PR_REVIEWER: {
+      const newUser = users?.find(u => u.id === value?.newValue);
+      const updatedByUser = users?.find(u => u.id === activity.updatedBy);
+
+      return updatedByUser === newUser
+        ? {
+            description: 'self-assigned as PR Reviewer',
+            details: '',
+          }
+        : {
+            description: 'assigned PR Reviewer',
+            details: <span className='font-semibold'>{newUser?.name || 'Unassigned'}</span>,
+          };
+    }
+
+    case ActivityType.QA: {
+      const oldUser = users?.find(u => u.id === value?.oldValue);
+      const newUser = users?.find(u => u.id === value?.newValue);
+      const updatedByUser = users?.find(u => u.id === activity.updatedBy);
+
+      return updatedByUser === newUser
+        ? {
+            description: 'self-assigned as QA',
+            details: '',
+          }
+        : {
+            description: 'assigned QA',
+            details: value?.oldValue ? (
+              <>
+                from <span className='font-semibold'>{oldUser?.name || 'Unassigned'}</span> to{' '}
+                <span className='font-semibold'>{newUser?.name || 'Unassigned'}</span>
+              </>
+            ) : (
+              <span className='font-semibold'>{newUser?.name || 'Unassigned'}</span>
+            ),
+          };
+    }
+
     case ActivityType.ASSIGNED_TO: {
       const oldUser = users?.find(u => u.id === value?.oldValue);
       const newUser = users?.find(u => u.id === value?.newValue);
@@ -299,6 +337,10 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
       return <FileText size={18} className='text-blue-600' />;
     case ActivityType.BOARD:
       return <SquareKanban size={18} className='text-purple-600' />;
+    case ActivityType.PR_REVIEWER:
+    case ActivityType.QA:
+    case ActivityType.ASSIGNED_TO:
+      return <SmallUserAvatar userId={activity.updatedBy} />;
     default:
       return <SmallUserAvatar userId={activity.updatedBy} />;
   }

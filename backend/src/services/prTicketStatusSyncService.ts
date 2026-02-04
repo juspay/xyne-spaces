@@ -1,13 +1,16 @@
 // PR to Ticket Status Sync Service
 // Handles mapping PR status changes to ticket stage updates based on configurable PR status mappings
 
-import { PRStatus, TicketStatusV2, PRStatusEvent } from '@prisma/client';
+import { PRStatus, TicketStatusV2, PRStatusEvent, MessageType, ActivityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { ticketService } from '@/services/ticketService';
 import { ActivitySource } from '@/types/ticket';
 import { logger } from '@/utils/logger';
 import { UserRepository } from '@/database/repositories/users';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
+import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
+import { syncUserWorkload } from '@/utils/workloadUtils';
+import { v4 as uuidv4 } from 'uuid';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -38,6 +41,7 @@ interface TicketInfo {
   stageName: string | null;
   conversationId: string | null;
   boardId: string;
+  userGroupId: string | null;
 }
 
 interface StageInfo {
@@ -300,7 +304,10 @@ export class PRTicketStatusSyncService {
         );
       }
 
-      // 7. Send message to conversation
+      // 8. Auto-assign PR_REVIEWER or QA based on PR event
+      await this.handleAssignmentBasedOnPREvent(ticket, params.prEvent, updatedBy);
+
+      // 9. Send message to conversation
       const stageChange = stageChanged
         ? { oldStageName, newStageName: targetStage.name }
         : undefined;
@@ -362,6 +369,7 @@ export class PRTicketStatusSyncService {
           stageName: true,
           conversationId: true,
           boardId: true,
+          userGroupId: true,
         },
       });
       if (ticket) {
@@ -393,6 +401,7 @@ export class PRTicketStatusSyncService {
               stageName: true,
               conversationId: true,
               boardId: true,
+              userGroupId: true,
             },
           });
           if (ticket) {
@@ -535,6 +544,233 @@ export class PRTicketStatusSyncService {
       [PRStatusEvent.DECLINED]: PRActionText.DECLINED,
     };
     return actionMap[event] || PRActionText.UPDATED;
+  }
+
+  /**
+   * Assign a user to a ticket with the specified responsibility
+   * Creates ticket assignment, activity log, and system message
+   */
+  private async assignUserToTicket(
+    ticket: TicketInfo,
+    assignedUserId: string,
+    responsibility: 'PR_REVIEWER' | 'QA',
+    fieldName: 'prReviewerId' | 'qaId',
+    roleName: string,
+    updatedBy: string,
+    assignmentType: AssignmentType
+  ): Promise<void> {
+    // Find existing assignment
+    const existingAssignment = await prisma.ticketAssignment.findFirst({
+      where: {
+        ticketId: ticket.id,
+        ...(responsibility === 'PR_REVIEWER'
+          ? { userId: assignedUserId, userResponsibility: responsibility }
+          : { userResponsibility: responsibility }
+        ),
+      },
+    });
+
+    const oldValue = existingAssignment?.userId;
+
+    // For PR_REVIEWER, skip if already assigned. For QA, update or create
+    if (responsibility === 'PR_REVIEWER' && existingAssignment) {
+      logger.info(
+        `[PR-Ticket-Sync] User ${assignedUserId} already assigned as ${responsibility} for ticket ${ticket.xyneId}`
+      );
+      return;
+    }
+
+    // Create or update assignment
+    if (existingAssignment && responsibility === 'QA') {
+      await prisma.ticketAssignment.update({
+        where: { id: existingAssignment.id },
+        data: { userId: assignedUserId },
+      });
+    } else {
+      await prisma.ticketAssignment.create({
+        data: {
+          ticketId: ticket.id,
+          userId: assignedUserId,
+          userResponsibility: responsibility,
+          createdBy: updatedBy,
+        },
+      });
+    }
+
+    logger.info(
+      `[PR-Ticket-Sync] Successfully assigned ${assignmentType} (${assignedUserId}) to ticket ${ticket.xyneId}`
+    );
+
+    // Create activity log
+    await prisma.ticketActivity.create({
+      data: {
+        ticketId: ticket.id,
+        updatedBy,
+        activityType: 'ASSIGNED_TO',
+        value: {
+          field: fieldName,
+          oldValue: responsibility === 'PR_REVIEWER' ? null : oldValue,
+          newValue: assignedUserId,
+        },
+      },
+    });
+
+    // Create system message
+    await this.createAssignmentSystemMessage(
+      ticket,
+      assignedUserId,
+      updatedBy,
+      roleName
+    );
+  }
+
+  /**
+   * Create a system message for assignment activity
+   */
+  private async createAssignmentSystemMessage(
+    ticket: TicketInfo,
+    assignedUserId: string,
+    updatedBy: string,
+    roleName: string
+  ): Promise<void> {
+    if (!ticket.conversationId) {
+      return;
+    }
+
+    const [assignedUser, updatedByUser] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: assignedUserId },
+        select: { name: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: updatedBy },
+        select: { name: true },
+      }),
+    ]);
+
+    const activityMessage = `${updatedByUser?.name || 'Bitbucket Bot'} assigned ${roleName} ${assignedUser?.name || assignedUserId}`;
+
+    await prisma.message.create({
+      data: {
+        messageId: uuidv4(),
+        conversationId: ticket.conversationId,
+        senderId: updatedBy,
+        content: activityMessage,
+        msgType: MessageType.SYSTEM,
+        hasAttachment: false,
+        edited: false,
+        isDeleted: false,
+        isSent: true,
+        showInChannel: false,
+        createdAt: new Date(),
+        metadata: {
+          activityType: ActivityType.ASSIGNED_TO,
+          isTicketActivity: true,
+        },
+      },
+    });
+
+    logger.info(
+      `[PR-Ticket-Sync] Created system message for ${roleName} assignment on ticket ${ticket.xyneId}`
+    );
+  }
+
+  /**
+   * Handle auto-assignment based on PR event
+   * - PR CREATED/UPDATED → assign PR_REVIEWER to TicketAssignment.prReviewerId array
+   * - PR MERGED → assign QA to TicketAssignment.qaId
+   */
+  private async handleAssignmentBasedOnPREvent(
+    ticket: TicketInfo,
+    prEvent: PRStatusEvent,
+    updatedBy: string
+  ): Promise<void> {
+    // Skip if ticket doesn't have a user group
+    if (!ticket.userGroupId) {
+      logger.info(
+        `[PR-Ticket-Sync] Skipping assignment for ticket ${ticket.xyneId}: no userGroupId`
+      );
+      return;
+    }
+
+    try {
+      let assignmentType: AssignmentType | null = null;
+      let fieldToUpdate: 'prReviewerId' | 'qaId' | null = null;
+
+      // Determine assignment type based on PR event
+      if (prEvent === PRStatusEvent.CREATED || prEvent === PRStatusEvent.UPDATED) {
+        assignmentType = AssignmentType.PR_REVIEWER;
+        fieldToUpdate = 'prReviewerId';
+        logger.info(
+          `[PR-Ticket-Sync] PR ${prEvent} event for ticket ${ticket.xyneId} - assigning PR_REVIEWER`
+        );
+      } else if (prEvent === PRStatusEvent.MERGED) {
+        assignmentType = AssignmentType.QA;
+        fieldToUpdate = 'qaId';
+        logger.info(
+          `[PR-Ticket-Sync] PR MERGED event for ticket ${ticket.xyneId} - assigning QA`
+        );
+      }
+
+      // Only proceed if we have an assignment type to handle
+      if (!assignmentType || !fieldToUpdate) {
+        return;
+      }
+
+      // Call assignment engine with the appropriate type
+      const assignmentResult = await evaluateAssignmentRule(
+        ticket.userGroupId,
+        ticket.boardId,
+        assignmentType
+      );
+
+      if (!assignmentResult.assignedUserId) {
+        logger.warn(
+          `[PR-Ticket-Sync] No ${assignmentType} user found for ticket ${ticket.xyneId}. Reason: ${assignmentResult.reason}`
+        );
+        return;
+      }
+
+      const assignedUserId = assignmentResult.assignedUserId;
+
+      // Handle assignment based on field type
+      const responsibility = fieldToUpdate === 'prReviewerId' ? 'PR_REVIEWER' : 'QA';
+      const roleName = fieldToUpdate === 'prReviewerId' ? 'PR Reviewer' : 'QA';
+
+      await this.assignUserToTicket(
+        ticket,
+        assignedUserId,
+        responsibility,
+        fieldToUpdate,
+        roleName,
+        updatedBy,
+        assignmentType
+      );
+
+      // Sync workload mapping for the assigned user
+      try {
+        await syncUserWorkload(
+          assignmentResult.assignedUserId,
+          ticket.userGroupId,
+          ticket.boardId,
+          updatedBy
+        );
+        logger.info(
+          `[PR-Ticket-Sync] Synced workload for ${assignmentType} user ${assignmentResult.assignedUserId}`
+        );
+      } catch (workloadError) {
+        logger.error(
+          `[PR-Ticket-Sync] Error syncing workload for user ${assignmentResult.assignedUserId}:`,
+          workloadError
+        );
+      }
+
+    } catch (error) {
+      logger.error(
+        `[PR-Ticket-Sync] Error handling assignment for ticket ${ticket.xyneId}:`,
+        error
+      );
+    }
   }
 }
 

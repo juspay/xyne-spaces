@@ -5,6 +5,7 @@ import type {
   UserExpertiseMapping,
   UserAssignmentState,
   UserWorkloadMapping,
+  UserResponsibility,
 } from '@prisma/client';
 
 export interface AssignmentResult {
@@ -19,15 +20,60 @@ export interface AssignmentCandidate {
 }
 
 /**
+ * Assignment type determines which user responsibilities are eligible
+ * This is for the assignment engine - NOT a UserResponsibility
+ */
+export enum AssignmentType {
+  TICKET_ASSIGNEE = 'TICKET_ASSIGNEE',  // For ticket.assignedTo field - everyone EXCEPT QA (MANAGER, TEAM_LEAD, MEMBER, PR_REVIEWER)
+  PR_REVIEWER = 'PR_REVIEWER',           // For ticket.prReviewerId field - only PR_REVIEWER
+  QA = 'QA',                             // For ticket.qaId field - only QA
+}
+
+/**
+ * Helper function to filter users by responsibility based on assignment type
+ */
+function filterUsersByResponsibility(
+  userGroupMappings: UserGroupMapping[],
+  assignmentType: AssignmentType
+): string[] {
+  return userGroupMappings
+    .filter(mapping => {
+      const responsibility = mapping.responsibility as UserResponsibility;
+      
+      switch (assignmentType) {
+        case AssignmentType.TICKET_ASSIGNEE:
+          // Everyone EXCEPT QA can be assigned regular tickets (assignedTo field)
+          return responsibility !== 'QA';
+        
+        case AssignmentType.PR_REVIEWER:
+          // Only PR_REVIEWER can be assigned for PR review
+          return responsibility === 'PR_REVIEWER';
+        
+        case AssignmentType.QA:
+          // Only QA can be assigned for QA tasks
+          return responsibility === 'QA';
+        
+        default:
+          return false;
+      }
+    })
+    .map(mapping => mapping.userId);
+}
+
+/**
  * Auto-assignment system that selects the most suitable user for a board or ticket.
  * Uses existing database tables only - no expression-based rules or configuration.
  *
  * Eligibility Flow (Filtering Phase):
  * 1. Fetch all users in the group
- * 2. Filter users where isActiveForAssignment = true AND onCall = true
- * 3. If no users found → Fallback to users where isActiveForAssignment = true (ignore onCall)
- * 4. If still no users → STOP (no auto-assignment)
- * 5. If board has expertise mappings: keep only users with expertise for the board
+ * 2. Filter by responsibility based on assignment type:
+ *    - TICKET_ASSIGNEE: Everyone except QA (MANAGER, TEAM_LEAD, MEMBER, PR_REVIEWER)
+ *    - PR_REVIEWER: Only users with PR_REVIEWER responsibility
+ *    - QA: Only users with QA responsibility
+ * 3. Filter users where isActiveForAssignment = true AND onCall = true
+ * 4. If no users found → Fallback to users where isActiveForAssignment = true (ignore onCall)
+ * 5. If still no users → STOP (no auto-assignment)
+ * 6. If board has expertise mappings: keep only users with expertise for the board
  *
  * Scoring Strategy (Ranking Phase):
  * For each user, calculate weighted workload across ALL boards:
@@ -41,9 +87,10 @@ export interface AssignmentCandidate {
  */
 export async function evaluateAssignmentRule(
   userGroupId: string,
-  boardId: string
+  boardId: string,
+  assignmentType: AssignmentType = AssignmentType.TICKET_ASSIGNEE
 ): Promise<AssignmentResult> {
-  logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}`);
+  logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}`);
 
   // Fetch user group mappings
   const userGroupMappings = await repositories.userGroupMapping.findMany({
@@ -55,7 +102,13 @@ export async function evaluateAssignmentRule(
     return { reason: 'NO_ON_CALL_USERS' };
   }
 
-  const userIds = userGroupMappings.map((m: UserGroupMapping) => m.userId);
+  // Filter users by responsibility based on assignment type
+  const userIds = filterUsersByResponsibility(userGroupMappings, assignmentType);
+
+  if (userIds.length === 0) {
+    logger.info(`[Assignment] No users with eligible responsibility (${assignmentType}) in userGroupId: ${userGroupId}`);
+    return { reason: 'NO_ON_CALL_USERS' };
+  }
 
   // Get user assignment states and expertise mappings in parallel
   const [userStates, expertiseMappings] = await Promise.all([

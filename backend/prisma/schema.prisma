@@ -80,6 +80,8 @@ enum UserResponsibility {
   MANAGER
   TEAM_LEAD
   MEMBER
+  PR_REVIEWER
+  QA
   @@schema("public")
 }
 
@@ -107,6 +109,8 @@ enum ActivityType {
   SUBTICKET_CREATED
   BOARD
   USER_GROUP_ID
+  PR_REVIEWER
+  QA
   @@schema("public")
 }
 
@@ -345,6 +349,21 @@ model TicketSubTicketMapping {
   @@index([ticketId])
   @@index([subTicketId])
   @@map("ticket_sub_ticket_mappings")
+  @@schema("public")
+}
+
+model TicketAssignment {
+  id                 String             @id @default(cuid())
+  ticketId           String             // Foreign key to Ticket
+  userId             String             // User ID assigned to this responsibility
+  userResponsibility UserResponsibility // PR_REVIEWER | QA | etc.
+  createdAt          DateTime           @default(now())
+  createdBy          String             // User who created the assignment
+
+  @@unique([ticketId, userId, userResponsibility]) // Prevent duplicate assignments
+  @@index([ticketId])
+  @@index([userId])
+  @@map("ticket_assignments")
   @@schema("public")
 }
 
