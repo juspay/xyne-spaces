@@ -1,3 +1,15 @@
+## [1.25.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.24.1...v1.25.0) (2026-02-04)
+
+
+### Features
+
+* making zoho workflow env based ([9e8c16d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9e8c16d3c0df09976c5dc967738f40c418b36dc0)), closes [#2738](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2738)
+
+
+### Bug Fixes
+
+* fixed queryBuilder mutator ([6d88965](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6d889657de1a1d909614b62111b03b752fb5d386))
+
 ## [1.24.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.24.0...v1.24.1) (2026-02-04)
 
 
