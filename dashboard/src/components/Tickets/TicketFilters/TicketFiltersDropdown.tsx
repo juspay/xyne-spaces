@@ -28,9 +28,7 @@ import {
 } from './Submenus';
 import { TicketFiltersProps, DateRange } from './types';
 import type { TicketFilters } from './types';
-import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
-import { queries } from '../../../zero/queries';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { FormFieldType } from '@xyne/shared';
 import type { TicketPriority, FormFields } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import * as Popover from '@radix-ui/react-popover';
@@ -49,12 +47,13 @@ interface FilterMenuItem {
   isDynamic?: boolean;
   fieldType?: FormFieldType;
   fieldEnum?: string[] | null;
-  boardName?: string;
 }
 
 const FILTER_MENU_ITEMS: FilterMenuItem[] = [
   { id: 'userGroups', label: 'User Groups', icon: Users, filterKey: 'userGroups' },
   { id: 'createdBy', label: 'Created by', icon: User, filterKey: 'createdBy' },
+  { id: 'prReviewers', label: 'PR Reviewer', icon: User, filterKey: 'prReviewers' },
+  { id: 'qaAssigned', label: 'QA', icon: User, filterKey: 'qaAssigned' },
   { id: 'dueDate', label: 'Due Date', icon: Calendar, filterKey: 'dueDate' },
   { id: 'createdAt', label: 'Created At', icon: Calendar, filterKey: 'createdAt' },
   { id: 'tags', label: 'Tags', icon: Tag, filterKey: 'tags' },
@@ -74,6 +73,7 @@ export const TicketFiltersDropdown = ({
   selectedBoard,
   availableTags,
   hideAssigneeFilter = false,
+  formMappings,
 }: TicketFiltersProps): ReactElement => {
   const [boardOpen, setBoardOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
@@ -85,7 +85,31 @@ export const TicketFiltersDropdown = ({
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  const selectedBoards = useMemo(() => filters.boards || [], [filters.boards]);
+  // Remove all 'more filters' (dynamicFields and others except boards) when 'All Boards' is selected
+  const selectedBoards = useMemo(() => {
+    if (!filters.boards || filters.boards.length === 0) {
+      // Only call onFiltersChange if any non-board filter is present
+      const hasOtherFilters = !!(
+        filters.priority?.length ||
+        filters.assignee?.length ||
+        filters.userGroups?.length ||
+        filters.createdBy?.length ||
+        filters.prReviewers?.length ||
+        filters.qaAssigned?.length ||
+        filters.dueDateStart !== undefined ||
+        filters.dueDateEnd !== undefined ||
+        filters.createdDateStart !== undefined ||
+        filters.createdDateEnd !== undefined ||
+        filters.tags?.length ||
+        (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0)
+      );
+      if (hasOtherFilters) {
+        onFiltersChange({ boards: [] });
+      }
+      return [];
+    }
+    return filters.boards;
+  }, [filters]);
 
   // Close submenu when main popover closes
   useEffect(() => {
@@ -137,80 +161,48 @@ export const TicketFiltersDropdown = ({
     }
   };
 
-  // Determine which boards to fetch form mappings for
-  const boardIdsForFormMappings = useMemo(() => {
-    // If specific boards are selected, use them
-    if (selectedBoards.length > 0) {
-      return selectedBoards;
-    }
-    // If "All Boards" is selected, use all available boards
-    return availableBoards || [];
-  }, [selectedBoards, availableBoards]);
-
-  // Fetch form mappings for selected or all boards
-  const [formMappings] = useCachedQuery(
-    queries.getFormMappingsByContextIds({
-      contextIds: boardIdsForFormMappings,
-      contextType: FormContextType.BOARD,
-      entityType: FormEntityType.TICKET,
-    }),
-    { enabled: boardIdsForFormMappings.length > 0 },
-  );
-
   // Generate dynamic filter menu items from form fields
   // Aggregate all form fields from selected boards, deduplicating by field ID
   const dynamicFilterItems = useMemo(() => {
     if (!formMappings || formMappings.length === 0) return [];
 
-    // Create board name lookup
-    const boardNameMap = new Map<string, string>();
-    allBoardsList?.forEach(board => {
-      boardNameMap.set(board.id, board.name);
-    });
-
-    // Check if showing multiple boards
-    const isMultipleBoards = boardIdsForFormMappings.length > 1;
-
-    // Collect all unique form fields by field ID with board info
-    const fieldsMap = new Map<string, { field: FormFields; boardId: string }>();
+    // Collect all unique form fields by field ID
+    const fieldsMap = new Map<string, { field: FormFields }>();
     formMappings.forEach(mapping => {
       const mappingWithFields = mapping as unknown as {
         formFields?: FormFields[];
-        contextId: string;
       };
       const fields = mappingWithFields.formFields;
-      const boardId = mappingWithFields.contextId;
 
       fields?.forEach((field: FormFields) => {
         // Use field ID as key to ensure uniqueness
         if (!fieldsMap.has(field.id)) {
-          fieldsMap.set(field.id, { field, boardId });
+          fieldsMap.set(field.id, { field });
         }
       });
     });
 
-    return Array.from(fieldsMap.values()).map(({ field, boardId }) => {
-      const boardName = boardNameMap.get(boardId);
-      const label =
-        isMultipleBoards && boardName ? `${field.fieldName} \u00b7 ${boardName}` : field.fieldName;
-
+    return Array.from(fieldsMap.values()).map(({ field }) => {
       return {
         id: `dynamic-${field.id}`,
-        label,
+        label: field.fieldName,
         icon: getIconForFieldType(field.fieldType),
         filterKey: `dynamicFields.${field.id}`,
         isDynamic: true,
         fieldType: field.fieldType,
         fieldEnum: field.fieldEnum as string[] | null,
-        boardName: isMultipleBoards ? boardName : undefined,
       };
     });
-  }, [formMappings, allBoardsList, boardIdsForFormMappings]);
+  }, [formMappings, allBoardsList, selectedBoards]);
 
-  // Combine static and dynamic filters
+  // Only show dynamic filters if a specific board is selected
   const allFilterItems = useMemo(() => {
+    if (!selectedBoards.length) {
+      // Only show static filters when All Boards is selected
+      return FILTER_MENU_ITEMS;
+    }
     return [...FILTER_MENU_ITEMS, ...dynamicFilterItems];
-  }, [dynamicFilterItems]);
+  }, [dynamicFilterItems, selectedBoards]);
   const handleTicketSelect = (result: DisplaySearchResult): Promise<void> => {
     const ticketId = result.searchContext?.ticketId || result.id;
     const channelId = result.searchContext?.channelId;
@@ -321,6 +313,8 @@ export const TicketFiltersDropdown = ({
     if (filters.assignee?.length) count++;
     if (filters.userGroups?.length) count++;
     if (filters.createdBy?.length) count++;
+    if (filters.prReviewers?.length) count++;
+    if (filters.qaAssigned?.length) count++;
     if (filters.dueDateStart !== undefined || filters.dueDateEnd !== undefined) count++;
     if (filters.createdDateStart !== undefined || filters.createdDateEnd !== undefined) count++;
     if (filters.tags?.length) count++;
@@ -375,6 +369,24 @@ export const TicketFiltersDropdown = ({
             onChange={(groups: string[]) => handleFilterChange('userGroups', groups)}
             onClose={() => setActiveSubmenu(null)}
             availableUserGroups={availableUserGroups || []}
+          />
+        );
+      case 'prReviewers':
+        return (
+          <UserSubmenu
+            selectedUsers={filters.prReviewers || []}
+            onChange={(users: string[]) => handleFilterChange('prReviewers', users)}
+            label='PR Reviewer'
+            availableUsers={availableUsers || []}
+          />
+        );
+      case 'qaAssigned':
+        return (
+          <UserSubmenu
+            selectedUsers={filters.qaAssigned || []}
+            onChange={(users: string[]) => handleFilterChange('qaAssigned', users)}
+            label='QA'
+            availableUsers={availableUsers || []}
           />
         );
       case 'createdBy':
@@ -619,15 +631,7 @@ export const TicketFiltersDropdown = ({
                     >
                       <div className='flex items-center gap-3'>
                         <Icon className='w-4 h-4' />
-                        {item.boardName ? (
-                          <span>
-                            <span>{item.label.split(' · ')[0]}</span>
-                            <span className='text-gray-400 mx-1'>·</span>
-                            <span className='text-gray-400 font-normal'>{item.boardName}</span>
-                          </span>
-                        ) : (
-                          <span>{item.label}</span>
-                        )}
+                        <span>{item.label}</span>
                       </div>
                       <ChevronRight className='w-4 h-4 text-gray-400' />
                     </button>

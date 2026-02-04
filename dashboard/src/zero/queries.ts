@@ -96,7 +96,7 @@ export const queries = defineQueries({
     },
   ),
   allTickets: defineQuery(() => {
-    return zql.tickets.orderBy('createdAt', 'desc').related('project');
+    return zql.tickets.orderBy('createdAt', 'desc').related('project').related('assignments');
   }),
   allWorkflows: defineQuery(() => {
     return zql.workflows.orderBy('createdAt', 'desc').related('ticket');
@@ -504,7 +504,8 @@ export const queries = defineQueries({
       .orderBy('createdAt', 'asc')
       .related('stages', stagesQuery =>
         stagesQuery.orderBy('sequenceNumber', 'asc').related('prStatusMappings'),
-      );
+      )
+      .related('formContextMappings', mappingQuery => mappingQuery.related('formFields'));
   }),
   stagesByBoard: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
     return zql.stages.where('boardId', boardId).orderBy('sequenceNumber', 'asc');
@@ -886,20 +887,6 @@ export const queries = defineQueries({
     },
   ),
   // Query to get form context mappings for multiple contexts (e.g., all boards in a project)
-  getFormMappingsByContextIds: defineQuery(
-    z.object({
-      contextIds: z.array(z.string()),
-      contextType: z.nativeEnum(FormContextType),
-      entityType: z.nativeEnum(FormEntityType),
-    }),
-    ({ args: { contextIds, contextType, entityType } }) => {
-      return zql.forms_context_mapping
-        .where('contextId', 'IN', contextIds)
-        .where('contextType', contextType)
-        .where('entityType', entityType)
-        .related('formFields');
-    },
-  ),
   // Query to get all form entity values for tickets (cached for reuse across all boards)
   getAllFormEntityValues: defineQuery(() => {
     return zql.form_entity_values.where('entityType', FormEntityType.TICKET).related('formField');

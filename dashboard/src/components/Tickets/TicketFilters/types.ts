@@ -1,10 +1,12 @@
-import { TicketPriority } from '@xyne/shared';
+import { TicketPriority, FormContextMapping } from '@xyne/shared';
 
 export interface TicketFilters {
   priority?: TicketPriority[];
   assignee?: string[]; // user IDs
   userGroups?: string[]; // user group IDs
   createdBy?: string[]; // user IDs
+  prReviewers?: string[]; // user IDs (from ticket_assignments with responsibility PR_REVIEWER)
+  qaAssigned?: string[]; // user IDs (from ticket_assignments with responsibility QA)
   dueDateStart?: number;
   dueDateEnd?: number;
   createdDateStart?: number;
@@ -58,6 +60,7 @@ export interface TicketFiltersProps {
   selectedBoard?: { id: string; name: string } | null | undefined;
   availableTags?: string[] | undefined;
   hideAssigneeFilter?: boolean;
+  formMappings?: readonly FormContextMapping[] | undefined;
 }
 
 export interface PriorityFilterProps {
