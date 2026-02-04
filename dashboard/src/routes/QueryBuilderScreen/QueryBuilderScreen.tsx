@@ -171,6 +171,7 @@ export const QueryBuilderScreen: React.FC = () => {
           dashboardId: currentDashboard.id,
           createdBy: user?.id || '',
           timestamp: Date.now(),
+          mappingId: uuidv4(),
         }),
       );
       resetForm();
