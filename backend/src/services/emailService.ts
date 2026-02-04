@@ -374,8 +374,9 @@ export class EmailService {
       }
     }
 
-    // Start workflow and capture result for SYSTEM message
+    // Start workflow (controlled by config)
     let workflowResult: { workflowId: string; executionId: string; status: string } | null = null;
+    if (config.zoho.autoWorkflowEnabled) {
       try {
         workflowResult = await workflowManager.startWorkflow({
           ticketId: ticket.id,
@@ -388,8 +389,11 @@ export class EmailService {
       } catch (error) {
         logger.error("Error while creating workflow zoho: tickets", error)
       }
+    } else {
+      logger.info(`[EmailService] Skipping auto-workflow for ticket ${ticket.id} (ZOHO_AUTO_WORKFLOW_ENABLED=false)`);
+    }
 
-    // Step 3: Create message with empty content and ticketId in metadata
+    // Step 3: Create BOT message with ticket (always created first)
     const messageData: CreateMessageInput = {
       conversationId: conversation.conversationId,
       senderId: userId,
@@ -409,25 +413,26 @@ export class EmailService {
       ticketId: ticket.id
     });
 
-
-    const messageDataSys: CreateMessageInput = {
-      conversationId: conversation.conversationId,
-      senderId: userId,
-      content: '', // Empty content as specified
-      msgType: MessageType.SYSTEM, // SYSTEM type enables WorkflowBubble rendering
-      hasAttachment: true,
-      metadata: {
-        ticketId: ticket.id,
-        xyneId: ticket.xyneId,
-        ...(workflowResult && {
-          workflowId: workflowResult.workflowId,
-          workflowName: emailSubject, // Use email subject as workflow name
-          workflowType: WorkflowType.GENIUS_QUERY_WORKFLOW,
-        }),
-      },
-    };
-
-    await this.messageRepository.create(messageDataSys, true);
+    // Create SYSTEM message for WorkflowBubble (only when workflow is enabled, AFTER ticket message)
+    if (config.zoho.autoWorkflowEnabled) {
+      const messageDataSys: CreateMessageInput = {
+        conversationId: conversation.conversationId,
+        senderId: userId,
+        content: '',
+        msgType: MessageType.SYSTEM,
+        hasAttachment: true,
+        metadata: {
+          ticketId: ticket.id,
+          xyneId: ticket.xyneId,
+          ...(workflowResult && {
+            workflowId: workflowResult.workflowId,
+            workflowName: emailSubject,
+            workflowType: WorkflowType.GENIUS_QUERY_WORKFLOW,
+          }),
+        },
+      };
+      await this.messageRepository.create(messageDataSys, true);
+    }
 
     // Create email entry with type DEFAULT
     const emailData = {
