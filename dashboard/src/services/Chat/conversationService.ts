@@ -91,6 +91,20 @@ export interface ApiErrorResponse {
   message?: string;
 }
 
+export interface MarkTicketSuggestionAsCreatedRequest {
+  suggestionId: string;
+  ticketId: string;
+  xyneId: string;
+  title: string;
+  ticketConversationId: string;
+}
+
+export interface MarkTicketSuggestionAsCreatedResponse {
+  success: boolean;
+  messageId: string;
+  conversationId: string;
+}
+
 // ============================================================================
 // CUSTOM ERROR CLASS
 // ============================================================================
@@ -379,6 +393,41 @@ export class ConversationService {
       if (data.files && data.files.length > 0) {
         this.trackFileUpload(data.files, 'ConversationReply');
       }
+
+      return response.data;
+    } catch (error) {
+      // Handle Axios errors with proper typing
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+
+      // Re-throw unknown errors
+      throw error;
+    }
+  }
+
+  /**
+   * Mark a ticket suggestion as created in the message content
+   * Updates the YAML frontmatter to move suggestion to created array
+   */
+  async markTicketSuggestionAsCreated(
+    conversationId: string,
+    messageId: string,
+    data: MarkTicketSuggestionAsCreatedRequest,
+  ): Promise<MarkTicketSuggestionAsCreatedResponse> {
+    try {
+      const response = await apiInstance.put<MarkTicketSuggestionAsCreatedResponse>(
+        `/conversations/${conversationId}/messages/${messageId}/ticket-suggestion`,
+        data,
+      );
 
       return response.data;
     } catch (error) {

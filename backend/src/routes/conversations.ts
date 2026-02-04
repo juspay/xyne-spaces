@@ -8,6 +8,7 @@ const conversationController = new ConversationController();
 // Keep replyToConversation for file upload handling
 router.post('/:conversationId/messages', uploadMultiple, conversationController.replyToConversation);
 
-
+// Update message content (for ticket suggestion → ticket created flow)
+router.put('/:conversationId/messages/:messageId/ticket-suggestion', conversationController.updateTicketSuggestion);
 
 export default router;

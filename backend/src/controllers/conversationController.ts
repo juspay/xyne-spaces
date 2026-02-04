@@ -32,6 +32,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
+import { replaceTicketSuggestionWithCreated } from '../utils/ticketSuggestionMarkdownGenerator';
 
 // Local type definitions
 interface UserInfo {
@@ -1369,6 +1370,86 @@ export class ConversationController {
       });
     } catch (error) {
       logger.error('Error updating message:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // PUT /api/conversations/{conversationId}/messages/{messageId}/ticket-suggestion
+  // Update ticket suggestion block to ticket-created block
+  updateTicketSuggestion = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId, messageId } = req.params;
+      const { suggestionId, ticketId, xyneId, title, ticketConversationId } = req.body;
+      const userId = req.user!.id;
+      // Validate required fields
+      if (!suggestionId || !ticketId || !xyneId || !title || !ticketConversationId) {
+        res.status(400).json({ 
+          error: 'suggestionId, ticketId, xyneId, title, and ticketConversationId are required' 
+        });
+        return;
+      }
+
+      // Check if message exists
+      const message = await this.messageRepository.findById(messageId);
+      if (!message) {
+        res.status(404).json({ error: 'Message not found' });
+        return;
+      }
+
+      // Verify message belongs to conversation
+      if (message.conversationId !== conversationId) {
+        res.status(400).json({ error: 'Message does not belong to this conversation' });
+        return;
+      }
+
+      // Verify this is a bot message with ticket suggestions
+      if (message.msgType !== MessageType.BOT) {
+        res.status(400).json({ error: 'Only bot messages with ticket suggestions can be updated' });
+        return;
+      }
+
+      const metadata = message.metadata as Record<string, any>;
+      if (!metadata?.hasSuggestedTickets) {
+        res.status(400).json({ error: 'Message does not contain ticket suggestions' });
+        return;
+      }
+
+      // Get user info for createdBy field
+      const userInfo = await this.getUserInfo(userId);
+
+      // Replace ticket-suggestion block with ticket-created block (using suggestionId for identification)
+      const updatedContent = replaceTicketSuggestionWithCreated(
+        message.content,
+        suggestionId, // Use UUID to find the suggestion
+        {
+          ticketId,
+          xyneId,
+          title,
+          conversationId: ticketConversationId,
+          createdBy: userInfo.email,
+          createdAt: new Date().toISOString(),
+        }
+      );
+
+      // Update message content and set edited flag
+      const updatedMessage = await this.messageRepository.update(messageId, {
+        content: updatedContent,
+        edited: true,
+      });
+
+      // Get conversation for channelId
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      res.status(200).json({
+        messageId: updatedMessage.messageId,
+        conversationId: updatedMessage.conversationId,
+        content: updatedMessage.content,
+        edited: true,
+      });
+    } catch (error) {
       res.status(500).json({ error: 'Internal server error' });
     }
   };
