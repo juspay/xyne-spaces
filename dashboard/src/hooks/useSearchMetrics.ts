@@ -40,6 +40,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const lastImpressionTimeRef = useRef<number>(0);
   const impressionCountRef = useRef<number>(0);
   const lastQueryTextRef = useRef<string>('');
+  const maxQueryLengthTextRef = useRef<string>('');
+  const previousTabRef = useRef<TabType>(TabType.ALL);
 
   // Search Input State
   const [text, setText] = useState('');
@@ -139,8 +141,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       sessionStartTimeRef.current = Date.now();
       impressionCountRef.current = 0;
       lastQueryTextRef.current = '';
+      maxQueryLengthTextRef.current = '';
 
-      searchMetricsService.trackSessionStart(newSessionId, String(context.userID));
+      searchMetricsService.trackSessionStart(
+        newSessionId,
+        String(context.userID),
+        previousTabRef.current,
+      );
 
       return newSessionId;
     },
@@ -170,16 +177,21 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       const totalSessionDurationMs =
         sessionStartTimeRef.current > 0 ? now - sessionStartTimeRef.current : 0;
 
+      // For 'clear' events, use max query length text; otherwise use last query text
+      const queryTextForEnd =
+        endReason === 'clear' ? maxQueryLengthTextRef.current : lastQueryTextRef.current;
+
       // Track session end event
-      if (lastQueryTextRef.current || endReason === 'click' || endReason === 'abandon') {
+      if (queryTextForEnd || endReason === 'click' || endReason === 'abandon') {
         searchMetricsService.trackSessionEnd({
           searchSessionId,
           userId: String(context.userID),
-          queryText: lastQueryTextRef.current || '',
+          queryText: queryTextForEnd || '',
           totalImpressions: impressionCountRef.current,
           dwellTimeMs,
           endReason,
           totalSessionDurationMs,
+          tab: previousTabRef.current,
         });
       }
 
@@ -191,6 +203,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       lastImpressionTimeRef.current = 0;
       impressionCountRef.current = 0;
       lastQueryTextRef.current = '';
+      maxQueryLengthTextRef.current = '';
     },
     [searchSessionId, context.userID],
   );
@@ -217,12 +230,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         facetCounts: params.facetCounts,
         searchTrigger: searchTriggerRef.current,
         ...(options.searchLocation && { searchLocation: options.searchLocation }),
+        tab: previousTabRef.current,
       });
 
       // Update tracking state for dwell time calculation
       lastImpressionTimeRef.current = now;
       impressionCountRef.current += 1;
       lastQueryTextRef.current = params.queryText;
+
+      // Track max query length for clear events
+      if (params.queryText.length > maxQueryLengthTextRef.current.length) {
+        maxQueryLengthTextRef.current = params.queryText;
+      }
 
       // Reset for next search
       impressionStartTimeRef.current = 0;
@@ -286,6 +305,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ...(params.channel && { channel: params.channel }),
         ...(scrollDepth !== undefined && { scrollDepth }),
         ...(params.resultUrl && { resultUrl: params.resultUrl }),
+        tab: previousTabRef.current,
       });
 
       // End the session with 'click' reason after tracking the click
@@ -351,11 +371,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   /**
    * Track search impressions when results are displayed
    */
-  /**
-   * Track search impressions when results are displayed
-   */
   useEffect(() => {
-    if (!searchSessionId || !text.trim() || searchResults.length === 0) {
+    if (!searchSessionId || !text.trim()) {
       return;
     }
 
@@ -859,6 +876,26 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       }
     };
   }, [loadMore]);
+
+  useEffect(() => {
+    // Skip tracking on initial mount
+    if (previousTabRef.current === activeTab) {
+      return;
+    }
+
+    previousTabRef.current = activeTab;
+
+    if (!searchSessionId) {
+      return;
+    }
+    currentSearchContext.activeTab = activeTab;
+    // Track the tab change
+    searchMetricsService.trackTabClick({
+      searchSessionId,
+      userId: String(context.userID),
+      tab: previousTabRef.current,
+    });
+  }, [searchSessionId, context.userID, activeTab]);
 
   /**
    * Cleanup on unmount

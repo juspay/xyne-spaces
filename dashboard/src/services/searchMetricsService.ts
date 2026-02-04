@@ -10,17 +10,31 @@ import type {
   SearchImpressionEvent,
   SearchClickEvent,
   SearchSessionEndEvent,
+  SearchTabClickEvent,
 } from '../types/searchEvents';
 import * as otelMetrics from './otel/searchMetrics';
 import { SEARCH_VERSION } from '../config';
 import { logger, Event } from '../utils/logger';
 import { detectPlatform } from '../hooks/usePlatform';
+import { TabType } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
+
+/**
+ * Helper function to count words in a text string
+ * @param text - The text to count words in
+ * @returns The number of words
+ */
+function countWords(text: string): number {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(word => word.length > 0).length;
+}
 
 class SearchMetricsService {
   /**
    * Track when a new search session starts
    */
-  trackSessionStart(searchSessionId: string, userId: string): void {
+  trackSessionStart(searchSessionId: string, userId: string, tab: TabType): void {
     // Log structured event
     const event: SearchSessionStartEvent = {
       event_name: 'vespa_search_session_start',
@@ -28,6 +42,7 @@ class SearchMetricsService {
       user_id: userId,
       timestamp: new Date().toISOString(),
       version: SEARCH_VERSION,
+      tab,
     };
     logger.info(Event.VESPA_SEARCH_SESSION_START, { event });
 
@@ -38,6 +53,7 @@ class SearchMetricsService {
         version: SEARCH_VERSION,
         user_id: userId,
         platform: platform,
+        tab: tab,
       });
     });
   }
@@ -54,7 +70,9 @@ class SearchMetricsService {
     facetCounts: Record<string, number>;
     searchTrigger: 'keyboard_shortcut' | 'click' | 'auto_focus';
     searchLocation?: 'global' | 'channel' | 'dm';
+    tab: TabType;
   }): void {
+    const words = countWords(params.queryText);
     // Log structured event
     const event: SearchImpressionEvent = {
       event_name: 'vespa_search_impression',
@@ -68,6 +86,8 @@ class SearchMetricsService {
       facet_counts: params.facetCounts,
       is_zero_result: params.totalHits === 0,
       search_trigger: params.searchTrigger,
+      query_text_length: words,
+      tab: params.tab,
       ...(params.searchLocation && { search_location: params.searchLocation }),
     };
     logger.info(Event.VESPA_SEARCH_IMPRESSION, { event });
@@ -83,6 +103,8 @@ class SearchMetricsService {
           version: SEARCH_VERSION,
           user_id: params.userId,
           platform: platform,
+          query_text_length: words,
+          tab: params.tab,
         });
       });
     });
@@ -101,7 +123,9 @@ class SearchMetricsService {
     channel?: string;
     scrollDepth?: number;
     resultUrl?: string;
+    tab: TabType;
   }): void {
+    const words = countWords(params.queryText);
     // Log structured event
     const event: SearchClickEvent = {
       event_name: 'vespa_search_click',
@@ -113,6 +137,8 @@ class SearchMetricsService {
       clicked_doc_id: params.clickedDocId,
       clicked_doc_type: params.clickedDocType,
       rank_position: params.rankPosition,
+      exact_query_text_length: words,
+      tab: params.tab,
       ...(params.channel && { channel: params.channel }),
       ...(params.scrollDepth !== undefined && { scroll_depth: params.scrollDepth }),
       ...(params.resultUrl && { result_url: params.resultUrl }),
@@ -127,6 +153,8 @@ class SearchMetricsService {
         version: SEARCH_VERSION,
         user_id: params.userId,
         platform: platform,
+        exact_query_text_length: words,
+        tab: params.tab,
       });
     });
 
@@ -155,7 +183,9 @@ class SearchMetricsService {
     dwellTimeMs: number;
     endReason: 'click' | 'abandon' | 'clear' | 'blur';
     totalSessionDurationMs: number;
+    tab: TabType;
   }): void {
+    const words = countWords(params.queryText);
     // Log structured event
     const event: SearchSessionEndEvent = {
       event_name: 'vespa_search_session_end',
@@ -168,6 +198,8 @@ class SearchMetricsService {
       dwell_time_ms: params.dwellTimeMs,
       end_reason: params.endReason,
       total_session_duration_ms: params.totalSessionDurationMs,
+      query_text_length: words,
+      tab: params.tab,
     };
     logger.info(Event.VESPA_SEARCH_SESSION_END, { event });
 
@@ -179,6 +211,8 @@ class SearchMetricsService {
         version: SEARCH_VERSION,
         user_id: params.userId,
         platform: platform,
+        query_text_length: words,
+        tab: params.tab,
       });
     });
 
@@ -198,6 +232,33 @@ class SearchMetricsService {
         version: SEARCH_VERSION,
         user_id: params.userId,
         platform: platform,
+      });
+    });
+  }
+
+  /**
+   * Track when a user clicks on a search tab (People, Messages, Channels, Tickets, Files)
+   */
+  trackTabClick(params: { searchSessionId: string; userId: string; tab: TabType }): void {
+    // Log structured event
+    const event: SearchTabClickEvent = {
+      event_name: 'search_tab_click',
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      timestamp: new Date().toISOString(),
+      version: SEARCH_VERSION,
+      tab: params.tab,
+    };
+    logger.info(Event.VESPA_SEARCH_TAB_CLICK, { event });
+
+    // Record metrics - increment tab click counter with tab labels for individual counts
+    const platform = detectPlatform();
+    otelMetrics.safeRecordMetric(() => {
+      otelMetrics.searchTabClicks.add(1, {
+        version: SEARCH_VERSION,
+        user_id: params.userId,
+        platform: platform,
+        tab: params.tab,
       });
     });
   }

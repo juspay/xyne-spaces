@@ -21,6 +21,7 @@ interface CommonEventFields {
  */
 export interface SearchSessionStartEvent extends CommonEventFields {
   event_name: 'vespa_search_session_start';
+  tab: string;
 }
 
 /**
@@ -53,6 +54,11 @@ export interface SearchImpressionEvent extends CommonEventFields {
    * - dm: Search within a direct message
    */
   search_location?: 'global' | 'channel' | 'dm';
+  /**
+   * Number of words in the query text
+   */
+  query_text_length: number;
+  tab: string;
 }
 
 /**
@@ -77,6 +83,11 @@ export interface SearchClickEvent extends CommonEventFields {
    * Example: "/channels/general/messages/123"
    */
   result_url?: string;
+  /**
+   * Number of words in the query text
+   */
+  exact_query_text_length: number;
+  tab: string;
 }
 
 /**
@@ -111,6 +122,16 @@ export interface SearchSessionEndEvent extends CommonEventFields {
    * Total duration of the entire search session from start to end (in milliseconds)
    */
   total_session_duration_ms: number;
+  /**
+   * Number of words in the query text
+   */
+  query_text_length: number;
+  tab: string;
+}
+
+export interface SearchTabClickEvent extends CommonEventFields {
+  event_name: 'search_tab_click';
+  tab: string;
 }
 
 /**
@@ -120,4 +141,5 @@ export type SearchMetricEvent =
   | SearchSessionStartEvent
   | SearchImpressionEvent
   | SearchClickEvent
-  | SearchSessionEndEvent;
+  | SearchSessionEndEvent
+  | SearchTabClickEvent;
