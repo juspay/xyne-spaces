@@ -1,3 +1,17 @@
+## [1.26.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.25.0...v1.26.0) (2026-02-04)
+
+
+### Features
+
+* changed the prompt to prevent leakage ([b874990](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b874990b33f7ffaa693280bb4052d260bab475a3)), closes [#2721](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2721)
+* enhance validation workflow with error fixing capabilities and maxTurns support ([c1df1d2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c1df1d27d5b291364767514ced8133a426adf62a))
+
+
+### Bug Fixes
+
+* added no cache ([fa93f19](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fa93f19897c76a178f58335879dcbc11d738a0da)), closes [#2754](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2754)
+* ios double notification fix, add force update for ios ([bb05d91](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bb05d914f8407a27c1c667633b49bfc6952d0c5f)), closes [#2446](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2446)
+
 ## [1.25.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.24.1...v1.25.0) (2026-02-04)
 
 
