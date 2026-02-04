@@ -36,6 +36,7 @@ export const Event = {
   VESPA_SEARCH_IMPRESSION: 'vespa_search_impression',
   VESPA_SEARCH_CLICK: 'vespa_search_click',
   VESPA_SEARCH_SESSION_END: 'vespa_search_session_end',
+  VESPA_SEARCH_TAB_CLICK: 'vespa_search_tab_click',
   APP_LOADER_HIDDEN: 'app_loader_hidden',
   INITIAL_STATE_HYDRATION_COMPLETE: 'initial_state_hydration_complete',
   INITIAL_STATE_HYDRATION_FAILED: 'initial_state_hydration_failed',

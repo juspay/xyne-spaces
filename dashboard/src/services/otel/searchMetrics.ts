@@ -30,6 +30,7 @@ let _searchRankScore: Counter | null = null;
 let _searchSessionsEnded: Counter | null = null;
 let _searchDwellTime: Histogram | null = null;
 let _searchSessionDuration: Histogram | null = null;
+let _searchTabClicks: Counter | null = null;
 
 /**
  * Counter: Total number of search sessions initiated
@@ -148,6 +149,23 @@ export const searchSessionDuration: Histogram = new Proxy({} as Histogram, {
       });
     }
     return _searchSessionDuration[prop as keyof Histogram];
+  },
+});
+
+/**
+ * Counter: Total number of search tab clicks
+ * Labels: tab_id, tab_name, version
+ */
+export const searchTabClicks: Counter = new Proxy({} as Counter, {
+  get(_target, prop) {
+    if (!_searchTabClicks) {
+      _searchTabClicks = getMeter().createCounter('search_tab_clicks_total', {
+        description:
+          'Total number of search tab clicks (People, Messages, Channels, Tickets, Files)',
+        unit: '1',
+      });
+    }
+    return _searchTabClicks[prop as keyof Counter];
   },
 });
 
