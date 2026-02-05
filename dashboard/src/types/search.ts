@@ -124,14 +124,23 @@ export interface VespaSearchFilters {
   rankProfile?: string;
   includeDebugInfo?: boolean; // Include matchfeatures and rankfeatures
   // Additional filters
-  channelId?: string;
   projectId?: string;
-  docType?: string;
-  senderId?: string;
-  groupId?: string;
   status?: string;
   ticketId?: string;
   searchId?: string;
+  // Ticket-specific filters
+  priority?: string; // HIGH, MEDIUM, LOW, CRITICAL
+  board?: string; // Board name/ID
+  tags?: string; // Comma-separated tags
+  before?: string; // Created before date (multiple formats)
+  after?: string; // Created after date (multiple formats)
+  on?: string; // Created on specific date (multiple formats)
+  range?: string; // Time keyword (today, yesterday, this week, last 7 days, etc.)
+  stage?: string; // Ticket stage
+  assignee?: string; // Assigned user ID
+
+  // Filter-only mode (no query text, just filters)
+  filterOnly?: boolean;
 }
 
 export interface VespaSearchGroup {

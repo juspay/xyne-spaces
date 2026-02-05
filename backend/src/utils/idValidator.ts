@@ -1,0 +1,208 @@
+import { db } from '@/database/client';
+import { logger } from '@/utils/logger';
+
+/**
+ * Validation results for IDs
+ */
+export interface IdValidationResult {
+  valid: string[];
+  invalid: string[];
+}
+
+/**
+ * Validate project IDs against the database
+ * @param projectIds - Array of project IDs to validate
+ * @returns Object containing valid and invalid IDs
+ */
+export async function validateProjectIds(projectIds: string[]): Promise<IdValidationResult> {
+  try {
+    if (!projectIds || projectIds.length === 0) {
+      return { valid: [], invalid: [] };
+    }
+
+    // Query database for existing projects
+    const existingProjects = await db.project.findMany({
+      where: {
+        id: {
+          in: projectIds
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const existingIds = new Set(existingProjects.map(p => p.id));
+    const valid = projectIds.filter(id => existingIds.has(id));
+    const invalid = projectIds.filter(id => !existingIds.has(id));
+
+    return { valid, invalid };
+  } catch (error) {
+    logger.error('Error validating project IDs:', error);
+    throw new Error('Failed to validate project IDs');
+  }
+}
+
+/**
+ * Validate channel IDs against the database
+ * @param channelIds - Array of channel IDs to validate
+ * @returns Object containing valid and invalid IDs
+ */
+export async function validateChannelIds(channelIds: string[]): Promise<IdValidationResult> {
+  try {
+    if (!channelIds || channelIds.length === 0) {
+      return { valid: [], invalid: [] };
+    }
+
+    // Query database for existing channels
+    const existingChannels = await db.channel.findMany({
+      where: {
+        id: {
+          in: channelIds
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const existingIds = new Set(existingChannels.map(c => c.id));
+    const valid = channelIds.filter(id => existingIds.has(id));
+    const invalid = channelIds.filter(id => !existingIds.has(id));
+
+    return { valid, invalid };
+  } catch (error) {
+    logger.error('Error validating channel IDs:', error);
+    throw new Error('Failed to validate channel IDs');
+  }
+}
+
+/**
+ * Validate user IDs against the database
+ * @param userIds - Array of user IDs to validate
+ * @returns Object containing valid and invalid IDs
+ */
+export async function validateUserIds(userIds: string[]): Promise<IdValidationResult> {
+  try {
+    if (!userIds || userIds.length === 0) {
+      return { valid: [], invalid: [] };
+    }
+
+    // Query database for existing users
+    const existingUsers = await db.user.findMany({
+      where: {
+        id: {
+          in: userIds
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const existingIds = new Set(existingUsers.map(u => u.id));
+    const valid = userIds.filter(id => existingIds.has(id));
+    const invalid = userIds.filter(id => !existingIds.has(id));
+
+    return { valid, invalid };
+  } catch (error) {
+    logger.error('Error validating user IDs:', error);
+    throw new Error('Failed to validate user IDs');
+  }
+}
+
+/**
+ * Parse comma-separated IDs and filter out empty strings
+ * @param idsString - Comma-separated string of IDs
+ * @returns Array of trimmed, non-empty IDs
+ */
+export function parseIds(idsString: string | string[]): string[] {
+  if (Array.isArray(idsString)) {
+    return idsString.map(id => id.trim()).filter(Boolean);
+  }
+  return idsString.split(',').map(id => id.trim()).filter(Boolean);
+}
+
+/**
+ * Validate board IDs against the database
+ * @param boardIds - Array of board IDs to validate
+ * @returns Object containing valid and invalid IDs
+ */
+export async function validateBoardIds(boardIds: string[]): Promise<IdValidationResult> {
+  try {
+    if (!boardIds || boardIds.length === 0) {
+      return { valid: [], invalid: [] };
+    }
+
+    const existingBoards = await db.board.findMany({
+      where: {
+        id: {
+          in: boardIds
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const existingIds = new Set(existingBoards.map(b => b.id));
+    const valid = boardIds.filter(id => existingIds.has(id));
+    const invalid = boardIds.filter(id => !existingIds.has(id));
+
+    return { valid, invalid };
+  } catch (error) {
+    logger.error('Error validating board IDs:', error);
+    throw new Error('Failed to validate board IDs');
+  }
+}
+
+/**
+ * Validate ticket IDs against the database
+ * @param ticketIds - Array of ticket IDs to validate
+ * @returns Object containing valid and invalid IDs
+ */
+export async function validateTicketIds(ticketIds: string[]): Promise<IdValidationResult> {
+  try {
+    if (!ticketIds || ticketIds.length === 0) {
+      return { valid: [], invalid: [] };
+    }
+
+    const existingTickets = await db.ticket.findMany({
+      where: {
+        id: {
+          in: ticketIds
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const existingIds = new Set(existingTickets.map(t => t.id));
+    const valid = ticketIds.filter(id => existingIds.has(id));
+    const invalid = ticketIds.filter(id => !existingIds.has(id));
+
+    return { valid, invalid };
+  } catch (error) {
+    logger.error('Error validating ticket IDs:', error);
+    throw new Error('Failed to validate ticket IDs');
+  }
+}
+
+/**
+ * Validate docType values (static validation - no DB query needed)
+ * @param docTypes - Array of document types to validate
+ * @returns Object containing valid and invalid types
+ */
+export function validateDocTypes(docTypes: string[]): IdValidationResult {
+  const validDocTypes = ['messages', 'attachments', 'channels', 'tickets', 'users'];
+
+  if (!docTypes || docTypes.length === 0) {
+    return { valid: [], invalid: [] };
+  }
+
+  const valid = docTypes.filter(t => validDocTypes.includes(t.toLowerCase()));
+  const invalid = docTypes.filter(t => !validDocTypes.includes(t.toLowerCase()));
+
+  return { valid, invalid };
+}

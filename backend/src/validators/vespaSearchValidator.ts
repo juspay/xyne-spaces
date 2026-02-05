@@ -7,10 +7,10 @@ import Joi from 'joi';
  * unified backend filters (channelId, projectId, docType, etc.)
  */
 export const vespaSearchQuerySchema = Joi.object({
-  // Required query parameter
-  q: Joi.string().min(1).max(500).required().messages({
-    'string.empty': 'Search query cannot be empty',
-    'string.min': 'Search query must be at least 1 character',
+  // Required query parameter - allow empty string for filter-only searches
+  q: Joi.string().min(0).max(500).allow('').required().messages({
+    'string.empty': 'Search query can be empty when using filters',
+    'string.min': 'Search query must be at least 0 characters',
     'string.max': 'Search query cannot exceed 500 characters',
     'any.required': 'Query parameter "q" is required'
   }),
@@ -75,18 +75,6 @@ export const vespaSearchQuerySchema = Joi.object({
     }),
 
   // Unified filters (work for both slack and ticket)
-  channelId: Joi.alternatives()
-    .try(
-      Joi.array().items(Joi.string()),
-      Joi.string().custom((value) => {
-        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
-      })
-    )
-    .optional()
-    .messages({
-      'alternatives.types': 'Channel ID must be a string or array'
-    }),
-
   projectId: Joi.alternatives()
     .try(
       Joi.array().items(Joi.string()),
@@ -99,43 +87,7 @@ export const vespaSearchQuerySchema = Joi.object({
       'alternatives.types': 'Project ID must be a string or array'
     }),
 
-  docType: Joi.alternatives()
-    .try(
-      Joi.array().items(Joi.string()),
-      Joi.string().custom((value) => {
-        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
-      })
-    )
-    .optional()
-    .messages({
-      'alternatives.types': 'Document type must be a string or array'
-    }),
-
-  senderId: Joi.alternatives()
-    .try(
-      Joi.array().items(Joi.string()),
-      Joi.string().custom((value) => {
-        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
-      })
-    )
-    .optional()
-    .messages({
-      'alternatives.types': 'Sender ID must be a string or array'
-    }),
-
   // Ticket-specific filters
-  groupId: Joi.alternatives()
-    .try(
-      Joi.array().items(Joi.string()),
-      Joi.string().custom((value) => {
-        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
-      })
-    )
-    .optional()
-    .messages({
-      'alternatives.types': 'Group ID must be a string or array'
-    }),
-
   status: Joi.alternatives()
     .try(
       Joi.array().items(Joi.string()),
@@ -159,6 +111,50 @@ export const vespaSearchQuerySchema = Joi.object({
     .messages({
       'alternatives.types': 'Ticket ID must be a string or array'
     }),
+
+  // Accept any string - validation happens in search handler
+  priority: Joi.string().optional(),
+
+  // Accept any string - validation happens in search handler
+  created: Joi.string().optional(),
+
+  // New ticket filters
+  board: Joi.string().optional().messages({
+    'string.base': 'Board must be a string'
+  }),
+
+  tags: Joi.string().optional().messages({
+    'string.base': 'Tags must be a comma-separated string'
+  }),
+
+  before: Joi.string().optional().messages({
+    'string.base': 'Before date must be a string'
+  }),
+
+  after: Joi.string().optional().messages({
+    'string.base': 'After date must be a string'
+  }),
+
+  on: Joi.string().optional().messages({
+    'string.base': 'On date must be a string'
+  }),
+
+  range: Joi.string().optional().messages({
+    'string.base': 'Range must be a string (time keyword)'
+  }),
+
+  stage: Joi.string().optional().messages({
+    'string.base': 'Stage must be a string'
+  }),
+
+  assignee: Joi.string().optional().messages({
+    'string.base': 'Assignee must be a string'
+  }),
+
+  // Filter-only mode flag
+  filterOnly: Joi.string().valid('true', 'false').optional().messages({
+    'any.only': 'filterOnly must be "true" or "false"'
+  }),
 
   // Debug flag
   includeDebugInfo: Joi.boolean().optional().messages({

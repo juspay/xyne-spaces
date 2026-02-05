@@ -64,11 +64,7 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
             };
             groups.push(group);
           }
-          if(item.fields?.rankfeatures?.nativeRank > config.nativeRankThreshold)
-          group.hits.push(item)
-          else{
-            removedCount++
-          }
+          group.hits.push(item);
         }
       } else if (item.children) {
         // Recurse into nested children
@@ -86,26 +82,32 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
 // Export search handler function
 export const searchHandler = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { 
-      q, 
-      apps = 'slack,ticket,user', 
-      offset = 0, 
+    const {
+      q,
+      apps = 'slack,ticket,user',
+      offset = 0,
       limit = 20,
       rankProfile,
       // Frontend-compatible filters
       type,        // 'messages' | 'attachments' | 'channels' | 'tickets'
       from,        // User name or ID
-      in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)     
+      in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)
       // Unified filters (work for both slack and ticket)
-      channelId,   // Channel ID(s) - comma-separated
       projectId,   // Project ID(s) - comma-separated
-      docType,     // Document type(s) - comma-separated
-      senderId,    // Sender/User ID(s) - comma-separated
       // Ticket-specific filters
-      groupId,     // User group ID(s) - comma-separated
       status,      // Ticket status(es) - comma-separated
       ticketId,     // Specific ticket ID(s) - comma-separated
-      searchId     
+      priority,    // Priority (HIGH, MEDIUM, LOW) - comma-separated
+      searchId,
+      board,       // Board name/ID
+      tags,        // Comma-separated tags
+      before,      // Created before date (multiple formats)
+      after,       // Created after date (multiple formats)
+      on,          // Created on specific date (multiple formats)
+      range,       // Time keyword filter (today, yesterday, etc.)
+      stage,       // Ticket stage
+      assignee,    // Assigned user name
+      filterOnly   // Flag for filter-only search (no query text)
     } = req.query;
 
     const userId = (req as any).user?.id;
@@ -114,7 +116,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       return;
     }
     
-    if (!q) {
+    // Allow empty query if filterOnly is true
+    if (!q && filterOnly !== 'true') {
       res.status(400).json({ success: false, error: 'Query parameter "q" is required' });
       return;
     }
@@ -161,9 +164,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       }
     }
     
-    // Map frontend 'from' filter to senderId
+    // Map frontend 'from' filter to senderId (messages) and createdBy (tickets)
     if (from) {
       options.slack.senderId = from;
+      options.ticket.createdBy = from;
     }
     
     // Map frontend 'in' filter to channelId
@@ -173,39 +177,63 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
     
     // Add unified filters (apply to both slack and ticket)
-    if (channelId) {
-      const channelIds = (channelId as string).split(',');
-      options.slack.channelId = channelIds;
-      options.ticket.channelId = channelIds;
-    }
-    
     if (projectId) {
       const projectIds = (projectId as string).split(',');
       options.slack.projectId = projectIds;
       options.ticket.projectId = projectIds;
     }
     
-    if (docType) {
-      options.slack.docType = (docType as string).split(',');
-    }
-    
-    if (senderId) {
-      options.slack.senderId = (senderId as string).split(',');
-    }
-    
     // Add ticket-specific filters
-    if (groupId) {
-      options.ticket.groupId = (groupId as string).split(',');
-    }
-    
     if (status) {
       options.ticket.status = (status as string).split(',');
     }
-    
+
     if (ticketId) {
       options.ticket.ticketId = (ticketId as string).split(',');
     }
-    
+
+    if (priority) {
+      options.ticket.priority = (priority as string).split(',');
+    }
+
+    // New ticket filters
+    if (board) {
+      options.ticket.boardId = (board as string).split(',');
+    }
+
+    if (tags) {
+      options.ticket.tags = (tags as string).split(',');
+    }
+
+    // Date filters (apply to both slack and ticket)
+    if (before) {
+      options.slack.createdBefore = before as string;
+      options.ticket.createdBefore = before as string;
+    }
+
+    if (after) {
+      options.slack.createdAfter = after as string;
+      options.ticket.createdAfter = after as string;
+    }
+
+    if (on) {
+      options.slack.createdOn = on as string;
+      options.ticket.createdOn = on as string;
+    }
+
+    if (range) {
+      options.slack.createdRange = range as string;
+      options.ticket.createdRange = range as string;
+    }
+
+    if (stage) {
+      options.ticket.stage = (stage as string).split(',');
+    }
+
+    if (assignee) {
+      options.ticket.assignedTo = (assignee as string).split(',');
+    }
+
     // Call vespa search
     const results = await vespaService.searchService.searchVespa(
       q as string,

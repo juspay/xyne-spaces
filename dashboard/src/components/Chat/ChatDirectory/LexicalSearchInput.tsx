@@ -15,7 +15,10 @@ import { Search } from 'lucide-react';
 interface LexicalSearchInputProps {
   placeholder?: string;
   value?: string;
-  onChange?: (text: string, mentions: Array<{ id: string; type: MentionType }>) => void;
+  onChange?: (
+    text: string,
+    mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+  ) => void;
   onUserSearch?: (query: string | null) => void;
   onChannelSearch?: (query: string | null) => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
@@ -69,17 +72,26 @@ function AutoFocusPlugin({ open }: { open?: boolean }) {
 function OnChangePluginWrapper({
   onChange,
 }: {
-  onChange?: (text: string, mentions: Array<{ id: string; type: MentionType }>) => void;
+  onChange?: (
+    text: string,
+    mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+  ) => void;
 }) {
-  const extractMentions = (node: LexicalNode): Array<{ id: string; type: MentionType }> => {
-    const mentions: Array<{ id: string; type: MentionType }> = [];
+  const extractMentions = (
+    node: LexicalNode,
+  ): Array<{ id: string; type: MentionType; prefix?: string }> => {
+    const mentions: Array<{ id: string; type: MentionType; prefix?: string }> = [];
 
     if ($isMentionNode(node)) {
       const mentionData = node.getMentionData();
-      mentions.push({
+      const mention: { id: string; type: MentionType; prefix?: string } = {
         id: mentionData.id,
         type: mentionData.type,
-      });
+      };
+      if (mentionData.prefix) {
+        mention.prefix = mentionData.prefix;
+      }
+      mentions.push(mention);
     }
 
     if ($isElementNode(node)) {

@@ -19,6 +19,7 @@ import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
 import { useUserSearch } from './useUsers';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
+import { parseSearchFilters } from '../utils/searchFilterParser';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -50,7 +51,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
   const [selectedMentions, setSelectedMentions] = useState<
-    Array<{ id: string; type: MentionType }>
+    Array<{ id: string; type: MentionType; prefix?: string }>
   >([]);
   const [useVespaSearch, setUseVespaSearch] = useState(true);
 
@@ -443,13 +444,25 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     async (
       query: string,
       activeTab: TabType,
-      selectedMentions: Array<{ id: string; type: MentionType }>,
+      selectedMentions: Array<{ id: string; type: MentionType; prefix?: string }>,
       useVespaSearch: boolean,
       filteredLocalUsers: User[],
       filteredLocalChannelsCount: number, // New Argument
       onComplete?: (results: DisplaySearchResult[], query: string) => void,
     ) => {
-      const searchText = query.trim();
+      const {
+        searchText,
+        priority: priorityFilter,
+        board: boardFilter,
+        tags: tagsFilter,
+        before: beforeFilter,
+        after: afterFilter,
+        on: onFilter,
+        range: rangeFilter,
+        stage: stageFilter,
+        status: statusFilter,
+        assignee: assigneeFilter,
+      } = parseSearchFilters(query);
 
       // Adjust local results count logic for context
       // Note: filteredLocalChannelsCount is passed in. For user tab, we count users?
@@ -465,6 +478,20 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         localResultsCount: localCount,
         facetCounts: {}, // Calculated in effect
       });
+
+      // Check if any filters are active
+      const hasFilters =
+        priorityFilter ||
+        boardFilter || //TODO: In commandChannelMenu
+        tagsFilter ||
+        beforeFilter ||
+        afterFilter ||
+        onFilter ||
+        rangeFilter ||
+        stageFilter ||
+        statusFilter ||
+        assigneeFilter ||
+        selectedMentions.length > 0;
 
       if (activeTab === TabType.USERS) {
         const results = [
@@ -488,7 +515,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             cumulativeCount: results.length,
           },
         }));
-      } else if (searchText && activeTab !== TabType.CHANNELS) {
+      } else if ((searchText || hasFilters) && activeTab !== TabType.CHANNELS) {
         setIsSearching(true);
         setSearchError(null);
         markSearchStart();
@@ -505,6 +532,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               apps: apps,
               offset: 0,
               limit: limit,
+              filterOnly: !searchText && !!hasFilters,
+              ...(priorityFilter && { priority: priorityFilter }),
+              ...(boardFilter && { board: boardFilter }),
+              ...(tagsFilter && { tags: tagsFilter }),
+              ...(beforeFilter && { before: beforeFilter }),
+              ...(afterFilter && { after: afterFilter }),
+              ...(onFilter && { on: onFilter }),
+              ...(rangeFilter && { range: rangeFilter }),
+              ...(stageFilter && { stage: stageFilter }),
+              ...(statusFilter && { status: statusFilter }),
+              ...(assigneeFilter && { assignee: assigneeFilter }),
             };
 
             if (activeTab === TabType.MESSAGES) {
@@ -519,8 +557,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             }
 
             const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
-            if (userMentions.length > 0) {
-              searchFilters.from = userMentions.map(user => user.id).join(',');
+
+            // Separate mentions by prefix
+            const fromMentions = userMentions.filter(m => m.prefix === 'from:' || !m.prefix);
+            const assigneeMentions = userMentions.filter(m => m.prefix === 'assignee:');
+
+            if (fromMentions.length > 0) {
+              searchFilters.from = fromMentions.map(user => user.id).join(',');
+            }
+
+            if (assigneeMentions.length > 0) {
+              searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
             }
 
             const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
@@ -713,14 +760,33 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    * Load More Results
    */
   const loadMoreResults = useCallback(async () => {
-    const query = text; // Match local var usage or rename
-    // Logic unchanged, but it updates searchResults which triggers impression tracking
-    // if updated results (length increased) also implies impression?
-    // Usually impression is for "query typed", not "load more".
-    // Our impression logic has `currentLength <= previousLength` check to avoid tracking when not typing.
-    // So load more won't trigger new impression unless text length changed, which it didn't.
+    const {
+      searchText,
+      priority: priorityFilter,
+      board: boardFilter,
+      tags: tagsFilter,
+      before: beforeFilter,
+      after: afterFilter,
+      on: onFilter,
+      range: rangeFilter,
+      stage: stageFilter,
+      status: statusFilter,
+      assignee: assigneeFilter,
+    } = parseSearchFilters(text);
 
-    if (isLoadingMore || !query.trim() || activeTab === TabType.CHANNELS) return;
+    const hasFilters =
+      priorityFilter ||
+      boardFilter ||
+      tagsFilter ||
+      beforeFilter ||
+      afterFilter ||
+      onFilter ||
+      rangeFilter ||
+      stageFilter ||
+      statusFilter ||
+      assigneeFilter;
+
+    if (isLoadingMore || (!searchText && !hasFilters) || activeTab === TabType.CHANNELS) return;
 
     const currentPagination = paginationState[activeTab];
     if (!currentPagination.hasMore) return;
@@ -734,10 +800,21 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         const pageSize = BACKEND_RESULTS_LIMIT;
 
         const searchFilters: VespaSearchFilters = {
-          query: query.trim(),
+          query: searchText,
           apps: `${VespaApps.CHAT},${VespaApps.TICKET}`,
           offset: currentOffset,
           limit: currentOffset + pageSize,
+          filterOnly: !searchText && !!hasFilters,
+          ...(priorityFilter && { priority: priorityFilter }),
+          ...(boardFilter && { board: boardFilter }),
+          ...(tagsFilter && { tags: tagsFilter }),
+          ...(beforeFilter && { before: beforeFilter }),
+          ...(afterFilter && { after: afterFilter }),
+          ...(onFilter && { on: onFilter }),
+          ...(rangeFilter && { range: rangeFilter }),
+          ...(stageFilter && { stage: stageFilter }),
+          ...(statusFilter && { status: statusFilter }),
+          ...(assigneeFilter && { assignee: assigneeFilter }),
         };
 
         if (activeTab === TabType.MESSAGES) {
@@ -752,8 +829,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         }
 
         const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
-        if (userMentions.length > 0) {
-          searchFilters.from = userMentions.map(user => user.id).join(',');
+
+        // Separate mentions by prefix
+        const fromMentions = userMentions.filter(m => m.prefix === 'from:' || !m.prefix);
+        const assigneeMentions = userMentions.filter(m => m.prefix === 'assignee:');
+
+        if (fromMentions.length > 0) {
+          searchFilters.from = fromMentions.map(user => user.id).join(',');
+        }
+
+        if (assigneeMentions.length > 0) {
+          searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
         }
 
         const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
@@ -801,7 +887,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         if (entityTypes.length > 0) {
           const nextPage = currentPagination.page + 1;
           const searchFilters: GlobalSearchFilters = {
-            query: query.trim(),
+            query: searchText || text.trim(),
             entityTypes,
             page: nextPage,
             limit: BACKEND_RESULTS_LIMIT,

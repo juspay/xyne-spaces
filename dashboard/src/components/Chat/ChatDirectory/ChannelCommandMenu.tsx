@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 import * as Tabs from '@radix-ui/react-tabs';
-import * as Switch from '@radix-ui/react-switch';
+//import * as Switch from '@radix-ui/react-switch';
 import { Channel } from '@xyne/shared';
 import {
   isDMChannel,
@@ -227,7 +227,7 @@ const ChannelCommandMenu = ({
 
     setSelectedMentions,
     useVespaSearch,
-    setUseVespaSearch,
+    // setUseVespaSearch,
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
@@ -503,7 +503,7 @@ const ChannelCommandMenu = ({
 
   // Handle Lexical editor change - extract text and mentions
   const handleEditorChange = useCallback(
-    (text: string, mentions: Array<{ id: string; type: MentionType }>) => {
+    (text: string, mentions: Array<{ id: string; type: MentionType; prefix?: string }>) => {
       const trimmedText = text.trim();
       const prevTrimmedText = prevSearchTextRef.current.trim();
 
@@ -1301,6 +1301,7 @@ const ChannelCommandMenu = ({
 
         {/* Footer */}
         <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-between shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
+          {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
             <label htmlFor='vespa-toggle' className='text-xs text-gray-600 cursor-pointer'>
               Vespa Search
@@ -1314,6 +1315,7 @@ const ChannelCommandMenu = ({
               <Switch.Thumb className='block w-4 h-4 bg-white rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[18px]' />
             </Switch.Root>
           </div>
+          */}
           <div className='flex items-center gap-6'>
             <span className='flex gap-[10px] items-center'>
               <span>Open</span>

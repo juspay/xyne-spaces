@@ -25,6 +25,10 @@ const getLevenshteinDistance = (a: string, b: string): number => {
  * Prefix length = Max(4, queryWordLength - 4)
  */
 const isPrefixMatch = (queryWord: string, documentWord: string): boolean => {
+
+   if (documentWord.startsWith(queryWord) && queryWord.length > 4) {
+    return true;
+  }
   const prefixLength = Math.max(4 , Math.max(queryWord.length - 4, documentWord.length - 4));
 
   // Document word must be at least as long as the prefix

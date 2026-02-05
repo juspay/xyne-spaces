@@ -133,6 +133,7 @@ export function MentionPlugin({
               id: item.id,
               name: item.name,
               type: type === MentionType.USER ? MentionType.USER : MentionType.CHANNEL,
+              prefix: trigger as 'from:' | 'in:' | 'assignee:',
               ...(item.email && { email: item.email }),
             };
             const mentionNode = $createMentionNode(mentionData);
@@ -182,6 +183,7 @@ export function MentionPlugin({
           id: item.id,
           name: item.name,
           type: type === MentionType.USER ? MentionType.USER : MentionType.CHANNEL,
+          prefix: trigger as 'from:' | 'in:' | 'assignee:',
           ...(item.email && { email: item.email }),
         };
         const mentionNode = $createMentionNode(mentionData);
@@ -488,6 +490,8 @@ export function MentionPlugin({
         const fromMatch = textBeforeCursor.match(/\bfrom:\s*(\S*)$/i);
         const atMatch = textBeforeCursor.match(/@(\S*)$/);
 
+        const assigneeMatch = textBeforeCursor.match(/\bassignee:\s*(\S*)$/i);
+
         // Check for "in:" or "#" (channel triggers)
         const inMatch = textBeforeCursor.match(/\bin:\s*(\S*)$/i);
         const hashMatch = textBeforeCursor.match(/#(\S*)$/);
@@ -501,6 +505,13 @@ export function MentionPlugin({
             text: 'from:',
             query: fromMatch[1] || '',
             index: textBeforeCursor.lastIndexOf('from:'),
+          };
+        } else if (assigneeMatch) {
+          trigger = {
+            type: 'user',
+            text: 'assignee:',
+            query: assigneeMatch[1] || '',
+            index: textBeforeCursor.lastIndexOf('assignee:'),
           };
         } else if (atMatch) {
           trigger = {
