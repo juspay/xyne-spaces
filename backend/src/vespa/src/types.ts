@@ -278,3 +278,7 @@ export const schemaToDocType: Record<VespaSchema, VespaDocType> = {
   [userSchema]: VespaDocType.USER,
   [attachmentSchema]: VespaDocType.ATTACHMENT,
 };
+
+export interface MatchFeatures {
+  [key: string]: number | string;
+}

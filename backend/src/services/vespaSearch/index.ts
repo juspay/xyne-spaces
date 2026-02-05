@@ -4,7 +4,7 @@ import { Request, Response } from 'express';
 import config from 'vespa/src/config';
 import { transformVespaResults } from './resultTransform';
 import { db } from '@/database/client';
-import { RankProfile, VespaDocType } from '@/vespa/src/types';
+import { MatchFeatures, RankProfile, VespaDocType, VespaSearchHit } from '@/vespa/src/types';
 
 
 // Create dependencies
@@ -64,7 +64,7 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
             };
             groups.push(group);
           }
-          if(item.fields.rankfeatures.nativeRank > config.nativeRankThreshold)
+          if(item.fields?.rankfeatures?.nativeRank > config.nativeRankThreshold)
           group.hits.push(item)
           else{
             removedCount++
@@ -215,15 +215,33 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       searchId as string
     );
 
+    // Create a map of docId -> matchfeatures from children
+    const matchFeaturesMap = new Map<string, MatchFeatures>();
+    (results.root.children || []).forEach((child: any) => {
+      if (child.fields?.docId && child.fields?.matchfeatures) {
+        matchFeaturesMap.set(child.fields.docId, child.fields.matchfeatures);
+      }
+    });
+
     // Parse Vespa results (grouped or flat)
     const parsedResults = parseVespaResults(results.root.children || []);
 
     if (parsedResults.grouped && parsedResults.groups) {
+      // Grouped result don't have matchFeatures
+      // Need to be added explicitly
       // Return grouped results
      
       const groupedResults = await Promise.all(
         parsedResults.groups.map(async (group) => {
-          const transformedHits = await transformVespaResults(group.hits, db);
+          // Attach matchfeatures to each hit's fields before transformation
+          const hitsWithMatchFeatures = group.hits.map((hit: VespaSearchHit) => ({
+            ...hit,
+            fields: {
+              ...hit.fields,
+              matchfeatures: matchFeaturesMap.get(hit.fields?.docId) || null
+            }
+          }));
+          const transformedHits = await transformVespaResults(hitsWithMatchFeatures, db);
           return {
             groupBy: group.groupBy,
             groupValue: group.groupValue,
@@ -245,6 +263,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       });
     } else {
       // Return flat results (backward compatible)
+      // flat results will have matchFeatures returned by vespa.
+      // No need to add.
       const hits = parsedResults.hits || [];
       const transformedResults = await transformVespaResults(hits, db);
 
