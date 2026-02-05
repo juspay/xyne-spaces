@@ -1,3 +1,15 @@
+## [1.28.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.27.0...v1.28.0) (2026-02-05)
+
+
+### Features
+
+* removing tracers from activityClassification ([9683e82](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9683e82282a6c86489efb4b40f2be1860c981604)), closes [#2808](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2808)
+
+
+### Bug Fixes
+
+* fixed multichannel selectdropdown [XYNE AI] ([49373e0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/49373e083acd51e80aba219a3c88307f2615142f))
+
 ## [1.27.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.26.0...v1.27.0) (2026-02-04)
 
 
