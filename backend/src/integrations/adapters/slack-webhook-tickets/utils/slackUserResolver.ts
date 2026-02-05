@@ -209,6 +209,13 @@ async function resolveSlackIds(slackUserId: Array<string>, botOauthToken: string
 }
 
 
+function resolveSpecialMentions(text: string): string {
+  const regex = /<!channel>|<!here>|@channel|@here/g;
+  return text.replace(regex, (match: string) => {
+    return `<span class="chat-input-special-mention" data-mention-type="${match.toLowerCase()}">${match}</span>`;
+  });
+}
+
 export async function resolveSlackMentions(
   text: string,
   botOauthToken: string,
@@ -217,7 +224,7 @@ export async function resolveSlackMentions(
   const userIds = extractAllSlackIds(text, true);
   const groupIds = extractAllSlackIds(text, false);
   if (userIds.length === 0 && groupIds.length === 0) {
-    return text;
+    return resolveSpecialMentions(text);
   }
 
   const userMapper = await resolveSlackIds(userIds, botOauthToken, 'user');
@@ -259,5 +266,5 @@ export async function resolveSlackMentions(
       }
     }
   }
-  return text;
+  return resolveSpecialMentions(text);
 }

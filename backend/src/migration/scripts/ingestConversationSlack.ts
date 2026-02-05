@@ -183,7 +183,7 @@ export async function ingestConversationSlack(
           externalSourceName,
           externalAttachments,
           {
-            maxFileSize: 500 * 1024 * 1024, // 50MB
+            maxFileSize: 800 * 1024 * 1024, // 800MB
             timeout: 200000, // 200 seconds
             scopeType: 'EXTERNAL_MESSAGE',
             scopeId: externalSourceName,

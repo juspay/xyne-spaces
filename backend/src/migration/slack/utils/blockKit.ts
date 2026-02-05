@@ -158,7 +158,7 @@ export function getMigrationMessageBlocks(data: MigrationMessageData) {
             fields: [
               {
                 type: 'mrkdwn',
-                text: `*Xyne Space Channel ID:*\n${data.xyneSpaceChannelId}`,
+                text: `*Xyne Space Channel:*\n${data.xyneSpaceChannelId}`,
               },
             ],
           },

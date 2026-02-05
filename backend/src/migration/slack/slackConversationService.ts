@@ -240,12 +240,22 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     // Validate input
     await validateInput(input);
 
+    let xyneSpaceChannelLink: string | undefined;
+    if (input.xyneSpaceChannelId && config.slackFrontendUrl) {
+      const channelRepo = new ChannelRepository();
+      const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
+      if (xyneChannel) {
+        const channelName = xyneChannel.name;
+        xyneSpaceChannelLink = `<${config.slackFrontendUrl}/chat/${input.xyneSpaceChannelId}|${channelName}>`;
+      }
+    }
+
     // Post initial message
     const blocks = getMigrationMessageBlocks({
       syncDate: input.syncDate!,
       userId: input.userId,
       syncOptions: input.syncOptions,
-      xyneSpaceChannelId: input.xyneSpaceChannelId,
+      xyneSpaceChannelId: xyneSpaceChannelLink || input.xyneSpaceChannelId,
     });
     const fallbackText = getMigrationMessageFallbackText(input.syncDate!);
 
@@ -371,6 +381,16 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
           threadTs: messageTs,
         });
       }
+    }
+
+    if (ENABLE_NOTIFICATIONS) {
+      const xyneSpacesLink = input.xyneSpaceChannelId && config.slackFrontendUrl
+        ? `<${config.slackFrontendUrl}/chat/${input.xyneSpaceChannelId}|Xyne Spaces>`
+        : 'Xyne Spaces';
+      await postMessage({
+        channelId: input.channelId!,
+        text: `<!channel> This Channel has been migrated to ${xyneSpacesLink}. Please move your conversations there only this channel will be soon archived.`,
+      });
     }
 
     logger.info('[Migration] Migration completed', {
