@@ -1,3 +1,10 @@
+## [1.30.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.29.0...v1.30.0) (2026-02-05)
+
+
+### Features
+
+* fix search summary ([1c08396](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1c08396e752d20f74def084e5e075053bfc1c324))
+
 ## [1.29.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.28.0...v1.29.0) (2026-02-05)
 
 
