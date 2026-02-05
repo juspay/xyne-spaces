@@ -3,106 +3,152 @@ import { bitbucketWebhookService } from "@/services/bitbucketWebhookService";
 import { logger } from "@/utils/logger";
 
 const router = Router();
+
+/**
+ * Bitbucket Server webhook envelope structure
+ * Based on Bitbucket Server 8.6 documentation
+ */
 export interface BitbucketWebhookEnvelope {
-  eventKey: string; // derived from header: X-Event-Key
-  receivedAt: string; // ISO timestamp (you add this)
+  eventKey: string; // derived from header: X-Event-Key (e.g., pr:opened, pr:merged)
+  date: string; // ISO timestamp from server
+  receivedAt: string; // ISO timestamp (we add this)
 
   repository: BitbucketRepository;
-  actor?: BitbucketActor;
+  actor?: BitbucketUser;
 
-  pullrequest?: BitbucketPullRequest;
-  //ts-ignore
-  push?: any; // event defined for limited type safety, can be expanded later
-  //ts-ignore
-  issue?: any;// event defined for limited type safety, can be expanded later
-  commit_status?: BitbucketCommitStatus;
-
-  // allow future Bitbucket additions
-  raw?: unknown; //bitbucket may send or change fields anytime
-}
-export interface BitbucketRepository {
-  uuid: string;
-  name: string;
-  full_name: string;
-  is_private: boolean;
-
-  project?: {
-    key: string;
-    name: string;
-    uuid: string;
+  pullRequest?: BitbucketPullRequest;
+  
+  // pr:modified specific fields
+  previousTitle?: string;
+  previousDescription?: string;
+  previousTarget?: {
+    id: string;
+    displayId: string;
+    type: string;
+    latestCommit: string;
+    latestChangeset: string;
   };
-
-  workspace?: {
-    uuid: string;
-    slug: string;
-  };
-
-  links?: {
-    html?: { href: string };
-  };
-}
-export interface BitbucketActor {
-  uuid: string;
-  display_name: string;
-  nickname?: string;
-  account_id?: string;
-  email?: string;
-  type: 'user' | 'team';
-}
-export interface BitbucketCommitStatus {
-  state: 'SUCCESSFUL' | 'FAILED' | 'INPROGRESS' | 'STOPPED';
-  key: string;
-  name: string;
-  url?: string;
-  description?: string;
+  
+  // Other event types
+  changes?: any[]; // for repo:refs_changed events
+  comment?: any; // for comment events
+  
+  // allow future Bitbucket Server additions
+  [key: string]: any;
 }
 
 /**
- * Bitbucket Cloud webhook pull request format
- * Used for webhook payloads from bitbucket.org
+ * Bitbucket Server repository structure
+ */
+export interface BitbucketRepository {
+  slug: string;
+  id: number;
+  name: string;
+  scmId: string;
+  state: string;
+  statusMessage: string;
+  forkable: boolean;
+  
+  project: {
+    key: string;
+    id: number;
+    name: string;
+    public: boolean;
+    type: string; // 'NORMAL' or 'PERSONAL'
+    owner?: BitbucketUser; // Present when type is PERSONAL
+  };
+  
+  public: boolean;
+  
+  links?: {
+    clone?: Array<{ href: string; name: string }>;
+    self?: Array<{ href: string }>;
+  };
+}
+
+/**
+ * Bitbucket Server user/actor structure
+ */
+export interface BitbucketUser {
+  name: string;
+  emailAddress: string;
+  id: number;
+  displayName: string;
+  active: boolean;
+  slug: string;
+  type: string;
+  
+  links?: {
+    self?: Array<{ href: string }>;
+  };
+}
+
+/**
+ * Bitbucket Server pull request structure
+ * Used for webhook payloads from Bitbucket Server/Data Center
  */
 export interface BitbucketPullRequest {
   id: number;
+  version: number;
   title: string;
   description?: string;
 
   state: 'OPEN' | 'MERGED' | 'DECLINED';
-  draft: boolean;
+  open: boolean;
+  closed: boolean;
 
-  comment_count: number;
-  task_count?: number;
+  createdDate: number; // Unix timestamp in milliseconds
+  updatedDate: number;
+  closedDate?: number;
 
-  created_on: string;
-  updated_on: string;
-
-  source: {
-    branch: {
-      name: string;
-    };
-    commit: {
-      hash: string;
-    };
+  fromRef: {
+    id: string; // e.g., "refs/heads/feature-branch"
+    displayId: string; // e.g., "feature-branch"
+    latestCommit: string;
+    repository: BitbucketRepository;
   };
 
-  destination: {
-    branch: {
-      name: string;
-    };
+  toRef: {
+    id: string;
+    displayId: string;
+    latestCommit: string;
+    repository: BitbucketRepository;
   };
 
-  merge_commit?: {
-    hash: string;
-  } | null;
+  locked: boolean;
 
-  author?: BitbucketActor;
+  author: {
+    user: BitbucketUser;
+    role: string;
+    approved: boolean;
+    status: string;
+  };
+
+  reviewers: Array<{
+    user: BitbucketUser;
+    lastReviewedCommit?: string;
+    role: string;
+    approved: boolean;
+    status: string;
+  }>;
+
+  participants: Array<{
+    user: BitbucketUser;
+    role: string;
+    approved: boolean;
+    status: string;
+  }>;
+
+  properties?: {
+    mergeCommit?: {
+      displayId: string;
+      id: string;
+    };
+    commentCount?: number;
+  };
 
   links: {
-    html: { href: string };
-    commits?: { href: string };
-    activity?: { href: string };
-    merge?: { href: string };
-    decline?: { href: string };
-    statuses?: { href: string };
+    self: Array<{ href: string } | null>;
   };
 }
 
