@@ -1,10 +1,11 @@
 import type { ReactElement } from 'react';
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { ArrowUp, X } from 'lucide-react';
+import { ArrowUp, X, Lock } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { toast } from 'sonner';
+import { ChannelScopeType } from '@xyne/shared';
 import { StopIcon } from './StopIcon';
 import { useAllVisibleChannels, searchChannels } from '../../../../hooks/useChannels';
 import type { Channel } from '../../../../machines/stateMachine';
@@ -54,8 +55,15 @@ export const XyneAIInputBox = ({
   const hasInitializedDefaultChannel = useRef(false);
   const { isMobile } = usePlatform();
 
-  // Get all visible channels
+  // Get all visible channels and filter out DMs
   const allChannels = useAllVisibleChannels();
+  const nonDMChannels = useMemo(() => {
+    return allChannels.filter(
+      channel =>
+        channel.scopeType !== ChannelScopeType.DM &&
+        channel.scopeType !== ChannelScopeType.GROUP_DM,
+    );
+  }, [allChannels]);
 
   // Initialize with current channel as default pill (if exists and not DM)
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>(() => {
@@ -81,13 +89,13 @@ export const XyneAIInputBox = ({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [dropdownTriggeredBy, setDropdownTriggeredBy] = useState<'button' | 'text'>('button');
 
-  // Filter channels based on search query
+  // Filter channels based on search query (exclude DMs)
   const filteredChannels = useMemo(() => {
     if (!channelSearchQuery.trim()) {
-      return allChannels.slice(0, 10);
+      return nonDMChannels.slice(0, 10);
     }
-    return searchChannels(allChannels, channelSearchQuery, 10);
-  }, [allChannels, channelSearchQuery]);
+    return searchChannels(nonDMChannels, channelSearchQuery, 10);
+  }, [nonDMChannels, channelSearchQuery]);
 
   // TipTap editor setup
   const editor = useEditor({
@@ -189,16 +197,16 @@ export const XyneAIInputBox = ({
     }
   }, [inputValue, editor]);
 
-  // Convert channels to MentionResult format for MentionSelector
+  // Convert channels to MentionResult format for MentionSelector (exclude DMs)
   const channelMentionItems: MentionResult[] = useMemo(() => {
-    return allChannels.map(channel => ({
+    return nonDMChannels.map(channel => ({
       id: channel.id,
       name: channel.name,
       type: 'channel' as const,
       isPrivate: String(channel.visibility) === 'PRIVATE',
       ...(channel.description && { description: channel.description }),
     }));
-  }, [allChannels]);
+  }, [nonDMChannels]);
 
   // Handle channel mention search
   const handleChannelMentionSearch = useCallback((query: string) => {
@@ -380,7 +388,11 @@ export const XyneAIInputBox = ({
             >
               <div className='flex items-center gap-1'>
                 <div className='flex-shrink-0'>
-                  {channel.isPrivate ? <span className='text-sm'>🔒</span> : <HashIcon />}
+                  {channel.isPrivate ? (
+                    <Lock className='h-3.5 w-3.5 text-gray-600' />
+                  ) : (
+                    <HashIcon />
+                  )}
                 </div>
                 <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap">
                   {channel.name}
@@ -457,7 +469,7 @@ export const XyneAIInputBox = ({
                   >
                     <div className='flex-shrink-0'>
                       {String(channel.visibility) === 'PRIVATE' ? (
-                        <span className='text-sm'>🔒</span>
+                        <Lock className='h-3.5 w-3.5 text-gray-600' />
                       ) : (
                         <HashIcon />
                       )}
@@ -466,11 +478,6 @@ export const XyneAIInputBox = ({
                       <div className="text-sm font-medium text-gray-900 font-['Inter'] truncate">
                         {channel.name}
                       </div>
-                      {channel.description && (
-                        <div className="text-xs text-gray-500 font-['Inter'] truncate">
-                          {channel.description}
-                        </div>
-                      )}
                     </div>
                   </button>
                 ))}
