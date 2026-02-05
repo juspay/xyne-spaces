@@ -7,6 +7,7 @@ import {
   userSchema,
   channelSchema,
 } from '../types';
+import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
 type AppName = 'chat' | 'ticket' | 'user';
 
@@ -15,14 +16,29 @@ export interface SlackFilters {
   projectId?: string[];
   docType?: string[];
   senderId?: string[];
+  // Date filters
+  createdBefore?: string;       // Created before date (multiple formats)
+  createdAfter?: string;        // Created after date (multiple formats)
+  createdOn?: string;           // Created on specific date (multiple formats)
+  createdRange?: string;        // Time keyword (today, yesterday, this week, etc.)
 }
 
 export interface TicketFilters {
   projectId?: string[];
   channelId?: string[];
-  groupId?: string[];
   status?: string[];
   ticketId?: string[];
+  priority?: string[];            // Filter by priority (HIGH, MEDIUM, LOW) - comma-separated
+  createdBy?: string[];         // Filter by ticket creator (for from: functionality)
+  // New filters
+  boardId?: string[];           // Filter by board ID - comma-separated
+  tags?: string[];              // Filter by tags
+  createdBefore?: string;       // Created before date (multiple formats)
+  createdAfter?: string;        // Created after date (multiple formats)
+  createdOn?: string;           // Created on specific date (multiple formats)
+  createdRange?: string;        // Time keyword (today, yesterday, this week, etc.)
+  stage?: string[];              // Filter by ticket stage - comma-separated
+  assignedTo?: string[];        // Filter by assigned user ID - comma-separated
 }
 
 export class YqlBuilder {
@@ -150,7 +166,31 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
       const senders = filters.senderId.map(id => `userId contains "${id.trim()}"`).join(' or ');
       conditions.push(`(${senders})`);
     }
+     if (filters.createdBefore) {
+      const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');
+      if (timestamp) conditions.push(`createdAtTimestamp < ${timestamp}`);
+    }
 
+    if (filters.createdAfter) {
+      const timestamp = parseDateToTimestamp(filters.createdAfter, 'end');
+      if (timestamp) conditions.push(`createdAtTimestamp > ${timestamp}`);
+    }
+
+    if (filters.createdOn) {
+      const rangeStart = parseDateToTimestamp(filters.createdOn, 'start');
+      const rangeEnd = parseDateToTimestamp(filters.createdOn, 'end');
+      if (rangeStart && rangeEnd) {
+        conditions.push(`(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`);
+      }
+    }
+
+    // Time keyword filter (today, yesterday, this week, last 7 days, etc.)
+    if (filters.createdRange) {
+      const timeRange = parseTimeKeyword(filters.createdRange);
+      if (timeRange) {
+        conditions.push(`(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`);
+      }
+    }
     // Exclude system messages
     //Permissions check
     conditions.push(`permissions contains "${userId}"`);
@@ -183,15 +223,9 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
       conditions.push(`(${channels})`);
     }
 
-    // Group filter
-    if (filters.groupId && filters.groupId.length > 0) {
-      const groups = filters.groupId.map(id => `userGroupId contains "${id.trim()}"`).join(' or ');
-      conditions.push(`(${groups})`);
-    }
-
     // Status filter
     if (filters.status && filters.status.length > 0) {
-      const statuses = filters.status.map(s => `status contains "${s.trim()}"`).join(' or ');
+      const statuses = filters.status.map(s => `status contains "${s.trim().toUpperCase()}"`).join(' or ');
       conditions.push(`(${statuses})`);
     }
 
@@ -199,6 +233,68 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
     if (filters.ticketId && filters.ticketId.length > 0) {
       const tickets = filters.ticketId.map(id => `docId contains "${id.trim()}"`).join(' or ');
       conditions.push(`(${tickets})`);
+    }
+
+    if (filters.priority && filters.priority.length > 0) {
+      const priorities = filters.priority.map(p => `priority contains "${p.trim().toUpperCase()}"`).join(' or ');
+      conditions.push(`(${priorities})`);
+    }
+
+    // CreatedBy filter (for from: functionality)
+    if (filters.createdBy && filters.createdBy.length > 0) {
+      const creators = filters.createdBy.map(id => `createdBy contains "${id.trim()}"`).join(' or ');
+      conditions.push(`(${creators})`);
+    }
+
+    // Board filter (array - comma-separated)
+    if (filters.boardId && filters.boardId.length > 0) {
+      const boards = filters.boardId.map(id => `boardId contains "${id.trim()}"`).join(' or ');
+      conditions.push(`(${boards})`);
+    }
+
+    // Tags filter (array)
+    if (filters.tags && filters.tags.length > 0) {
+      const tagConditions = filters.tags.map(tag => `tags contains "${tag.trim()}"`).join(' or ');
+      conditions.push(`(${tagConditions})`);
+    }
+
+    // Stage filter
+    if (filters.stage && filters.stage.length > 0) {
+      const stages = filters.stage.map(s => `stage contains "${s.trim().toUpperCase()}"`).join(' or ');
+      conditions.push(`(${stages})`);
+    }
+
+    // AssignedTo filter (search by ID)
+    if (filters.assignedTo && filters.assignedTo.length > 0) {
+      const assignees = filters.assignedTo.map(id => `assignedTo contains "${id.trim()}"`).join(' or ');
+      conditions.push(`(${assignees})`);
+    }
+
+    // Date filters (ISO or dd/mm/yy or dd mon yy - no time keywords)
+    if (filters.createdBefore) {
+      const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');
+      if (timestamp) conditions.push(`createdAtTimestamp < ${timestamp}`);
+    }
+
+    if (filters.createdAfter) {
+      const timestamp = parseDateToTimestamp(filters.createdAfter, 'end');
+      if (timestamp) conditions.push(`createdAtTimestamp > ${timestamp}`);
+    }
+
+    if (filters.createdOn) {
+      const rangeStart = parseDateToTimestamp(filters.createdOn, 'start');
+      const rangeEnd = parseDateToTimestamp(filters.createdOn, 'end');
+      if (rangeStart && rangeEnd) {
+        conditions.push(`(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`);
+      }
+    }
+
+    // Time keyword filter (today, yesterday, this week, last 7 days, etc.)
+    if (filters.createdRange) {
+      const timeRange = parseTimeKeyword(filters.createdRange);
+      if (timeRange) {
+        conditions.push(`(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`);
+      }
     }
 
     return conditions.join(' and ');

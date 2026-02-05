@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { searchHandler } from '../services/vespaSearch';
-import { validateQuery } from '../middleware/validation';
+import { validateQuery, validateSearchFilters } from '../middleware/validation';
 import { vespaSearchQuerySchema } from '../validators/vespaSearchValidator';
 
 const router = Router();
@@ -18,14 +18,21 @@ const router = Router();
  * @param {string} from - Filter by user ID(s) - comma-separated (optional)
  * @param {string} in - Filter by channel ID(s) - comma-separated (optional)
  * @param {string} projectId - Filter by project ID(s) - comma-separated (optional)
- * @param {string} docType - Filter by document type(s) - comma-separated (optional)
- * @param {string} senderId - Filter by sender ID(s) - comma-separated (optional)
- * @param {string} groupId - Filter by user group ID(s) - comma-separated (optional)
  * @param {string} status - Filter by ticket status(es) - comma-separated (optional)
  * @param {string} ticketId - Filter by specific ticket ID(s) - comma-separated (optional)
+ * @param {string} priority - Filter by priority: HIGH|MEDIUM|LOW|CRITICAL (optional)
+ * @param {string} board - Filter by board name (optional)
+ * @param {string} tags - Filter by tags - comma-separated (optional)
+ * @param {string} before - Created before date (optional)
+ * @param {string} after - Created after date (optional)
+ * @param {string} on - Created on specific date (optional)
+ * @param {string} range - Time keyword filter (optional)
+ * @param {string} stage - Filter by ticket stage (optional)
+ * @param {string} assignee - Filter by assigned user ID (optional)
+ * @param {boolean} filterOnly - Enable filter-only mode (no query text required) (optional)
  * @param {boolean} includeDebugInfo - Include debug info in response (optional)
  * @param {boolean} searchId - searchId (optional)
  */
-router.get('/', validateQuery(vespaSearchQuerySchema), searchHandler);
+router.get('/', validateQuery(vespaSearchQuerySchema), validateSearchFilters(), searchHandler);
 
 export default router;

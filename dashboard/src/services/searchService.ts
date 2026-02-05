@@ -374,24 +374,8 @@ export class SearchService {
       params['rankProfile'] = filters.rankProfile;
     }
 
-    if (filters.channelId) {
-      params['channelId'] = filters.channelId;
-    }
-
     if (filters.projectId) {
       params['projectId'] = filters.projectId;
-    }
-
-    if (filters.docType) {
-      params['docType'] = filters.docType;
-    }
-
-    if (filters.senderId) {
-      params['senderId'] = filters.senderId;
-    }
-
-    if (filters.groupId) {
-      params['groupId'] = filters.groupId;
     }
 
     if (filters.status) {
@@ -408,6 +392,46 @@ export class SearchService {
 
     if (filters.searchId) {
       params['searchId'] = filters.searchId;
+    }
+
+    if (filters.priority) {
+      params['priority'] = filters.priority;
+    }
+
+    if (filters.board) {
+      params['board'] = filters.board;
+    }
+
+    if (filters.tags) {
+      params['tags'] = filters.tags;
+    }
+
+    if (filters.before) {
+      params['before'] = filters.before;
+    }
+
+    if (filters.after) {
+      params['after'] = filters.after;
+    }
+
+    if (filters.on) {
+      params['on'] = filters.on;
+    }
+
+    if (filters.range) {
+      params['range'] = filters.range;
+    }
+
+    if (filters.stage) {
+      params['stage'] = filters.stage;
+    }
+
+    if (filters.assignee) {
+      params['assignee'] = filters.assignee;
+    }
+
+    if (filters.filterOnly !== undefined) {
+      params['filterOnly'] = filters.filterOnly.toString();
     }
 
     return params;

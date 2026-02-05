@@ -117,7 +117,8 @@ export interface VespaChatMessageDocument extends VespaDocument {
   username: string;
   userEmail: string;
   image: string;
-  createdAt: number;
+  createdAt: string;
+  createdAtTimestamp: number;
   threadId: string;
   channelWeightedSet: any,
   userWeightedSet: any,
@@ -127,7 +128,7 @@ export interface VespaChatMessageDocument extends VespaDocument {
   replyCount: number;
   replyUsersCount: number;
   mentions: string[];
-  updatedAt: number;
+  updatedAt: string;
   deletedAt: number;
   metadata: string;
   threadMentions?: string[];

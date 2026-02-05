@@ -15,6 +15,7 @@ export interface MentionData {
   id: string;
   name: string;
   type: 'user' | 'channel';
+  prefix?: 'from:' | 'in:' | 'assignee:';
   email?: string;
   photoLink?: string;
 }
@@ -109,6 +110,10 @@ export class MentionNode extends DecoratorNode<React.JSX.Element> {
   }
 
   override getTextContent(): string {
+    if (this.__mentionData.prefix) {
+      return `${this.__mentionData.prefix} ${this.__mentionData.name}`;
+    }
+    // Fallback for backward compatibility
     const prefix = this.__mentionData.type === MentionType.USER ? 'from: ' : 'in: ';
     return `${prefix}${this.__mentionData.name}`;
   }

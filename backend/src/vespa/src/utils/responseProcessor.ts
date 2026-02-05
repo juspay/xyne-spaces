@@ -125,7 +125,7 @@ const stripHighlightTags = (text: string): string => {
 
     const result = processNodesRecursively(response.root.children, (node) => {
       const matchFeatures = node.fields?.matchfeatures;
-      const nativeRank = matchFeatures?.combined_nativeRank || node.fields?.rankfeatures?.nativeRank;
+      const nativeRank = matchFeatures?.combined_nativeRank ?? node.fields?.rankfeatures?.nativeRank;
 
       if (typeof nativeRank === 'number' && nativeRank >= threshold) {
         return { keep: true, node };

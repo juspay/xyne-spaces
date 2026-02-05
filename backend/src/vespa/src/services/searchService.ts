@@ -82,7 +82,6 @@ export class SearchService {
       // Parse time keywords from query
       const parsedQuery: ParsedTimeQuery = parseTimeKeywords(query);
       const searchQuery = parsedQuery.cleanedQuery || query;
-
       const freshnessWeight = parsedQuery.config?.freshnessWeight ?? 0.0;
       const filteringWeight = parsedQuery.config?.filteringWeight ?? 0.0;
       const timeRangeStart = parsedQuery.config?.timeRange.from ?? 0;
@@ -168,7 +167,9 @@ export class SearchService {
       let response = await this.vespa.search<VespaSearchResponse>(payload);
       
        // Filter by nativerank if enabled
-       if (nativeRankThreshold > 0) {
+       // Skip nativeRank filtering for filter-only searches (no query text)
+       // nativeRank is based on text matching - meaningless without a query
+       if (nativeRankThreshold > 0 && searchQuery?.trim()) {
         response = filterByNativeRank(response, nativeRankThreshold , this.logger);
       }
 
