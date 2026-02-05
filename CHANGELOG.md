@@ -1,3 +1,10 @@
+## [1.29.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.28.0...v1.29.0) (2026-02-05)
+
+
+### Features
+
+* Add matchFeature in debug info for grouped vespa search ([4080d4b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4080d4bf7cde997f7af2096d2664897b5e1f7cde)), closes [#2747](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2747)
+
 ## [1.28.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.27.0...v1.28.0) (2026-02-05)
 
 
