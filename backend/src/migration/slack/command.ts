@@ -9,6 +9,9 @@ import { logger } from '../../utils/logger';
 import { getSyncModal } from './utils/blockKit';
 import { verifySlackRequest } from './middleware/verifySlackRequest';
 import { config } from '../../config/env';
+import { UserRepository } from '../../database/repositories/users';
+import { UserGroupRepository } from '../../database/repositories/userGroups';
+import { UserGroupMappingRepository } from '../../database/repositories/userGroupMappingRepository';
 
 const router = Router();
 
@@ -39,25 +42,36 @@ router.post('/command', verifySlackRequest, async (req: Request, res: Response) 
       }
 
       if (!approvedUsers.includes(user_id)) {
-        logger.warn('[Migration] Unauthorized user attempted /sync command', {
-          userId: user_id,
-          approvedUsers: approvedUsers,
-        });
 
         let messageText = ':sadblob: You are not authorized to perform this action.\n\n';
         messageText += 'Approved users:\n';
         messageText += approvedUsers.map((userId: string) => `<@${userId}>`).join(',');
         messageText += '\n\nPlease contact them to run this migration.';
 
-        return res.status(200).json({
-          response_type: 'ephemeral',
-          text: messageText,
-        });
-      }
+        const userRepo = new UserRepository();
+        const userGroupRepo = new UserGroupRepository();
+        const userGroupMappingRepo = new UserGroupMappingRepository();        
+        const userGroupId = 'cml9ekof80268qqgsz9de3m6d' //User Group ID for Slack Migration Admins
 
-      logger.info('[Migration] User authorized for /sync command', {
-        userId: user_id,
-      });
+        const user = await userRepo.findByMetadataField('slackId', user_id);
+        const userGroup = await userGroupRepo.findById(userGroupId);
+
+        if (!user || !userGroup) {
+          return res.status(200).json({
+            response_type: 'ephemeral',
+            text: messageText,
+          });
+        }
+
+        const userGroupMapping = await userGroupMappingRepo.exists(userGroupId, user.id);
+
+        if (!userGroupMapping) {
+          return res.status(200).json({
+            response_type: 'ephemeral',
+            text: messageText,
+          });
+        }
+      }
     }
 
     const client = new WebClient(token);
