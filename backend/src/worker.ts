@@ -6,7 +6,6 @@ import { eventPollingService } from './workflows/services/event-polling-service'
 import { registerAllWorkflows } from '@/workflows'
 import { vespaWorker } from './workers/vespaWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
-import { shutdownActivityClassificationTracing } from '@/services/activity/activityClassificationLangfuseTracing'
 import { gcsPollingService } from './services/gcsPollingService'
 import { notificationWorker } from '@/notification-service/consumers/notificationWorker'
 import { notificationService as realTimeNotificationService } from '@/notification-service'
@@ -106,7 +105,6 @@ class WorkerService {
 
       if (activityClassificationEnabled) {
         await activityClassificationWorkerService.stop()
-        await shutdownActivityClassificationTracing()
       }
 
       await DatabaseClient.disconnect()
