@@ -241,12 +241,12 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     await validateInput(input);
 
     let xyneSpaceChannelLink: string | undefined;
-    if (input.xyneSpaceChannelId && config.slackFrontendUrl) {
+    if (input.xyneSpaceChannelId) {
       const channelRepo = new ChannelRepository();
       const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
       if (xyneChannel) {
         const channelName = xyneChannel.name;
-        xyneSpaceChannelLink = `<${config.slackFrontendUrl}/chat/${input.xyneSpaceChannelId}|${channelName}>`;
+        xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|${channelName}>`;
       }
     }
 
@@ -384,8 +384,8 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     }
 
     if (ENABLE_NOTIFICATIONS) {
-      const xyneSpacesLink = input.xyneSpaceChannelId && config.slackFrontendUrl
-        ? `<${config.slackFrontendUrl}/chat/${input.xyneSpaceChannelId}|Xyne Spaces>`
+      const xyneSpacesLink = input.xyneSpaceChannelId
+        ? `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|Xyne Spaces>`
         : 'Xyne Spaces';
       await postMessage({
         channelId: input.channelId!,

@@ -18,6 +18,20 @@ export class UserGroupMappingRepository extends BaseRepository<
     return this.db.userGroupMapping.findUnique({ where: { id } });
   }
 
+  async findByUserGroupAndUser(userGroupId: string, userId: string) {
+    return this.db.userGroupMapping.findFirst({
+      where: {
+        userId,
+        userGroupId,
+      },
+    });
+  }
+
+  async exists(userGroupId: string, userId: string): Promise<boolean> {
+    const mapping = await this.findByUserGroupAndUser(userGroupId, userId);
+    return mapping !== null;
+  }
+
   async findMany(options?: { where?: Prisma.UserGroupMappingWhereInput; skip?: number; take?: number; orderBy?: Prisma.UserGroupMappingOrderByWithRelationInput }) {
     return this.db.userGroupMapping.findMany(options || {});
   }
