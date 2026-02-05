@@ -231,7 +231,12 @@ const ChannelCommandMenu = ({
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
-  } = useSearchMetrics({ allChannels });
+  } = useSearchMetrics({
+    allChannels,
+    onSearchComplete: useCallback((results: DisplaySearchResult[], query: string) => {
+      triggerSummaryFetchRef.current?.(results, query);
+    }, []),
+  });
 
   // Aliases to match old usage if needed or just use new names
   const search = searchText;
