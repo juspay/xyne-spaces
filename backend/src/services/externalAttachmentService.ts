@@ -100,7 +100,7 @@ class DefaultAuthHandler implements AuthHandler {
 }
 
 export class ExternalAttachmentService {
-  private static readonly DEFAULT_MAX_FILE_SIZE = 500 * 1024 * 1024; // 50MB
+  private static readonly DEFAULT_MAX_FILE_SIZE = 800 * 1024 * 1024; // 800MB
   private static readonly DEFAULT_TIMEOUT = 200000; // 200 seconds
 
   private static readonly authHandlers: Record<string, AuthHandler> = {
@@ -257,16 +257,7 @@ export class ExternalAttachmentService {
       }
 
       // Determine MIME type from response or fallback to expected
-      let responseMimeType = response.headers.get('content-type')?.split(';')[0]?.trim();
-      
-      // If MIME type is ambiguous (binary/octet-stream or application/octet-stream), try to infer from file extension
-      if (responseMimeType && (responseMimeType === 'binary/octet-stream' || responseMimeType === 'application/octet-stream')) {
-        const extensionMimeType = this.getMimeTypeFromExtension(fileName);
-        if (extensionMimeType) {
-          logger.debug(`Inferred MIME type from extension: ${extensionMimeType} (original: ${responseMimeType})`);
-          responseMimeType = extensionMimeType;
-        }
-      }
+      const responseMimeType = response.headers.get('content-type')?.split(';')[0];
       
       const finalMimeType = responseMimeType || expectedMimeType || 'application/octet-stream';
 
@@ -357,60 +348,6 @@ export class ExternalAttachmentService {
     };
 
     return mimeToExt[mimeType] || '';
-  }
-
-  /**
-   * Get MIME type from file extension
-   * Useful when the response MIME type is ambiguous (e.g., binary/octet-stream)
-   */
-  private getMimeTypeFromExtension(fileName: string): string | null {
-    const extension = path.extname(fileName).toLowerCase();
-    const extToMime: Record<string, string> = {
-      // Images
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp',
-      '.svg': 'image/svg+xml',
-      
-      // Documents
-      '.pdf': 'application/pdf',
-      '.doc': 'application/msword',
-      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      '.xls': 'application/vnd.ms-excel',
-      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      '.ppt': 'application/vnd.ms-powerpoint',
-      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      
-      // Text files
-      '.txt': 'text/plain',
-      '.md': 'text/markdown',
-      '.csv': 'text/csv',
-      '.json': 'application/json',
-      '.xml': 'application/xml',
-      '.html': 'text/html',
-      '.htm': 'text/html',
-      
-      // Archives
-      '.zip': 'application/zip',
-      '.7z': 'application/x-7z-compressed',
-      '.tar': 'application/x-tar',
-      '.gz': 'application/gzip',
-      
-      // Video
-      '.mp4': 'video/mp4',
-      '.webm': 'video/webm',
-      '.avi': 'video/avi',
-      '.mov': 'video/quicktime',
-      
-      // Audio
-      '.mp3': 'audio/mpeg',
-      '.wav': 'audio/wav',
-      '.ogg': 'audio/ogg'
-    };
-
-    return extToMime[extension] || null;
   }
 
   /**

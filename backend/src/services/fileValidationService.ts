@@ -44,6 +44,7 @@ export class FileValidationService {
     'application/json',
     'application/xml',
     'text/xml',
+    'text/html',
 
     // Archive files
     'application/zip',
@@ -62,6 +63,10 @@ export class FileValidationService {
     'audio/wav',
     'audio/ogg',
     'audio/mp3',
+
+    // Binary files
+    'application/octet-stream',
+    'binary/octet-stream',
   ]);
 
   // File extensions that are potentially dangerous
