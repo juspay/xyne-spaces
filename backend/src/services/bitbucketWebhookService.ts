@@ -11,13 +11,14 @@ import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { PRStatusEvent } from '@prisma/client';
 /**
- * Bitbucket webhook event types for pull requests
+ * Bitbucket Server webhook event types for pull requests
+ * Based on Bitbucket Server 8.6 documentation
  */
 export enum BitbucketPREventType {
-  PR_CREATED = 'pullrequest:created',
-  PR_UPDATED = 'pullrequest:updated',
-  PR_FULFILLED = 'pullrequest:fulfilled', // Merged
-  PR_REJECTED = 'pullrequest:rejected', // Declined
+  PR_OPENED = 'pr:opened',
+  PR_MODIFIED = 'pr:modified',
+  PR_MERGED = 'pr:merged',
+  PR_DECLINED = 'pr:declined',
 }
 
 interface PREventContext {
@@ -59,12 +60,12 @@ export class BitbucketWebhookService {
         return { success: true, message: `Event ${eventKey} acknowledged but not processed` };
       }
 
-      // Validate PR data exists
-      if (!payload.pullrequest) {
+      // Validate PR data exists (Bitbucket Server uses 'pullRequest' with capital R)
+      if (!payload.pullRequest) {
         logger.warn(
-          `[Bitbucket-Webhook] PR event ${eventKey} received but pullrequest data missing`
+          `[Bitbucket-Webhook] PR event ${eventKey} received but pullRequest data missing`
         );
-        return { success: true, message: 'No pullrequest data in payload' };
+        return { success: true, message: 'No pullRequest data in payload' };
       }
 
       // Extract PR context
@@ -138,34 +139,44 @@ export class BitbucketWebhookService {
   }
 
   /**
-   * Check if event is a pull request event
+   * Check if event is a pull request event (Bitbucket Server format)
    */
   private isPullRequestEvent(eventKey: string): boolean {
-    return eventKey.startsWith('pullrequest:');
+    return eventKey.startsWith('pr:');
   }
 
   /**
-   * Extract common PR context from webhook payload
+   * Extract common PR context from webhook payload (Bitbucket Server format)
    */
   private extractPRContext(payload: BitbucketWebhookEnvelope): PREventContext {
-    const pr = payload.pullrequest!;
+    const pr = payload.pullRequest!;
     const repoName = payload.repository.name;
-    const projectName = payload.repository.project?.key || 'unknown';
-    const workspace = payload.repository.workspace?.slug || 'unknown';
+    const projectName = payload.repository.project.key;
+    const repoSlug = payload.repository.slug;
+
+    // Build repository URL (web URL, not SSH)
+    const repositoryURL = pr.links.self?.[0]?.href?.replace(`/pull-requests/${pr.id}`, '') ||
+      `https://bitbucket.example.com/projects/${projectName}/repos/${repoSlug}`;
+    
+    // Build PR URL from repository URL
+    const prUrl = `${repositoryURL}/pull-requests/${pr.id}`;
+    
+    // Build git clone URL (SSH format)
+    const repoUrl = `${config.bitbucket.sshBaseUrl}/${projectName}/${repoSlug}.git`.toLowerCase();
 
     return {
       pr,
       prId: pr.id,
-      prUrl: pr.links.html.href,
+      prUrl,
       repoName,
-      repoUrl: `${config.bitbucket.sshBaseUrl}/${workspace}/${repoName}.git`.toLowerCase(),
+      repoUrl,
       projectName,
-      workspace,
-      sourceBranch: pr.source.branch.name,
-      destinationBranch: pr.destination.branch.name,
-      numberOfComments: pr.comment_count,
-      prAuthor: pr.author?.display_name || 'Unknown User',
-      prAuthorEmail: pr.author?.email,
+      workspace: projectName, // In Server, project key serves as workspace
+      sourceBranch: pr.fromRef.displayId,
+      destinationBranch: pr.toRef.displayId,
+      numberOfComments: pr.properties?.commentCount || 0,
+      prAuthor: pr.author.user.displayName,
+      prAuthorEmail: pr.author.user.emailAddress,
     };
   }
 
@@ -178,19 +189,19 @@ export class BitbucketWebhookService {
     validationResult: { isValid: boolean; ticketId?: string }
   ): Promise<void> {
     switch (eventType) {
-      case BitbucketPREventType.PR_CREATED:
+      case BitbucketPREventType.PR_OPENED:
         await this.handlePRCreated(context, validationResult);
         break;
 
-      case BitbucketPREventType.PR_UPDATED:
+      case BitbucketPREventType.PR_MODIFIED:
         await this.handlePRUpdated(context, validationResult);
         break;
 
-      case BitbucketPREventType.PR_FULFILLED:
-        await this.handlePRFulfilled(context, validationResult);
+      case BitbucketPREventType.PR_MERGED:
+        await this.handlePRMerged(context, validationResult);
         break;
 
-      case BitbucketPREventType.PR_REJECTED:
+      case BitbucketPREventType.PR_DECLINED:
         await this.handlePRRejected(context, validationResult);
         break;
 
@@ -249,7 +260,7 @@ export class BitbucketWebhookService {
     return await pullRequestValidationService.validatePullRequest(
       context.pr.title,
       context.prId,
-      context.pr.source.commit.hash,
+      context.pr.fromRef.latestCommit,
       context.sourceBranch,
       context.destinationBranch,
       context.repoName,
@@ -313,9 +324,9 @@ export class BitbucketWebhookService {
   }
 
   /**
-   * Handle PR fulfilled (merged) event
+   * Handle PR merged event
    */
-  private async handlePRFulfilled(
+  private async handlePRMerged(
     context: PREventContext,
     _validationResult: { isValid: boolean; ticketId?: string }
   ): Promise<void> {
