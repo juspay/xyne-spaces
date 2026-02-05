@@ -10,7 +10,6 @@ import {
   getActivityClassificationPrompt,
   type ActivityClassificationPromptResult,
 } from '@/services/activity/activityClassificationLangfusePrompts';
-import { createActivityClassificationOnEventHandler } from '@/services/activity/activityClassificationLangfuseTracing';
 import { config as envConfig } from '@/config/env';
 import { runActivityClassification } from '@/agents/activity-classification';
 
@@ -269,7 +268,6 @@ export class ActivityClassificationService {
         },
         {
           modelOverride: this.model,
-          onEvent: createActivityClassificationOnEventHandler(),
         }
       );
 
@@ -404,7 +402,6 @@ export class ActivityClassificationService {
         },
         {
           modelOverride: this.model,
-          onEvent: createActivityClassificationOnEventHandler(),
         }
       );
 
