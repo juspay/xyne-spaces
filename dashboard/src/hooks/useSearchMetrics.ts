@@ -27,6 +27,7 @@ type SearchLocation = 'global' | 'channel' | 'dm';
 interface UseSearchMetricsOptions {
   searchLocation?: SearchLocation;
   allChannels?: Array<{ channel: Channel; category: ChannelCategory; searchableNames?: string[] }>;
+  onSearchComplete?: (results: DisplaySearchResult[], query: string) => void;
 }
 
 const BACKEND_RESULTS_LIMIT = 25;
@@ -741,7 +742,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         useVespaSearch,
         filteredLocalUsers,
         filteredLocalChannels.length,
-        // We can pass onComplete if needed, but for now it's optional
+        options.onSearchComplete,
       );
     }, 300);
 
@@ -754,6 +755,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     filteredLocalUsers, // Should be stable or memoized if possible, but it comes from useUserSearch which memos
     // filteredLocalChannels.length - use length to avoid deep dep
     filteredLocalChannels.length,
+    options.onSearchComplete,
+    performSearch,
   ]);
 
   /**
