@@ -150,6 +150,7 @@ function renderCallItem({
           onCallClick();
         }
       }}
+      data-testid={`${statusText}`}
     >
       <div className='flex items-center justify-between gap-4'>
         {/* Left: Icon + Name + Info */}

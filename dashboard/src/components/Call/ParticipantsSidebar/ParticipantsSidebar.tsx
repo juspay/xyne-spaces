@@ -140,6 +140,7 @@ export function ParticipantsSidebar({
               onClick={() => setShowInviteModal(true)}
               className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white hover:bg-gray-100 text-black border border-gray-300 transition-colors'
               title='Add People'
+              data-testid='add-people-button'
             >
               <UserPlus size={16} />
               <span className='text-sm font-medium'>Add People</span>
@@ -158,7 +159,10 @@ export function ParticipantsSidebar({
         <div className='flex-1 overflow-y-auto p-3 space-y-3'>
           {/* Attendees Section */}
           {contributors.length > 0 && (
-            <div className='border border-border rounded-lg overflow-hidden'>
+            <div
+              className='border border-border rounded-lg overflow-hidden'
+              data-testid='attendees-section'
+            >
               <SectionHeader
                 title='Attendees'
                 count={contributors.length}
@@ -177,7 +181,10 @@ export function ParticipantsSidebar({
 
           {/* Also Invited Section */}
           {alsoInvited.length > 0 && (
-            <div className='border border-border rounded-lg overflow-hidden'>
+            <div
+              className='border border-border rounded-lg overflow-hidden'
+              data-testid='invited-section'
+            >
               <SectionHeader
                 title='Also invited'
                 count={alsoInvited.length}

@@ -86,6 +86,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
         <button
           onClick={handleButtonClick}
           disabled={isAlone}
+          data-testid='start-call-button'
           className={cn(
             'h-[35px] transition-colors rounded-lg w-8.5 !p-2',
             'border border-border bg-white hover:bg-gray-50',

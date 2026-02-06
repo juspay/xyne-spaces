@@ -142,7 +142,7 @@ class TestWorld extends World implements CustomWorld {
       return;
     }
 
-    let contextOptions = {};
+    let contextOptions: Record<string, unknown> = {};
     if (viewport) {
       const [width, height] = viewport.split('x').map(Number);
       if (width && height) {
@@ -152,6 +152,8 @@ class TestWorld extends World implements CustomWorld {
 
     // Determine which browser instance to use
     let browserInstance: Browser;
+    const effectiveBrowserType = browserType || config.browser;
+
     if (browserType && browserType !== config.browser) {
       if (!scope.sessionBrowsers.has(browserType)) {
         const launcher = getBrowserLauncher(browserType);
@@ -166,7 +168,12 @@ class TestWorld extends World implements CustomWorld {
       browserInstance = scope.browser;
     }
 
-    // Create new context (incognito session) with optional viewport
+    // Only add permissions for Chromium - Firefox/WebKit don't support this API
+    if (effectiveBrowserType === 'chromium') {
+      contextOptions.permissions = ['microphone', 'camera'];
+    }
+
+    // Create new context (incognito session) with optional viewport and permissions
     const context = await browserInstance.newContext(contextOptions);
     const page = await context.newPage();
 
