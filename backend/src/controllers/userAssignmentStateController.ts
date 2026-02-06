@@ -21,19 +21,19 @@ export class UserAssignmentStateController {
       if (isUnavailable === true) {
         // Toggle ON: Set user as unavailable
         if (!unavailableUntil) {
-          res.status(400).json({ error: 'unavailableUntil is required when setting unavailable' });
+          res.status(400).json({ error: 'Please select a time.' });
           return;
         }
 
         const unavailableUntilTimestamp = parseInt(unavailableUntil, 10);
 
         if (isNaN(unavailableUntilTimestamp)) {
-          res.status(400).json({ error: 'unavailableUntil must be a valid number' });
+          res.status(400).json({ error: 'Please enter a valid value.' });
           return;
         }
 
         if (unavailableUntilTimestamp <= Date.now()) {
-          res.status(400).json({ error: 'unavailableUntil must be in the future' });
+          res.status(400).json({ error: 'Please select a future time.' });
           return;
         }
 

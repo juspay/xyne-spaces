@@ -548,7 +548,7 @@ export const AssignmentConfigScreen = ({
                                   </div>
                                   {isUnavailable && (
                                     <Tooltip content={unavailableTooltip}>
-                                      <PauseCircle className='size-3.5 text-gray-500 flex-shrink-0 cursor-help' />
+                                      <PauseCircle className='size-3.5 text-gray-500 flex-shrink-0' />
                                     </Tooltip>
                                   )}
                                 </div>

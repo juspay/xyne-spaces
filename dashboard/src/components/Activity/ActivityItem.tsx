@@ -37,6 +37,7 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
       return <EtaActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'paused_from_assignment':
+    case 'resumed_from_assignment':
       return <AssignmentPauseActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'ticket_assigned':

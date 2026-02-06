@@ -251,7 +251,7 @@ const Settings = (): ReactElement => {
           </div>
           {isCurrentlyUnavailable && unavailableUntil && (
             <div className='text-xs text-gray-500'>
-              Unavailable until {new Date(unavailableUntil).toLocaleString()}
+              Until {new Date(unavailableUntil).toLocaleString()}
             </div>
           )}
         </div>

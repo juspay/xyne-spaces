@@ -210,6 +210,9 @@ export class UserAssignmentStateService {
       // Delete Redis backup
       await redisService.deleteAssignmentStateBackup(userId);
 
+      // Notify managers that user is available again
+      await this.notifyManagersOfResume(userId, userGroupIds);
+
       logger.info(`▶️ [ASSIGNMENT-STATE] User ${userId} set available for assignment in ${userGroupIds.length} group(s)`);
       return userGroupIds;
     } catch (error) {
@@ -305,6 +308,56 @@ export class UserAssignmentStateService {
     } catch (error) {
       // Don't throw - notification failure shouldn't break the pause action
       logger.error(`❌ [ASSIGNMENT-STATE] Error notifying managers of pause:`, error);
+    }
+  }
+
+  /**
+   * Notify managers when a user resumes from ticket assignment
+   * @param userId - User ID who resumed
+   * @param userGroupIds - User group IDs the user belongs to
+   */
+  private async notifyManagersOfResume(
+    userId: string,
+    userGroupIds: string[]
+  ): Promise<void> {
+    try {
+      // Get all managers for these user groups
+      const managerIds = await this.getManagersForUserGroups(userGroupIds);
+
+      if (managerIds.length === 0) {
+        logger.debug(`ℹ️ [ASSIGNMENT-STATE] No managers found for user groups: ${userGroupIds.join(', ')}`);
+        return;
+      }
+
+      // Get user's name for the notification
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true, email: true },
+      });
+
+      const userName = user?.name || user?.email || 'A team member';
+
+      // Create activities for all managers
+      const activities = managerIds
+        .filter(managerId => managerId !== userId) // Don't notify the user themselves
+        .map(managerId => ({
+          id: uuidv4(),
+          userId: managerId,
+          actorAction: 'resumed_from_assignment',
+          actionSource: 'assignment',
+          actionSourceId: userId,
+          classification: ActivityClassification.FYI,
+        }));
+
+      if (activities.length > 0) {
+        await activityService.createActivities(activities);
+        logger.info(
+          `📢 [ASSIGNMENT-STATE] Notified ${activities.length} manager(s) that ${userName} resumed from ticket assignment`
+        );
+      }
+    } catch (error) {
+      // Don't throw - notification failure shouldn't break the resume action
+      logger.error(`❌ [ASSIGNMENT-STATE] Error notifying managers of resume:`, error);
     }
   }
 }
