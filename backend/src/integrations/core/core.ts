@@ -311,6 +311,7 @@ export class ExternalSourceCore {
       }
       const createResult = await emailService.createConversationWithEmail({
         channelId: source.channelId,
+        boardId: source.boardId || undefined, // Pass boardId from ExternalSource for ticket creation
         userId: source.displayName,
         emailSubject: normalizedData.emailData.subject || "",
         emailBody: normalizedData.content,

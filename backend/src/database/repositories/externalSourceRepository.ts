@@ -31,12 +31,14 @@ export class ExternalSourceRepository {
   /**
    * Create external source
    * @param data.credentials - Encrypted credentials string (use encrypt() from encryptionService)
+   * @param data.boardId - Optional target board for ticket creation
    */
   async create(data: {
     name: string;
     sourceType: string;
     displayName: string;
     channelId: string;
+    boardId?: string; // Target board for ticket creation
     credentials: string; // Encrypted credentials
   }) {
     return await this.db.externalSource.create({
@@ -45,6 +47,7 @@ export class ExternalSourceRepository {
         sourceType: data.sourceType,
         displayName: data.displayName,
         channelId: data.channelId,
+        boardId: data.boardId,
         credentials: data.credentials,
         isActive: true,
       }
@@ -57,6 +60,7 @@ export class ExternalSourceRepository {
   async update(id: string, data: {
     displayName?: string;
     channelId?: string;
+    boardId?: string;
     isActive?: boolean;
   }) {
     return await this.db.externalSource.update({
