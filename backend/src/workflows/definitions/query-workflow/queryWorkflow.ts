@@ -31,7 +31,7 @@ const initializeLLMClient = (): LLMClient => {
         retries: 5
       },
     },
-    defaultModel: 'glm-46-fp8',
+    defaultModel: 'glm-latest',
   });
 };
 
@@ -58,7 +58,7 @@ ${description}`;
     const llmMessages: UserMessage[] = [createUserMessage(prompt)];
 
     const response = await llmClient.generate({
-      model: 'glm-46-fp8',
+      model: 'glm-latest',
       messages: llmMessages,
     });
 

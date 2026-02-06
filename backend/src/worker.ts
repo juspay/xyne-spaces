@@ -1,4 +1,5 @@
 import { config } from 'dotenv'
+import { config as appConfig } from '@/config/env'
 import { DatabaseClient } from '@/database/client'
 import { logger } from '@/utils/logger'
 import { pollingService } from './workflows/services/polling-service'
@@ -12,6 +13,7 @@ import { notificationService as realTimeNotificationService } from '@/notificati
 import { redisService } from '@/services/redisService'
 //import { vespaWorker } from '@/workers/vespaWorker'
 import { workerScheduler } from './workers';
+import { initializeOpenCode, shutdownOpenCode } from '@/workflows/framework/opencode';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 
@@ -29,6 +31,14 @@ class WorkerService {
       // Register workflow definitions
       logger.info('Registering workflow definitions in worker...')
       registerAllWorkflows()
+
+      // Initialize OpenCode only if enabled
+      if (appConfig.openCode.enabled) {
+        logger.info('Initializing OpenCode server...')
+        await initializeOpenCode()
+      } else {
+        logger.info('OpenCode is disabled, skipping initialization')
+      }
 
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
@@ -79,6 +89,7 @@ class WorkerService {
   async shutdown(): Promise<void> {
     try {
       logger.info('Shutting down worker service...')
+      await shutdownOpenCode()
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
       const activityClassificationEnabled =

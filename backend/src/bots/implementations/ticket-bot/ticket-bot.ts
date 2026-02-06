@@ -93,7 +93,7 @@ export class TicketBot extends UnifiedBaseBot<TicketBotInput, TicketBotOutput> {
   private prisma: PrismaClient;
 
   // Model configuration
-  private readonly MODEL = 'glm-46-fp8';
+  private readonly MODEL = 'glm-latest';
   private readonly COMPACTION_THRESHOLD = 0.95; // 95%
 
   // Model limits (from framework)
@@ -165,7 +165,7 @@ Provide a concise but informative summary:`;
 
     try {
       const response = await this.llmClient.generate({
-        model: 'glm-46-fp8',
+        model: 'glm-latest',
         messages: llmMessages,
       });
 

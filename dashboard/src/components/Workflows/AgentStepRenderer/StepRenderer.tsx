@@ -15,6 +15,7 @@ import { UserMessageRenderer } from './UserMessageRenderer';
 import { ToolErrorRenderer } from './ToolErrorRenderer';
 import { formatStepData } from '../utils/utils';
 import { FinalResultRenderer } from './FinalResultRenderer';
+import { ToolBackgroundTaskRenderer } from './ToolBackgroundTaskRenderer';
 
 interface AgentStepRendererProps {
   step: WorkflowStep;
@@ -58,6 +59,20 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
     assistant_message: () => <LLMCallRenderer data={step.data} />,
     // eslint-disable-next-line @typescript-eslint/naming-convention
     final_result: () => <FinalResultRenderer data={step.data?.['gitInfo']} />,
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_background_task: () => (
+      <ToolBackgroundTaskRenderer data={step.data} toolName='background_task' />
+    ),
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_delegate_task: () => (
+      <ToolBackgroundTaskRenderer data={step.data} toolName='delegate_task' />
+    ),
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_background_output: () => (
+      <ToolBackgroundTaskRenderer data={step.data} toolName='background_output' />
+    ),
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_call_omo_agent: () => <ToolBackgroundTaskRenderer data={step.data} toolName='omo_agent' />,
   };
 
   const stepTypeMap: Record<string, string> = {
@@ -71,6 +86,8 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
     tool_write: 'tool_write',
     // eslint-disable-next-line @typescript-eslint/naming-convention
     'tool_todo-write': 'tool_todo-write',
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    'tool_todo-read': 'tool_todo-write',
     // eslint-disable-next-line @typescript-eslint/naming-convention
     tool_edit: 'tool_edit',
     // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -87,6 +104,14 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
     assistant_message: 'assistant_message',
     // eslint-disable-next-line @typescript-eslint/naming-convention
     final_result: 'final_result',
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_delegate_task: 'tool_delegate_task',
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_background_task: 'tool_background_task',
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_background_output: 'tool_background_output',
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_call_omo_agent: 'tool_call_omo_agent',
   };
 
   const stepName = step.stepName.toLowerCase();
@@ -120,7 +145,8 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
   }
 
   // early return for some steps to avoid rendering the accordion
-  if (step.stepName === 'tool_todo-write') return <ToolTodoWriteRenderer data={step.data} />;
+  if (step.stepName === 'tool_todo-write' || step.stepName === 'tool_todo-read')
+    return <ToolTodoWriteRenderer data={step.data} />;
   if (step.stepName === 'tool_read') return <ToolReadRenderer data={step.data} />;
   if (step.stepName === 'tool_grep') return <ToolGrepRenderer data={step.data} />;
   if (step.stepName === 'tool_ls') return <ToolLsRenderer data={step.data} />;

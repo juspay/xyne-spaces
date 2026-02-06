@@ -250,6 +250,7 @@ export class WorkflowRegistry {
 
       // Execute preExecute if defined, otherwise use empty object
       const rawContext = engine.getContext();
+      
       let parsedContext: any = rawContext;
       if (definition.inputSchema) {
         parsedContext = definition.inputSchema.parse(rawContext);

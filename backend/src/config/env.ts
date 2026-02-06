@@ -90,6 +90,16 @@ const envSchema = Joi.object({
   JENKINS_JOB_PATH: Joi.string().default(''),
   JENKINS_USERNAME: Joi.string().allow('').default(''),
   JENKINS_API_TOKEN: Joi.string().allow('').default(''),
+  // OpenCode Configuration
+  OPENCODE_ENABLED: Joi.boolean().default(true),
+  OPENCODE_SPAWN_SERVER: Joi.boolean().default(true),
+  OPENCODE_BASE_URL: Joi.string().uri().default(''),
+  OPENCODE_TIMEOUT_MS: Joi.number().default(600000),
+  OPENCODE_AUTO_COMPACT: Joi.boolean().default(true),
+  OPENCODE_MODEL: Joi.string().allow('').default(''),
+  // oh-my-opencode Plugin Configuration
+  OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
+  OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default(''),
   // Web Search Configuration
   WEB_SEARCH_URL: Joi.string().uri().allow('').default(''),
   WEB_SEARCH_API_KEY: Joi.string().allow('').default(''),
@@ -240,6 +250,17 @@ export const config = {
     jobPath: envVars.JENKINS_JOB_PATH,
     username: envVars.JENKINS_USERNAME,
     apiToken: envVars.JENKINS_API_TOKEN,
+  },
+  openCode: {
+    enabled: envVars.OPENCODE_ENABLED,
+    spawnServer: envVars.OPENCODE_SPAWN_SERVER,
+    baseUrl: envVars.OPENCODE_BASE_URL,
+    timeoutMs: envVars.OPENCODE_TIMEOUT_MS,
+    autoCompact: envVars.OPENCODE_AUTO_COMPACT,
+    model: envVars.OPENCODE_MODEL,
+    // oh-my-opencode plugin settings
+    pluginEnabled: envVars.OPENCODE_PLUGIN_ENABLED,
+    pluginVersion: envVars.OPENCODE_PLUGIN_VERSION,
   },
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   otel: {

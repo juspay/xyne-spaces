@@ -31,7 +31,7 @@ export async function generateMarkdownSummary(
             retries: 5
           }
         },
-        defaultModel: 'glm-46-fp8'
+        defaultModel: 'glm-latest'
       },
       tools: {
         enabled: [], // No tools needed for markdown generation

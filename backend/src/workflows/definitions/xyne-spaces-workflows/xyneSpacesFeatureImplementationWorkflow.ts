@@ -33,6 +33,7 @@ import {
   BaseWorkflowContext,
   AgenticCheckpointResult,
   GitInfo,
+  ExecutorType,
 } from '../../workflow-types';
 import { WorkflowDefinition, EmptyPreExecuteResult } from '../../registry/workflowRegistry';
 import { WorkflowType, ImageAttachment } from '../../types/workflow-enums';
@@ -63,6 +64,7 @@ export interface XyneSpacesFeatureContext extends BaseWorkflowContext {
   repoBranch?: string;
   checkoutCommit?: string;
   imageAttachments?: ImageAttachment[];
+  executorType?: ExecutorType;
 }
 
 export interface XyneSpacesFeatureOutput {
@@ -90,6 +92,7 @@ const XyneSpacesFeatureInputSchema = z.object({
   baseBranch: z.string().optional(),
   repoBranch: z.string().optional(),
   checkoutCommit: z.string().optional(),
+  executorType: z.enum(['xyne-code', 'opencode']).optional().describe('Select the executor to use for this workflow'),
   imageAttachments: z.array(z.object({
     id: z.string(),
     type: z.literal('image'),
@@ -100,7 +103,7 @@ const XyneSpacesFeatureInputSchema = z.object({
 });
 
 const xyneSpacesFeatureContextMapper = (
-  payload: z.infer<typeof XyneSpacesFeatureInputSchema> & { ticketId: string ; title: string; description: string; baseBranch?: string; repoBranch?: string; checkoutCommit?: string; imageAttachments?: ImageAttachment[] }
+  payload: z.infer<typeof XyneSpacesFeatureInputSchema> & { ticketId: string ; title: string; description: string; baseBranch?: string; repoBranch?: string; checkoutCommit?: string; imageAttachments?: ImageAttachment[]; executorType?: ExecutorType }
 ): XyneSpacesFeatureContext => ({
   ticketId: payload.ticketId,
   title: payload.title,
@@ -109,6 +112,7 @@ const xyneSpacesFeatureContextMapper = (
   repoBranch: payload.repoBranch,
   checkoutCommit: payload.checkoutCommit,
   imageAttachments: payload.imageAttachments,
+  executorType: payload.executorType,
 });
 
 export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
@@ -163,7 +167,8 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         context.repoBranch || undefined, // repoBranch
         context.baseBranch || 'main',     // baseBranch
         context.checkoutCommit,
-        projectGuidelines
+        projectGuidelines,
+        context.executorType
       )
     );
 
@@ -173,8 +178,16 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
     // Get the branch created by planning step to reuse in implementation
     const workflowBranch = planningResult.gitInfo?.branch;
 
+    // Log the implementation plan for debugging
     logger.info('Planning phase completed. Starting implementation...');
     logger.info(`Using branch from planning: ${workflowBranch}`);
+    logger.info(`Implementation plan length: ${implementationPlan.length} characters`);
+    if (implementationPlan.length < 500) {
+      logger.warn(`⚠️ WARNING: Implementation plan is very short (${implementationPlan.length} chars)!`);
+      logger.warn(`Plan content: ${implementationPlan}`);
+    } else {
+      logger.info(`Plan preview: ${implementationPlan.substring(0, 300)}...`);
+    }
 
     // =========================================================================
     // PHASE 2: IMPLEMENTATION
@@ -189,7 +202,8 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         workflowBranch,  // Pass the branch from planning step so implementation continues on same branch
         context.baseBranch || 'main', // baseBranch
         context.checkoutCommit,
-        projectGuidelines
+        projectGuidelines,
+        context.executorType
       )
     );
 
@@ -225,7 +239,8 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         gitInfo.branch,
         context.baseBranch || 'main',
         context.checkoutCommit,
-        projectGuidelines
+        projectGuidelines,
+        context.executorType
       );
 
       const validationResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(

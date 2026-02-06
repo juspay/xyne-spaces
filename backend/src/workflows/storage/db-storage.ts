@@ -33,6 +33,17 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import {logger} from '@/utils/logger';
 
 const prisma = DatabaseClient.getInstance()
+function normalizeToolName(toolName: string): string {
+  const toolMappings: Record<string, string> = {
+    'view': 'read',
+    'todowrite': 'todo-write',
+    'todoread': 'todo-read',
+    'patch': 'multiedit',
+    'fetch': 'bash',
+  }
+  
+  return toolMappings[toolName] || toolName
+}
 
 // Data collected from each agentic checkpoint for consolidated knowledge generation
 export interface PendingAgenticResult {
@@ -1157,10 +1168,11 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
   async createToolExecutionStep(childExecutionId: string, toolExecution: any): Promise<void> {
     try {
+      const normalizedToolName = normalizeToolName(toolExecution.name)
       const workflowStep = await this.createStepAndNotify(childExecutionId, {
         workflowExecution: { connect: { id: childExecutionId } },
         stepExecutorType: STEP_TYPES.AGENT,
-        stepName: `tool_${toolExecution.name}`,
+        stepName: `tool_${normalizedToolName}`,
         type: 'output',
         data: safeSerialize({
           id: toolExecution.id,
@@ -1176,7 +1188,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
         stepsId: workflowStep.id,
         toolCallId: toolExecution.id,
         stepType: 'tool',
-        toolName: toolExecution.name
+        toolName: normalizedToolName
       })
     } catch (error) {
       throw new Error(`Failed to create tool execution step: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -1221,7 +1233,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
     )
   }
 
-  async updateToolExecutionStep(workflowStep: string, toolData: any, toolCallStatus: string): Promise<void> {
+  async updateToolExecutionStep(workflowStep: string, toolData: any, toolCallStatus: string, toolInput?: Record<string, unknown>): Promise<void> {
     try {
       const workflowStepList = await repositories.workflowSteps.findMany({
         where: {
@@ -1232,6 +1244,10 @@ export class DBWorkflowStorage implements WorkflowStorage {
         const workflowStepDB = workflowStepList[0];
         const prevData: any = safeDeserialize(workflowStepDB.data || "{}");
         prevData["output"] = toolData;
+        
+        if (toolInput && Object.keys(toolInput).length > 0) {
+          prevData["input"] = toolInput;
+        }
 
         await repositories.workflowSteps.update(workflowStep, {
           data: safeSerialize(prevData),
@@ -1247,16 +1263,26 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
   async createLLMCallStep(childExecutionId: string, llmCall: any): Promise<void> {
     try {
+      const stepData: Record<string, unknown> = {
+        messages: llmCall.messages || [],
+        response: llmCall.content,
+        tokens: llmCall.tokens
+      }
+      
+      if (llmCall.thinking) {
+        stepData.thinking = llmCall.thinking
+      }
+      
+      if (llmCall.toolCalls && llmCall.toolCalls.length > 0) {
+        stepData.toolCalls = llmCall.toolCalls
+      }
+      
       const workflowStep = await this.createStepAndNotify(childExecutionId, {
         workflowExecution: { connect: { id: childExecutionId } },
         stepExecutorType: STEP_TYPES.AGENT,
         stepName: `llm_call_${Date.now()}`,
         type: 'output',
-        data: safeSerialize({
-          messages: llmCall.messages,
-          response: llmCall.content,
-          tokens: llmCall.tokens
-        }),
+        data: safeSerialize(stepData),
         status: 'completed'
       })
 
@@ -1272,16 +1298,38 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
   async createAssistantMessageStep(childExecutionId: string, message: any): Promise<void> {
     try {
-      await this.createStepAndNotify(childExecutionId, {
+      let stepData: Record<string, unknown>
+      const stepName = 'assistant_message'
+      
+      if (message.turn !== undefined && message.result) {
+        stepData = {
+          turn: message.turn,
+          content: message.result.content,
+          thinking: message.result.thinking,
+          finish: message.result.finish,
+          tokens: message.result.tokens,
+          cost: message.result.cost,
+          role: 'assistant'
+        }
+      } else {
+        stepData = {
+          content: message.content,
+          role: message.role || 'assistant'
+        }
+      }
+      
+      const workflowStep = await this.createStepAndNotify(childExecutionId, {
         workflowExecution: { connect: { id: childExecutionId } },
         stepExecutorType: STEP_TYPES.AGENT,
-        stepName: 'assistant_message',
+        stepName,
         type: 'output',
-        data: safeSerialize({
-          content: message.content,
-          role: message.role
-        }),
+        data: safeSerialize(stepData),
         status: 'completed'
+      })
+
+      await repositories.agentSteps.create({
+        stepsId: workflowStep.id,
+        stepType: 'assistant-message'
       })
     } catch (error) {
       throw new Error(`Failed to create assistant message step: ${error instanceof Error ? error.message : 'Unknown error'}`)
