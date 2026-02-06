@@ -16,6 +16,7 @@ import {
 } from '@/database/repositories/messageAttachmentRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { UserRepository } from '@/database/repositories/users';
+import { BoardRepository } from '@/database/repositories/boardRepository';
 import { DatabaseClient } from '@/database/client';
 import {
   MessageType,
@@ -52,6 +53,7 @@ interface UserInfo {
 
 export interface CreateConversationWithEmailParams {
   channelId: string;
+  boardId?: string; // Target board for ticket creation (from ExternalSource)
   userId: string;
   emailSubject: string;
   emailBody: string;
@@ -87,6 +89,7 @@ export class EmailService {
   private messageAttachmentRepository: MessageAttachmentRepository;
   private channelRepository: ChannelRepository;
   private userRepository: UserRepository;
+  private boardRepository: BoardRepository;
   private prisma: PrismaClient;
 
   constructor() {
@@ -96,6 +99,7 @@ export class EmailService {
     this.messageAttachmentRepository = new MessageAttachmentRepository();
     this.channelRepository = new ChannelRepository();
     this.userRepository = new UserRepository();
+    this.boardRepository = new BoardRepository();
     this.prisma = DatabaseClient.getInstance();
   }
 
@@ -208,6 +212,7 @@ export class EmailService {
   async createConversationWithEmail(params: CreateConversationWithEmailParams) {
     const {
       channelId,
+      boardId: passedBoardId, // boardId passed from ExternalSource
       userId,
       emailSubject,
       emailBody,
@@ -279,17 +284,27 @@ export class EmailService {
 
     const projectId = channel.projectId;
 
-    // Hardcoded boardId for Zoho ticket creation, with fallback to default board
-    const defaultBoard = await this.prisma.board.findFirst({
-      where: { projectId },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    if (!defaultBoard) {
-      throw new Error(`No board found for project ${projectId}`);
+    // boardId MUST be configured in ExternalSource - no fallback allowed
+    if (!passedBoardId) {
+      logger.error(`[EmailService] ExternalSource missing boardId configuration for channel: ${channelId}`);
+      throw new Error(`ExternalSource must have a boardId configured. Channel: ${channelId}. Please configure boardId in external_sources table.`);
     }
 
-    const boardId = defaultBoard.id;
+    // Validate that the passed boardId exists
+    const configuredBoard = await this.boardRepository.findById(passedBoardId);
+    if (!configuredBoard) {
+      logger.error(`[EmailService] Configured boardId ${passedBoardId} not found in database`);
+      throw new Error(`Configured boardId ${passedBoardId} not found in database. Please verify external_sources.boardId points to a valid board.`);
+    }
+
+    // Validate that the board belongs to the same project as the channel
+    if (configuredBoard.projectId !== projectId) {
+      logger.error(`[EmailService] Board project mismatch: boardId ${passedBoardId} belongs to project ${configuredBoard.projectId}, but channel belongs to project ${projectId}`);
+      throw new Error(`Configured boardId ${passedBoardId} belongs to different project (${configuredBoard.projectId} vs ${projectId}). External source, channel, and board must all be in the same project.`);
+    }
+
+    const boardId = passedBoardId;
+    logger.info(`[EmailService] Using configured boardId ${boardId} from ExternalSource`);
 
     // Validate that board has stages before creating conversation
     const stages = await this.prisma.stage.findMany({

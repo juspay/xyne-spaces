@@ -1362,11 +1362,13 @@ model ExternalSource {
   sourceType      String                    // "zoho", "slack", "jira", etc. - flexible string
   displayName     String                    // "Zoho (Euler Team)"
   channelId       String                    // Target channel for messages (no FK constraint)
+  boardId         String?                   // Target board for ticket creation (no FK constraint) - N:1 with Board
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  @@index([boardId])
   @@map("external_sources")
   @@schema("public")
 }

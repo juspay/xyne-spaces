@@ -219,6 +219,16 @@ export class BoardRepository {
     });
   }
 
+  /**
+   * Find board by ID with full details including projectId
+   * Used for validating board belongs to correct project
+   */
+  async findById(id: string): Promise<Board | null> {
+    return await this.db.board.findUnique({
+      where: { id },
+    });
+  }
+
   async findBoardsByProject(projectId: string): Promise<Board[]> {
     return await this.db.board.findMany({
       where: { projectId },
