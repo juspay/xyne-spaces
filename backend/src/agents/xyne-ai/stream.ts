@@ -152,7 +152,7 @@ export interface XyneAIStreamRequest extends XyneAIRequest {
 export async function* xyneAIStream(
   request: XyneAIStreamRequest
 ): AsyncGenerator<XyneAIStreamChunk, void, unknown> {
-  const { query, sessionId, channelIds, conversationId, userId, currentTimestamp, onStreamEvent } = request;
+  const { query, sessionId, channelIds, conversationId, userId, currentTimestamp, onStreamEvent, researchContext } = request;
   
   const timestamp = currentTimestamp || getCurrentTimestamp();
   const source: 'thread' | 'channel' = conversationId ? 'thread' : 'channel';
@@ -196,6 +196,7 @@ export async function* xyneAIStream(
     onStreamEvent,
     userInfo: request.userInfo,
     webSearchEnabled: request.webSearchEnabled,
+    researchContext,
     requestMappings: {
       channelNameToId: new Map<string, string>(),
       userNameToId: new Map<string, string>(),

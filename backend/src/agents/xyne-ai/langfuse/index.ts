@@ -27,8 +27,8 @@ export {
 
 export {
   buildAgentTemplateVariables,
-  buildToolTemplateVariables,
   type SourceType,
+  type AvailableResearchOptions,
 } from './template-variables.js';
 
 export {

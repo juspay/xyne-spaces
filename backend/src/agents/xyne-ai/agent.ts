@@ -17,12 +17,14 @@ import {
 import { config } from '../../config/env.js';
 import { db } from '../../database/client.js';
 
-import { getXyneAITools, type XyneAIAgentContext, type UserInfo } from './tools/index.js';
+import { getXyneAITools, type XyneAIAgentContext, type UserInfo, type ResearchContext } from './tools/index.js';
+import { researchAgentService } from '../../services/researchAgentService.js';
 
 import {
   getPromptFromLangfuse,
   PROMPT_NAMES,
   buildAgentTemplateVariables,
+  type AvailableResearchOptions,
 } from './langfuse/index.js';
 import {logger} from '@/utils/logger';
 
@@ -62,9 +64,11 @@ async function buildAgentPrompt(
   timestamp?: string,
   userInfo?: UserInfo,
   channelNames?: string[],
-  webSearchEnabled?: boolean
+  webSearchEnabled?: boolean,
+  researchContext?: ResearchContext,
+  researchOptions?: AvailableResearchOptions
 ): Promise<string> {
-  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled);
+  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions);
   
   const prompt = await getPromptFromLangfuse(PROMPT_NAMES.XYNE_AI_SYSTEM, {
     templateVariables,
@@ -72,7 +76,8 @@ async function buildAgentPrompt(
   
   if (!prompt) {
     logger.warn(`[XyneAI] Agent prompt '${PROMPT_NAMES.XYNE_AI_SYSTEM}' not available, using minimal default`);
-    return `You are Xyne AI, an intelligent assistant. Current timestamp: ${timestamp || new Date().toISOString()}. ${channelNames && channelNames.length > 0 ? `Current channels: ${channelNames.join(', ')}` : 'No channels in context.'}`;
+    const researchInfo = researchContext ? ` Current ${researchContext.type}: "${researchContext.name}".` : '';
+    return `You are Xyne AI, an intelligent assistant. Current timestamp: ${timestamp || new Date().toISOString()}. ${channelNames && channelNames.length > 0 ? `Current channels: ${channelNames.join(', ')}.` : 'No channels in context.'}${researchInfo}`;
   }
   
   return prompt;
@@ -146,22 +151,71 @@ async function getChannelInfo(channelIds: string[]): Promise<{
 // Agent Runner
 // ============================================================================
 
+/**
+ * Fetch available products and repositories from Research Agent at runtime
+ * Returns both the display names (for prompt) and name→ID mappings (for tool)
+ */
+async function fetchResearchData(): Promise<{
+  researchOptions: AvailableResearchOptions;
+  productNameToId: Map<string, string>;
+  repositoryNameToId: Map<string, string>;
+}> {
+  try {
+    const [products, repositories] = await Promise.all([
+      researchAgentService.listProducts().catch(() => []),
+      researchAgentService.listRepositories().catch(() => []),
+    ]);
+    
+    return {
+      researchOptions: {
+        productNames: products.map(p => p.name),
+        repositoryNames: repositories.map(r => r.name),
+      },
+      productNameToId: new Map(products.map(p => [p.name, p.id])),
+      repositoryNameToId: new Map(repositories.map(r => [r.name, r.id])),
+    };
+  } catch (error) {
+    logger.warn('[XyneAI] Failed to fetch research data:', error);
+    return {
+      researchOptions: { productNames: [], repositoryNames: [] },
+      productNameToId: new Map(),
+      repositoryNameToId: new Map(),
+    };
+  }
+}
+
 export async function createAgentRunner(
   source: 'thread' | 'channel',
   context: XyneAIAgentContext,
   messages: Message[],
   onEvent?: (event: TraceEvent) => void
 ) {
-  const { channelNames, contextChannelMap, contextChannelIdToName } = await getChannelInfo(context.channelIds);
+  // Fetch channel info and research data in parallel (single API call for research)
+  const [channelInfo, researchData] = await Promise.all([
+    getChannelInfo(context.channelIds),
+    fetchResearchData(),
+  ]);
   
-  // Add the pre-computed channel maps to context
+  const { channelNames, contextChannelMap, contextChannelIdToName } = channelInfo;
+  const { researchOptions, productNameToId, repositoryNameToId } = researchData;
+  
+  // Add the pre-computed maps to context
   const enrichedContext: XyneAIAgentContext = {
     ...context,
     contextChannelMap,
     contextChannelIdToName,
+    productNameToId,
+    repositoryNameToId,
   };
   
-  const systemPrompt = await buildAgentPrompt(source, context.timestamp, context.userInfo, channelNames, context.webSearchEnabled);
+  const systemPrompt = await buildAgentPrompt(
+    source, 
+    context.timestamp, 
+    context.userInfo, 
+    channelNames, context.webSearchEnabled,
+    context.researchContext,
+    researchOptions
+  );
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled);
   const agentRegistry = createAgentRegistry(agent);
   const runConfig = createRunConfig(agentRegistry, onEvent);

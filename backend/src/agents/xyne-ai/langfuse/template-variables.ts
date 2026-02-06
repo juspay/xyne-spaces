@@ -2,9 +2,14 @@
  * Template Variables for Langfuse Prompts
  */
 
-import type { UserInfo } from '../tools/index.js';
+import type { UserInfo, ResearchContext } from '../tools/index.js';
 
 export type SourceType = 'thread' | 'channel';
+
+export interface AvailableResearchOptions {
+  productNames: string[];
+  repositoryNames: string[];
+}
 
 function getCurrentTimestamp(): string {
   const now = new Date();
@@ -46,12 +51,45 @@ function formatChannelContext(channelNames?: string[]): string {
   return `${label}: ${channelNames.map(n => `"${n}"`).join(', ')} (already validated)`;
 }
 
+/**
+ * Format current research context (selected product/repository) for agent prompt
+ * Includes both current selection AND all available options
+ */
+function formatFullResearchContext(
+  researchContext?: ResearchContext,
+  researchOptions?: AvailableResearchOptions
+): string {
+  const parts: string[] = [];
+  
+  // Current selection
+  if (researchContext) {
+    const typeLabel = researchContext.type === 'product' ? 'Product' : 'Repository';
+    parts.push(`Current ${typeLabel}: "${researchContext.name}"`);
+  } else {
+    parts.push('No product/repository selected');
+  }
+  
+  // Available options
+  if (researchOptions) {
+    if (researchOptions.productNames.length > 0) {
+      parts.push(`Available Products: [${researchOptions.productNames.join(', ')}]`);
+    }
+    if (researchOptions.repositoryNames.length > 0) {
+      parts.push(`Available Repositories: [${researchOptions.repositoryNames.join(', ')}]`);
+    }
+  }
+  
+  return parts.join('\n');
+}
+
 export function buildAgentTemplateVariables(
   _source: SourceType,
   currentTimestamp?: string,
   userInfo?: UserInfo,
   channelNames?: string[],
-  webSearchEnabled?: boolean
+  webSearchEnabled?: boolean,
+  researchContext?: ResearchContext,
+  researchOptions?: AvailableResearchOptions
 ): Record<string, string> {
   const variables = {
     current_timestamp: currentTimestamp || getCurrentTimestamp(),
@@ -79,11 +117,9 @@ export function buildAgentTemplateVariables(
 - **Citation Mapping:** The web_search tool displays results as [1], [2], [3]... but when citing in your response, you must prefix with the tool call letter (A for first call, B for second, etc.). So if you want to cite result [3] from your first web_search call, use [A3].
 - **Single URL Per Keypoint:** When citing web_search results, provide ONLY ONE URL per keypoint. Each keypoint should cite exactly ONE search result with its URL. The system will automatically attach the corresponding URL to your citation.`
       : '',
+    research_context: formatFullResearchContext(researchContext, researchOptions),
   };
   
   return variables;
 }
 
-export function buildToolTemplateVariables(_toolName: string): Record<string, string> | undefined {
-  return undefined;
-}

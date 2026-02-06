@@ -6,8 +6,15 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
 import { metrics } from '@/services/otel/pull/metrics';
+import { researchAgentService } from '@/services/researchAgentService';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
+
+// Research context schema - selected product or repository from frontend
+const ResearchContextSchema = z.object({
+  type: z.enum(['product', 'repository']),
+  name: z.string().min(1),
+});
 
 // Request validation schema
 // Note: channel_ids can be empty [] - agent will ask user to specify channel if needed
@@ -17,6 +24,7 @@ const XyneAIRequestSchema = z.object({
   channel_ids: z.array(z.string().min(1)).default([]), // Allow empty array - agent handles clarification
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   web_search_enabled: z.boolean().optional().default(false), // Enable/disable web search tool, defaults to false
+  research_context: ResearchContextSchema.optional().nullable(), // Selected product/repository from frontend
 });
 
 // Feedback request validation schema
@@ -49,7 +57,7 @@ export class XyneAIController {
       return;
     }
 
-    const { query, session_id, channel_ids, conversation_id, web_search_enabled } = parseResult.data;
+    const { query, session_id, channel_ids, conversation_id, web_search_enabled, research_context } = parseResult.data;
 
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -118,6 +126,7 @@ export class XyneAIController {
         userId,
         userInfo,
         webSearchEnabled: web_search_enabled,
+        researchContext: research_context || undefined,  // Selected product/repository from frontend
       };
 
       // Track metrics: context channels count
@@ -239,6 +248,52 @@ export class XyneAIController {
     } catch (error) {
       logger.error('[XyneAI] Error submitting feedback:', error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * GET /api/xyne-ai/list-products
+   * 
+   * Returns list of available products from Research Agent
+   * Response: [{ id: string, name: string }]
+   */
+  listProducts = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      const products = await researchAgentService.listProducts();
+      res.json(products);
+    } catch (error) {
+      logger.error('[XyneAI] Error listing products:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch products';
+      res.status(500).json({ error: errorMessage });
+    }
+  };
+
+  /**
+   * GET /api/xyne-ai/list-repositories
+   * 
+   * Returns list of available repositories from Research Agent
+   * Response: [{ id: string, name: string }]
+   */
+  listRepositories = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      const repositories = await researchAgentService.listRepositories();
+      res.json(repositories);
+    } catch (error) {
+      logger.error('[XyneAI] Error listing repositories:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch repositories';
+      res.status(500).json({ error: errorMessage });
     }
   };
 
