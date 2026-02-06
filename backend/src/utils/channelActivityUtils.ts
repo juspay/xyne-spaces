@@ -32,6 +32,7 @@ export async function createChannelCreatedActivity(
   const activities = memberIds.map(userId => ({
     id: uuidv4(),
     userId,
+    actorId: creatorUserId,
     actorAction: 'created' as const,
     actionSource: 'channel' as const,
     actionSourceId: channelId,
@@ -66,6 +67,7 @@ export async function createChannelVisibilityChangedActivity(
   const activities = memberIds.map(userId => ({
     id: uuidv4(),
     userId,
+    actorId: changerUserId,
     actorAction: 'visibility_changed' as const,
     actionSource: 'channel' as const,
     actionSourceId: channelId,
@@ -100,6 +102,7 @@ export async function createChannelArchivedActivity(
   const activities = memberIds.map(userId => ({
     id: uuidv4(),
     userId,
+    actorId: archiverUserId,
     actorAction: 'archived' as const,
     actionSource: 'channel' as const,
     actionSourceId: channelId,

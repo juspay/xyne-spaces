@@ -6,6 +6,8 @@ import { ReactionAddedActivity } from './ReactionAddedActivity';
 import { DirectMessageActivity } from './DirectMessageActivity';
 import { EtaActivity } from './EtaActivity';
 import { AssignmentPauseActivity } from './AssignmentPauseActivity';
+import { TicketAssignmentActivity } from './TicketAssignmentActivity';
+import { TicketUpdateActivity } from './TicketUpdateActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -36,6 +38,20 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
 
     case 'paused_from_assignment':
       return <AssignmentPauseActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'ticket_assigned':
+      return <TicketAssignmentActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'ticket_status':
+    case 'ticket_eta':
+    case 'ticket_board':
+      return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'ticket_pr_created':
+    case 'ticket_pr_updated':
+    case 'ticket_pr_merged':
+    case 'ticket_pr_declined':
+      return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;

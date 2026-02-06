@@ -4,6 +4,7 @@ import { MessageType } from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 
 // Job Types
 export type EtaDeadlineJobType = 'check-eta-deadlines';
@@ -146,6 +147,9 @@ class EtaDeadlineQueue {
 
       logger.info(`[ETA-DEADLINE] Found ${tickets.length} open tickets with ETA`);
 
+      const xyneTicketBot = await unifiedBotUserService.getBotByEmail('ticket-bot@bot.xyne.ai');
+      const actorId = xyneTicketBot?.id || 'cmjkaarlm0001jq9oftpebya1';
+
       const activitiesToCreate: Prisma.ActivityCreateManyInput[] = [];
 
       for (const ticket of tickets) {
@@ -171,6 +175,7 @@ class EtaDeadlineQueue {
           for (const userId of usersToNotify) {
             activitiesToCreate.push({
               userId,
+              actorId,
               actorAction: 'eta_warning',
               actionSource: 'ticket',
               actionSourceId: ticket.id,
@@ -200,6 +205,7 @@ class EtaDeadlineQueue {
             for (const userId of usersToNotify) {
               activitiesToCreate.push({
                 userId,
+                actorId,
                 actorAction: 'eta_breach',
                 actionSource: 'ticket',
                 actionSourceId: ticket.id,

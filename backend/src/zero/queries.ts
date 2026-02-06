@@ -357,7 +357,8 @@ export const queries = defineQueries({
           .related('reactionCounts')
           .related('attachments')
       )
-      .related('reaction');
+      .related('reaction')
+      .related('ticket');
   }),
 
   userMissedCalls: defineQuery(({ ctx }) => {
@@ -404,7 +405,8 @@ export const queries = defineQueries({
             .related('reactionCounts')
             .related('attachments')
         )
-        .related('reaction');
+        .related('reaction')
+        .related('ticket');
     }
   ),
 

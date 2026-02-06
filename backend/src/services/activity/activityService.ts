@@ -14,7 +14,10 @@ export interface CreateActivityParams {
   messageId?: string;
   reactionId?: string;
   callId?: string;
+  ticketId?: string;
   channelId?: string;
+  pullRequestId?: string;
+  actorId: string;
   classification?: ActivityClassification;
   classificationConfidence?: number | null;
   classificationJobType?: ActivityClassificationJobType | null;
@@ -36,7 +39,9 @@ export class ActivityService {
       messageId: params.messageId,
       reactionId: params.reactionId,
       callId: params.callId,
+      ticketId: params.ticketId,
       channelId: params.channelId,
+      actorId: params.actorId,
       classification: params.classification,
     });
     await this.prisma.activity.create({
@@ -49,7 +54,10 @@ export class ActivityService {
         ...(params.messageId ? { messageId: params.messageId } : {}),
         ...(params.reactionId ? { reactionId: params.reactionId } : {}),
         ...(params.callId ? { callId: params.callId } : {}),
+        ...(params.ticketId ? { ticketId: params.ticketId } : {}),
+        ...(params.pullRequestId ? { pullRequestId: params.pullRequestId } : {}),
         channelId: params.channelId,
+        actorId: params.actorId,
         ...(params.classification ? { classification: params.classification } : {}),
         ...(params.classificationJobType !== undefined
           ? { classificationJobType: params.classificationJobType }
@@ -99,7 +107,9 @@ export class ActivityService {
         ...(a.messageId ? { messageId: a.messageId } : {}),
         ...(a.reactionId ? { reactionId: a.reactionId } : {}),
         ...(a.callId ? { callId: a.callId } : {}),
+        ...(a.ticketId ? { ticketId: a.ticketId } : {}),
         channelId: a.channelId,
+        actorId: a.actorId,
         ...(a.classification ? { classification: a.classification } : {}),
         ...(a.classificationJobType !== undefined
           ? { classificationJobType: a.classificationJobType }

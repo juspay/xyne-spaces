@@ -292,6 +292,7 @@ export class UserAssignmentStateService {
           actorAction: 'paused_from_assignment',
           actionSource: 'assignment',
           actionSourceId: userId,
+          actorId: userId,
           classification: ActivityClassification.FYI,
         }));
 

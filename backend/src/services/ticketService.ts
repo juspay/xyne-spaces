@@ -48,6 +48,7 @@ export class TicketService {
       repoName: string;
       sourceBranchName: string;
       destinationBranchName: string;
+      pullRequestId?: string;
       prAuthor?: string;
       remainingOpenPRs?: number;
     }

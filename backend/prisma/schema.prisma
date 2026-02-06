@@ -941,6 +941,7 @@ model ACLAuditLog {
 
 enum PRStatus {
   OPEN
+  UPDATED
   DECLINED
   MERGED
   @@schema("public")
@@ -1328,7 +1329,10 @@ model Activity {
   messageId       String?  // FK to messages.messageId (no constraint)
   reactionId      String?  // FK to reactions.reactionId (no constraint)
   callId          String?  // FK to calls.id (no constraint)
+  ticketId        String?  // FK to tickets.id (no constraint)
   channelId       String?  // Channel where the activity occurred (optional, not present for ticket activities)
+  pullRequestId   String?  // FK to pull_requests.id (optional, present only for PR-related ticket activities)
+  actorId         String  // User who performed the action (no FK constraint)
   classification  ActivityClassification @default(PENDING)
   classificationConfidence Float?
   classificationJobType ActivityClassificationJobType?
@@ -1343,7 +1347,10 @@ model Activity {
   @@index([messageId]) // Fast lookup by message
   @@index([reactionId]) // Fast lookup by reaction
   @@index([callId]) // Fast lookup by call
+  @@index([ticketId]) // Fast lookup by ticket
   @@index([channelId]) // Fast lookup by channel
+  @@index([actorId])
+  
   @@map("activities")
   @@schema("public")
 }
@@ -1844,3 +1851,6 @@ model dashboardQueryMapping {
   @@map("dashboard_queries_mapping")
   @@schema("public")
 }
+
+
+

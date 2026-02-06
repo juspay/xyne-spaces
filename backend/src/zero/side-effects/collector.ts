@@ -38,6 +38,22 @@ export async function collectSideEffectJobs(
     }
   }
 
+  // Capture previous ticket state for update operations
+  if (operation === 'update' && table === 'tickets') {
+    const entity = await tx.run(zql.tickets.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        assignedTo: entity.assignedTo,
+        stageName: entity.stageName,
+        statusV2: entity.statusV2,
+        eta: entity.eta,
+        boardId: entity.boardId,
+        createdBy: entity.createdBy,
+        channelId: entity.channelId,
+      };
+    }
+  }
+
   accumulator.push({
     entityType: table,
     entityId,
