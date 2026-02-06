@@ -1,3 +1,10 @@
+## [1.32.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.31.0...v1.32.0) (2026-02-06)
+
+
+### Features
+
+* handle drawer state via native bridge ([b32a67e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b32a67eeb712400b25c5c3ddfde8d0ed8fb21c87)), closes [#2847](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2847)
+
 ## [1.31.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.30.1...v1.31.0) (2026-02-06)
 
 
