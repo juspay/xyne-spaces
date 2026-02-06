@@ -3,10 +3,33 @@ const MAX_LARGE_EMOJIS = 23;
 
 /**
  * Regular expression to match modern Unicode emojis robustly.
- * This is the best pattern for correctly matching single- and multi-codepoint emojis
- * (like skin tones, ZWJ sequences, and flags).
+ * This pattern correctly matches:
+ * - Single emojis and multi-codepoint emojis
+ * - ZWJ (Zero Width Joiner) sequences (e.g., 👩‍🍼, 👨‍👩‍👧‍👦, 👩‍💻)
+ * - Skin tone modifiers (e.g., 👩🏻, 👨🏿)
+ * - Flag sequences (e.g., 🇺🇸, 🇬🇧)
+ * - Variation selectors (e.g., ❤️)
  */
-const EMOJI_REGEX = /\p{Emoji_Presentation}|\p{Extended_Pictographic}/gu;
+const EMOJI_REGEX = new RegExp(
+  [
+    // Flag sequences (Regional Indicator pairs)
+    '(?:\\p{RI}\\p{RI})',
+    '|',
+    // Emoji with optional modifiers, variation selectors, and ZWJ sequences
+    '(?:',
+    '[\\p{Emoji_Presentation}\\p{Extended_Pictographic}]',
+    '(?:\\p{Emoji_Modifier})?', // Optional skin tone
+    '(?:\\uFE0F)?', // Optional variation selector
+    '(?:', // ZWJ sequence (repeatable)
+    '\\u200D', // Zero Width Joiner
+    '[\\p{Emoji_Presentation}\\p{Extended_Pictographic}]',
+    '(?:\\p{Emoji_Modifier})?', // Optional skin tone
+    '(?:\\uFE0F)?', // Optional variation selector
+    ')*',
+    ')',
+  ].join(''),
+  'gu',
+);
 
 export type MessageToken = { type: 'text'; content: string } | { type: 'emoji'; content: string };
 
