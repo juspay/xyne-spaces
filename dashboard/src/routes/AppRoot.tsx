@@ -74,6 +74,7 @@ import { sharedChatRoutes } from './SharedChatRoutes';
 import DashboardCreation from './DashboardCreation/DashboardCreation';
 import QueryBuilderScreen from './QueryBuilderScreen/QueryBuilderScreen.tsx';
 import Drawer from '../components/ui/Drawer';
+import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
 
 const AppRoot = (): ReactElement => {
   // Create panel refs for WebView
@@ -176,6 +177,35 @@ const AppRoot = (): ReactElement => {
       // Users can manually close it with the X button
     }
   }, [location.pathname, xyneAIState, xyneAIChannelId]);
+
+  useEffect(() => {
+    if (!reactNativeBridge.isAvailable()) {
+      return;
+    }
+
+    const unsubscribe = reactNativeBridge.on('CLOSE_DRAWER', () => {
+      const snapshot = xyneAIActor.getSnapshot();
+      if (snapshot.matches('open')) {
+        xyneAIActor.send({ type: 'CLOSE' });
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const isXyneAIDrawerOpen = xyneAIState.matches('open');
+
+  useEffect(() => {
+    if (!reactNativeBridge.isAvailable()) {
+      return;
+    }
+
+    const messageType = isXyneAIDrawerOpen
+      ? NativeOutboundMessageType.DRAWER_OPENED
+      : NativeOutboundMessageType.DRAWER_CLOSED;
+
+    reactNativeBridge.send(messageType);
+  }, [isXyneAIDrawerOpen]);
 
   return (
     <ZeroProvider>

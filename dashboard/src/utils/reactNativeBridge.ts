@@ -88,6 +88,7 @@ const nativeInboundMessageTypeValues = {
   NATIVE_PENDING_CALL_STATE: 'NATIVE_PENDING_CALL_STATE',
   // Call actions
   NATIVE_REQUEST_CALLBACK: 'NATIVE_REQUEST_CALLBACK',
+  CLOSE_DRAWER: 'CLOSE_DRAWER',
 } as const;
 
 export type NativeInboundMessageType = keyof typeof nativeInboundMessageTypeValues;
@@ -110,6 +111,8 @@ const nativeOutboundMessageTypeValues = {
   LIVEKIT_TOGGLE_CAMERA: 'LIVEKIT_TOGGLE_CAMERA',
   LIVEKIT_TOGGLE_SCREEN_SHARE: 'LIVEKIT_TOGGLE_SCREEN_SHARE',
   START_NOTE_TAKER: 'START_NOTE_TAKER',
+  DRAWER_OPENED: 'DRAWER_OPENED',
+  DRAWER_CLOSED: 'DRAWER_CLOSED',
 } as const;
 
 export type NativeOutboundMessageType = keyof typeof nativeOutboundMessageTypeValues;
@@ -265,6 +268,7 @@ type ReactNativeInboundPayloadMap = {
   // Pending call state for cold start sync
   NATIVE_PENDING_CALL_STATE: NativePendingCallStatePayload;
   NATIVE_REQUEST_CALLBACK: NativeRequestCallbackPayload;
+  CLOSE_DRAWER: undefined;
 };
 
 type ReactNativeOutboundPayloadMap = {
@@ -303,6 +307,8 @@ type ReactNativeOutboundPayloadMap = {
   LIVEKIT_TOGGLE_CAMERA: LiveKitTogglePayload;
   LIVEKIT_TOGGLE_SCREEN_SHARE: LiveKitTogglePayload;
   START_NOTE_TAKER: undefined;
+  DRAWER_OPENED: undefined;
+  DRAWER_CLOSED: undefined;
 };
 
 export type ReactNativeInboundMessage = {
