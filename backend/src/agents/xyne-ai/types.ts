@@ -4,7 +4,7 @@
  * API request, streaming chunks, and output types.
  */
 
-import type { UserInfo } from './tools/index.js';
+import type { UserInfo, ResearchContext } from './tools/index.js';
 
 // ============================================================================
 // Request Types
@@ -19,6 +19,7 @@ export interface XyneAIRequest {
   currentTimestamp?: string | null;
   userInfo?: UserInfo;
   webSearchEnabled?: boolean;  // Enable/disable web search tool
+  researchContext?: ResearchContext;
 }
 
 // ============================================================================

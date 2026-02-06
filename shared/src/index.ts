@@ -8,3 +8,4 @@ export * from './activity';
 export * from './types';
 export * from './board-types';
 export * from './types/workflowApproval';
+export * from './types/research';

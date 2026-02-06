@@ -39,7 +39,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     getPromptFromLangfuse(PROMPT_NAMES.RESEARCH_AGENT),
   ]);
   
-  return {
+  const descriptions = {
     fetch_channel_messages: fetchChannel || 'Fetch messages from the current channel.',
     fetch_thread_messages: '',
     search_relevant_messages: searchMessages || 'Search for relevant messages in the channel.',
@@ -49,6 +49,8 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     web_search: webSearch || 'Perform a web search to find current information from the internet.',
     research_agent: researchAgent || 'Query the Research Agent for codebase analysis and technical investigation.',
   };
+  
+  return descriptions;
 }
 
 /**

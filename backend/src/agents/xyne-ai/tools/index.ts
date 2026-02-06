@@ -16,6 +16,7 @@ export type {
   StreamEventCallback,
   UserInfo,
   XyneAIAgentContext,
+  ResearchContext,
   ToolMessage,
   ToolResult,
   ToolResultWithCapping,

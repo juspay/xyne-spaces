@@ -16,6 +16,7 @@ import { XyneAIHeader } from './components/XyneAIHeader';
 import { useXyneAIStream } from './hooks/useXyneAIStream';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import type { ResearchContext } from './hooks/useResearchAgent';
 
 interface XyneAISidebarProps {
   channelId: string | null;
@@ -35,6 +36,9 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
   const currentUser = useSelf();
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [webSearchAccessible, setWebSearchAccessible] = useState(false);
+  const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
+    null,
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -65,7 +69,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
     ? ['Summarize this channel', 'Notes shared last week', 'SR trend today']
     : ['How can I help you?', 'Ask me anything', 'General assistance'];
 
-  // Use the streaming hook with selected channel IDs
+  // Use the streaming hook with selected channel IDs and research context
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: selectedChannelIds,
     conversationId,
@@ -73,6 +77,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
     setConversationId,
     setCurrentTraceId,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
+    researchContext: selectedResearchContext,
   });
 
   // Scroll to bottom function
@@ -603,6 +608,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
             onInputChange={setInputValue}
             onSubmit={() => void handleSubmit()}
             onSelectedChannelsChange={setSelectedChannelIds}
+            onResearchContextChange={setSelectedResearchContext}
             isStreaming={messages.some(m => m.isStreaming)}
             onAbort={abortCurrentRequest}
             webSearchEnabled={webSearchEnabled}

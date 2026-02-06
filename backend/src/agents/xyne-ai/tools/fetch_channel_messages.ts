@@ -218,7 +218,24 @@ export function createFetchChannelMessagesTool(): Tool<{ date_from?: string; dat
     execute: async (args, context) => {
       const { channels, date_from, date_to } = args;
   
-      if (channels && channels.length > 0) {
+      // Validate channels parameter - must have 1-5 channel names
+      if (!channels || channels.length === 0) {
+        return `Error: NO_CHANNELS_PROVIDED - The 'channels' parameter is required and cannot be empty.
+
+To fix this:
+1. Extract the channel name from the user's query (e.g., "summarize genius-discussions" → channels: ["genius-discussions"])
+2. If the channel name needs validation, call field_value_discovery first to get the exact channel name
+3. If no specific channel is mentioned by the user, check the CHANNEL CONTEXT in the system prompt for available channels
+4. If no channels are in context, ask the user to specify which channel they want to summarize
+
+Example: fetch_channel_messages({ channels: ["genius-discussions"], date_from: "2025-01-01" })`;
+      }
+
+      if (channels.length > 5) {
+        return `Error: TOO_MANY_CHANNELS - Maximum 5 channels allowed per summarization. You provided ${channels.length} channels. Please reduce the number of channels.`;
+      }
+
+      if (channels.length > 0) {
         logger.info(`[Tool] fetch_channel_messages called with channel names=${JSON.stringify(channels)}`);
         
         // Resolve channel names to IDs - uses pre-computed context map first, then request mappings from FVD
@@ -287,30 +304,8 @@ export function createFetchChannelMessagesTool(): Tool<{ date_from?: string; dat
         
         return formatToolResultForContext(result, prefix) + dateInfo;
       }
-      
-      // Default: use all channels from context with pre-computed channel name map
-      const channelCount = context.channelIds.length;
-      logger.info(`[Tool] fetch_channel_messages called with context.channelIds=${JSON.stringify(context.channelIds)}, channelCount=${channelCount}`);
-      
-      // Use multi-channel implementation for all cases
-      const result = await fetchChannelMessagesMultiChannelImpl(context.channelIds, context.sessionId, date_from, date_to, context.contextChannelIdToName) as ToolResultWithCapping;
-      const prefix = await getNextPrefix(context.sessionId);
-      if (result.success && result.messages.length > 0) {
-        await appendSessionMappings(context.sessionId, buildMessageMappings(result), prefix);
-      }
-      
-      // Add info about date range used
-      const dateRange = getDefaultDateRange(channelCount);
-      let dateInfo = '';
-      
-      // Check if date range was capped
-      if (result.dateRangeCapped && result.requestedDays) {
-        dateInfo = `\n\nNOTE: You requested ${result.requestedDays} days, but with ${channelCount} channel${channelCount > 1 ? 's' : ''} we can only summarize the last ${dateRange.days} days. Showing messages from the last ${dateRange.days} days.`;
-      } else if (!date_from) {
-        dateInfo = `\n\nDate range: Last ${dateRange.days} days (based on ${channelCount} channel${channelCount > 1 ? 's' : ''})`;
-      }
-      
-      return formatToolResultForContext(result, prefix) + dateInfo;
+
+      return 'Error: Unexpected state - channels validation failed';
     },
   };
 }

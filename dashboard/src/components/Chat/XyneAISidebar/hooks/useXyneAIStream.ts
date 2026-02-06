@@ -5,6 +5,7 @@ import type { Message } from '../utils/XyneAITypes';
 import { parseStreamingContent, transformToolOutput } from '../utils/XyneAIUtils';
 import { generateToolInputStatus } from '../utils/toolInputStatus';
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
+import type { ResearchContext } from '@xyne/shared';
 
 interface UseXyneAIStreamParams {
   channelIds: string[];
@@ -13,6 +14,7 @@ interface UseXyneAIStreamParams {
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
   webSearchEnabled?: boolean;
+  researchContext?: ResearchContext | null;
 }
 
 // Helper function to clear status message from a message object
@@ -31,6 +33,7 @@ export const useXyneAIStream = ({
   setConversationId,
   setCurrentTraceId,
   webSearchEnabled = false,
+  researchContext,
 }: UseXyneAIStreamParams) => {
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -102,6 +105,10 @@ export const useXyneAIStream = ({
             session_id: conversationId,
             // eslint-disable-next-line @typescript-eslint/naming-convention
             web_search_enabled: webSearchEnabled,
+            // eslint-disable-next-line @typescript-eslint/naming-convention
+            research_context: researchContext
+              ? { type: researchContext.type, name: researchContext.name }
+              : null,
           }),
           signal: abortController.signal,
         });
@@ -178,7 +185,7 @@ export const useXyneAIStream = ({
         );
       }
     },
-    [channelIds, conversationId, setMessages, setConversationId, webSearchEnabled],
+    [channelIds, conversationId, researchContext, setMessages, setConversationId, webSearchEnabled],
   );
 
   const abortCurrentRequest = useCallback(() => {

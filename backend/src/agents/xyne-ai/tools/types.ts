@@ -35,6 +35,15 @@ export interface UserInfo {
 // ============================================================================
 
 /**
+ * Research context - currently selected product or repository from frontend
+ * Only contains name (no ID) - ID lookup happens internally via productNameToId/repositoryNameToId
+ */
+export interface ResearchContext {
+  type: 'product' | 'repository';
+  name: string;
+}
+
+/**
  * Agent context with channelId and conversationId
  */
 export interface XyneAIAgentContext {
@@ -54,6 +63,10 @@ export interface XyneAIAgentContext {
     channelNameToId: Map<string, string>;
     userNameToId: Map<string, string>;
   };
+  // Research Agent context
+  researchContext?: ResearchContext;  // Currently selected product/repository (for agent prompt)
+  productNameToId?: Map<string, string>;  // Product name→ID mapping (for tool validation)
+  repositoryNameToId?: Map<string, string>
 }
 
 // ============================================================================
@@ -138,21 +151,8 @@ export interface ToolDescriptions {
 // Research Agent Types
 // ============================================================================
 
-/**
- * Research Agent response structure
- */
-export interface ResearchAgentResponse {
-  session_id: string;
-  analysis: string;
-  follow_ups: Array<{
-    question: string;
-    justification: string;
-    data_type: string;
-    specific_keys?: string[];
-  }>;
-  is_complete: boolean;
-  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
-}
+// Re-export from the centralized service
+export type { ResearchAgentResponse, ResearchFollowUp } from '../../../services/researchAgentService.js';
 
 // ============================================================================
 // Constants

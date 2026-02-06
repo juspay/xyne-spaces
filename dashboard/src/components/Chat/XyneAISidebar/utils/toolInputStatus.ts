@@ -255,6 +255,9 @@ export const generateToolInputStatus = (toolName: string, toolInput: unknown): s
         return 'Searching the web';
       }
 
+      case 'research_agent':
+        return 'Running deep research, it may take a while';
+
       default:
         return 'Processing';
     }

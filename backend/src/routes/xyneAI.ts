@@ -57,4 +57,24 @@ router.post('/', xyneAIController.query);
  */
 router.post('/feedback', xyneAIController.feedback);
 
+/**
+ * List available products for Research Agent
+ *
+ * GET /api/xyne-ai/list-products
+ *
+ * Response:
+ * [{ id: string, name: string }]
+ */
+router.get('/list-products', xyneAIController.listProducts);
+
+/**
+ * List available repositories for Research Agent
+ *
+ * GET /api/xyne-ai/list-repositories
+ *
+ * Response:
+ * [{ id: string, name: string }]
+ */
+router.get('/list-repositories', xyneAIController.listRepositories);
+
 export default router;
