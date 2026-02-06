@@ -1,3 +1,21 @@
+## [1.33.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.32.0...v1.33.0) (2026-02-06)
+
+
+### Features
+
+* added boardId in external source schema ([af82511](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/af825118b431c16ee314bd70de52b56663d03541)), closes [#2885](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2885)
+* added call automation ([879ce3b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/879ce3b2f5703733a41c59c0103cadf99ab5c4a2)), closes [#2453](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2453)
+* added phone number, dob and team edit thing ([c649977](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c6499777f97e7a2fde2dc1e53a689b341e77348d)), closes [#2380](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2380)
+* Repo and Product context support in Ask AI ([f8058e6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f8058e681c7c3e72f2b6a60632efd362f52017bf)), closes [#2785](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2785)
+
+
+### Bug Fixes
+
+* Fixes for quarto publish and new doc creation flow ([eb59846](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/eb598465a6c1a73432fa92e0e26222d8f46e7154))
+* joint emoji fix ([54dbc92](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/54dbc9229edd5b26d1e36cb0a7d0f10a6a1b4199)), closes [#2863](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2863)
+* manager notification on resume and z-index fix ([f16caeb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f16caeb711180ac0597c5f736ee63cf53d182c39)), closes [#2835](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2835)
+* rate limiting for zero queries and mutations ([6aae969](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6aae969b15689fa0ad1a1e249d56dfc40878795e)), closes [#2654](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2654)
+
 ## [1.32.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.31.0...v1.32.0) (2026-02-06)
 
 
