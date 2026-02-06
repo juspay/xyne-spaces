@@ -1,3 +1,10 @@
+## [1.33.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.33.0...v1.33.1) (2026-02-06)
+
+
+### Bug Fixes
+
+* login issue fixes ([811bf7e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/811bf7e5f9b1f9593431286829257edfbc421a1e)), closes [#2787](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2787)
+
 ## [1.33.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.32.0...v1.33.0) (2026-02-06)
 
 
