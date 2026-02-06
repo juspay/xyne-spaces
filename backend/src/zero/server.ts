@@ -22,6 +22,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
+import { checkRateLimit } from '@/services/zeroRateLimiter';
 
 // Create database connection pool
 const isDev = process.env['NODE_ENV'] === 'development';
@@ -76,6 +77,12 @@ export async function handleMutate(request: Request): Promise<unknown> {
   if (!authData) {
     throw new Error("Unauthorized")
   }
+
+  const isAllowed = await checkRateLimit("mutate", authData.sub);
+  if (!isAllowed) {
+    throw new Error("Rate limit exceeded");
+  }
+
 
   try {
     const result = await handleMutateRequest(
@@ -144,6 +151,11 @@ export async function handleQueries(request: Request): Promise<any> {
   const authData = extractAuthDataFromRequest(request);
   if (!authData) {
     throw new Error("Unauthorized")
+  }
+
+  const isAllowed = await checkRateLimit("query", authData.sub);
+  if (!isAllowed) {
+    throw new Error("Rate limit exceeded");
   }
 
   try {
