@@ -49,6 +49,7 @@ export interface XyneAIAgentContext {
   userInfo?: UserInfo;  // User information for personalization and trace grouping
   contextChannelMap?: Map<string, string>;  // Pre-computed channel name→ID map
   contextChannelIdToName?: Map<string, string>;
+  webSearchEnabled?: boolean;  // Flag to enable/disable web search functionality
   requestMappings?: {  // Request-scoped mappings from FVD tool
     channelNameToId: Map<string, string>;
     userNameToId: Map<string, string>;
@@ -108,13 +109,14 @@ export interface ToolResultWithCapping extends ToolResult {
 // ============================================================================
 
 /**
- * Message mappings for frontend (messageIndex -> messageId/conversationId/channelId)
+ * Message mappings for frontend (messageIndex -> messageId/conversationId/channelId/url)
  */
 export interface MessageMappings {
   messageIdMapping: Record<number, string>;  // messageIndex -> messageId
   conversationIdMapping: Record<number, string>;  // messageIndex -> conversationId
   isTicketMapping: Record<number, boolean>;  // messageIndex -> isTicket flag
   channelIdMapping: Record<number, string>;  // messageIndex -> channelId
+  urlMapping: Record<number, string>;  // messageIndex -> URL from web search results
 }
 
 // ============================================================================
@@ -128,6 +130,7 @@ export interface ToolDescriptions {
   search_relevant_tickets: string;
   genius: string;
   field_value_discovery: string;
+  web_search: string;
   research_agent: string;
 }
 

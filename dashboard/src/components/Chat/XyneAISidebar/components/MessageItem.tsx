@@ -1,4 +1,5 @@
 import { ReactElement, useState } from 'react';
+import { Globe, Link } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -440,23 +441,32 @@ const SummarizerContent = ({
                 >
                   {keyPoint.point}
                 </ReactMarkdown>
-                {keyPoint.citation?.conversationId && !message.isStreaming && (
-                  <>
-                    {' '}
-                    <button
-                      type='button'
-                      onClick={(): void => {
-                        if (keyPoint.citation) {
-                          onSummarizerCitationClick(keyPoint.citation);
+                {(keyPoint.citation?.conversationId || keyPoint.citation?.url) &&
+                  !message.isStreaming && (
+                    <>
+                      {' '}
+                      <button
+                        type='button'
+                        onClick={(): void => {
+                          if (keyPoint.citation) {
+                            onSummarizerCitationClick(keyPoint.citation);
+                          }
+                        }}
+                        className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
+                        title={
+                          keyPoint.citation?.url
+                            ? `Open source URL`
+                            : `Jump to message ${keyPoint.citation.messageIndex}`
                         }
-                      }}
-                      className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
-                      title={`Jump to message ${keyPoint.citation.messageIndex}`}
-                    >
-                      {keyPoint.citation.messageIndex}
-                    </button>
-                  </>
-                )}
+                      >
+                        {keyPoint.citation?.url ? (
+                          <Link size={10} />
+                        ) : (
+                          keyPoint.citation.messageIndex
+                        )}
+                      </button>
+                    </>
+                  )}
               </span>
             </li>
           ))}
@@ -616,6 +626,27 @@ const MessageActions = ({
         </svg>
       </button>
     </div>
+
+    {/* Web Search Icon */}
+    {message.toolOutputs?.some(
+      output =>
+        'toolName' in output &&
+        output.toolName === 'web_search' &&
+        'content' in output &&
+        typeof output.content === 'string' &&
+        (output.content.includes('Found') || output.content.includes('search results')),
+    ) && (
+      <Tooltip content='Powered By searXNG' side='left'>
+        <a
+          href='https://github.com/searxng/searxng'
+          target='_blank'
+          rel='noopener noreferrer'
+          className='flex items-center gap-[2.521px] p-[4.51px] rounded-[11.345px] bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
+        >
+          <Globe className='w-2 h-2 text-white' />
+        </a>
+      </Tooltip>
+    )}
 
     {/* Genius Icon */}
     {message.isGeniusResponse && (

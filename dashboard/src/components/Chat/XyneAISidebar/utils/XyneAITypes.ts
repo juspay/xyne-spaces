@@ -14,6 +14,7 @@ export interface SummarizerCitation {
   conversationId: string;
   channelId?: string; // Optional - may not be available during streaming
   isTicket?: boolean; // Distinguishes ticket citations from message citations
+  url?: string; // URL from web search results for this citation
 }
 
 export interface SummarizerKeyPoint {

@@ -12,6 +12,7 @@ interface UseXyneAIStreamParams {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
+  webSearchEnabled?: boolean;
 }
 
 // Helper function to clear status message from a message object
@@ -29,6 +30,7 @@ export const useXyneAIStream = ({
   setMessages,
   setConversationId,
   setCurrentTraceId,
+  webSearchEnabled = false,
 }: UseXyneAIStreamParams) => {
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -98,6 +100,8 @@ export const useXyneAIStream = ({
             conversation_id: '',
             // eslint-disable-next-line @typescript-eslint/naming-convention
             session_id: conversationId,
+            // eslint-disable-next-line @typescript-eslint/naming-convention
+            web_search_enabled: webSearchEnabled,
           }),
           signal: abortController.signal,
         });
@@ -174,7 +178,7 @@ export const useXyneAIStream = ({
         );
       }
     },
-    [channelIds, conversationId, setMessages, setConversationId],
+    [channelIds, conversationId, setMessages, setConversationId, webSearchEnabled],
   );
 
   const abortCurrentRequest = useCallback(() => {
@@ -406,6 +410,32 @@ function handleToolOutput(
               ...msg,
               fetchedMessages: content,
               agentType: 'summarizer',
+            }
+          : msg,
+      ),
+    );
+    return;
+  }
+
+  // Handle web_search tool - store it in toolOutputs for badge display
+  if (toolName === 'web_search') {
+    const content = data['content'] as string;
+
+    // Create a minimal tool output entry for web_search
+    const webSearchToolOutput: GeniusToolOutput = {
+      id: `tool-websearch-${Date.now()}-${Math.random()}`,
+      toolName: 'web_search',
+      content: content,
+    } as GeniusToolOutput;
+
+    toolOutputs.push(webSearchToolOutput);
+
+    setMessages(prev =>
+      prev.map(msg =>
+        msg.id === botMessageId
+          ? {
+              ...msg,
+              toolOutputs: [...toolOutputs],
             }
           : msg,
       ),

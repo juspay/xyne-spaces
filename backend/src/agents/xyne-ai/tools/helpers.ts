@@ -29,12 +29,13 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, searchMessages, searchTickets, geniusQuery, fieldValueDiscovery, researchAgent] = await Promise.all([
+  const [fetchChannel, searchMessages, searchTickets, geniusQuery, fieldValueDiscovery, webSearch, researchAgent] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_TICKETS),
     getPromptFromLangfuse(PROMPT_NAMES.GENIUS),
     getPromptFromLangfuse(PROMPT_NAMES.FIELD_VALUE_DISCOVERY),
+    getPromptFromLangfuse(PROMPT_NAMES.WEB_SEARCH),
     getPromptFromLangfuse(PROMPT_NAMES.RESEARCH_AGENT),
   ]);
   
@@ -45,6 +46,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     search_relevant_tickets: searchTickets || 'Search for relevant support tickets using semantic search.',
     genius: geniusQuery || 'Query Genius for analytics and data insights.',
     field_value_discovery: fieldValueDiscovery || 'Discover field values from data sources.',
+    web_search: webSearch || 'Perform a web search to find current information from the internet.',
     research_agent: researchAgent || 'Query the Research Agent for codebase analysis and technical investigation.',
   };
 }
@@ -191,20 +193,25 @@ export function formatMessages(
 /**
  * Build message mappings from tool result
  */
-export function buildMessageMappings(result: ToolResult): MessageMappings {
+export function buildMessageMappings(result: ToolResult, urlMapping?: Record<number, string>): MessageMappings {
   const messageIdMapping: Record<number, string> = {};
   const conversationIdMapping: Record<number, string> = {};
   const isTicketMapping: Record<number, boolean> = {};
   const channelIdMapping: Record<number, string> = {};
+  const finalUrlMapping: Record<number, string> = {};
 
   for (const msg of result.messages) {
     messageIdMapping[msg.messageIndex] = msg.messageId;
     conversationIdMapping[msg.messageIndex] = msg.conversationId;
     isTicketMapping[msg.messageIndex] = msg.isTicket || false;
     channelIdMapping[msg.messageIndex] = msg.channelId;
+    // Include URL from provided mapping if available
+    if (urlMapping && urlMapping[msg.messageIndex]) {
+      finalUrlMapping[msg.messageIndex] = urlMapping[msg.messageIndex];
+    }
   }
   
-  return { messageIdMapping, conversationIdMapping, isTicketMapping, channelIdMapping };
+  return { messageIdMapping, conversationIdMapping, isTicketMapping, channelIdMapping, urlMapping: finalUrlMapping };
 }
 
 /**
@@ -340,7 +347,7 @@ export async function appendSessionMappings(
     const existingData = await redis.get(key);
     const existing: MessageMappings = existingData 
       ? JSON.parse(existingData) 
-      : { messageIdMapping: {}, conversationIdMapping: {}, isTicketMapping: {}, channelIdMapping: {} };
+      : { messageIdMapping: {}, conversationIdMapping: {}, isTicketMapping: {}, channelIdMapping: {}, urlMapping: {} };
     
     // Add new mappings with prefix
     for (const [index, msgId] of Object.entries(mappings.messageIdMapping)) {
@@ -361,6 +368,12 @@ export async function appendSessionMappings(
     for (const [index, chanId] of Object.entries(mappings.channelIdMapping)) {
       const prefixedKey = `${prefix}${index}`;
       existing.channelIdMapping[prefixedKey as unknown as number] = chanId;
+    }
+
+    // Add URL mappings with prefix
+    for (const [index, url] of Object.entries(mappings.urlMapping)) {
+      const prefixedKey = `${prefix}${index}`;
+      existing.urlMapping[prefixedKey as unknown as number] = url;
     }
     
     await redis.setex(key, CITATION_TTL_SECONDS, JSON.stringify(existing));

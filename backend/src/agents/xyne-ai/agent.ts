@@ -46,11 +46,11 @@ function createModelProvider() {
 // Agent Definition
 // ============================================================================
 
-function createXyneAIAgent(systemPrompt: string): Agent<XyneAIAgentContext, string> {
+function createXyneAIAgent(systemPrompt: string, webSearchEnabled?: boolean): Agent<XyneAIAgentContext, string> {
   return {
     name: 'XyneAI',
     instructions: () => systemPrompt,
-    tools: getXyneAITools(),
+    tools: getXyneAITools(webSearchEnabled),
     modelConfig: {
       temperature: 0.3,
     },
@@ -61,9 +61,10 @@ async function buildAgentPrompt(
   source: 'thread' | 'channel',
   timestamp?: string,
   userInfo?: UserInfo,
-  channelNames?: string[]
+  channelNames?: string[],
+  webSearchEnabled?: boolean
 ): Promise<string> {
-  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames);
+  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled);
   
   const prompt = await getPromptFromLangfuse(PROMPT_NAMES.XYNE_AI_SYSTEM, {
     templateVariables,
@@ -160,8 +161,8 @@ export async function createAgentRunner(
     contextChannelIdToName,
   };
   
-  const systemPrompt = await buildAgentPrompt(source, context.timestamp, context.userInfo, channelNames);
-  const agent = createXyneAIAgent(systemPrompt);
+  const systemPrompt = await buildAgentPrompt(source, context.timestamp, context.userInfo, channelNames, context.webSearchEnabled);
+  const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled);
   const agentRegistry = createAgentRegistry(agent);
   const runConfig = createRunConfig(agentRegistry, onEvent);
   const initialState = createInitialState(enrichedContext, messages);

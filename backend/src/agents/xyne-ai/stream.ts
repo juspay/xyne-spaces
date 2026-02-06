@@ -94,6 +94,7 @@ function convertRawToOutput(
     const pointNum = index + 1;
     const citationRef = citations[pointNum] || '';
     const channelId = (mappings?.channelIdMapping as Record<string, string>)?.[citationRef] || defaultChannelId || '';
+    const url = (mappings?.urlMapping as Record<string, string>)?.[citationRef];
     
     return {
       point,
@@ -104,6 +105,7 @@ function convertRawToOutput(
         channelId,
         prefixedRef: citationRef,
         isTicket: (mappings?.isTicketMapping as Record<string, boolean>)?.[citationRef] || false,
+        url,
       },
     };
   });
@@ -193,6 +195,7 @@ export async function* xyneAIStream(
     streamProvider: streamProvider as StreamProvider | undefined,
     onStreamEvent,
     userInfo: request.userInfo,
+    webSearchEnabled: request.webSearchEnabled,
     requestMappings: {
       channelNameToId: new Map<string, string>(),
       userNameToId: new Map<string, string>(),

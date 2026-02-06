@@ -1,6 +1,7 @@
 import { ReactElement, useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChannel } from '../../../hooks/useChannels';
+import { useSelf } from '../../../hooks/useUsers';
 import { BASE_URL } from '../../../services/clients/apiClient';
 import {
   xyneAIStorage,
@@ -31,6 +32,9 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
   const [isLoadingConversation, setIsLoadingConversation] = useState(true);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
+  const currentUser = useSelf();
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [webSearchAccessible, setWebSearchAccessible] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -42,6 +46,19 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
   const channelDescription = (channel?.['description'] as string) || '';
 
   const scopeType = (channel?.['scopeType'] as string) || '';
+
+  // Check if user has access to web search from metadata
+  useEffect(() => {
+    if (currentUser?.metadata) {
+      const metadata = currentUser.metadata as { web_search_enabled?: boolean };
+      const hasAccess = metadata.web_search_enabled === true;
+      setWebSearchAccessible(hasAccess);
+      // Reset web search to off if user loses access
+      if (!hasAccess) {
+        setWebSearchEnabled(false);
+      }
+    }
+  }, [currentUser?.metadata]);
 
   // Suggestion queries - different based on context
   const suggestionQueries = channelId
@@ -55,6 +72,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
     setMessages,
     setConversationId,
     setCurrentTraceId,
+    webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
   });
 
   // Scroll to bottom function
@@ -451,7 +469,15 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
         messageId: msgId,
         channelId: citationChannelId,
         isTicket,
+        url,
       } = citation;
+
+      // For web search citations (URL present), open in new tab
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+
       // Use channelId from citation if available, otherwise fallback to current channelId
       const targetChannelId = citationChannelId || channelId;
 
@@ -579,6 +605,9 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
             onSelectedChannelsChange={setSelectedChannelIds}
             isStreaming={messages.some(m => m.isStreaming)}
             onAbort={abortCurrentRequest}
+            webSearchEnabled={webSearchEnabled}
+            webSearchAccessible={webSearchAccessible}
+            onWebSearchToggle={() => setWebSearchEnabled(!webSearchEnabled)}
           />
         </>
       )}

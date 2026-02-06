@@ -20,6 +20,10 @@ export { authRefreshDuration, authRefreshTotal, clearAuthTokenTotal } from './au
 
 export { loadingAnimationDuration, dataLoadDuration } from './loadingMetrics';
 
+export { askAIOpenedTotal } from './xyneAIMetrics';
+
+export { trackAskAIOpened } from './xyneAIMetrics';
+
 export function safeRecordMetric(fn: () => void): void {
   try {
     fn();
