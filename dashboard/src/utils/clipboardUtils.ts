@@ -2,6 +2,79 @@
  * Clipboard utilities for copying HTML content with proper formatting preservation
  */
 
+import type { Element, Root } from 'hast';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkGfm from 'remark-gfm';
+import remarkRehype from 'remark-rehype';
+import rehypeStringify from 'rehype-stringify';
+
+/**
+ * Rehype plugin: convert h1–h6 to <p><strong>...</strong></p> so headings paste as bold
+ * in the Xyne TipTap editor (and other rich targets) which rely on <strong>/<b>, not <h2>.
+ */
+function rehypeHeadingsToBold() {
+  return (tree: Root): void => {
+    const isHeading = (node: unknown): node is Element => {
+      return (
+        node !== null &&
+        typeof node === 'object' &&
+        'type' in node &&
+        'tagName' in node &&
+        (node as Element).type === 'element' &&
+        /^h[1-6]$/.test((node as Element).tagName)
+      );
+    };
+
+    const visit = (node: Root | Element, parent: Root | Element | null, index: number): void => {
+      if (isHeading(node)) {
+        const strong: Element = {
+          type: 'element',
+          tagName: 'strong',
+          properties: {},
+          children: node.children,
+        };
+        const p: Element = {
+          type: 'element',
+          tagName: 'p',
+          properties: {},
+          children: [strong],
+        };
+        if (parent) {
+          parent.children[index] = p;
+        }
+        return;
+      }
+      if ('children' in node && Array.isArray(node.children)) {
+        node.children.forEach((child, i) => visit(child as Element, node as Root | Element, i));
+      }
+    };
+
+    tree.children.forEach((child, i) => visit(child as Element, tree, i));
+  };
+}
+
+/**
+ * Converts markdown to HTML (headings as <p><strong>...</strong></p> for clipboard paste).
+ */
+export const markdownToHtml = async (markdown: string): Promise<string> => {
+  try {
+    const file = await unified()
+      .use(remarkParse)
+      .use(remarkGfm)
+      .use(remarkRehype)
+      .use(rehypeHeadingsToBold)
+      .use(rehypeStringify)
+      .process(markdown);
+
+    return String(file);
+  } catch (error) {
+    console.error('Failed to process markdown:', error);
+    // Fallback to original markdown if processing fails
+    return markdown;
+  }
+};
+
 /**
  * Converts HTML to formatted plain text while preserving structure
  * - Preserves line breaks, lists, code blocks, blockquotes

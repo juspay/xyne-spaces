@@ -27,7 +27,7 @@ import { mutators } from '../../../zero/mutators';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import { cn } from '../../../utils/classNames';
-import { copyHtmlToClipboard } from '../../../utils/clipboardUtils';
+import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUtils';
 import { DraftMessage } from '../ChatDirectory/ChatDirectory.types';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
@@ -343,7 +343,26 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleCopyMessage = (): void => {
     if (message?.content) {
-      copyHtmlToClipboard(message.content)
+      // Check if this is markdown content (e.g., call summaries)
+      const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
+
+      // For forwarded messages, extract the actual content from the XML structure
+      const contentToCopy =
+        message.msgType === MessageType.FORWARDED
+          ? parseForwardedMessageXml(message.content)?.content || message.content
+          : message.content;
+
+      // Convert markdown to HTML if needed, then normalize headings to bold paragraphs
+      const copyPromise = isMarkdownContent
+        ? markdownToHtml(contentToCopy)
+            .then(html => copyHtmlToClipboard(html))
+            .catch(error => {
+              console.warn('Markdown processing failed, falling back to raw content:', error);
+              return copyHtmlToClipboard(contentToCopy);
+            })
+        : copyHtmlToClipboard(contentToCopy);
+
+      copyPromise
         .then(() => {
           toast.success('Message copied to clipboard');
         })
