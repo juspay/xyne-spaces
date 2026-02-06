@@ -1027,7 +1027,8 @@ class CodeServerService {
     }
 
     /**
-     * Checkout a branch, creating it from baseBranch if it doesn't exist
+     * Checkout a branch, creating it from baseBranch if it doesn't exist.
+     * Prioritizes remote branch since Edit implies the branch exists on remote.
      */
     public async checkoutBranch(
         repoPath: string,
@@ -1035,82 +1036,120 @@ class CodeServerService {
         baseBranch?: string
     ): Promise<{ success: boolean; created: boolean; error?: string }> {
         return new Promise((resolve) => {
-            // First try to checkout existing branch
-            log.info(`[CodeServer] Attempting to checkout branch: ${branchName}`);
-
-            const checkoutProcess = spawn('git', ['checkout', branchName], {
+            log.info(`[CodeServer] Fetching all branches from origin...`);
+            const fetchProcess = spawn('git', ['fetch', 'origin', '--prune'], {
                 cwd: repoPath,
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
 
-            let checkoutStderr = '';
-            checkoutProcess.stderr?.on('data', (data: Buffer) => {
-                checkoutStderr += data.toString();
+            let fetchStderr = '';
+            fetchProcess.stderr?.on('data', (data: Buffer) => {
+                fetchStderr += data.toString();
             });
 
-            checkoutProcess.on('close', (checkoutCode) => {
-                if (checkoutCode === 0) {
-                    // Branch exists and checked out
-                    log.info(`[CodeServer] Checked out existing branch: ${branchName}`);
-                    resolve({ success: true, created: false });
-                    return;
+            fetchProcess.on('close', (fetchCode) => {
+                if (fetchCode !== 0) {
+                    log.warn(`[CodeServer] Fetch failed: ${fetchStderr.trim()} (might be offline)`);
+                } else {
+                    log.info(`[CodeServer] Successfully fetched from origin`);
                 }
 
-                // Branch doesn't exist, need to create it
-                if (!baseBranch) {
-                    resolve({ success: false, created: false, error: `Branch ${branchName} doesn't exist and no base branch provided` });
-                    return;
-                }
-
-                // First checkout base branch
-                log.info(`[CodeServer] Branch not found, checking out base branch: ${baseBranch}`);
-                const baseCheckoutProcess = spawn('git', ['checkout', baseBranch], {
+                // Try local branch first to preserve any local commits
+                log.info(`[CodeServer] Trying to checkout local branch: ${branchName}`);
+                const checkoutProcess = spawn('git', ['checkout', branchName], {
                     cwd: repoPath,
                     stdio: ['ignore', 'pipe', 'pipe'],
                 });
 
-                let baseStderr = '';
-                baseCheckoutProcess.stderr?.on('data', (data: Buffer) => {
-                    baseStderr += data.toString();
+                let checkoutStderr = '';
+                checkoutProcess.stderr?.on('data', (data: Buffer) => {
+                    checkoutStderr += data.toString();
                 });
 
-                baseCheckoutProcess.on('close', (baseCode) => {
-                    if (baseCode !== 0) {
-                        resolve({ success: false, created: false, error: `Failed to checkout base branch: ${baseStderr}` });
+                checkoutProcess.on('close', (checkoutCode) => {
+                    if (checkoutCode === 0) {
+                        log.info(`[CodeServer] Checked out existing local branch: ${branchName}`);
+                        resolve({ success: true, created: false });
                         return;
                     }
 
-                    // Pull latest from base branch
-                    log.info(`[CodeServer] Pulling latest from ${baseBranch}`);
-                    const pullProcess = spawn('git', ['pull', 'origin', baseBranch], {
+                    log.info(`[CodeServer] Local branch not found: ${checkoutStderr.trim()}, trying remote`);
+                    
+                    const remoteCheckoutProcess = spawn('git', ['checkout', '-b', branchName, `origin/${branchName}`], {
                         cwd: repoPath,
                         stdio: ['ignore', 'pipe', 'pipe'],
                     });
 
-                    pullProcess.on('close', (pullCode) => {
-                        // Create new branch (don't fail if pull fails - might be offline)
-                        if (pullCode !== 0) {
-                            log.warn(`[CodeServer] Pull failed (might be offline), continuing with local state`);
+                    let remoteStderr = '';
+                    remoteCheckoutProcess.stderr?.on('data', (data: Buffer) => {
+                        remoteStderr += data.toString();
+                    });
+
+                    remoteCheckoutProcess.on('close', (remoteCode) => {
+                        if (remoteCode === 0) {
+                            log.info(`[CodeServer] Checked out branch from remote: ${branchName}`);
+                            resolve({ success: true, created: false });
+                            return;
                         }
 
-                        log.info(`[CodeServer] Creating new branch: ${branchName}`);
-                        const createProcess = spawn('git', ['checkout', '-b', branchName], {
+                        log.info(`[CodeServer] Remote checkout also failed: ${remoteStderr.trim()}`);
+
+                        if (!baseBranch) {
+                            resolve({ success: false, created: false, error: `Branch ${branchName} doesn't exist locally or on remote, and no base branch provided` });
+                            return;
+                        }
+
+                        // First checkout base branch
+                        log.info(`[CodeServer] Branch not found anywhere, checking out base branch: ${baseBranch}`);
+                        const baseCheckoutProcess = spawn('git', ['checkout', baseBranch], {
                             cwd: repoPath,
                             stdio: ['ignore', 'pipe', 'pipe'],
                         });
 
-                        let createStderr = '';
-                        createProcess.stderr?.on('data', (data: Buffer) => {
-                            createStderr += data.toString();
+                        let baseStderr = '';
+                        baseCheckoutProcess.stderr?.on('data', (data: Buffer) => {
+                            baseStderr += data.toString();
                         });
 
-                        createProcess.on('close', (createCode) => {
-                            if (createCode === 0) {
-                                log.info(`[CodeServer] Created and checked out branch: ${branchName}`);
-                                resolve({ success: true, created: true });
-                            } else {
-                                resolve({ success: false, created: false, error: createStderr });
+                        baseCheckoutProcess.on('close', (baseCode) => {
+                            if (baseCode !== 0) {
+                                resolve({ success: false, created: false, error: `Failed to checkout base branch: ${baseStderr}` });
+                                return;
                             }
+
+                            // Pull latest from base branch
+                            log.info(`[CodeServer] Pulling latest from ${baseBranch}`);
+                            const pullProcess = spawn('git', ['pull', 'origin', baseBranch], {
+                                cwd: repoPath,
+                                stdio: ['ignore', 'pipe', 'pipe'],
+                            });
+
+                            pullProcess.on('close', (pullCode) => {
+                                // Create new branch (don't fail if pull fails - might be offline)
+                                if (pullCode !== 0) {
+                                    log.warn(`[CodeServer] Pull failed (might be offline), continuing with local state`);
+                                }
+
+                                log.info(`[CodeServer] Creating new branch: ${branchName}`);
+                                const createProcess = spawn('git', ['checkout', '-b', branchName], {
+                                    cwd: repoPath,
+                                    stdio: ['ignore', 'pipe', 'pipe'],
+                                });
+
+                                let createStderr = '';
+                                createProcess.stderr?.on('data', (data: Buffer) => {
+                                    createStderr += data.toString();
+                                });
+
+                                createProcess.on('close', (createCode) => {
+                                    if (createCode === 0) {
+                                        log.info(`[CodeServer] Created and checked out branch: ${branchName}`);
+                                        resolve({ success: true, created: true });
+                                    } else {
+                                        resolve({ success: false, created: false, error: createStderr });
+                                    }
+                                });
+                            });
                         });
                     });
                 });

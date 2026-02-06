@@ -100,9 +100,9 @@ const prodConfig: AppConfig = {
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
   codeServer: {
     version: '4.107.0',
-    defaultPort: 8080,
-    portRangeStart: 8080,
-    portRangeEnd: 8180,
+    defaultPort: 7080,
+    portRangeStart: 7080,
+    portRangeEnd: 7280,
     dataDir: 'code-server-data',
     binaryDir: 'code-server',
     authType: 'none',

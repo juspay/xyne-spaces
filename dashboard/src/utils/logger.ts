@@ -46,6 +46,21 @@ export const Event = {
   AUTH_REFRESH_SUCCESS: 'auth_refresh_success',
   AUTH_REFRESH_FAILED: 'auth_refresh_failed',
   CLEAR_AUTH_TOKEN_CALLED: 'clear_auth_token_called',
+  QUARTO_SETUP_STARTED: 'quarto_setup_started',
+  QUARTO_SETUP_SUCCESS: 'quarto_setup_success',
+  QUARTO_SETUP_FAILED: 'quarto_setup_failed',
+  QUARTO_ACCESS_SETUP_SUCCESS: 'quarto_access_setup_success',
+  QUARTO_ACCESS_SETUP_FAILED: 'quarto_access_setup_failed',
+  QUARTO_WORKSPACE_READY: 'quarto_workspace_ready',
+  QUARTO_REPO_CREATED: 'quarto_repo_created',
+  QUARTO_REPO_UPDATED: 'quarto_repo_updated',
+  QUARTO_REPO_DELETED: 'quarto_repo_deleted',
+  IDE_SETUP_STARTED: 'ide_setup_started',
+  IDE_SETUP_FAILED: 'ide_setup_failed',
+  IDE_WORKSPACE_READY: 'ide_workspace_ready',
+  IDE_REPO_CREATED: 'ide_repo_created',
+  IDE_REPO_UPDATED: 'ide_repo_updated',
+  IDE_REPO_DELETED: 'ide_repo_deleted',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

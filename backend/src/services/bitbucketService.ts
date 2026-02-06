@@ -156,4 +156,41 @@ export class BitbucketService {
     // Sort by date (newest first)
     return allPullRequests.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }
+
+  /**
+   * Add user write permission to a specific repository
+   * @param projectKey The Bitbucket project key
+   * @param repositorySlug The repository slug
+   * @param username The Bitbucket username to grant access to
+   */
+  async addUserWritePermission(
+    projectKey: string,
+    repositorySlug: string,
+    username: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const endpoint = `/rest/api/latest/projects/${projectKey}/repos/${repositorySlug}/permissions/users?name=${encodeURIComponent(username)}&permission=REPO_WRITE`;
+    const url = `${this.config.baseUrl}${endpoint}`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          'Accept': 'application/json;charset=UTF-8',
+          'Authorization': this.getAuthHeader(),
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error(`Failed to add user permission: ${response.status} ${response.statusText}`, { errorText });
+        return { success: false, error: `Bitbucket API error: ${response.status} ${response.statusText}` };
+      }
+
+      logger.info(`Successfully added REPO_WRITE permission for user ${username} to ${projectKey}/${repositorySlug}`);
+      return { success: true };
+    } catch (error) {
+      logger.error('Error adding user permission:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
 }

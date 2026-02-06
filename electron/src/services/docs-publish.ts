@@ -1,6 +1,7 @@
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { app, session, net } from 'electron';
 import log from 'electron-log/main';
 import archiver from 'archiver';
@@ -60,12 +61,17 @@ class DocsPublishService {
             }
 
             let repoName: string;
-            if (remoteUrl.includes('@')) {
-                const match = remoteUrl.match(/:([^/]+\/[^.]+)/);
-                repoName = match ? match[1] : path.basename(projectPath);
+            
+            let match = remoteUrl.match(/:([^/]+\/[^/.]+)(?:\.git)?$/);
+            if (match) {
+                repoName = match[1];
             } else {
-                const match = remoteUrl.match(/\/([^/]+\/[^/.]+)(\.git)?$/);
-                repoName = match ? match[1] : path.basename(projectPath);
+                match = remoteUrl.match(/\/([^/]+\/[^/.]+?)(?:\.git)?$/);
+                if (match) {
+                    repoName = match[1];
+                } else {
+                    repoName = path.basename(projectPath);
+                }
             }
 
             const branchName = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath, encoding: 'utf-8' }).trim();
@@ -86,6 +92,7 @@ class DocsPublishService {
             const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
 
             const url = `${this.backendUrl}/api/docs/check/${userRepo}`;
+            log.info(`[DocsPublish] Checking existing doc at: ${url}`);
 
             return new Promise((resolve) => {
                 const request = net.request({ method: 'GET', url });
@@ -657,6 +664,8 @@ class DocsPublishService {
                     await this.handleGetShareTargets(req, res, parsedUrl);
                 } else if (req.method === 'POST' && pathname === '/api/share') {
                     await this.handleShareDoc(req, res);
+                } else if (req.method === 'GET' && pathname.startsWith('/api/docs/check/')) {
+                    await this.handleCheckExistingDoc(req, res, pathname);
                 } else if (req.method === 'GET' && pathname === '/api/ping') {
                     res.writeHead(200, { 
                         'Content-Type': 'application/json',
@@ -712,13 +721,14 @@ class DocsPublishService {
                     : await this.getGitInfo(gitInfoPath);
 
                 if (!gitInfo) {
-                    const uuid = crypto.randomUUID();
+                    const username = os.userInfo().username || 'local';
+                    const normalizedPath = gitInfoPath.replace(/[\/\\]/g, '-').replace(/^-+|-+$/g, '');
                     gitInfo = {
-                        repoName: 'local/docs',
-                        branchName: uuid,
+                        repoName: username,
+                        branchName: normalizedPath,
                         remoteUrl: '',
                     };
-                    log.info(`[DocsPublish] No git repo found, using generated userRepo: ${gitInfo.repoName}/${gitInfo.branchName}`);
+                    log.info(`[DocsPublish] No git repo found, using username/localpath: ${gitInfo.repoName}/${gitInfo.branchName}`);
                 }
 
                 const { repoName, branchName, remoteUrl } = gitInfo;
@@ -982,6 +992,47 @@ class DocsPublishService {
                 res.end(JSON.stringify({ success: false, error: 'Failed to share doc' }));
             }
         });
+    }
+
+    private async handleCheckExistingDoc(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
+        if (!this.backendUrl) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ exists: false, error: 'Backend URL not configured' }));
+            return;
+        }
+
+        try {
+            const userRepo = pathname.replace('/api/docs/check/', '');
+            log.info(`[DocsPublish] Checking existing doc for: ${userRepo}`);
+
+            const cookies = await session.defaultSession.cookies.get({ url: this.backendUrl });
+            const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+            const url = `${this.backendUrl}/api/docs/check/${userRepo}`;
+
+            const request = net.request({ method: 'GET', url });
+            request.setHeader('Cookie', cookieString);
+
+            let responseData = '';
+            request.on('response', (response) => {
+                response.on('data', (chunk) => { responseData += chunk.toString(); });
+                response.on('end', () => {
+                    log.info(`[DocsPublish] Check existing doc response: ${responseData.substring(0, 200)}`);
+                    res.writeHead(response.statusCode || 200, { 'Content-Type': 'application/json' });
+                    res.end(responseData);
+                });
+            });
+            request.on('error', (err) => {
+                log.error('[DocsPublish] Check existing doc request error:', err);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ exists: false, error: err.message }));
+            });
+            request.end();
+        } catch (error) {
+            log.error('[DocsPublish] Failed to check existing doc:', error);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ exists: false, error: 'Failed to check existing doc' }));
+        }
     }
 
     getPort(): number | null {
