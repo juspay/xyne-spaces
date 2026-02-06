@@ -214,6 +214,7 @@ export function CallControls({
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               title={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
+              data-testid='mic-toggle-button'
             >
               {isMicEnabled ? (
                 <Mic
@@ -300,6 +301,7 @@ export function CallControls({
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               title={isCameraEnabled ? 'Turn off camera' : 'Turn on camera'}
+              data-testid='camera-toggle-button'
             >
               {isCameraEnabled ? (
                 <Video
@@ -406,6 +408,7 @@ export function CallControls({
           )}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Participants'
+          data-testid='add-participant-button'
         >
           <Users
             className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
@@ -509,6 +512,7 @@ export function CallControls({
           className={cn(buttonClasses, 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40')}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Leave call'
+          data-testid='end-call-button'
         >
           <PhoneOff
             className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}

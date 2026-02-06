@@ -57,7 +57,7 @@ export function InviteToCallModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose} title='Invite to Call'>
-      <div className='p-4 space-y-6'>
+      <div className='p-4 space-y-6' data-testid='invite-to-call-modal'>
         <div>
           <h2 className='text-lg font-semibold text-foreground mb-1'>Invite to Call</h2>
           <p className='text-sm text-muted-foreground'>
@@ -73,6 +73,7 @@ export function InviteToCallModal({
             placeholder='Search users to invite...'
             label='Select Users'
             hintText='Search by name or email to find users to invite'
+            data-testid='search-user-invite'
           />
         </div>
 
@@ -86,6 +87,7 @@ export function InviteToCallModal({
             onClick={handleInvite}
             disabled={selectedUsers.length === 0 || isInviting}
             loading={isInviting}
+            data-testid='invite-button'
           >
             {isInviting
               ? 'Inviting...'

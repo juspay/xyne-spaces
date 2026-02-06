@@ -28,7 +28,7 @@ export const CallConfirmationModal: React.FC<CallConfirmationModalProps> = ({
 }) => {
   return (
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
-      <div className='p-6 flex flex-col max-w-[460px]'>
+      <div className='p-6 flex flex-col max-w-[460px]' data-testid='confirm-call-modal'>
         {/* Icon */}
         <div className='w-10 h-10 rounded-xl bg-indigo-100/60 border border-indigo-200/80 flex items-center justify-center mb-5'>
           <div className='scale-[1.25]'>
@@ -54,6 +54,7 @@ export const CallConfirmationModal: React.FC<CallConfirmationModalProps> = ({
             onClick={onConfirm}
             size='sm'
             className='bg-[#6276BE] hover:bg-[#5264a8] text-white'
+            data-testid='confirm-call-button'
           >
             Okay
           </Button>

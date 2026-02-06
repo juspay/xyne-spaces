@@ -68,27 +68,16 @@ When('I click on {string}', async function (this: CustomWorld, selector: string)
   await this.page.click(selector);
 });
 
-When('I force click on text {string}', async function (this: CustomWorld, text: string) {
+When('I click on the id {string}', async function (this: CustomWorld, testId: string) {
   if (!this.page) throw new Error('Browser not initialized');
 
-  let resolvedText = text;
+  uiLogger.info(`[UI] Clicking on id: ${testId}`);
 
-  const userMatch = text.match(/^user:([^.]+)\.(.+)$/);
-  if (userMatch) {
-    const [, browserSession, field] = userMatch;
-    for (const [, userData] of this.userData) {
-      if (userData.browserSession === browserSession) {
-        resolvedText = userData[field as keyof typeof userData] as string;
-        break;
-      }
-    }
-    if (resolvedText === text) {
-      throw new Error(`No user found logged in browser session "${browserSession}"`);
-    }
-  }
+  const element = this.page.locator(`[id="${testId}"]`).first();
+  await element.waitFor({ state: 'visible', timeout: 10000 });
+  await element.click();
 
-  await this.page.click(`text="${resolvedText}"`, { force: true });
-  uiLogger.info(`[UI] Force clicked on text: "${resolvedText}"`);
+  uiLogger.info(`[UI] Clicked on id: ${testId}`);
 });
 
 When('I click on text {string}', async function (this: CustomWorld, text: string) {
@@ -144,6 +133,35 @@ When('I click the button with text {string}', async function (this: CustomWorld,
   await this.page.click(`button:has-text("${text}")`);
 });
 
+When(
+  'I click on the first button in the element {string}',
+  async function (this: CustomWorld, selector: string) {
+    if (!this.page) throw new Error('Browser not initialized');
+
+    uiLogger.info(`[UI] Clicking on first button in: ${selector}`);
+
+    const container = this.page.locator(selector).first();
+    await container.waitFor({ state: 'visible', timeout: 10000 });
+
+    let firstButton = container.locator('button').first();
+
+    const buttonCount = await container.locator('button').count();
+    if (buttonCount === 0) {
+      uiLogger.info('[UI] No button elements found, trying role="button"');
+      firstButton = container.locator('[role="button"]').first();
+      const roleButtonCount = await container.locator('[role="button"]').count();
+      if (roleButtonCount === 0) {
+        throw new Error(
+          `No buttons found in element ${selector}. Expected either <button> elements or elements with role="button"`
+        );
+      }
+    }
+    await firstButton.click();
+
+    uiLogger.info('[UI] Clicked on first button');
+  }
+);
+
 // Type Actions
 When(
   'I type {string} on the element {string}',
@@ -184,8 +202,16 @@ When('I clear the text in {string}', async function (this: CustomWorld, selector
 // Whole page
 Then('I should see the element {string}', async function (this: CustomWorld, selector: string) {
   if (!this.page) throw new Error('Browser not initialized');
-  const element = await this.page.$(selector);
-  expect(element).to.not.be.null;
+
+  uiLogger.info(`[UI] Verifying element is visible: ${selector}`);
+
+  const element = this.page.locator(selector).first();
+  await element.waitFor({ state: 'visible', timeout: 10000 });
+
+  const isVisible = await element.isVisible();
+  expect(isVisible).to.be.true;
+
+  uiLogger.info(`[UI] Element ${selector} is visible`);
 });
 
 Then('I should not see {string}', async function (this: CustomWorld, text: string) {

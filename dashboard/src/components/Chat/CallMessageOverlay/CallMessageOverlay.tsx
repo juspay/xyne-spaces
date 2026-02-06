@@ -124,6 +124,7 @@ export function CallMessageOverlay({
             <button
               onClick={() => handleCallAction(handleCallClick)}
               className='bg-green-600 hover:bg-green-700 text-white border-green-600 px-3 py-1 rounded-md text-sm font-medium transition-colors'
+              data-testid='join-button'
             >
               Join
             </button>

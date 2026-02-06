@@ -254,6 +254,7 @@ export function MiniCallView({
               height: `${size.height}px`,
               borderRadius: isChatOpen ? '12px 12px 0 0' : '12px',
             }}
+            data-testid='call-window'
           >
             <ResizeHandles showCorner={!isChatOpen} />
 
@@ -269,7 +270,7 @@ export function MiniCallView({
                     </div>
                     <span className='text-white text-xs font-semibold'>Call Active</span>
                     <span className='text-gray-400 text-xs'>·</span>
-                    <span className='text-gray-400 text-xs'>
+                    <span className='text-gray-400 text-xs' data-testid='participant-count'>
                       {participantCount} participant{participantCount !== 1 ? 's' : ''}
                     </span>
                   </div>
