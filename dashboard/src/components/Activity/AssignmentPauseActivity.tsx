@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
-import { PauseCircle } from 'lucide-react';
+import { PauseCircle, PlayCircle } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 
@@ -11,25 +11,44 @@ export const AssignmentPauseActivity = ({
   activity: ActivityWithRelated;
   isExpanded: boolean;
 }): ReactElement | null => {
-  // actionSourceId contains the userId of the user who paused
-  const pausedUserId = activity.actionSourceId;
-  const pausedUser = useUser(pausedUserId);
+  const isPaused = activity.actorAction === 'paused_from_assignment';
 
-  if (!pausedUser) return null;
+  // actionSourceId contains the userId of the user who paused/resumed
+  const userId = activity.actionSourceId;
+  const user = useUser(userId);
 
-  const userName = pausedUser.name || pausedUser.email || 'A team member';
+  if (!user) return null;
+
+  const userName = user.name || user.email || 'A team member';
 
   // No target path needed - this is just informational
   const targetPath = '';
 
+  // Determine badge icon and text based on action type
+  const badgeIcon = isPaused ? (
+    <PauseCircle className='w-4 h-4 text-gray-600' />
+  ) : (
+    <PlayCircle className='w-4 h-4 text-green-600' />
+  );
+
+  const badgeColorClass = isPaused ? 'bg-gray-100' : 'bg-green-100';
+
+  const expandedText = isPaused
+    ? `${userName} has paused from ticket assignment`
+    : `${userName} has resumed from ticket assignment`;
+
+  const collapsedSuffix = isPaused
+    ? ' paused from ticket assignment'
+    : ' resumed from ticket assignment';
+
   return (
     <ActivityItemCard
       activity={activity}
-      actorId={pausedUserId}
+      actorId={userId}
       actorName={userName}
       channelId={undefined}
-      badgeIcon={<PauseCircle className='w-4 h-4 text-gray-600' />}
-      badgeColorClass='bg-gray-100'
+      badgeIcon={badgeIcon}
+      badgeColorClass={badgeColorClass}
       description={<span className='text-gray-500 text-sm'>ticket assignment</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
@@ -37,14 +56,12 @@ export const AssignmentPauseActivity = ({
     >
       {isExpanded ? (
         <div className='flex flex-col gap-1 mt-2'>
-          <div className='text-sm text-[#181B1D] font-medium'>
-            {userName} has paused from ticket assignment
-          </div>
+          <div className='text-sm text-[#181B1D] font-medium'>{expandedText}</div>
         </div>
       ) : (
         <span className='text-sm text-[#181B1D]'>
           <span className='font-semibold'>{userName}</span>
-          <span className='text-[#505B62]'> paused from ticket assignment</span>
+          <span className='text-[#505B62]'>{collapsedSuffix}</span>
         </span>
       )}
     </ActivityItemCard>

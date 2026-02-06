@@ -63,7 +63,7 @@ export const UserGroupListItem = ({
             </div>
 
             {memberCount > 0 && (
-              <div className='flex items-center -space-x-2'>
+              <div className='flex items-center -space-x-2 z-0'>
                 {/* Show up to 3 member avatars */}
                 {members.slice(0, 3).map((member, index) => (
                   <div key={member.id} className='relative' style={{ zIndex: 3 - index }}>
