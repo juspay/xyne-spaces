@@ -4,7 +4,6 @@ import { ReactElement } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
 import { cn } from '../../../utils/classNames';
 import { useUser } from '../../../hooks/useUsers';
-import { UserPresenceStatus } from '@xyne/shared';
 import { User } from '../../../machines/stateMachine';
 
 export type AvatarSize = 'sm' | 'rg' | 'md' | 'lg' | 'xl' | 'big';
@@ -115,7 +114,7 @@ const generateAvatarColor = (userId: string): { bg: string; text: string } => {
 const Avatar = ({
   userId,
   size = 'md',
-  showActiveStatus = true,
+  // showActiveStatus = true,
   className,
 }: AvatarProps): ReactElement => {
   const { user: currentUser } = useAuth();
@@ -145,7 +144,7 @@ const Avatar = ({
         {initials}
       </AvatarFallback>
 
-      {showActiveStatus && (
+      {/* {showActiveStatus && (
         <>
           {(() => {
             const status = user?.presenceStatus?.status;
@@ -184,7 +183,7 @@ const Avatar = ({
             return null;
           })()}
         </>
-      )}
+      )} */}
     </AvatarRoot>
   );
 };

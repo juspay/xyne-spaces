@@ -84,7 +84,6 @@ import activityLogRoutes from '@/routes/activityLog';
 import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
-import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
@@ -404,8 +403,8 @@ export class App {
     await metricsSyncQueue.runInitialSync();
 
     // Initialize presence cleanup queue (Bull-based scheduling)
-    logger.info('Initializing presence cleanup queue...');
-    await presenceCleanupQueue.initialize();
+    // logger.info('Initializing presence cleanup queue...');
+    // await presenceCleanupQueue.initialize();
 
     logger.info('Initializing ETA deadline queue...');
     await etaDeadlineQueue.initialize();
@@ -487,7 +486,7 @@ export class App {
       await metricsSyncQueue.close();
 
       // Close presence cleanup queue
-      await presenceCleanupQueue.close();
+      // await presenceCleanupQueue.close();
 
       // Close ETA deadline queue
       await etaDeadlineQueue.close();
