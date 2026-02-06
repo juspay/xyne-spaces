@@ -1,3 +1,10 @@
+## [1.30.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.30.0...v1.30.1) (2026-02-06)
+
+
+### Bug Fixes
+
+* call summary and forward msg copy fix ([12a8aa4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/12a8aa41dbb8fb68f031a14eaff9e8b55ee38032)), closes [#2831](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2831)
+
 ## [1.30.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.29.0...v1.30.0) (2026-02-05)
 
 
