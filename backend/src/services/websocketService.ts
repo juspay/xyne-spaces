@@ -3,11 +3,9 @@ import { Server as HttpServer } from 'http';
 
 import { redisService, ChatMessage, WorkflowEvent } from './redisService';
 import { typingService, TypingUser } from './typingService';
-import { userStatusService } from './userStatusService';
 import { workspaceEventService, WorkspaceEvent } from './workspaceEventService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
-import { DatabaseClient } from '../database/client';
 import { logger } from '@/utils/logger';
 import { authMiddleware } from '../middleware/auth';
 import { notificationService } from '@/notification-service';
@@ -207,7 +205,7 @@ class WebSocketService {
   }
 
   private async handleConnection(socket: AuthenticatedSocket): Promise<void> {
-    const { userId, userEmail, userName } = socket;
+    const { userId, userEmail } = socket;
 
     logger.info(`🔌 [CONNECT] User ${userEmail} connected via WebSocket (Socket ID: ${socket.id})`);
 
@@ -224,34 +222,34 @@ class WebSocketService {
     // Subscribe to user-specific events (only once per user across all their connections)
     await this.setupUserEventSubscription(userId);
 
-    // Set user status to ONLINE automatically on connect (unless status is AWAY)
-    try {
-      // Check current status in database
-      const prisma = DatabaseClient.getInstance();
-      const currentPresence = await prisma.userPresence.findUnique({
-        where: { userId }
-      });
+    // // Set user status to ONLINE automatically on connect (unless status is AWAY)
+    // try {
+    //   // Check current status in database
+    //   const prisma = DatabaseClient.getInstance();
+    //   const currentPresence = await prisma.userPresence.findUnique({
+    //     where: { userId }
+    //   });
       
-      // Only auto-set ONLINE if user is not AWAY
-      if (!currentPresence || currentPresence.status !== 'AWAY') {
-        const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
-        await userStatusService.setUserStatus(
-          userId,
-          'ONLINE',
-          currentPresence?.status || null,
-          {
-            userName: userName || userEmail.split('@')[0],
-            userEmail,
-            deviceInfo
-          }
-        );
+    //   // Only auto-set ONLINE if user is not AWAY
+    //   if (!currentPresence || currentPresence.status !== 'AWAY') {
+    //     const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
+    //     await userStatusService.setUserStatus(
+    //       userId,
+    //       'ONLINE',
+    //       currentPresence?.status || null,
+    //       {
+    //         userName: userName || userEmail.split('@')[0],
+    //         userEmail,
+    //         deviceInfo
+    //       }
+    //     );
 
-      } else {
-        logger.info(`👤 [USER-STATUS] User ${userName || userEmail} remains AWAY on connect`);
-      }
-    } catch (error) {
-      logger.error('❌ [USER-STATUS] Error setting user online status:', error);
-    }
+    //   } else {
+    //     logger.info(`👤 [USER-STATUS] User ${userName || userEmail} remains AWAY on connect`);
+    //   }
+    // } catch (error) {
+    //   logger.error('❌ [USER-STATUS] Error setting user online status:', error);
+    // }
 
     // Handle joining sessions
     socket.on('join_session', async (data: JoinSessionData) => {
@@ -287,14 +285,14 @@ class WebSocketService {
 
     // Handle user activity (extends online time)
     // Supports acknowledgment callback for reliable delivery detection
-    socket.on('user_activity', async (_data: unknown, callback?: (ack: { success: boolean }) => void) => {
-      await this.handleUserActivity(socket);
+    // socket.on('user_activity', async (_data: unknown, callback?: (ack: { success: boolean }) => void) => {
+    //   await this.handleUserActivity(socket);
       
-      // Send acknowledgment if callback provided (for heartbeat reliability)
-      if (typeof callback === 'function') {
-        callback({ success: true });
-      }
-    });
+    //   // Send acknowledgment if callback provided (for heartbeat reliability)
+    //   if (typeof callback === 'function') {
+    //     callback({ success: true });
+    //   }
+    // });
 
     // Handle bulk channel subscriptions (new user-driven model)
     socket.on('subscribe_to_channels', async (data: SubscribeToChannelsData) => {
@@ -574,22 +572,6 @@ class WebSocketService {
       // Remove user connection from Redis
       await redisService.removeUserConnection(userId, socket.id);
 
-      // Check if user has other active connections
-      const remainingConnections = await redisService.getUserConnections(userId);
-      
-      if (remainingConnections.length > 0) {
-        // User has other tabs/devices open - do nothing, they're still connected
-        logger.info(`👤 [USER-STATUS] User ${userName || userEmail} still has ${remainingConnections.length} other connection(s), staying ONLINE`);
-      } else {
-        // No remaining connections - but DON'T mark OFFLINE immediately!
-        // Let the grace period handle it:
-        // - Redis TTL (90s) will keep user in ONLINE state briefly
-        // - If user reopens tab, heartbeat will refresh the TTL
-        // - If no heartbeat for 5 min, cleanup job marks OFFLINE
-        // This prevents flicker when user refreshes page or briefly closes tab
-        logger.info(`👤 [USER-STATUS] User ${userName || userEmail} has no remaining connections, grace period started (cleanup job will mark OFFLINE if no heartbeat)`);
-      }
-
       // Clean up typing indicators for this user
       await typingService.cleanupUserTyping(userId);
 
@@ -634,17 +616,17 @@ class WebSocketService {
 
       logger.info(`👤 [USER-STATUS] User ${userName || userEmail} manually updating status to ${status}`);
 
-      const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
-      await userStatusService.setUserStatus(
-        userId,
-        status,
-        null,
-        {
-          userName: userName || userEmail.split('@')[0],
-          userEmail,
-          deviceInfo
-        }
-      );
+      // const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
+      // await userStatusService.setUserStatus(
+      //   userId,
+      //   status,
+      //   null,
+      //   {
+      //     userName: userName || userEmail.split('@')[0],
+      //     userEmail,
+      //     deviceInfo
+      //   }
+      // );
 
       // Confirm status update to user
       socket.emit('status_updated', {
@@ -660,20 +642,20 @@ class WebSocketService {
     }
   }
 
-  private async handleUserActivity(socket: AuthenticatedSocket): Promise<void> {
-    try {
-      const { userId, userName, userEmail } = socket;
-      const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
+  // private async handleUserActivity(socket: AuthenticatedSocket): Promise<void> {
+  //   try {
+  //     const { userId, userName, userEmail } = socket;
+  //     // const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
 
-      // Log at info level so we can see heartbeats in production logs
-      logger.info(`💓 [HEARTBEAT] Received from ${userName || userEmail} (${userId}) via socket ${socket.id}`);
+  //     // Log at info level so we can see heartbeats in production logs
+  //     // logger.info(`💓 [HEARTBEAT] Received from ${userName || userEmail} (${userId}) via socket ${socket.id}`);
 
-      // Update user activity (extends online time)
-      await userStatusService.updateUserActivity(userId, deviceInfo);
-    } catch (error) {
-      logger.error('❌ [USER-STATUS] Error handling user activity:', error);
-    }
-  }
+  //     // Update user activity (extends online time)
+  //     // await userStatusService.updateUserActivity(userId, deviceInfo);
+  //   } catch (error) {
+  //     logger.error('❌ [USER-STATUS] Error handling user activity:', error);
+  //   }
+  // }
 
   private async handleNotificationAcknowledgment(socket: AuthenticatedSocket, data: { notificationId: string }): Promise<void> {
     try {

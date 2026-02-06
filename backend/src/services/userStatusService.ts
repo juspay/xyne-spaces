@@ -68,21 +68,21 @@ export class UserStatusService {
 
       if(currentPresence !== status) {  
 
-        // Update database (upsert)
-        await this.prisma.userPresence.upsert({
-          where: { userId },
-          update: {
-            status,
-            deviceInfo: user.deviceInfo,
-          },
-          create: {
-            userId,
-            status,
-            lastActiveAt: new Date(timestamp),
-            lastSeenAt: new Date(timestamp),
-            deviceInfo: user.deviceInfo
-          }
-        });
+        // // Update database (upsert)
+        // await this.prisma.userPresence.upsert({
+        //   where: { userId },
+        //   update: {
+        //     status,
+        //     deviceInfo: user.deviceInfo,
+        //   },
+        //   create: {
+        //     userId,
+        //     status,
+        //     lastActiveAt: new Date(timestamp),
+        //     lastSeenAt: new Date(timestamp),
+        //     deviceInfo: user.deviceInfo
+        //   }
+        // });
       }
 
       logger.info(`👤 [USER-STATUS] User ${user.userName} (${userId}) status updated to ${status}`);
@@ -173,20 +173,20 @@ export class UserStatusService {
       await redisService.del(userStatusKey);
 
       // Update database
-      await this.prisma.userPresence.upsert({
-        where: { userId },
-        update: {
-          status: 'OFFLINE',
-          lastSeenAt: new Date(),
-          updatedAt: new Date()
-        },
-        create: {
-          userId,
-          status: 'OFFLINE',
-          lastActiveAt: new Date(),
-          lastSeenAt: new Date()
-        }
-      });
+      // await this.prisma.userPresence.upsert({
+      //   where: { userId },
+      //   update: {
+      //     status: 'OFFLINE',
+      //     lastSeenAt: new Date(),
+      //     updatedAt: new Date()
+      //   },
+      //   create: {
+      //     userId,
+      //     status: 'OFFLINE',
+      //     lastActiveAt: new Date(),
+      //     lastSeenAt: new Date()
+      //   }
+      // });
 
       if (currentStatus) {
         logger.info(`👤 [USER-STATUS] User ${currentStatus.userName} (${userId}) marked as OFFLINE`);

@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { X, User, SmilePlus, ChevronDown, Check, PauseCircle } from 'lucide-react';
+import { X, User, SmilePlus, PauseCircle } from 'lucide-react';
 import { useZero } from '@rocicorp/zero/react';
 import { useAuth } from '../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -14,13 +14,10 @@ import { useDebugSettings } from '../../hooks/useDebugSettings';
 import { cn } from '../ui/Drawer';
 import { isStatusExpired, formatExpiryTime } from '../../utils/statusUtils';
 import { Switch } from '../ui/Switch';
-import { UserPresenceStatus } from '@xyne/shared';
 import { useChannelByName } from '../../hooks/useChannels';
-import { useSelf, useUser } from '../../hooks/useUsers';
+import { useSelf } from '../../hooks/useUsers';
 import { mutators } from '../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
-import { Popover } from '../ui/Popover/Popover';
-import { websocketService } from '../../services/clients/socketClient';
 import { apiInstance } from '../../services/clients/apiClient';
 
 const Settings = (): ReactElement => {
@@ -38,8 +35,8 @@ const Settings = (): ReactElement => {
   const generalChannel = useChannelByName('general');
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId?: string }>();
-  const userData = useUser(user?.id || '');
-  const userPresence = userData?.presenceStatus;
+  // const userData = useUser(user?.id || '');
+  // const userPresence = userData?.presenceStatus;
   const handleLogout = (): void => {
     logout();
   };
@@ -132,54 +129,10 @@ const Settings = (): ReactElement => {
         </div>
         <div className='flex-1 min-w-0 space-y-1'>
           <p className='text-sm font-medium text-gray-900 truncate'>{user?.name || 'User'}</p>
-          {userPresence?.status && (
-            <Popover
-              trigger={
-                <button className='flex items-center gap-1.5 hover:bg-gray-100 px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'>
-                  {userPresence.status === UserPresenceStatus.ONLINE ? (
-                    <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-white' />
-                  ) : (
-                    <div className='w-2 h-2 rounded-full bg-gray-300 ring-2 ring-white'>
-                      <div className='w-full h-full rounded-full bg-white/50' />
-                    </div>
-                  )}
-                  <p className='text-xs text-gray-600'>
-                    {userPresence.status === UserPresenceStatus.ONLINE ? 'Active' : 'Away'}
-                  </p>
-                  <ChevronDown className='size-3 text-gray-400' />
-                </button>
-              }
-              align='start'
-              className='w-40 p-1'
-            >
-              <div className='space-y-0.5'>
-                <button
-                  onClick={() => {
-                    websocketService.emit('update_status', { status: 'ONLINE' });
-                  }}
-                  className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
-                >
-                  <div className='w-2 h-2 rounded-full bg-green-500' />
-                  <span>Active</span>
-                  {userPresence.status !== UserPresenceStatus.AWAY && (
-                    <Check className='size-3 ml-auto text-gray-500' />
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    websocketService.emit('update_status', { status: 'AWAY' });
-                  }}
-                  className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
-                >
-                  <div className='w-2 h-2 rounded-full border border-gray-400' />
-                  <span>Away</span>
-                  {userPresence.status === UserPresenceStatus.AWAY && (
-                    <Check className='size-3 ml-auto text-gray-500' />
-                  )}
-                </button>
-              </div>
-            </Popover>
-          )}
+          <div className='flex items-center gap-1.5'>
+            <div className='w-2 h-2 rounded-full bg-green-500' />
+            <p className='text-xs text-gray-600'>Active</p>
+          </div>
         </div>
       </div>
 

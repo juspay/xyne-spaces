@@ -8,7 +8,6 @@ import { useZero } from '@rocicorp/zero/react';
 import { mutators } from '../../zero/mutators';
 import { callActor } from '../../machines/callMachine';
 import { v4 as uuidv4 } from 'uuid';
-import heartbeatService from '../../services/heartbeatService';
 import { roomActor } from '../../machines/roomMachine';
 import { CallType } from '@xyne/shared';
 
@@ -411,7 +410,7 @@ export const NotificationHandler: React.FC = () => {
 
           // Start heartbeat using Web Worker-based service
           // This is immune to browser background tab throttling
-          heartbeatService.start(30000); // 30 seconds
+          // heartbeatService.start(30000); // 30 seconds
         })
         .catch(() => {
           // WebSocket connection failed - will retry on next user state change
@@ -421,7 +420,7 @@ export const NotificationHandler: React.FC = () => {
 
     return (): void => {
       // Stop heartbeat service on cleanup
-      heartbeatService.stop();
+      // heartbeatService.stop();
 
       if (isConnectedRef.current) {
         websocketService.removeListener('notification_received', handleNotificationRef.current);
