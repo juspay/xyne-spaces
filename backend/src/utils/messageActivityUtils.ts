@@ -134,6 +134,7 @@ export async function createSpecialMentionActivities(
   const activities = userIds.map(userId => ({
     id: uuidv4(),
     userId,
+    actorId: senderUserId,
     actorAction: 'group_mention' as const,
     actionSource: 'message' as const,
     actionSourceId: messageId,
@@ -176,6 +177,7 @@ export async function createDirectMessageActivities(
   const activities = recipientIds.map(userId => ({
     id: uuidv4(),
     userId,
+    actorId: senderUserId,
     actorAction: 'direct_message' as const,
     actionSource: 'message' as const,
     actionSourceId: messageId,

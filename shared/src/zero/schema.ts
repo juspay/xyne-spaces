@@ -971,7 +971,9 @@ export const activityTable = table('activities')
     messageId: string().optional(),
     reactionId: string().optional(),
     callId: string().optional(),
+    ticketId: string().optional(),
     channelId: string().optional(),
+    actorId: string(),
     classification: enumeration<ActivityClassification>(),
     classificationConfidence: number().optional(),
     classificationJobType: enumeration<ActivityClassificationJobType>().optional(),
@@ -2033,6 +2035,16 @@ export const activityTableRelationships = relationships(activityTable, ({ one })
     sourceField: ['callId'],
     destField: ['id'],
     destSchema: callTable,
+  }),
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  actor: one({
+    sourceField: ['actorId'],
+    destField: ['id'],
+    destSchema: userTable,
   }),
 }));
 

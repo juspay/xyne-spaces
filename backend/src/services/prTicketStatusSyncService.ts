@@ -11,6 +11,7 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { v4 as uuidv4 } from 'uuid';
+import { PullRequestActivityHandler } from '@/zero/side-effects/tables/pull-requests-handler';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -96,13 +97,13 @@ export class PRTicketStatusSyncService {
    */
   private async getBitbucketBotId(): Promise<string> {
     try {
-      const bitbucketBot = await unifiedBotUserService.getBotByBotId('bitbucket');
+      const bitbucketBot = await unifiedBotUserService.getBotByEmail('bitbucket-bot@bot.xyne.ai');
       if (bitbucketBot) {
         return bitbucketBot.id;
       }
 
       logger.warn('[PR-Ticket-Sync] Bitbucket bot not found, falling back to xyne-automatic bot');
-      const xyneBot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+      const xyneBot = await unifiedBotUserService.getBotByEmail('ticket-bot@bot.xyne.ai');
       if (xyneBot) {
         return xyneBot.id;
       }
@@ -232,6 +233,7 @@ export class PRTicketStatusSyncService {
             destinationBranchName: pr.destinationBranchName,
             prAuthor: params.prAuthor,
             remainingOpenPRs: params.remainingOpenPRs,
+            pullRequestId: pr.id,
           }
         );
         await this.sendTicketUpdateMessage(ticket, pr, params, updatedBy);
@@ -259,6 +261,7 @@ export class PRTicketStatusSyncService {
             destinationBranchName: pr.destinationBranchName,
             prAuthor: params.prAuthor,
             remainingOpenPRs: params.remainingOpenPRs,
+            pullRequestId: pr.id,
           }
         );
         await this.sendTicketUpdateMessage(
@@ -291,6 +294,7 @@ export class PRTicketStatusSyncService {
           destinationBranchName: pr.destinationBranchName,
           prAuthor: params.prAuthor,
           remainingOpenPRs: params.remainingOpenPRs,
+          pullRequestId: pr.id,
         }
       );
 
@@ -298,6 +302,17 @@ export class PRTicketStatusSyncService {
         logger.info(
           `[PR-Ticket-Sync] Updated ticket ${ticket.xyneId} stage: ${oldStageName} → ${targetStage.name}`
         );
+        
+        // Create PR activities for users when stage changed due to PR webhook
+        const prActivityHandler = new PullRequestActivityHandler({ userID: updatedBy });
+        await prActivityHandler.onUpdate({
+          entityType: 'pull_requests',
+          entityId: pr.id,
+          operation: 'update',
+          args: {
+            status: params.newStatus,
+          },
+        });
       } else {
         logger.info(
           `[PR-Ticket-Sync] Ticket ${ticket.xyneId} already in stage ${targetStage.name}`

@@ -1,5 +1,5 @@
 import { BaseSideEffectHandler } from '../base-handler';
-import type { SideEffectJobConfig } from '../types';
+import type { SideEffectJobConfig, ConversationPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 
@@ -44,8 +44,8 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
   }
 
   async onDelete(job: SideEffectJobConfig): Promise<void> {
-    const {previousValue} = job;
-    
+    const previousValue = job.previousValue as ConversationPreviousValue | undefined;
+
     const [channel, channelParticipantsRaw] = await Promise.all([
       db.channel.findUnique({
         where: { id: previousValue?.channelId },

@@ -1037,11 +1037,22 @@ class NotificationService {
     try {
       const ticket = await prisma.ticket.findUnique({
         where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+        },
       });
       if (!ticket) {
         logger.warn(`Ticket not found: ${ticketId}`);
         return;
       }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/tickets?tickets=${ticketId}`;
 
       await this.createNotification(assignedTo, {
         title: 'Ticket Assigned',
@@ -1049,10 +1060,12 @@ class NotificationService {
         type: 'TICKET_ASSIGNMENT',
         relatedEntityType: 'ticket',
         relatedEntityId: ticketId,
-        actionUrl: `/tickets?tickets=${ticketId}`,
+        actionUrl,
         metadata: {
           ticketId,
           assignedBy,
+          channelId: ticket.channelId,
+          conversationId: ticket.conversationId,
         },
       });
     } catch (error) {

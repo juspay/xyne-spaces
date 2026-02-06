@@ -77,6 +77,7 @@ class CallSideEffectService {
         // 3. Create Activities
         await activityService.createActivities(invitedParticipants.map(participant => ({
             userId: participant.userId,
+            actorId: participant.invitedBy,
             actorAction: 'missed_call',
             actionSource: 'call',
             actionSourceId: call.externalId,

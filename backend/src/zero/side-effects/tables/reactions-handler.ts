@@ -81,6 +81,7 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
       reactionId: context.reactionId,
       messageId: context.messageId, // Also store messageId for easier querying
       channelId: context.channelId,
+      actorId: this.ctx.userID
     });
   }
 

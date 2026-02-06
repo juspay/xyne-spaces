@@ -115,7 +115,9 @@ const TABS: TabConfig[] = [
     label: 'Tickets',
     Icon: Ticket,
     filter: activity =>
-      activity.actorAction === 'eta_warning' || activity.actorAction === 'eta_breach',
+      activity.actorAction === 'eta_warning' ||
+      activity.actorAction === 'eta_breach' ||
+      activity.ticketId !== null,
   },
   {
     value: 'group_mentions',
@@ -247,6 +249,20 @@ const ActivityListView = (): ReactElement => {
         return ['added', 'removed'];
       case 'group_mentions':
         return ['group_mention'];
+      case 'tickets':
+        return [
+          'eta_warning',
+          'eta_breach',
+          'ticket_assigned',
+          'ticket_status',
+          'ticket_eta',
+          'ticket_board',
+          'ticket_assigned_to',
+          'ticket_pr_created',
+          'ticket_pr_updated',
+          'ticket_pr_merged',
+          'ticket_pr_declined',
+        ];
       default:
         return []; // Empty array for 'all' - query will not filter by type
     }

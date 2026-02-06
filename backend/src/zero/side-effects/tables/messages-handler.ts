@@ -150,6 +150,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       const activities = validMentionedUsers.map(user => ({
         id: uuidv4(),
         userId: user.userId,
+        actorId: senderId,
         actorAction: user.mentionSource === 'direct' ? 'mentioned_user' as const : 'group_mention' as const,
         // Dual-write: populate both old and new columns
         actionSource: 'message' as const,
@@ -255,6 +256,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const activities = validParticipantIds.map(userId => ({
       id: uuidv4(),
       userId,
+      actorId: senderUserId,
       actorAction: 'replied' as const,
       // Dual-write: populate both old and new columns
       actionSource: 'message' as const,
@@ -383,6 +385,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       const activities = uniqueRecipientIds.map(userId => ({
         id: uuidv4(),
         userId,
+        actorId: senderId,
         actorAction: 'group_mention' as const,
         // Dual-write: populate both old and new columns
         actionSource: 'message' as const,
