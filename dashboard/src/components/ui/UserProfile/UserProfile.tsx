@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mail, Phone, SmilePlus, X, Calendar, Cake, MessageSquare, Headphones } from 'lucide-react';
+import {
+  Mail,
+  Phone,
+  SmilePlus,
+  X,
+  Calendar,
+  Cake,
+  MessageSquare,
+  Headphones,
+  Edit2,
+  Check,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../Avatar/Avatar';
 import { StatusIndicator } from '../StatusIndicator';
@@ -19,6 +30,8 @@ import { useCallActions } from '../../../hooks/useCallActions';
 import { useAuth } from '../../../hooks/useAuth';
 import { toast } from 'sonner';
 import { useZero } from '@rocicorp/zero/react';
+import SearchUser from '../SearchUser/SearchUser';
+import type { User } from '@xyne/shared';
 
 interface UserProfileProps {
   userId: string;
@@ -39,6 +52,16 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
   const [dmChannelId, setDmChannelId] = useState<string | null>(null);
   const shouldTriggerCallRef = useRef(false);
   const managerUser = users?.find(u => u.id === userProfile?.manager);
+
+  // Edit mode states
+  const [editingField, setEditingField] = useState<
+    'team' | 'phoneNumber' | 'dob' | 'manager' | null
+  >(null);
+  const [editValue, setEditValue] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Manager edit state
+  const [selectedManagerUsers, setSelectedManagerUsers] = useState<User[]>([]);
 
   // Use useCallActions hook - channelId will be empty string initially, then update
   const { handleCallClick } = useCallActions({
@@ -111,6 +134,109 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
     );
   };
 
+  // Handle edit field
+  const handleStartEdit = (
+    field: 'team' | 'phoneNumber' | 'dob',
+    currentValue?: string | number | null,
+  ): void => {
+    setEditingField(field);
+    setEditError(null);
+    if (currentValue !== undefined && currentValue !== null) {
+      if (field === 'dob' && typeof currentValue === 'number') {
+        const date = new Date(currentValue);
+        setEditValue(date.toISOString().split('T')[0] || '');
+      } else {
+        setEditValue(String(currentValue));
+      }
+    } else {
+      setEditValue('');
+    }
+  };
+
+  const handleCancelEdit = (): void => {
+    setEditingField(null);
+    setEditValue('');
+    setEditError(null);
+  };
+
+  const validateField = (field: 'team' | 'phoneNumber' | 'dob', value: string): boolean => {
+    setEditError(null);
+
+    if (!value.trim() && field !== 'dob') {
+      setEditError('This field cannot be empty');
+      return false;
+    }
+
+    if (field === 'phoneNumber') {
+      const phoneRegex = /^\+?[1-9]\d{9,14}$/;
+      if (!phoneRegex.test(value)) {
+        setEditError('Please enter a valid phone number');
+        return false;
+      }
+    }
+
+    if (field === 'dob') {
+      if (!value) {
+        setEditError('Please select a date');
+        return false;
+      }
+      const selectedDate = new Date(value);
+      const today = new Date();
+      const age = today.getFullYear() - selectedDate.getFullYear();
+
+      if (selectedDate > today) {
+        setEditError('Date of birth cannot be in the future');
+        return false;
+      }
+
+      if (age < 1 || age > 100) {
+        setEditError('Please enter a valid date of birth (age 1-100)');
+        return false;
+      }
+    }
+
+    if (field === 'team' && value.length > 20) {
+      setEditError('Team name must be less than 20 characters');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSaveEdit = (): void => {
+    if (!editingField || editingField === 'manager') return;
+
+    if (!validateField(editingField, editValue)) {
+      return;
+    }
+
+    const updateParams: {
+      team?: string | null;
+      phoneNumber?: string | null;
+      dob?: number | null;
+    } = {};
+
+    if (editingField === 'team') {
+      updateParams.team = editValue.trim();
+    } else if (editingField === 'phoneNumber') {
+      updateParams.phoneNumber = editValue.trim();
+    } else if (editingField === 'dob') {
+      updateParams.dob = new Date(editValue).getTime();
+    }
+
+    zero.mutate(
+      mutators.userProfile.upsert({
+        ...updateParams,
+        timestamp: Date.now(),
+        profileId: uuidv4(),
+      }),
+    );
+
+    setEditingField(null);
+    setEditValue('');
+    setEditError(null);
+  };
+
   const statusEmoji = user?.presenceStatus?.statusEmoji;
   const statusContent = user?.presenceStatus?.statusContent;
   const statusExpiryAt = user?.presenceStatus?.statusExpiryAt;
@@ -138,7 +264,59 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           </h2>
 
           {/* Team */}
-          {userProfile?.team && <div className='text-lg text-gray-600'>{userProfile.team}</div>}
+          {editingField === 'team' && isOwnProfile ? (
+            <div className='mt-2 space-y-1'>
+              <div className='flex items-center gap-2'>
+                <input
+                  type='text'
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleSaveEdit();
+                    if (e.key === 'Escape') handleCancelEdit();
+                  }}
+                  placeholder='Enter team name'
+                  maxLength={20}
+                  className='flex-1 px-2 py-1 text-lg border border-gray-300 rounded focus:outline-none focus:border-gray-400'
+                />
+                <button
+                  onClick={handleSaveEdit}
+                  className='p-1 text-green-600 hover:bg-green-50 rounded'
+                  title='Save'
+                >
+                  <Check className='size-4' />
+                </button>
+                <button
+                  onClick={handleCancelEdit}
+                  className='p-1 text-gray-600 hover:bg-gray-100 rounded'
+                  title='Cancel'
+                >
+                  <X className='size-4' />
+                </button>
+              </div>
+              {editError && <p className='text-xs text-red-600'>{editError}</p>}
+            </div>
+          ) : userProfile?.team ? (
+            <div className='flex items-center gap-2 mt-1'>
+              <div className='text-lg text-gray-600'>{userProfile.team}</div>
+              {isOwnProfile && (
+                <button
+                  onClick={() => handleStartEdit('team', userProfile.team)}
+                  className='text-gray-400 hover:text-gray-600'
+                  title='Edit team'
+                >
+                  <Edit2 className='size-3' />
+                </button>
+              )}
+            </div>
+          ) : isOwnProfile ? (
+            <button
+              onClick={() => handleStartEdit('team')}
+              className='mt-1 text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1'
+            >
+              <span>+ Add Team Name</span>
+            </button>
+          ) : null}
 
           {/* Online/Away Status */}
           {userPresence?.status && (
@@ -263,16 +441,92 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
       <div className='mx-6 border-b border-gray-200' />
 
       {/* Manager Section */}
-      {managerUser && (
+      {(managerUser || isOwnProfile) && (
         <div className='px-6 py-4'>
-          <h3 className='text-sm font-semibold text-gray-900 mb-3'>Manager</h3>
-          <div className='flex items-center gap-3'>
-            <Avatar userId={managerUser.id} size='md' />
-            <div>
-              <div className='text-sm font-medium text-gray-900'>{managerUser.name}</div>
-              <div className='text-sm text-gray-800'>{userProfile?.team || 'Product / Design'}</div>
-            </div>
+          <div className='flex items-center gap-2 mb-3'>
+            <h3 className='text-sm font-semibold text-gray-900'>Manager</h3>
+            {isOwnProfile && managerUser && editingField !== 'manager' && (
+              <button
+                onClick={() => {
+                  setEditingField('manager');
+                  setSelectedManagerUsers([managerUser]);
+                }}
+                className='text-gray-400 hover:text-gray-600'
+                title='Edit manager'
+              >
+                <Edit2 className='size-3' />
+              </button>
+            )}
           </div>
+          {editingField === 'manager' && isOwnProfile ? (
+            <div className='space-y-2'>
+              <div className='[&_.bg-blue-600]:bg-gray-700 [&_.bg-blue-600]:text-white [&_.hover\\:bg-blue-600\\/90]:hover:bg-gray-600'>
+                <SearchUser
+                  excludeUserIds={[userId]}
+                  selectedUsers={selectedManagerUsers}
+                  onUsersChange={users => {
+                    // Only keep the last selected user (single manager)
+                    if (users.length > 1) {
+                      setSelectedManagerUsers([users[users.length - 1]!]);
+                    } else {
+                      setSelectedManagerUsers(users);
+                    }
+                  }}
+                  placeholder='Search for a manager...'
+                  hintText=''
+                  label=''
+                />
+              </div>
+              <div className='flex justify-end gap-2'>
+                <button
+                  onClick={() => {
+                    setEditingField(null);
+                    setSelectedManagerUsers([]);
+                  }}
+                  className='px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800'
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const managerId =
+                      selectedManagerUsers.length > 0
+                        ? (selectedManagerUsers[0]?.id ?? null)
+                        : null;
+                    zero.mutate(
+                      mutators.userProfile.upsert({
+                        manager: managerId,
+                        timestamp: Date.now(),
+                        profileId: uuidv4(),
+                      }),
+                    );
+                    setEditingField(null);
+                    setSelectedManagerUsers([]);
+                  }}
+                  className='px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800'
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          ) : managerUser ? (
+            <div className='flex items-center gap-3'>
+              <Avatar userId={managerUser.id} size='md' />
+              <div className='flex-1'>
+                <div className='text-sm font-medium text-gray-900'>{managerUser.name}</div>
+              </div>
+            </div>
+          ) : isOwnProfile ? (
+            <button
+              onClick={() => {
+                setEditingField('manager');
+                setSelectedManagerUsers([]);
+              }}
+              className='text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1'
+            >
+              <span>+ Add Manager</span>
+            </button>
+          ) : null}
         </div>
       )}
 
@@ -292,19 +546,69 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           </div>
 
           {/* Phone Number */}
-          {userProfile?.phoneNumber && (
+          {userProfile?.phoneNumber || isOwnProfile ? (
             <div className='flex items-start gap-3'>
               <div className='p-2 bg-gray-100 rounded-lg flex-shrink-0'>
                 <Phone className='size-4 text-gray-400' />
               </div>
               <div className='flex-1'>
-                <div className='text-sm font-semibold text-gray-900 leading-tight'>
+                <div className='text-sm font-semibold text-gray-900 leading-tight flex items-center gap-2'>
                   Phone Number
+                  {isOwnProfile && userProfile?.phoneNumber && editingField !== 'phoneNumber' && (
+                    <button
+                      onClick={() => handleStartEdit('phoneNumber', userProfile.phoneNumber)}
+                      className='text-gray-400 hover:text-gray-600'
+                      title='Edit phone number'
+                    >
+                      <Edit2 className='size-3' />
+                    </button>
+                  )}
                 </div>
-                <div className='text-sm text-gray-800 mt-1'>{userProfile.phoneNumber}</div>
+                {editingField === 'phoneNumber' && isOwnProfile ? (
+                  <div className='mt-1 space-y-1'>
+                    <div className='flex items-center gap-2'>
+                      <input
+                        type='tel'
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleSaveEdit();
+                          if (e.key === 'Escape') handleCancelEdit();
+                        }}
+                        placeholder='Enter phone number'
+                        maxLength={15}
+                        className='flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-gray-400'
+                      />
+                      <button
+                        onClick={handleSaveEdit}
+                        className='p-1 text-green-600 hover:bg-green-50 rounded'
+                        title='Save'
+                      >
+                        <Check className='size-4' />
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        className='p-1 text-gray-600 hover:bg-gray-100 rounded'
+                        title='Cancel'
+                      >
+                        <X className='size-4' />
+                      </button>
+                    </div>
+                    {editError && <p className='text-xs text-red-600'>{editError}</p>}
+                  </div>
+                ) : userProfile?.phoneNumber ? (
+                  <div className='text-sm text-gray-800 mt-1'>{userProfile.phoneNumber}</div>
+                ) : (
+                  <button
+                    onClick={() => handleStartEdit('phoneNumber')}
+                    className='mt-1 text-sm text-blue-600 hover:text-blue-700'
+                  >
+                    + Add Phone Number
+                  </button>
+                )}
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Start Date */}
           {userProfile?.joinedOn && (
@@ -329,26 +633,77 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           )}
 
           {/* Birth Date */}
-          {userProfile?.dob && (
+          {userProfile?.dob || isOwnProfile ? (
             <div className='flex items-start gap-3'>
               <div className='p-2 bg-gray-100 rounded-lg flex-shrink-0'>
                 <Cake className='size-4 text-gray-400' />
               </div>
               <div className='flex-1'>
-                <div className='text-sm font-semibold text-gray-900 leading-tight'>Birth Date</div>
-                <div className='text-sm text-gray-800 mt-1'>
-                  {new Date(userProfile.dob)
-                    .toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                    })
-                    .replace(',', '')}{' '}
-                  {formatAge(userProfile.dob)}
+                <div className='text-sm font-semibold text-gray-900 leading-tight flex items-center gap-2'>
+                  Birth Date
+                  {isOwnProfile && userProfile?.dob && editingField !== 'dob' && (
+                    <button
+                      onClick={() => handleStartEdit('dob', userProfile.dob)}
+                      className='text-gray-400 hover:text-gray-600'
+                      title='Edit birth date'
+                    >
+                      <Edit2 className='size-3' />
+                    </button>
+                  )}
                 </div>
+                {editingField === 'dob' && isOwnProfile ? (
+                  <div className='mt-1 space-y-1'>
+                    <div className='flex items-center gap-2'>
+                      <input
+                        type='date'
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleSaveEdit();
+                          if (e.key === 'Escape') handleCancelEdit();
+                        }}
+                        max={new Date().toISOString().split('T')[0]}
+                        className='flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-gray-400'
+                      />
+                      <button
+                        onClick={handleSaveEdit}
+                        className='p-1 text-green-600 hover:bg-green-50 rounded'
+                        title='Save'
+                      >
+                        <Check className='size-4' />
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        className='p-1 text-gray-600 hover:bg-gray-100 rounded'
+                        title='Cancel'
+                      >
+                        <X className='size-4' />
+                      </button>
+                    </div>
+                    {editError && <p className='text-xs text-red-600'>{editError}</p>}
+                  </div>
+                ) : userProfile?.dob ? (
+                  <div className='text-sm text-gray-800 mt-1'>
+                    {new Date(userProfile.dob)
+                      .toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                      })
+                      .replace(',', '')}{' '}
+                    {formatAge(userProfile.dob)}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => handleStartEdit('dob')}
+                    className='mt-1 text-sm text-blue-600 hover:text-blue-700'
+                  >
+                    + Add Birth Date
+                  </button>
+                )}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
