@@ -301,12 +301,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [filters.boards]);
 
   // Get all boards for the project (needed for channel stage view and create ticket modal)
-  const [allBoards] = useCachedQuery(
+  // In my-tickets/user-tickets/group-tickets, fetch ALL boards (no project filter) since tickets can span projects
+  const isMyTicketsView =
+    viewMode === 'my-tickets' || viewMode === 'user-tickets' || viewMode === 'group-tickets';
+
+  const [allBoardsGlobal] = useCachedQuery(queries.getAllBoards(), {
+    enabled: isMyTicketsView,
+  });
+
+  const [allBoardsProject] = useCachedQuery(
     queries.boardsByProject({ projectId: effectiveProjectId || '' }),
     {
-      enabled: !!effectiveProjectId,
+      enabled: !isMyTicketsView && !!effectiveProjectId,
     },
   );
+
+  const allBoards = isMyTicketsView ? allBoardsGlobal : allBoardsProject;
 
   // Create memo of form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
   const groupByFormFields = useMemo(
@@ -581,10 +591,50 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return Array.from(new Set(groups));
   }, [allProjectTickets]);
 
+  // Get available board IDs based on view mode
   const availableBoards = useMemo(() => {
+    // For my-tickets/user-tickets/group-tickets, get boards from the filtered tickets
+    if (isMyTicketsView) {
+      if (!allProjectTickets || allProjectTickets.length === 0) return undefined;
+      const boardIds = allProjectTickets
+        .map(ticket => ticket.boardId)
+        .filter((id): id is string => id !== null);
+      return Array.from(new Set(boardIds));
+    }
+    // For other views, use boards from the project
     if (!allBoards || allBoards.length === 0) return undefined;
     return allBoards.map(board => board.id);
-  }, [allBoards]);
+  }, [allBoards, allProjectTickets, viewMode, filters]);
+
+  // Clear invalid board filters in my-tickets/user-tickets/group-tickets views
+  useEffect(() => {
+    if (isMyTicketsView) {
+      // If there's a board filter set but it doesn't match any available boards, clear it
+      if (
+        filters.boards &&
+        filters.boards.length > 0 &&
+        availableBoards &&
+        availableBoards.length > 0
+      ) {
+        const validBoards = filters.boards.filter(boardId => availableBoards.includes(boardId));
+
+        // If none of the filtered boards are valid, clear the filter
+        if (validBoards.length === 0) {
+          setFilters({
+            ...filters,
+            boards: [],
+          });
+        }
+        // If some but not all are valid, update to only valid ones
+        else if (validBoards.length !== filters.boards.length) {
+          setFilters({
+            ...filters,
+            boards: validBoards,
+          });
+        }
+      }
+    }
+  }, [viewMode, filters.boards, availableBoards, filters, setFilters]);
 
   const [allTags] = useCachedQuery(queries.getAllTicketTags());
   const allUsers = useUsers();
@@ -861,6 +911,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   //detects when switching back to kanban
   useEffect(() => {
+    // Skip auto-selection for my-tickets, user-tickets, and group-tickets views
+    // because users should see all their tickets across all boards
+    if (isMyTicketsView) {
+      return;
+    }
+
     // Safety Checks
     if (!state.matches('initialized')) return;
     if (!allBoards || allBoards.length === 0) return;
@@ -886,7 +942,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         });
       }
     }
-  }, [layoutView, state.value, filters, allBoards, setFilters]);
+  }, [layoutView, state.value, filters, allBoards, setFilters, viewMode]);
 
   return (
     <div className='flex flex-col h-full w-full bg-gray-50 relative'>
@@ -898,19 +954,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             <TicketFiltersDropdown
               filters={filters}
               onFiltersChange={setFilters}
-              projectId={effectiveProjectId || ''}
+              projectId={
+                isMyTicketsView
+                  ? '' // Don't filter by project in my-tickets - tickets can span multiple projects
+                  : effectiveProjectId || ''
+              }
               availablePriorities={availablePriorities}
               availableUsers={availableUsers}
               availableUserGroups={availableUserGroups}
               availableBoards={availableBoards}
               allBoardsList={allBoards}
-              showBoardsFilter={!!channelId}
+              showBoardsFilter={!!channelId || isMyTicketsView}
               selectedBoard={selectedBoard}
               availableTags={availableTags}
               hideAssigneeFilter={viewMode === 'my-tickets' ? true : false}
               formMappings={
-                filters.boards?.length === 1 && allBoards
-                  ? allBoards.find(b => b.id === filters.boards?.[0])?.formContextMappings || []
+                filters.boards?.length === 1 && allBoardsProject
+                  ? allBoardsProject.find(b => b.id === filters.boards?.[0])?.formContextMappings ||
+                    []
                   : []
               }
             />
