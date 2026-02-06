@@ -1720,11 +1720,12 @@ model VespaInsertionLogs {
 model Repo {
   id         String @id @default(cuid())
   name       String         // e.g., "xyne-spaces"
-  url        String @unique // SSH or HTTPS URL
+  url        String         // SSH or HTTPS URL
   baseBranch Json           // Base branches to checkout from: ["main", "develop"]
   prefix     String         // Branch prefix: "feature"
   createdBy  String         // User who added the repo
 
+  @@unique([url, createdBy]) // Same repo can be added by different users
   @@index([name])
   @@map("repos")
   @@schema("public")

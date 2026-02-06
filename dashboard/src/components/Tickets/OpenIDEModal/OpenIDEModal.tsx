@@ -15,6 +15,8 @@ import {
   Search,
   ArrowLeft,
   Tag,
+  Trash2,
+  Pencil,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -28,6 +30,9 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useVSCode } from '../../../contexts/VSCodeContext';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { apiInstance } from '../../../services/clients/apiClient';
+import { useAuth } from '../../../hooks/useAuth';
+import { logger, Event } from '../../../utils/logger';
 
 type OpenIDEModalMode = 'ticket' | 'quarto';
 
@@ -50,9 +55,15 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
   const navigate = useNavigate();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { registerSession } = useVSCode();
+  const { user } = useAuth();
 
-  // Query all repos
-  const [repos] = useCachedQuery(queries.getAllRepos());
+  // Query all repos and filter by current user
+  const [allRepos] = useCachedQuery(queries.getAllRepos());
+
+  const repos = useMemo(() => {
+    if (!allRepos || !user?.id) return [];
+    return allRepos.filter(repo => repo.createdBy === user.id);
+  }, [allRepos, user?.id]);
 
   // Main state
   const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
@@ -73,6 +84,9 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
 
   const [quartoWorkingBranch, setQuartoWorkingBranch] = useState<string>('');
 
+  const [quartoSetupInProgress, setQuartoSetupInProgress] = useState(false);
+  const quartoSetupAttempted = useRef(false);
+
   // Add repo form state
   const [showAddForm, setShowAddForm] = useState(false);
   const [newRepoName, setNewRepoName] = useState('');
@@ -81,6 +95,12 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
   const [newRepoPrefix, setNewRepoPrefix] = useState('feature');
   const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [pendingRepoName, setPendingRepoName] = useState<string | null>(null);
+
+  const [editingRepo, setEditingRepo] = useState<Repo | null>(null);
+  const [editRepoName, setEditRepoName] = useState('');
+  const [editRepoUrl, setEditRepoUrl] = useState('');
+  const [editRepoBranches, setEditRepoBranches] = useState('');
+  const [editRepoPrefix, setEditRepoPrefix] = useState('');
 
   // Mode-specific values
   const isTicketMode = mode === 'ticket' && ticket;
@@ -138,6 +158,29 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
       }
     }
   }, [repos, selectedRepo, pendingRepoName]);
+
+  useEffect(() => {
+    if (selectedRepo && repos.length > 0) {
+      const stillExists = repos.some(r => r.id === selectedRepo.id);
+      if (!stillExists) {
+        const firstRepo = repos[0];
+        if (firstRepo) {
+          setSelectedRepo(firstRepo);
+          const baseBranch = firstRepo.baseBranch as string[] | undefined;
+          setSelectedBranch(baseBranch?.[0] || 'main');
+          setSelectedPrefix(firstRepo.prefix || 'feature');
+        } else {
+          setSelectedRepo(null);
+          setSelectedBranch('main');
+          setSelectedPrefix('feature');
+        }
+      }
+    } else if (selectedRepo && repos.length === 0) {
+      setSelectedRepo(null);
+      setSelectedBranch('main');
+      setSelectedPrefix('feature');
+    }
+  }, [repos, selectedRepo]);
 
   // Focus search input when dropdown opens
   useEffect(() => {
@@ -202,6 +245,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
       }),
     );
 
+    logger.info(Event.IDE_REPO_CREATED, { repoName, repoUrl: newRepoUrl.trim() });
     setPendingRepoName(repoName);
     setRepoSearchQuery('');
     setShowAddForm(false);
@@ -209,6 +253,77 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
     setNewRepoUrl('');
     setIsSavingRepo(false);
   }, [z, repos, newRepoName, newRepoUrl, newRepoBranches, newRepoPrefix]);
+
+  const handleStartEditRepo = useCallback((repo: Repo) => {
+    setEditingRepo(repo);
+    setEditRepoName(repo.name);
+    setEditRepoUrl(repo.url);
+    const branches = repo.baseBranch as string[] | undefined;
+    setEditRepoBranches(branches?.join(', ') || 'main');
+    setEditRepoPrefix(repo.prefix || 'feature');
+    setShowRepoDropdown(false);
+  }, []);
+
+  const handleSaveEditRepo = useCallback(() => {
+    if (!editingRepo || !editRepoName.trim() || !editRepoUrl.trim()) {
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    const branches = editRepoBranches
+      .split(',')
+      .map(b => b.trim())
+      .filter(Boolean);
+    if (branches.length === 0) branches.push('main');
+
+    void z.mutate(
+      mutators.repo.update({
+        id: editingRepo.id,
+        name: editRepoName.trim(),
+        url: editRepoUrl.trim(),
+        baseBranch: branches,
+        prefix: editRepoPrefix.trim() || 'feature',
+      }),
+    );
+
+    logger.info(Event.IDE_REPO_UPDATED, { repoId: editingRepo.id, repoName: editRepoName.trim() });
+    toast.success('Repository updated');
+
+    if (selectedRepo?.id === editingRepo.id) {
+      setSelectedRepo({
+        ...editingRepo,
+        name: editRepoName.trim(),
+        url: editRepoUrl.trim(),
+        baseBranch: branches,
+        prefix: editRepoPrefix.trim() || 'feature',
+      });
+      if (!branches.includes(selectedBranch)) {
+        setSelectedBranch(branches[0] || 'main');
+      }
+      setSelectedPrefix(editRepoPrefix.trim() || 'feature');
+    }
+
+    setEditingRepo(null);
+  }, [
+    z,
+    editingRepo,
+    editRepoName,
+    editRepoUrl,
+    editRepoBranches,
+    editRepoPrefix,
+    selectedRepo,
+    selectedBranch,
+  ]);
+
+  const handleDeleteRepo = useCallback(
+    (repoId: string) => {
+      void z.mutate(mutators.repo.delete({ id: repoId }));
+      logger.info(Event.IDE_REPO_DELETED, { repoId });
+      toast.success('Repository deleted');
+      // The useEffect watching repos will handle updating selectedRepo
+    },
+    [z],
+  );
 
   // Handle opening the IDE
   const handleOpenIDE = useCallback(async () => {
@@ -225,11 +340,21 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
 
     setIsLoading(true);
     setError(null);
+    logger.info(Event.IDE_SETUP_STARTED, {
+      repoUrl: selectedRepo.url,
+      branch: branchToUse,
+      repoName: selectedRepo.name,
+    });
 
     try {
       const result = await api.prepareForTicket(selectedRepo.url, selectedBranch, branchToUse);
 
       if (!result.success) {
+        logger.error(Event.IDE_SETUP_FAILED, {
+          error: result.error,
+          repoUrl: selectedRepo.url,
+          branch: branchToUse,
+        });
         setError(result.error ?? 'Failed to prepare workspace');
         setIsLoading(false);
         return;
@@ -244,6 +369,11 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
 
       const codeServerUrl = await api.getUrlWithFolder(result.workspacePath);
       if (!codeServerUrl) {
+        logger.error(Event.IDE_SETUP_FAILED, {
+          error: 'Failed to get VS Code URL',
+          repoUrl: selectedRepo.url,
+          branch: branchToUse,
+        });
         setError('Failed to get VS Code URL');
         setIsLoading(false);
         return;
@@ -261,9 +391,21 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
       // Navigate to the persistent VSCode screen
       onClose();
       void navigate('/vscode');
+      logger.info(Event.IDE_WORKSPACE_READY, {
+        repoUrl: selectedRepo.url,
+        branch: branchToUse,
+        repoName: selectedRepo.name,
+        workspacePath: result.workspacePath,
+      });
       toast.success(`Workspace ready on branch ${branchToUse}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error occurred');
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      logger.error(Event.IDE_SETUP_FAILED, {
+        error: errorMessage,
+        repoUrl: selectedRepo.url,
+        branch: branchToUse,
+      });
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -277,6 +419,100 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
     onClose,
     registerSession,
   ]);
+
+  const handleQuartoAutoOpen = useCallback(async () => {
+    if (!isElectronApp()) {
+      setError('VS Code is only available in the desktop app');
+      return;
+    }
+
+    const api = window.electronAPI?.codeServer;
+    if (!api?.prepareForTicket) {
+      setError('Please restart the Electron app to enable this feature');
+      return;
+    }
+
+    setQuartoSetupInProgress(true);
+    setError(null);
+    logger.info(Event.QUARTO_SETUP_STARTED, { mode: 'auto' });
+
+    try {
+      const setupResponse = await apiInstance.post<{
+        success: boolean;
+        repoUrl: string;
+        branch: string;
+        error?: string;
+      }>('/docs/setup-quarto-access');
+
+      if (!setupResponse.data.success) {
+        logger.error(Event.QUARTO_ACCESS_SETUP_FAILED, { error: setupResponse.data.error });
+        setError(setupResponse.data.error ?? 'Failed to setup repository access');
+        setQuartoSetupInProgress(false);
+        return;
+      }
+      logger.info(Event.QUARTO_ACCESS_SETUP_SUCCESS, {
+        repoUrl: setupResponse.data.repoUrl,
+        branch: setupResponse.data.branch,
+      });
+
+      const { repoUrl, branch } = setupResponse.data;
+
+      const result = await api.prepareForTicket(repoUrl, branch, branch);
+
+      if (!result.success) {
+        logger.error(Event.QUARTO_SETUP_FAILED, { error: result.error, repoUrl, branch });
+        setError(result.error ?? 'Failed to prepare workspace');
+        setQuartoSetupInProgress(false);
+        return;
+      }
+
+      if (result.stashedChanges) {
+        toast.warning('Uncommitted changes were stashed', {
+          description: 'Use "git stash pop" to restore them',
+          duration: 5000,
+        });
+      }
+
+      const codeServerUrl = await api.getUrlWithFolder(result.workspacePath);
+      if (!codeServerUrl) {
+        logger.error(Event.QUARTO_SETUP_FAILED, {
+          error: 'Failed to get VS Code URL',
+          repoUrl,
+          branch,
+        });
+        setError('Failed to get VS Code URL');
+        setQuartoSetupInProgress(false);
+        return;
+      }
+
+      registerSession(result.workspacePath, codeServerUrl, branch, 'xyne-spaces-docs', undefined);
+
+      onClose();
+      void navigate('/vscode');
+      logger.info(Event.QUARTO_WORKSPACE_READY, {
+        repoUrl,
+        branch,
+        workspacePath: result.workspacePath,
+      });
+      toast.success(`Quarto workspace ready on branch ${branch}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to setup quarto access';
+      logger.error(Event.QUARTO_SETUP_FAILED, { error: errorMessage });
+      setError(errorMessage);
+    } finally {
+      setQuartoSetupInProgress(false);
+    }
+  }, [navigate, onClose, registerSession]);
+
+  useEffect(() => {
+    if (mode === 'quarto' && isOpen && !quartoSetupAttempted.current) {
+      quartoSetupAttempted.current = true;
+      void handleQuartoAutoOpen();
+    }
+    if (!isOpen) {
+      quartoSetupAttempted.current = false;
+    }
+  }, [mode, isOpen, handleQuartoAutoOpen]);
 
   // Select a repo from dropdown
   const selectRepo = useCallback((repo: Repo) => {
@@ -450,6 +686,150 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
     );
   }
 
+  if (editingRepo) {
+    return (
+      <Dialog
+        open={isOpen}
+        onOpenChange={open => !open && onClose()}
+        title='Edit Repository'
+        className='max-w-md'
+      >
+        <div className='p-5 space-y-4'>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={() => setEditingRepo(null)}
+            className='-mt-1 -ml-1'
+          >
+            <ArrowLeft className='w-4 h-4' />
+            Back
+          </Button>
+
+          <div>
+            <span className='block text-sm font-medium text-gray-700 mb-1.5'>
+              Name <span className='text-red-500'>*</span>
+            </span>
+            <Input
+              value={editRepoName}
+              onChange={e => setEditRepoName(e.target.value)}
+              placeholder='xyne-spaces'
+            />
+          </div>
+
+          <div>
+            <span className='block text-sm font-medium text-gray-700 mb-1.5'>
+              Git URL <span className='text-red-500'>*</span>
+            </span>
+            <Input
+              value={editRepoUrl}
+              onChange={e => setEditRepoUrl(e.target.value)}
+              placeholder='git@github.com:org/repo.git'
+            />
+          </div>
+
+          <div>
+            <span className='block text-sm font-medium text-gray-700 mb-1.5'>Base Branches</span>
+            <Input
+              value={editRepoBranches}
+              onChange={e => setEditRepoBranches(e.target.value)}
+              placeholder='main, develop'
+            />
+            <p className='text-xs text-gray-500 mt-1'>Comma-separated branches to checkout from</p>
+          </div>
+
+          <div>
+            <span className='block text-sm font-medium text-gray-700 mb-1.5'>Branch Prefix</span>
+            <Input
+              value={editRepoPrefix}
+              onChange={e => setEditRepoPrefix(e.target.value)}
+              placeholder='feature'
+            />
+            {ticket && (
+              <p className='text-xs text-gray-500 mt-1'>
+                Format: {editRepoPrefix || 'feature'}/{ticket.xyneId}
+              </p>
+            )}
+          </div>
+
+          {error && (
+            <div className='flex items-center gap-2 p-2 text-red-600 bg-red-50 rounded text-sm'>
+              <AlertCircle className='w-4 h-4' /> {error}
+            </div>
+          )}
+
+          <div className='flex gap-2 pt-2'>
+            <Button variant='secondary' className='flex-1' onClick={() => setEditingRepo(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant='default'
+              className='flex-1'
+              onClick={() => void handleSaveEditRepo()}
+              disabled={!editRepoName.trim() || !editRepoUrl.trim()}
+            >
+              Save Changes
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    );
+  }
+
+  if (mode === 'quarto' && (quartoSetupInProgress || !error)) {
+    return (
+      <Dialog
+        open={isOpen}
+        onOpenChange={open => !open && onClose()}
+        title='New Quarto Document'
+        className='max-w-md'
+      >
+        <div className='p-5 space-y-4'>
+          <div className='flex flex-col items-center gap-4 py-8'>
+            {quartoSetupInProgress && !error ? (
+              <>
+                <Loader2 className='w-12 h-12 text-green-600 animate-spin' />
+                <div className='text-center'>
+                  <p className='font-medium text-gray-900'>Setting up Quarto workspace...</p>
+                  <p className='text-sm text-gray-500 mt-1'>Opening xyne-spaces-docs repository</p>
+                </div>
+              </>
+            ) : error ? (
+              <>
+                <AlertCircle className='w-12 h-12 text-red-500' />
+                <div className='text-center'>
+                  <p className='font-medium text-gray-900'>Setup failed</p>
+                  <p className='text-sm text-red-600 mt-1'>{error}</p>
+                </div>
+                <div className='flex gap-3 pt-2 w-full'>
+                  <Button variant='secondary' className='flex-1' onClick={onClose}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant='default'
+                    className='flex-1'
+                    onClick={() => {
+                      setError(null);
+                      void handleQuartoAutoOpen();
+                    }}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <Loader2 className='w-12 h-12 text-green-600 animate-spin' />
+                <div className='text-center'>
+                  <p className='font-medium text-gray-900'>Preparing...</p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </Dialog>
+    );
+  }
+
   // Main modal view
   const modalTitle = title ?? (isTicketMode ? 'Open in VS Code' : 'New Quarto Document');
 
@@ -532,19 +912,48 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                 <div className='max-h-48 overflow-y-auto'>
                   {filteredRepos.length > 0 ? (
                     filteredRepos.map(repo => (
-                      <Button
+                      <div
                         key={repo.id}
-                        variant='ghost'
-                        onClick={() => selectRepo(repo)}
-                        className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 transition-colors justify-start ${
-                          selectedRepo?.id === repo.id
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'text-gray-900 hover:bg-gray-50'
+                        className={`flex items-center justify-between px-3 py-2 hover:bg-gray-50 cursor-pointer ${
+                          selectedRepo?.id === repo.id ? 'bg-blue-50' : ''
                         }`}
                       >
-                        <FolderGit2 className='w-4 h-4 text-gray-400' />
-                        <span className='flex-1 truncate'>{repo.name}</span>
-                      </Button>
+                        <button
+                          className='flex-1 text-left min-w-0'
+                          onClick={() => selectRepo(repo)}
+                        >
+                          <span
+                            className={`text-sm font-medium block truncate ${selectedRepo?.id === repo.id ? 'text-blue-700' : 'text-gray-900'}`}
+                          >
+                            {repo.name}
+                          </span>
+                          <span className='text-xs text-gray-500 block truncate'>{repo.url}</span>
+                        </button>
+                        <div className='flex items-center gap-1 ml-2 flex-shrink-0'>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              handleStartEditRepo(repo);
+                            }}
+                            className='p-1 text-gray-400 hover:text-blue-500 rounded'
+                            title='Edit repository'
+                          >
+                            <Pencil className='w-3.5 h-3.5' />
+                          </button>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              if (confirm('Delete this repository?')) {
+                                handleDeleteRepo(repo.id);
+                              }
+                            }}
+                            className='p-1 text-gray-400 hover:text-red-500 rounded'
+                            title='Delete repository'
+                          >
+                            <Trash2 className='w-3.5 h-3.5' />
+                          </button>
+                        </div>
+                      </div>
                     ))
                   ) : repoSearchQuery.trim() ? (
                     <div className='px-3 py-4 text-center text-sm text-gray-500'>
@@ -583,6 +992,12 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
               </div>
             )}
           </div>
+          {/* Show selected repo URL info */}
+          {selectedRepo && !showRepoDropdown && (
+            <p className='text-xs text-gray-500 mt-1 truncate' title={selectedRepo.url}>
+              {selectedRepo.url}
+            </p>
+          )}
         </div>
 
         {/* Branch Selector */}

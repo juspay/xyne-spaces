@@ -3,6 +3,7 @@
 
 import { Request, Response } from 'express';
 import { docsService } from '@/services/docsService.js';
+import { bitbucketManager } from '@/bitbucket/apis.js';
 import { logger } from '@/utils/logger.js';
 
 
@@ -336,6 +337,39 @@ export class DocsController {
             logger.error('[DocsController] Error sharing doc:', error);
             res.status(500).json({
                 error: 'Failed to share doc',
+                message: error instanceof Error ? error.message : 'Unknown error',
+            });
+        }
+    };
+
+    setupQuartoAccess = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const userEmail = req.user?.email;
+
+            if (!userEmail) {
+                res.status(403).json({ error: 'Unauthorized - user not authenticated' });
+                return;
+            }
+            const bitbucketUserIdentifier = userEmail;
+
+            const result = await bitbucketManager.addUserWritePermission('XYNE', 'xyne-spaces-docs', bitbucketUserIdentifier);
+
+            if (result.success) {
+                res.status(200).json({
+                    success: true,
+                    repoUrl: 'ssh://git@github.com/example-org/xyne-spaces-docs.git',
+                    branch: 'main',
+                });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    error: result.error || 'Failed to setup repository access',
+                });
+            }
+        } catch (error) {
+            logger.error('[DocsController] Error setting up quarto access:', error);
+            res.status(500).json({
+                error: 'Failed to setup quarto access',
                 message: error instanceof Error ? error.message : 'Unknown error',
             });
         }

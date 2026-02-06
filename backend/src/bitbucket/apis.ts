@@ -244,6 +244,45 @@ export class BitbucketManager {
       throw error;
     }
   }
+
+  /**
+   * Add user write permission to a specific repository
+   * @param projectKey The Bitbucket project key
+   * @param repositorySlug The repository slug
+   * @param username The Bitbucket username to grant access to
+   */
+  async addUserWritePermission(
+    projectKey: string,
+    repositorySlug: string,
+    username: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const url = `${BASE_URL}/projects/${projectKey}/repos/${repositorySlug}/permissions/users?name=${encodeURIComponent(username)}&permission=REPO_WRITE`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: this.getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        
+        if (response.status === 409 && errorText.includes('downgrade your own permissions')) {
+          logger.info(`[Bitbucket-API] User ${username} already has higher permissions on ${projectKey}/${repositorySlug}`);
+          return { success: true };
+        }
+        
+        logger.error(`[Bitbucket-API] Failed to add user permission: ${response.status} ${response.statusText}`, { errorText });
+        return { success: false, error: `Bitbucket API error: ${response.status} ${response.statusText}` };
+      }
+
+      logger.info(`[Bitbucket-API] Successfully added REPO_WRITE permission for user ${username} to ${projectKey}/${repositorySlug}`);
+      return { success: true };
+    } catch (error) {
+      logger.error('[Bitbucket-API] Error adding user permission:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
 }
 
 export const bitbucketManager = new BitbucketManager();

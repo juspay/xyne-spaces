@@ -32,6 +32,8 @@ router.get('/share-targets', authMiddleware.authenticate, docsController.getShar
 
 router.post('/share', authMiddleware.authenticate, docsController.shareDoc);
 
+router.post('/setup-quarto-access', authMiddleware.authenticate, docsController.setupQuartoAccess);
+
 router.delete('/:docId', authMiddleware.authenticate, docsController.deleteDoc);
 
 export default router;

@@ -12,7 +12,7 @@ import { Button } from '../../ui/Button';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import { isElectronApp } from '../../../utils/electronApp';
-import { OpenIDEModal } from '../../Tickets/OpenIDEModal';
+import { QuartoDocModal } from '../QuartoDocModal';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import {
   PanelGroup,
@@ -34,8 +34,8 @@ const CanvasPanel = (): ReactElement => {
   const isOnIndexRoute = location.pathname === '/chat/canvas';
 
   const canvasPanelRef = useRef<ImperativePanelHandle>(null);
-  const [showNewQuartoDocModal, setShowNewQuartoDocModal] = useState(false);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
+  const [showQuartoModal, setShowQuartoModal] = useState(false);
 
   // Fetch canvases
   const [allCanvases] = useQuery(queries.userCanvases());
@@ -70,13 +70,7 @@ const CanvasPanel = (): ReactElement => {
   }, [z, navigate]);
 
   const handleCreateQuartoDoc = useCallback(() => {
-    if (isElectronApp()) {
-      setShowNewQuartoDocModal(true);
-    } else {
-      toast.info('Create Quarto Doc', {
-        description: 'Quarto doc creation is only available in the Electron app.',
-      });
-    }
+    setShowQuartoModal(true);
   }, []);
 
   const handleSelectCanvas = useCallback(
@@ -219,7 +213,12 @@ const CanvasPanel = (): ReactElement => {
     }
 
     // Show canvas list on index route
-    return <div className='flex flex-col h-full bg-white w-screen'>{renderLeftPanel()}</div>;
+    return (
+      <>
+        <div className='flex flex-col h-full bg-white w-screen'>{renderLeftPanel()}</div>
+        <QuartoDocModal isOpen={showQuartoModal} onClose={() => setShowQuartoModal(false)} />
+      </>
+    );
   }
 
   // Desktop view - two-panel layout with resizable panels
@@ -249,12 +248,7 @@ const CanvasPanel = (): ReactElement => {
           </div>
         </Panel>
       </PanelGroup>
-
-      <OpenIDEModal
-        isOpen={showNewQuartoDocModal}
-        onClose={() => setShowNewQuartoDocModal(false)}
-        mode='quarto'
-      />
+      <QuartoDocModal isOpen={showQuartoModal} onClose={() => setShowQuartoModal(false)} />
     </div>
   );
 };
