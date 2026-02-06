@@ -61,6 +61,10 @@ export const Event = {
   IDE_REPO_CREATED: 'ide_repo_created',
   IDE_REPO_UPDATED: 'ide_repo_updated',
   IDE_REPO_DELETED: 'ide_repo_deleted',
+  API_ERROR_INTERCEPTOR_CAUGHT: 'api_error_interceptor_caught',
+  AUTH_SESSION_EXPIRED: 'auth_session_expired',
+  API_NETWORK_ERROR: 'api_network_error',
+  API_OPERATIONAL_ERROR: 'api_operational_error',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

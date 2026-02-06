@@ -7,6 +7,7 @@ import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import '../types/express';
+import { config } from '@/config/env';
 
 export class AuthV2Controller {
   private googleClient: OAuth2Client;
@@ -297,13 +298,13 @@ export class AuthV2Controller {
 
       res.cookie('google_access_token', customToken, {
         ...cookieOptions,
-        maxAge: 24 * 60 * 60 * 1000,
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
         });
       }
 
@@ -345,7 +346,6 @@ export class AuthV2Controller {
         res.status(401).json({
           error: 'No session found',
           message: 'Session ID cookie is missing',
-          needsReauth: true,
         });
         return;
       }
@@ -359,7 +359,6 @@ export class AuthV2Controller {
         res.status(401).json({
           error: 'Invalid session',
           message: 'Session not found or expired',
-          needsReauth: true,
         });
         return;
       }
@@ -371,7 +370,6 @@ export class AuthV2Controller {
         res.status(401).json({
           error: 'Session expired',
           message: 'Please re-authenticate',
-          needsReauth: true,
         });
         return;
       }
@@ -389,7 +387,8 @@ export class AuthV2Controller {
       });
 
       const isProduction = process.env.NODE_ENV === 'production';
-      const cookieMaxAge = 24 * 60 * 60 * 1000;
+
+      const cookieMaxAge = config.jwt.expirationSeconds * 1000;
 
       res.cookie('google_access_token', customToken, {
         httpOnly: true,
@@ -578,13 +577,13 @@ export class AuthV2Controller {
 
       res.cookie('google_access_token', customToken, {
         ...cookieOptions,
-        maxAge: 24 * 60 * 60 * 1000,
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
         });
       }
 
@@ -743,13 +742,13 @@ export class AuthV2Controller {
 
       res.cookie('google_access_token', customToken, {
         ...cookieOptions,
-        maxAge: 24 * 60 * 60 * 1000,
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
         });
       }
 
@@ -796,9 +795,10 @@ export class AuthV2Controller {
     try {
       logger.info(`[${requestId}] Processing logout`);
 
-      if (req.user) {
-        logger.info(`[${requestId}] Revoking sessions for user: ${req.user.email}`);
-        await this.userSessionService.revokeAllUserSessions(req.user.id);
+      const sessionId = req.cookies?.user_session_id;
+      if (sessionId) {
+        logger.info(`[${requestId}] Revoking session: ${sessionId} for user ${req.user?.email}`);
+        await this.userSessionService.revokeSession(sessionId);
       }
 
       res.clearCookie('google_access_token', { path: '/' });

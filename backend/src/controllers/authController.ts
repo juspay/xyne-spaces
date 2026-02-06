@@ -5,6 +5,7 @@ import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
 import { jwtService } from '../services/jwtService';
 import '../middleware/auth'; // Import to get extended Express types
+import { config } from '@/config/env';
 
 export class AuthController {
   private googleClient: OAuth2Client;
@@ -310,14 +311,14 @@ export class AuthController {
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction,
-        sameSite: 'lax' as const,
+        sameSite: 'strict' as const,
         path: '/',
       };
 
-      // Set auth token cookie (expires in 15 minutes)
+      // Set auth token cookie (expires in 24 hours)
       res.cookie('google_access_token', customToken, {
         ...cookieOptions,
-        maxAge: 15 * 60 * 1000, // 15 minutes in milliseconds
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       // Set session ID cookie (expires in 30 days)
@@ -477,9 +478,9 @@ export class AuthController {
       res.cookie('google_access_token', customToken, {
         httpOnly: true,
         secure: isProduction,
-        sameSite: 'lax',
+        sameSite: 'strict',
         path: '/',
-        maxAge: 15 * 60 * 1000, // 15 minutes in milliseconds
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       res.status(200).json({
@@ -693,14 +694,14 @@ export class AuthController {
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction,
-        sameSite: 'lax' as const,
+        sameSite: 'strict' as const,
         path: '/',
       };
 
-      // Set auth token cookie (expires in 15 minutes)
+      // Set auth token cookie (expires in 24 hours)
       res.cookie('google_access_token', customToken, {
         ...cookieOptions,
-        maxAge: 15 * 60 * 1000, // 15 minutes in milliseconds
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       // Set session ID cookie (expires in 30 days)
@@ -762,7 +763,6 @@ export class AuthController {
         res.status(401).json({
           error: 'No session found',
           message: 'Session ID cookie is missing',
-          needsReauth: true
         });
         return;
       }
@@ -777,7 +777,6 @@ export class AuthController {
         res.status(401).json({
           error: 'Invalid session',
           message: 'Session not found or expired',
-          needsReauth: true
         });
         return;
       }
@@ -790,7 +789,6 @@ export class AuthController {
         res.status(401).json({
           error: 'Session expired',
           message: 'Please re-authenticate',
-          needsReauth: true
         });
         return;
       }
@@ -811,19 +809,16 @@ export class AuthController {
 
       // Set new token in HTTP-only cookie (browser receives this directly!)
       const isProduction = process.env.NODE_ENV === 'production';
-      const cookieMaxAge = 15 * 60 * 1000; // 15 minutes
-      const expiryDate = new Date(Date.now() + cookieMaxAge);
 
       res.cookie('google_access_token', customToken, {
         httpOnly: true,
         secure: isProduction,
-        sameSite: 'lax',
+        sameSite: 'strict',
         path: '/',
-        maxAge: cookieMaxAge,
+        maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       logger.info(`[REFRESH] New JWT cookie set for user: ${session.user.email}`);
-      logger.info(`[REFRESH] Cookie expires at: ${expiryDate.toISOString()}`);
       logger.info(`[REFRESH] Sending Set-Cookie header to browser`);
 
       res.status(200).json({

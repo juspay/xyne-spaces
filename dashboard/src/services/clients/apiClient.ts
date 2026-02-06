@@ -1,7 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
-import { websocketService } from './socketClient';
 import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanelService';
 import { API_BASE_URL } from '../../config';
 import { logger, Logger } from '../../utils/logger';
@@ -10,8 +9,6 @@ import {
   httpRequestTotal,
   httpRequestErrors,
   safeRecordMetric,
-  authRefreshDuration,
-  authRefreshTotal,
   clearAuthTokenTotal,
 } from '../otel';
 
@@ -160,13 +157,28 @@ apiConfig.interceptors.response.use(
   async (error: unknown) => {
     // Type guard to ensure error has the expected structure
     if (!error || typeof error !== 'object' || !('config' in error)) {
+      logger.error(Logger.Event.API_CALL_FAILED, {
+        errorMessage: 'Unknown error structure in response interceptor',
+      });
       return Promise.reject(new Error('Unknown error occurred'));
     }
 
     const axiosError = error as AxiosError & {
       config: InternalAxiosRequestConfig & { _retry?: boolean };
-      response?: { status: number; data?: { needsReauth?: boolean; needsRefresh?: boolean } };
+      response?: {
+        status: number;
+        data?: {
+          error?: string;
+          message?: string;
+        };
+      };
     };
+
+    logger.debug(Logger.Event.API_ERROR_INTERCEPTOR_CAUGHT, {
+      message: axiosError.message,
+      code: axiosError.code,
+      url: axiosError.config?.url,
+    });
 
     // Track API latency for failed requests
     const config = axiosError.config as InternalAxiosRequestConfig & {
@@ -179,6 +191,7 @@ apiConfig.interceptors.response.use(
     const sanitizedUrl = sanitizeUrl(fullUrl);
     const method = config.method?.toUpperCase() || 'unknown';
     const statusCode = axiosError.response?.status || 0;
+    const responseData = axiosError.response?.data;
 
     logger.error(Logger.Event.API_CALL_FAILED, {
       api_url: sanitizedUrl,
@@ -187,6 +200,8 @@ apiConfig.interceptors.response.use(
       latency,
       error_message: axiosError.message,
       requestId: config.metadata?.requestId,
+      serverError: responseData?.error,
+      serverMessage: responseData?.message,
     });
 
     safeRecordMetric(() => {
@@ -209,66 +224,12 @@ apiConfig.interceptors.response.use(
     });
 
     if (axiosError.response?.status === 401) {
-      const responseData = axiosError.response.data;
-
-      if (responseData?.needsRefresh && !axiosError.config._retry) {
-        axiosError.config._retry = true;
-        try {
-          const refreshStartTime = Date.now();
-          // Note: Using direct axios call instead of apiInstance
-          const refreshHeaders: Record<string, string> = {};
-          refreshHeaders['x-request-id'] = uuidv4();
-          if (logger.zeroClientID) {
-            refreshHeaders['x-client-id'] = logger.zeroClientID;
-          }
-          if (logger.zeroClientGroupID) {
-            refreshHeaders['x-zero-client-group-id'] = logger.zeroClientGroupID;
-          }
-          await axios.get(`${BASE_URL}/auth/refresh-session`, {
-            withCredentials: true,
-            headers: refreshHeaders,
-          });
-          // Reconnect WebSocket with new token
-
-          const refreshLatency = Date.now() - refreshStartTime;
-
-          logger.info(Logger.Event.AUTH_REFRESH_SUCCESS, {
-            refresh_latency_ms: refreshLatency,
-            trigger: 'API_SESSION_EXPIRED',
-          });
-
-          safeRecordMetric(() => {
-            authRefreshDuration.record(refreshLatency, {
-              trigger: 'api_session_expired',
-              platformName: logger.platformName,
-            });
-            authRefreshTotal.add(1, {
-              trigger: 'api_session_expired',
-              platformName: logger.platformName,
-              status: 'success',
-            });
-          });
-
-          if (websocketService.isConnectedToServer()) {
-            websocketService.reconnect();
-          }
-
-          return apiConfig.request(axiosError.config);
-        } catch (error) {
-          logger.error(Logger.Event.AUTH_REFRESH_FAILED, {
-            errorMessage: error instanceof Error ? error.message : 'Unknown error',
-            sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
-          });
-          safeRecordMetric(() => {
-            authRefreshTotal.add(1, {
-              trigger: 'api_session_expired',
-              platformName: logger.platformName,
-              status: 'error',
-              reason: error instanceof Error ? error.message : 'Unknown error',
-            });
-          });
-        }
-      }
+      logger.warn(Logger.Event.AUTH_SESSION_EXPIRED, {
+        url: sanitizedUrl,
+        message: 'Received 401 Unauthorized. Logging out.',
+        serverError: responseData?.error,
+        serverMessage: responseData?.message,
+      });
 
       // Track app refresh before reload
       mixpanelService.track(EVENTS.APP_REFRESH, {
@@ -286,6 +247,11 @@ apiConfig.interceptors.response.use(
       return Promise.reject(new Error('Session refresh failed - please re-authenticate'));
     } else if (!axiosError.response) {
       // Network error (backend down) - log but don't redirect
+      logger.warn(Logger.Event.API_NETWORK_ERROR, {
+        message: axiosError.message,
+        code: axiosError.code,
+        description: 'Network error - backend server may be down.',
+      });
       // console.error('🌐 [AUTH] Network error - backend server may be down:', error);
     }
 
@@ -298,6 +264,12 @@ apiConfig.interceptors.response.use(
 
     if (axios.isAxiosError(error) && error.response) {
       const status = error.response.status;
+
+      logger.info(Logger.Event.API_OPERATIONAL_ERROR, {
+        url: sanitizedUrl,
+        status,
+        message: `Handling operational error for status ${status}`,
+      });
 
       // Handle specific error responses with custom data
       if (error.response.data) {

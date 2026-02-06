@@ -191,7 +191,7 @@ export class TestAuthController {
             const cookieOptions = {
                 httpOnly: true,
                 secure: false,
-                sameSite: 'lax' as const,
+                sameSite: 'strict' as const,
                 path: '/',
             };
 
@@ -211,7 +211,7 @@ export class TestAuthController {
                 res.cookie('is_new_user', 'true', {
                     httpOnly: true,
                     secure: false,
-                    sameSite: 'lax',
+                    sameSite: 'strict',
                     path: '/',
                     maxAge: 30 * 24 * 60 * 60 * 1000,
                 });

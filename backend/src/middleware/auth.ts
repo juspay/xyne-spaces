@@ -7,6 +7,7 @@ import { UserSessionService } from '../services/userSessionService';
 import { apiKeyService } from '../services/apiKeyService';
 import { jwtService } from '../services/jwtService';
 import '../types/express'; // Import the Express type extensions
+import { config } from '@/config/env';
 
 export class AuthMiddleware {
   private googleClient?: OAuth2Client;
@@ -207,9 +208,9 @@ export class AuthMiddleware {
             res.cookie('google_access_token', refreshResult.customToken, {
               httpOnly: true,
               secure: isProduction,
-              sameSite: 'lax',
+              sameSite: 'strict',
               path: '/',
-              maxAge: 24 * 60 * 60 * 1000, // 15 minutes
+              maxAge: config.jwt.expirationSeconds * 1000,
             });
 
             // Update req.cookies for downstream handlers
@@ -227,7 +228,6 @@ export class AuthMiddleware {
           res.status(401).json({
             error: 'Invalid or expired session',
             message: 'Please re-authenticate',
-            needsReauth: true
           });
           return;
         }
@@ -279,7 +279,7 @@ export class AuthMiddleware {
             res.cookie('google_access_token', refreshResult.customToken, {
               httpOnly: true,
               secure: isProduction,
-              sameSite: 'lax',
+              sameSite: 'strict',
               path: '/',
               maxAge: 24 * 60 * 60 * 1000, // 15 minutes
             });
@@ -301,7 +301,6 @@ export class AuthMiddleware {
           res.status(401).json({
             error: 'Invalid or expired session',
             message: 'Please re-authenticate',
-            needsReauth: true
           });
           return;
         }
@@ -310,7 +309,6 @@ export class AuthMiddleware {
         res.status(401).json({
           error: 'Invalid or expired session',
           message: 'Token expired and no session provided for refresh',
-          needsReauth: true
         });
         return;
       }
@@ -513,7 +511,6 @@ export class AuthMiddleware {
         res.status(401).json({
           error: 'Authentication required',
           message: 'No token provided',
-          needsReauth: true
         });
         return;
       }
@@ -524,12 +521,11 @@ export class AuthMiddleware {
         payload = jwtService.verifyToken(token);
         logger.info(`Zero auth: Token valid, expires at ${new Date(payload.exp * 1000).toISOString()}`);
       } catch (verifyError) {
-        logger.warn('Zero auth failed: JWT token expired/invalid - returning 401 with needsRefresh');
+        logger.warn('Zero auth failed: JWT token expired/invalid - returning 401');
         logger.info('Error details:', verifyError instanceof Error ? verifyError.message : 'Unknown error');
         res.status(401).json({
           error: 'Invalid or expired token',
           message: 'Token verification failed',
-          needsRefresh: true
         });
         return;
       }
@@ -538,7 +534,6 @@ export class AuthMiddleware {
         res.status(401).json({
           error: 'Invalid token',
           message: 'JWT token payload is invalid',
-          needsReauth: true
         });
         return;
       }
@@ -550,7 +545,6 @@ export class AuthMiddleware {
         res.status(401).json({
           error: 'User not found',
           message: 'User associated with this token no longer exists',
-          needsReauth: true
         });
         return;
       }
@@ -582,7 +576,6 @@ export class AuthMiddleware {
       res.status(401).json({
         error: 'Authentication failed',
         message: 'Unable to verify authentication token',
-        needsReauth: true
       });
     }
   };
