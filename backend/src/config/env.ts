@@ -26,6 +26,7 @@ const envSchema = Joi.object({
   GOOGLE_CLIENT_ID: Joi.string().allow('').default(''),
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').default(''),
   JWT_SECRET: Joi.string().required(),
+  JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
   // Google Cloud Storage Configuration (Workload Identity)
@@ -271,5 +272,8 @@ export const config = {
   webSearch: {
     url: envVars.WEB_SEARCH_URL,
     apiKey: envVars.WEB_SEARCH_API_KEY,
+  },
+  jwt: {
+    expirationSeconds: envVars.JWT_EXPIRATION_SECONDS,
   },
 };

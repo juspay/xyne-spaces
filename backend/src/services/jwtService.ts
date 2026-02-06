@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger';
+import { config } from '../config/env';
 
 export interface JwtPayload {
   sub: string;
@@ -39,7 +40,7 @@ export class JwtService {
         },
         this.secret,
         {
-          expiresIn: '1d', // 1 day
+          expiresIn: config.jwt.expirationSeconds,
           issuer: this.issuer,
           audience: this.audience,
         }
