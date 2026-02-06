@@ -97,7 +97,7 @@ export interface WorkflowStorage {
 
   // Framework step creation methods
   createToolExecutionStep(childExecutionId: string, toolExecution: any): Promise<void>
-  updateToolExecutionStep(childExecutionId: string, toolData: any, toolCallStatus: string): Promise<void>
+  updateToolExecutionStep(childExecutionId: string, toolData: any, toolCallStatus: string, toolInput?: Record<string, unknown>): Promise<void>
   updateToolExecutionAgentStep(toolExecutionId: string, updateData: UpdateAgentStepInput): Promise<AgentStep>
   createLLMCallStep(childExecutionId: string, llmCall: any): Promise<void>
   createAssistantMessageStep(childExecutionId: string, message: any): Promise<void>

@@ -134,7 +134,10 @@ export type PrLinkGenerator = (params: {
 }) => string
 
 // Framework-based agentic checkpoint config
+export type ExecutorType = 'xyne-code' | 'opencode'
+
 export type AgenticCheckpointConfig = {
+  executorType?: ExecutorType
   conversationContext?: {
     messages?: readonly Message[]  // Framework Message type
     initialUserMessage?: string
@@ -152,6 +155,8 @@ export type AgenticCheckpointConfig = {
     // Continuation-specific fields (set by agent-executor during continuation)
     continuationCommitHash?: string  // Commit to checkout for continuation
     existingPrLink?: string          // Existing PR to update (not create new)
+    /** Optional hook called after repo is cloned, before agent execution. Use for project-specific setup like npm install */
+    postCloneSetup?: (repoPath: string, repoName: string) => Promise<void>
   }
   agentConfigVersions?: AgentConfigVersions
   /** When true, captures learnings from the checkpoint for the knowledge base */

@@ -99,7 +99,7 @@ export async function generateKnowledgeLearnings(
             retries: 3
           }
         },
-        defaultModel: 'glm-46-fp8'
+        defaultModel: 'glm-latest'
       },
       tools: {
         enabled: [], // No tools needed for knowledge extraction
@@ -316,7 +316,7 @@ export async function generateConsolidatedKnowledgeLearnings(
             retries: 3
           }
         },
-        defaultModel: 'glm-46-fp8'
+        defaultModel: 'glm-latest'
       },
       tools: {
         enabled: [], // No tools needed for knowledge extraction

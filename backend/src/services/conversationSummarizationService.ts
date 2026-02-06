@@ -135,7 +135,7 @@ export class ConversationSummarizationService {
     }
   ) {
     this.defaultChunkSize = config?.defaultChunkSize || 55500;
-    this.defaultModel = config?.defaultModel || 'glm-46-fp8';
+    this.defaultModel = config?.defaultModel || 'glm-latest';
   }
 
   /**

@@ -107,8 +107,17 @@ export class BitbucketManager {
     try {
       const url = this.buildPullRequestUrl(projectName, repoName);
 
+      let prTitle = 'Xyne Generated PR';
+      if (xyneId && ticketTitle) {
+        prTitle = `feat: ${xyneId} ${ticketTitle}`;
+      } else if (xyneId) {
+        prTitle = `feat: ${xyneId}`;
+      } else if (ticketTitle) {
+        prTitle = `feat: ${ticketTitle}`;
+      }
+
       const payload = {
-        title: ticketTitle ? `${xyneId} : ${ticketTitle}` : 'Xyne Generated PR',
+        title: prTitle,
         description: ticketDescription || 'Auto-generated pull request',
         fromRef: {
           id: `refs/heads/${sourceBranchName}`,

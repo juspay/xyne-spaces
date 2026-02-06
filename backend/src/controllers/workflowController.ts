@@ -204,7 +204,7 @@ export class WorkflowController {
   // POST: Create workflow from form data (replaces old ticket creation workflow logic)
   createWorkflow = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { title, workflowType, description, ticketId, ...customFields } = req.body;
+      const { title, workflowType, description, ticketId, executorType, ...customFields } = req.body;
       // Validate required fields
       if (!title) {
         res.status(400).json({ error: 'title is required' });
@@ -268,13 +268,18 @@ export class WorkflowController {
       const imageAttachments = await ticketService.getImagesForTicket(ticketId);
 
       // Build context - add ticketId and imageAttachments to the parsed input
-      const context = def.contextMapper({
+      const mappedContext = def.contextMapper({
         ...parsedInput,
         ticketId,
         title,
         description,
         imageAttachments,
+        executorType: executorType || 'xyne-code', // Default to xyne-code if not provided
       });
+      const context = {
+        ...mappedContext,
+        executorType: executorType || 'xyne-code',
+      };
 
       if (!context || typeof context !== 'object' || !Object.keys(context).length) {
         res.status(400).json({

@@ -70,13 +70,16 @@ export async function runDeterministicValidation(
 
   logger.info('Running deterministic validation steps...');
 
-  // Step 1: Install dependencies in shared
+  // Step 1: Install and build shared (dashboard depends on shared being built)
   logger.info('Installing dependencies in shared...');
-  await executeCommand('npm i', `${repoPath}/shared`);
+  await executeCommand('npm i --force', `${repoPath}/shared`);
+  
+  logger.info('Building shared...');
+  await executeCommand('npm run build', `${repoPath}/shared`);
 
-  // Step 2: Install dependencies in dashboard
+  // Step 2: Install dependencies in dashboard (use --force for clean install, --ignore-scripts to avoid duplicate shared build)
   logger.info('Installing dependencies in dashboard...');
-  await executeCommand('npm i', `${repoPath}/dashboard`);
+  await executeCommand('npm i --force --ignore-scripts', `${repoPath}/dashboard`);
 
   // Step 3: Format code
   logger.info('Formatting code...');
