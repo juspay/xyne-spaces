@@ -1,3 +1,15 @@
+## [1.31.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.30.1...v1.31.0) (2026-02-06)
+
+
+### Features
+
+* added_websearch_tool_for_Xyne_AI ([38c4191](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/38c4191e7555d9df619721a82e81492aeef9816d)), closes [#2786](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2786)
+
+
+### Bug Fixes
+
+* removed db upserts for user presence status, cleanup cron and heartbeat worker ([13f33fd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/13f33fd002510355855a62bb41687394d9cd4a91)), closes [#2806](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2806)
+
 ## [1.30.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.30.0...v1.30.1) (2026-02-06)
 
 
