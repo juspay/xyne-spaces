@@ -245,6 +245,16 @@ export const generateToolInputStatus = (toolName: string, toolInput: unknown): s
       case 'fetch_channel_messages':
         return 'Fetching channel messages';
 
+      case 'web_search': {
+        const query = extractSafeString(input['query']);
+        if (query) {
+          // Remove HTML quote entities
+          const cleanQuery = query.replace(/"/g, '').replace(/"/g, '');
+          return `Searching the web for ${cleanQuery}`;
+        }
+        return 'Searching the web';
+      }
+
       default:
         return 'Processing';
     }

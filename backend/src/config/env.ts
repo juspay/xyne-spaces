@@ -90,6 +90,9 @@ const envSchema = Joi.object({
   JENKINS_JOB_PATH: Joi.string().default(''),
   JENKINS_USERNAME: Joi.string().allow('').default(''),
   JENKINS_API_TOKEN: Joi.string().allow('').default(''),
+  // Web Search Configuration
+  WEB_SEARCH_URL: Joi.string().uri().allow('').default(''),
+  WEB_SEARCH_API_KEY: Joi.string().allow('').default(''),
   // Otel Configuration
   OTEL_BASE_URL: Joi.string().default(''),
   OTEL_SERVICE_NAME: Joi.string().default(''),
@@ -243,5 +246,9 @@ export const config = {
     baseUrl: envVars.OTEL_BASE_URL,
     serviceName: envVars.OTEL_SERVICE_NAME,
     exportIntervalMs: envVars.OTEL_EXPORT_INTERVAL_MS,
+  },
+  webSearch: {
+    url: envVars.WEB_SEARCH_URL,
+    apiKey: envVars.WEB_SEARCH_API_KEY,
   },
 };

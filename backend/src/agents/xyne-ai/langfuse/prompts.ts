@@ -154,6 +154,7 @@ export const PROMPT_NAMES = {
   SEARCH_RELEVANT_TICKETS: 'search_relevant_tickets',
   GENIUS: 'genius_as_tool',
   FIELD_VALUE_DISCOVERY: 'field_value_discovery',
+  WEB_SEARCH: 'web_search',
   RESEARCH_AGENT: 'research_agent',
 } as const;
 

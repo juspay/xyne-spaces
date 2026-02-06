@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { ArrowUp, X, Lock } from 'lucide-react';
+import { ArrowUp, X, Lock, Globe } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -31,6 +31,9 @@ interface XyneAIInputBoxProps {
   onSelectedChannelsChange?: (channelIds: string[]) => void;
   isStreaming?: boolean;
   onAbort?: () => void;
+  webSearchEnabled?: boolean;
+  webSearchAccessible?: boolean;
+  onWebSearchToggle?: () => void;
 }
 
 interface SelectedChannel {
@@ -49,6 +52,9 @@ export const XyneAIInputBox = ({
   onSelectedChannelsChange,
   isStreaming = false,
   onAbort,
+  webSearchEnabled = false,
+  webSearchAccessible = false,
+  onWebSearchToggle,
 }: XyneAIInputBoxProps): ReactElement => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -417,8 +423,47 @@ export const XyneAIInputBox = ({
             editor={editor}
             className="bg-transparent outline-none text-foreground p-2 pr-12 placeholder:text-muted-foreground text-sm font-['Inter']"
           />
+        </div>
 
-          {/* Send Button - Absolutely Positioned */}
+        {/* Bottom buttons - Web Search and Submit */}
+        <div className='flex items-center justify-between gap-2 px-2'>
+          <div className='flex items-center gap-2'>
+            {/* Web Search Toggle Button */}
+            {onWebSearchToggle && (
+              <button
+                type='button'
+                onClick={() => {
+                  if (webSearchAccessible) {
+                    onWebSearchToggle();
+                  }
+                }}
+                disabled={!webSearchAccessible}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  webSearchEnabled
+                    ? 'bg-[#E6F4EA] text-[#1E8E3E] hover:bg-[#D8EBE2]'
+                    : 'hover:bg-gray-100 text-gray-600'
+                } ${!webSearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
+                aria-label={
+                  webSearchAccessible
+                    ? webSearchEnabled
+                      ? 'Disable web search'
+                      : 'Enable web search'
+                    : 'Web search not available'
+                }
+                title={
+                  webSearchAccessible
+                    ? webSearchEnabled
+                      ? 'Web search enabled'
+                      : 'Enable web search'
+                    : "You don't have access to web search."
+                }
+              >
+                <Globe className='w-4 h-4' />
+              </button>
+            )}
+          </div>
+
+          {/* Submit/Stop button */}
           <button
             onClick={isStreaming ? onAbort : onSubmit}
             disabled={!isStreaming && !inputValue.trim()}

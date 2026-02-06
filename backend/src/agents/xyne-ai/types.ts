@@ -18,6 +18,7 @@ export interface XyneAIRequest {
   userId: string;
   currentTimestamp?: string | null;
   userInfo?: UserInfo;
+  webSearchEnabled?: boolean;  // Enable/disable web search tool
 }
 
 // ============================================================================
@@ -31,6 +32,7 @@ export interface Citation {
   channelId: string;
   prefixedRef: string;
   isTicket?: boolean; // Distinguishes ticket citations from message citations
+  url?: string; // URL from web search results for this citation
 }
 
 export interface KeyPointWithCitation {

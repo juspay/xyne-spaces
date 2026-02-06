@@ -65,7 +65,7 @@
     "@types/yauzl": "^2.10.3",
     "@xyne/shared": "file:../shared",
     "@xyne/vespa-ts": "^1.5.0",
-    "@xynehq/jaf": "0.1.30",
+    "@xynehq/jaf": "0.1.31",
     "@y-sweet/sdk": "^0.9.1",
     "agentic-framework": "file:../framework",
     "bull": "^4.16.5",

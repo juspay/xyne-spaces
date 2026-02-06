@@ -16,6 +16,7 @@ const XyneAIRequestSchema = z.object({
   session_id: z.preprocess(emptyToUndefined, z.string().uuid().optional()),
   channel_ids: z.array(z.string().min(1)).default([]), // Allow empty array - agent handles clarification
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
+  web_search_enabled: z.boolean().optional().default(false), // Enable/disable web search tool, defaults to false
 });
 
 // Feedback request validation schema
@@ -48,7 +49,7 @@ export class XyneAIController {
       return;
     }
 
-    const { query, session_id, channel_ids, conversation_id } = parseResult.data;
+    const { query, session_id, channel_ids, conversation_id, web_search_enabled } = parseResult.data;
 
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -116,10 +117,16 @@ export class XyneAIController {
         conversationId: conversation_id,
         userId,
         userInfo,
+        webSearchEnabled: web_search_enabled,
       };
 
       // Track metrics: context channels count
       metrics.askAIContextChannels.observe(channel_ids.length);
+
+      // Track web search query if enabled
+      if (web_search_enabled) {
+        metrics.webSearchEnabledTotal.inc();
+      }
 
       const startTime = Date.now();
       let status = 'success';

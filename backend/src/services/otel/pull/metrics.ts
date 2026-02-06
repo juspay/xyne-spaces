@@ -156,6 +156,20 @@ const askAIFeedbackTotal = getOrCreateMetric("ask_ai_feedback_total", () => new 
   registers: [register],
 }));
 
+// Counter: Total Ask AI queries with web search enabled
+const webSearchEnabledTotal = getOrCreateMetric("web_search_enabled_total", () => new client.Counter({
+  name: "web_search_enabled_total",
+  help: 'Total number of Ask AI queries submitted with web search enabled',
+  registers: [register],
+}));
+
+// Counter: Total times web search tool was used
+const webSearchToolUsedTotal = getOrCreateMetric("web_search_tool_used_total", () => new client.Counter({
+  name: "web_search_tool_used_total",
+  help: 'Total number of times web search tool was used in Ask AI',
+  registers: [register],
+}));
+
 
 // Metrics endpoint
 export const metricsEndpoint = async (_req: Request, res: Response) => {
@@ -198,4 +212,7 @@ export const metrics = {
   askAIQueryDuration,
   askAIContextChannels,
   askAIFeedbackTotal,
+  // Web search metrics
+  webSearchEnabledTotal,
+  webSearchToolUsedTotal,
 };

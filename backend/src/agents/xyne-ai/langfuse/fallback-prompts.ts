@@ -72,7 +72,9 @@ CHANNEL CONTEXT - {{channel_context}}
 **Description:** Queries the Genius Analytics engine.
 **Constraint:** Pass the user's natural language question DIRECTLY to the tool. Output the result verbatim.
 
-6. <tool>research_agent</tool>
+{{web_search_tool_definition}}
+
+7. <tool>research_agent</tool>
 **Usage:** Deep codebase analysis, code understanding, and technical investigation (RCA, bug investigation, code flow analysis).
 **Description:** Queries the Research Agent for understanding code implementation, payment flows, and technical debugging.
 **Parameters:**
@@ -98,6 +100,7 @@ CHANNEL CONTEXT - {{channel_context}}
 
 ## 2. SEARCH & RETRIEVAL WORKFLOW
 - **Generic Search:** Call <tool>search_relevant_messages</tool>. Do not pass the 'channels' parameter unless specific channels were explicitly named by the user.
+{{web_search_handling_instructions}}
 - **User-Specific Search ("BY" vs "FOR"):**
     - **BY/FROM:** (e.g., "What did John say?") Use the 'sender' parameter. Validate the name first via <tool>field_value_discovery</tool>.
     - **FOR/ABOUT:** (e.g., "Tasks for John") **DO NOT** use the 'sender' parameter. Search for the name within the 'query' string of <tool>search_relevant_messages</tool>.
@@ -124,6 +127,8 @@ CHANNEL CONTEXT - {{channel_context}}
 ## MESSAGE REFERENCES
 - Prefix tool results alphabetically: [A1, A2...] for Call 1, [B1, B2...] for Call 2.
 - Citations must use these exact references (e.g., "A1").
+
+{{web_search_citation_instructions}}
 
 ## RESPONSE SCHEMA (JSON ONLY)
 You must respond with valid JSON containing these keys:
@@ -329,6 +334,29 @@ Examples:
 Note: The tool will stream results as they are computed. Pass the user's analytics question directly to this tool.`;
 
 /**
+ * Fallback description for web_search tool
+ */
+const WEB_SEARCH_FALLBACK = `Perform a web search to find current information from the internet.
+
+Use this tool when the user asks about:
+- Recent news, current events, or trending topics
+- Information that may not be in the chat history
+- External resources, documentation, or references
+- Real-time data or up-to-date information
+- Facts, statistics, or general knowledge from the web
+
+The query should be a clear search term or phrase that describes what the user is looking for.
+
+Examples:
+- "Latest news about AI developments"
+- "What is the current price of Bitcoin"
+- "Recent updates about TypeScript 5.0"
+- "Best practices for React hooks"
+- "Current weather in Bangalore";
+
+Note: This tool searches the internet and returns relevant web pages with titles, URLs, and snippets.`;
+
+/**
  * Fallback description for research_agent tool
  */
 const RESEARCH_AGENT_FALLBACK = `Query the Research Agent for deep codebase analysis, code understanding, and technical investigation.
@@ -372,6 +400,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'search_relevant_tickets': SEARCH_RELEVANT_TICKETS_FALLBACK,
   'genius_as_tool': GENIUS_FALLBACK,
   'field_value_discovery': FIELD_VALUE_DISCOVERY_FALLBACK,
+  'web_search': WEB_SEARCH_FALLBACK,
   'research_agent': RESEARCH_AGENT_FALLBACK,
 };
 

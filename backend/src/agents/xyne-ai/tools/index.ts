@@ -62,6 +62,7 @@ import { createSearchRelevantMessagesTool, getSearchRelevantMessagesTool } from 
 import { createSearchRelevantTicketsTool, getSearchRelevantTicketsTool } from './search_relevant_tickets.js';
 import { createFieldValueDiscoveryTool } from './field_value_discovery.js';
 import { createGeniusTool, getGeniusTool } from './genius.js';
+import { createWebSearchTool, getWebSearchTool } from './web_search.js';
 import { createResearchAgentTool, getResearchAgentTool } from './research_agent.js';
 
 import type { XyneAIAgentContext } from './types.js';
@@ -88,6 +89,9 @@ export { createFieldValueDiscoveryTool };
 // Genius
 export { createGeniusTool, getGeniusTool };
 
+// Web Search
+export { createWebSearchTool, getWebSearchTool };
+
 // Research Agent
 export { createResearchAgentTool, getResearchAgentTool };
 
@@ -99,8 +103,8 @@ export { createResearchAgentTool, getResearchAgentTool };
  * Get all Xyne AI tools (with descriptions from Langfuse)
  * MUST call initializeTools() before using this function
  */
-export function getXyneAITools(): Tool<any, XyneAIAgentContext>[] {
-  return [
+export function getXyneAITools(webSearchEnabled?: boolean): Tool<any, XyneAIAgentContext>[] {
+  const tools = [
     createFetchChannelMessagesTool(),
     // createFetchThreadMessagesTool(), // Commented out in original
     createSearchRelevantMessagesTool(),
@@ -109,6 +113,13 @@ export function getXyneAITools(): Tool<any, XyneAIAgentContext>[] {
     createGeniusTool(),
     createResearchAgentTool(),
   ];
+
+  // Add web search tool if runtime flag is true
+  if (webSearchEnabled) {
+    tools.push(createWebSearchTool());
+  }
+
+  return tools;
 }
 
 /**
