@@ -33,6 +33,13 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
 
       res.json(result);
     } catch (error) {
+      if (error instanceof Error && error.message === "Rate limit exceeded") {
+        res.status(429).json({
+          error: 'Rate limit exceeded',
+          message: 'You have exceeded the maximum number of allowed mutations. Please try again later.'
+        });
+        return;
+      }
 
       res.status(500).json({
         error: 'Internal server error',
@@ -71,6 +78,13 @@ export const handleGetQueries = async (req: Request, res: Response): Promise<voi
 
       res.json(result);
     } catch (error) {
+      if (error instanceof Error && error.message === "Rate limit exceeded") {
+        res.status(429).json({
+          error: 'Rate limit exceeded',
+          message: 'You have exceeded the maximum number of allowed queries. Please try again later.'
+        });
+        return;
+      }
 
       res.status(500).json({
         error: 'Internal server error',
