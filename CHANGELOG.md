@@ -1,3 +1,10 @@
+## [1.33.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.33.1...v1.33.2) (2026-02-07)
+
+
+### Bug Fixes
+
+* readding transcript ([cf8061c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cf8061c1db3f6ac3037fc7c179fe664518b746ce)), closes [#2900](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2900)
+
 ## [1.33.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.33.0...v1.33.1) (2026-02-06)
 
 
