@@ -778,7 +778,7 @@ Output ONLY the processed transcript, nothing else.`;
   async processCallWithSummary(callId: string, messageId: string): Promise<void> {
     try {
       // First, process the transcript (existing functionality)
-      // await this.postCallTranscript(callId, messageId);
+      await this.postCallTranscript(callId, messageId);
 
       // Get call details for summary generation
       const call = await repositories.calls.findByExternalId(callId);
