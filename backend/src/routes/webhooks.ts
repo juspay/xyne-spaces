@@ -13,7 +13,7 @@ export interface BitbucketWebhookEnvelope {
   date: string; // ISO timestamp from server
   receivedAt: string; // ISO timestamp (we add this)
 
-  repository: BitbucketRepository;
+  repository?: BitbucketRepository;
   actor?: BitbucketUser;
 
   pullRequest?: BitbucketPullRequest;

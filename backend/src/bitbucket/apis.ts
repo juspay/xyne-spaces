@@ -212,8 +212,6 @@ export class BitbucketManager {
   }
 
   async postBuildStatus(
-    workspace: string,
-    repoSlug: string,
     commitHash: string,
     state: 'INPROGRESS' | 'SUCCESSFUL' | 'FAILED',
     key: string,
@@ -222,7 +220,7 @@ export class BitbucketManager {
     description: string
   ) {
     try {
-      const buildStatusUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/commit/${commitHash}/statuses/build`;
+      const buildStatusUrl = `${config.bitbucket.BaseUrl}/rest/build-status/1.0/commits/${commitHash}`;
       const payload = {
         state,
         key,

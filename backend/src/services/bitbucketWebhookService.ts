@@ -150,9 +150,10 @@ export class BitbucketWebhookService {
    */
   private extractPRContext(payload: BitbucketWebhookEnvelope): PREventContext {
     const pr = payload.pullRequest!;
-    const repoName = payload.repository.name;
-    const projectName = payload.repository.project.key;
-    const repoSlug = payload.repository.slug;
+    const repo = pr.toRef.repository;
+    const repoName =repo.name;
+    const projectName = repo.project.key; 
+    const repoSlug = repo.slug;
 
     // Build repository URL (web URL, not SSH)
     const repositoryURL = pr.links.self?.[0]?.href?.replace(`/pull-requests/${pr.id}`, '') ||
@@ -267,7 +268,7 @@ export class BitbucketWebhookService {
       context.repoUrl,
       context.prUrl,
       context.numberOfComments,
-      context.workspace
+      context.prAuthorEmail
     );
   }
 

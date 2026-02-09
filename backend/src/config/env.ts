@@ -233,6 +233,7 @@ export const config = {
     apiToken: envVars.BITBUCKET_AUTH,
     apiUsername: envVars.BITBUCKET_USERNAME,
     sshBaseUrl: envVars.BITBUCKET_SSH_BASE_URL,
+     BaseUrl: envVars.BITBUCKET_BASE_URL,
   },
   workingHours: {
     start: envVars.WORKING_HOUR_START,
