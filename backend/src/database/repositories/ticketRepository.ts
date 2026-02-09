@@ -64,6 +64,18 @@ export class TicketRepository {
     // Calculate ETA deadline using working hours logic
     const etaDeadline = calculateETADeadline(new Date(), totalEtaHours);
 
+    // Upsert merchant if merchantId is provided
+    if (data.merchantId) {
+      await prisma.merchant.upsert({
+        where: { mid: data.merchantId },
+        update: {}, // No update needed if exists
+        create: {
+          mid: data.merchantId,
+        }
+      });
+      logger.info(`[TicketRepository] Upserted merchant with mid: ${data.merchantId}`);
+    }
+
     // Create ticket with the conversationId, auto-assigned stageName, and calculated ETA
     const ticket = await prisma.ticket.create({
       data: {

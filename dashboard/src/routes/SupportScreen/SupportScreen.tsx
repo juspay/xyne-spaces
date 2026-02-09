@@ -11,6 +11,7 @@ import {
   ArrowUp,
   LayoutGrid,
   List,
+  Store,
 } from 'lucide-react';
 import { ReactElement, useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
@@ -22,7 +23,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { RenderMessageWithHTML } from '../../components/Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import ThreadList from '../../components/Chat/ThreadList/ThreadList';
 import { ChatInput } from '../../components/Chat/ChatInput/ChatInput';
-import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
+import { useChannel, useGetChannelUserStatus, useEmailChannels } from '../../hooks/useChannels';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from '../../components/Chat/DragAndDropOverlay';
@@ -60,21 +61,43 @@ import {
 import type { Ticket } from '@xyne/shared';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
+import { Hash } from 'lucide-react';
 
-type SupportTicket = QueryResultType<typeof queries.ticketsForEmailChannels>[number];
-type MerchantTicket = QueryResultType<typeof queries.filteredTicketsByProject>[number];
+// Unified type for tickets from the supportTicketsFiltered query
+type SupportTicket = QueryResultType<typeof queries.supportTicketsFiltered>[number];
 
-const ALL_MERCHANTS_ID = 'all';
-const MERCHANT_TICKETS_PROJECT_ID = 'cmjtvlffw00s6k0715z3y7zzw';
-const MERCHANT_TICKETS_BOARD_ID = 'cmjtvlfg000s7k071w52j3mfs';
+// Type for Merchant from Merchant table
+type Merchant = QueryResultType<typeof queries.getAllMerchants>[number];
+
+const ALL_CHANNELS_ID = 'all';
 
 const getMerchantInitial = (name: string): string => {
   return name.charAt(0).toUpperCase() || '?';
 };
 
-const getTicketMerchantId = (ticket: SupportTicket | MerchantTicket): string => {
-  return ticket.merchantId || 'unknown';
+const getChannelInitial = (name: string): string => {
+  return name.charAt(0).toUpperCase() || '#';
 };
+
+// Reusable icon component for dropdown options
+const DropdownIcon = ({
+  children,
+  variant = 'channel',
+}: {
+  children: React.ReactNode;
+  variant?: 'channel' | 'merchant';
+}): ReactElement => (
+  <div
+    className={cn(
+      'w-4 h-4 rounded-md flex items-center justify-center font-bold text-[10px]',
+      variant === 'channel'
+        ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300',
+    )}
+  >
+    {children}
+  </div>
+);
 
 // Type definition for emails from the query
 type Email = QueryResultType<typeof queries.getEmailsForTicket>[number];
@@ -130,10 +153,13 @@ const SupportScreen = (): ReactElement => {
   const { ticketId } = useParams<{ ticketId?: string }>();
   const navigate = useNavigate();
   const zero = useZero();
-  const [supportTickets] = useCachedQuery(queries.ticketsForEmailChannels());
   const { userID } = useAuthContextValues();
   const [showMyTicketsOnly, setShowMyTicketsOnly] = useState(false);
-  const [selectedMerchantId, setSelectedMerchantId] = useState<string | null>(null);
+  const [selectedMerchantMid, setSelectedMerchantMid] = useState<string | null>(null);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(() => {
+    const saved = localStorage.getItem('support-selected-channel');
+    return saved || null;
+  });
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('support-view-mode');
     return (saved as ViewMode) || 'kanban';
@@ -143,78 +169,83 @@ const SupportScreen = (): ReactElement => {
     localStorage.setItem('support-view-mode', viewMode);
   }, [viewMode]);
 
-  const [merchantTicketsData] = useCachedQuery(
-    queries.filteredTicketsByProject({
-      projectId: MERCHANT_TICKETS_PROJECT_ID,
-      filters: {
-        boardId: MERCHANT_TICKETS_BOARD_ID,
-      },
+  useEffect(() => {
+    if (selectedChannelId) {
+      localStorage.setItem('support-selected-channel', selectedChannelId);
+    } else {
+      localStorage.removeItem('support-selected-channel');
+    }
+  }, [selectedChannelId]);
+
+  // Fetch EMAIL channels using hook (from state machine, already loaded)
+  const emailChannels = useEmailChannels();
+
+  // Unified query: filters by EMAIL channels, optional channelId, and optional merchant
+  const [supportTickets] = useCachedQuery(
+    queries.supportTicketsFiltered({
+      channelId:
+        selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : undefined,
+      merchantMid: selectedMerchantMid ?? undefined,
     }),
   );
 
+  // Fetch all merchants from Merchant table for dropdown
+  const [merchants] = useCachedQuery(queries.getAllMerchants());
+
+  // Build merchant options from Merchant table
   const merchantOptions = useMemo<SelectorOption[]>(() => {
-    const merchantTickets = merchantTicketsData ?? [];
-    const merchantOptions: SelectorOption[] = [];
+    const options: SelectorOption[] = [];
 
-    merchantOptions.push({
-      value: ALL_MERCHANTS_ID,
-      label: 'All Merchants',
-      icon: (
-        <div className='w-4 h-4 rounded-md flex items-center justify-center bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold text-[10px]'>
-          <List size={10} />
-        </div>
-      ),
-    });
+    const merchantsList = Array.isArray(merchants) ? merchants : [];
 
-    // merchant map
-    const merchantMap = new Map<string, string>();
-    merchantTickets.forEach(ticket => {
-      const merchantId = getTicketMerchantId(ticket);
-      if (!merchantMap.has(merchantId)) {
-        const isUnknown = merchantId === 'unknown';
-        const name = isUnknown ? 'Unknown Merchant' : merchantId;
-        merchantMap.set(merchantId, name);
-      }
-    });
-
-    const sortedMerchants = Array.from(merchantMap.entries())
-      .filter(([id]) => id !== ALL_MERCHANTS_ID)
-      .sort((a, b) => a[1].localeCompare(b[1]));
-
-    sortedMerchants.forEach(([id, name]) => {
-      merchantOptions.push({
-        value: id,
-        label: name,
-        icon: (
-          <div className='w-4 h-4 rounded-md flex items-center justify-center bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold text-[10px]'>
-            {getMerchantInitial(name)}
-          </div>
-        ),
+    merchantsList.forEach((merchant: Merchant) => {
+      options.push({
+        value: merchant.mid,
+        label: merchant.mid,
+        icon: <DropdownIcon variant='merchant'>{getMerchantInitial(merchant.mid)}</DropdownIcon>,
       });
     });
 
-    return merchantOptions;
-  }, [merchantTicketsData]);
+    return options;
+  }, [merchants]);
 
-  const assignedToMe = useMemo(
-    () => supportTickets.filter(ticket => ticket.assignedTo === userID),
-    [supportTickets, userID],
-  );
+  // Email channels are already sorted by the useEmailChannels hook
+  const sortedEmailChannels = emailChannels;
 
+  // Build channel options from pre-sorted EMAIL channels
+  const channelOptions = useMemo<SelectorOption[]>(() => {
+    const options: SelectorOption[] = [];
+
+    options.push({
+      value: ALL_CHANNELS_ID,
+      label: 'All Channels',
+      icon: (
+        <DropdownIcon variant='channel'>
+          <Hash size={10} />
+        </DropdownIcon>
+      ),
+    });
+
+    sortedEmailChannels.forEach(channel => {
+      const channelName = channel.name?.trim() || 'Unnamed Channel';
+      options.push({
+        value: channel.id,
+        label: channelName,
+        icon: <DropdownIcon variant='channel'>{getChannelInitial(channelName)}</DropdownIcon>,
+      });
+    });
+
+    return options;
+  }, [sortedEmailChannels]);
+
+  // The unified query already handles filtering, just apply user filter
   const displayedTickets = useMemo(() => {
-    if (selectedMerchantId === null) {
-      const tickets = showMyTicketsOnly ? assignedToMe : supportTickets;
-      return tickets;
+    const tickets = supportTickets ?? [];
+    if (showMyTicketsOnly) {
+      return tickets.filter(ticket => ticket.assignedTo === userID);
     }
-
-    if (selectedMerchantId === ALL_MERCHANTS_ID) {
-      const merchantTickets = merchantTicketsData ?? [];
-      return merchantTickets;
-    }
-
-    const merchantTickets = merchantTicketsData ?? [];
-    return merchantTickets.filter(ticket => getTicketMerchantId(ticket) === selectedMerchantId);
-  }, [showMyTicketsOnly, assignedToMe, supportTickets, selectedMerchantId, merchantTicketsData]);
+    return tickets;
+  }, [supportTickets, showMyTicketsOnly, userID]);
 
   const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
   const stageColumns = useMemo(
@@ -266,7 +297,7 @@ const SupportScreen = (): ReactElement => {
 
   const handleTicketClick = useCallback(
     (ticket: Ticket) => {
-      const ticketData = ticket as SupportTicket | MerchantTicket;
+      const ticketData = ticket as SupportTicket;
       void navigate(`/support/${ticketData.xyneId}`, {
         state: {
           conversationId: ticketData.conversationId,
@@ -296,14 +327,29 @@ const SupportScreen = (): ReactElement => {
                   <span className='truncate'>Xyne Desk</span>
                 </div>
                 <div className='flex items-center gap-2'>
+                  {/* Channel Dropdown (ExternalSources via EMAIL channels) */}
+                  <EntitySelector
+                    options={channelOptions}
+                    selectedValue={selectedChannelId}
+                    onSelect={setSelectedChannelId}
+                    placeholder='Channels'
+                    searchPlaceholder='Search channel...'
+                    showClearButton={selectedChannelId !== null}
+                    inputClassName='rounded-[10px] border border-gray-200 hover:bg-gray-50 px-3 py-1.5 h-8 text-sm font-medium whitespace-nowrap [&>svg:last-child]:rotate-90'
+                    inputIcon={<Hash className='w-3 h-3 text-gray-500' />}
+                    showIndicator={true}
+                    width='auto'
+                  />
+                  {/* Merchant Dropdown */}
                   <EntitySelector
                     options={merchantOptions}
-                    selectedValue={selectedMerchantId}
-                    onSelect={setSelectedMerchantId}
+                    selectedValue={selectedMerchantMid}
+                    onSelect={setSelectedMerchantMid}
                     placeholder='Merchants'
                     searchPlaceholder='Search merchant...'
-                    showClearButton={selectedMerchantId !== null}
-                    inputClassName='whitespace-nowrap px-2 py-1 h-auto text-sm font-medium border-none'
+                    showClearButton={selectedMerchantMid !== null}
+                    inputClassName='rounded-[10px] border border-gray-200 hover:bg-gray-50 px-3 py-1.5 h-8 text-sm font-medium whitespace-nowrap [&>svg:last-child]:rotate-90'
+                    inputIcon={<Store className='w-3 h-3 text-gray-500' />}
                     showIndicator={true}
                     width='auto'
                   />
