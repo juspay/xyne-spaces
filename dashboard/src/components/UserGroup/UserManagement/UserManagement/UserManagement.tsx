@@ -2,7 +2,6 @@ import { ReactElement, useMemo } from 'react';
 import { queries } from '../../../../zero/queries';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { UserList } from '../UserList/UserList';
-import { UserSelector } from '../UserSelector/UserSelector';
 import type { User } from '@xyne/shared';
 import { UserResponsibility } from '@xyne/shared';
 import { useUsers } from '../../../../hooks/useUsers';
@@ -48,25 +47,18 @@ export const UserManagement = ({
   };
 
   return (
-    <div className='space-y-4'>
-      <div>
-        <h3 className='text-sm font-medium text-gray-900 mb-3'>Group Members</h3>
+    <div className='h-full flex flex-col'>
+      <div className='px-6 pt-6 pb-3'>
+        <h3 className='text-sm font-medium text-gray-900'>Group Members</h3>
+      </div>
 
-        {/* Current Users */}
+      {/* Unified Search, Add and List Users */}
+      <div className='flex-1 overflow-hidden'>
         <UserList
           userGroupId={userGroupId}
           users={currentUsers}
           responsibilities={responsibilities}
           onUserRemove={handleUserRemoved}
-          disabled={disabled}
-        />
-      </div>
-
-      {/* User Selector */}
-      <div>
-        <UserSelector
-          userGroupId={userGroupId}
-          excludeUserIds={currentUsers.map(user => user.id)}
           onUsersAdded={handleUsersAdded}
           disabled={disabled}
         />
