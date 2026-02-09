@@ -5,12 +5,23 @@
  * when Langfuse credentials are not configured.
  */
 
+// ============================================================================
+// Langfuse Configuration (shared between prompts and tracing)
+// ============================================================================
+
+export {
+  getLangfuseConfig,
+  isLangfuseEnabled,
+  type LangfuseConfig,
+} from './config.js';
+
+// ============================================================================
+// Tracing exports
+// ============================================================================
+
 export {
   initializeLangfuseTracing,
-  isLangfuseEnabled,
   createOnEventHandler,
-  getLangfuseConfig,
-  type LangfuseConfig,
 } from './tracing.js';
 
 export {
