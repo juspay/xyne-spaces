@@ -18,6 +18,7 @@ export const ChannelCategory = {
   STARRED: 'starred',
   CHANNELS: 'channels',
   DIRECT_MESSAGES: 'direct-messages',
+  GROUP_DMS: 'group-dms',
 } as const;
 
 export type ChannelCategory = (typeof ChannelCategory)[keyof typeof ChannelCategory];
