@@ -28,6 +28,7 @@ Feature: Create Ticket from Message Hover Actions
     And I click on text "Todo" in the element "[data-testid='ticket-status-selector-options']"
     And I select a workflow if available
     And I click the button with text "Create Ticket"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear
 
   @ticket-from-message-with-assignee
   Scenario: Create a ticket from message and assign to another user
@@ -49,6 +50,7 @@ Feature: Create Ticket from Message Hover Actions
     # Select Workflow Type
     And I select a workflow if available
     And I click the button with text "Create Ticket"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear
  
 
   @ticket-from-thread
@@ -74,6 +76,7 @@ Feature: Create Ticket from Message Hover Actions
     # Select Workflow Type
     And I select a workflow if available
     And I click on "[data-testid='ticket-submit-button']"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear
 
 
   @ticket-from-thread-with-assignee
@@ -96,4 +99,5 @@ Feature: Create Ticket from Message Hover Actions
     And I click on text "High" in the element "[data-testid='ticket-priority-selector-options']"
     And I select a workflow if available
     And I click on "[data-testid='ticket-submit-button']"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear
 

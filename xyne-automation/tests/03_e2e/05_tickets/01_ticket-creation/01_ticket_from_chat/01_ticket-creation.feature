@@ -25,6 +25,7 @@ Feature: Ticket Creation E2E Flow
     And I click on text "Todo" in the element "[data-testid='ticket-status-selector-options']"
     And I select a workflow if available
     And I click the button with text "Create Ticket"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear
     
 
 
@@ -47,6 +48,7 @@ Feature: Ticket Creation E2E Flow
     And I click on text "Medium" in the element "[data-testid='ticket-priority-selector-options']"
     And I select a workflow if available
     And I click the button with text "Create Ticket"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear
 
 
   @ticket-create @ticket-create-test
@@ -66,6 +68,7 @@ Feature: Ticket Creation E2E Flow
     And I click on text "Low" in the element "[data-testid='ticket-priority-selector-options']"
     And I select a workflow if available
     And I click the button with text "Create Ticket"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear
 
   @ticket-create @ticket-create-user
   Scenario: Admin creates a User Story ticket
@@ -86,5 +89,6 @@ Feature: Ticket Creation E2E Flow
     And I click on text "Medium" in the element "[data-testid='ticket-priority-selector-options']"
     And I select a workflow if available
     And I click the button with text "Create Ticket"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear
     
  

@@ -21,6 +21,7 @@ Feature: Create Ticket from Channel Tickets Tab
     And I click on text "Todo" in the element "[data-testid='ticket-status-selector-options']"
     And I select a workflow if available
     And I click on "[data-testid='ticket-submit-button']"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear
 
   @ticket-from-tickets-tab-with-assignee
   Scenario: Create a ticket from Tickets tab and assign to another user
@@ -35,3 +36,4 @@ Feature: Create Ticket from Channel Tickets Tab
     And I click on text "High" in the element "[data-testid='ticket-priority-selector-options']"
     And I select a workflow if available
     And I click on "[data-testid='ticket-submit-button']"
+    And I wait for "[data-testid='create-ticket-modal']" to disappear

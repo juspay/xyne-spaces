@@ -31,14 +31,14 @@ export class GCSService {
   public constructor(bucketName?: string) {
     this.bucketName = bucketName || config.gcs.bucketName;
 
-    // Use fake-gcs-server in development, real GCS in production
-    const isDevelopment = process.env.NODE_ENV === 'development';
+    // Use fake-gcs-server in development/test, real GCS in production
+    const isEnvTestOrDevelopment = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
     const storageOptions: StorageOptions = {
       projectId: config.gcs.projectId,
     };
 
-    if (isDevelopment && config.gcs.fakeGcsHost) {
-      // Point to fake-gcs-server for local development (only if FAKE_GCS_HOST is set)
+    if (isEnvTestOrDevelopment && config.gcs.fakeGcsHost) {
+      // Point to fake-gcs-server for local development/test (only if FAKE_GCS_HOST is set)
       storageOptions.apiEndpoint = `http://${config.gcs.fakeGcsHost}`;
       logger.info(`GCS Service initialized with fake-gcs-server at ${config.gcs.fakeGcsHost} for bucket: ${this.bucketName}`);
     } else {
