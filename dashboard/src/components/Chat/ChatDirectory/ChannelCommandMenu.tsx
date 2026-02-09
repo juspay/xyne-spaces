@@ -513,7 +513,8 @@ const ChannelCommandMenu = ({
       const prevTrimmedText = prevSearchTextRef.current.trim();
 
       // Start a new session when text is cleared (had content, now empty)
-      if (prevTrimmedText && !trimmedText) {
+      // BUT don't trigger if mentions are present (indicates filter operator usage like from:/in:)
+      if (prevTrimmedText && !trimmedText && mentions.length === 0) {
         onClose('clear');
         onOpen('keyboard_shortcut');
       }
