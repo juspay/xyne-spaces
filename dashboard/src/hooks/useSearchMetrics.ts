@@ -460,7 +460,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         range: rangeFilter,
         stage: stageFilter,
         status: statusFilter,
-        assignee: assigneeFilter,
       } = parseSearchFilters(query);
 
       // Adjust local results count logic for context
@@ -489,7 +488,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         rangeFilter ||
         stageFilter ||
         statusFilter ||
-        assigneeFilter ||
         selectedMentions.length > 0;
 
       if (activeTab === TabType.USERS) {
@@ -541,8 +539,27 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               ...(rangeFilter && { range: rangeFilter }),
               ...(stageFilter && { stage: stageFilter }),
               ...(statusFilter && { status: statusFilter }),
-              ...(assigneeFilter && { assignee: assigneeFilter }),
             };
+
+            const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
+            const fromMentions = userMentions.filter(m => m.prefix === 'from:' || !m.prefix);
+            const assigneeMentions = userMentions.filter(m => m.prefix === 'assignee:');
+
+            // Assignee filter doesn't apply to Messages/Attachments - return empty results
+            if (
+              assigneeMentions.length > 0 &&
+              activeTab !== TabType.TICKETS &&
+              activeTab !== TabType.ALL
+            ) {
+              setSearchResults([]);
+              setPaginationState(prev => ({
+                ...prev,
+                [activeTab]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+              }));
+              setIsSearching(false);
+              pendingSearchCountRef.current -= 1;
+              return;
+            }
 
             if (activeTab === TabType.MESSAGES) {
               searchFilters.type = VespaDocTypes.MESSAGES;
@@ -555,18 +572,15 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.apps = VespaApps.TICKET;
             }
 
-            const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
-
-            // Separate mentions by prefix
-            const fromMentions = userMentions.filter(m => m.prefix === 'from:' || !m.prefix);
-            const assigneeMentions = userMentions.filter(m => m.prefix === 'assignee:');
+            // Add assignee filter for Tickets/ALL (force ticket-only search)
+            if (assigneeMentions.length > 0) {
+              searchFilters.type = VespaDocTypes.TICKETS;
+              searchFilters.apps = VespaApps.TICKET;
+              searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
+            }
 
             if (fromMentions.length > 0) {
               searchFilters.from = fromMentions.map(user => user.id).join(',');
-            }
-
-            if (assigneeMentions.length > 0) {
-              searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
             }
 
             const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
@@ -772,7 +786,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       range: rangeFilter,
       stage: stageFilter,
       status: statusFilter,
-      assignee: assigneeFilter,
     } = parseSearchFilters(text);
 
     const hasFilters =
@@ -785,7 +798,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       rangeFilter ||
       stageFilter ||
       statusFilter ||
-      assigneeFilter;
+      selectedMentions.length > 0;
 
     if (isLoadingMore || (!searchText && !hasFilters) || activeTab === TabType.CHANNELS) return;
 
@@ -815,8 +828,21 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           ...(rangeFilter && { range: rangeFilter }),
           ...(stageFilter && { stage: stageFilter }),
           ...(statusFilter && { status: statusFilter }),
-          ...(assigneeFilter && { assignee: assigneeFilter }),
         };
+
+        const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
+        const fromMentions = userMentions.filter(m => m.prefix === 'from:' || !m.prefix);
+        const assigneeMentions = userMentions.filter(m => m.prefix === 'assignee:');
+
+        // Assignee filter doesn't apply to Messages/Attachments - return empty
+        if (
+          assigneeMentions.length > 0 &&
+          activeTab !== TabType.TICKETS &&
+          activeTab !== TabType.ALL
+        ) {
+          setIsLoadingMore(false);
+          return;
+        }
 
         if (activeTab === TabType.MESSAGES) {
           searchFilters.type = VespaDocTypes.MESSAGES;
@@ -829,18 +855,15 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchFilters.apps = VespaApps.TICKET;
         }
 
-        const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
-
-        // Separate mentions by prefix
-        const fromMentions = userMentions.filter(m => m.prefix === 'from:' || !m.prefix);
-        const assigneeMentions = userMentions.filter(m => m.prefix === 'assignee:');
+        // Add assignee filter for Tickets/ALL (force ticket-only search)
+        if (assigneeMentions.length > 0) {
+          searchFilters.type = VespaDocTypes.TICKETS;
+          searchFilters.apps = VespaApps.TICKET;
+          searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
+        }
 
         if (fromMentions.length > 0) {
           searchFilters.from = fromMentions.map(user => user.id).join(',');
-        }
-
-        if (assigneeMentions.length > 0) {
-          searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
         }
 
         const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);

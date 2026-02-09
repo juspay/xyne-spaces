@@ -265,6 +265,7 @@ function formatTimestamp(timestamp: string): string {
   try {
     const date = new Date(timestamp);
     return date.toLocaleString('en-US', {
+      timeZone: 'UTC',
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -343,14 +344,14 @@ function transformMessage(
   // Handle potentially invalid createdAt timestamp
   let timestamp = '';
   try {
-    if (doc.createdAt) {
-      const date = new Date(doc.createdAt);
+    if (doc.createdAtTimestamp) {
+      const date = new Date(doc.createdAtTimestamp);
       if (!isNaN(date.getTime())) {
         timestamp = formatTimestamp(date.toISOString());
       }
     }
   } catch (error) {
-    logger.warn('Invalid createdAt for message:', doc.docId, doc.createdAt);
+    logger.warn('Invalid createdAt for message:', doc.docId, doc.createdAtTimestamp);
   }
 
   return {
@@ -441,14 +442,14 @@ function transformTicket(
   // Handle potentially invalid createdAt timestamp
   let timestamp = '';
   try {
-    if (doc.createdAt) {
-      const date = new Date(doc.createdAt);
+    if (doc.createdAtTimestamp) {
+      const date = new Date(doc.createdAtTimestamp);
       if (!isNaN(date.getTime())) {
         timestamp = formatTimestamp(date.toISOString());
       }
     }
   } catch (error) {
-    logger.warn('Invalid createdAt for ticket:', doc.docId, doc.createdAt);
+    logger.warn('Invalid createdAt for ticket:', doc.docId, doc.createdAtTimestamp);
   }
 
   // Get creator and assignee names from userMap

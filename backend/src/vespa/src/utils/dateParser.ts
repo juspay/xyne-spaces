@@ -25,9 +25,9 @@ const MONTH_NAMES: Record<string, number> = {
  */
 function applyBoundary(date: Date, boundary: 'start' | 'end'): number {
   if (boundary === 'start') {
-    date.setHours(0, 0, 0, 0);
+    date.setUTCHours(0, 0, 0, 0);
   } else {
-    date.setHours(23, 59, 59, 999);
+    date.setUTCHours(23, 59, 59, 999);
   }
   return date.getTime();
 }
@@ -59,7 +59,7 @@ export function parseDateToTimestamp(dateStr: string, boundary: 'start' | 'end')
     const month = parseInt(dmyMatch[2], 10) - 1; // JavaScript months are 0-indexed
     let year = parseInt(dmyMatch[3], 10);
     if (year < 100) year += 2000;
-    const date = new Date(year, month, day);
+    const date = new Date(Date.UTC(year, month, day));
     if (isNaN(date.getTime())) return null;
     return applyBoundary(date, boundary);
   }
@@ -72,7 +72,7 @@ export function parseDateToTimestamp(dateStr: string, boundary: 'start' | 'end')
     const month = MONTH_NAMES[dMonYMatch[2].toLowerCase()];
     let year = parseInt(dMonYMatch[3], 10);
     if (year < 100) year += 2000;
-    const date = new Date(year, month, day);
+    const date = new Date(Date.UTC(year, month, day));
     if (isNaN(date.getTime())) return null;
     return applyBoundary(date, boundary);
   }
