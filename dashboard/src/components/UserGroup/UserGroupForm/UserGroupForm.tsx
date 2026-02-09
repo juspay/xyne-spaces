@@ -1,5 +1,6 @@
 import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useForm, Controller } from 'react-hook-form';
+import { Users } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
@@ -38,6 +39,7 @@ export const UserGroupForm = ({
   const isEdit = !!userGroup;
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'about' | 'members'>('about');
 
   // ONE Map - mutate directly
   const responsibilitiesRef = useRef<Map<string, UserResponsibility>>(new Map());
@@ -153,115 +155,173 @@ export const UserGroupForm = ({
       onSubmit={e => {
         void handleFormSubmit(handleSubmit)(e);
       }}
-      className='space-y-6 p-6'
+      className='flex flex-col h-[800px]'
     >
+      {/* User Group Header */}
+      <div className='px-6 py-4 border-b border-gray-200'>
+        <div className='flex items-center gap-3'>
+          <div className='w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center'>
+            <Users className='w-5 h-5 text-primary' />
+          </div>
+          <div>
+            <h2 className='text-lg font-semibold text-gray-900'>
+              {isEdit ? userGroup.name : 'New User Group'}
+            </h2>
+            {isEdit && userGroup.alias && (
+              <p className='text-sm text-gray-500'>@{userGroup.alias}</p>
+            )}
+          </div>
+        </div>
+      </div>
+
       {error && (
-        <div className='bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded'>
+        <div className='bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mx-6 mt-6'>
           {error}
         </div>
       )}
 
-      <div>
-        <label htmlFor='name' className='block text-sm font-medium text-foreground mb-1.5'>
-          User Group Name
-        </label>
-        <Controller
-          name='name'
-          control={control}
-          rules={{ required: 'User group name is required' }}
-          render={({ field: { onChange, value } }) => (
-            <Input
-              id='name'
-              value={value}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-              placeholder='Enter user group name'
-              required
-              disabled={isLoading}
-            />
-          )}
-        />
-      </div>
-
-      <div>
-        <label htmlFor='alias' className='block text-sm font-medium text-foreground mb-1.5'>
-          Alias (for mentions)
-        </label>
-        <Controller
-          name='alias'
-          control={control}
-          render={({ field: { onChange, value } }) => (
-            <Input
-              id='alias'
-              value={value}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-              placeholder='e.g., frontend-team, backend-devs (optional)'
-              disabled={isLoading}
-            />
-          )}
-        />
-        <p className='text-xs text-muted-foreground mt-1.5'>
-          Lowercase letters, numbers, hyphens, and underscores only
-        </p>
-      </div>
-
-      <div>
-        <label htmlFor='description' className='block text-sm font-medium text-foreground mb-1.5'>
-          Description
-        </label>
-        <Controller
-          name='description'
-          control={control}
-          render={({ field: { onChange, value } }) => (
-            <Textarea
-              id='description'
-              value={value}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onChange(e.target.value)}
-              placeholder='Enter user group description (optional)'
-              rows={4}
-              disabled={isLoading}
-            />
-          )}
-        />
-      </div>
-
-      {/* User Management - Show for both create and edit modes */}
-      <div>
-        <hr className='border-gray-200 my-6' />
-        <div className='text-sm text-gray-600 mb-4'>
-          <p className='font-medium mb-2'>User Management</p>
+      {/* Tabs Header */}
+      <div className='border-b border-gray-200 px-6'>
+        <div className='flex gap-6'>
+          <Button
+            type='button'
+            variant='ghost'
+            onClick={() => setActiveTab('about')}
+            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors rounded-none ${
+              activeTab === 'about'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            About
+          </Button>
+          <Button
+            type='button'
+            variant='ghost'
+            onClick={() => setActiveTab('members')}
+            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors rounded-none ${
+              activeTab === 'members'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Members
+          </Button>
         </div>
+      </div>
 
-        {isEdit && userGroup ? (
-          <UserManagement
-            userGroupId={userGroup.id}
-            disabled={isLoading}
-            responsibilities={responsibilities}
-            onUsersChange={() => {
-              // Force re-render if needed
-            }}
-          />
-        ) : (
-          <UserSelector
-            userGroupId='' // Will be set after creation
-            excludeUserIds={[]}
-            onUsersAdded={() => {
-              // Users are handled in form submission
-            }}
-            disabled={
-              isLoading
-                ? {
-                    value: true,
-                    reason: 'Cannot add users while creating group',
+      {/* Tab Content */}
+      <div className='flex-1 overflow-y-auto'>
+        {activeTab === 'about' && (
+          <div className='space-y-6 p-6'>
+            <div>
+              <label htmlFor='name' className='block text-sm font-medium text-foreground mb-1.5'>
+                User Group Name
+              </label>
+              <Controller
+                name='name'
+                control={control}
+                rules={{ required: 'User group name is required' }}
+                render={({ field: { onChange, value } }) => (
+                  <Input
+                    id='name'
+                    value={value}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+                    placeholder='Enter user group name'
+                    required
+                    disabled={isLoading}
+                  />
+                )}
+              />
+            </div>
+
+            <div>
+              <label htmlFor='alias' className='block text-sm font-medium text-foreground mb-1.5'>
+                Alias (for mentions)
+              </label>
+              <Controller
+                name='alias'
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <Input
+                    id='alias'
+                    value={value}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+                    placeholder='e.g., frontend-team, backend-devs (optional)'
+                    disabled={isLoading}
+                  />
+                )}
+              />
+              <p className='text-xs text-muted-foreground mt-1.5'>
+                Lowercase letters, numbers, hyphens, and underscores only
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor='description'
+                className='block text-sm font-medium text-foreground mb-1.5'
+              >
+                Description
+              </label>
+              <Controller
+                name='description'
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <Textarea
+                    id='description'
+                    value={value}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                      onChange(e.target.value)
+                    }
+                    placeholder='Enter user group description (optional)'
+                    rows={4}
+                    disabled={isLoading}
+                  />
+                )}
+              />
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'members' && (
+          <div className='h-full flex flex-col'>
+            {isEdit && userGroup ? (
+              <UserManagement
+                userGroupId={userGroup.id}
+                disabled={isLoading}
+                responsibilities={responsibilities}
+                onUsersChange={() => {
+                  // Force re-render if needed
+                }}
+              />
+            ) : (
+              <div className='p-6'>
+                <UserSelector
+                  userGroupId='' // Will be set after creation
+                  excludeUserIds={[]}
+                  onUsersAdded={() => {
+                    // Users are handled in form submission
+                  }}
+                  disabled={
+                    isLoading
+                      ? {
+                          value: true,
+                          reason: 'Cannot add users while creating group',
+                        }
+                      : false
                   }
-                : false
-            }
-            selectedUsersOverride={selectedUsers}
-            onSelectedUsersChange={setSelectedUsers}
-          />
+                  selectedUsersOverride={selectedUsers}
+                  onSelectedUsersChange={setSelectedUsers}
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      <div className='flex gap-2 justify-end'>
+      {/* Footer Actions */}
+      <div className='border-t border-gray-200 p-6 flex gap-2 justify-end bg-white'>
         <Button variant='outline' onClick={onCancel} disabled={isLoading} type='button'>
           Cancel
         </Button>
