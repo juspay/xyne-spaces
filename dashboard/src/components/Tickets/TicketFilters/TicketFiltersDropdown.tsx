@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useRef, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ListFilter,
@@ -15,6 +15,7 @@ import {
   FileText,
   Hash,
   ToggleLeft,
+  X,
 } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import {
@@ -85,6 +86,27 @@ export const TicketFiltersDropdown = ({
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
+  // Memoized filter active check for menu items
+  const isFilterActive = useCallback(
+    (item: FilterMenuItem): boolean => {
+      // Handle date range filters which use separate Start/End keys
+      if (item.filterKey === 'dueDate') {
+        return !!(filters.dueDateStart !== undefined || filters.dueDateEnd !== undefined);
+      }
+      if (item.filterKey === 'createdAt') {
+        return !!(filters.createdDateStart !== undefined || filters.createdDateEnd !== undefined);
+      }
+      const filterValue = filters[item.filterKey as keyof TicketFilters];
+      if (Array.isArray(filterValue)) {
+        return filterValue.length > 0;
+      }
+      if (typeof filterValue === 'object' && filterValue !== null) {
+        return Object.keys(filterValue).length > 0;
+      }
+      return !!filterValue;
+    },
+    [filters],
+  );
   // Remove all 'more filters' (dynamicFields and others except boards) when 'All Boards' is selected
   const selectedBoards = useMemo(() => {
     if (!filters.boards || filters.boards.length === 0) {
@@ -306,11 +328,21 @@ export const TicketFiltersDropdown = ({
     onFiltersChange(newFilters);
   };
 
-  const getActiveFilterCount = (): number => {
+  const getFilterAssigneeCount = (): number => {
     let count = 0;
-    if (filters.boards?.length) count++;
-    if (filters.priority?.length) count++;
     if (filters.assignee?.length) count++;
+    return count;
+  };
+
+  const getFilterPriorityCount = (): number => {
+    let count = 0;
+    if (filters.priority?.length) count++;
+    return count;
+  };
+
+  const getMoreFiltersActiveCount = (): number => {
+    let count = 0;
+    // Excludes boards (auto-selected), assignee and priority (have their own indicators)
     if (filters.userGroups?.length) count++;
     if (filters.createdBy?.length) count++;
     if (filters.prReviewers?.length) count++;
@@ -324,7 +356,17 @@ export const TicketFiltersDropdown = ({
     return count;
   };
 
-  const hasActiveFilters = getActiveFilterCount() > 0;
+  const getActiveFilterCount =
+    getMoreFiltersActiveCount() + getFilterAssigneeCount() + getFilterPriorityCount();
+
+  const hasActiveFilters = getActiveFilterCount > 0;
+  const hasMoreFiltersActive = getMoreFiltersActiveCount() > 0;
+  const hasAssigneeFilter = getFilterAssigneeCount() > 0;
+  const hasPriorityFilter = getFilterPriorityCount() > 0;
+
+  const handleClearAllFilters = useCallback((): void => {
+    onFiltersChange({});
+  }, [onFiltersChange]);
 
   const handleMenuItemClick = (category: string): void => {
     const newActiveSubmenu = activeSubmenu === category ? null : category;
@@ -523,6 +565,7 @@ export const TicketFiltersDropdown = ({
                 <div className='flex items-center gap-1.5'>
                   <User className='w-3 h-3 p-px font-medium' />
                   <span className='font-medium'>Assignee</span>
+                  {hasAssigneeFilter && <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />}
                   <ChevronDown
                     className={cn(
                       'w-3 h-3 ml-1 transition-transform',
@@ -557,6 +600,7 @@ export const TicketFiltersDropdown = ({
               <div className='flex items-center gap-1.5'>
                 <BarChart4Icon className='w-3 h-3 p-px font-medium' />
                 <span className='font-medium'>Priority</span>
+                {hasPriorityFilter && <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />}
                 <ChevronDown
                   className={cn('w-4 h-4 ml-1 transition-transform', priorityOpen && 'rotate-180')}
                 />
@@ -587,6 +631,7 @@ export const TicketFiltersDropdown = ({
               <div className='flex items-center gap-1.5'>
                 <ListFilter className='w-3 h-3 font-medium' />
                 <span className='font-medium'>More Filters</span>
+                {hasMoreFiltersActive && <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />}
               </div>
             </Button>
           </Popover.Trigger>
@@ -616,7 +661,6 @@ export const TicketFiltersDropdown = ({
                 .map(item => {
                   const Icon = item.icon;
                   const isActive = activeSubmenu === item.id;
-
                   return (
                     <button
                       key={item.id}
@@ -632,6 +676,9 @@ export const TicketFiltersDropdown = ({
                       <div className='flex items-center gap-3'>
                         <Icon className='w-4 h-4' />
                         <span>{item.label}</span>
+                        {isFilterActive(item) && (
+                          <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
+                        )}
                       </div>
                       <ChevronRight className='w-4 h-4 text-gray-400' />
                     </button>
@@ -661,6 +708,18 @@ export const TicketFiltersDropdown = ({
           <BarChart3 className='w-4 h-4' />
           <span>Analytics</span>
         </Button>
+
+        {/* Clear Filters Button */}
+        {hasActiveFilters && (
+          <Button
+            variant='outline'
+            className='bg-white border border-gray-200 rounded-[10px] h-8'
+            onClick={handleClearAllFilters}
+          >
+            <X className='w-4 h-4' />
+            <span>Clear Filters</span>
+          </Button>
+        )}
 
         {/* ticket search */}
 
