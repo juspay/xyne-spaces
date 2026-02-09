@@ -7,6 +7,7 @@ import { ReactionsSideEffectHandler } from './tables/reactions-handler';
 import { ConversationsSideEffectHandler } from './tables/conversations-handler';
 import { CallSideEffectHandler } from './tables/call-handler';
 import { TicketsSideEffectHandler } from './tables/tickets-handler';
+import { TicketAssignmentsSideEffectHandler } from './tables/ticket-assignments-handler';
 
 export class SideEffectHandlerFactory {
 
@@ -25,6 +26,8 @@ export class SideEffectHandlerFactory {
         return new CallSideEffectHandler(ctx);
       case 'tickets':
         return new TicketsSideEffectHandler(ctx);
+      case 'ticket_assignments':
+        return new TicketAssignmentsSideEffectHandler(ctx);
         
       default:
         return new BaseSideEffectHandler(ctx);

@@ -82,6 +82,20 @@ const getActivityConfig = (actorAction: string): ActivityConfig => {
         description: 'declined a PR for ticket in',
         label: 'PR Declined',
       };
+    case 'ticket_pr_reviewer_assigned':
+      return {
+        icon: <GitPullRequest className='w-4 h-4 text-blue-600' />,
+        badgeColor: 'bg-blue-100',
+        description: 'assigned you as PR reviewer for ticket',
+        label: 'PR Reviewer Assigned',
+      };
+    case 'ticket_qa_assigned':
+      return {
+        icon: <UserPlus className='w-4 h-4 text-green-600' />,
+        badgeColor: 'bg-green-100',
+        description: 'assigned you as QA for ticket',
+        label: 'QA Assigned',
+      };
     default:
       return {
         icon: <Ticket className='w-4 h-4 text-gray-600' />,
