@@ -48,7 +48,7 @@ class WorkerService {
 
       if (vespaEnabled) {
         await vespaWorker.start()
-        workerScheduler.start();
+        await workerScheduler.start();
       } else if (notificationWorkerEnabled) {
         logger.info('Starting notification worker service...')
         // Redis connection is required for notification worker checks
