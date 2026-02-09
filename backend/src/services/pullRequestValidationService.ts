@@ -39,6 +39,15 @@ export class PullRequestValidationService {
     this.prMetricsRepository = new PRMetricsRepository();
     this.bitbucketManager = new BitbucketManager();
   }
+  //additionally, only allow build status updates for certain users (for testing)
+  //will be removed later 
+  checkBuildStatusPermission(email: string): boolean {  
+    if(!email) {
+      return false;
+    }
+    const allowedTestEmails = ["john.doe@gmail.com","john.doe@gmail.com","john.doe@gmail.com"]
+    return allowedTestEmails?.includes(email) || false;
+  }
 
   async validatePullRequest(
     prTitle: string,
@@ -50,15 +59,16 @@ export class PullRequestValidationService {
     repoUrl?: string,
     prUrl?: string,
     numberOfComments?: number,
-    workspaceSlug?: string
+    authorEmail?:string
   ): Promise<ValidationResult> {
+    const permission = this.checkBuildStatusPermission(authorEmail || '');
     try {
       logger.debug(`[PR-Validation] Validating PR ${prId}: ${prTitle}`);
       const ticketIdMatch = prTitle.match(BITBUCKET_PR_CONFIG.PR_TITLE_PATTERN);
-
+      
       if (!ticketIdMatch) {
         const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.INVALID_FORMAT;
-        await this.postFailedBuildStatus(workspaceSlug, repoName, commitHash, errorMessage);
+        if(permission) await this.postFailedBuildStatus(commitHash, errorMessage);
         return { isValid: false, errorMessage };
       }
 
@@ -67,15 +77,16 @@ export class PullRequestValidationService {
 
       const ticket = await this.ticketRepository.getTicketByXyneId(ticketId);
 
+
       if (!ticket) {
         const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.TICKET_NOT_FOUND(ticketId);
-        await this.postFailedBuildStatus(workspaceSlug, repoName, commitHash, errorMessage);
+        if(permission) await this.postFailedBuildStatus(commitHash, errorMessage);
         return { isValid: false, errorMessage, ticketId };
       }
 
-      if (ticket.status === 'RESOLVED') {
+      if (ticket.status === 'RESOLVED' && permission) {
         const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.TICKET_ALREADY_RESOLVED(ticketId);
-        await this.postFailedBuildStatus(workspaceSlug, repoName, commitHash, errorMessage);
+        if(permission)await this.postFailedBuildStatus(commitHash, errorMessage);
         return { isValid: false, errorMessage, ticketId };
       }
 
@@ -115,7 +126,7 @@ export class PullRequestValidationService {
                 `rejecting duplicate`
             );
             const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
-            await this.postFailedBuildStatus(workspaceSlug, repoName, commitHash, errorMessage);
+            if(permission) await this.postFailedBuildStatus( commitHash, errorMessage);
             return { isValid: false, errorMessage, ticketId };
           }
 
@@ -140,19 +151,19 @@ export class PullRequestValidationService {
 
           // Post success and return valid
           const successMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
-          await this.postSuccessfulBuildStatus(workspaceSlug, repoName, commitHash, successMessage);
+          if(permission) await this.postSuccessfulBuildStatus( commitHash, successMessage);
           return { isValid: true, ticketId: resolvedTicketId };
         }
 
         // Duplicate PR is manual (no workflowExecutionId), reject it
         logger.debug(`[PR-Validation] Duplicate PR ${duplicatePR.prId} is manual, rejecting`);
         const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
-        await this.postFailedBuildStatus(workspaceSlug, repoName, commitHash, errorMessage);
+        if(permission) await this.postFailedBuildStatus( commitHash, errorMessage);
         return { isValid: false, errorMessage, ticketId };
       }
 
       const successMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
-      await this.postSuccessfulBuildStatus(workspaceSlug, repoName, commitHash, successMessage);
+      if(permission) await this.postSuccessfulBuildStatus( commitHash, successMessage);
       logger.info(`PR ${prId} validation successful for ticket ${ticketId}`);
 
       // Validation service only validates - storage is handled by webhook handlers
@@ -160,31 +171,23 @@ export class PullRequestValidationService {
     } catch (error) {
       logger.error('Error during PR validation:', error);
       const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.INTERNAL_ERROR;
-      await this.postFailedBuildStatus(workspaceSlug, repoName, commitHash, errorMessage);
+      if(permission) await this.postFailedBuildStatus(commitHash, errorMessage);
       return { isValid: false, errorMessage };
     }
   }
-
+  
   private async postSuccessfulBuildStatus(
-    workspaceSlug: string | undefined,
-    repoSlug: string | undefined,
     commitHash: string,
     description: string
   ): Promise<void> {
     try {
-      if (!workspaceSlug || !repoSlug) {
-        logger.warn('Cannot post build status: workspace or repo slug missing');
-        return;
-      }
       await this.bitbucketManager.postBuildStatus(
-        workspaceSlug,
-        repoSlug,
         commitHash,
         'SUCCESSFUL',
         BITBUCKET_PR_CONFIG.BUILD_STATUS.KEY,
         BITBUCKET_PR_CONFIG.BUILD_STATUS.NAME,
         process.env.FRONTEND_URL || '' ,
-        description
+        description,
       );
     } catch (error) {
       logger.error('Error posting successful build status:', error);
@@ -192,19 +195,11 @@ export class PullRequestValidationService {
   }
 
   private async postFailedBuildStatus(
-    workspaceSlug: string | undefined,
-    repoSlug: string | undefined,
     commitHash: string,
     description: string
   ): Promise<void> {
     try {
-      if (!workspaceSlug || !repoSlug) {
-        logger.warn('Cannot post build status: workspace or repo slug missing');
-        return;
-      }
       await this.bitbucketManager.postBuildStatus(
-        workspaceSlug,
-        repoSlug,
         commitHash,
         'FAILED',
         BITBUCKET_PR_CONFIG.BUILD_STATUS.KEY,
