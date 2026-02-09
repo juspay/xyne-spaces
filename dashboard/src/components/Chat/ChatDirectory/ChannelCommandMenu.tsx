@@ -23,6 +23,8 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { Channel } from '@xyne/shared';
 import {
   isDMChannel,
+  isGroupDMChannel,
+  isOneToOneDMChannel,
   getDMParticipantIdsToFetch,
   parseDMParticipantIds,
 } from './ChatDirectory.utils';
@@ -638,6 +640,13 @@ const ChannelCommandMenu = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchText, activeTab]);
 
+  // Reset expanded categories only when search text is cleared completely
+  useEffect(() => {
+    if (!searchText.trim()) {
+      setExpandedCategories(new Set());
+    }
+  }, [searchText]);
+
   // Reset state when menu closes
   useEffect(() => {
     if (!open) {
@@ -755,6 +764,8 @@ const ChannelCommandMenu = ({
         return 'Channels';
       case ChannelCategory.DIRECT_MESSAGES:
         return 'Direct Messages';
+      case ChannelCategory.GROUP_DMS:
+        return 'Group DMs';
       default:
         return '';
     }
@@ -1180,27 +1191,144 @@ const ChannelCommandMenu = ({
 
               {!showEmptyState && !error && !mentionSearchType && (
                 <>
-                  {/* Local Channels Results */}
-                  {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-                    filteredLocalChannels.length > 0 && (
-                      <>
-                        {Object.entries(groupedChannels).map(([category, items]) => {
-                          const isExpanded = expandedCategories.has(category);
-                          const shouldLimit = !search.trim();
-                          const hasMore = items.length > DISPLAY_LIMIT;
-                          const displayItems =
-                            shouldLimit && !isExpanded && hasMore
-                              ? items.slice(0, DISPLAY_LIMIT)
-                              : items;
-                          const hiddenCount = items.length - DISPLAY_LIMIT;
+                  {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
+                  {searchText.trim() ? (
+                    <>
+                      {/* 0. Starred (from local channels) - shown very first */}
+                      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                        groupedChannels['starred'] &&
+                        groupedChannels['starred'].length > 0 && (
+                          <div className='mb-4'>
+                            {(() => {
+                              const items = groupedChannels['starred'];
+                              const category = ChannelCategory.STARRED;
+                              const isExpanded = expandedCategories.has(category);
+                              const hasMore = items.length > DISPLAY_LIMIT;
+                              const displayItems =
+                                !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+                              const hiddenCount = items.length - DISPLAY_LIMIT;
 
-                          return (
-                            <div key={category} className='mb-4'>
+                              return (
+                                <Command.Group
+                                  heading={getCategoryLabel(category)}
+                                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                >
+                                  {displayItems.map(({ channel }, index) => {
+                                    const unreadCount = unreadCounts[channel.id] ?? 0;
+                                    return (
+                                      <ChannelCommandItem
+                                        key={channel.id}
+                                        channel={channel}
+                                        currentUserID={currentUserID}
+                                        unreadCount={unreadCount}
+                                        search={search}
+                                        onSelect={() => handleChannelSelect(channel, index + 1)}
+                                        getChannelIcon={getChannelIcon}
+                                      />
+                                    );
+                                  })}
+                                  {hasMore && (
+                                    <button
+                                      onClick={() => toggleCategoryExpansion(category)}
+                                      className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                    >
+                                      {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                    </button>
+                                  )}
+                                </Command.Group>
+                              );
+                            })()}
+                          </div>
+                        )}
+
+                      {/* 1. Users (from local) - shown first when searching, real-time updates */}
+                      {(activeTab === TabType.ALL || activeTab === TabType.USERS) &&
+                        filteredLocalUsers.length > 0 && (
+                          <div className='mb-4'>
+                            {(() => {
+                              // Map of DM User IDs for fast lookup (to prioritize active DMs)
+                              const dmUserIdSet = new Set<string>();
+                              groupedChannels['direct-messages']?.forEach(({ channel }) => {
+                                if (isOneToOneDMChannel(channel.scopeType)) {
+                                  const participants = parseDMParticipantIds(channel);
+                                  const otherUserId = participants.find(id => id !== currentUserID);
+                                  if (otherUserId) dmUserIdSet.add(otherUserId);
+                                }
+                              });
+
+                              // Convert local users to DisplaySearchResult format
+                              const userItems: DisplaySearchResult[] = filteredLocalUsers.map(
+                                user => ({
+                                  id: user.id,
+                                  type: 'user' as const,
+                                  title: user.name,
+                                  subtitle: user.email || '',
+                                  relevanceScore: 1,
+                                  metadata: {},
+                                }),
+                              );
+
+                              // Prioritize users with active DMs
+                              const usersWithDM = userItems.filter(item =>
+                                dmUserIdSet.has(item.id),
+                              );
+                              const usersNoDM = userItems.filter(item => !dmUserIdSet.has(item.id));
+                              const allItems = [...usersWithDM, ...usersNoDM];
+
+                              const totalItemsCount = allItems.length;
+                              const displayCount = totalItemsCount;
+
+                              const isExpanded = expandedCategories.has('user');
+                              const hasMore = totalItemsCount > DISPLAY_LIMIT;
+
+                              const displayItems =
+                                !isExpanded && hasMore
+                                  ? allItems.slice(0, DISPLAY_LIMIT)
+                                  : allItems;
+
+                              const hiddenCount = totalItemsCount - DISPLAY_LIMIT;
+
+                              return (
+                                <Command.Group
+                                  heading={`${getGroupLabel('user')} (${displayCount})`}
+                                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                >
+                                  {displayItems.map((item, index) => (
+                                    <SearchResultItem
+                                      key={item.id}
+                                      result={item}
+                                      onSelect={res => handleBackendResultSelect(res, index + 1)}
+                                    />
+                                  ))}
+                                  {hasMore && (
+                                    <button
+                                      onClick={() => toggleCategoryExpansion('user')}
+                                      className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                    >
+                                      {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                    </button>
+                                  )}
+                                </Command.Group>
+                              );
+                            })()}
+                          </div>
+                        )}
+
+                      {/* 2. Group DMs (from local channels) - only show group DMs in search results, 1:1 DMs are in Users section */}
+                      {(() => {
+                        const groupDMs =
+                          groupedChannels['direct-messages']?.filter(({ channel }) =>
+                            isGroupDMChannel(channel.scopeType),
+                          ) || [];
+                        return (
+                          (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                          groupDMs.length > 0 && (
+                            <div className='mb-4'>
                               <Command.Group
-                                heading={getCategoryLabel(category as ChannelCategory)}
+                                heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
                                 className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                               >
-                                {displayItems.map(({ channel }, index) => {
+                                {groupDMs.map(({ channel }, index) => {
                                   const unreadCount = unreadCounts[channel.id] ?? 0;
                                   return (
                                     <ChannelCommandItem
@@ -1214,88 +1342,231 @@ const ChannelCommandMenu = ({
                                     />
                                   );
                                 })}
-                                {shouldLimit && hasMore && (
-                                  <button
-                                    onClick={() => toggleCategoryExpansion(category)}
-                                    className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
-                                  >
-                                    {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                                  </button>
-                                )}
                               </Command.Group>
                             </div>
-                          );
-                        })}
-                      </>
-                    )}
+                          )
+                        );
+                      })()}
 
-                  {/* Backend Search Results */}
-                  {activeTab !== TabType.CHANNELS && backendResults.length > 0 && (
-                    <>
-                      {Object.entries(groupedBackendResults)
-                        .sort(([typeA], [typeB]) => {
-                          // Prioritize 'user' type to render first
-                          if (typeA === 'user') return -1;
-                          if (typeB === 'user') return 1;
-                          return 0;
-                        })
-                        .map(([type, items]) => {
-                          let displayCount: number;
-                          if (activeTab === TabType.ALL) {
-                            displayCount = items.length;
-                          } else if (useVespaSearch) {
-                            // For Vespa on individual tabs, use cumulative count
-                            displayCount = paginationState[activeTab].cumulativeCount;
-                          } else {
-                            // For PG search, use items length
-                            displayCount = items.length;
-                          }
-                          // Apply limiting only to users
-                          const isUserType = type === 'user';
-                          const isExpanded = expandedCategories.has(type);
-                          const hasMore = items.length > DISPLAY_LIMIT;
-                          const displayItems =
-                            isUserType && !isExpanded && hasMore
-                              ? items.slice(0, DISPLAY_LIMIT)
-                              : items;
-                          const hiddenCount = items.length - DISPLAY_LIMIT;
+                      {/* 3. Channels (from local channels) */}
+                      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                        groupedChannels['channels'] &&
+                        groupedChannels['channels'].length > 0 && (
+                          <div className='mb-4'>
+                            {(() => {
+                              const items = groupedChannels['channels'];
+                              const category = ChannelCategory.CHANNELS;
+                              const isExpanded = expandedCategories.has(category);
+                              const hasMore = items.length > DISPLAY_LIMIT;
+                              const displayItems =
+                                !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+                              const hiddenCount = items.length - DISPLAY_LIMIT;
 
-                          return (
-                            <div key={type} className='mb-4'>
-                              <Command.Group
-                                heading={`${getGroupLabel(type)} (${displayCount})`}
-                                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                              >
-                                {displayItems.map((result, index) => (
-                                  <SearchResultItem
-                                    key={result.id}
-                                    result={result}
-                                    onSelect={res => handleBackendResultSelect(res, index + 1)}
-                                  />
-                                ))}
-                                {isUserType && hasMore && (
-                                  <button
-                                    onClick={() => toggleCategoryExpansion(type)}
-                                    className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                              return (
+                                <Command.Group
+                                  heading={getCategoryLabel(category)}
+                                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                >
+                                  {displayItems.map(({ channel }, index) => {
+                                    const unreadCount = unreadCounts[channel.id] ?? 0;
+                                    return (
+                                      <ChannelCommandItem
+                                        key={channel.id}
+                                        channel={channel}
+                                        currentUserID={currentUserID}
+                                        unreadCount={unreadCount}
+                                        search={search}
+                                        onSelect={() => handleChannelSelect(channel, index + 1)}
+                                        getChannelIcon={getChannelIcon}
+                                      />
+                                    );
+                                  })}
+                                  {hasMore && (
+                                    <button
+                                      onClick={() => toggleCategoryExpansion(category)}
+                                      className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                    >
+                                      {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                    </button>
+                                  )}
+                                </Command.Group>
+                              );
+                            })()}
+                          </div>
+                        )}
+
+                      {/* 4. Messages and Tickets (from backend) */}
+                      {backendResults.length > 0 && (
+                        <>
+                          {['conversation', 'ticket']
+                            .filter(type => {
+                              if (activeTab === TabType.ALL) return true;
+                              if (activeTab === TabType.MESSAGES && type === 'conversation')
+                                return true;
+                              if (activeTab === TabType.TICKETS && type === 'ticket') return true;
+                              return false;
+                            })
+                            .map(type => {
+                              const items = groupedBackendResults[type];
+                              if (!items || items.length === 0) return null;
+
+                              const displayCount =
+                                useVespaSearch && activeTab !== TabType.ALL
+                                  ? paginationState[activeTab].cumulativeCount
+                                  : items.length;
+
+                              return (
+                                <div key={type} className='mb-4'>
+                                  <Command.Group
+                                    heading={`${getGroupLabel(type)} (${displayCount})`}
+                                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                                   >
-                                    {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                                  </button>
-                                )}
-                              </Command.Group>
-                            </div>
-                          );
-                        })}
+                                    {items.map((result, index) => (
+                                      <SearchResultItem
+                                        key={result.id}
+                                        result={result}
+                                        onSelect={res => handleBackendResultSelect(res, index + 1)}
+                                      />
+                                    ))}
+                                  </Command.Group>
+                                </div>
+                              );
+                            })}
 
-                      {/* Infinite scroll trigger and loading indicator */}
-                      {paginationState[activeTab].hasMore && (
-                        <div ref={loadMoreRef} className='py-4 flex justify-center'>
-                          {isLoadingMore && (
-                            <div className='flex items-center gap-2 text-xs text-gray-500'>
-                              <Loader2 className='h-4 w-4 animate-spin' />
-                              <span>Loading more results...</span>
+                          {/* Infinite scroll trigger and loading indicator */}
+                          {paginationState[activeTab].hasMore && (
+                            <div ref={loadMoreRef} className='py-4 flex justify-center'>
+                              {isLoadingMore && (
+                                <div className='flex items-center gap-2 text-xs text-gray-500'>
+                                  <Loader2 className='h-4 w-4 animate-spin' />
+                                  <span>Loading more results...</span>
+                                </div>
+                              )}
                             </div>
                           )}
-                        </div>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {/* Local Channels Results */}
+                      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                        filteredLocalChannels.length > 0 && (
+                          <>
+                            {Object.entries(groupedChannels).map(([category, items]) => {
+                              const isExpanded = expandedCategories.has(category);
+                              const shouldLimit = !search.trim();
+                              const hasMore = items.length > DISPLAY_LIMIT;
+                              const displayItems =
+                                shouldLimit && !isExpanded && hasMore
+                                  ? items.slice(0, DISPLAY_LIMIT)
+                                  : items;
+                              const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                              return (
+                                <div key={category} className='mb-4'>
+                                  <Command.Group
+                                    heading={getCategoryLabel(category as ChannelCategory)}
+                                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                  >
+                                    {displayItems.map(({ channel }, index) => {
+                                      const unreadCount = unreadCounts[channel.id] ?? 0;
+                                      return (
+                                        <ChannelCommandItem
+                                          key={channel.id}
+                                          channel={channel}
+                                          currentUserID={currentUserID}
+                                          unreadCount={unreadCount}
+                                          search={search}
+                                          onSelect={() => handleChannelSelect(channel, index + 1)}
+                                          getChannelIcon={getChannelIcon}
+                                        />
+                                      );
+                                    })}
+                                    {shouldLimit && hasMore && (
+                                      <button
+                                        onClick={() => toggleCategoryExpansion(category)}
+                                        className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                      >
+                                        {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                      </button>
+                                    )}
+                                  </Command.Group>
+                                </div>
+                              );
+                            })}
+                          </>
+                        )}
+
+                      {/* Backend Search Results */}
+                      {activeTab !== TabType.CHANNELS && backendResults.length > 0 && (
+                        <>
+                          {Object.entries(groupedBackendResults)
+                            .sort(([typeA], [typeB]) => {
+                              // Prioritize 'user' type to render first
+                              if (typeA === 'user') return -1;
+                              if (typeB === 'user') return 1;
+                              return 0;
+                            })
+                            .map(([type, items]) => {
+                              let displayCount: number;
+                              if (activeTab === TabType.ALL) {
+                                displayCount = items.length;
+                              } else if (useVespaSearch) {
+                                // For Vespa on individual tabs, use cumulative count
+                                displayCount = paginationState[activeTab].cumulativeCount;
+                              } else {
+                                // For PG search, use items length
+                                displayCount = items.length;
+                              }
+                              // Apply limiting only to users
+                              const isUserType = type === 'user';
+                              const isExpanded = expandedCategories.has(type);
+                              const hasMore = items.length > DISPLAY_LIMIT;
+                              const displayItems =
+                                isUserType && !isExpanded && hasMore
+                                  ? items.slice(0, DISPLAY_LIMIT)
+                                  : items;
+                              const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                              return (
+                                <div key={type} className='mb-4'>
+                                  <Command.Group
+                                    heading={`${getGroupLabel(type)} (${displayCount})`}
+                                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                  >
+                                    {displayItems.map((result, index) => (
+                                      <SearchResultItem
+                                        key={result.id}
+                                        result={result}
+                                        onSelect={res => handleBackendResultSelect(res, index + 1)}
+                                      />
+                                    ))}
+                                    {isUserType && hasMore && (
+                                      <button
+                                        onClick={() => toggleCategoryExpansion(type)}
+                                        className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                      >
+                                        {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                      </button>
+                                    )}
+                                  </Command.Group>
+                                </div>
+                              );
+                            })}
+
+                          {/* Infinite scroll trigger and loading indicator */}
+                          {paginationState[activeTab].hasMore && (
+                            <div ref={loadMoreRef} className='py-4 flex justify-center'>
+                              {isLoadingMore && (
+                                <div className='flex items-center gap-2 text-xs text-gray-500'>
+                                  <Loader2 className='h-4 w-4 animate-spin' />
+                                  <span>Loading more results...</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
                       )}
                     </>
                   )}

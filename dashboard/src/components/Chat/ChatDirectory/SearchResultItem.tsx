@@ -4,6 +4,7 @@ import { Hash, User, MessageCircle, Ticket, Paperclip } from 'lucide-react';
 import { DisplaySearchResult } from '../../../types/search';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import UserAvatar from '../../UserAvatar/UserAvatar';
+import Avatar from '../../ui/Avatar/Avatar';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 
 interface SearchResultItemProps {
@@ -54,7 +55,7 @@ const SearchResultItem = ({ result, onSelect }: SearchResultItemProps): ReactEle
           onSelect={() => void onSelect(result)}
           className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
         >
-          <UserAvatar userId={result.id} />
+          <Avatar userId={result.id} size='sm' />
           <div className='flex-1 min-w-0'>
             <div className='font-semibold text-xs text-gray-800 truncate'>{result.title}</div>
             <div className='text-[11px] text-gray-500'>{result.subtitle}</div>
