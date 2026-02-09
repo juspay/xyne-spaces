@@ -96,6 +96,41 @@ export const mutators = defineMutators({
         });
       },
     ),
+    promoteToChannel: defineMutator(
+      z.object({
+        channelId: z.string(),
+        name: z.string().min(2).max(80),
+        description: z.string().optional(),
+        visibility: z.enum([ChannelVisibility.PUBLIC, ChannelVisibility.PRIVATE]),
+        projectId: z.string(),
+        conversationId: z.string(),
+        messageId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { channelId, name } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error('Channel not found');
+        }
+
+        if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
+          throw new Error('Only GROUP_DM channels can be promoted to a regular channel');
+        }
+
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participant) {
+          throw new Error('You are not a participant of this channel');
+        }
+
+        const existingChannel = await tx.run(zql.channels.where('name', name).one());
+        if (existingChannel && existingChannel.id !== channelId) {
+          throw new Error('A channel with this name already exists');
+        }
+      },
+    ),
     addParticipants: defineMutator(
       z.object({
         channelId: z.string(),
