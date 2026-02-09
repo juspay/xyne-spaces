@@ -1294,14 +1294,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <TicketKeyValuePair
             ticketKey='Status'
             value={
-              <Selector
-                items={stages}
-                selectedValue={ticket.stageName}
-                onValueChange={handleStageChange}
-                placeholder='Set Status'
-                icon={<TicketStatusIcon size={14} />}
-                noBorder={true}
-              />
+              <div data-testid='ticket-detail-status-selector'>
+                <Selector
+                  items={stages}
+                  selectedValue={ticket.stageName}
+                  onValueChange={handleStageChange}
+                  placeholder='Set Status'
+                  icon={<TicketStatusIcon size={14} />}
+                  noBorder={true}
+                />
+              </div>
             }
           />
 
@@ -1320,14 +1322,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <TicketKeyValuePair
             ticketKey='Priority'
             value={
-              <Selector
-                items={priorityItems}
-                selectedValue={ticket.priority}
-                onValueChange={handlePriorityChange}
-                placeholder='Set Priority'
-                icon={<TicketPriorityIcon size={14} />}
-                noBorder={true}
-              />
+              <div data-testid='ticket-detail-priority-selector'>
+                <Selector
+                  items={priorityItems}
+                  selectedValue={ticket.priority}
+                  onValueChange={handlePriorityChange}
+                  placeholder='Set Priority'
+                  icon={<TicketPriorityIcon size={14} />}
+                  noBorder={true}
+                />
+              </div>
             }
           />
 
@@ -1342,7 +1346,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             ticketKey='ETA'
             value={
               editingETA ? (
-                <div className='flex items-center gap-2'>
+                <div className='flex items-center gap-2' data-testid='ticket-detail-eta-input'>
                   <input
                     ref={etaInputRef}
                     type='datetime-local'
@@ -1363,6 +1367,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <div
                   role='button'
                   tabIndex={0}
+                  data-testid='ticket-detail-eta-display'
                   className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] cursor-pointer hover:bg-gray-100 px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-gray-200 transition-colors'
                   onClick={() => setEditingETA(true)}
                   onKeyDown={e => {

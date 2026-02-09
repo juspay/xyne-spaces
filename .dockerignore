@@ -65,4 +65,6 @@ apps
 electron
 xyne-automation
 ysweet
-scripts
+scripts/*
+!scripts/setup-fake-gcs.sh
+!scripts/setup-fake-gcs-test.sh

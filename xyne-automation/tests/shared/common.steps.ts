@@ -195,6 +195,30 @@ When('I clear the text in {string}', async function (this: CustomWorld, selector
   uiLogger.info(`[UI] Cleared text in element "${selector}"`);
 });
 
+When(
+  'I set datetime input {string} to {int} days from now',
+  async function (this: CustomWorld, selector: string, days: number) {
+    if (!this.page) throw new Error('Browser not initialized');
+    const element = this.page.locator(selector).first();
+    await element.waitFor({ state: 'visible' });
+
+    // Calculate future date
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + days);
+
+    // Format for datetime-local input: YYYY-MM-DDTHH:mm
+    const year = futureDate.getFullYear();
+    const month = String(futureDate.getMonth() + 1).padStart(2, '0');
+    const day = String(futureDate.getDate()).padStart(2, '0');
+    const dateValue = `${year}-${month}-${day}T12:00`;
+
+    await element.fill(dateValue);
+    // Blur to trigger save
+    await element.blur();
+    uiLogger.info(`[UI] Set datetime input "${selector}" to ${dateValue} (${days} days from now)`);
+  }
+);
+
 // ============================================
 // UI Assertion Steps
 // ============================================

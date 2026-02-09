@@ -394,3 +394,24 @@ When('I select a workflow if available', async function (this: CustomWorld) {
     }
   }
 });
+
+When(
+  'I click on ticket card with title {string}',
+  async function (this: CustomWorld, ticketTitle: string) {
+    if (!this.page) throw new Error('Browser not initialized');
+    const ticketsTab = this.page.locator('[data-testid="channel-tickets-tab"]');
+    if (await ticketsTab.isVisible()) {
+      await ticketsTab.click();
+      await this.page.waitForTimeout(500);
+    }
+    const anyTicketCard = this.page.locator('[data-testid^="ticket-card-"]').first();
+    await anyTicketCard.waitFor({ state: 'visible', timeout: 15000 });
+
+    const ticketCardSelector = `[data-testid='ticket-card-title']:has-text('${ticketTitle}')`;
+    const ticketCard = this.page.locator(ticketCardSelector);
+    await ticketCard.waitFor({ state: 'visible', timeout: 20000 });
+    await this.page.waitForTimeout(300);
+    await ticketCard.click();
+    uiLogger.info(`[Tickets] Clicked on ticket card with title: "${ticketTitle}"`);
+  }
+);

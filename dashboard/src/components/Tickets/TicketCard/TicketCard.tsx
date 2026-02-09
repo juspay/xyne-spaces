@@ -402,6 +402,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
             {/* Title */}
             {ticket.title && (
               <h3
+                data-testid='ticket-card-title'
                 className={cn(
                   'text-[#202020] line-clamp-1 break-all mb-2',
                   isCompact ? 'font-medium text-sm' : 'font-semibold text-[15px]',

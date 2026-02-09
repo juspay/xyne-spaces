@@ -934,6 +934,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     <Dialog
       open={isOpen}
       onOpenChange={handleClose}
+      data-testid='create-ticket-modal'
       className={cn(
         'w-full max-w-screen-md max-h-1/2 rounded-xl border border-border',
         'top-1/3 !-translate-y-1/3',
