@@ -356,16 +356,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    */
   const onResultClick = useCallback(
     (result: DisplaySearchResult, rankPosition: number, channelId?: string, resultUrl?: string) => {
-      if (currentSearchContext.query.trim()) {
-        trackClick({
-          queryText: currentSearchContext.query,
-          clickedDocId: result.id,
-          clickedDocType: result.type,
-          rankPosition,
-          ...(channelId !== undefined ? { channel: channelId } : {}),
-          ...(resultUrl !== undefined ? { resultUrl } : {}),
-        });
-      }
+      trackClick({
+        queryText: currentSearchContext.query,
+        clickedDocId: result.id,
+        clickedDocType: result.type,
+        rankPosition,
+        ...(channelId !== undefined ? { channel: channelId } : {}),
+        ...(resultUrl !== undefined ? { resultUrl } : {}),
+      });
     },
     [trackClick, currentSearchContext.query],
   );
