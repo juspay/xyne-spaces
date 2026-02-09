@@ -1,3 +1,17 @@
+## [1.34.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.33.2...v1.34.0) (2026-02-09)
+
+
+### Features
+
+* ticket PR and QA assignee activities ([efcaa8b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/efcaa8bd51053a018f23bdbc79bb3e79677552fa)), closes [#2891](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2891)
+
+
+### Bug Fixes
+
+* Disable Langfuse tracing for ASK AI ([1168d30](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1168d30c64415aab36f8440ac7036e3c35d8a2be)), closes [#2917](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2917)
+* fixes suggetions list scroll bug ([baff4dc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/baff4dcabb3939561629d94a8f70a0831ee21d05))
+* timezone fix in search ([2e5338e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2e5338e29846072aae44d2c263a93a34bbca3b2c))
+
 ## [1.33.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.33.1...v1.33.2) (2026-02-07)
 
 
