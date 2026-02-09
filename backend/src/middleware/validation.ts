@@ -119,7 +119,7 @@ export const validateSearchFilters = () => {
         const projectIds = parseIds(projectId as string);
         const validation = await validateProjectIds(projectIds);
         if (validation.invalid.length > 0) {
-          throw new AppError(`Invalid project IDs: ${validation.invalid.join(', ')}`, 400);
+          return next(new AppError(`Invalid project IDs: ${validation.invalid.join(', ')}`, 400));
         }
       }
 
@@ -128,7 +128,7 @@ export const validateSearchFilters = () => {
         const channelIds = parseIds(inChannel as string);
         const validation = await validateChannelIds(channelIds);
         if (validation.invalid.length > 0) {
-          throw new AppError(`Invalid channel IDs: ${validation.invalid.join(', ')}`, 400);
+          return next(new AppError(`Invalid channel IDs: ${validation.invalid.join(', ')}`, 400));
         }
       }
 
@@ -137,7 +137,7 @@ export const validateSearchFilters = () => {
         const userIds = parseIds(from as string);
         const validation = await validateUserIds(userIds);
         if (validation.invalid.length > 0) {
-          throw new AppError(`Invalid user IDs: ${validation.invalid.join(', ')}`, 400);
+          return next(new AppError(`Invalid user IDs: ${validation.invalid.join(', ')}`, 400));
         }
       }
 
@@ -146,7 +146,7 @@ export const validateSearchFilters = () => {
         const docTypes = parseIds(type as string);
         const validation = validateDocTypes(docTypes);
         if (validation.invalid.length > 0) {
-          throw new AppError(`Invalid document types: ${validation.invalid.join(', ')}`, 400);
+          return next(new AppError(`Invalid document types: ${validation.invalid.join(', ')}`, 400));
         }
       }
 
@@ -155,7 +155,7 @@ export const validateSearchFilters = () => {
         const boardIds = parseIds(board as string);
         const validation = await validateBoardIds(boardIds);
         if (validation.invalid.length > 0) {
-          throw new AppError(`Invalid board IDs: ${validation.invalid.join(', ')}`, 400);
+          return next(new AppError(`Invalid board IDs: ${validation.invalid.join(', ')}`, 400));
         }
       }
 
@@ -164,7 +164,7 @@ export const validateSearchFilters = () => {
         const ticketIds = parseIds(ticketId as string);
         const validation = await validateTicketIds(ticketIds);
         if (validation.invalid.length > 0) {
-          throw new AppError(`Invalid ticket IDs: ${validation.invalid.join(', ')}`, 400);
+          return next(new AppError(`Invalid ticket IDs: ${validation.invalid.join(', ')}`, 400));
         }
       }
 
@@ -173,16 +173,16 @@ export const validateSearchFilters = () => {
         const userIds = parseIds(assignee as string);
         const validation = await validateUserIds(userIds);
         if (validation.invalid.length > 0) {
-          throw new AppError(`Invalid assignee IDs: ${validation.invalid.join(', ')}`, 400);
+          return next(new AppError(`Invalid assignee IDs: ${validation.invalid.join(', ')}`, 400));
         }
       }
     } catch (error) {
-      // If it's already an AppError, re-throw it
+      // If it's already an AppError, pass to error handler
       if (error instanceof AppError) {
-        throw error;
+        return next(error);
       }
-      // Otherwise, wrap in AppError
-      throw new AppError('ID validation failed', 500);
+      // Otherwise, wrap in AppError with original error message
+      return next(new AppError(`ID validation failed: ${error}`, 500));
     }
 
     next();

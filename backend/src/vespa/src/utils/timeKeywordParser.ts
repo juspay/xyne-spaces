@@ -99,49 +99,49 @@ export const RANKING_PROFILES = {
   DEFAULT: 'default_native',
 } as const;
 
-// ============== Date Helper Functions ==============
+// ============== Date Helper Functions (UTC-based) ==============
 
 function startOfDay(date: Date): Date {
   const result = new Date(date);
-  result.setHours(0, 0, 0, 0);
+  result.setUTCHours(0, 0, 0, 0);
   return result;
 }
 
 function endOfDay(date: Date): Date {
   const result = new Date(date);
-  result.setHours(23, 59, 59, 999);
+  result.setUTCHours(23, 59, 59, 999);
   return result;
 }
 
 function setHours(date: Date, hours: number): Date {
   const result = new Date(date);
-  result.setHours(hours, 0, 0, 0);
+  result.setUTCHours(hours, 0, 0, 0);
   return result;
 }
 
 function subDays(date: Date, days: number): Date {
   const result = new Date(date);
-  result.setDate(result.getDate() - days);
+  result.setUTCDate(result.getUTCDate() - days);
   return result;
 }
 
 function subHours(date: Date, hours: number): Date {
   const result = new Date(date);
-  result.setHours(result.getHours() - hours);
+  result.setUTCHours(result.getUTCHours() - hours);
   return result;
 }
 
 function startOfWeek(date: Date): Date {
   const result = new Date(date);
-  const day = result.getDay();
-  const diff = result.getDate() - day + (day === 0 ? -6 : 1); // Monday as start
-  result.setDate(diff);
+  const day = result.getUTCDay();
+  const diff = result.getUTCDate() - day + (day === 0 ? -6 : 1); // Monday as start
+  result.setUTCDate(diff);
   return startOfDay(result);
 }
 
 function startOfMonth(date: Date): Date {
   const result = new Date(date);
-  result.setDate(1);
+  result.setUTCDate(1);
   return startOfDay(result);
 }
 

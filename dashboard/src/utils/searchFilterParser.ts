@@ -110,16 +110,9 @@ export function parseSearchFilters(text: string) {
     searchText = searchText.replace(statusMatch[0], '').trim();
   }
 
-  // Parse assignee:value
-  const assigneeMatch = searchText.match(/\bassignee:\s*(\S+)/i);
-  if (assigneeMatch && assigneeMatch[1]) {
-    assignee = assigneeMatch[1];
-    searchText = searchText.replace(assigneeMatch[0], '').trim();
-  }
-
   // Clean incomplete filter patterns
   searchText = searchText
-    .replace(/\b(priority|board|tags|before|after|on|range|stage|status|assignee):\s*/gi, '')
+    .replace(/\b(priority|board|tags|before|after|on|range|stage|status):\s*/gi, '')
     .trim();
 
   return {
