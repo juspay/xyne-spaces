@@ -59,23 +59,20 @@ type AttachmentType = QueryResultType<
 interface AttachmentsBlockProps {
   attachments: readonly AttachmentType[];
   isMobile: boolean;
-  separateVideos?: boolean;
   className?: string;
 }
 
 /**
  * AttachmentsBlock renders message attachments with expand/collapse functionality.
- * Used for both regular messages and forwarded messages.
+ * Videos are rendered in separate rows first, then other attachments.
  *
  * @param attachments - Array of attachment objects
  * @param isMobile - Whether the view is mobile
- * @param separateVideos - Whether to render videos in separate rows (default: true for regular messages)
  * @param className - Optional wrapper class name
  */
 const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   attachments,
   isMobile,
-  separateVideos = true,
   className = '',
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -122,55 +119,37 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
 
       {isExpanded && (
         <div className='flex flex-col gap-3'>
-          {separateVideos ? (
-            <>
-              {/* Videos first - each in separate row */}
-              {attachments
-                .filter(attachment => attachment.mimetype.startsWith('video/'))
-                .map(attachment => (
-                  <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
-                    <MessageAttachment attachment={attachment} />
-                  </div>
-                ))}
+          {/* Videos first - each in separate row */}
+          {attachments
+            .filter(attachment => attachment.mimetype.startsWith('video/'))
+            .map(attachment => (
+              <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
+                <MessageAttachment attachment={attachment} />
+              </div>
+            ))}
 
-              {/* Other attachments in one row */}
-              {attachments.filter(attachment => !attachment.mimetype.startsWith('video/')).length >
-                0 && (
-                <div
-                  className={`flex gap-3 ${isMobile ? 'overflow-x-auto flex-nowrap no-scrollbar' : 'flex-wrap'}`}
-                >
-                  {attachments
-                    .filter(attachment => !attachment.mimetype.startsWith('video/'))
-                    .map(attachment => {
-                      const isImageOrText =
-                        attachment.mimetype.startsWith('image/') ||
-                        attachment.mimetype === 'text/plain';
-
-                      return (
-                        <div
-                          key={attachment.id}
-                          className={`flex items-center gap-2 py-2 text-sm ${!isImageOrText ? 'w-[256px] aspect-square' : ''} ${isMobile ? 'flex-shrink-0' : ''}`}
-                        >
-                          <MessageAttachment attachment={attachment} />
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-            </>
-          ) : (
-            /* All attachments in one row (for forwarded messages) */
+          {/* Other attachments in one row */}
+          {attachments.filter(attachment => !attachment.mimetype.startsWith('video/')).length >
+            0 && (
             <div
               className={`flex gap-3 ${isMobile ? 'overflow-x-auto flex-nowrap no-scrollbar' : 'flex-wrap'}`}
             >
-              {attachments.map(attachment => (
-                <div
-                  key={attachment.id}
-                  className={`flex items-center gap-2 py-2 text-sm ${isMobile ? 'flex-shrink-0' : ''}`}
-                >
-                  <MessageAttachment attachment={attachment} />
-                </div>
-              ))}
+              {attachments
+                .filter(attachment => !attachment.mimetype.startsWith('video/'))
+                .map(attachment => {
+                  const isImageOrText =
+                    attachment.mimetype.startsWith('image/') ||
+                    attachment.mimetype === 'text/plain';
+
+                  return (
+                    <div
+                      key={attachment.id}
+                      className={`flex items-center gap-2 py-2 text-sm ${!isImageOrText ? 'w-[256px] aspect-square' : ''} ${isMobile ? 'flex-shrink-0' : ''}`}
+                    >
+                      <MessageAttachment attachment={attachment} />
+                    </div>
+                  );
+                })}
             </div>
           )}
         </div>
@@ -746,7 +725,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <AttachmentsBlock
                       attachments={attachments}
                       isMobile={isMobile}
-                      separateVideos={false}
                       className='mt-2'
                     />
                     {/* Posted in link for forwarded messages */}
@@ -807,11 +785,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               )}
 
               {!isForwardedMessage && (
-                <AttachmentsBlock
-                  attachments={attachments}
-                  isMobile={isMobile}
-                  separateVideos={true}
-                />
+                <AttachmentsBlock attachments={attachments} isMobile={isMobile} />
               )}
               {!contentOnly && (
                 <ReactionView

@@ -2,8 +2,13 @@
 
 import { ReactElement, KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Channel } from '@xyne/shared';
-import { ChannelScopeType } from '@xyne/shared';
+import {
+  type Channel,
+  MessageType,
+  isForwardedMessageXml,
+  parseForwardedMessageXml,
+  ChannelScopeType,
+} from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 
 import { cn } from '../../ui/Dialog';
@@ -56,6 +61,19 @@ export const DmListItem = ({
     if (!lastMessage) return 'No messages yet';
 
     const prefix = lastMessage.senderId === context.userID ? 'You: ' : '';
+
+    // Handle forwarded messages - content is XML, need to parse it
+    if (
+      lastMessage.msgType === MessageType.FORWARDED &&
+      isForwardedMessageXml(lastMessage.content)
+    ) {
+      const parsed = parseForwardedMessageXml(lastMessage.content);
+      if (parsed) {
+        const text = parsed.optionalText || parsed.content;
+        return `${prefix}${stripHtml(text || 'Forwarded a message')}`;
+      }
+    }
+
     let content =
       lastMessage.content || (lastMessage.attachments?.length ? 'Sent an attachment' : 'Message');
 

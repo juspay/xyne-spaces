@@ -639,6 +639,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               onAttachClick={handleAttachClick}
               onSend={() => void handleSend()}
               placeholder={placeholder}
+              hideSendButton={hideSendButton}
+              showAttachButton={!!features.fileAttachments}
             />
           ) : (
             <div
