@@ -4,9 +4,7 @@
         "details": [
             {
                 "appID": "YM9U73Z2JM.net.juspay.xynespaces",
-                "paths": [
-                    "/launch/*"
-                ]
+                "paths": [ "NOT /_/*", "/*" ]
             }
         ]
     }
