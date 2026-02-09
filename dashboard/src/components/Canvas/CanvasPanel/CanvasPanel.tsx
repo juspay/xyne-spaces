@@ -1,12 +1,12 @@
 import { ReactElement, useState, useRef, useCallback } from 'react';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
-import { FileText, Plus, ArrowLeft } from 'lucide-react';
+import { FileText, Plus, ArrowLeft, Loader2 } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { useQuery, useZero } from '@rocicorp/zero/react';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import type { Canvas } from '../Canvas.types';
-import { CanvasVisibility, DocType } from '@xyne/shared';
+import { DocType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { Button } from '../../ui/Button';
 import { v4 as uuidv4 } from 'uuid';
@@ -21,6 +21,7 @@ import {
   type ImperativePanelHandle,
 } from 'react-resizable-panels';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { canvasService } from '../../../services/Canvas/canvasService';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 
@@ -35,6 +36,7 @@ const CanvasPanel = (): ReactElement => {
 
   const canvasPanelRef = useRef<ImperativePanelHandle>(null);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
+  const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [showQuartoModal, setShowQuartoModal] = useState(false);
 
   // Fetch canvases
@@ -44,30 +46,27 @@ const CanvasPanel = (): ReactElement => {
   const canvases = (allCanvases as unknown as Canvas[]) || [];
   const quartoDocs = (allQuartoDocs as unknown as Canvas[]) || [];
 
-  const handleCreateCanvas = useCallback(() => {
+  const handleCreateCanvas = useCallback(async () => {
+    setIsCreatingCanvas(true);
     const newCanvasId = uuidv4();
     const viewAccessId = uuidv4();
 
     try {
-      z.mutate(
-        mutators.canvas.create({
-          id: newCanvasId,
-          title: 'Untitled Canvas',
-          content: [] as ReadonlyJSONValue,
-          viewAccessId,
-          visibility: CanvasVisibility.PRIVATE,
-          timestamp: Date.now(),
-          participantId: uuidv4(),
-        }),
-      );
+      await canvasService.createCollaborativeCanvas({
+        id: newCanvasId,
+        title: 'Untitled Canvas',
+        viewAccessId,
+      });
 
       void navigate(`/chat/canvas/${newCanvasId}`);
     } catch {
       toast.error('Error', {
         description: 'Failed to create canvas. Please try again.',
       });
+    } finally {
+      setIsCreatingCanvas(false);
     }
-  }, [z, navigate]);
+  }, [navigate]);
 
   const handleCreateQuartoDoc = useCallback(() => {
     setShowQuartoModal(true);
@@ -162,9 +161,18 @@ const CanvasPanel = (): ReactElement => {
               </Button>
             )
           ) : (
-            <Button variant='default' size='sm' onClick={() => handleCreateCanvas()}>
-              <Plus size={16} className='mr-1' />
-              New Canvas
+            <Button
+              variant='default'
+              size='sm'
+              onClick={() => void handleCreateCanvas()}
+              disabled={isCreatingCanvas}
+            >
+              {isCreatingCanvas ? (
+                <Loader2 size={16} className='mr-1 animate-spin' />
+              ) : (
+                <Plus size={16} className='mr-1' />
+              )}
+              {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
             </Button>
           )}
         </div>

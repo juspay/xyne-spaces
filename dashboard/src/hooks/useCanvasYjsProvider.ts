@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { canvasService } from '../services/Canvas/canvasService';
 import type { YSweetAuthToken } from '../services/Canvas/canvasService';
+import { canvasPrefetchService } from '../services/Canvas/canvasPrefetchService';
+import { logger, Event } from '../utils/logger';
 
 const COLLABORATION_COLORS = [
   '#E57373',
@@ -70,11 +72,26 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   const { canvasId, userId, userName, channelId, title, viewAccessId } = options;
   const userColor = options.userColor ?? generateUserColor(userId);
 
-  const doc = useMemo(() => new Y.Doc(), []);
-  const fragment = useMemo(() => doc.getXmlFragment('document-store'), [doc]);
+  const prefetchedCanvas = useMemo(() => {
+    const canvas = canvasPrefetchService.consumePrefetchedCanvas(canvasId);
+    if (canvas) {
+      logger.info(Event.CANVAS_OPENED_FROM_PREFETCH, { canvasId });
+    } else {
+      logger.info(Event.CANVAS_OPENED, { canvasId });
+    }
+    return canvas;
+  }, [canvasId]);
 
-  const providerRef = useRef<YSweetProvider | null>(null);
-  const [awareness, setAwareness] = useState<Awareness | null>(null);
+  const doc = useMemo(() => prefetchedCanvas?.doc ?? new Y.Doc(), [prefetchedCanvas]);
+  const fragment = useMemo(
+    () => prefetchedCanvas?.fragment ?? doc.getXmlFragment('document-store'),
+    [prefetchedCanvas, doc],
+  );
+
+  const providerRef = useRef<YSweetProvider | null>(prefetchedCanvas?.provider ?? null);
+  const [awareness, setAwareness] = useState<Awareness | null>(
+    prefetchedCanvas?.provider.awareness ?? null,
+  );
 
   const hasConnectedOnceRef = useRef(false);
   const lastNotificationStatusRef = useRef<string>('');
@@ -190,6 +207,93 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   }, [refetch]);
 
   useEffect(() => {
+    if (prefetchedCanvas?.provider) {
+      const provider = prefetchedCanvas.provider;
+      providerRef.current = provider;
+      setAwareness(provider.awareness);
+
+      if (prefetchedCanvas.isConnected) {
+        setConnectionStatus('connected');
+        hasConnectedOnceRef.current = true;
+      }
+
+      const handleConnectionStatus = (
+        status: 'offline' | 'connecting' | 'error' | 'handshaking' | 'connected',
+      ): void => {
+        setConnectionStatus(status);
+
+        if (status === 'connected') {
+          errorCountRef.current = 0;
+          if (!hasConnectedOnceRef.current) {
+            hasConnectedOnceRef.current = true;
+            lastNotificationStatusRef.current = status;
+            logger.info(Event.CANVAS_CONNECTION_ESTABLISHED, { canvasId, fromPrefetch: true });
+          }
+        } else if (status === 'error') {
+          errorCountRef.current += 1;
+          logger.error(Event.CANVAS_CONNECTION_ERROR, {
+            canvasId,
+            errorCount: errorCountRef.current,
+            fromPrefetch: true,
+          });
+          if (errorCountRef.current >= 5) {
+            provider.destroy();
+            providerRef.current = null;
+            setAwareness(null);
+          }
+          if (lastNotificationStatusRef.current !== 'error') {
+            lastNotificationStatusRef.current = 'error';
+            toast.warning('Connection Issue', {
+              description: 'Your changes are saved locally and will sync automatically.',
+            });
+          }
+        } else if (status === 'offline' && lastNotificationStatusRef.current === 'connected') {
+          lastNotificationStatusRef.current = 'offline';
+          toast.info('Working Offline', {
+            description: 'Changes will sync when connection is restored',
+          });
+        }
+      };
+
+      provider.on(EVENT_CONNECTION_STATUS, handleConnectionStatus);
+
+      const handleLocalChanges = (hasChanges: boolean): void => {
+        if (localChangesTimerRef.current) {
+          clearTimeout(localChangesTimerRef.current);
+        }
+
+        if (hasChanges) {
+          setHasLocalChanges(true);
+        } else {
+          localChangesTimerRef.current = setTimeout(() => {
+            setHasLocalChanges(false);
+          }, 2000);
+        }
+      };
+
+      provider.on(EVENT_LOCAL_CHANGES, handleLocalChanges);
+
+      return (): void => {
+        provider.off(EVENT_CONNECTION_STATUS, handleConnectionStatus);
+        provider.off(EVENT_LOCAL_CHANGES, handleLocalChanges);
+
+        if (localChangesTimerRef.current) {
+          clearTimeout(localChangesTimerRef.current);
+        }
+
+        const hasUnsavedChanges = hasLocalChangesRef.current;
+        if (hasUnsavedChanges) {
+          toast.warning('Unsaved Changes', {
+            description: 'Some changes may not have been saved',
+          });
+        }
+
+        provider.destroy();
+        providerRef.current = null;
+        setAwareness(null);
+      };
+    }
+
     if (!authTokenData) return;
 
     const actualDocId = authTokenData.docId || canvasId;
@@ -214,12 +318,15 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
         if (!hasConnectedOnceRef.current) {
           hasConnectedOnceRef.current = true;
           lastNotificationStatusRef.current = status;
-          toast.success('Canvas Connected', {
-            description: 'Real-time collaboration active',
-          });
+          logger.info(Event.CANVAS_CONNECTION_ESTABLISHED, { canvasId, fromPrefetch: false });
         }
       } else if (status === 'error') {
         errorCountRef.current += 1;
+        logger.error(Event.CANVAS_CONNECTION_ERROR, {
+          canvasId,
+          errorCount: errorCountRef.current,
+          fromPrefetch: false,
+        });
         if (errorCountRef.current >= 5) {
           provider.destroy();
           providerRef.current = null;

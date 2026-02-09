@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileText,
   Trash2,
@@ -32,6 +32,7 @@ import { queries } from '../../../zero/queries';
 import { CanvasParticipantsTray, type ParticipantItem } from '../CanvasParticipantsTray';
 import { useNavigate } from 'react-router-dom';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 
@@ -95,6 +96,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const [shareCanvas, setShareCanvas] = useState<Canvas | null>(null);
   const [participantsTrayCanvas, setParticipantsTrayCanvas] = useState<Canvas | null>(null);
 
+  const { prefetchTopCanvases, handleMouseEnter, handleMouseLeave } = useCanvasPrefetch();
+
   // Use external filter if provided, otherwise use internal state
   const activeFilter = externalActiveFilter ?? internalActiveFilter;
 
@@ -105,6 +108,22 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       setInternalActiveFilter(filter);
     }
   };
+
+  useEffect(() => {
+    if (canvases.length > 0 && activeFilter !== 'quarto_docs') {
+      const collaborativeCanvases = canvases.filter(c => c.isCollaborative !== false);
+      void prefetchTopCanvases(
+        collaborativeCanvases.map(c => ({
+          id: c.id,
+          ...(c.channelId ? { channelId: c.channelId } : {}),
+          ...(c.viewAccessId ? { viewAccessId: c.viewAccessId } : {}),
+          ...(c.isCollaborative !== undefined ? { isCollaborative: c.isCollaborative } : {}),
+          title: c.title,
+        })),
+        3,
+      );
+    }
+  }, [canvases, activeFilter, prefetchTopCanvases]);
 
   const filteredCanvases = useMemo(() => {
     // If showing Quarto docs filter, return Quarto docs when that filter is active
@@ -276,6 +295,20 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   className='group flex items-center px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer'
                   onClick={() => (isQuartoDoc ? handleQuartoDocClick(canvas) : onSelect(canvas))}
                   data-testid={`canvas-item-${canvas.id}`}
+                  onMouseEnter={() => {
+                    if (!isQuartoDoc && canvas.isCollaborative !== false) {
+                      handleMouseEnter({
+                        id: canvas.id,
+                        ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
+                        ...(canvas.viewAccessId ? { viewAccessId: canvas.viewAccessId } : {}),
+                        ...(canvas.isCollaborative !== undefined
+                          ? { isCollaborative: canvas.isCollaborative }
+                          : {}),
+                        title: canvas.title,
+                      });
+                    }
+                  }}
+                  onMouseLeave={handleMouseLeave}
                   onKeyDown={(e: React.KeyboardEvent) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();

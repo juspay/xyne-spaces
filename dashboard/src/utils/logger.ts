@@ -65,6 +65,19 @@ export const Event = {
   AUTH_SESSION_EXPIRED: 'auth_session_expired',
   API_NETWORK_ERROR: 'api_network_error',
   API_OPERATIONAL_ERROR: 'api_operational_error',
+  CANVAS_PREFETCH_STARTED: 'canvas_prefetch_started',
+  CANVAS_PREFETCH_SUCCESS: 'canvas_prefetch_success',
+  CANVAS_PREFETCH_FAILED: 'canvas_prefetch_failed',
+  CANVAS_PREFETCH_TIMEOUT: 'canvas_prefetch_timeout',
+  CANVAS_CREATED: 'canvas_created',
+  CANVAS_CREATE_FAILED: 'canvas_create_failed',
+  CANVAS_OPENED: 'canvas_opened',
+  CANVAS_OPENED_FROM_PREFETCH: 'canvas_opened_from_prefetch',
+  CANVAS_CONNECTION_ESTABLISHED: 'canvas_connection_established',
+  CANVAS_CONNECTION_ERROR: 'canvas_connection_error',
+  CANVAS_SYNC_COMPLETE: 'canvas_sync_complete',
+  CANVAS_DELETED: 'canvas_deleted',
+  CANVAS_DUPLICATED: 'canvas_duplicated',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];
