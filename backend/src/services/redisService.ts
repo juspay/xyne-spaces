@@ -52,25 +52,24 @@ class RedisService {
     this.initializeRedis();
   }
 
+  public getRedisConfig() {
+    return {
+      maxRetriesPerRequest: 3,
+      lazyConnect: true,
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
+      ...(process.env.REDIS_TLS === 'true' && {
+        tls: {
+          rejectUnauthorized: false
+        }
+      })
+    };
+  }
+
   private initializeRedis(): void {
     try {
-      // Base configuration
-      const baseConfig = {
-        maxRetriesPerRequest: 3,
-        lazyConnect: true,
-      };
-
-      const config = {
-        ...baseConfig,
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-        ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-        ...(process.env.REDIS_TLS === 'true' && {
-          tls: {
-            rejectUnauthorized: false
-          }
-        })
-      };
+      const config = this.getRedisConfig();
 
       // Main Redis instance for data operations
       this.redis = new Redis(config);

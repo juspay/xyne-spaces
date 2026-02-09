@@ -1,5 +1,6 @@
-import Queue from 'bull';
+import Bull from 'bull';
 import { personalizationSyncWorker } from './personalizationSyncWorker';
+import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 
 /**
@@ -9,17 +10,7 @@ import { logger } from '@/utils/logger';
  */
 export class WorkerScheduler {
     private isRunning = false;
-    private personalizationQueue: Queue.Queue | null = null;
-
-    private getRedisConfig() {
-        return {
-            redis: {
-                host: process.env.REDIS_HOST || 'localhost',
-                port: parseInt(process.env.REDIS_PORT || '6379', 10),
-                password: process.env.REDIS_PASSWORD || undefined,
-            }
-        };
-    }
+    private personalizationQueue: Bull.Queue | null = null;
 
     /**
      * Start all workers
@@ -33,7 +24,7 @@ export class WorkerScheduler {
         logger.info('[WORKER_SCHEDULER] Starting workers...');
 
         // Initialize Bull Queue
-        this.personalizationQueue = new Queue('personalization-sync', this.getRedisConfig());
+        this.personalizationQueue = new Bull('personalization-sync', {redis:redisService.getRedisConfig()});
 
         // Define worker process
         this.personalizationQueue.process(async (job) => {
@@ -52,7 +43,13 @@ export class WorkerScheduler {
             {},
             {
                 repeat: { cron: '0 */6 * * *' },
-                jobId: 'personalization-sync-repeatable'
+                jobId: 'personalization-sync-repeatable',
+                attempts: 3,
+                backoff: {
+                type: 'exponential',
+                delay: 5000,
+                },
+                removeOnComplete: true,
             }
         );
 
