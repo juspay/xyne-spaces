@@ -1,11 +1,21 @@
 import { apiInstance } from '../clients/apiClient';
 import { toast } from 'sonner';
 import { getFileDimensions } from '../../components/ui/utils/files';
+import { QueryClient } from '@tanstack/react-query';
+import { logger, Event } from '../../utils/logger';
 
 export interface YSweetAuthRequest {
   docId: string;
   channelId?: string;
   title?: string;
+  viewAccessId?: string;
+  editAccessId?: string;
+}
+
+export interface CreateCollaborativeCanvasRequest {
+  id: string;
+  title?: string;
+  channelId?: string;
   viewAccessId?: string;
   editAccessId?: string;
 }
@@ -26,10 +36,58 @@ export interface CanvasFileUploadResponse {
   thumbnailUrl?: string;
 }
 
+// Cache for prefetched canvas data
+const prefetchedCanvases = new Map<string, { token: YSweetAuthToken; timestamp: number }>();
+const PREFETCH_CACHE_TTL = 1000 * 60 * 50; // 50 minutes (same as staleTime)
+
 export class CanvasService {
   async getYSweetAuthToken(request: YSweetAuthRequest): Promise<YSweetAuthToken> {
     const response = await apiInstance.post<YSweetAuthToken>('/ysweet/auth', request);
     return response.data;
+  }
+
+  async createCollaborativeCanvas(
+    request: CreateCollaborativeCanvasRequest,
+  ): Promise<YSweetAuthToken> {
+    const response = await apiInstance.post<YSweetAuthToken>('/ysweet/auth', {
+      docId: request.id,
+      channelId: request.channelId,
+      title: request.title || 'Untitled Canvas',
+      viewAccessId: request.viewAccessId,
+      editAccessId: request.editAccessId,
+    });
+    return response.data;
+  }
+
+  async prefetchCanvas(
+    queryClient: QueryClient,
+    canvasId: string,
+    options?: { channelId?: string; viewAccessId?: string },
+  ): Promise<void> {
+    const cached = prefetchedCanvases.get(canvasId);
+    if (cached && Date.now() - cached.timestamp < PREFETCH_CACHE_TTL) {
+      return;
+    }
+
+    try {
+      const token = await this.getYSweetAuthToken({
+        docId: canvasId,
+        ...(options?.channelId ? { channelId: options.channelId } : {}),
+        ...(options?.viewAccessId ? { viewAccessId: options.viewAccessId } : {}),
+      });
+
+      queryClient.setQueryData(
+        ['ysweet-auth', canvasId, options?.channelId, options?.viewAccessId],
+        token,
+      );
+
+      prefetchedCanvases.set(canvasId, { token, timestamp: Date.now() });
+    } catch (error) {
+      logger.warn(Event.CANVAS_PREFETCH_FAILED, {
+        canvasId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
   }
 
   async uploadCanvasFile(canvasId: string, file: File): Promise<string> {

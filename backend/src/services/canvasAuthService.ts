@@ -187,6 +187,7 @@ class CanvasAuthService {
             editAccessId: options?.editAccessId || uuidv4(),
             viewAccessId: options?.viewAccessId || uuidv4(),
             content: [],
+            isCollaborative: true,
             ...(options?.channelId ? { channelId: options.channelId } : {}),
           },
         }),
