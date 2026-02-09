@@ -13,7 +13,6 @@ import {
   ChannelScopeType,
   ConversationParticipation,
   schema,
-  TicketPriority,
   ChannelRole,
   AttachmentEntityType,
   ChannelType,
@@ -110,7 +109,43 @@ export const queries = defineQueries({
       .related('project')
       .related('tags')
       .related('entity')
-      .related('conversation', (c) => c.related('channel'));
+      .related('conversation');
+  }),
+
+  // Unified query for Xyne Desk: filters by EMAIL channels with optional channel and merchant filters
+  supportTicketsFiltered: defineQuery(
+    z.object({
+      channelId: z.string().optional(),
+      merchantMid: z.string().optional(),
+    }).optional(),
+    ({ args }) => {
+      let query = zql.tickets;
+
+      // If specific channelId provided (from email channels dropdown), use direct filter
+      // Otherwise, filter by EMAIL channel type to get all email support tickets
+      if (args?.channelId) {
+        query = query.where('channelId', args.channelId);
+      } else {
+        query = query.whereExists('channel', (channel) => channel.where('type', ChannelType.EMAIL));
+      }
+
+      // Apply merchant filter using direct merchantId field
+      if (args?.merchantMid) {
+        query = query.where('merchantId', args.merchantMid);
+      }
+
+      return query
+        .orderBy('createdAt', 'desc')
+        .related('project')
+        .related('tags')
+        .related('entity')
+        .related('conversation', (c) => c.related('channel'));
+    }
+  ),
+
+  // Get all merchants for Xyne Desk dropdown (simple indexed query on small table)
+  getAllMerchants: defineQuery(() => {
+    return zql.merchants.orderBy('mid', 'asc');
   }),
 
   getEmailsForTicket: defineQuery(
@@ -441,72 +476,6 @@ export const queries = defineQueries({
     zql.tickets.where('projectId', projectId).related('tags').orderBy('createdAt', 'desc')
   ),
 
-  filteredTicketsByProject: defineQuery(
-    z.object({
-      projectId: z.string(),
-      filters: z.object({
-        boardId: z.string().optional(),
-        priority: z.array(z.nativeEnum(TicketPriority)).optional(),
-        assignee: z.array(z.string()).optional(),
-        userGroups: z.array(z.string()).optional(),
-        createdBy: z.array(z.string()).optional(),
-        dueDateStart: z.number().optional(),
-        dueDateEnd: z.number().optional(),
-        createdDateStart: z.number().optional(),
-        createdDateEnd: z.number().optional(),
-      }),
-    }),
-    ({ args: { projectId, filters } }) => {
-      let query = zql.tickets.where('projectId', projectId);
-
-      // Apply boardId filter
-      if (filters.boardId) {
-        query = query.where('boardId', filters.boardId);
-      }
-
-      // Apply priority filter
-      if (filters.priority && filters.priority.length > 0) {
-        query = query.where('priority', 'IN', filters.priority);
-      }
-
-      // Apply assignee filter
-      if (filters.assignee && filters.assignee.length > 0) {
-        query = query.where('assignedTo', 'IN', filters.assignee);
-      }
-
-      // Apply user groups filter
-      if (filters.userGroups && filters.userGroups.length > 0) {
-        query = query.where('userGroupId', 'IN', filters.userGroups);
-      }
-
-      // Apply created by filter
-      if (filters.createdBy && filters.createdBy.length > 0) {
-        query = query.where('createdBy', 'IN', filters.createdBy);
-      }
-
-      // Apply due date range filter
-      if (filters.dueDateStart !== undefined) {
-        query = query.where('eta', '>=', filters.dueDateStart);
-      }
-      if (filters.dueDateEnd !== undefined) {
-        query = query.where('eta', '<=', filters.dueDateEnd);
-      }
-
-      // Apply created date range filter
-      if (filters.createdDateStart !== undefined) {
-        query = query.where('createdAt', '>=', filters.createdDateStart);
-      }
-      if (filters.createdDateEnd !== undefined) {
-        query = query.where('createdAt', '<=', filters.createdDateEnd);
-      }
-
-      return query
-        .orderBy('createdAt', 'desc')
-        .related('project')
-        .related('tags')
-        .related('entity');
-    }
-  ),
 
   boardsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
     return zql.boards

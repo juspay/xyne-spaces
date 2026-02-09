@@ -418,6 +418,13 @@ export const initiateInvestigationAndWaitForWebhook = async (
   }
 
   if (result.merchant_id) {
+    // Upsert merchant if it doesn't exist
+    await prisma.merchant.upsert({
+      where: { mid: result.merchant_id },
+      update: {},
+      create: { mid: result.merchant_id },
+    });
+    
     await prisma.ticket.update({
       where: { id: ticketId },
       data: {
@@ -805,7 +812,16 @@ export const categorizateAndUpdateTicket = async (
 
   const newMerchantId = categorization.Merchant || ticket.merchantId;
   const newPriority = mapSeverityToPriority(categorization.Severity);
-  
+
+  // Upsert merchant if it doesn't exist
+  if (newMerchantId) {
+    await prisma.merchant.upsert({
+      where: { mid: newMerchantId },
+      update: {},
+      create: { mid: newMerchantId },
+    });
+  }
+
   await prisma.ticket.update({
     where: { id: ticketId },
     data: {

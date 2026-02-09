@@ -2,7 +2,7 @@ import { useSelector } from '@xstate/react';
 import { useMemo } from 'react';
 import { Conversation, stateMachineActor, type Channel } from '../machines/stateMachine';
 import Fuse from 'fuse.js';
-import { ChannelScopeType, ChannelUserStatus } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, ChannelUserStatus } from '@xyne/shared';
 import { queryCacheActor } from '../machines/queryCacheMachine';
 
 const shallowEqualChannels = (a: Channel[], b: Channel[]): boolean => {
@@ -135,6 +135,17 @@ export const useMigratedChannels = (): Channel[] => {
   return useMemo(() => {
     if (!channels?.length) return [];
     return channels.filter(channel => channel.isMigrated);
+  }, [channels]);
+};
+
+// Hook to get EMAIL type channels (for Xyne Desk / external sources)
+export const useEmailChannels = (): Channel[] => {
+  const channels = useAllChannels();
+  return useMemo(() => {
+    if (!channels?.length) return [];
+    return channels
+      .filter(channel => channel.type === ChannelType.EMAIL)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   }, [channels]);
 };
 

@@ -318,6 +318,9 @@ model Ticket {
   @@index([boardId])
   @@index([projectId])
   @@index([userGroupId])
+  @@index([merchantId])
+  @@index([merchantId, createdAt])
+  @@index([channelId, merchantId])
   @@map("tickets")
   @@schema("public")
 }
@@ -1854,6 +1857,16 @@ model dashboardQueryMapping {
   @@map("dashboard_queries_mapping")
   @@schema("public")
 }
+
+// Merchant table for Xyne Desk support screen dropdown
+model Merchant {
+  id        String   @id @default(cuid())
+  mid       String   @unique // Merchant identifier (matches TicketEntityMapping.entityName)
+
+  @@map("merchants")
+  @@schema("public")
+}
+
 
 
 

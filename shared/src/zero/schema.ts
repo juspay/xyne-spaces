@@ -1234,6 +1234,21 @@ export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
   })
   .primaryKey('id');
 
+export const merchantTable = table('merchants')
+  .columns({
+    id: string(),
+    mid: string(),
+  })
+  .primaryKey('id');
+
+// Merchant table relationships
+export const merchantTableRelationships = relationships(merchantTable, ({ many }) => ({
+  tickets: many({
+    sourceField: ['mid'],
+    destField: ['merchantId'],
+    destSchema: ticketTable,
+  }),
+}));
 
 // Define relationships
 
@@ -1322,6 +1337,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ['boardId'],
     destField: ['id'],
     destSchema: boardTable,
+  }),
+  merchant: one({
+    sourceField: ['merchantId'],
+    destField: ['mid'],
+    destSchema: merchantTable,
   }),
   tags: many({
     sourceField: ['id'],
@@ -2315,6 +2335,7 @@ export const schema = createSchema({
     dashboardTable,
     queryTable,
     dashboardQueryMappingTable,
+    merchantTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -2373,6 +2394,7 @@ export const schema = createSchema({
     dashboardTableRelationships,
     queryTableRelationships,
     dashboardQueryMappingTableRelationships,
+    merchantTableRelationships,
   ],
 });
 
@@ -2437,6 +2459,7 @@ export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type Dashboard = Row<typeof schema.tables.dashboards>;
 export type Query = Row<typeof schema.tables.queries>;
 export type DashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
+export type Merchant = Row<typeof schema.tables.merchants>;
 
 export type Context = {
   userID: string;
