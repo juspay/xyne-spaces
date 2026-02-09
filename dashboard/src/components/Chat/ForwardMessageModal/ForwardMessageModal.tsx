@@ -1,11 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { Button } from '../../ui/Button/Button';
-import Input from '../../ui/Input';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Badge } from '../../ui/Badge';
-import { Search, X, Hash, Lock } from 'lucide-react';
-import { cn } from '../../../utils/classNames';
+import { X, Hash, Lock } from 'lucide-react';
 import { useUserSearch, useUser, useUsers } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
 import { useChannelSearch, useAllChannels } from '../../../hooks/useChannels';
@@ -20,7 +18,6 @@ import {
   MessageType,
   parseForwardedMessageXml,
 } from '@xyne/shared';
-import * as Popover from '@radix-ui/react-popover';
 import { channelService } from '../../../services/Chat/channelService';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '@rocicorp/zero/react';
@@ -28,14 +25,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { mutators } from '../../../zero/mutators';
 import { InputBox } from '../../ui/InputBox';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
-import {
-  ForwardMessageFormProps,
-  ForwardTarget,
-  SearchResultItem,
-  SelectionMode,
-} from './ForwardMessageModal.types';
+import { ForwardMessageFormProps, ForwardTarget, SelectionMode } from './ForwardMessageModal.types';
 import { toast } from 'sonner';
 import { getDMParticipantIdsToFetch } from '../ChatDirectory/ChatDirectory.utils';
+import { Combobox } from '../../ui/Combobox/Combobox';
+import { DropdownListItemType } from '../../ui/Combobox/Combobox.types';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 /**
  * ForwardMessageForm component allows users to forward a message to channels or users.
@@ -49,16 +44,19 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   onCancel,
   onSuccess,
 }) => {
-  const [searchValue, setSearchValue] = useState('');
+  const { isMobile } = usePlatform();
   const [selectedTargets, setSelectedTargets] = useState<ForwardTarget[]>([]);
-  const [isSearchOpen, setIsSearchOpen] = useState(true); // Open by default to show initial suggestions
-  const [isInitialOpen, setIsInitialOpen] = useState(true); // Track if this is the initial modal open
-  const [selectedIndex, setSelectedIndex] = useState(-1);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const [isInitialOpen, setIsInitialOpen] = useState(!isMobile); // Don't show initial suggestions on mobile
+  const [comboboxOpen, setComboboxOpen] = useState(!isMobile); // Don't auto-open dropdown on mobile
+  const comboboxInputRef = useRef<HTMLInputElement>(null);
   const inputBoxRef = useRef<InputBoxHandle>(null);
   const navigate = useNavigate();
   const zero = useZero();
+
+  // Auto-focus combobox input on modal open
+  useEffect(() => {
+    comboboxInputRef.current?.focus();
+  }, []);
 
   // Initialize form with useForm hook
   const form = useForm({
@@ -214,61 +212,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     return message.content;
   }, [useOptionalText, forwardedMessageData, message.content]);
 
-  // Search for users and channels
-  const userResults = useUserSearch(searchValue, 5);
-  const channelResults = useChannelSearch(searchValue, 5);
   const allChannels = useAllChannels();
   const allUsers = useUsers();
-
-  // Get default suggestions for initial modal open (Users from DMs first, then channels)
-  const defaultSuggestions: SearchResultItem[] = useMemo(() => {
-    // Only compute if initial open and no search query
-    if (!isInitialOpen || searchValue.trim().length > 0) return [];
-
-    const suggestions: SearchResultItem[] = [];
-
-    // Get recent 1:1 DMs (exclude Group DMs) sorted by lastActivityAt
-    // Extract the OTHER user from each DM and add as type: 'user'
-    const recentDMs = [...allChannels]
-      .filter(channel => channel.scopeType === ChannelScopeType.DM)
-      .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
-      .slice(0, 5);
-
-    // Add users from DMs first (as type: 'user' so they behave like search results)
-    recentDMs.forEach(channel => {
-      const participantIds = getDMParticipantIdsToFetch(channel, currentUser?.id || '');
-      const otherUser = allUsers.find(user => participantIds.includes(user.id));
-
-      if (otherUser && otherUser.id !== currentUser?.id) {
-        suggestions.push({
-          type: 'user',
-          id: otherUser.id,
-          name: otherUser.name,
-          description: otherUser.email,
-          user: otherUser,
-        });
-      }
-    });
-
-    // Get recent channels (DEFAULT scope) sorted by lastActivityAt
-    const recentChannels = [...allChannels]
-      .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-      .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
-      .slice(0, 8 - suggestions.length); // Fill remaining slots
-
-    // Add channels after users
-    recentChannels.forEach(channel => {
-      suggestions.push({
-        type: 'channel',
-        id: channel.id,
-        name: channel.name,
-        description: channel.description,
-        channel,
-      });
-    });
-
-    return suggestions;
-  }, [allChannels, isInitialOpen, searchValue, allUsers, currentUser?.id]);
 
   // Determine current selection mode based on selected targets
   const selectionMode: SelectionMode = useMemo(() => {
@@ -287,171 +232,150 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     );
   }, [selectedTargets]);
 
-  // Combine and filter results based on selection mode
-  const searchResults: SearchResultItem[] = useMemo(() => {
-    // If channel is already selected, don't show any more results
-    if (selectionMode === 'channel') {
-      return [];
-    }
-
-    // Show default suggestions on initial modal open with no search query
-    if (isInitialOpen && searchValue.trim().length === 0) {
-      return defaultSuggestions;
-    }
-
-    const results: SearchResultItem[] = [];
-
-    // If no selection yet, show both channels and users
-    if (selectionMode === 'none') {
-      // Add channels (only DEFAULT scope type channels, including current channel)
-      channelResults
-        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-        .forEach(channel => {
-          results.push({
-            type: 'channel',
-            id: channel.id,
-            name: channel.name,
-            description: channel.description,
-            channel,
-          });
-        });
-    }
-
-    // Add users (filter out already selected users and current user)
-    userResults
-      .filter(user => !selectedUserIds.has(user.id) && user.id !== currentUser?.id)
-      .forEach(user => {
-        results.push({
-          type: 'user',
-          id: user.id,
-          name: user.name,
-          description: user.email,
-          user,
-        });
-      });
-
-    return results.slice(0, 10);
-  }, [
-    userResults,
-    channelResults,
-    selectionMode,
-    selectedUserIds,
-    currentUser?.id,
-    isInitialOpen,
-    searchValue,
-    defaultSuggestions,
-  ]);
-
-  // Update dropdown visibility when search changes (but not during initial state)
-  useEffect(() => {
-    // Don't close popover during initial state - we want to show default suggestions
-    if (isInitialOpen) return;
-
-    const shouldShow = searchValue.trim().length > 0;
-    setIsSearchOpen(shouldShow);
-    if (!shouldShow) {
-      setSelectedIndex(-1);
-    }
-  }, [searchValue, isInitialOpen]);
-
-  // Scroll selected item into view
-  useEffect(() => {
-    if (selectedIndex >= 0 && listRef.current) {
-      const selectedElement = listRef.current.children[selectedIndex] as HTMLElement;
-      if (selectedElement) {
-        selectedElement.scrollIntoView({ block: 'nearest' });
-      }
-    }
-  }, [selectedIndex]);
-
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    setSearchValue(e.target.value);
-    setIsSearchOpen(true);
-    setSelectedIndex(-1);
-    setIsInitialOpen(false); // User started typing, exit initial state
-  };
-
-  const handleSelectTarget = (item: SearchResultItem): void => {
-    const newTarget: ForwardTarget = {
-      type: item.type,
-      id: item.id,
-      name: item.name,
-    };
-
-    if (item.type === 'channel') {
-      // Channel selection replaces everything - only one channel allowed
-      setSelectedTargets([newTarget]);
-    } else {
-      // User selection - add to existing users
-      setSelectedTargets((prev: ForwardTarget[]) => [...prev, newTarget]);
-    }
-
-    setSearchValue('');
-    setIsSearchOpen(false);
-    setSelectedIndex(-1);
-    setIsInitialOpen(false); // User made a selection, exit initial state
-    inputRef.current?.focus();
-  };
-
   const handleRemoveTarget = (targetId: string): void => {
     setSelectedTargets((prev: ForwardTarget[]) =>
       prev.filter((t: ForwardTarget) => t.id !== targetId),
     );
-    inputRef.current?.focus();
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (!isSearchOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      setIsSearchOpen(true);
-      return;
-    }
-
-    if (!isSearchOpen) return;
-
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        setSelectedIndex(prev => (prev < searchResults.length - 1 ? prev + 1 : prev));
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        setSelectedIndex(prev => (prev > 0 ? prev - 1 : -1));
-        break;
-      case 'Enter':
-        e.preventDefault();
-        if (selectedIndex >= 0 && searchResults[selectedIndex]) {
-          handleSelectTarget(searchResults[selectedIndex]);
-        }
-        break;
-      case 'Escape':
-        e.preventDefault();
-        setIsSearchOpen(false);
-        setSelectedIndex(-1);
-        inputRef.current?.blur();
-        break;
-    }
-  };
-
-  const handleFocus = (): void => {
-    if (searchValue.trim().length > 0) {
-      setIsSearchOpen(true);
-    }
-  };
-
-  const handleBlur = (): void => {
-    setTimeout(() => {
-      // Don't close during initial state - keep default suggestions visible
-      if (!isInitialOpen) {
-        setIsSearchOpen(false);
-        setSelectedIndex(-1);
-      }
-    }, 200);
+    setInputValue('');
+    setTimeout(() => comboboxInputRef.current?.focus(), 0);
   };
 
   const getChannelIcon = (channelId: string): React.ReactNode => {
     const channel = allChannels.find(c => c.id === channelId);
     const isPrivate = channel?.visibility === ChannelVisibility.PRIVATE;
     return isPrivate ? <Lock className='w-4 h-4' /> : <Hash className='w-4 h-4' />;
+  };
+
+  const [inputValue, setInputValue] = useState<string>('');
+  const trimmedInputValue = inputValue.trim();
+  const usersSuggestions = useUserSearch(trimmedInputValue, 5);
+  const channelsSuggestions = useChannelSearch(trimmedInputValue, 5);
+  const dropdownListItems = useMemo(() => {
+    // Show default suggestions on initial modal open with empty input
+    if (!inputValue.trim()) {
+      if (isInitialOpen) {
+        const defaults: DropdownListItemType[] = [];
+
+        // Recent 1:1 DMs sorted by lastActivityAt (up to 5)
+        const recentDMs = [...allChannels]
+          .filter(channel => channel.scopeType === ChannelScopeType.DM)
+          .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
+          .slice(0, 5);
+
+        recentDMs.forEach(channel => {
+          const participantIds = getDMParticipantIdsToFetch(channel, currentUser?.id || '');
+          const otherUser = allUsers.find(user => participantIds.includes(user.id));
+
+          if (otherUser && otherUser.id !== currentUser?.id) {
+            defaults.push({
+              leftSlot: <Avatar userId={otherUser.id} size='sm' />,
+              label: otherUser.name,
+              description: otherUser.email,
+              value: otherUser.id,
+            });
+          }
+        });
+
+        // Recent DEFAULT channels sorted by lastActivityAt (up to 5)
+        const recentChannels = [...allChannels]
+          .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
+          .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
+          .slice(0, 5);
+
+        recentChannels.forEach(channel => {
+          defaults.push({
+            leftSlot:
+              channel.visibility === ChannelVisibility.PUBLIC ? (
+                <Hash className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
+              ) : (
+                <Lock className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
+              ),
+            label: channel.name,
+            value: channel.id,
+          });
+        });
+
+        return defaults;
+      }
+      return [];
+    }
+
+    const suggestedUsers: DropdownListItemType[] = usersSuggestions
+      .filter(currUser => currentUser?.id !== currUser.id && !selectedUserIds.has(currUser.id))
+      .map(currUser => ({
+        leftSlot: <Avatar userId={currUser.id} size='sm' />,
+        label: currUser.name,
+        description: currUser.email,
+        value: currUser.id,
+      }));
+
+    const suggestedChannels: DropdownListItemType[] = channelsSuggestions
+      .filter(currChannel => currChannel.scopeType === ChannelScopeType.DEFAULT)
+      .map(currChannel => ({
+        leftSlot:
+          currChannel.visibility === ChannelVisibility.PUBLIC ? (
+            <Hash className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
+          ) : (
+            <Lock className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
+          ),
+        label: currChannel.name,
+        value: currChannel.id,
+      }));
+
+    if (selectionMode === 'none') {
+      return [...suggestedUsers, ...suggestedChannels];
+    } else if (selectionMode === 'channel') {
+      return suggestedChannels;
+    } else {
+      return suggestedUsers;
+    }
+  }, [
+    inputValue,
+    selectedUserIds,
+    isInitialOpen,
+    usersSuggestions,
+    channelsSuggestions,
+    selectionMode,
+  ]);
+
+  const onInputValueChangeHandler = (queryString: string) => {
+    setInputValue(queryString);
+    if (queryString.trim().length > 0 && isInitialOpen) {
+      setIsInitialOpen(false);
+    }
+  };
+
+  const onValueChangeHandler = (selectedValue: string | null) => {
+    if (!selectedValue) return;
+
+    // Check if the selected value is a user
+    const selectedUser = allUsers.find(u => u.id === selectedValue);
+    if (selectedUser) {
+      const newTarget: ForwardTarget = {
+        type: 'user',
+        id: selectedUser.id,
+        name: selectedUser.name,
+      };
+      setSelectedTargets((prev: ForwardTarget[]) => [...prev, newTarget]);
+      setInputValue('');
+      setIsInitialOpen(false);
+      comboboxInputRef.current?.focus();
+      return;
+    }
+
+    // Check if the selected value is a channel
+    const selectedChannel = allChannels.find(c => c.id === selectedValue);
+    if (selectedChannel) {
+      const newTarget: ForwardTarget = {
+        type: 'channel',
+        id: selectedChannel.id,
+        name: selectedChannel.name,
+      };
+      setSelectedTargets([newTarget]);
+      setInputValue('');
+      setIsInitialOpen(false);
+      return;
+    }
   };
 
   return (
@@ -467,6 +391,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-200 dark:border-gray-700'>
         <h2 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>Forward message</h2>
         <button
+          type='button'
           className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2'
           onClick={onCancel}
         >
@@ -475,192 +400,67 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         </button>
       </div>
 
-      <div className='px-6 py-4 space-y-4'>
-        {/* Search for recipients */}
-        <div>
-          <label
-            htmlFor='forward-search-input'
-            className='block text-sm font-medium text-foreground mb-1.5'
-          >
-            Forward to
-          </label>
-
-          {/* Selected targets badges */}
-          {selectedTargets.length > 0 && (
-            <div className='flex flex-wrap gap-2 mb-2'>
-              {selectedTargets.map((target: ForwardTarget) => (
-                <Badge key={target.id} variant='primary' className='flex items-center gap-1.5 pr-1'>
-                  {target.type === 'channel' ? (
-                    <span className='flex items-center gap-1'>
-                      {getChannelIcon(target.id)}
-                      <span className='text-xs'>{target.name}</span>
-                    </span>
-                  ) : (
+      <div className='px-6 py-4 space-y-2'>
+        {selectedTargets.length > 0 && (
+          <div className='flex flex-wrap gap-2 mb-2'>
+            {selectedTargets.map((target: ForwardTarget) => (
+              <Badge key={target.id} variant='primary' className='flex items-center gap-1.5 pr-1'>
+                {target.type === 'channel' ? (
+                  <span className='flex items-center gap-1'>
+                    {getChannelIcon(target.id)}
                     <span className='text-xs'>{target.name}</span>
-                  )}
-                  <button
-                    type='button'
-                    onClick={() => handleRemoveTarget(target.id)}
-                    className='rounded-full p-0.5 transition-colors'
-                    aria-label={`Remove ${target.name}`}
-                  >
-                    <X className='h-3 w-3' />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-          )}
-
-          {/* Search input - hide if channel is selected (only one channel allowed) */}
-          {selectionMode !== 'channel' && (
-            <Popover.Root open={isSearchOpen} onOpenChange={setIsSearchOpen}>
-              <Popover.Anchor asChild>
-                <div className='relative'>
-                  <Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none z-10' />
-                  <Input
-                    id='forward-search-input'
-                    name='off'
-                    autoFocus={true} // eslint-disable-line jsx-a11y/no-autofocus
-                    autoComplete='off'
-                    autoCorrect='off'
-                    autoCapitalize='off'
-                    spellCheck={false}
-                    data-form-type='other'
-                    data-lpignore='true'
-                    data-1p-ignore='true'
-                    ref={inputRef}
-                    type='text'
-                    role='combobox'
-                    aria-expanded={isSearchOpen}
-                    aria-controls='forward-search-listbox'
-                    aria-autocomplete='list'
-                    aria-activedescendant={
-                      selectedIndex >= 0 ? `forward-search-option-${selectedIndex}` : undefined
-                    }
-                    className='pl-10'
-                    placeholder={
-                      selectionMode === 'users'
-                        ? 'Add more users...'
-                        : 'Search channels or users...'
-                    }
-                    value={searchValue}
-                    onChange={handleSearchChange}
-                    onKeyDown={handleKeyDown}
-                    onFocus={handleFocus}
-                    onBlur={handleBlur}
-                  />
-                </div>
-              </Popover.Anchor>
-
-              <Popover.Portal>
-                <Popover.Content
-                  side='bottom'
-                  align='start'
-                  sideOffset={4}
-                  className={cn(
-                    'z-[9999] min-w-[var(--radix-popover-trigger-width)] max-h-[250px] overflow-y-auto',
-                    'rounded-md border border-border bg-popover shadow-lg',
-                    'data-[state=open]:animate-in data-[state=closed]:animate-out',
-                    'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-                    'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
-                    'data-[side=bottom]:slide-in-from-top-2',
-                    'scroll-smooth',
-                  )}
-                  style={{ WebkitOverflowScrolling: 'touch' }}
-                  onOpenAutoFocus={e => e.preventDefault()}
-                  collisionPadding={8}
-                  avoidCollisions={true}
-                  onWheel={e => {
-                    e.stopPropagation();
-                  }}
-                  onInteractOutside={() => {
-                    setIsSearchOpen(false);
-                    setSelectedIndex(-1);
-                  }}
+                  </span>
+                ) : (
+                  <span className='text-xs'>{target.name}</span>
+                )}
+                <button
+                  type='button'
+                  onClick={() => handleRemoveTarget(target.id)}
+                  className='rounded-full p-0.5 transition-colors'
+                  aria-label={`Remove ${target.name}`}
                 >
-                  {searchResults.length > 0 ? (
-                    <ul ref={listRef} id='forward-search-listbox' role='listbox' className='py-1'>
-                      {searchResults.map((item, index) => (
-                        <li
-                          key={`${item.type}-${item.id}`}
-                          id={`forward-search-option-${index}`}
-                          role='option'
-                          aria-selected={index === selectedIndex}
-                          className={cn(
-                            'relative flex cursor-pointer select-none items-center gap-3 px-3 py-2 text-sm outline-none transition-colors',
-                            index === selectedIndex
-                              ? 'bg-accent text-accent-foreground'
-                              : 'hover:bg-accent hover:text-accent-foreground',
-                          )}
-                          onClick={() => handleSelectTarget(item)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              handleSelectTarget(item);
-                            }
-                          }}
-                          onMouseEnter={() => setSelectedIndex(index)}
-                          tabIndex={-1}
-                        >
-                          {item.type === 'channel' ? (
-                            <>
-                              <div className='size-6 flex items-center justify-center shrink-0 bg-gray-100 dark:bg-gray-700 rounded'>
-                                {item.channel?.visibility === ChannelVisibility.PRIVATE ? (
-                                  <Lock className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
-                                ) : (
-                                  <Hash className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
-                                )}
-                              </div>
-                              <div className='flex flex-col min-w-0 flex-1'>
-                                <span className='font-medium truncate'>{item.name}</span>
-                                {item.description && (
-                                  <span className='text-xs text-muted-foreground truncate'>
-                                    {item.description}
-                                  </span>
-                                )}
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <div className='size-6 flex items-center justify-center shrink-0'>
-                                <Avatar userId={item.id} size='sm' showActiveStatus={false} />
-                              </div>
-                              <div className='flex flex-col min-w-0 flex-1'>
-                                <span className='font-medium truncate'>{item.name}</span>
-                                {item.description && (
-                                  <span className='text-xs text-muted-foreground truncate'>
-                                    {item.description}
-                                  </span>
-                                )}
-                              </div>
-                            </>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className='px-4 py-4 text-center text-sm text-muted-foreground'>
-                      {searchValue.trim()
-                        ? `No results found for "${searchValue}"`
-                        : 'Start typing to search...'}
-                    </div>
-                  )}
-                </Popover.Content>
-              </Popover.Portal>
-            </Popover.Root>
-          )}
-
+                  <X className='h-3 w-3' />
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
+        {selectionMode !== 'channel' && (
+          <Combobox
+            ref={comboboxInputRef}
+            label='Forward to'
+            onInputValueChange={onInputValueChangeHandler}
+            onValueChange={onValueChangeHandler}
+            queryString={inputValue}
+            placeholder={
+              selectionMode === 'users' ? 'Add more users...' : 'Search channels or users...'
+            }
+            items={dropdownListItems}
+            value={null}
+            hintText='Select a channel or one or more users to forward this message'
+            onBlur={() => setIsInitialOpen(false)}
+            open={comboboxOpen}
+            onOpenChange={setComboboxOpen}
+            autoHighlight={true}
+          />
+        )}
+        {selectionMode === 'channel' && (
           <p className='text-xs text-muted-foreground mt-1.5'>
-            {selectionMode === 'channel'
-              ? 'Message will be forwarded to the selected channel'
-              : selectionMode === 'users'
-                ? 'Add more users or forward to the selected users'
-                : 'Select a channel or one or more users to forward this message'}
+            Message will be forwarded to the selected channel
           </p>
-        </div>
-
+        )}
+      </div>
+      <div className='px-6 py-4 space-y-4'>
         {/* Optional message with InputBox */}
-        <div>
+        <div
+          onKeyDownCapture={e => {
+            if (e.key === 'Enter' && !e.shiftKey && selectedTargets.length > 0) {
+              e.preventDefault();
+              e.stopPropagation();
+              void form.handleSubmit();
+            }
+          }}
+        >
           <label
             htmlFor='forward-message-optional'
             className='block text-sm font-medium text-foreground mb-1.5'
@@ -672,7 +472,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             id='forward-message-optional'
             placeholder='Add a note to the forwarded message...'
             onSendMessage={async () => {
-              // No-op: Forward is handled by the Forward button
+              // Handled by the wrapper div's onKeyDown
             }}
             onContentChange={(html: string, text: string) => {
               form.setFieldValue('optionalMessageHtml', html);
@@ -691,7 +491,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             }}
             showTypingIndicator={false}
             disabled={form.state.isSubmitting}
-            disableEnterToSend
             hideSendButton
           />
         </div>
@@ -699,7 +498,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         {/* Message preview */}
         <div>
           <span className='block text-sm font-medium text-foreground mb-1.5'>Message preview</span>
-          <div className='bg-gray-50 dark:bg-gray-700 rounded-md p-3 border border-gray-200 dark:border-gray-600'>
+          <div className='bg-gray-50 dark:bg-gray-700 rounded-md p-3 border border-gray-200 dark:border-gray-600 max-h-[200px] overflow-y-auto'>
             <div className='flex gap-3'>
               <div className='flex-shrink-0'>
                 <Avatar userId={message.senderId} size='md' />
@@ -715,7 +514,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                 </div>
                 {previewContent && (
                   <div
-                    className={`text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words overflow-hidden ${getEmojiFontSizeClass(previewContent)}`}
+                    className={`text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
                   >
                     <RenderMessageWithHTML message={previewContent} />
                   </div>

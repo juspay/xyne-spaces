@@ -227,12 +227,25 @@ export const SearchUser: React.FC<SearchUserProps> = ({
               'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
               'data-[side=bottom]:slide-in-from-top-2',
               'scroll-smooth',
+              'touch-action-pan-y overscroll-contain',
             )}
-            style={{ WebkitOverflowScrolling: 'touch' }}
+            style={{
+              WebkitOverflowScrolling: 'touch',
+              touchAction: 'pan-y',
+              overscrollBehavior: 'contain',
+            }}
             onOpenAutoFocus={e => e.preventDefault()}
             collisionPadding={8}
             avoidCollisions={true}
             onWheel={e => {
+              e.stopPropagation();
+            }}
+            onTouchStart={e => {
+              // Prevent long-press from triggering parent context menus
+              e.stopPropagation();
+            }}
+            onTouchMove={e => {
+              // Allow touch scrolling within the popover on mobile
               e.stopPropagation();
             }}
             onInteractOutside={() => {

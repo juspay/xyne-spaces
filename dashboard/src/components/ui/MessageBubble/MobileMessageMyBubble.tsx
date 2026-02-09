@@ -203,17 +203,24 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                       maxHeight={500}
                     />
                   </div>
-                  {/* Attachments inside the forwarded message border */}
+                  {/* Attachments inside the forwarded message border - vertical layout same as normal messages */}
                   {attachments.length > 0 && (
-                    <div className='mt-2 flex gap-3 overflow-x-auto flex-nowrap no-scrollbar'>
-                      {attachments.map(attachment => (
-                        <div
-                          key={attachment.id}
-                          className='flex items-center gap-2 py-1 text-sm flex-shrink-0'
-                        >
-                          <MessageAttachment attachment={attachment} />
-                        </div>
-                      ))}
+                    <div className='mt-2'>
+                      {attachments.map(attachment => {
+                        const isImageVideoOrText =
+                          attachment.mimetype.startsWith('image/') ||
+                          attachment.mimetype.startsWith('video/') ||
+                          attachment.mimetype === 'text/plain';
+
+                        return (
+                          <div
+                            key={attachment.id}
+                            className={`flex items-center gap-2 py-1 text-sm ${!isImageVideoOrText ? 'w-[256px] aspect-square' : ''}`}
+                          >
+                            <MessageAttachment attachment={attachment} />
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                   {/* Posted in link for forwarded messages */}
