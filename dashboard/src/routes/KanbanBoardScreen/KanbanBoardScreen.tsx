@@ -327,7 +327,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Dynamic grouping options based on form fields
   const groupingOptions = useMemo(() => {
     const baseOptions = [
-      { value: 'none' as const, label: 'None', icon: <X className='h-4 w-4' /> },
       {
         value: 'assignee' as const,
         label: 'Group by: Assignee',
@@ -1147,11 +1146,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   {/* Matching Header Style */}
                   <div className='mb-1 border-b flex items-center justify-between px-4 py-3'>
                     <span className='text-sm font-bold tracking-wide'>Group by</span>
-                    <DropdownMenu.Item className='outline-none'>
-                      <div className='cursor-pointer hover:bg-gray-100 rounded p-1 transition-colors'>
-                        <X className='w-3.5 h-3.5' />
-                      </div>
-                    </DropdownMenu.Item>
+                    {groupBy !== 'none' && (
+                      <DropdownMenu.Item
+                        className='outline-none'
+                        aria-label='Clear grouping'
+                        onSelect={() => {
+                          setGroupBy('none');
+                        }}
+                      >
+                        <div className='cursor-pointer hover:bg-gray-100 rounded p-1 transition-colors'>
+                          <X className='w-3.5 h-3.5' />
+                        </div>
+                      </DropdownMenu.Item>
+                    )}
                   </div>
 
                   {/* Grouping Options */}
