@@ -16,6 +16,9 @@ import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import AboutChannel from '../AboutChannel/AboutChannel';
+import { AddChannelForm } from '../AddChannelForm/AddChannelForm';
+import { PromoteGroupDmRequest } from '../../../services/Chat/channelService';
+import { toast } from 'sonner';
 
 import {
   Search,
@@ -29,6 +32,7 @@ import {
   LucideUserMinus,
   Trash,
   PhoneOff,
+  ArrowUpCircle,
 } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
@@ -69,6 +73,7 @@ const Info = ({
   const initialTab = defaultTab === 'members' && isDM ? 'about' : defaultTab;
   const [activeTab, setActiveTab] = useState<ChannelTab>(initialTab);
   const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
+  const [showPromoteDialog, setShowPromoteDialog] = useState(false);
 
   const [participants] = useCachedQuery(queries.channelParticipants({ channelId: channel.id }));
 
@@ -113,6 +118,56 @@ const Info = ({
   const handleAddPeopleCancel = (): void => {
     setShowAddPeopleDialog(false);
   };
+
+  const [isPromoting, setIsPromoting] = useState(false);
+
+  const handlePromoteClick = (): void => {
+    setShowPromoteDialog(true);
+  };
+
+  const handlePromoteSubmit = async (data: PromoteGroupDmRequest): Promise<void> => {
+    setIsPromoting(true);
+    try {
+      const timestamp = Date.now();
+      const conversationId = uuidv4();
+      const messageId = uuidv4();
+      const visibility =
+        data.visibility === 'public' ? ChannelVisibility.PUBLIC : ChannelVisibility.PRIVATE;
+
+      const mutation = zero.mutate(
+        mutators.channel.promoteToChannel({
+          channelId: channel.id,
+          name: data.name,
+          description: data.description,
+          visibility,
+          projectId: data.projectId,
+          conversationId,
+          messageId,
+          timestamp,
+        }),
+      );
+
+      const serverRes = await mutation.server;
+      if (serverRes.type === 'error') {
+        toast.error(serverRes.error.message || 'Failed to promote group DM to channel');
+        return;
+      }
+
+      setShowPromoteDialog(false);
+      toast.success('Group DM promoted to channel successfully');
+      void navigate(`/chat/${channel.id}`);
+    } catch {
+      toast.error('Something went wrong while promoting the channel');
+    } finally {
+      setIsPromoting(false);
+    }
+  };
+
+  const handlePromoteCancel = (): void => {
+    setShowPromoteDialog(false);
+  };
+
+  const showPromoteButton = isGroupDM && isParticipant;
 
   const handleLeaveChannel = (): void => {
     onClose?.();
@@ -244,6 +299,12 @@ const Info = ({
             {isUserInCurrentChannelCall ? 'Leave' : 'Call'}
           </div>
         </button>
+        {showPromoteButton && (
+          <button onClick={handlePromoteClick} className={headerLinkContainerStyle}>
+            <ArrowUpCircle size={16} color='#788187' />
+            <div className='text-[#788187] text-[13px]'>Promote</div>
+          </button>
+        )}
         {isParticipant && !isDM && !isGroupDM && (
           <button onClick={handleLeaveChannel} className={headerLinkContainerStyle}>
             <LucideLogOut size={16} color='#D14040' />
@@ -304,6 +365,19 @@ const Info = ({
           onSuccess={handleAddPeopleSuccess}
           onCancel={handleAddPeopleCancel}
         />
+      </Dialog>
+
+      <Dialog open={showPromoteDialog} onOpenChange={setShowPromoteDialog}>
+        <div className='p-4'>
+          <AddChannelForm
+            mode='promote'
+            onSubmit={data => {
+              void handlePromoteSubmit(data as PromoteGroupDmRequest);
+            }}
+            onCancel={handlePromoteCancel}
+            loading={isPromoting}
+          />
+        </div>
       </Dialog>
 
       <CallConfirmationModal

@@ -8,7 +8,7 @@ export interface CheckDuplicateChannelResponse {
 
 export interface CreateChannelFormData {
   name: string;
-  description: string;
+  description?: string;
   visibility: 'public' | 'private';
   topicTags: string[];
   projectId: string;
@@ -75,6 +75,14 @@ export interface AddGroupDmParticipantsResponse {
   participantsAdded: number;
   conversationsMigrated?: number;
   message: string;
+}
+
+export interface PromoteGroupDmRequest {
+  name: string;
+  description?: string;
+  visibility: 'public' | 'private';
+  projectId: string;
+  topicTags: string[];
 }
 
 export class ChannelService {

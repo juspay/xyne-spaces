@@ -5,7 +5,11 @@ import { SingleSelect } from '@juspay/blend-design-system';
 
 import { Button } from '../../ui/Button';
 import { cn } from '../../../utils/classNames';
-import { channelService, CreateChannelFormData } from '../../../services/Chat/channelService';
+import {
+  channelService,
+  CreateChannelFormData,
+  PromoteGroupDmRequest,
+} from '../../../services/Chat/channelService';
 import Input from '../../ui/Input';
 import Textarea from '../../ui/Textarea';
 import RadioGroup, { Radio } from '../../ui/RadioGroup';
@@ -13,13 +17,22 @@ import { Badge } from '../../ui/Badge';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
+type ChannelFormMode = 'create' | 'promote';
+type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
+
 interface AddChannelFormProps {
-  onSubmit: (data: CreateChannelFormData) => void;
+  mode?: ChannelFormMode;
+  onSubmit: (data: ChannelFormData) => void;
   onCancel: () => void;
   loading?: boolean;
 }
 
-export const AddChannelForm: React.FC<AddChannelFormProps> = ({ onSubmit, loading, onCancel }) => {
+export const AddChannelForm: React.FC<AddChannelFormProps> = ({
+  mode = 'create',
+  onSubmit,
+  loading,
+  onCancel,
+}) => {
   const [debouncedChannelName, setDebouncedChannelName] = useState('');
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
@@ -61,7 +74,20 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({ onSubmit, loadin
       if (duplicateCheck?.isDuplicate) {
         return;
       }
-      onSubmit?.(value);
+      if (mode === 'promote') {
+        const promoteData: PromoteGroupDmRequest = {
+          name: value.name,
+          visibility: value.visibility,
+          projectId: value.projectId,
+          topicTags: value.topicTags,
+        };
+        if (value.description) {
+          promoteData.description = value.description;
+        }
+        onSubmit?.(promoteData);
+      } else {
+        onSubmit?.(value);
+      }
     },
   });
 
@@ -136,7 +162,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({ onSubmit, loadin
 
   const renderFormComponent = (): ReactElement => (
     <div className='space-y-6 max-w-md mx-auto bg-white'>
-      <div className='text-xl font-medium text-foreground mb-1'>Create a channel</div>
+      <div className='text-xl font-medium text-foreground mb-1'>
+        {mode === 'promote' ? 'Promote to Channel' : 'Create a channel'}
+      </div>
       {/* Channel Name */}
       <form.Field
         name='name'
@@ -312,7 +340,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({ onSubmit, loadin
           className='bg-blue-600 hover:bg-blue-700'
           data-testid='create-channel-button'
         >
-          Create Channel
+          {mode === 'promote' ? 'Promote to Channel' : 'Create Channel'}
         </Button>
       </div>
     </div>

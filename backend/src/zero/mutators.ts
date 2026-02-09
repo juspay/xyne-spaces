@@ -356,6 +356,96 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         await sendAddAndRemoveParticipantsSystemMessage(tx, {channel, newParticipants, authData: messageSender, operationType: 'participants_joined'})
         },
       ),
+      promoteToChannel: defineMutator(
+        z.object({
+          channelId: z.string(),
+          name: z.string().min(2).max(80),
+          description: z.string().optional(),
+          visibility: z.enum([ChannelVisibility.PUBLIC, ChannelVisibility.PRIVATE]),
+          projectId: z.string(),
+          conversationId: z.string(),
+          messageId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: { channelId, name, description, visibility, projectId, conversationId, messageId, timestamp },
+        }) => {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error('Channel not found');
+          }
+
+          if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
+            throw new Error('Only GROUP_DM channels can be promoted to a regular channel');
+          }
+
+          const participant = await tx.run(
+            zql.channel_participants.where('channelId', channelId).where('userId', authData.sub).one(),
+          );
+
+          if (!participant) {
+            throw new Error('You are not a participant of this channel');
+          }
+
+          const existingChannel = await tx.run(zql.channels.where('name', name).one());
+          if (existingChannel && existingChannel.id !== channelId) {
+            throw new Error('A channel with this name already exists');
+          }
+
+          await tx.mutate.channels.update({
+            id: channelId,
+            scopeType: ChannelScopeType.DEFAULT,
+            name: name,
+            description: description || null,
+            visibility: visibility,
+            projectId: projectId,
+            updatedAt: timestamp,
+            lastActivityAt: timestamp,
+          });
+
+          await tx.mutate.conversations.insert({
+            conversationId: conversationId,
+            channelId: channelId,
+            createdBy: authData.sub,
+            initialMessageId: messageId,
+            lastActivityAt: timestamp,
+            replyCount: 0,
+            pinned: false,
+            createdAt: timestamp,
+          });
+
+          const systemContent = `This group DM was promoted to a channel by ${authData.name}`;
+          await tx.mutate.messages.insert({
+            messageId: messageId,
+            conversationId: conversationId,
+            senderId: authData.sub,
+            content: systemContent,
+            msgType: MessageType.SYSTEM,
+            hasAttachment: false,
+            edited: false,
+            isDeleted: false,
+            isSent: true,
+            showInChannel: false,
+            createdAt: timestamp,
+            metadata: {
+              operationType: 'group_dm_promoted',
+              promotedBy: authData.sub,
+              newName: name,
+              newVisibility: visibility,
+              newProjectId: projectId,
+            },
+          });
+
+          await tx.mutate.conversation_participants.insert({
+            id: uuidv4(),
+            conversationId: conversationId,
+            userId: authData.sub,
+            participationType: ConversationParticipation.AUTHOR,
+            joinedAt: timestamp,
+          });
+        },
+      ),
       addParticipants: defineMutator(
         z.object({
           channelId: z.string(),
