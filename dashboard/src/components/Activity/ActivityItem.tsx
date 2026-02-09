@@ -52,6 +52,8 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
     case 'ticket_pr_updated':
     case 'ticket_pr_merged':
     case 'ticket_pr_declined':
+    case 'ticket_pr_reviewer_assigned':
+    case 'ticket_qa_assigned':
       return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
 
     default:

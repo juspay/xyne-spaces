@@ -12,6 +12,7 @@ import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { PullRequestActivityHandler } from '@/zero/side-effects/tables/pull-requests-handler';
+import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -43,6 +44,7 @@ interface TicketInfo {
   conversationId: string | null;
   boardId: string;
   userGroupId: string | null;
+  channelId: string | null;
 }
 
 interface StageInfo {
@@ -385,6 +387,7 @@ export class PRTicketStatusSyncService {
           conversationId: true,
           boardId: true,
           userGroupId: true,
+          channelId: true,
         },
       });
       if (ticket) {
@@ -417,6 +420,7 @@ export class PRTicketStatusSyncService {
               conversationId: true,
               boardId: true,
               userGroupId: true,
+              channelId: true,
             },
           });
           if (ticket) {
@@ -601,8 +605,17 @@ export class PRTicketStatusSyncService {
         where: { id: existingAssignment.id },
         data: { userId: assignedUserId },
       });
+      
+      // Trigger side effect handler to create activity for update
+      const handler = new TicketAssignmentsSideEffectHandler({ userID: updatedBy });
+      handler.onUpdate({
+        entityId: existingAssignment.id,
+        entityType: 'ticket_assignments',
+        operation: 'update',
+        args: { userId: assignedUserId },
+      }).catch(err => logger.error('[PR-Ticket-Sync] Side-effect handler error on update:', err));
     } else {
-      await prisma.ticketAssignment.create({
+      const newAssignment = await prisma.ticketAssignment.create({
         data: {
           ticketId: ticket.id,
           userId: assignedUserId,
@@ -610,6 +623,14 @@ export class PRTicketStatusSyncService {
           createdBy: updatedBy,
         },
       });
+      
+      // Trigger side effect handler to create activity
+      const handler = new TicketAssignmentsSideEffectHandler({ userID: updatedBy });
+      handler.onInsert({
+        entityId: newAssignment.id,
+        entityType: 'ticket_assignments',
+        operation: 'insert',
+      }).catch(err => logger.error('[PR-Ticket-Sync] Side-effect handler error on insert:', err));
     }
 
     logger.info(

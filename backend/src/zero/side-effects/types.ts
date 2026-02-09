@@ -39,6 +39,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   conversations: ['insert', 'delete'],
   calls: ['update'],
   tickets: ['update'],
+  ticket_assignments: ['insert', 'update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {
