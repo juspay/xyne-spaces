@@ -195,7 +195,7 @@ function formatCallDuration(durationMs: number): string {
  * Format final call message based on participant count
  * Examples:
  * - 1 participant: "Alice started a call • lasted 2m"
- * - 2 participants: "You and Bob were in the call for 9m"
+ * - 2 participants: "Alice and Bob were in the call for 9m"
  * - 3+ participants: "Alice and 2 others were in the call for 15m"
  */
 function formatFinalCallMessage(
@@ -208,14 +208,7 @@ function formatFinalCallMessage(
   if (participants.length === 1) {
     return `${participants[0].userName} started a call • lasted ${duration}`;
   } else if (participants.length === 2) {
-    const otherParticipant = participants.find(p => p.userId !== currentUserId) || participants[0];
-    const currentUser = participants.find(p => p.userId === currentUserId);
-    
-    if (currentUser) {
-      return `You and ${otherParticipant.userName} were in the call for ${duration}`;
-    } else {
-      return `${participants[0].userName} and ${participants[1].userName} were in the call for ${duration}`;
-    }
+    return `${participants[0].userName} and ${participants[1].userName} were in the call for ${duration}`;
   } else {
     const firstParticipant = participants.find(p => p.userId === currentUserId) 
       ? participants.find(p => p.userId !== currentUserId) || participants[0]
