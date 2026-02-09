@@ -8,33 +8,12 @@ import {
   type TraceEvent,
 } from '@xynehq/jaf';
 import { logger } from '../../../utils/logger.js';
+import { getLangfuseConfig } from './config.js';
 
-export interface LangfuseConfig {
-  secretKey: string;
-  publicKey: string;
-  baseUrl: string;
-  enabled: boolean;
-}
-
-export function getLangfuseConfig(): LangfuseConfig {
-  const secretKey = process.env.LANGFUSE_SECRET_KEY || '';
-  const publicKey = process.env.LANGFUSE_PUBLIC_KEY || '';
-  const baseUrl = process.env.LANGFUSE_BASE_URL || '';
-  
-  // All three credentials must be present for Langfuse to be enabled
-  const enabled = Boolean(secretKey && publicKey && baseUrl);
-  
-  return {
-    secretKey,
-    publicKey,
-    baseUrl,
-    enabled,
-  };
-}
-
-export function isLangfuseEnabled(): boolean {
-  return getLangfuseConfig().enabled;
-}
+// ============================================================================
+// TRACING TOGGLE - Set to false to disable tracing
+// ============================================================================
+const TRACING_ENABLED = false;
 
 let traceCollector: TraceCollector | null = null;
 let isInitialized = false;
@@ -53,6 +32,11 @@ function getTraceCollector(): TraceCollector {
 // ============================================================================
 
 export function initializeLangfuseTracing(): void {
+  if (!TRACING_ENABLED) {
+    logger.info('[Langfuse] Tracing is disabled via TRACING_ENABLED flag.');
+    return;
+  }
+  
   if (isInitialized) {
     logger.debug('[Langfuse] Already initialized');
     return;
@@ -74,6 +58,10 @@ export function initializeLangfuseTracing(): void {
 }
 
 export function createOnEventHandler(): (event: TraceEvent) => void {
+  if (!TRACING_ENABLED) {
+    return () => {};
+  }
+  
   const config = getLangfuseConfig();
   
   if (!config.enabled) {

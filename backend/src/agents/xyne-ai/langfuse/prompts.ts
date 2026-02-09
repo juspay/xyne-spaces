@@ -6,7 +6,7 @@
 
 import { LangfuseClient } from '@langfuse/client';
 import { logger } from '../../../utils/logger.js';
-import { getLangfuseConfig } from './tracing.js';
+import { getLangfuseConfig } from './config.js';
 import { compileFallbackPrompt } from './fallback-prompts.js';
 
 const DEFAULT_PROMPT_CACHE_TTL = parseInt(process.env.LANGFUSE_PROMPT_CACHE_TTL || '300', 10) * 1000;
