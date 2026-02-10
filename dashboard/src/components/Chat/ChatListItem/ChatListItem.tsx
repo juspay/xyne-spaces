@@ -70,7 +70,7 @@ export const ChatListItem = ({
       data-index={dataIndex}
       id={`conv-${conversation.conversationId}`}
       data-hash-id={`conv-${conversation.conversationId}`}
-      className={`${showAvatar ? 'pt-4' : ''} space-y-1`}
+      className={`${showAvatar ? 'pt-4' : 'pt-1'} pb-1`}
     >
       <ChatBubble
         message={message}
