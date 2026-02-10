@@ -156,7 +156,18 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                   </>
                 ) : (
                   /* COLLAPSED HEADER */
-                  <div className='flex flex-col items-center justify-between w-full h-full min-h-[236px]'>
+                  <div
+                    className='flex flex-col items-center justify-between w-full h-full min-h-[236px] cursor-pointer'
+                    onClick={() => toggleCollapse(stage.id)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleCollapse(stage.id);
+                      }
+                    }}
+                    role='button'
+                    tabIndex={0}
+                  >
                     <div className='flex flex-col items-center gap-2 w-full h-full'>
                       <KanbanIcon stage={stage} />
                       <h3
@@ -179,7 +190,10 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
 
                     <Button
                       variant='ghost'
-                      onClick={() => toggleCollapse(stage.id)}
+                      onClick={e => {
+                        e.stopPropagation();
+                        toggleCollapse(stage.id);
+                      }}
                       className='!p-0 !bg-transparent'
                     >
                       <ExpandIcon />
