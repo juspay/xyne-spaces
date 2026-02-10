@@ -157,6 +157,36 @@ export class CallService {
       console.error('Failed to validate calls:', error);
     }
   }
+
+  /**
+   * End call for everyone (host only)
+   * Removes the participants from the LiveKit room and marks the call as ENDED in the backend
+   */
+  async endCallForAll(callId: string): Promise<void> {
+    try {
+      const response = await apiInstance.post<{ success: boolean }>(`/calls/${callId}/end-for-all`);
+
+      if (!response.data.success) {
+        throw new Error('Failed to end call for everyone');
+      }
+    } catch (error) {
+      // Handle Axios errors with proper typing
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+
+      // Re-throw unknown errors
+      throw error;
+    }
+  }
 }
 
 export const callService = new CallService();

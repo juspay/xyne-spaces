@@ -32,5 +32,8 @@ router.post('/:callId/decline', callController.declineCall);
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);
 
+// End call for everyone (host only)
+router.post('/:callId/end-for-all', callController.endCallForAll);
+
 export default router;
 

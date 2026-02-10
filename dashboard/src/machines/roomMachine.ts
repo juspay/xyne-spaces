@@ -10,6 +10,7 @@ import {
   RoomConnectOptions,
   Participant,
   setLogLevel,
+  DisconnectReason,
 } from 'livekit-client';
 import type { Zero } from '@rocicorp/zero';
 import { mutators } from '../zero/mutators';
@@ -34,7 +35,7 @@ import {
   isNativeCallSupported,
 } from '../utils/reactNativeBridge';
 import { v4 as uuidv4 } from 'uuid';
-import { logger, Event } from '../utils/logger';
+import { logger, Event, Logger } from '../utils/logger';
 
 // Set LiveKit log level
 setLogLevel('warn');
@@ -139,8 +140,12 @@ export type RoomMachineEvent =
   | { type: 'TOGGLE_CHAT' }
   | { type: 'TOGGLE_AI_ASSISTANT' }
   | { type: 'ADD_CHAT_MESSAGE'; message: ChatMessage }
-  | { type: 'DISCONNECT' }
-  | { type: 'CONNECTION_STATE_CHANGED'; state: ConnectionState }
+  | { type: 'DISCONNECT'; endForAll?: boolean }
+  | {
+      type: 'CONNECTION_STATE_CHANGED';
+      state: ConnectionState;
+      disconnectReason?: DisconnectReason;
+    }
   | { type: 'PARTICIPANTS_CHANGED' }
   | { type: 'TRACK_SUBSCRIBED'; participant: RemoteParticipant; track: RemoteTrack }
   | { type: 'TRACK_UNSUBSCRIBED'; participant: RemoteParticipant; track: RemoteTrack }
@@ -283,11 +288,15 @@ export const roomMachine = setup({
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Connected });
         });
 
-        room.on(LiveKitRoomEvent.Disconnected, () => {
+        room.on(LiveKitRoomEvent.Disconnected, (reason?: DisconnectReason) => {
           logger.info(Event.LIVEKIT_ROOM_DISCONNECTED, {
             callId,
           });
-          sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Disconnected });
+          sendBack({
+            type: 'CONNECTION_STATE_CHANGED',
+            state: ConnectionState.Disconnected,
+            ...(reason !== undefined && { disconnectReason: reason }),
+          });
         });
 
         // Participant events
@@ -570,21 +579,36 @@ export const roomMachine = setup({
           externalId: string | null;
           zero: Zero | null;
           isNativeMode: boolean;
+          endForAll: boolean;
         };
       }) => {
-        const { room, externalId, zero, isNativeMode } = input;
+        const { room, externalId, zero, isNativeMode, endForAll } = input;
 
         // eslint-disable-next-line no-console
         console.log('[roomMachine] disconnectAndCleanup started', {
           hasRoom: !!room,
           externalId,
           isNativeMode,
+          endForAll,
         });
 
         try {
-          // First, update database to mark user as left
-          if (zero && externalId) {
-            void zero.mutate(mutators.calls.leave({ callId: externalId, timestamp: Date.now() }));
+          // If ending call for all, call the API first
+          if (endForAll && externalId) {
+            try {
+              await callService.endCallForAll(externalId);
+            } catch (error) {
+              logger.error(Logger.Event.API_CALL_FAILED, {
+                context: 'roomMachine.disconnectAndCleanup.endForAll',
+                error: error instanceof Error ? error.message : String(error),
+              });
+              // Continue with disconnect even if API call fails
+            }
+          } else {
+            // Normal disconnect - update database to mark user as left
+            if (zero && externalId) {
+              void zero.mutate(mutators.calls.leave({ callId: externalId, timestamp: Date.now() }));
+            }
           }
 
           // If in native mode, send disconnect to React Native bridge
@@ -1256,10 +1280,11 @@ export const roomMachine = setup({
       on: {
         DISCONNECT: {
           target: 'disconnecting',
-          actions: (): void => {
+          actions: ({ event }): void => {
             // eslint-disable-next-line no-console
             console.log(
               '[Room Machine] Received DISCONNECT event in connected state',
+              { endForAll: event.type === 'DISCONNECT' ? event.endForAll : false },
               new Error().stack,
             );
           },
@@ -1526,9 +1551,27 @@ export const roomMachine = setup({
             },
           }),
         },
-        CONNECTION_STATE_CHANGED: {
-          actions: ['updateConnectionState'],
-        },
+        CONNECTION_STATE_CHANGED: [
+          {
+            guard: ({ event }): boolean =>
+              event.type === 'CONNECTION_STATE_CHANGED' &&
+              event.state === ConnectionState.Disconnected &&
+              event.disconnectReason === DisconnectReason.PARTICIPANT_REMOVED,
+            target: 'disconnecting',
+            actions: [
+              'updateConnectionState',
+              (): void => {
+                toast.info('Call ended', {
+                  description: 'The host has ended the call for everyone',
+                  duration: 5000,
+                });
+              },
+            ],
+          },
+          {
+            actions: ['updateConnectionState'],
+          },
+        ],
         PARTICIPANTS_CHANGED: {
           actions: 'updateParticipants',
         },
@@ -1669,11 +1712,12 @@ export const roomMachine = setup({
       ],
       invoke: {
         src: 'disconnectAndCleanup',
-        input: ({ context }) => ({
+        input: ({ context, event }) => ({
           room: context.room, // May be null in native mode
           externalId: context.externalId,
           zero: context.zero,
           isNativeMode: isNativeCallSupported(), // Check dynamically - context.isNativeMode is stale from module init
+          endForAll: event.type === 'DISCONNECT' ? (event.endForAll ?? false) : false,
         }),
         onDone: {
           target: 'idle',

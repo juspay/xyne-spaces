@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useMemo } from 'react';
+import { useEffect, useCallback, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { Zero } from '@rocicorp/zero';
 import { CallType } from '@xyne/shared';
@@ -10,6 +10,8 @@ import { AIInviteDialog } from '../CallModals/AIInviteDialog';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
+import { EndCallModal } from '../EndCallModal/EndCallModal';
+import { useIsCallHost, useIsOnlyParticipant, useCallParticipants } from '../../../hooks/useCalls';
 
 export interface CustomLiveKitRoomProps {
   token: string;
@@ -112,15 +114,38 @@ export function CustomLiveKitRoom({
     roomActor.send({ type: 'TOGGLE_SCREEN_SHARE' });
   }, []);
 
-  // Disconnect from room via XState
-  const handleDisconnect = useCallback(() => {
-    // Close thread panel first if it's open
-    if (isChatOpen) {
-      roomActor.send({ type: 'TOGGLE_CHAT' });
+  const [showEndCallModal, setShowEndCallModal] = useState(false);
+
+  const isHost = useIsCallHost(externalId, user?.id);
+
+  const callParticipants = useCallParticipants(externalId);
+
+  const isOnlyParticipant = useIsOnlyParticipant(callParticipants);
+
+  const handleDisconnect = useCallback(
+    (endForAll = false) => {
+      if (isChatOpen) {
+        roomActor.send({ type: 'TOGGLE_CHAT' });
+      }
+      roomActor.send({ type: 'DISCONNECT', endForAll });
+      setShowEndCallModal(false);
+    },
+    [isChatOpen],
+  );
+
+  const handleDisconnectClick = useCallback(() => {
+    if (isHost && !isOnlyParticipant) {
+      setShowEndCallModal(true);
+    } else {
+      handleDisconnect();
     }
-    // Then disconnect from the call
-    roomActor.send({ type: 'DISCONNECT' });
-  }, [isChatOpen]);
+  }, [isHost, isOnlyParticipant, handleDisconnect]);
+
+  // End call for everyone (host only)
+  const handleEndForAll = useCallback(() => {
+    // handleDisconnect will close thread panel and send DISCONNECT with endForAll=true
+    handleDisconnect(true);
+  }, [handleDisconnect]);
 
   const handleToggleThread = useCallback(() => {
     if (channelId && metadata?.conversationId) {
@@ -217,10 +242,17 @@ export function CustomLiveKitRoom({
           onToggleMic={toggleMicrophone}
           onToggleCamera={toggleCamera}
           onToggleScreenShare={toggleScreenShare}
-          onDisconnect={handleDisconnect}
+          onDisconnect={handleDisconnectClick}
           onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
           onToggleThread={handleToggleThread}
           onRequestControl={handleRequestControl}
+        />
+        <EndCallModal
+          isOpen={showEndCallModal}
+          onClose={() => setShowEndCallModal(false)}
+          onEndForSelf={() => handleDisconnect()}
+          onEndForAll={handleEndForAll}
+          isHost={isHost}
         />
         <AIInviteDialog
           isOpen={inviteDialogOpen}
@@ -272,11 +304,18 @@ export function CustomLiveKitRoom({
         onToggleMic={toggleMicrophone}
         onToggleCamera={toggleCamera}
         onToggleScreenShare={toggleScreenShare}
-        onDisconnect={handleDisconnect}
+        onDisconnect={handleDisconnectClick}
         onMinimize={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
         onToggleThread={handleToggleThread}
         onRequestControl={handleRequestControl}
         requestedAiController={isAiControlRequested}
+      />
+      <EndCallModal
+        isOpen={showEndCallModal}
+        onClose={() => setShowEndCallModal(false)}
+        onEndForSelf={() => handleDisconnect()}
+        onEndForAll={handleEndForAll}
+        isHost={isHost}
       />
       <AIInviteDialog
         isOpen={inviteDialogOpen}

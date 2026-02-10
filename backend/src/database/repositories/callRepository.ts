@@ -1,5 +1,5 @@
 import { DatabaseClient } from '../client';
-import { CallStatus, CallType, type Call, type CallParticipant } from '@prisma/client';
+import { CallStatus, CallType, InvitationResponse, type Call, type CallParticipant, type Prisma } from '@prisma/client';
 
 export type { Call, CallParticipant };
 
@@ -94,6 +94,55 @@ export class CallRepository {
   async delete(id: string): Promise<void> {
     await DatabaseClient.getInstance().call.delete({
       where: { id }
+    });
+  }
+
+  /**
+   * Get active participants for a call
+   * Active participants are those who have ACCEPTED and haven't left (leftAt is null)
+   */
+  async getActiveParticipants(callId: string): Promise<CallParticipant[]> {
+    const result = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        callId,
+        response: InvitationResponse.ACCEPTED,
+        leftAt: null
+      }
+    });
+    return result;
+  }
+
+  /**
+   * Get participants who joined the call at any point
+   */
+  async getJoinedParticipants(callId: string): Promise<CallParticipant[]> {
+    const result = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        callId,
+        joinedAt: { not: null }
+      }
+    });
+    return result;
+  }
+
+  /**
+   * Mark all active participants as left for a call
+   * @param tx - Optional transaction client for atomic operations
+   */
+  async markAllParticipantsAsLeft(
+    callId: string,
+    leftAt: Date,
+    tx?: Prisma.TransactionClient
+  ): Promise<void> {
+    const client = tx || DatabaseClient.getInstance();
+    await client.callParticipant.updateMany({
+      where: {
+        callId,
+        leftAt: null,
+      },
+      data: {
+        leftAt,
+      },
     });
   }
 
