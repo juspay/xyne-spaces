@@ -78,6 +78,9 @@ export const Event = {
   CANVAS_SYNC_COMPLETE: 'canvas_sync_complete',
   CANVAS_DELETED: 'canvas_deleted',
   CANVAS_DUPLICATED: 'canvas_duplicated',
+  LIVEKIT_HEARTBEAT: 'livekit_heartbeat',
+  LIVEKIT_ROOM_DISCONNECTED: 'livekit_room_disconnected',
+  LIVEKIT_PARTICIPANT_DISCONNECTED: 'livekit_participant_disconnected',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

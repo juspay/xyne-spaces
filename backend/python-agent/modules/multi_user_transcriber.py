@@ -25,8 +25,9 @@ from livekit.agents import (
 from livekit.plugins import openai, silero
 
 from events import EventBus
+from config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ResilientSTT(stt.STT):
@@ -82,19 +83,19 @@ class ResilientSTT(stt.STT):
                 
                 # Don't retry on certain errors (e.g., authentication, invalid input)
                 if any(err in error_str.lower() for err in ["unauthorized", "invalid", "authentication"]):
-                    logger.error(f"[ResilientSTT] Non-retryable error: {e}")
+                    logger.error(f"STT_RECOGNITION_FAILED_NON_RETRYABLE | error={e}, error_type=auth")
                     raise
                 
                 # For other errors (network, timeout, temporary), retry
                 if attempt < self._max_retries - 1:
                     delay = self._base_delay * (2 ** attempt)  # Exponential backoff
                     logger.warning(
-                        f"[ResilientSTT] Attempt {attempt + 1}/{self._max_retries} failed: {e}. "
-                        f"Retrying in {delay:.1f}s..."
+                        f"STT_RECOGNITION_RETRY | attempt={attempt + 1}, total_attempts={self._max_retries}, "
+                        f"error={e}, next_retry_delay={delay:.1f}s"
                     )
                     await asyncio.sleep(delay)
                 else:
-                    logger.error(f"[ResilientSTT] All {self._max_retries} attempts failed")
+                    logger.error(f"STT_RECOGNITION_ALL_RETRIES_FAILED | attempts={self._max_retries}, last_error={e}")
         
         # All retries exhausted
         raise last_error
@@ -113,6 +114,7 @@ class ParticipantTranscriber(Agent):
         participant_identity: str,
         participant_name: str,
         on_transcription: Callable[[dict], Awaitable[None]],
+        call_id: str = "unknown",
     ):
         """
         Initialize the transcriber agent.
@@ -121,6 +123,7 @@ class ParticipantTranscriber(Agent):
             participant_identity: The participant's identity (for backend lookup)
             participant_name: The participant's display name
             on_transcription: Async callback to emit transcription events
+            call_id: Call ID for logging
         """
         super().__init__(
             instructions="not-needed",  # We're only transcribing, not generating responses
@@ -128,6 +131,7 @@ class ParticipantTranscriber(Agent):
         self.participant_identity = participant_identity
         self.participant_name = participant_name
         self._on_transcription = on_transcription
+        self._call_id = call_id
     
     async def on_user_turn_completed(
         self, 
@@ -144,10 +148,7 @@ class ParticipantTranscriber(Agent):
         user_transcript = new_message.text_content
         
         if not user_transcript or not user_transcript.strip():
-            logger.debug(f"[STT] Empty transcription for {self.participant_name}")
             raise StopResponse()
-        
-        logger.info(f"[STT] Transcription from {self.participant_name}: \"{user_transcript}\"")
         
         # Emit transcription event (same format as ear.py)
         await self._on_transcription({
@@ -157,6 +158,9 @@ class ParticipantTranscriber(Agent):
             "spoken_at": time.time(),  # Built-in STT doesn't expose exact speech time
             "participant_identity": self.participant_identity,
         })
+        
+        # Log transcription generated (Phase 2.1.16)
+        logger.info(f"transcription_generated | participant_id={self.participant_identity}, text_preview={user_transcript[:50]}...")
         
         # Stop response generation - we're only transcribing
         raise StopResponse()
@@ -187,6 +191,8 @@ class MultiUserTranscriber:
         vad_prefix_padding_duration: float = 0.5,  # Pre-buffer to capture speech onset
         # AI Session for interruption (optional)
         agent_session: Optional[AgentSession] = None,
+        # Call ID for logging
+        call_id: str = "unknown",
     ):
         """
         Initialize the multi-user transcriber.
@@ -223,6 +229,7 @@ class MultiUserTranscriber:
         # Session management
         self._sessions: Dict[str, AgentSession] = {}
         self._tasks: set[asyncio.Task] = set()
+        self._call_id = call_id
         
         # Pre-load VAD model for faster session startup
         self._vad: Optional[silero.VAD] = None
@@ -231,9 +238,9 @@ class MultiUserTranscriber:
         self._shared_stt: Optional[ResilientSTT] = None
         
         logger.info(
-            f"[MultiUserTranscriber] Initialized with VAD threshold={vad_activation_threshold}, "
-            f"min_speech={vad_min_speech_duration}s, min_silence={vad_min_silence_duration}s, "
-            f"prefix_padding={vad_prefix_padding_duration}s"
+            f"multi_user_transcriber_initialized | "
+            f"vad_threshold={vad_activation_threshold}, min_speech={vad_min_speech_duration}s, "
+            f"min_silence={vad_min_silence_duration}s, prefix_padding={vad_prefix_padding_duration}s"
         )
     
     def _create_stt(self) -> ResilientSTT:
@@ -252,7 +259,7 @@ class MultiUserTranscriber:
                 max_retries=3,
                 base_delay=1.0,
             )
-            logger.info(f"[MultiUserTranscriber] Created shared resilient STT (gpt-4o-transcribe) with prompt=\"{stt_prompt}\"")
+            logger.info(f"resilient_stt_created | model=gpt-4o-transcribe, max_retries=3, base_delay=1.0")
         return self._shared_stt
     
     def _create_vad(self) -> silero.VAD:
@@ -264,6 +271,7 @@ class MultiUserTranscriber:
                 min_silence_duration=self._vad_min_silence_duration,
                 prefix_padding_duration=self._vad_prefix_padding_duration,
             )
+            logger.info(f"vad_model_loaded | activation_threshold={self._vad_activation_threshold}, min_speech={self._vad_min_speech_duration}, min_silence={self._vad_min_silence_duration}")
         return self._vad
     
     async def _emit_transcription(self, data: dict):
@@ -274,7 +282,7 @@ class MultiUserTranscriber:
         """Register room event handlers."""
         self.ctx.room.on("participant_connected", self._on_participant_connected)
         self.ctx.room.on("participant_disconnected", self._on_participant_disconnected)
-        logger.info("[MultiUserTranscriber] Started - listening for participants")
+        logger.info(f"transcriber_started")
     
     async def aclose(self):
         """Clean up all sessions and tasks."""
@@ -296,7 +304,7 @@ class MultiUserTranscriber:
         self.ctx.room.off("participant_connected", self._on_participant_connected)
         self.ctx.room.off("participant_disconnected", self._on_participant_disconnected)
         
-        logger.info("[MultiUserTranscriber] Closed all sessions")
+        logger.info(f"all_transcriber_sessions_closed | sessions_count={len(self._sessions)}")
     
     async def _cancel_task(self, task: asyncio.Task):
         """Cancel a task gracefully."""
@@ -309,11 +317,11 @@ class MultiUserTranscriber:
     def _on_participant_connected(self, participant: rtc.RemoteParticipant):
         """Handle new participant connection."""
         if participant.identity in self._sessions:
-            logger.debug(f"[MultiUserTranscriber] Session already exists for {participant.identity}")
+            logger.debug(f"participant_session_already_exists | participant_id={participant.identity}")
             return
         
         participant_name = participant.name or participant.identity
-        logger.info(f"[MultiUserTranscriber] Starting session for {participant_name}")
+        logger.info(f"participant_session_starting | participant_id={participant.identity}, participant_name={participant_name}")
         
         task = asyncio.create_task(self._start_session(participant))
         self._tasks.add(task)
@@ -322,9 +330,9 @@ class MultiUserTranscriber:
             try:
                 session = t.result()
                 self._sessions[participant.identity] = session
-                logger.info(f"[MultiUserTranscriber] Session started for {participant_name}")
+                logger.info(f"participant_session_started | participant_id={participant.identity}, participant_name={participant_name}")
             except Exception as e:
-                logger.error(f"[MultiUserTranscriber] Failed to start session for {participant_name}: {e}")
+                logger.error(f"participant_session_failed | participant_id={participant.identity}, error={e}")
             finally:
                 self._tasks.discard(t)
         
@@ -337,7 +345,7 @@ class MultiUserTranscriber:
             return
         
         participant_name = participant.name or participant.identity
-        logger.info(f"[MultiUserTranscriber] Closing session for {participant_name}")
+        logger.info(f"participant_disconnected | participant_id={participant.identity}, participant_name={participant_name}")
         
         task = asyncio.create_task(self._close_session(session))
         self._tasks.add(task)
@@ -366,6 +374,7 @@ class MultiUserTranscriber:
             participant_identity=participant.identity,
             participant_name=participant_name,
             on_transcription=self._emit_transcription,
+            call_id=self._call_id,
         )
         
         # Start session with participant-specific options
@@ -387,15 +396,19 @@ class MultiUserTranscriber:
     async def _close_session(self, session: AgentSession):
         """
         Close an AgentSession gracefully.
-        
+
         Args:
             session: The session to close
         """
         try:
+            logger.info(f"stt_drain_started")
             await session.drain()
+            logger.info(f"stt_drain_completed")
             await session.aclose()
+        except asyncio.TimeoutError:
+            logger.warning(f"stt_drain_timeout")
         except Exception as e:
-            logger.warning(f"[MultiUserTranscriber] Error closing session: {e}")
+            logger.warning(f"participant_session_close_error | error={e}")
     
     def handle_existing_participants(self):
         """Start sessions for participants already in the room."""
@@ -413,4 +426,4 @@ class MultiUserTranscriber:
             agent_session: The main AI AgentSession
         """
         self.agent_session = agent_session
-        logger.info("[MultiUserTranscriber] Linked main AgentSession for interruption")
+        logger.info(f"transcriber_linked_to_ai")

@@ -34,6 +34,7 @@ import {
   isNativeCallSupported,
 } from '../utils/reactNativeBridge';
 import { v4 as uuidv4 } from 'uuid';
+import { logger, Event } from '../utils/logger';
 
 // Set LiveKit log level
 setLogLevel('warn');
@@ -254,8 +255,14 @@ export const roomMachine = setup({
 
     // Room event listener - continuously listens to Room events and sends them to the machine
     roomEventListener: fromCallback(
-      ({ sendBack, input }: { sendBack: (event: RoomMachineEvent) => void; input: Room }) => {
-        const room = input;
+      ({
+        sendBack,
+        input,
+      }: {
+        sendBack: (event: RoomMachineEvent) => void;
+        input: { room: Room; callId: string };
+      }) => {
+        const { room, callId } = input;
 
         // Helper to update participants
         const updateParticipants = (): void => {
@@ -277,11 +284,18 @@ export const roomMachine = setup({
         });
 
         room.on(LiveKitRoomEvent.Disconnected, () => {
+          logger.info(Event.LIVEKIT_ROOM_DISCONNECTED, {
+            callId,
+          });
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Disconnected });
         });
 
         // Participant events
-        room.on(LiveKitRoomEvent.ParticipantDisconnected, (_participant: RemoteParticipant) => {
+        room.on(LiveKitRoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+          logger.info(Event.LIVEKIT_PARTICIPANT_DISCONNECTED, {
+            callId,
+            participantIdentity: participant.identity,
+          });
           updateParticipants();
           playAudio(AUDIO_PATHS.CALL_EXIT);
         });
@@ -585,6 +599,9 @@ export const roomMachine = setup({
 
           // Web mode - disconnect directly
           if (room) {
+            logger.info(Event.LIVEKIT_ROOM_DISCONNECTED, {
+              callId: externalId,
+            });
             await room.disconnect();
             room.removeAllListeners();
           }
@@ -1213,7 +1230,10 @@ export const roomMachine = setup({
         webMode: {
           invoke: {
             src: 'roomEventListener',
-            input: ({ context }) => context.room!,
+            input: ({ context }) => ({
+              room: context.room!,
+              callId: context.externalId || 'unknown',
+            }),
           },
         },
       },

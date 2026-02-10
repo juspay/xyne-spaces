@@ -42,7 +42,7 @@ export class LiveKitService {
     logger.info('LiveKit Service initialized', {
       serverUrl: this.serverUrl,
       clientUrl: this.clientUrl,
-      livekitUrl: this.livekitUrl,  
+      livekitUrl: this.livekitUrl,
     });
   }
 
@@ -61,10 +61,10 @@ export class LiveKitService {
         emptyTimeout: options.emptyTimeout || 120,
         metadata: options.metadata,
       });
-      
-      logger.info(`LiveKit room created: ${options.name}`);
+
+      logger.info(`[${options.name}] livekit_room_created | max_participants=${options.maxParticipants || 100}, empty_timeout=${options.emptyTimeout || 120}`);
     } catch (error) {
-      logger.error('Failed to create LiveKit room:', error);
+      logger.error(`[${options.name}] livekit_room_creation_failed | error=${error}`);
       throw error;
     }
   }
@@ -86,10 +86,10 @@ export class LiveKitService {
       });
 
       const token = await at.toJwt();
-      logger.info(`Generated LiveKit token for user ${options.userIdentity} in room ${options.roomName}`);
+      logger.info(`[${options.roomName}] access_token_generated | user_id=${options.userIdentity}, ttl=${options.ttl || '10m'}`);
       return token;
     } catch (error) {
-      logger.error('Failed to generate LiveKit token:', error);
+      logger.error(`[${options.roomName}] access_token_generation_failed | user_id=${options.userIdentity}, error=${error}`);
       throw error;
     }
   }
@@ -141,7 +141,7 @@ export class LiveKitService {
   getClientUrl(): string {
     return this.clientUrl;
   }
-  
+
   getServerUrl(): string {
     return this.serverUrl;
   }

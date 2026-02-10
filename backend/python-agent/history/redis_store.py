@@ -8,8 +8,9 @@ import redis.asyncio as redis
 from livekit.agents import AgentSession, llm
 from openai import AsyncAzureOpenAI
 import logging
+from config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ConversationStore:
@@ -46,15 +47,21 @@ class ConversationStore:
                 await self.redis_client.expire(self.key, self.ttl)
 
             set_size = await self.redis_client.zcard(self.key)
+            user = entry.get("user", "Unknown")
+            text_preview = entry.get("text", "")[:30]
+            logger.debug(f"entry_added | user={user}, text_preview={text_preview}, total_entries={set_size}")
+
             if set_size > self.max_history:
                 await self._compact_with_llm()
 
         except Exception as e:
-            logger.error(f"[REDIS] Error storing conversation entry: {e}", exc_info=True)
+            logger.error(f"entry_add_failed | error={e}, data_snapshot={str(entry)[:100]}", exc_info=True)
 
     async def _compact_with_llm(self) -> None:
+        compaction_start = time.time()
         try:
             if self.openai_client is None:
+                logger.info(f"compaction_method_selected | method=simple, reason=no_openai_client")
                 await self._compact_simple()
                 return
 
@@ -64,6 +71,7 @@ class ConversationStore:
 
             split_point = len(all_entries) // 2
             old_entries = all_entries[:split_point]
+            logger.info(f"history_compaction_started | current_entries={len(all_entries)}, target_entries={self.max_history}, compaction_method=llm")
 
             old_messages = []
             for entry_json, _ in old_entries:
@@ -121,8 +129,12 @@ class ConversationStore:
                 self.key, {json.dumps(summary_entry): earliest_timestamp}
             )
 
+            entries_after = await self.redis_client.zcard(self.key)
+            duration_ms = (time.time() - compaction_start) * 1000
+            logger.info(f"history_compaction_completed | entries_before={len(all_entries)}, entries_after={entries_after}, duration_ms={duration_ms:.0f}")
+
         except Exception as e:
-            logger.error(f"[REDIS] Error during LLM compaction: {e}", exc_info=True)
+            logger.error(f"history_compaction_failed | error={e}, fallback_behavior=simple_compaction", exc_info=True)
             await self._compact_simple()
 
     async def _compact_simple(self) -> None:
@@ -130,9 +142,11 @@ class ConversationStore:
             set_size = await self.redis_client.zcard(self.key)
             if set_size > self.max_history:
                 entries_to_remove = set_size - self.max_history
+                logger.info(f"compaction_method_selected | method=simple, current_entries={set_size}, target_entries={self.max_history}")
                 await self.redis_client.zremrangebyrank(self.key, 0, entries_to_remove - 1)
+                logger.info(f"history_compaction_completed | entries_before={set_size}, entries_after={self.max_history}, method=simple")
         except Exception as e:
-            logger.error(f"[REDIS] Error during simple compaction: {e}", exc_info=True)
+            logger.error(f"history_compaction_failed | error={e}, method=simple", exc_info=True)
 
     async def restore_to_session(
         self,
@@ -142,9 +156,11 @@ class ConversationStore:
     ) -> int:
         try:
             max_messages = max_messages or 20
+            logger.info(f"history_restore_started | max_messages={max_messages}")
             entries = await self.redis_client.zrange(self.key, 0, -1)
 
             if not entries:
+                logger.info(f"history_restored | messages_restored=0, reason=no_entries")
                 return 0
 
             parsed_entries = []
@@ -176,14 +192,19 @@ class ConversationStore:
 
             await agent.update_chat_ctx(chat_ctx)
 
+            if messages_to_restore:
+                timestamp_range = f"{messages_to_restore[0].get('timestamp', 0):.0f}-{messages_to_restore[-1].get('timestamp', 0):.0f}"
+                logger.info(f"history_restored | messages_restored={len(messages_to_restore)}, timestamp_range={timestamp_range}")
+
             return len(messages_to_restore)
 
         except Exception as e:
-            logger.error(f"[REDIS] Error restoring conversation history: {e}", exc_info=True)
+            logger.error(f"history_restore_failed | error={e}", exc_info=True)
             return 0
 
     async def delete(self) -> None:
         try:
             await self.redis_client.delete(self.key)
+            logger.info(f"conversation_deleted | key={self.key}")
         except Exception as e:
-            logger.error(f"[REDIS] Error deleting conversation history: {e}", exc_info=True)
+            logger.error(f"conversation_delete_failed | error={e}", exc_info=True)

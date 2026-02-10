@@ -2,8 +2,9 @@ import time
 import functools
 import logging
 from typing import Callable, Any
+from config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def log_tool_latency(func: Callable[..., Any]) -> Callable[..., Any]:
     """

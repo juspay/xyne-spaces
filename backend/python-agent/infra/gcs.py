@@ -4,8 +4,9 @@ Google Cloud Storage bucket provider
 import logging
 from typing import Optional
 from google.cloud import storage
+from config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class GCSBucketProvider:

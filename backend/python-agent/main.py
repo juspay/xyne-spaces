@@ -11,7 +11,7 @@ import redis.asyncio as redis
 from livekit import rtc
 from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli
 
-from config import Config, setup_logging, get_logger
+from config import Config, setup_logging, get_logger, set_call_id
 from transcription import (
     TranscriptionDeduplicator,
     TranscriptionStorage,
@@ -32,13 +32,48 @@ from health_server import start_health_server
 setup_logging()
 logger = get_logger(__name__)
 
+# Suppress livekit-agents internal logging - only show CRITICAL errors
+# This must be done at module level (before cli.run_app) to catch all logs
+import logging as _logging
+_logging.getLogger("livekit").setLevel(_logging.CRITICAL)
+_logging.getLogger("livekit.agents").setLevel(_logging.CRITICAL)
+_logging.getLogger("livekit.plugins").setLevel(_logging.CRITICAL)
+_logging.getLogger("livekit.agents.ipc").setLevel(_logging.CRITICAL)
+
 # Load configuration
 config = Config.load()
 
-logger.info(f"Connecting to LiveKit at: {config.livekit_url}")
-logger.info(f"Azure OpenAI STT Endpoint: {config.azure_stt_endpoint}")
-logger.info(f"Azure OpenAI STT Model: {config.azure_stt_model}")
-logger.info(f"Environment: {config.node_env} (development mode: {config.is_development})")
+# Only log startup info in main process (not in worker processes)
+import multiprocessing as _mp
+if _mp.current_process().name == "MainProcess":
+    logger.info(f"Connecting to LiveKit at: {config.livekit_url}")
+    logger.info(f"Azure OpenAI STT Endpoint: {config.azure_stt_endpoint}")
+    logger.info(f"Azure OpenAI STT Model: {config.azure_stt_model}")
+    logger.info(f"Environment: {config.node_env} (development mode: {config.is_development})")
+
+
+def _cleanup_duplicate_handlers():
+    """
+    Remove all duplicate and JSON handlers from root logger.
+    
+    Livekit-agents adds its own handlers (text + JSON) after our setup_logging().
+    This function removes ALL handlers and adds a single text handler with our format.
+    Must be called from within entrypoint (after livekit has configured handlers).
+    """
+    root_logger = _logging.getLogger()
+    
+    # Remove ALL existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Add a single handler with our format
+    handler = _logging.StreamHandler()
+    handler.setFormatter(_logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    root_logger.addHandler(handler)
+    root_logger.setLevel(_logging.INFO)
 
 
 async def entrypoint(ctx: JobContext):
@@ -48,17 +83,24 @@ async def entrypoint(ctx: JobContext):
     Args:
         ctx: JobContext provided by livekit-agents framework
     """
+    # Clean up duplicate handlers added by livekit-agents
+    # This must be done here (not at module level) because livekit adds handlers
+    # after cli.run_app() starts worker processes
+    _cleanup_duplicate_handlers()
+    
     # Get the room name (call_id) for file storage
     call_id = ctx.room.name
+
+    set_call_id(call_id)
 
     # Sanitize call_id to prevent path traversal attacks
     # Allow only alphanumeric characters, underscores, and hyphens
     safe_call_id = re.sub(r'[^a-zA-Z0-9_-]', '_', call_id)
 
     if safe_call_id != call_id:
-        logger.warning(f"Room name sanitized: '{call_id}' -> '{safe_call_id}' (potential path traversal attempt)")
+        logger.warning(f"room_name_sanitized | original={call_id}, sanitized={safe_call_id}")
 
-    logger.info(f"Agent starting in room: {call_id} (safe_id: {safe_call_id})")
+    logger.info(f"agent_starting | node_env={config.node_env}")
 
     # Initialize conversation store (Redis-backed, without OpenAI client yet)
     conversation_store = None
@@ -76,8 +118,8 @@ async def entrypoint(ctx: JobContext):
             redis_kwargs["ssl"] = True
             redis_kwargs["ssl_cert_reqs"] = ssl.CERT_NONE
         
+        logger.info(f"redis_connection_attempt | host=REDACTED, port=REDACTED, tls=REDACTED")
         redis_client = redis.Redis(**redis_kwargs)
-        # Ping returns a coroutine, but type checker may not know this
         ping_result = await redis_client.ping()  # type: ignore[misc]
         conversation_store = ConversationStore(
             redis_client=redis_client,
@@ -87,9 +129,9 @@ async def entrypoint(ctx: JobContext):
             openai_client=None,  # Will be set after AI manager initializes
             model=config.azure_openai_model,  # Use same model as agent
         )
-        logger.info(f"[REDIS] Connected to Redis at {config.redis_host}:{config.redis_port} (TLS: {config.redis_tls})")
+        logger.info(f"redis_connected | host=REDACTED, port=REDACTED, ttl=REDACTED")
     except Exception as e:
-        logger.error(f"[REDIS] Failed to connect to Redis: {e}. Conversation history will not be persisted.")
+        logger.warning(f"redis_connection_failed | error={e}, fallback=in_memory")
         conversation_store = None
 
     # Initialize modules
@@ -108,6 +150,7 @@ async def entrypoint(ctx: JobContext):
         vad_min_speech_duration=config.vad_min_speech_duration,
         vad_min_silence_duration=config.vad_min_silence_duration,
         vad_prefix_padding_duration=0.5,  # Pre-buffer 500ms to capture speech onset
+        call_id=call_id,
     )
 
     # Initialize GCS bucket provider (lazy initialization)
@@ -119,9 +162,9 @@ async def entrypoint(ctx: JobContext):
     
     # Log GCS initialization status
     if bucket:
-        logger.info(f"GCS bucket initialized: {config.gcs_bucket_name} (project: {config.gcs_project_id})")
+        logger.info(f"gcs_bucket_initialized | bucket={config.gcs_bucket_name}, project={config.gcs_project_id}")
     else:
-        logger.warning(f"GCS bucket NOT initialized - project_id={config.gcs_project_id}, bucket_name={config.gcs_bucket_name}")
+        logger.warning(f"gcs_bucket_not_available | project={config.gcs_project_id}, bucket={config.gcs_bucket_name}, fallback=local")
 
     # Initialize transcription storage (GCS with buffer, or local fallback)
     use_buffer = bucket is not None  # Always buffer when GCS is available
@@ -140,9 +183,10 @@ async def entrypoint(ctx: JobContext):
     )
     
     # Initialize Azure services (TTS/LLM)
+    logger.info(f"azure_services_initializing | stt={config.azure_stt_endpoint}, tts={config.azure_tts_endpoint}, llm={config.azure_openai_endpoint}")
     azure_initialized = await ai_manager.initialize_azure_services()
     if not azure_initialized:
-        logger.warning("Azure services initialization failed - AI features may be limited")
+        logger.warning(f"azure_services_failed | error=initialization_failed, fallback=ai_disabled")
     
     # Set OpenAI client in conversation store for LLM-based compaction
     if conversation_store and ai_manager.llm:
@@ -153,7 +197,7 @@ async def entrypoint(ctx: JobContext):
             azure_endpoint=config.azure_openai_endpoint,
             api_version="2024-10-21",
         )
-        logger.info("[REDIS] OpenAI client configured for conversation compaction")
+        logger.info(f"conversation_store_configured | max_history={config.max_conversation_history}, compaction=llm")
 
     # Initialize transcription pipeline components
     deduplicator = TranscriptionDeduplicator()
@@ -166,10 +210,12 @@ async def entrypoint(ctx: JobContext):
         deduplicator=deduplicator,
         conversation_store=conversation_store,
         ai_manager=ai_manager,
+        call_id=call_id,
     )
     
     # Subscribe to transcription events
     event_bus.subscribe("TRANSCRIPTION", transcription_handler.handle)
+    logger.info(f"event_bus_subscribed | event=TRANSCRIPTION, handler=transcription_handler")
 
     # Subscribe to AI action events (for frontend popup triggers like invite user)
     async def handle_ai_action(data: dict):
@@ -178,8 +224,9 @@ async def entrypoint(ctx: JobContext):
         controller_info = ai_manager.get_controller_info()
         controller_id = controller_info.get("controller_id")
         await publisher.publish_action(data, controller_id=controller_id)
-    
+
     event_bus.subscribe("AI_ACTION", handle_ai_action)
+    logger.info(f"event_bus_subscribed | event=AI_ACTION, handler=handle_ai_action")
 
     # Handle AI voice toggle and control requests from frontend
     @ctx.room.on("data_received")
@@ -232,7 +279,8 @@ async def entrypoint(ctx: JobContext):
 
     # Connect to room with auto-subscribe to audio only
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    
+    logger.info(f"room_connected | auto_subscribe=AUDIO_ONLY")
+
     # Set the participant name to "Xyne Automatic"
     await ctx.room.local_participant.set_name("Xyne Automatic")
 
@@ -241,9 +289,9 @@ async def entrypoint(ctx: JobContext):
     try:
         if ctx.room.metadata:
             room_metadata = json.loads(ctx.room.metadata)
-            logger.info(f"Room metadata loaded: {room_metadata.keys()}")
+            logger.info(f"room_context_loaded | channel_id={room_metadata.get('channelId')}, board_id={room_metadata.get('boardId')}, project_id={room_metadata.get('projectId')}, participants={len(ctx.room.remote_participants)}")
     except Exception as e:
-        logger.warning(f"Could not parse room metadata: {e}")
+        logger.warning(f"room_context_load_failed | error={e}")
     
     # Build participant name to ID mapping
     participant_map = {}
@@ -262,12 +310,7 @@ async def entrypoint(ctx: JobContext):
         api_key=config.transcription_agent_api_key,
         participant_map=participant_map,
     )
-    logger.info(
-        f"Call context: callId={call_context.call_id}, "
-        f"channelId={call_context.channel_id}, "
-        f"boardId={call_context.board_id}, "
-        f"participants={list(call_context.participant_map.keys())}"
-    )
+    logger.info(f"call_context_created | channel_id={call_context.channel_id}, board_id={call_context.board_id}, participants={list(call_context.participant_map.keys())}")
 
     # Set room context and create AgentSession with tools
     ai_manager.room_context = call_context.to_room_context()
@@ -275,13 +318,13 @@ async def entrypoint(ctx: JobContext):
     # Validate call context for tool use
     if not call_context.is_valid_for_tools():
         if not call_context.channel_id:
-            logger.warning("Missing 'channelId' - ticket creation may fail")
+            logger.warning(f"call_context_validation_warning | missing_field=channelId, impact=ticket_creation_may_fail")
         if not call_context.board_id:
-            logger.warning("Missing 'boardId' - ticket creation may fail")
+            logger.warning(f"call_context_validation_warning | missing_field=boardId, impact=ticket_creation_may_fail")
         if not call_context.backend_url:
-            logger.warning("Missing 'backend_url' - ticket creation will fail")
+            logger.warning(f"call_context_validation_warning | missing_field=backend_url, impact=ticket_creation_will_fail")
         if not call_context.api_key:
-            logger.warning("Missing 'api_key' - ticket creation will fail")
+            logger.warning(f"call_context_validation_warning | missing_field=api_key, impact=ticket_creation_will_fail")
     
     # Create ticket creation tool
     room_context = call_context.to_room_context()
@@ -310,7 +353,7 @@ async def entrypoint(ctx: JobContext):
     # Link AgentSession to MultiUserTranscriber for VAD-based speech interruption
     if ai_manager.is_ready():
         multi_user_transcriber.set_agent_session(ai_manager.get_agent_session())
-        logger.info("Linked AgentSession to MultiUserTranscriber for speech interruption")
+        logger.info(f"agent_session_linked | component=multi_user_transcriber")
 
     # Initialize cleanup manager
     webhook = WebhookNotifier(config.backend_url, config.transcription_agent_api_key)
@@ -344,7 +387,7 @@ async def entrypoint(ctx: JobContext):
     
     # Initialize tracker with existing participants
     participant_tracker.initialize_from_room(ctx.room)
-    logger.info("Agent ready - listening for audio")
+    logger.info(f"agent_ready | participants={len(participant_tracker.active_participants)}")
 
     # Simple wait - let the agent run until LiveKit disconnects it
     # Cleanup happens in participant_disconnected handler before disconnect

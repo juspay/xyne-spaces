@@ -213,37 +213,42 @@ export class TranscriptService {
    */
   async postCallTranscript(callId: string, messageId: string): Promise<void> {
     try {
-      logger.info(`Starting transcript processing for call: ${callId}, message: ${messageId}`);
+      logger.info(`[${callId}] transcript_processing_started | message_id=${messageId}`);
 
       // 0. Check if transcript attachment already exists to avoid redundant processing
+      logger.info(`[${callId}] attachment_exists_check | message_id=${messageId}, attachment_type=transcript`);
       const transcriptAttachment =
         await repositories.messageAttachments.findTranscriptByMessageId(messageId);
 
       if (transcriptAttachment) {
         logger.warn(
-          `Transcript for message ${messageId} already exists. Skipping redundant processing.`
+          `[${callId}] attachment_already_exists | message_id=${messageId}, skipping=true`
         );
         return;
       }
 
       // 1. Get call details
+      logger.info(`[${callId}] call_lookup_started`);
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
-        logger.error(`Call not found: ${callId}`);
+        logger.error(`[${callId}] call_not_found`);
         return;
       }
+      logger.info(`[${callId}] call_found | status=${call.status}, created_by=${call.createdByUserId}`);
 
       // Note: Status check removed - webhook only fires when room disconnects,
       // which means all users have left (agent is always the last to leave)
 
       // 2. Get the call message to retrieve conversationId
+      logger.info(`[${callId}] message_lookup_started | message_id=${messageId}`);
       const callMessage = await repositories.messages.findById(messageId);
       if (!callMessage) {
         logger.warn(
-          `Call system message not found for messageId ${messageId} - skipping transcript`
+          `[${callId}] message_not_found | message_id=${messageId}`
         );
         return;
       }
+      logger.info(`[${callId}] message_found | message_id=${messageId}, conversation_id=${callMessage.conversationId}`);
 
       // 3. Retrieve transcript from GCS or local file
       const transcriptContent = await this.retrieveTranscript(callId);
@@ -254,24 +259,33 @@ export class TranscriptService {
       }
 
       // 4. Parse JSONL entries
+      logger.info(`[${callId}] transcript_parsing_started`);
       const entries = this.parseTranscriptEntries(transcriptContent);
       if (entries.length === 0) {
-        logger.error(`No valid transcript entries found for call: ${callId}`);
+        logger.error(`[${callId}] transcript_parsing_failed | entries_count=0`);
         throw new Error(`No valid transcript entries found for call: ${callId}`);
       }
+      const uniqueSpeakers = new Set(entries.map(e => e.user)).size;
+      logger.info(`[${callId}] transcript_parsed | entries_count=${entries.length}, speakers_count=${uniqueSpeakers}`);
 
       // 5. Format as plain text (usernames are already included in transcript entries)
-      const formattedTranscript = this.formatTranscript(entries);
+      logger.info(`[${callId}] transcript_formatting_started | format=plain_text`);
+      const formattedTranscript = this.formatTranscript(entries, callId);
+      logger.info(`[${callId}] transcript_formatted | format=plain_text, characters_count=${formattedTranscript.length}`);
 
       // 6. Post-process transcript: translate to English
+      logger.info(`[${callId}] translation_started | source_language=auto, target_language=english`);
+      const translationStart = Date.now();
       const processedTranscript = await this.postProcessTranscript(formattedTranscript);
+      logger.info(`[${callId}] translation_completed | duration_ms=${Date.now() - translationStart}`);
 
       // 7. Upload processed transcript to GCS as .txt file
+      logger.info(`[${callId}] formatted_transcript_upload_started | gcs_path=attachments/${callId}_formatted.txt`);
       const txtGcsPath = await this.uploadFormattedTranscript(callId, processedTranscript);
+      logger.info(`[${callId}] formatted_transcript_uploaded | gcs_path=${txtGcsPath}, bytes_uploaded=${processedTranscript.length}`);
 
       // 8. Keep the original JSONL file for debugging/archival purposes
       // Note: Not deleting the JSONL file as it may be useful for troubleshooting
-      logger.info(`Keeping original JSONL file: transcriptions/${callId}.jsonl`);
 
       // 9. Build GCS URL using transcript bucket
       const gcsUrl = `gs://${config.gcs.transcriptionBucketName}/${txtGcsPath}`;
@@ -283,7 +297,8 @@ export class TranscriptService {
       const uniqueParticipants = Array.from(new Set(entries.map((e) => e.user))).filter(Boolean);
 
       // 11. Create attachment linked to the existing call message
-      await repositories.messageAttachments.create({
+      logger.info(`[${callId}] attachment_creation_started | message_id=${messageId}, attachment_type=transcript`);
+      const attachment = await repositories.messageAttachments.create({
         entityId: messageId,
         entityType: AttachmentEntityType.CHAT,
         originalFilename: `call_transcript.txt`,
@@ -301,20 +316,22 @@ export class TranscriptService {
           participantCount: uniqueParticipants.length,
         },
       });
+      logger.info(`[${callId}] attachment_created | attachment_id=${attachment.id}, gcs_url=${gcsUrl}`);
 
       // 12. Save transcript URL to Call record for easier access (used by recordings feature)
       await repositories.calls.update(call.id, {
         transcript: gcsUrl,
       });
+      logger.info(`[${callId}] call_record_updated | fields_updated=transcript`);
 
       // 13. Update the call message to indicate it has an attachment
       await repositories.messages.update(messageId, {
         hasAttachment: true,
       });
 
-      logger.info(`Successfully attached processed transcript to call message: ${messageId}`);
+      logger.info(`[${callId}] transcript_processing_completed | message_id=${messageId}`);
     } catch (error) {
-      logger.error(`Failed to process transcript for call ${callId}:`, error);
+      logger.error(`[${callId}] transcript_processing_failed | message_id=${messageId}, error=${error}`);
       // Throw error to allow controller to return proper error response
       throw error;
     }
@@ -325,30 +342,28 @@ export class TranscriptService {
    * Returns raw JSONL content or null if not found
    */
   private async retrieveTranscript(callId: string): Promise<string | null> {
+    const gcsPath = `transcriptions/${callId}.jsonl`;
     try {
-      const gcsPath = `transcriptions/${callId}.jsonl`;
-      logger.info(
-        `Attempting to fetch transcript from transcript bucket ${config.gcs.transcriptionBucketName}: ${gcsPath}`
-      );
+      logger.info(`[${callId}] transcript_fetch_started | gcs_path=${gcsPath}`);
 
       // Use dedicated transcript bucket
       const file = this.transcriptBucket.file(gcsPath);
       const [exists] = await file.exists();
 
       if (!exists) {
-        logger.error(
-          `Transcript file not found in bucket: gs://${config.gcs.transcriptionBucketName}/${gcsPath}`
-        );
+        logger.error(`[${callId}] gcs_download_failed | error=file_not_found, gcs_path=${gcsPath}`);
         throw new Error(
           `Transcript file not found in bucket: gs://${config.gcs.transcriptionBucketName}/${gcsPath}`
         );
       }
 
+      logger.info(`[${callId}] gcs_download_started`);
+      const downloadStart = Date.now();
       const [buffer] = await file.download();
-      logger.info(`Successfully fetched transcript from transcript bucket for call: ${callId}`);
+      logger.info(`[${callId}] gcs_download_completed | bytes_downloaded=${buffer.length}, duration_ms=${Date.now() - downloadStart}`);
       return buffer.toString('utf-8');
     } catch (error) {
-      logger.error(`Failed to fetch transcript from transcript bucket for ${callId}:`, error);
+      logger.error(`[${callId}] gcs_download_failed | error=${error}, gcs_path=${gcsPath}`);
       throw error;
     }
   }
@@ -380,7 +395,7 @@ export class TranscriptService {
    * when they occur within TRANSCRIPT_CONSOLIDATION_GAP_SECONDS of each other.
    * Speaker changes always create a new entry.
    */
-  private consolidateEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
+  private consolidateEntries(entries: TranscriptEntry[], callId: string): TranscriptEntry[] {
     if (entries.length === 0) {
       return [];
     }
@@ -409,7 +424,7 @@ export class TranscriptService {
     consolidated.push(currentEntry);
 
     logger.info(
-      `Consolidated ${entries.length} transcript entries into ${consolidated.length} entries`
+      `[${callId}] transcript_consolidated | original_entries=${entries.length}, consolidated_entries=${consolidated.length}`
     );
     return consolidated;
   }
@@ -417,13 +432,13 @@ export class TranscriptService {
   /**
    * Format transcript entries into plain text
    */
-  private formatTranscript(entries: TranscriptEntry[]): string {
+  private formatTranscript(entries: TranscriptEntry[], callId?: string): string {
     if (entries.length === 0) {
       return 'No transcript available.';
     }
 
     // Consolidate consecutive entries from same speaker within 30s gap
-    const consolidatedEntries = this.consolidateEntries(entries);
+    const consolidatedEntries = this.consolidateEntries(entries, callId || 'unknown');
 
     const firstTimestamp = consolidatedEntries[0].timestamp;
     let formatted = '';
@@ -446,7 +461,7 @@ export class TranscriptService {
     const filepath = `attachments/${callId}_formatted.txt`;
     const buffer = Buffer.from(content, 'utf-8');
 
-    logger.info(`Uploading formatted transcript to transcript bucket: ${filepath}`);
+    logger.info(`[${callId}] gcs_upload_started | type=formatted_transcript, gcs_path=${filepath}`);
 
     // Use dedicated transcript bucket
     const file = this.transcriptBucket.file(filepath);
@@ -459,7 +474,7 @@ export class TranscriptService {
       },
     });
 
-    logger.info(`Successfully uploaded formatted transcript to transcript bucket: ${filepath}`);
+    logger.info(`[${callId}] gcs_upload_completed | type=formatted_transcript, gcs_path=${filepath}`);
     return filepath;
   }
 
@@ -507,7 +522,7 @@ export class TranscriptService {
         return null;
       }
 
-      return this.formatTranscript(entries);
+      return this.formatTranscript(entries, callId);
     } catch (error) {
       logger.error(`Failed to get transcript content for ${callId}:`, error);
       return null;
@@ -541,7 +556,7 @@ Output ONLY the processed transcript, nothing else.`;
     try {
       const result = await this.summaryAgent.execute({
         messages: [createSystemMessage(systemInstructions),
-          createUserMessage(transcript)],
+        createUserMessage(transcript)],
       });
 
       if (!['completed', 'max_turns'].includes(result.status as string)) {
@@ -556,7 +571,7 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
       const processedTranscript = last.content.trim();
-      logger.info('Successfully post-processed transcript (translation)');
+      // Note: callId not available in this context, logged at caller level
       return processedTranscript;
     } catch (error) {
       logger.error('Error during transcript post-processing:', error);
@@ -567,29 +582,47 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Generate AI summary from the formatted transcript
    * @param transcript - The formatted transcript text
+   * @param callId - The call ID for logging
    * @returns AI-generated Markdown summary or null if generation fails
    */
-  async generateCallSummary(transcript: string): Promise<string | null> {
+  async generateCallSummary(transcript: string, callId?: string): Promise<string | null> {
+    const logCallId = callId || 'unknown';
     if (!this.summaryAgent) return null;
 
+    logger.info(`[${logCallId}] ai_summary_generation_started | summary_type=call_summary, model=${config.llm.litellmModel || 'glm-latest'}`);
     const prompt = CALL_SUMMARY_PROMPT.replace('{transcript}', transcript);
 
-    const result = await this.summaryAgent.execute({
-      messages: [createUserMessage(prompt)],
-    });
+    const summaryStart = Date.now();
+    try {
+      logger.info(`[${logCallId}] ai_summary_api_call | endpoint=${config.llm.litellmBaseUrl}, model=${config.llm.litellmModel || 'glm-latest'}`);
+      const result = await this.summaryAgent.execute({
+        messages: [createUserMessage(prompt)],
+      });
 
-    if (!['completed', 'max_turns'].includes(result.status as string)) {
+      if (result.status === 'error' || !result.messages.length) {
+        logger.error(`[${logCallId}] ai_summary_generation_failed | error=empty_response, status=${result.status}`);
+        return null;
+      }
+
+      const last = result.messages.at(-1);
+      if (!last) {
+        logger.error(`[${logCallId}] ai_summary_generation_failed | error=no_messages`);
+        return null;
+      }
+
+      const markdownContent = 'content' in last ? last.content?.trim() : null;
+      if (!markdownContent) {
+        logger.error(`[${logCallId}] ai_summary_generation_failed | error=no_content`);
+        return null;
+      }
+
+      logger.info(`[${logCallId}] ai_summary_generated | summary_length=${markdownContent.length}, duration_ms=${Date.now() - summaryStart}`);
+      // Return raw markdown - no sanitization needed for markdown
+      return markdownContent;
+    } catch (error) {
+      logger.error(`[${logCallId}] ai_summary_generation_failed | error=${error}, duration_ms=${Date.now() - summaryStart}`);
       return null;
     }
-
-    const last = result.messages.at(-1);
-    if (!last) return null;
-
-    const markdownContent = 'content' in last ? last.content?.trim() : null;
-    if (!markdownContent) return null;
-
-    // Return raw markdown - no sanitization needed for markdown
-    return markdownContent;
   }
 
   /**
@@ -614,7 +647,7 @@ Output ONLY the processed transcript, nothing else.`;
     if (!last || !('content' in last)) return null;
 
     const title = last.content?.trim() || null;
-    
+
     // Truncate to 100 chars max
     return title ? title.substring(0, 100) : null;
   }
@@ -654,16 +687,16 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
       let jsonContent = last.content.trim();
-      
+
       // Strip markdown code fences if present (```json...``` or ```...```)
       const codeBlockMatch = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
       if (codeBlockMatch) {
         jsonContent = codeBlockMatch[1].trim();
       }
-      
+
       // Parse JSON response
       const parsed = JSON.parse(jsonContent);
-      
+
       if (!parsed.suggestions || !Array.isArray(parsed.suggestions)) {
         logger.warn('Invalid ticket suggestions format: missing or invalid suggestions array');
         return [];
@@ -676,8 +709,8 @@ Output ONLY the processed transcript, nothing else.`;
           id: `suggestion-${Date.now()}-${index}`,
           title: s.title || 'Untitled Task',
           description: s.description || '',
-          priority: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(s.priority) 
-            ? s.priority 
+          priority: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(s.priority)
+            ? s.priority
             : 'MEDIUM',
           suggestedAssignee: s.suggestedAssignee || 'unassigned',
           status: 'pending' as const,
@@ -705,7 +738,7 @@ Output ONLY the processed transcript, nothing else.`;
     markdownSummary: string,
     _createdByUserId: string,
     ticketSuggestions?: TicketSuggestion[]
-  ) {    
+  ) {
     logger.info(`[postSummaryAsReply] Starting for callId: ${callId}, conversationId: ${conversationId}`);
 
     let xyneAutomaticBot;
@@ -725,7 +758,7 @@ Output ONLY the processed transcript, nothing else.`;
 
     // Build markdown content with ticket suggestions in YAML frontmatter
     let fullMarkdownContent = '';
-    
+
     if (ticketSuggestions && ticketSuggestions.length > 0) {
       const frontmatterData = {
         suggestions: ticketSuggestions.map((suggestion) => ({
@@ -736,11 +769,11 @@ Output ONLY the processed transcript, nothing else.`;
           assignee: suggestion.suggestedAssignee,
         })),
       };
-      
+
       fullMarkdownContent = '---\n' + yaml.dump(frontmatterData) + '---\n\n';
       logger.info(`Added ${ticketSuggestions.length} ticket suggestions in YAML frontmatter`);
     }
-    
+
     // Append the markdown summary after frontmatter
     fullMarkdownContent += markdownSummary;
 
@@ -761,7 +794,7 @@ Output ONLY the processed transcript, nothing else.`;
       },
     });
 
-    logger.info(`[postSummaryAsReply] Message created: ${message.messageId} in conversation ${conversationId}`);
+    logger.info(`[${callId}] summary_posted_as_reply | message_id=${message.messageId}, conversation_id=${conversationId}, sender=${xyneAutomaticBot.id}`);
 
     await repositories.conversations.incrementReplyCount(conversationId);
     logger.info(`[postSummaryAsReply] Reply count incremented for conversation ${conversationId}`);
@@ -783,35 +816,35 @@ Output ONLY the processed transcript, nothing else.`;
       // Get call details for summary generation
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
-        logger.error(`Call not found for summary generation: ${callId}`);
+        logger.error(`[${callId}] call_not_found | context=summary_generation`);
         return;
       }
 
       // Get the call message to retrieve conversationId for the reply
       const callMessage = await repositories.messages.findById(messageId);
       if (!callMessage) {
-        logger.error(`Call message not found for summary: ${messageId}`);
+        logger.error(`[${callId}] message_not_found | message_id=${messageId}, context=summary_generation`);
         return;
       }
 
       // Retrieve and format transcript for AI
       const transcriptContent = await this.retrieveTranscript(callId);
       if (!transcriptContent) {
-        logger.warn(`No transcript content available for AI summary: ${callId}`);
+        logger.warn(`[${callId}] ai_summary_skipped | reason=no_transcript_content`);
         return;
       }
 
       const entries = this.parseTranscriptEntries(transcriptContent);
       if (entries.length === 0) {
-        logger.warn(`No transcript entries for AI summary: ${callId}`);
+        logger.warn(`[${callId}] ai_summary_skipped | reason=no_transcript_entries`);
         return;
       }
 
-      const formattedTranscript = this.formatTranscript(entries);
+      const formattedTranscript = this.formatTranscript(entries, callId);
 
       const startTime = Date.now();
       const [summary, title, ticketSuggestions] = await Promise.all([
-        this.generateCallSummary(formattedTranscript).catch(err => {
+        this.generateCallSummary(formattedTranscript, callId).catch(err => {
           logger.error(`Failed to generate summary: ${err}`);
           return null;
         }),
@@ -834,7 +867,7 @@ Output ONLY the processed transcript, nothing else.`;
           aiSummary: summary,
           title: title || undefined,  // Update title if generated
         });
-        logger.info(`Saved AI summary${title ? ' and title' : ''} to call record: ${callId}`);
+        logger.info(`[${callId}] call_record_updated | fields_updated=aiSummary`);
 
         // Update the call system message with the title (if generated)
         if (title) {
@@ -845,11 +878,11 @@ Output ONLY the processed transcript, nothing else.`;
               const message = await tx.message.findUnique({
                 where: { messageId },
               });
-              
+
               if (message) {
                 const currentContent = message.content || '';
                 const updatedContent = `${title} • ${currentContent}`;
-                
+
                 // Update message with title
                 await tx.message.update({
                   where: { messageId },
@@ -861,7 +894,7 @@ Output ONLY the processed transcript, nothing else.`;
                     },
                   },
                 });
-                
+
                 logger.info(`Updated call message ${messageId} with title: ${title}`);
               } else {
                 logger.warn(`Call message ${messageId} not found for title update`);
@@ -882,10 +915,10 @@ Output ONLY the processed transcript, nothing else.`;
           ticketSuggestions
         );
       } else {
-        logger.warn(`AI summary generation returned null for call: ${callId}`);
+        logger.warn(`[${callId}] ai_summary_skipped | reason=generation_failed`);
       }
     } catch (error) {
-      logger.error(`Failed to process call with summary for ${callId}:`, error);
+      logger.error(`[${callId}] process_call_with_summary_failed | error=${error}`);
       // Don't re-throw - the transcript was already processed successfully
     }
   }

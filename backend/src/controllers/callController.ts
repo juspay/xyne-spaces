@@ -18,7 +18,7 @@ export class CallController {
   async getOrCreateBotUser() {
     try {
       const botUser = await unifiedBotUserService.getBotByBotId('xyne-automatic');
-      
+
       if (!botUser) {
         throw new Error('Xyne Automatic bot not found - make sure bot registry is initialized');
       }
@@ -32,11 +32,15 @@ export class CallController {
 
   // POST /api/calls/initiate - Start a new call
   initiateCall = async (req: Request, res: Response): Promise<void> => {
+    const correlationId = uuidv4();
+    let callId = 'pending';
     try {
-        const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless } = req.body;
+      const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.name;
       const userEmail = req.user?.email;
+
+      logger.info(`[${correlationId}] call_initiation_requested | user_id=${userId}, channel_id=${channelId}, call_type=${callType}, is_headless=${isHeadless}`);
 
       if (!userId) {
         res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -52,7 +56,7 @@ export class CallController {
           userId,
           [botUser.id],
           repositories.channelParticipants
-        );        
+        );
       }
       // If no channelId but invitedUserIds is provided, find or create channel
       else if (!channelId && invitedUserIds && invitedUserIds.length > 0) {
@@ -77,14 +81,15 @@ export class CallController {
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
-      const existingCall = isHeadless 
-        ? null 
+      logger.info(`[${correlationId}] existing_call_check | channel_id=${finalChannelId}`);
+      const existingCall = isHeadless
+        ? null
         : await repositories.calls.findActiveCallByChannelId(finalChannelId);
-      
+
       if (existingCall) {
         // Verify the LiveKit room still exists
         const roomInfo = await livekitService.getRoomInfo(existingCall.externalId);
-        
+
         if (roomInfo) {
           // Room exists, generate token to join the existing call
           const token = await livekitService.generateAccessToken({
@@ -93,7 +98,7 @@ export class CallController {
             userName: userName || userEmail || 'Unknown',
           });
 
-          logger.info(`User ${userId} joining existing call ${existingCall.externalId} in channel ${finalChannelId}`);
+          logger.info(`[${existingCall.externalId}] joining_existing_call | user_id=${userId}, channel_id=${finalChannelId}, correlation_id=${correlationId}`);
 
           // Return credentials for existing call
           res.json({
@@ -107,17 +112,20 @@ export class CallController {
           return;
         } else {
           // Room doesn't exist but call is marked as active - mark it as ended
-          logger.info(`Call ${existingCall.externalId} marked as active but room not found. Ending call.`);
+          logger.info(`[${existingCall.externalId}] existing_call_room_stale | marked_as=${existingCall.status}, room_exists=false`);
           await repositories.calls.update(existingCall.id, {
             status: CallStatus.ENDED,
             endedAt: new Date(),
           });
+          logger.info(`[${existingCall.externalId}] call_status_updated | from=${existingCall.status}, to=ENDED, reason=room_not_found`);
         }
       }
 
       // No active call or existing call's room is gone - create a new call
       // Generate unique call ID
       const callExternalId = uuidv4();
+      callId = callExternalId;
+      logger.info(`[${callExternalId}] creating_new_call | user_id=${userId}, channel_id=${finalChannelId}, call_type=${callType}, correlation_id=${correlationId}`);
 
       // Fetch channel to get projectId and boardId for room metadata
       const channel = await repositories.channels.findById(finalChannelId);
@@ -150,8 +158,6 @@ export class CallController {
         userName: userName || userEmail || 'Unknown',
       });
 
-      logger.info(`LiveKit credentials generated for call: ${callExternalId} by user ${userId}`);
-
       // For headless calls, create the Call record in database
       // (Normal calls create the record via Zero mutator on client-side)
       if (isHeadless) {
@@ -167,7 +173,7 @@ export class CallController {
           recordingEnabled: true, // Headless calls are recordings
           startedAt: new Date(),
         });
-        logger.info(`Created Call record for headless recording: ${callExternalId}`);
+        logger.info(`[${callExternalId}] call_record_created | is_headless=true, channel_id=${finalChannelId}`);
 
         // Create system message for headless call (so transcript can be attached later)
         // Generate IDs upfront
@@ -204,7 +210,7 @@ export class CallController {
 
         // Update channel activity
         await repositories.channels.updateLastActivity(finalChannelId);
-        logger.info(`Created system message for headless recording: ${callExternalId}`);
+        logger.info(`[${callExternalId}] system_message_created | message_id=${messageId}, message_subtype=call_started`);
       }
 
       // Return credentials with resolved channelId
@@ -217,7 +223,7 @@ export class CallController {
         channelId: finalChannelId, // Include the resolved or provided channelId
       });
     } catch (error) {
-      logger.error('Failed to initiate call:', error);
+      logger.error(`[${callId}] call_initiation_failed | error=${error}`);
       res.status(500).json({ success: false, error: 'Failed to initiate call' });
     }
   };
@@ -240,7 +246,7 @@ export class CallController {
 
       const call = await repositories.calls.findByExternalId(callId);
 
-      if(call && call.status === CallStatus.ENDED) {
+      if (call && call.status === CallStatus.ENDED) {
         res.status(400).json({ success: false, error: 'Cannot join an ended call' });
         return;
       }
@@ -334,7 +340,7 @@ export class CallController {
 
           // Check LiveKit room state
           const roomInfo = await livekitService.getRoomInfo(callId);
-          
+
           let shouldEndCall = false;
           let reason = '';
 
@@ -346,7 +352,7 @@ export class CallController {
             // Get actual participant list (more reliable than numParticipants)
             const participants = await livekitService.listParticipants(callId);
             logger.info(`Room ${callId} - numParticipants: ${roomInfo.numParticipants}, actual participants: ${participants.length}`);
-            
+
             // Check if room has no active participants
             if (participants.length === 0) {
               shouldEndCall = true;
@@ -361,7 +367,7 @@ export class CallController {
               status: 'ENDED',
               endedAt,
             });
-            logger.info(`Marked call ${callId} as ENDED - ${reason}`);
+            logger.info(`[${callId}] call_status_updated | from=${call.status}, to=ENDED, reason=${reason}`);
             logger.info(`Transcript will be processed when user views the ended call message`);
 
             // Increment call count and add duration only for calls lasting > 60 seconds
@@ -369,7 +375,7 @@ export class CallController {
             if (callDurationSeconds > 60) {
               // Convert duration to minutes (rounded to 1 decimal place)
               const callDurationMinutes = Math.round((callDurationSeconds / 60) * 10) / 10;
-              
+
               try {
                 await Promise.all([
                   websocketService.incrementTodayCallCount(),
@@ -380,7 +386,7 @@ export class CallController {
                 logger.error('Failed to update call metrics for auto-ended call:', err);
               }
             }
-            
+
             // Update the call system message metadata to mark as ended
             const metadata = call.metadata as { systemMessageId?: string } | null;
             const systemMessageId = metadata?.systemMessageId;
@@ -499,7 +505,7 @@ export class CallController {
       return;
     }
 
-    logger.info(`Transcript ready webhook received for call ${callId}`);
+    logger.info(`[${callId}] transcript_ready_webhook_received | webhook_source=python_agent`);
 
     const result = await this._processCallTranscript(callId);
 
@@ -555,7 +561,7 @@ export class CallController {
 
     try {
       const recordings = await repositories.calls.findByUserAndType(userId, 'HEADLESS' as CallType);
-      
+
       // Transform to response format, sorted newest first
       const response = recordings
         .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
@@ -565,7 +571,7 @@ export class CallController {
           title: call.title || 'Untitled Recording',
           startedAt: call.startedAt,
           endedAt: call.endedAt,
-          durationMs: call.endedAt 
+          durationMs: call.endedAt
             ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
             : null,
           hasTranscript: !!call.transcript,
@@ -594,7 +600,7 @@ export class CallController {
 
     try {
       const call = await repositories.calls.findByExternalId(callId);
-      
+
       if (!call) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
@@ -608,7 +614,7 @@ export class CallController {
 
       // Fetch transcript content from GCS URL if available
       let transcriptContent: string | null = null;
-      
+
       if (call.transcript && call.transcript.startsWith('gs://')) {
         try {
           // Use transcriptService to fetch from GCS
@@ -637,7 +643,7 @@ export class CallController {
           title: call.title || 'Untitled Recording',
           startedAt: call.startedAt,
           endedAt: call.endedAt,
-          durationMs: call.endedAt 
+          durationMs: call.endedAt
             ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
             : null,
           transcript: transcriptContent,
@@ -672,7 +678,7 @@ export class CallController {
 
     try {
       const call = await repositories.calls.findByExternalId(callId);
-      
+
       if (!call) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
@@ -1005,7 +1011,7 @@ export class CallController {
       res.status(400).json({ success: false, error: 'Call ID is required' });
       return;
     }
-    
+
     logger.info(`[CallController] Declining call ${callId} for user ${userId}`);
 
     try {
@@ -1024,7 +1030,7 @@ export class CallController {
           userId: userId
         }
       });
-      
+
       if (!participant) {
         logger.warn(`[CallController] Participant not found for decline: callId=${callId}, userId=${userId}`);
         res.status(404).json({ success: false, error: 'Participant not found' });
@@ -1044,7 +1050,7 @@ export class CallController {
         // Trigger side effects manually as Zero mutator won't catch this API update in time/context
         // This ensures notifications are cancelled and other participants are updated if needed
         await callSideEffectService.handleParticipantResponse(participant.id, InvitationResponse.DECLINED);
-        
+
         logger.info(`User ${userId} declined call ${callId}`);
       } else {
         logger.info(`User ${userId} attempted to decline call ${callId} but status was ${participant.response}`);
@@ -1074,7 +1080,7 @@ export class CallController {
       res.status(400).json({ success: false, error: 'Call ID is required' });
       return;
     }
-    
+
     logger.info(`[CallController] User ${userId} leaving call ${callId}`);
 
     try {
@@ -1093,7 +1099,7 @@ export class CallController {
           userId: userId
         }
       });
-      
+
       if (!participant) {
         logger.warn(`[CallController] Participant not found for leave: callId=${callId}, userId=${userId}`);
         res.status(404).json({ success: false, error: 'Participant not found' });
@@ -1128,11 +1134,12 @@ export class CallController {
 
       if (activeParticipants.length === 0) {
         logger.info(`[CallController] No active participants remaining for call ${callId}. Ending call.`);
-        
+
         await repositories.calls.update(call.id, {
           status: CallStatus.ENDED,
           endedAt: now,
         });
+        logger.info(`[${callId}] call_status_updated | from=${call.status}, to=ENDED, reason=no_active_participants`);
       }
 
       logger.info(`User ${userId} left call ${callId}`);
@@ -1158,7 +1165,7 @@ export class CallController {
 
     try {
       const call = await repositories.calls.findByExternalId(callId);
-      
+
       if (!call) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
