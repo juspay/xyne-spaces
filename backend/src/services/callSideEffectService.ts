@@ -33,7 +33,7 @@ class CallSideEffectService {
 
         const call = await db.call.findUnique({
             where: { id: callId },
-            select: { externalId: true, channelId: true }
+            select: { externalId: true, channelId: true, callType: true }
         });
 
         if (!call) return;
@@ -56,19 +56,26 @@ class CallSideEffectService {
             try {
                 await callTimeoutWorker.removeJob(participant.id);
 
+                const invitedByUserId = participant.invitedBy;
+                const caller = await db.user.findUnique({ where: { id: invitedByUserId } });
+                const callerName = caller?.name || 'Someone';
+
                 await notificationService.createNotification(participant.userId, {
-                    title: 'Call Dismissed',
-                    message: 'Call Dismissed',
-                    type: NotificationType.CALL_DISMISS,
+                    title: 'Missed Call',
+                    message: `You missed a call from ${callerName}`,
+                    type: NotificationType.MISSED_CALL,
                     relatedEntityType: 'call',
                     relatedEntityId: call.externalId,
                     metadata: {
-                        action: 'CALL_DISMISS',
                         callId: call.externalId,
+                        channelId: call.channelId,
+                        callerId: invitedByUserId,
+                        callerName: callerName,
+                        callType: call.callType,
                         reason: 'ended'
                     }
                 });
-                this.logger.info(`Cleaned up participant ${participant.id}: Job removed, KILL_UI sent.`);
+                this.logger.info(`Cleaned up participant ${participant.id}: Job removed, MISSED_CALL sent.`);
             } catch (err) {
                 this.logger.error(`Failed to cleanup participant ${participant.id}`, err);
             }
@@ -217,7 +224,7 @@ class CallSideEffectService {
 
             if (!call) return;
 
-            await notificationService.createNotification(participant.userId, {
+            await notificationService.createFCMNotification(participant.userId, {
                 title: 'Call Dismissed',
                 message: 'Call Dismissed',
                 type: NotificationType.CALL_DISMISS,
