@@ -1,8 +1,9 @@
-import { ReactElement, useRef, useState, useEffect, useMemo } from 'react';
+import { ReactElement, useRef, useState, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Hash, Pencil, Headphones } from 'lucide-react';
 import { ChannelVisibility, Channel } from '@xyne/shared';
 import { isDMChannel } from './ChatDirectory.utils';
+import { useDraft } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
 import { useSelector } from '@xstate/react';
@@ -28,17 +29,9 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
   const [isTruncated, setIsTruncated] = useState(false);
   const currentUserID = context.userID;
 
-  // Get draft message from localStorage
-  const draftMessage = useMemo<string | undefined>(() => {
-    try {
-      const stored = localStorage.getItem('channel-draft-message');
-      if (!stored) return undefined;
-      const allDrafts = JSON.parse(stored) as Record<string, { text: string } | undefined>;
-      return allDrafts[channel.id]?.text.trim() || undefined;
-    } catch {
-      return undefined;
-    }
-  }, [channel.id]);
+  // Get draft from state machine (reactive updates)
+  const draft = useDraft(channel.id);
+  const draftMessage = draft?.text?.trim() || undefined;
 
   const isActive = activeChannelId === channel.id;
   const isPrivate = channel.visibility === ChannelVisibility.PRIVATE;
