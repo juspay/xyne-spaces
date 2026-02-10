@@ -17,6 +17,7 @@ interface UseGenerateDetailedSummaryReturn {
   generateDetailedSummary: (
     callId: string,
     messageId?: string,
+    customPrompt?: string,
   ) => Promise<GenerateDetailedSummaryResult>;
   isLoading: boolean;
   error: string | null;
@@ -31,14 +32,26 @@ export function useGenerateDetailedSummary(): UseGenerateDetailedSummaryReturn {
   const [error, setError] = useState<string | null>(null);
 
   const generateDetailedSummary = useCallback(
-    async (callId: string, messageId?: string): Promise<GenerateDetailedSummaryResult> => {
+    async (
+      callId: string,
+      messageId?: string,
+      customPrompt?: string,
+    ): Promise<GenerateDetailedSummaryResult> => {
       setIsLoading(true);
       setError(null);
 
       try {
+        // Validate customPrompt length
+        if (customPrompt && customPrompt.length > 5000) {
+          throw new Error('Custom prompt must be less than 5000 characters');
+        }
+
         const response = await apiInstance.post<GenerateDetailedSummaryResponse>(
           `/calls/${callId}/generate-detailed-summary`,
-          { messageId },
+          {
+            messageId,
+            customPrompt: customPrompt?.trim(),
+          },
         );
 
         const data = response.data;

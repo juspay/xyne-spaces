@@ -50,10 +50,7 @@ export function useGeneratePRD(): UseGeneratePRDReturn {
 
         const response = await apiInstance.post<GeneratePRDResponse>(
           `/calls/${callId}/generate-prd`,
-          {
-            messageId,
-            customPrompt: customPrompt?.trim(),
-          },
+          { messageId, customPrompt },
         );
 
         const data = response.data;

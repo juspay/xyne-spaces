@@ -831,7 +831,7 @@ export class CallController {
   generateDetailedSummary = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
     const { callId } = req.params;
-    const { messageId } = req.body;
+    const { messageId, customPrompt } = req.body;
 
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -885,7 +885,8 @@ export class CallController {
       const result = await callDocumentService.generateAndPostDetailedSummary(
         callId,
         transcriptContent,
-        callMessage.conversationId
+        callMessage.conversationId,
+        customPrompt
       );
 
       if (!result.success) {

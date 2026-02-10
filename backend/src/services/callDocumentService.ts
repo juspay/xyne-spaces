@@ -493,6 +493,7 @@ export class CallDocumentService {
       // Sanitize inputs to prevent injection attacks
       const sanitizedTranscript = sanitizeInput(transcript);
       const sanitizedSummary = sanitizeInput(summary);
+
       const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
 
       let prompt = PRD_GENERATION_PROMPT
@@ -543,7 +544,7 @@ export class CallDocumentService {
   /**
    * Generate detailed summary from transcript
    */
-  async generateDetailedSummary(transcript: string): Promise<string | null> {
+  async generateDetailedSummary(transcript: string, customPrompt?: string): Promise<string | null> {
     const agent = this.createAgent();
     if (!agent) {
       logger.warn('[CallDocumentService] Failed to create agent for detailed summary');
@@ -553,8 +554,13 @@ export class CallDocumentService {
     try {
       // Sanitize input to prevent injection attacks
       const sanitizedTranscript = sanitizeInput(transcript);
+      const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
 
-      const prompt = DETAILED_SUMMARY_PROMPT.replace('{transcript}', sanitizedTranscript);
+      let prompt = DETAILED_SUMMARY_PROMPT.replace('{transcript}', sanitizedTranscript);
+
+      if (sanitizedCustomPrompt) {
+        prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this summary. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
+      }
 
       const result = await agent.execute({
         messages: [createUserMessage(prompt)],
@@ -947,11 +953,12 @@ A comprehensive detailed summary has been generated from this call.
   async generateAndPostDetailedSummary(
     callId: string,
     transcript: string,
-    conversationId: string
+    conversationId: string,
+    customPrompt?: string
   ): Promise<{ success: boolean; canvasUrl?: string; error?: string }> {
     try {
       // 1. Generate detailed summary markdown
-      const detailedSummaryMarkdown = await this.generateDetailedSummary(transcript);
+      const detailedSummaryMarkdown = await this.generateDetailedSummary(transcript, customPrompt);
       if (!detailedSummaryMarkdown) {
         return { success: false, error: 'Failed to generate detailed summary' };
       }
