@@ -4,13 +4,17 @@ MultiUserTranscriber - Built-in STT with AgentSession per participant
 Uses livekit-agents built-in STT with:
 - silero.VAD for voice activity detection (with pre-buffering)
 - openai.STT.with_azure() for Azure OpenAI Whisper transcription
+- google.STT() for Google Cloud Speech-to-Text transcription
+- LiveKit Turn Detector for contextually-aware end-of-turn detection
 - One AgentSession per participant for proper audio isolation
 - Retry logic for handling transient errors
 """
 import asyncio
+import json
 import logging
+import os
 import time
-from typing import Dict, Optional, Callable, Awaitable
+from typing import Dict, Optional, Callable, Awaitable, Set, Any
 
 from livekit import rtc
 from livekit.agents import (
@@ -22,7 +26,9 @@ from livekit.agents import (
     room_io,
     stt,
 )
-from livekit.plugins import openai, silero
+from livekit.plugins import openai, silero, google
+from livekit.plugins import deepgram
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from events import EventBus
 from config import get_logger
@@ -33,19 +39,19 @@ logger = get_logger(__name__)
 class ResilientSTT(stt.STT):
     """
     STT wrapper with retry logic for handling transient errors.
-    
     Retries on network errors, timeouts, and other temporary failures.
+    Note: For streaming, we delegate directly to the inner STT since
+    retry logic for streams is complex and best handled by the underlying provider.
     """
-    
+
     def __init__(
-        self, 
+        self,
         inner_stt: stt.STT,
         max_retries: int = 3,
         base_delay: float = 1.0,
     ):
         """
         Initialize the resilient STT wrapper.
-        
         Args:
             inner_stt: The actual STT implementation to wrap
             max_retries: Maximum number of retry attempts
@@ -57,6 +63,16 @@ class ResilientSTT(stt.STT):
         self._inner_stt = inner_stt
         self._max_retries = max_retries
         self._base_delay = base_delay
+    
+    def stream(self, *, language=None, conn_options=None):
+        """
+        Delegate streaming directly to the inner STT.
+        The inner STT (Google/Azure) handles its own reconnection logic.
+        """
+        if language is not None:
+            return self._inner_stt.stream(language=language, conn_options=conn_options)
+        else:
+            return self._inner_stt.stream(conn_options=conn_options)
     
     async def _recognize_impl(
         self,
@@ -115,6 +131,7 @@ class ParticipantTranscriber(Agent):
         participant_name: str,
         on_transcription: Callable[[dict], Awaitable[None]],
         call_id: str = "unknown",
+        ai_enabled: bool = False,
     ):
         """
         Initialize the transcriber agent.
@@ -124,14 +141,17 @@ class ParticipantTranscriber(Agent):
             participant_name: The participant's display name
             on_transcription: Async callback to emit transcription events
             call_id: Call ID for logging
+            ai_enabled: Whether AI voice is enabled (affects turn detection)
         """
         super().__init__(
-            instructions="not-needed",  # We're only transcribing, not generating responses
+            instructions="not-needed",
+            turn_detection=MultilingualModel(),
         )
         self.participant_identity = participant_identity
         self.participant_name = participant_name
         self._on_transcription = on_transcription
         self._call_id = call_id
+        self.ai_enabled = ai_enabled
     
     async def on_user_turn_completed(
         self, 
@@ -184,6 +204,14 @@ class MultiUserTranscriber:
         azure_api_key: str,
         azure_api_version: str,
         azure_deployment: str,
+        stt_model: str = "azure",
+        google_credentials_json: Optional[str] = None,
+        google_stt_model: str = "chirp_3",
+        google_stt_language: str = "en-US",
+        # Deepgram STT Configuration
+        deepgram_api_key: Optional[str] = None,
+        deepgram_model: str = "nova-3",
+        deepgram_language: str = "en-US",
         # VAD Configuration
         vad_activation_threshold: float = 0.5,
         vad_min_speech_duration: float = 0.1,
@@ -196,7 +224,6 @@ class MultiUserTranscriber:
     ):
         """
         Initialize the multi-user transcriber.
-        
         Args:
             ctx: JobContext from livekit-agents
             event_bus: EventBus for emitting transcription events
@@ -204,6 +231,13 @@ class MultiUserTranscriber:
             azure_api_key: Azure OpenAI API key
             azure_api_version: Azure OpenAI API version
             azure_deployment: Azure OpenAI Whisper deployment name
+            stt_model: STT provider to use ('google', 'azure', or 'deepgram', default: 'google')
+            google_credentials_json: Google service account credentials JSON (for validation/logging only, actual credentials loaded from GOOGLE_APPLICATION_CREDENTIALS env var)
+            google_stt_model: Google STT model name (e.g., long, latest_long, short)
+            google_stt_language: Language code (e.g., en-US)
+            deepgram_api_key: Deepgram API key
+            deepgram_model: Deepgram model name (e.g., nova-3, flux-general-en)
+            deepgram_language: Language code (e.g., en-US)
             vad_activation_threshold: VAD sensitivity (0.0-1.0, higher = less sensitive)
             vad_min_speech_duration: Minimum speech duration to trigger detection
             vad_min_silence_duration: Minimum silence before end of speech
@@ -213,57 +247,126 @@ class MultiUserTranscriber:
         self.ctx = ctx
         self.bus = event_bus
         self.agent_session = agent_session
-        
-        # Azure STT configuration
         self._azure_endpoint = azure_endpoint
         self._azure_api_key = azure_api_key
         self._azure_api_version = azure_api_version
         self._azure_deployment = azure_deployment
+
+        self._stt_model = stt_model.lower()
+        self._google_credentials_json = google_credentials_json
+        self._google_stt_model = google_stt_model
+        self._google_stt_language = google_stt_language
         
-        # VAD configuration
+        self._deepgram_api_key = deepgram_api_key
+        self._deepgram_model = deepgram_model
+        self._deepgram_language = deepgram_language
+        
         self._vad_activation_threshold = vad_activation_threshold
         self._vad_min_speech_duration = vad_min_speech_duration
         self._vad_min_silence_duration = vad_min_silence_duration
         self._vad_prefix_padding_duration = vad_prefix_padding_duration
         
-        # Session management
         self._sessions: Dict[str, AgentSession] = {}
-        self._tasks: set[asyncio.Task] = set()
         self._call_id = call_id
+        self._tasks: Set[asyncio.Task] = set()
+        self._agent_session: Optional[AgentSession] = None
+        self._ai_manager: Optional[Any] = None
+        self._call_type: Optional[str] = None
+        self._stt_model_override: Optional[str] = None  # User's STT model preference from UI
         
         # Pre-load VAD model for faster session startup
         self._vad: Optional[silero.VAD] = None
         
         # Shared resilient STT with retry logic
         self._shared_stt: Optional[ResilientSTT] = None
-        
         logger.info(
             f"multi_user_transcriber_initialized | "
             f"vad_threshold={vad_activation_threshold}, min_speech={vad_min_speech_duration}s, "
             f"min_silence={vad_min_silence_duration}s, prefix_padding={vad_prefix_padding_duration}s"
         )
+        
+
     
-    def _create_stt(self) -> ResilientSTT:
-        """Create or reuse shared resilient STT instance."""
-        if self._shared_stt is None:
-            stt_prompt = "The following technical discussion includes terms like Xyne Calls, Juspay Euler, Namma Cloud, Xyne Chats, Xyne Tickets, Juspay Hyperswitch, Xyne Support, Namma Yatri, Xyne Spaces, Juspay,  Xyne Code, Xyne Training, Namma Bengaluru, Xyne Automatic, Juspay Payments Operating System, Xyne AI, Xyne Assistant, Namma Shuttle, Xyne Agent, Xyne Bot, Juspay Technologies, Namma Switch, Xyne The speaker begins by saying:"
-            inner_stt = openai.STT.with_azure(
-                azure_endpoint=self._azure_endpoint,
-                azure_deployment=self._azure_deployment,
-                api_version=self._azure_api_version,
-                api_key=self._azure_api_key,
-                prompt=stt_prompt
-            )
-            self._shared_stt = ResilientSTT(
-                inner_stt=inner_stt,
-                max_retries=3,
-                base_delay=1.0,
-            )
-            logger.info(f"resilient_stt_created | model=gpt-4o-transcribe, max_retries=3, base_delay=1.0")
+    
+    def _create_google_stt_instance(self) -> google.STT:
+        """
+        Helper to create Google STT instance.
+        
+        Credentials file path is read from GOOGLE_APPLICATION_CREDENTIALS
+        environment variable (secure temp file created in main.py at startup).
+        """
+        language_codes = [lang.strip() for lang in self._google_stt_language.split(',')]
+        
+        # Get credentials file path from environment
+        credentials_file = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+        if not credentials_file:
+            raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set")
+        
+        # Create Google STT with Chirp configuration
+        return google.STT(
+            model=self._google_stt_model,
+            languages=language_codes,
+            credentials_file=credentials_file,
+            location="us",
+            detect_language=False,
+            enable_word_confidence=False,
+            min_confidence_threshold=0.5,
+            sample_rate=16000,
+            interim_results=True,
+        )
+    
+    def _create_stt(self, call_type: Optional[str] = None) -> ResilientSTT:
+        """
+        Create or reuse shared resilient STT instance.
+        For HEADLESS calls, bypass cache to allow per-call STT selection.
+        """
+        selected_model = self._stt_model_override or self._stt_model
+        
+        if self._shared_stt is None or call_type == 'HEADLESS':
+            # Use Deepgram STT
+            if selected_model == "deepgram" and self._deepgram_api_key:
+                inner_stt = deepgram.STT(
+                    model=self._deepgram_model,
+                    detect_language=True,  # Auto-detect language
+                    interim_results=True,
+                    punctuate=True,
+                    filler_words=True,
+                    sample_rate=16000,
+                    endpointing_ms=25,
+                    api_key=self._deepgram_api_key,
+                )
+                resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
+                # For HEADLESS, return without caching. For regular calls, cache it.
+                if call_type == 'HEADLESS':
+                    return resilient_stt
+                else:
+                    self._shared_stt = resilient_stt
+                    
+            # Use Google STT
+            elif selected_model == "google" and os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+                logger.info("[STT] Using Google Cloud Speech-to-Text")
+                inner_stt = self._create_google_stt_instance()
+                resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
+                
+                if call_type == 'HEADLESS':
+                    return resilient_stt
+                else:
+                    self._shared_stt = resilient_stt
+            else:
+                logger.info("[STT] Using Azure OpenAI Whisper")
+                stt_prompt = "The following technical discussion includes terms like Xyne Calls, Juspay Euler, Namma Cloud, Xyne Chats, Xyne Tickets, Juspay Hyperswitch, Xyne Support, Namma Yatri, Xyne Spaces, Juspay,  Xyne Code, Xyne Training, Namma Bengaluru, Xyne Automatic, Juspay Payments Operating System, Xyne AI, Xyne Assistant, Namma Shuttle, Xyne Agent, Xyne Bot, Juspay Technologies, Namma Switch, Xyne The speaker begins by saying:"
+                inner_stt = openai.STT.with_azure(
+                    azure_endpoint=self._azure_endpoint,
+                    azure_deployment=self._azure_deployment,
+                    api_version=self._azure_api_version,
+                    api_key=self._azure_api_key,
+                    prompt=stt_prompt
+                )
+                self._shared_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
         return self._shared_stt
     
     def _create_vad(self) -> silero.VAD:
-        """Create or reuse VAD instance."""
+        """Create or reuse VAD instance with stricter settings."""
         if self._vad is None:
             self._vad = silero.VAD.load(
                 activation_threshold=self._vad_activation_threshold,
@@ -354,27 +457,26 @@ class MultiUserTranscriber:
     async def _start_session(self, participant: rtc.RemoteParticipant) -> AgentSession:
         """
         Create and start an AgentSession for a participant.
-        
         Args:
             participant: The remote participant to transcribe
-            
         Returns:
             The started AgentSession
         """
         participant_name = participant.name or participant.identity
-        
-        # Create session with VAD and STT
+        # Create session with VAD and call-type-aware STT
         session = AgentSession(
             vad=self._create_vad(),
-            stt=self._create_stt(),
+            stt=self._create_stt(call_type=self._call_type),  # Pass call type for STT selection
         )
         
         # Create agent for this participant
+        # Use dynamic turn detection based on AI state
         agent = ParticipantTranscriber(
             participant_identity=participant.identity,
             participant_name=participant_name,
             on_transcription=self._emit_transcription,
             call_id=self._call_id,
+            ai_enabled=self._is_ai_enabled(),
         )
         
         # Start session with participant-specific options
@@ -414,16 +516,26 @@ class MultiUserTranscriber:
         """Start sessions for participants already in the room."""
         for participant in self.ctx.room.remote_participants.values():
             self._on_participant_connected(participant)
-    
     def set_agent_session(self, agent_session: AgentSession):
-        """
-        Set the main AI AgentSession for interruption handling.
-        
-        Note: Built-in VAD in each transcription session should handle
-        interruption automatically, but this allows additional coordination.
-        
-        Args:
-            agent_session: The main AI AgentSession
-        """
-        self.agent_session = agent_session
-        logger.info(f"transcriber_linked_to_ai")
+        """Set the agent session for VAD-based speech interruption."""
+        self._agent_session = agent_session
+    
+    def set_ai_manager(self, ai_manager: Any):
+        """Set the AI manager to check AI voice state."""
+        self._ai_manager = ai_manager
+    
+    def set_call_type(self, call_type: str):
+        """Set the call type for STT selection (HEADLESS, AUDIO, VIDEO)."""
+        self._call_type = call_type
+    
+    def set_stt_model_override(self, model: str):
+        """Set user's STT model preference from UI (google or azure)."""
+        self._stt_model_override = model.lower()
+        logger.info(f"[MultiUserTranscriber] STT model override: {model}")
+    
+    def _is_ai_enabled(self) -> bool:
+        """Check if AI voice is currently enabled."""
+        if self._ai_manager is None:
+            return False
+        return getattr(self._ai_manager, 'ai_voice_enabled', False)
+    

@@ -20,6 +20,17 @@ class Config:
     azure_stt_api_key: str
     azure_stt_api_version: str
     azure_stt_model: str
+
+    # STT Provider Configuration (google, azure, or deepgram)
+    stt_model: str  # 'google', 'azure', or 'deepgram'
+    google_credentials_json: Optional[str]
+    google_stt_model: str  # Model for Google STT (e.g., chirp-2)
+    google_stt_language: str
+    
+    # Deepgram STT Configuration
+    deepgram_api_key: Optional[str]
+    deepgram_model: str  # Model for Deepgram STT (e.g., nova-3, flux-general-en)
+    deepgram_language: str
     
     # Azure OpenAI TTS Configuration
     azure_tts_endpoint: str
@@ -96,6 +107,17 @@ class Config:
             azure_stt_api_key=os.getenv("AZURE_OPENAI_STT_API_KEY", ""),
             azure_stt_api_version=os.getenv("AZURE_OPENAI_STT_API_VERSION", ""),
             azure_stt_model=os.getenv("AZURE_OPENAI_STT_MODEL", ""),
+
+            # STT Provider Configuration (google, azure, or deepgram, default: azure)
+            stt_model=os.getenv("STT_MODEL", "azure").lower(),
+            google_credentials_json=os.getenv("GOOGLE_CREDENTIALS_JSON"),
+            google_stt_model=os.getenv("GOOGLE_STT_MODEL", "chirp_3"),
+            google_stt_language=os.getenv("GOOGLE_STT_LANGUAGE", "en-US"),
+            
+            # Deepgram STT
+            deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
+            deepgram_model=os.getenv("DEEPGRAM_MODEL", "nova-3"),
+            deepgram_language=os.getenv("DEEPGRAM_LANGUAGE", "en-US"),
             
             # Azure OpenAI TTS
             azure_tts_endpoint=os.getenv("AZURE_OPENAI_TTS_ENDPOINT", ""),

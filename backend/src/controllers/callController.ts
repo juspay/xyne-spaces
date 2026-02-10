@@ -37,7 +37,7 @@ export class CallController {
     const correlationId = uuidv4();
     let callId = 'pending';
     try {
-      const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless } = req.body;
+        const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.name;
       const userEmail = req.user?.email;
@@ -140,6 +140,8 @@ export class CallController {
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
         projectId: channel.projectId,
+        callType: isHeadless ? 'HEADLESS' : callType,
+        sttModel: sttModel || 'azure',
       });
 
       // Create LiveKit room with metadata
@@ -198,7 +200,7 @@ export class CallController {
         await repositories.messages.createWithExecutionId({
           conversationId,
           senderId: 'system',
-          content: `<p>📞 Recording started</p>`,
+          content: `📞 Recording started`,
           msgType: 'SYSTEM',
           showInChannel: true,
           metadata: {
@@ -707,7 +709,7 @@ export class CallController {
 
           if (callMessage) {
             await repositories.messages.update(callMessage.messageId, {
-              content: `<p>📝 Recording Saved: ${title.trim()}</p>`,
+              content: `Recording Saved: ${title.trim()}`,
               metadata: {
                 ...(callMessage.metadata as Record<string, any> || {}),
                 operation: 'call_ended',

@@ -4,8 +4,10 @@ Listens to room audio, transcribes via OpenAI Whisper, and publishes results
 """
 import asyncio
 import json
+import os
 import re
 import ssl
+import tempfile
 
 import redis.asyncio as redis
 from livekit import rtc
@@ -87,6 +89,43 @@ async def entrypoint(ctx: JobContext):
     # This must be done here (not at module level) because livekit adds handlers
     # after cli.run_app() starts worker processes
     _cleanup_duplicate_handlers()
+    # Create secure Google credentials file from JSON environment variable
+    # Google Cloud SDKs read credentials from GOOGLE_APPLICATION_CREDENTIALS file path
+    if config.google_credentials_json:
+        try:
+            # Validate JSON and log project info
+            if isinstance(config.google_credentials_json, str):
+                parsed = json.loads(config.google_credentials_json)
+                logger.info(
+                    f"[Google STT] Valid credentials JSON, project={parsed.get('project_id')}"
+                )
+            else:
+                parsed = config.google_credentials_json
+                logger.info(
+                    f"[Google STT] Credentials dict format, project={parsed.get('project_id')}"
+                )
+            
+            # Create secure temporary file for credentials
+            # delete=False keeps file after close, we'll clean it up on agent shutdown
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                json.dump(parsed, f, indent=2, ensure_ascii=False)
+                credentials_file = f.name
+            
+            # Set file permissions to 600 (owner read/write only) for security
+            os.chmod(credentials_file, 0o600)
+            
+            # Set environment variable to file path for Google SDK auto-discovery
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_file
+            logger.info(f"[Google STT] Credentials file created at {credentials_file}")
+            
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"[Google STT] JSON parsing failed at position {e.pos}"
+            )
+        except Exception as e:
+            logger.error(f"[Google STT] Failed to setup credentials: {e}")
+    else:
+        logger.warning("[Google STT] Credentials not provided")
     
     # Get the room name (call_id) for file storage
     call_id = ctx.room.name
@@ -138,7 +177,7 @@ async def entrypoint(ctx: JobContext):
     event_bus = EventBus()
     
     # Initialize MultiUserTranscriber with built-in STT (replaces EarModule)
-    # Uses livekit-agents built-in VAD + Azure OpenAI Whisper STT
+    # Supports Azure OpenAI Whisper, Google Cloud STT, and Deepgram STT
     multi_user_transcriber = MultiUserTranscriber(
         ctx=ctx,
         event_bus=event_bus,
@@ -146,6 +185,13 @@ async def entrypoint(ctx: JobContext):
         azure_api_key=config.azure_stt_api_key,
         azure_api_version=config.azure_stt_api_version,
         azure_deployment=config.azure_stt_model,  # Model name is deployment name for Azure
+        stt_model=config.stt_model,
+        google_credentials_json=config.google_credentials_json,
+        google_stt_model=config.google_stt_model,
+        google_stt_language=config.google_stt_language,
+        deepgram_api_key=config.deepgram_api_key,
+        deepgram_model=config.deepgram_model,
+        deepgram_language=config.deepgram_language,
         vad_activation_threshold=config.vad_activation_threshold,
         vad_min_speech_duration=config.vad_min_speech_duration,
         vad_min_silence_duration=config.vad_min_silence_duration,
@@ -290,6 +336,18 @@ async def entrypoint(ctx: JobContext):
         if ctx.room.metadata:
             room_metadata = json.loads(ctx.room.metadata)
             logger.info(f"room_context_loaded | channel_id={room_metadata.get('channelId')}, board_id={room_metadata.get('boardId')}, project_id={room_metadata.get('projectId')}, participants={len(ctx.room.remote_participants)}")
+            
+            # Extract call type for STT selection
+            call_type = room_metadata.get("callType")
+            if call_type:
+                multi_user_transcriber.set_call_type(call_type)
+                logger.info(f"[STT Selection] Call type: {call_type}")
+            
+            # Extract user's STT model preference
+            stt_model_override = room_metadata.get("sttModel")
+            if stt_model_override:
+                multi_user_transcriber.set_stt_model_override(stt_model_override)
+                logger.info(f"[STT Selection] User selected: {stt_model_override}")
     except Exception as e:
         logger.warning(f"room_context_load_failed | error={e}")
     
@@ -354,6 +412,8 @@ async def entrypoint(ctx: JobContext):
     if ai_manager.is_ready():
         multi_user_transcriber.set_agent_session(ai_manager.get_agent_session())
         logger.info(f"agent_session_linked | component=multi_user_transcriber")
+        multi_user_transcriber.set_ai_manager(ai_manager)
+        logger.info("Linked AgentSession and AI Manager to MultiUserTranscriber for speech interruption and adaptive turn detection")
 
     # Initialize cleanup manager
     webhook = WebhookNotifier(config.backend_url, config.transcription_agent_api_key)

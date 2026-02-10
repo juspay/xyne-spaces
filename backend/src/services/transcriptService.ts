@@ -85,7 +85,7 @@ You are analyzing a call transcript to identify actionable work items that shoul
 
 CRITICAL RULES:
 - Output ONLY valid JSON
-- Generate 1-10 actionable ticket suggestions based on the call content
+- Generate 1-25 actionable ticket suggestions based on the call content
 - Each suggestion must be a concrete task mentioned or implied in the call
 - Extract assignee names ONLY if explicitly mentioned in the transcript (e.g., "John will handle this")
 - Use "unassigned" if no specific person is mentioned
@@ -704,7 +704,7 @@ Output ONLY the processed transcript, nothing else.`;
 
       // Transform and validate suggestions
       const suggestions: TicketSuggestion[] = parsed.suggestions
-        .slice(0, 10) // Limit to 10 suggestions
+        .slice(0, 25) // Limit to 25 suggestions
         .map((s: any, index: number) => ({
           id: `suggestion-${Date.now()}-${index}`,
           title: s.title || 'Untitled Task',
@@ -776,6 +776,10 @@ Output ONLY the processed transcript, nothing else.`;
 
     // Append the markdown summary after frontmatter
     fullMarkdownContent += markdownSummary;
+
+    if (ticketSuggestions && ticketSuggestions.length > 0) {
+      fullMarkdownContent += '\n\n## Suggested Tickets:\n\n';
+    }
 
     // Use repository pattern for database operations
     const message = await repositories.messages.create({
@@ -914,6 +918,18 @@ Output ONLY the processed transcript, nothing else.`;
           call.createdByUserId,
           ticketSuggestions
         );
+
+        try {
+          const { callDocumentService } = await import('@/services/callDocumentService');
+          await callDocumentService.generateAndPostDetailedSummary(
+            callId,
+            formattedTranscript,
+            callMessage.conversationId
+          );
+          logger.info(`Auto-generated detailed summary for call: ${callId}`);
+        } catch (error) {
+          logger.error(`Failed to auto-generate detailed summary for call ${callId}:`, error);
+        }
       } else {
         logger.warn(`[${callId}] ai_summary_skipped | reason=generation_failed`);
       }
