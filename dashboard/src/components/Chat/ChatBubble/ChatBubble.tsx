@@ -487,6 +487,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // Check if this is a showInChannel message (thread reply shown in main channel)
   const isShowInChannel = message.showInChannel === true;
 
+  // Check if this is a call message (system message with isCallMessage metadata)
+  const isCallMessage = isSystemMessage && metadata?.['isCallMessage'] === true;
+
   const SHOW_IN_CHANNEL_REPLY_COUNT_CHECK = 1;
 
   // Access parent message through conversation relationship
@@ -632,8 +635,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 })}
               {...((!isSystemMessage || isTicketCreationMessage) &&
                 !isMessageDeleted && { onBookmark: handleToggleBookmark })}
-              {...(!isSystemMessage &&
-                !isMessageDeleted && { onForwardMessage: handleForwardMessage })}
+              {...(!isMessageDeleted &&
+                (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage })}
               isBookmarked={isBookmarked}
               isPinned={conversation?.pinned || false}
               {...(shouldShowSendToChannel &&
@@ -676,8 +679,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 })}
               {...((!isSystemMessage || isTicketCreationMessage) &&
                 !isMessageDeleted && { onBookmark: handleToggleBookmark })}
-              {...(!isSystemMessage &&
-                !isMessageDeleted && { onForwardMessage: handleForwardMessage })}
+              {...(!isMessageDeleted &&
+                (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage })}
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
               {...(canEditMessage && !hasTicket && { onEditMessage: handleEditMessage })}
