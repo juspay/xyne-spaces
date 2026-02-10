@@ -138,6 +138,16 @@ export class LiveKitService {
     }
   }
 
+  async removeParticipant(roomName: string, participantIdentity: string): Promise<void> {
+    try {
+      await this.roomService.removeParticipant(roomName, participantIdentity);
+      logger.info(`Removed participant ${participantIdentity} from room ${roomName}`);
+    } catch (error) {
+      logger.error(`Failed to remove participant ${participantIdentity} from room ${roomName}:`, error);
+      throw error;
+    }
+  }
+
   getClientUrl(): string {
     return this.clientUrl;
   }

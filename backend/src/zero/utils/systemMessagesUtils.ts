@@ -3,6 +3,7 @@ import { Transaction } from '@rocicorp/zero';
 import { AuthData, ParticipantOperationType } from '@/zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { zql } from '../queries';
+import { repositories } from '@/database/repositories';
 
 type ParticipantMetadata = {
   operationType: ParticipantOperationType;
@@ -304,4 +305,35 @@ export async function updateCallSystemMessageOnEnd(
       durationMs,
     },
   });
+}
+
+
+// Get participants who joined a call with their user names and format the final call message
+export async function formatEndedCallMessage(
+  callId: string,
+  callStartedAt: Date,
+  userId: string
+): Promise<{ content: string; durationMs: number; participantsList: Array<{ userId: string; userName: string }> }> {
+  const participants = await repositories.calls.getJoinedParticipants(callId);
+
+  const userIds = participants.map(p => p.userId);
+  const users = await repositories.users.findMany({
+    where: {
+      id: { in: userIds },
+    },
+  });
+
+  const userMap = new Map(users.map(u => [u.id, u.name || 'Unknown']));
+
+  const participantsList = participants.map(p => ({
+    userId: p.userId,
+    userName: userMap.get(p.userId) || 'Unknown',
+  }));
+
+  const durationMs = Date.now() - new Date(callStartedAt).getTime();
+  
+  // Format the final message content
+  const content = formatFinalCallMessage(participantsList, durationMs, userId);
+
+  return { content, durationMs, participantsList };
 }

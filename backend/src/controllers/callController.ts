@@ -9,6 +9,7 @@ import { websocketService } from '@/services/websocketService';
 import { CallStatus, CallType, InvitationResponse } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
+import { formatEndedCallMessage } from '@/zero/utils/systemMessagesUtils';
 
 export class CallController {
   /**
@@ -1145,6 +1146,116 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to leave call:', error);
       res.status(500).json({ success: false, error: 'Failed to leave call' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/end-for-all
+   * Host ends the call for everyone by removing all participants and marking call as ended
+   */
+  endCallForAll = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        logger.warn(`[CallController] Call not found for end-for-all: ${callId}`);
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        logger.warn(`[CallController] User ${userId} attempted to end call ${callId} but is not the host`);
+        res.status(403).json({ success: false, error: 'Only the call host can end the call for everyone' });
+        return;
+      }
+
+      const now = new Date();
+      const metadata = call.metadata as { systemMessageId?: string } | null;
+      const systemMessageId = metadata?.systemMessageId;
+
+      let messageContent: string | undefined;
+      let durationMs: number | undefined;
+      if (systemMessageId) {
+        const formatted = await formatEndedCallMessage(
+          call.id,
+          call.startedAt,
+          userId
+        );
+        messageContent = formatted.content;
+        durationMs = formatted.durationMs;
+      }
+
+      await db.$transaction(async (tx) => {
+        // Mark call as ended
+        await tx.call.update({
+          where: { id: call.id },
+          data: {
+            status: CallStatus.ENDED,
+            endedAt: now,
+          },
+        });
+
+        // Update all active participants to mark them as left
+        await repositories.calls.markAllParticipantsAsLeft(call.id, now, tx);
+
+        // Update system message if exists
+        if (systemMessageId && messageContent) {
+          await tx.message.update({
+            where: { messageId: systemMessageId },
+            data: {
+              content: messageContent,
+              metadata: {
+                isCallMessage: true,
+                callId: call.externalId,
+                operation: 'call_ended',
+                durationMs,
+              },
+            },
+          });
+        }
+      });
+
+      logger.info(`[CallController] Database transaction completed for ending call ${callId}`);
+
+      try {
+        const participants = await livekitService.listParticipants(callId);
+        
+        // Filter out LiveKit agents (default pattern: agent-<id>)
+        const participantsToRemove = participants.filter(participant => 
+          !participant.identity.startsWith('agent-')
+        );
+        
+        const removalPromises = participantsToRemove.map(participant => 
+          livekitService.removeParticipant(callId, participant.identity)
+            .catch(error => {
+              logger.warn(`[CallController] Failed to remove participant ${participant.identity}:`, error);
+            })
+        );
+        
+        await Promise.all(removalPromises);
+        
+      } catch (liveKitError) {
+        logger.warn(`[CallController] Failed to remove participants from room ${callId}:`, liveKitError);
+      }
+
+      logger.info(`[CallController] Host ${userId} successfully ended call ${callId} for everyone`);
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Failed to end call for all:', error);
+      res.status(500).json({ success: false, error: 'Failed to end call for everyone' });
     }
   };
 
