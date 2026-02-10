@@ -208,9 +208,7 @@ export class CallController {
           },
         }, messageId);
 
-        // Update channel activity
-        await repositories.channels.updateLastActivity(finalChannelId);
-        logger.info(`[${callExternalId}] system_message_created | message_id=${messageId}, message_subtype=call_started`);
+        logger.info(`Created system message for headless recording: ${callExternalId}`);
       }
 
       // Return credentials with resolved channelId

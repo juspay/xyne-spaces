@@ -815,12 +815,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             },
           });
 
-          // Update channel last activity
-          await tx.mutate.channels.update({
-            id: channelId,
-            lastActivityAt: now,
-          });
-
           // Add creator as conversation participant
           await tx.mutate.conversation_participants.insert({
             id: conversationParticipantId,
@@ -957,12 +951,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               updatedBy: authData.sub,
               updatedByName: requestingUser.name,
             },
-          });
-
-          // Update channel last activity
-          await tx.mutate.channels.update({
-            id: channelId,
-            lastActivityAt: now,
           });
 
           // Add creator as conversation participant

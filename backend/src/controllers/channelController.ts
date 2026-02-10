@@ -129,9 +129,6 @@ export class ChannelController {
         initialMessageId: createdMessage.messageId,
       });
 
-      // Update channel last activity
-      await this.channelRepository.updateLastActivity(channelId);
-
       // Reopen DM for all participants so they can see the system message
       await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
 
@@ -1603,9 +1600,6 @@ export class ChannelController {
           await this.channelRepository.update(channelId, {
             name: newChannelName
           });
-          
-          // Update current channel's last activity
-          await this.channelRepository.updateLastActivity(channelId);
 
           // Send system message for added participants
           if (participantsAddedList.length > 0) {
