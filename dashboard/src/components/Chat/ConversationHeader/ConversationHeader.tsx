@@ -92,7 +92,7 @@ const ConversationHeader = ({
             className='text-base font-semibold hover:underline tracking-[-0.17px] flex items-center gap-2'
             data-testid='channel-info-trigger'
           >
-            <span>{displayName}</span>
+            <span className='visual-regression-hide'>{displayName}</span>
             {isDM && (
               <StatusIndicator
                 statusEmoji={dmUser?.presenceStatus?.statusEmoji}

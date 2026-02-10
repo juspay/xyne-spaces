@@ -162,7 +162,7 @@ function renderCallItem({
           <div className='flex-1 min-w-0'>
             <h3 className='text-sm font-medium text-[#384049] dark:text-[#F1F3F4] break-words'>
               {isChannelCall ? (
-                <span className='flex items-center gap-1'>
+                <span className='flex items-center gap-1 visual-regression-hide'>
                   <Hash size={14} className='flex-shrink-0' />
                   {channel?.name || 'Unknown Channel'}
                 </span>
@@ -186,7 +186,7 @@ function renderCallItem({
                 </>
               )}
             </h3>
-            <div className='flex items-center gap-2 mt-0.5 flex-wrap'>
+            <div className='flex items-center gap-2 mt-0.5 flex-wrap visual-regression-hide'>
               <span
                 className={`text-xs ${isMissedCall ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}
               >

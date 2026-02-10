@@ -8,12 +8,15 @@ import * as dotenv from 'dotenv';
 import { config } from '@/config';
 
 import { apiLogger, cucumberLogger } from '@/lib/logger';
+import { getScreenshotDirectories } from '@/lib/paths';
 
 import { CustomWorld, getBrowserLauncher, scope } from '@/fixtures/cucumber.world';
 
-// Ensure screenshot directory exists
-const timestamp = process.env.REPORT_TIMESTAMP || 'latest';
-const screenshotDir = path.resolve(__dirname, '..', 'report', timestamp, 'screenshots');
+// Get screenshot directories from shared utility
+const {
+  failureScreenshots: failureScreenshotDir,
+  visualRegression: visualRegressionScreenshotDir,
+} = getScreenshotDirectories();
 
 setDefaultTimeout(config.timeout);
 
@@ -30,9 +33,12 @@ BeforeAll(async function () {
     headless: config.headless,
   });
 
-  // Create screenshot directory if it doesn't exist
-  if (!fs.existsSync(screenshotDir)) {
-    fs.mkdirSync(screenshotDir, { recursive: true });
+  // Create screenshot directories if they don't exist
+  if (!fs.existsSync(failureScreenshotDir)) {
+    fs.mkdirSync(failureScreenshotDir, { recursive: true });
+  }
+  if (!fs.existsSync(visualRegressionScreenshotDir)) {
+    fs.mkdirSync(visualRegressionScreenshotDir, { recursive: true });
   }
 });
 
@@ -68,6 +74,43 @@ After({ tags: '@e2e or @ui' }, async function (this: CustomWorld, scenario) {
   // Sessions will be cleaned up by the AfterAll hook when the entire test run completes
 });
 
+// After hook to capture screenshot for ALL scenarios (visual regression testing)
+// This runs for every scenario (passed or failed) and saves to visual-regression-screenshots directory
+After({ tags: '@e2e or @ui' }, async function (this: CustomWorld, scenario) {
+  if (this.page) {
+    const scenarioName = scenario.pickle.name.replace(/[^a-zA-Z0-9]/g, '_');
+    const status = scenario.result?.status === Status.PASSED ? 'passed' : 'failed';
+    const visualRegressionScreenshotName = `visual_regression_${scenarioName}_${status}`;
+
+    try {
+      await new Promise((r) => setTimeout(r, 500));
+      await this.page.$$eval('.visual-regression-hide', (els) => {
+        els.forEach((el) => {
+          el.style.setProperty('opacity', '0', 'important');
+        });
+      });
+      await new Promise((r) => setTimeout(r, 500));
+
+      await this.page.screenshot({
+        path: path.join(visualRegressionScreenshotDir, `${visualRegressionScreenshotName}.png`),
+        fullPage: true,
+      });
+
+      await this.page.$$eval('.visual-regression-hide', (els) => {
+        els.forEach((el) => {
+          el.style.removeProperty('opacity');
+        });
+      });
+
+      cucumberLogger.info(
+        `Visual regression screenshot saved: ${visualRegressionScreenshotName}.png\n`
+      );
+    } catch (error) {
+      cucumberLogger.error('Failed to capture visual regression screenshot:', error);
+    }
+  }
+});
+
 // General before hook for all scenarios
 Before(async function (this: CustomWorld, scenario) {
   cucumberLogger.info(`🚀 Starting scenario: ${scenario.pickle.name}`);
@@ -77,9 +120,9 @@ Before(async function (this: CustomWorld, scenario) {
 After(async function (this: CustomWorld, scenario) {
   const status = scenario.result?.status;
   if (status === Status.FAILED) {
-    cucumberLogger.info(`❌ Scenario failed: ${scenario.pickle.name}\n`);
+    cucumberLogger.info(`❌ Scenario failed: ${scenario.pickle.name}`);
   } else if (status === Status.PASSED) {
-    cucumberLogger.info(`✅ Scenario passed: ${scenario.pickle.name}\n`);
+    cucumberLogger.info(`✅ Scenario passed: ${scenario.pickle.name}`);
   }
 });
 

@@ -9,6 +9,7 @@ import { BrowserType, config } from '@/config';
 
 import { createApiClient } from '@/lib/api-client';
 import { browserLogger, cucumberLogger } from '@/lib/logger';
+import { getScreenshotDirectories } from '@/lib/paths';
 
 import { CapturedApiResponse, StoredUserContext } from '@/fixtures/cucumber.types';
 
@@ -246,12 +247,11 @@ class TestWorld extends World implements CustomWorld {
     if (!this.page) return null;
 
     try {
-      const timestamp = process.env.REPORT_TIMESTAMP || 'latest';
-      const screenshotDir = path.resolve(__dirname, '..', 'report', timestamp, 'screenshots');
-      await fs.promises.mkdir(screenshotDir, { recursive: true });
+      const { failureScreenshots: failureScreenshotDir } = getScreenshotDirectories();
+      await fs.promises.mkdir(failureScreenshotDir, { recursive: true });
 
       const sanitizedName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const screenshotPath = path.join(screenshotDir, `${sanitizedName}.png`);
+      const screenshotPath = path.join(failureScreenshotDir, `${sanitizedName}.png`);
 
       return await this.page.screenshot({
         path: screenshotPath,

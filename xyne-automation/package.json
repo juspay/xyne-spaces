@@ -8,6 +8,7 @@
     "test:api": "npx cucumber-js --profile api",
     "test:ui": "npx cucumber-js --profile ui",
     "test:e2e": "npx cucumber-js --profile e2e",
+    "test:visual-regression": "TEST_ENV=local ts-node -r tsconfig-paths/register tests/non-functional/visual-regression.ts",
     "test:debug": "NODE_OPTIONS='--inspect' npx cucumber-js --format progress",
     "clean": "rm -rf report/*",
     "lint": "eslint . && npm run type-check",
@@ -38,6 +39,10 @@
     "typescript-eslint": "^8.52.0"
   },
   "dependencies": {
-    "axios": "^1.13.2"
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "axios": "^1.13.2",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0"
   }
 }

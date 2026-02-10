@@ -228,7 +228,9 @@ const Info = ({
             <ChannelIcon channel={channel} />
           </div>
           <div>
-            <div className='text-[17px] font-medium text-[#181B1D]'>{channelDisplayName}</div>
+            <div className='text-[17px] font-medium text-[#181B1D] visual-regression-hide'>
+              {channelDisplayName}
+            </div>
             <div className='flex items-center gap-x-2'>
               <div className='flex items-center gap-1'>
                 <LucideKanbanSquare color='#788187' size={14} />

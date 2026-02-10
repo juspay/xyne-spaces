@@ -30,7 +30,7 @@ export function ParticipantAvatar({
   return (
     <div
       className={cn(
-        'rounded-full bg-gradient-to-br flex items-center justify-center text-white font-bold shadow-lg',
+        'rounded-full bg-gradient-to-br flex items-center justify-center text-white font-bold shadow-lg visual-regression-hide',
         gradientFrom,
         gradientTo,
         showBorder && 'ring-2 ring-white/20',

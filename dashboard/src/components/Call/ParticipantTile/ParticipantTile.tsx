@@ -129,7 +129,7 @@ export function ParticipantTile({
               src='/images/xyne_logo.png'
               alt='Xyne Automatic'
               className={cn(
-                'rounded-full object-cover',
+                'rounded-full object-cover visual-regression-hide',
                 avatarSize === 'small'
                   ? 'w-8 h-8'
                   : avatarSize === 'medium'
@@ -163,7 +163,7 @@ export function ParticipantTile({
       {/* Participant Info Overlay */}
       <div
         className={cn(
-          'absolute text-white font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]',
+          'absolute text-white font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] visual-regression-hide',
           compact
             ? 'bottom-0.5 left-0.5 text-[9px]'
             : 'bottom-1 left-1 sm:bottom-2 sm:left-2 text-[10px] sm:text-xs max-w-[calc(100%-0.5rem)] truncate',

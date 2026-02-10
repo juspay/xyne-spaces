@@ -137,7 +137,7 @@ const Avatar = ({
     : { bg: 'bg-muted', text: 'text-muted-foreground' };
 
   return (
-    <AvatarRoot className={cn(sizeClass, className)}>
+    <AvatarRoot className={cn(sizeClass, className, 'visual-regression-hide')}>
       {user?.picture && <AvatarImage src={user.picture} alt={user?.name || 'User avatar'} />}
 
       <AvatarFallback className={cn(colorClass.bg, colorClass.text, sizeClass)}>

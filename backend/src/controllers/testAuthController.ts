@@ -102,7 +102,6 @@ export class TestAuthController {
                         logger.warn(`[${requestId}] Default organization not found`);
                     }
 
-                    
                     const essentialResources = [
                         { name: 'TICKETS', description: 'Ticket management endpoints' },
                         { name: 'PROJECTS', description: 'Project management endpoints' },
@@ -209,7 +208,7 @@ export class TestAuthController {
 
             if (isNewUser) {
                 res.cookie('is_new_user', 'true', {
-                    httpOnly: true,
+                    httpOnly: false,
                     secure: false,
                     sameSite: 'strict',
                     path: '/',

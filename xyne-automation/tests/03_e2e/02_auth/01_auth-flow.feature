@@ -16,15 +16,14 @@ Feature: Authentication E2E Flow
     And the user data should be stored in global context as "user1"
     And the user should be redirected to "/onboarding"
 
-  # TODO: Skipping temporarily because in main it is failing
-  # Scenario: User skips onboarding
-  #   Given using browser "e2e-browser1"
-  #   When I click the button with text "Get Started"
-  #   And I click the button with text "->"
-  #   And I click the button with text "->"
-  #   And I click the button with text "->"
-  #   And I click the button with text "Open My Workspace"
-  #   Then the user should be redirected to "/chat"
+  Scenario: User skips onboarding
+    Given using browser "e2e-browser1"
+    When I click the button with text "Get Started"
+    And I click the button with text "->"
+    And I click the button with text "->"
+    And I click the button with text "->"
+    And I click the button with text "Open My Workspace"
+    Then the user should be redirected to "/chat"
 
   Scenario: Cleanup browser session
     Given close the browser "e2e-browser1"
