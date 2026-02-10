@@ -71,10 +71,10 @@ type BlockNoteBlock = BlockNoteTextBlock | BlockNoteBulletListBlock;
  */
 function sanitizeInput(input: string | null): string {
   if (!input) return '';
-  
+
   // Remove null bytes and other control characters except newlines and tabs
   const sanitized = input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-  
+
   // Limit length to prevent excessive token usage (adjust as needed)
   const maxLength = 100000; // ~100K chars
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
@@ -323,7 +323,7 @@ function convertMarkdownToBlockNote(markdown: string): BlockNoteBlock[] {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    
+
     // Skip empty lines at the beginning
     if (!line.trim() && blocks.length === 0) continue;
 
@@ -376,7 +376,7 @@ function convertMarkdownToBlockNote(markdown: string): BlockNoteBlock[] {
       // Handle bold text **text**
       const parts = line.split(/\*\*(.*?)\*\*/);
       const content: any[] = [];
-      
+
       parts.forEach((part, idx) => {
         if (part) {
           if (idx % 2 === 1) {
@@ -472,11 +472,16 @@ export class CallDocumentService {
   }
 
   /**
-   * Generate PRD from transcript and summary
+   * Generate a PRD from transcript and summary
+   * @param transcript - The call transcript content
+   * @param summary - Optional call summary
+   * @param customPrompt - Optional custom instructions to guide PRD generation (max 5000 chars)
+   * @returns PRD document or null if generation fails
    */
   async generatePRDFromTranscript(
     transcript: string,
-    summary: string | null
+    summary: string | null,
+    customPrompt?: string
   ): Promise<PRDDocument | null> {
     const agent = this.createAgent();
     if (!agent) {
@@ -488,10 +493,15 @@ export class CallDocumentService {
       // Sanitize inputs to prevent injection attacks
       const sanitizedTranscript = sanitizeInput(transcript);
       const sanitizedSummary = sanitizeInput(summary);
-      
-      const prompt = PRD_GENERATION_PROMPT
+      const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
+
+      let prompt = PRD_GENERATION_PROMPT
         .replace('{transcript}', sanitizedTranscript)
         .replace('{summary}', sanitizedSummary || 'No summary available');
+
+      if (sanitizedCustomPrompt) {
+        prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this PRD. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
+      }
 
       const result = await agent.execute({
         messages: [createUserMessage(prompt)],
@@ -516,6 +526,7 @@ export class CallDocumentService {
       // Extract JSON from response
       const jsonMatch = lastMessage.content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
+        // Fallback: try to find JSON if wrapped in markdown code blocks that weren't caught
         logger.error('[CallDocumentService] Could not find JSON in PRD response');
         return null;
       }
@@ -542,7 +553,7 @@ export class CallDocumentService {
     try {
       // Sanitize input to prevent injection attacks
       const sanitizedTranscript = sanitizeInput(transcript);
-      
+
       const prompt = DETAILED_SUMMARY_PROMPT.replace('{transcript}', sanitizedTranscript);
 
       const result = await agent.execute({
@@ -754,10 +765,10 @@ A Product Requirements Document has been generated from this call discussion.
       });
 
       await repositories.conversations.incrementReplyCount(conversationId);
-      
+
       // Update the original call message with PRD canvas URL
       await this.updateCallMessageMetadata(conversationId, callId, 'prdCanvasUrl', canvasUrl);
-      
+
       logger.info(`[CallDocumentService] Posted PRD link to conversation ${conversationId}`);
     } catch (error) {
       logger.error('[CallDocumentService] Failed to post PRD to conversation:', error);
@@ -802,10 +813,10 @@ A comprehensive detailed summary has been generated from this call.
       });
 
       await repositories.conversations.incrementReplyCount(conversationId);
-      
+
       // Update call message with canvas URL
       await this.updateCallMessageMetadata(conversationId, callId, 'detailedSummaryCanvasUrl', canvasUrl);
-      
+
       logger.info(`[CallDocumentService] Posted detailed summary link to conversation ${conversationId}`);
     } catch (error) {
       logger.error('[CallDocumentService] Failed to post detailed summary to conversation:', error);
@@ -824,7 +835,7 @@ A comprehensive detailed summary has been generated from this call.
   ): Promise<void> {
     try {
       const prisma = DatabaseClient.getInstance();
-      
+
       // Find the original call message (not bot messages that also have callId)
       const callMessage = await prisma.message.findFirst({
         where: {
@@ -876,11 +887,12 @@ A comprehensive detailed summary has been generated from this call.
     transcript: string,
     summary: string | null,
     _createdByUserId: string,
-    conversationId: string
+    conversationId: string,
+    customPrompt?: string
   ): Promise<{ success: boolean; canvasUrl?: string; error?: string }> {
     try {
       // 1. Generate PRD from transcript
-      const prd = await this.generatePRDFromTranscript(transcript, summary);
+      const prd = await this.generatePRDFromTranscript(transcript, summary, customPrompt);
       if (!prd) {
         return { success: false, error: 'Failed to generate PRD from transcript' };
       }

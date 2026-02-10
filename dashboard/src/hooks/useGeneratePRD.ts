@@ -16,7 +16,11 @@ interface GeneratePRDResponse {
 }
 
 interface UseGeneratePRDReturn {
-  generatePRD: (callId: string, messageId?: string) => Promise<GeneratePRDResult>;
+  generatePRD: (
+    callId: string,
+    messageId?: string,
+    customPrompt?: string,
+  ) => Promise<GeneratePRDResult>;
   isLoading: boolean;
   error: string | null;
 }
@@ -30,14 +34,26 @@ export function useGeneratePRD(): UseGeneratePRDReturn {
   const [error, setError] = useState<string | null>(null);
 
   const generatePRD = useCallback(
-    async (callId: string, messageId?: string): Promise<GeneratePRDResult> => {
+    async (
+      callId: string,
+      messageId?: string,
+      customPrompt?: string,
+    ): Promise<GeneratePRDResult> => {
       setIsLoading(true);
       setError(null);
 
       try {
+        // Validate customPrompt length
+        if (customPrompt && customPrompt.length > 5000) {
+          throw new Error('Custom prompt must be less than 5000 characters');
+        }
+
         const response = await apiInstance.post<GeneratePRDResponse>(
           `/calls/${callId}/generate-prd`,
-          { messageId },
+          {
+            messageId,
+            customPrompt: customPrompt?.trim(),
+          },
         );
 
         const data = response.data;
