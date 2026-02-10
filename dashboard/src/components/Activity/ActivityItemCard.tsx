@@ -6,6 +6,7 @@ import { mutators } from '../../zero/mutators';
 import { useChannel } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../hooks/useAuth';
+import { usePlatform } from '../../hooks/usePlatform';
 import UserAvatar from '../UserAvatar/UserAvatar';
 import { AvatarSize } from '@juspay/blend-design-system';
 import { formatDistanceToNow, isToday } from 'date-fns';
@@ -47,6 +48,7 @@ export const ActivityItemCard = ({
   const navigate = useNavigate();
   const context = useAuthContextValues();
   const zero = useZero();
+  const { isMobile } = usePlatform();
 
   const channel = useChannel(channelId || '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
@@ -98,19 +100,28 @@ export const ActivityItemCard = ({
       <div className='flex flex-1 flex-col min-w-0 overflow-hidden'>
         <div className='flex w-full items-start justify-between gap-2 flex-wrap'>
           <div className='flex flex-wrap items-baseline gap-x-1.5 text-sm leading-snug min-w-0 flex-1'>
-            <UserHoverWrapper userId={actorId}>
-              <button
-                className='font-semibold text-[#181B1D] hover:underline flex-shrink-0'
-                onClick={e => e.stopPropagation()}
-              >
-                {actorName}
-              </button>
-            </UserHoverWrapper>
+            {isMobile ? (
+              <span className='font-semibold text-[#181B1D]'>{actorName}</span>
+            ) : (
+              <UserHoverWrapper userId={actorId}>
+                <button
+                  className='font-semibold text-[#181B1D] hover:underline flex-shrink-0'
+                  onClick={e => e.stopPropagation()}
+                >
+                  {actorName}
+                </button>
+              </UserHoverWrapper>
+            )}
 
             <span className='text-[#505B62] flex-shrink-0'>{description}</span>
 
             {actorAction !== 'paused_from_assignment' &&
-              actorAction !== 'resumed_from_assignment' && (
+              actorAction !== 'resumed_from_assignment' &&
+              (isMobile ? (
+                <span className='font-semibold text-[#3B4145]'>
+                  {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
+                </span>
+              ) : (
                 <GenericMentionHoverPopover
                   data={{
                     icon: '#',
@@ -125,7 +136,7 @@ export const ActivityItemCard = ({
                     {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
                   </button>
                 </GenericMentionHoverPopover>
-              )}
+              ))}
           </div>
 
           <span className='flex-shrink-0 whitespace-nowrap text-xs text-[#505B62] ml-auto sm:ml-2'>

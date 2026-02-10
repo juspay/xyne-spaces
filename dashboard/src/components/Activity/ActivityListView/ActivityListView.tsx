@@ -160,7 +160,10 @@ const ActivityListView = (): ReactElement => {
     const unread = window.localStorage.getItem('activity_unread_toggle');
     return unread === 'true';
   });
-  const [active, setActive] = useState<'condensed' | 'detailed'>('condensed');
+  const [active, setActive] = useState<'condensed' | 'detailed'>(() => {
+    const viewMode = window.localStorage.getItem('activity_view_mode');
+    return viewMode === 'detailed' ? 'detailed' : 'condensed';
+  });
   const [actionableToggle, setActionableToggle] = useState<boolean>(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
@@ -227,6 +230,11 @@ const ActivityListView = (): ReactElement => {
   const handleActionableToggle = useCallback((checked: boolean): void => {
     setActionableToggle(checked);
     window.localStorage.setItem('activity_actionable_toggle', String(checked));
+  }, []);
+
+  const handleViewModeChange = useCallback((mode: 'condensed' | 'detailed'): void => {
+    setActive(mode);
+    window.localStorage.setItem('activity_view_mode', mode);
   }, []);
 
   const visibleTabs = useMemo(() => {
@@ -597,7 +605,7 @@ const ActivityListView = (): ReactElement => {
                 {/* Condensed View */}
                 <button
                   onClick={() => {
-                    setActive('condensed');
+                    handleViewModeChange('condensed');
                     setShowMobileMenu(false);
                   }}
                   className={cn(
@@ -612,7 +620,7 @@ const ActivityListView = (): ReactElement => {
                 {/* Detailed View */}
                 <button
                   onClick={() => {
-                    setActive('detailed');
+                    handleViewModeChange('detailed');
                     setShowMobileMenu(false);
                   }}
                   className={cn(
