@@ -451,7 +451,7 @@ export async function downloadUIUpdate(): Promise<boolean> {
         setupBlurListener(mainWindow, remoteConfig);
       } else {
         log.info('[UIUpdater] Window NOT visible, applying update immediately...');
-        applyAndReload(mainWindow, remoteConfig);
+        void applyAndReload(mainWindow, remoteConfig);
       }
     } else {
       log.info('[UIUpdater] No valid window found, skipping update application');
@@ -475,7 +475,7 @@ function setupBlurListener(mainWindow: BrowserWindow, releaseConfig: ReleaseConf
     log.info('[UIUpdater] Blur event received, hasStagedUpdatePending:', hasStagedUpdatePending);
     if (hasStagedUpdatePending && !mainWindow.isDestroyed()) {
       log.info('[UIUpdater] Window lost focus, applying staged update...');
-      applyAndReload(mainWindow, releaseConfig);
+      void applyAndReload(mainWindow, releaseConfig);
     }
   };
   
@@ -488,9 +488,9 @@ function setupBlurListener(mainWindow: BrowserWindow, releaseConfig: ReleaseConf
 }
 
 /**
- * Apply the staged update and reload the window
+ * Apply the staged update and reload the window without cache
  */
-function applyAndReload(mainWindow: BrowserWindow, releaseConfig: ReleaseConfig): void {
+async function applyAndReload(mainWindow: BrowserWindow, releaseConfig: ReleaseConfig): Promise<void> {
   // Clean up blur listener
   if (blurListenerCleanup) {
     blurListenerCleanup();
@@ -508,9 +508,20 @@ function applyAndReload(mainWindow: BrowserWindow, releaseConfig: ReleaseConfig)
   
   saveActiveReleaseConfig(releaseConfig);
   
-  // Reload the window with new UI
+  // Reload the window with new UI (clear cache first)
   if (!mainWindow.isDestroyed()) {
-    log.info('[UIUpdater] Reloading window with new UI...');
+    log.info('[UIUpdater] Clearing network cache and reloading window with new UI...');
+    
+    try {
+      const session = mainWindow.webContents.session;
+      
+      // Clear network cache (where bundles and assets are cached)
+      await session.clearCache();
+      log.info('[UIUpdater] Network cache cleared');
+    } catch (error) {
+      log.error('[UIUpdater] Error clearing cache:', error);
+    }
+    
     const bundledUrl = 'xyne-spaces://./';
     void mainWindow.loadURL(bundledUrl);
   }

@@ -7,6 +7,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 declare global {
   interface Window {
     pdfjsWasmDir?: string;
+    __APP_VERSION__?: string;
   }
 }
 

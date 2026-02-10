@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { X, User, SmilePlus, PauseCircle } from 'lucide-react';
+import { X, User, SmilePlus, Copy, PauseCircle } from 'lucide-react';
 import { useZero } from '@rocicorp/zero/react';
 import { useAuth } from '../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -19,6 +19,8 @@ import { useSelf } from '../../hooks/useUsers';
 import { mutators } from '../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { apiInstance } from '../../services/clients/apiClient';
+import { logger } from '../../utils/logger';
+import { toast } from 'sonner';
 
 const Settings = (): ReactElement => {
   const { logout } = useAuth();
@@ -317,6 +319,48 @@ const Settings = (): ReactElement => {
             label='Show send indicators'
           />
         </div>
+      </div>
+
+      <hr className='border-border w-full' />
+
+      <div className='text-xs flex flex-col gap-1 text-gray-400'>
+        <div>Version: {__APP_VERSION__}</div>
+        {logger.zeroClientID && (
+          <button
+            onClick={() => {
+              navigator.clipboard
+                .writeText(logger.zeroClientID!)
+                .then(() => {
+                  toast.success('Client ID copied to clipboard');
+                })
+                .catch(() => {
+                  toast.error('Failed to copy Client ID');
+                });
+            }}
+            className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+          >
+            <span>Client ID: {logger.zeroClientID}</span>
+            <Copy className='size-3' />
+          </button>
+        )}
+        {logger.zeroClientGroupID && (
+          <button
+            onClick={() => {
+              navigator.clipboard
+                .writeText(logger.zeroClientGroupID!)
+                .then(() => {
+                  toast.success('Client Group ID copied to clipboard');
+                })
+                .catch(() => {
+                  toast.error('Failed to copy Client Group ID');
+                });
+            }}
+            className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+          >
+            <span>Client Group ID: {logger.zeroClientGroupID}</span>
+            <Copy className='size-3' />
+          </button>
+        )}
       </div>
 
       <hr className='border-border w-full' />

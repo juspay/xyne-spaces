@@ -128,6 +128,13 @@
           }
         }
       ],
+       [
+        "@semantic-release/npm",
+        {
+          "npmPublish": false,
+          "pkgRoot": "dashboard"
+        }
+      ],
       [
         "@semantic-release/npm",
         {
@@ -140,6 +147,7 @@
         {
           "assets": [
             "package.json",
+            "dashboard/package.json",
             "CHANGELOG.md"
           ],
           "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",

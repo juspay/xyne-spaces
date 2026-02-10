@@ -3,6 +3,9 @@ import App from './App.tsx';
 import './global.css';
 import { mixpanelService } from './services/Analytics/mixpanelService';
 
+// Expose app version to window for Electron access
+window.__APP_VERSION__ = __APP_VERSION__;
+
 // Store original console.error
 // eslint-disable-next-line no-console
 const originalConsoleError = console.error;

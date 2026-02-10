@@ -12,6 +12,7 @@ import { agentAuthService } from '../services/agent-auth';
 import { BrowserWindow } from 'electron';
 import { Logger } from '../services/logger/pre-enrollment-logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
+import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
 
 // Forward logs to renderer process
 (log.transports as any).forwardToRenderer = (message: any) => {
@@ -57,6 +58,9 @@ export function getIsQuitting(): boolean {
 // Handle before-quit to allow Cmd+Q to actually quit the app
 app.on('before-quit', async () => {
   isQuitting = true;
+
+  // Stop version checker
+  stopVersionChecker();
 
   // Gracefully stop agent auth server
   try {
@@ -105,6 +109,15 @@ async function initializeApp(): Promise<void> {
   setupRequestInterceptor();
   setupIpcHandlers();
 
+  // Clear network cache on app start to ensure fresh assets
+  try {
+    const { session } = await import('electron');
+    await session.defaultSession.clearCache();
+    log.info('[App] Network cache cleared on startup');
+  } catch (error) {
+    log.error('[App] Failed to clear cache on startup:', error);
+  }
+
   await createMainWindow();
   setWindowReferences();
 
@@ -119,6 +132,9 @@ async function initializeApp(): Promise<void> {
   }
   // Auto-start docs publish server in the background
   startDocsPublishServerInBackground();
+
+  // Start version checker to auto-reload on new deployments
+  startVersionChecker();
 
   // setup app state listners 
   setupAppStateListeners();

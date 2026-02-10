@@ -108,6 +108,15 @@ export interface ElectronAPI {
     getActiveSessionCount: () => Promise<number>;
   };
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
+  getBundleVersion: () => Promise<string | null>;
+  onAppUpdateAvailable: (
+    callback: (data: {
+      currentVersion: string;
+      latestVersion: string;
+      loadType: 'manual' | 'auto';
+    }) => void,
+  ) => () => void;
+  applyAppUpdate: () => void;
 }
 
 declare global {

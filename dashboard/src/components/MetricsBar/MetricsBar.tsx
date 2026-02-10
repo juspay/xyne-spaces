@@ -1,10 +1,8 @@
-import { ReactElement, useState, useCallback } from 'react';
-import { ChevronsUpDown, UserRound, MessageCircle, Phone, Copy } from 'lucide-react';
+import { ReactElement, useState, useCallback, useEffect } from 'react';
+import { ChevronsUpDown, UserRound, MessageCircle, Phone, RefreshCw } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../../machines/stateMachine';
-import { logger } from '../../utils/logger';
 import Tooltip from '../ui/Tooltip/Tooltip';
-import { toast } from 'sonner';
 
 type MetricsMode = 'today' | 'allTime';
 
@@ -33,12 +31,43 @@ const formatDuration = (durationMinutes: number): string => {
 
 const MetricsBar = (): ReactElement => {
   const [mode, setMode] = useState<MetricsMode>('today');
+  const [updateAvailable, setUpdateAvailable] = useState<{
+    currentVersion: string;
+    latestVersion: string;
+    loadType: 'manual' | 'auto';
+  } | null>(null);
 
   // Subscribe to metrics from global XState store
   const { today, allTime, loading, error } = useSelector(
     stateMachineActor,
     state => state.context.metrics,
   );
+
+  // Listen for app update available event from Electron
+  useEffect(() => {
+    if (!window.electronAPI?.onAppUpdateAvailable) return;
+
+    const cleanup = window.electronAPI.onAppUpdateAvailable(data => {
+      // Validate the data structure
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        typeof data.currentVersion !== 'string' ||
+        typeof data.latestVersion !== 'string' ||
+        (data.loadType !== 'manual' && data.loadType !== 'auto')
+      ) {
+        console.warn('Invalid app update data received:', data);
+        return;
+      }
+
+      if (data.loadType === 'auto') {
+        window.location.reload();
+      }
+      setUpdateAvailable(data);
+    });
+
+    return cleanup;
+  }, []);
 
   // Get current period's metrics
   const currentMetrics = mode === 'today' ? today : allTime;
@@ -57,17 +86,8 @@ const MetricsBar = (): ReactElement => {
     setMode(prev => (prev === 'today' ? 'allTime' : 'today'));
   };
 
-  const handleCopySessionId = (): void => {
-    if (logger.zeroClientID) {
-      navigator.clipboard
-        .writeText(logger.zeroClientID)
-        .then(() => {
-          toast.success('Zero Client ID copied to clipboard');
-        })
-        .catch(() => {
-          toast.error('Failed to copy Zero Client ID');
-        });
-    }
+  const handleApplyUpdate = (): void => {
+    window.electronAPI?.applyAppUpdate?.();
   };
 
   const displayLabel = mode === 'today' ? 'Today' : 'All Time';
@@ -130,25 +150,27 @@ const MetricsBar = (): ReactElement => {
         </span>
       </div>
 
-      <div className='w-px h-4 bg-[var(--metrics-bar-divider)]' />
-
-      <Tooltip
-        content={logger.zeroClientID || 'No Zero Client ID'}
-        side='bottom'
-        delayDuration={300}
-      >
-        <button
-          onClick={handleCopySessionId}
-          className='flex items-center gap-2 transition-all duration-300 ease-out cursor-pointer hover:opacity-80'
-          disabled={!logger.zeroClientID}
-        >
-          <Copy className='w-4 h-4 text-[var(--metrics-bar-color)]' />
-          <span className='font-sans font-normal text-xs leading-none tracking-normal text-[var(--metrics-bar-color)]'>
-            Zero Client ID
-          </span>
-          <span className='font-sans font-semibold text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] transition-all duration-300 ease-out visual-regression-hide'></span>
-        </button>
-      </Tooltip>
+      {/* Update Available Button */}
+      {updateAvailable && (
+        <>
+          <div className='w-px h-4 bg-[var(--metrics-bar-divider)]' />
+          <Tooltip
+            content={`Update available: ${updateAvailable.currentVersion} → ${updateAvailable.latestVersion}`}
+            side='bottom'
+            delayDuration={300}
+          >
+            <button
+              onClick={handleApplyUpdate}
+              className='flex items-center gap-2 transition-all duration-300 ease-out cursor-pointer hover:opacity-80 text-green-500'
+            >
+              <RefreshCw className='w-4 h-4' />
+              <span className='font-sans font-semibold text-xs leading-none tracking-normal'>
+                Update
+              </span>
+            </button>
+          </Tooltip>
+        </>
+      )}
     </div>
   );
 };
