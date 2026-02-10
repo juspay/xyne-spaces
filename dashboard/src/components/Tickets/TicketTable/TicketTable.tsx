@@ -622,6 +622,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             suppressCellFocus={false}
             suppressNoRowsOverlay={true}
             alwaysShowHorizontalScroll
+            pagination={true}
+            paginationPageSize={25}
+            paginationPageSizeSelector={false}
           />
         </div>
 
