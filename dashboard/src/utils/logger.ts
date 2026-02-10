@@ -136,7 +136,7 @@ export class Logger implements LoggerConfig {
         flushIntervalInMs: FLUSH_INTERVAL_IN_MS,
         maxBatchSize: MAX_BATCH_SIZE,
         maxRetries: MAX_RETRIES,
-        version: '1.0',
+        version: window.__APP_VERSION__ || 'unknown',
       };
       if (this.emailId !== null) {
         payload.emailId = this.emailId;

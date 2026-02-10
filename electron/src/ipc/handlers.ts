@@ -7,6 +7,7 @@ import { config } from '../app/config';
 import { codeServerService } from '../services/code-server';
 import { docsPublishService } from '../services/docs-publish';
 import { Logger as enrollmentLogger } from '../services/logger/pre-enrollment-logger';
+import { performHardReload } from '../services/version-checker';
 
 let previewBrowserView: BrowserView | null = null;
 
@@ -312,5 +313,24 @@ export function setupIpcHandlers(): void {
     }
 
     void previewWindow.loadURL(url);
+  });
+
+  // Bundle version handler - gets the dashboard's __APP_VERSION__
+  ipcMain.handle('get-bundle-version', async () => {
+    const mainWindow = getMainWindow();
+    if (!mainWindow) {
+      return null;
+    }
+    try {
+      const version = await mainWindow.webContents.executeJavaScript('window.__APP_VERSION__');
+      return version;
+    } catch {
+      return null;
+    }
+  });
+
+  // App update handler - triggers hard reload when user clicks update button
+  ipcMain.on('apply-app-update', () => {
+    void performHardReload();
   });
 }

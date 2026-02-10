@@ -170,4 +170,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('electron-log', listener);
     return () => ipcRenderer.removeListener('electron-log', listener);
   },
+
+  // Bundle version API
+  getBundleVersion: () => ipcRenderer.invoke('get-bundle-version'),
+
+  // App update APIs
+  onAppUpdateAvailable: (callback: (data: { currentVersion: string; latestVersion: string }) => void) => {
+    const listener = (_event: unknown, data: { currentVersion: string; latestVersion: string }) => callback(data);
+    ipcRenderer.on('app-update-available', listener);
+    return () => ipcRenderer.removeListener('app-update-available', listener);
+  },
+  applyAppUpdate: () => ipcRenderer.send('apply-app-update'),
 });

@@ -2,10 +2,38 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
+import packageJson from './package.json';
+import { readFileSync, writeFileSync } from 'fs';
+
+const pkg = JSON.parse(
+  readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')
+);
 
 export default defineConfig({
   plugins: [
     react(),
+    {
+      name: 'version-file',
+      closeBundle() {
+        try {
+          writeFileSync(
+            'dist/version.json',
+            JSON.stringify(
+              {
+                version: pkg.version,
+                buildTime: Date.now()
+              },
+              null,
+              2
+            )
+          );
+          console.log('✓ version.json created successfully');
+        } catch (error) {
+          console.error('✗ Failed to create version.json:', error);
+          throw new Error(`Build failed: Unable to create version.json - ${error}`);
+        }
+      }
+    },
     viteStaticCopy({
       targets: [
         // PDF.js worker - renamed to .js for nginx compatibility
@@ -22,6 +50,9 @@ export default defineConfig({
       ],
     }),
   ],
+  build: {
+    manifest: true
+  },
   server: {
     port: 5173,
     host: true,
@@ -55,5 +86,6 @@ export default defineConfig({
     'process.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL),
     'process.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(process.env.VITE_GOOGLE_CLIENT_ID),
     'process.env.VITE_MIXPANEL_TOKEN': JSON.stringify(process.env.VITE_MIXPANEL_TOKEN),
+    __APP_VERSION__: JSON.stringify(packageJson.version),
   },
 });
