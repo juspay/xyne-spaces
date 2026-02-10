@@ -272,12 +272,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             style: 'padding: 0.75rem;',
           },
         }),
-        LinkExtension.configure({
+        LinkExtension.extend({
+          inclusive: false,
+        }).configure({
           openOnClick: false,
           HTMLAttributes: {
-            class: 'text-blue-600 underline cursor-pointer hover:text-blue-700',
+            class: 'text-blue-600 hover:text-blue-700 underline cursor-text',
             rel: 'noopener noreferrer',
-            target: '_blank',
           },
         }),
         Placeholder.configure({
@@ -654,6 +655,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 className={`
                   chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-6 break-words
                   text-foreground placeholder:text-muted-foreground
+                  [&_a]:pointer-events-none
                   ${emojiSizeClass}
                 `}
               />

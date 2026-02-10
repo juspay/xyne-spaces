@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Tooltip, TooltipAlign, TooltipSide } from '@juspay/blend-design-system';
-import { Bold, Italic, Code, FileCode, Link, List, ListOrdered, TextQuote } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Tooltip } from '../Tooltip';
+import { Bold, Italic, Code, FileCode, Link, List, ListOrdered, TextQuote, X } from 'lucide-react';
 import type { EditorToolbarProps } from './EditorToolbar.types';
+import Dialog from '../Dialog';
+import Button from '../Button';
 
 export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
   const [isActive, setIsActive] = useState({
@@ -14,6 +16,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
     bulletList: false,
     orderedList: false,
   });
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkText, setLinkText] = useState('');
+  const [hasSelection, setHasSelection] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!editor) return;
@@ -89,16 +95,71 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
   const handleLink = useCallback(() => {
     if (!editor) return;
 
+    const { from, to } = editor.state.selection;
+    let selectedText = editor.state.doc.textBetween(from, to);
     const previousUrl = editor.getAttributes('link')['href'] as string | undefined;
-    const url = window.prompt('URL', previousUrl ?? '');
 
-    if (url === null) return;
-    if (url === '') {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run();
-      return;
+    // If we're inside an existing link
+    if (editor.isActive('link')) {
+      editor.chain().extendMarkRange('link').run();
+      const { from: newFrom, to: newTo } = editor.state.selection;
+      selectedText = editor.state.doc.textBetween(newFrom, newTo);
     }
 
-    editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+    const hasTextSelected = selectedText.length > 0;
+    setHasSelection(hasTextSelected);
+    setLinkText(selectedText);
+    setLinkUrl(previousUrl || '');
+    setOpen(true);
+  }, [editor]);
+
+  const applyLink = useCallback(() => {
+    if (!editor || !linkUrl.trim()) return;
+
+    // if no protocol is specified
+    let finalUrl = linkUrl.trim();
+    if (!/^https?:\/\//i.test(finalUrl)) {
+      finalUrl = `https://${finalUrl}`;
+    }
+
+    const { from, to } = editor.state.selection;
+    const textToInsert =
+      linkText.trim() || (hasSelection ? editor.state.doc.textBetween(from, to) : linkUrl);
+
+    if (hasSelection) {
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from, to })
+        .insertContent({
+          type: 'text',
+          text: textToInsert,
+          marks: [{ type: 'link', attrs: { href: finalUrl } }],
+        })
+        .run();
+    } else {
+      const currentPos = from;
+      editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: 'text',
+          text: textToInsert,
+          marks: [{ type: 'link', attrs: { href: finalUrl } }],
+        })
+        .insertContent(' ')
+        .setTextSelection(currentPos + textToInsert.length)
+        .run();
+    }
+
+    setOpen(false);
+    setLinkText('');
+    setLinkUrl('');
+  }, [editor, linkUrl, linkText, hasSelection]);
+
+  const removeLink = useCallback(() => {
+    editor?.chain().focus().extendMarkRange('link').unsetLink().run();
+    setOpen(false);
   }, [editor]);
 
   const handleBulletList = useCallback(() => {
@@ -121,148 +182,179 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
     }`;
 
   return (
-    <div className='border-gray-200 p-1'>
-      <div className='flex items-center gap-1 px-3 py-2 bg-[#FAFAFA] rounded-xl'>
-        <Tooltip
-          content='Bold (⌘B)'
-          side={TooltipSide.TOP}
-          delayDuration={500}
-          align={TooltipAlign.START}
-        >
-          <button
-            type='button'
-            onClick={handleBold}
-            className={buttonClass(isActive.bold)}
-            aria-label='Bold'
-            aria-pressed={isActive.bold}
+    <>
+      {/* Link Hover Tooltip */}
+      <div className='border-gray-200 p-1'>
+        <div className='flex items-center gap-1 px-3 py-2 bg-[#FAFAFA] rounded-xl'>
+          <Tooltip content='Bold (⌘B)'>
+            <button
+              type='button'
+              onClick={handleBold}
+              className={buttonClass(isActive.bold)}
+              aria-label='Bold'
+              aria-pressed={isActive.bold}
+            >
+              <Bold className='h-4 w-4' />
+            </button>
+          </Tooltip>
+
+          <Tooltip content='Italic (⌘I)'>
+            <button
+              type='button'
+              onClick={handleItalic}
+              className={buttonClass(isActive.italic)}
+              aria-label='Italic'
+              aria-pressed={isActive.italic}
+            >
+              <Italic className='h-4 w-4' />
+            </button>
+          </Tooltip>
+
+          <Tooltip content='Inline Code (⌘E)'>
+            <button
+              type='button'
+              onClick={handleCode}
+              className={buttonClass(isActive.code)}
+              aria-label='Inline code'
+              aria-pressed={isActive.code}
+            >
+              <Code className='h-4 w-4' />
+            </button>
+          </Tooltip>
+
+          <Tooltip content='Code Block (⌘⇧E)'>
+            <button
+              type='button'
+              onClick={handleCodeBlock}
+              className={buttonClass(isActive.codeBlock)}
+              aria-label='Code block'
+              aria-pressed={isActive.codeBlock}
+            >
+              <FileCode className='h-4 w-4' />
+            </button>
+          </Tooltip>
+
+          <Dialog
+            open={open}
+            onOpenChange={setOpen}
+            trigger={
+              <Tooltip content='Insert Link (⌘K)'>
+                <button
+                  type='button'
+                  onClick={handleLink}
+                  className={buttonClass(isActive.link)}
+                  aria-label='Insert link'
+                  aria-pressed={isActive.link}
+                >
+                  <Link className='h-4 w-4' />
+                </button>
+              </Tooltip>
+            }
+            title={hasSelection ? 'Edit link' : 'Insert link'}
+            className='p-4 w-96 backdrop-blur-none'
           >
-            <Bold className='h-4 w-4' />
-          </button>
-        </Tooltip>
+            <div className='space-y-3'>
+              <div className='flex items-center justify-between'>
+                <h2 className='text-sm font-medium text-gray-700'>
+                  {hasSelection ? 'Edit link' : 'Insert link'}
+                </h2>
+                <button
+                  onClick={() => setOpen(false)}
+                  className='p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600'
+                >
+                  <X className='h-4 w-4' />
+                </button>
+              </div>
 
-        <Tooltip
-          content='Italic (⌘I)'
-          side={TooltipSide.TOP}
-          delayDuration={500}
-          align={TooltipAlign.START}
-        >
-          <button
-            type='button'
-            onClick={handleItalic}
-            className={buttonClass(isActive.italic)}
-            aria-label='Italic'
-            aria-pressed={isActive.italic}
-          >
-            <Italic className='h-4 w-4' />
-          </button>
-        </Tooltip>
+              <div>
+                <input
+                  type='text'
+                  value={linkText}
+                  onChange={e => setLinkText(e.target.value)}
+                  placeholder='Link text'
+                  autoFocus // eslint-disable-line jsx-a11y/no-autofocus
+                  className='w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+                />
+              </div>
 
-        <Tooltip
-          content='Inline Code (⌘E)'
-          side={TooltipSide.TOP}
-          delayDuration={500}
-          align={TooltipAlign.START}
-        >
-          <button
-            type='button'
-            onClick={handleCode}
-            className={buttonClass(isActive.code)}
-            aria-label='Inline code'
-            aria-pressed={isActive.code}
-          >
-            <Code className='h-4 w-4' />
-          </button>
-        </Tooltip>
+              <div>
+                <input
+                  type='url'
+                  value={linkUrl}
+                  onChange={e => setLinkUrl(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && applyLink()}
+                  placeholder='https://example.com'
+                  className='w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+                />
+              </div>
 
-        <div className='h-4 w-px bg-gray-300 mx-1' aria-hidden='true' />
+              <div className='flex items-center justify-between pt-2'>
+                {isActive.link && (
+                  <Button
+                    onClick={removeLink}
+                    className='text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50'
+                    variant='ghost'
+                  >
+                    Remove
+                  </Button>
+                )}
+                <div className='flex gap-2 ml-auto'>
+                  <Button
+                    onClick={() => setOpen(false)}
+                    variant='secondary'
+                    className='px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded'
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={applyLink}
+                    disabled={!linkUrl.trim()}
+                    className='px-3 py-1.5 text-xs bg-sidebar-badge-accent text-white rounded disabled:opacity-50'
+                  >
+                    {hasSelection && isActive.link ? 'Update' : 'Apply'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Dialog>
 
-        <Tooltip
-          content='Code Block (⌘⇧E)'
-          side={TooltipSide.TOP}
-          delayDuration={500}
-          align={TooltipAlign.START}
-        >
-          <button
-            type='button'
-            onClick={handleCodeBlock}
-            className={buttonClass(isActive.codeBlock)}
-            aria-label='Code block'
-            aria-pressed={isActive.codeBlock}
-          >
-            <FileCode className='h-4 w-4' />
-          </button>
-        </Tooltip>
+          <Tooltip content='Blockquote (⌘⇧B)'>
+            <button
+              type='button'
+              onClick={handleBlockquote}
+              className={buttonClass(isActive.blockquote)}
+              aria-label='Quote'
+              aria-pressed={isActive.blockquote}
+            >
+              <TextQuote className='h-4 w-4' />
+            </button>
+          </Tooltip>
 
-        <Tooltip
-          content='Insert Link (⌘K)'
-          side={TooltipSide.TOP}
-          delayDuration={500}
-          align={TooltipAlign.START}
-        >
-          <button
-            type='button'
-            onClick={handleLink}
-            className={buttonClass(isActive.link)}
-            aria-label='Insert link'
-            aria-pressed={isActive.link}
-          >
-            <Link className='h-4 w-4' />
-          </button>
-        </Tooltip>
+          <Tooltip content='Bullet List'>
+            <button
+              type='button'
+              onClick={handleBulletList}
+              className={buttonClass(isActive.bulletList)}
+              aria-label='Bullet list'
+              aria-pressed={isActive.bulletList}
+            >
+              <List className='h-4 w-4' />
+            </button>
+          </Tooltip>
 
-        <div className='h-4 w-px bg-gray-300 mx-1' aria-hidden='true' />
-
-        <Tooltip
-          content='Blockquote (⌘⇧B)'
-          side={TooltipSide.TOP}
-          delayDuration={500}
-          align={TooltipAlign.START}
-        >
-          <button
-            type='button'
-            onClick={handleBlockquote}
-            className={buttonClass(isActive.blockquote)}
-            aria-label='Quote'
-            aria-pressed={isActive.blockquote}
-          >
-            <TextQuote className='h-4 w-4' />
-          </button>
-        </Tooltip>
-
-        <Tooltip
-          content='Bullet List'
-          side={TooltipSide.TOP}
-          delayDuration={500}
-          align={TooltipAlign.START}
-        >
-          <button
-            type='button'
-            onClick={handleBulletList}
-            className={buttonClass(isActive.bulletList)}
-            aria-label='Bullet list'
-            aria-pressed={isActive.bulletList}
-          >
-            <List className='h-4 w-4' />
-          </button>
-        </Tooltip>
-
-        <Tooltip
-          content='Numbered List'
-          side={TooltipSide.TOP}
-          delayDuration={500}
-          align={TooltipAlign.START}
-        >
-          <button
-            type='button'
-            onClick={handleOrderedList}
-            className={buttonClass(isActive.orderedList)}
-            aria-label='Numbered list'
-            aria-pressed={isActive.orderedList}
-          >
-            <ListOrdered className='h-4 w-4' />
-          </button>
-        </Tooltip>
+          <Tooltip content='Numbered List'>
+            <button
+              type='button'
+              onClick={handleOrderedList}
+              className={buttonClass(isActive.orderedList)}
+              aria-label='Numbered list'
+              aria-pressed={isActive.orderedList}
+            >
+              <ListOrdered className='h-4 w-4' />
+            </button>
+          </Tooltip>
+        </div>
       </div>
-    </div>
+    </>
   );
 };
