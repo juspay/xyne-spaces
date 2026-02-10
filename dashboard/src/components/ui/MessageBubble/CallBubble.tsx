@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { CreatePRDModal } from './CreatePRDModal';
-import { useNavigate } from 'react-router-dom';
+import { CreateDocumentModal } from './CreateDocumentModal';
 import { Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
@@ -37,16 +36,13 @@ interface CallBubbleProps {
 const GeneratePRDButton: React.FC<{
   callId: string;
   messageId: string;
-  canvasURL?: string | undefined;
   isCanvasCreated?: boolean;
-}> = ({ callId, messageId, canvasURL: _canvasURL, isCanvasCreated }) => {
+}> = ({ callId, messageId, isCanvasCreated }) => {
   const { generatePRD, isLoading } = useGeneratePRD();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const handleGenerate = async (customPrompt?: string): Promise<void> => {
-    // Close the modal immediately
     setIsModalOpen(false);
-    // Generate PRD - button will show "Generating..." via isLoading state
     await generatePRD(callId, messageId, customPrompt);
   };
 
@@ -69,11 +65,18 @@ const GeneratePRDButton: React.FC<{
         )}
       </button>
 
-      <CreatePRDModal
+      <CreateDocumentModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onGenerate={handleGenerate}
         isLoading={isLoading}
+        title='Generate PRD'
+        description='Choose how you want to generate the Product Requirements Document.'
+        standardOptionLabel='Standard PRD'
+        standardOptionSubtext='Generate a standard PRD based on the entire call transcript.'
+        customOptionLabel='Custom Instructions'
+        customOptionSubtext='Provide specific details or focus areas for the PRD.'
+        customInputPlaceholder='E.g., Focus on the API authentication flow and error handling...'
       />
     </>
   );
@@ -82,60 +85,58 @@ const GeneratePRDButton: React.FC<{
 /**
  * Button component for generating detailed summary from call transcript
  */
-const GenerateDetailedSummaryButton: React.FC<{ callId: string; messageId: string }> = ({
-  callId,
-  messageId,
-}) => {
+const GenerateDetailedSummaryButton: React.FC<{
+  callId: string;
+  messageId: string;
+  isSummaryCanvasCreated?: boolean;
+}> = ({ callId, messageId, isSummaryCanvasCreated }) => {
   const { generateDetailedSummary, isLoading } = useGenerateDetailedSummary();
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const handleClick = (): void => {
-    void generateDetailedSummary(callId, messageId);
+  const handleGenerate = async (customPrompt?: string): Promise<void> => {
+    // Close the modal immediately
+    setIsModalOpen(false);
+    // Generate summary - button will show "Generating..." via isLoading state
+    await generateDetailedSummary(callId, messageId, customPrompt);
   };
 
   return (
-    <button
-      type='button'
-      onClick={handleClick}
-      disabled={isLoading}
-      className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
-      style={{ color: '#0077FF' }}
-    >
-      {isLoading ? (
-        <>
-          <Loader2 className='w-4 h-4 animate-spin' />
-          <span>Generating...</span>
-        </>
-      ) : (
-        <>
-          <span>Create Detailed Summary</span>
-        </>
-      )}
-    </button>
-  );
-};
+    <>
+      <button
+        type='button'
+        onClick={() => setIsModalOpen(true)}
+        disabled={isLoading}
+        className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
+        style={{ color: '#0077FF' }}
+      >
+        {isLoading ? (
+          <>
+            <Loader2 className='w-4 h-4 animate-spin' />
+            <span>Generating...</span>
+          </>
+        ) : (
+          <span>
+            {isSummaryCanvasCreated ? 'Generate Another Summary' : 'Generate Detailed Summary'}
+          </span>
+        )}
+      </button>
 
-/**
- * Button component for opening existing detailed summary canvas
- */
-const OpenDetailedSummaryButton: React.FC<{ canvasUrl: string }> = ({ canvasUrl }) => {
-  const navigate = useNavigate();
-
-  const handleClick = (): void => {
-    const canvasId = canvasUrl.split('/').pop();
-    if (canvasId) {
-      void navigate(`/chat/canvas/${canvasId}`);
-    }
-  };
-
-  return (
-    <button
-      type='button'
-      onClick={handleClick}
-      className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all'
-      style={{ color: '#0077FF' }}
-    >
-      <span>Open Detailed Summary</span>
-    </button>
+      <CreateDocumentModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onGenerate={async prompt => {
+          await handleGenerate(prompt);
+        }}
+        isLoading={isLoading}
+        title='Generate Detailed Summary'
+        description='Choose how you want to generate the detailed summary.'
+        standardOptionLabel='Standard Summary'
+        standardOptionSubtext='Phase-based summary with decisions, action items, and key takeaways.'
+        customOptionLabel='Custom Instructions'
+        customOptionSubtext='Provide specific details or focus areas for the summary.'
+        customInputPlaceholder='E.g., Focus on technical decisions and architecture discussions...'
+      />
+    </>
   );
 };
 
@@ -250,19 +251,18 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
               <GeneratePRDButton
                 callId={callId}
                 messageId={message.messageId}
-                canvasURL={metadata?.prdCanvasUrl}
                 isCanvasCreated={!!metadata?.prdCanvasUrl}
               />
 
               {/* Separator */}
               <span className='text-gray-400'>•</span>
 
-              {/* Detailed Summary Button */}
-              {metadata?.detailedSummaryCanvasUrl ? (
-                <OpenDetailedSummaryButton canvasUrl={metadata.detailedSummaryCanvasUrl} />
-              ) : (
-                <GenerateDetailedSummaryButton callId={callId} messageId={message.messageId} />
-              )}
+              {/* Detailed Summary Button - always show to allow generating multiple summaries */}
+              <GenerateDetailedSummaryButton
+                callId={callId}
+                messageId={message.messageId}
+                isSummaryCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
+              />
             </div>
           )}
         </>
