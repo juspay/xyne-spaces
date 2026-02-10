@@ -54,8 +54,10 @@ export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
         <div className='absolute left-0 right-0 top-1/2 h-px bg-gray-300 -translate-y-1/2' />
       )}
 
-      <div className='relative bg-white'>
-        <Badge variant='outline'>{dateText}</Badge>
+      <div className='relative'>
+        <Badge variant='outline' className='bg-white'>
+          {dateText}
+        </Badge>
       </div>
     </div>
   );
