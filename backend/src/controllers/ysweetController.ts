@@ -6,7 +6,7 @@ import { logger } from '@/utils/logger';
 
 const TOKEN_VALID_SECONDS = 3600;
 
-const isDevelopment = config.env === 'development';
+const isDevelopment = config.env === 'development' || config.isTestEnv;
 
 export class YSweetController {
 
