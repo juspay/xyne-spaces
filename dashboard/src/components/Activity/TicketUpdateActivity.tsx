@@ -128,12 +128,12 @@ export const TicketUpdateActivity = ({
   const isPRAction = activity.actorAction.startsWith('ticket_pr_');
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm text-[#181B1D] font-medium'>
+      <div className='text-sm text-[#181B1D] font-medium break-words whitespace-normal'>
         {' '}
         {isPRAction ? config.label.toLowerCase() : `${config.label} updated`} for ticket &ldquo;
         {ticket.title}&rdquo;
       </div>
-      <div className='text-xs text-[#505B62]'>
+      <div className='text-xs text-[#505B62] break-words whitespace-normal'>
         Ticket ID: <span className='font-mono'>{ticketXyneId}</span>
       </div>
     </div>

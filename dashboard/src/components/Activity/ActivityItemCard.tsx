@@ -95,19 +95,19 @@ export const ActivityItemCard = ({
         </UserHoverWrapper>
       </div>
 
-      <div className='flex flex-1 flex-col min-w-0'>
-        <div className='flex w-full items-start justify-between gap-2'>
-          <div className='flex flex-wrap items-baseline gap-x-1.5 text-sm leading-snug'>
+      <div className='flex flex-1 flex-col min-w-0 overflow-hidden'>
+        <div className='flex w-full items-start justify-between gap-2 flex-wrap'>
+          <div className='flex flex-wrap items-baseline gap-x-1.5 text-sm leading-snug min-w-0 flex-1'>
             <UserHoverWrapper userId={actorId}>
               <button
-                className='font-semibold text-[#181B1D] hover:underline'
+                className='font-semibold text-[#181B1D] hover:underline flex-shrink-0'
                 onClick={e => e.stopPropagation()}
               >
                 {actorName}
               </button>
             </UserHoverWrapper>
 
-            <span className='text-[#505B62]'>{description}</span>
+            <span className='text-[#505B62] flex-shrink-0'>{description}</span>
 
             {actorAction !== 'paused_from_assignment' &&
               actorAction !== 'resumed_from_assignment' && (
@@ -119,7 +119,7 @@ export const ActivityItemCard = ({
                   }}
                 >
                   <button
-                    className='font-semibold text-[#3B4145] hover:underline cursor-pointer'
+                    className='font-semibold text-[#3B4145] hover:underline cursor-pointer text-left whitespace-normal'
                     onClick={e => e.stopPropagation()}
                   >
                     {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
@@ -128,7 +128,7 @@ export const ActivityItemCard = ({
               )}
           </div>
 
-          <span className='flex-shrink-0 whitespace-nowrap text-xs text-[#505B62]'>
+          <span className='flex-shrink-0 whitespace-nowrap text-xs text-[#505B62] ml-auto sm:ml-2'>
             {getTimestampDisplay(activity.createdAt)}
           </span>
         </div>
@@ -137,7 +137,9 @@ export const ActivityItemCard = ({
         <div
           className={cn(
             'mt-px w-full text-[#3B4145]',
-            isExpanded ? '' : 'line-clamp-1 break-words whitespace-normal',
+            isExpanded
+              ? 'whitespace-normal break-normal'
+              : 'line-clamp-1 break-normal whitespace-normal',
           )}
         >
           {children}
