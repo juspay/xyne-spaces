@@ -516,12 +516,6 @@ export const mutators = defineMutators({
           },
         });
 
-        // Update channel last activity
-        await tx.mutate.channels.update({
-          id: channelId,
-          lastActivityAt: now,
-        });
-
         // Add creator as conversation participant
         await tx.mutate.conversation_participants.insert({
           id: conversationParticipantId,
@@ -655,12 +649,6 @@ export const mutators = defineMutators({
             updatedBy: ctx.userID,
             updatedByName: requestingUser.name,
           },
-        });
-
-        // Update channel last activity
-        await tx.mutate.channels.update({
-          id: channelId,
-          lastActivityAt: now,
         });
 
         // Add creator as conversation participant

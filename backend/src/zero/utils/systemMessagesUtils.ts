@@ -111,12 +111,6 @@ export async function sendAddAndRemoveParticipantsSystemMessage(
         content: updatedContent,
         metadata: updatedMetadata,
       });
-
-      // Update channel last activity
-      await tx.mutate.channels.update({
-        id: channelId,
-        lastActivityAt: Date.now(),
-      });
     } else {
       // Create new message
       const systemContent = formatSystemGenerateMessage(newParticipants, operationType, authData);
@@ -159,12 +153,6 @@ export async function sendAddAndRemoveParticipantsSystemMessage(
         metadata: messageMetadata,
         showInChannel: false,
         isSent: true
-      });
-
-      // Update channel last activity
-      await tx.mutate.channels.update({
-        id: channelId,
-        lastActivityAt: now,
       });
     }
   }
@@ -275,12 +263,6 @@ export async function sendCallSystemMessage(
     metadata: messageMetadata,
     showInChannel: false, // Only show as conversation card, not as standalone message
     isSent: true,
-  });
-
-  // Update channel last activity
-  await tx.mutate.channels.update({
-    id: channelId,
-    lastActivityAt: now,
   });
 
   return { messageId, conversationId };

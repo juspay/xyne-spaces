@@ -150,6 +150,8 @@ export class TicketController {
         },
       });
 
+      await this.channelRepository.updateLastActivity(channelId);
+
       return ticket;
     });
 
@@ -464,6 +466,11 @@ export class TicketController {
 
         return { ticket, conversationId };
       });
+
+      const ticketChannelId = sourceConversationId ? validatedConversation.channelId : channelId;
+      if (ticketChannelId) {
+        await this.channelRepository.updateLastActivity(ticketChannelId);
+      }
 
        // Create TicketTag records for each tag
       if (tags && tags.length > 0) {
