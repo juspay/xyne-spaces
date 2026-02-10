@@ -1,7 +1,9 @@
 livekit
-livekit-agents
+livekit-agents[turn-detector]~=1.3
 livekit-plugins-silero
 livekit-plugins-openai
+livekit-plugins-google
+livekit-plugins-deepgram
 openai>=1.0.0
 python-dotenv
 aiofiles
