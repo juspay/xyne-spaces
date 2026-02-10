@@ -16,7 +16,8 @@ from openai import AzureOpenAI
 from events import EventBus
 
 # Configure logger
-logger = logging.getLogger(__name__)
+from config import get_logger
+logger = get_logger(__name__)
 
 
 class EarModule:

@@ -12,7 +12,9 @@ from typing import Optional, Any
 
 import aiofiles
 
-logger = logging.getLogger(__name__)
+from config import set_call_id, get_logger
+
+logger = get_logger(__name__)
 
 
 class GCSStreamer:
@@ -40,47 +42,47 @@ class GCSStreamer:
         self._write_count = 0
         self._drop_count = 0
         self._flush_count = 0
+        self._call_id = filename.replace('transcriptions/', '').replace('.jsonl', '')
         
-        logger.info(f"[GCS:STREAMER] Initialized | file={filename} | queue_max_size=2000")
+        logger.info(f"gcs_streamer_initialized | queue_max_size=2000")
     
     def start(self):
         """Start the background writer thread."""
-        logger.info(f"[GCS:START] Starting background writer thread for {self.filename}")
         self._worker_thread = threading.Thread(target=self._run_writer, daemon=True)
         self._worker_thread.start()
-        logger.info(f"[GCS:START] Thread started | thread_id={self._worker_thread.ident}")
+        logger.info(f"gcs_writer_thread_started | thread_id={self._worker_thread.ident}")
     
     def stop(self):
         """Stop the streamer and flush remaining data."""
         with self._stop_lock:
             if self._stopped:
-                logger.info(f"[GCS:STOP] Already stopped, skipping | file={self.filename}")
+                logger.debug(f"gcs_stop_already_called")
                 return
             self._stopped = True
         
         queue_size = self._queue.qsize()
         logger.info(
-            f"[GCS:STOP] Stopping streamer | "
-            f"queue_size={queue_size} | writes={self._write_count} | "
-            f"drops={self._drop_count} | flushes={self._flush_count}"
+            f"gcs_streamer_stopping | "
+            f"queue_size={queue_size}, writes={self._write_count}, "
+            f"drops={self._drop_count}, flushes={self._flush_count}"
         )
         self._stop_event.set()
         
         if self._worker_thread:
-            logger.info("[GCS:STOP] Waiting for writer thread to drain queue (timeout=30s)...")
+            logger.debug(f"gcs_draining_queue")
             join_start = time.time()
             self._worker_thread.join(timeout=30.0)
             join_elapsed = time.time() - join_start
             
             if self._worker_thread.is_alive():
                 logger.error(
-                    f"[GCS:STOP] Thread still alive after {join_elapsed:.1f}s | "
-                    f"queue_remaining={self._queue.qsize()}"
+                    f"gcs_drain_timeout | "
+                    f"elapsed={join_elapsed:.1f}s, queue_remaining={self._queue.qsize()}"
                 )
             else:
                 logger.info(
-                    f"[GCS:STOP] Thread exited cleanly | "
-                    f"elapsed={join_elapsed:.2f}s | final_stats: writes={self._write_count}, "
+                    f"gcs_streamer_stopped | "
+                    f"elapsed={join_elapsed:.2f}s, writes={self._write_count}, "
                     f"drops={self._drop_count}, flushes={self._flush_count}"
                 )
     
@@ -90,17 +92,18 @@ class GCSStreamer:
             self._queue.put_nowait(data)
             self._write_count += 1
             if self._write_count % 50 == 0:
-                logger.debug(f"[GCS:QUEUE] Queued item #{self._write_count} | queue_size={self._queue.qsize()}")
+                logger.debug(f"gcs_queue_progress | queued={self._write_count}, queue_size={self._queue.qsize()}")
         except queue.Full:
             self._drop_count += 1
             logger.error(
-                f"[GCS:QUEUE] Queue full! Dropping transcription | "
-                f"total_drops={self._drop_count} | queue_size={self._queue.qsize()}"
+                f"gcs_queue_full | "
+                f"total_drops={self._drop_count}, queue_size={self._queue.qsize()}"
             )
     
     def _run_writer(self):
         """Background thread that writes to GCS."""
-        logger.info(f"[GCS:WRITER] Thread started | thread_id={threading.current_thread().ident}")
+        set_call_id(self._call_id)
+        logger.debug(f"gcs_writer_thread_running")
         
         blob_writer = None
         retry_count = 0
@@ -110,10 +113,10 @@ class GCSStreamer:
         while retry_count < max_retries:
             try:
                 if not blob_writer:
-                    logger.info(f"[GCS:CONNECT] Attempting connection | attempt={retry_count + 1}/{max_retries}")
+                    logger.info(f"gcs_connect_attempt | attempt={retry_count + 1}/{max_retries}")
                     blob = self.bucket.blob(self.filename)
                     blob_writer = blob.open("w", content_type="application/x-ndjson")
-                    logger.info(f"[GCS:CONNECT] Stream opened | gs://{self.bucket.name}/{self.filename}")
+                    logger.info(f"gcs_stream_opened | gcs_path=gs://{self.bucket.name}/{self.filename}")
                     retry_count = 0  # Reset on success
                 
                 lines_since_flush = 0
@@ -123,7 +126,7 @@ class GCSStreamer:
                         data = self._queue.get(timeout=1.0)
                     except queue.Empty:
                         if self._stop_event.is_set():
-                            logger.info(f"[GCS:WRITER] Queue empty and stop event set | total_written={local_write_count}")
+                            logger.debug(f"gcs_queue_drained | total_written={local_write_count}")
                             break
                         continue
                     
@@ -134,8 +137,8 @@ class GCSStreamer:
                     
                     if local_write_count % 100 == 0:
                         logger.info(
-                            f"[GCS:WRITE] Progress | written={local_write_count} | "
-                            f"queue_size={self._queue.qsize()} | pending_flush={lines_since_flush}"
+                            f"gcs_write_progress | written={local_write_count}, "
+                            f"queue_size={self._queue.qsize()}, pending_flush={lines_since_flush}"
                         )
                     
                     # Flush every 5 lines for durability
@@ -144,45 +147,45 @@ class GCSStreamer:
                             blob_writer.flush()
                             self._flush_count += 1
                         except Exception as e:
-                            logger.warning(f"[GCS:FLUSH] Flush error: {e}")
+                            logger.warning(f"gcs_flush_error | error={e}")
                         lines_since_flush = 0
                     
                     self._queue.task_done()
                 
                 # Final flush
                 if lines_since_flush > 0 and blob_writer:
-                    logger.info(f"[GCS:FLUSH] Final flush | pending_lines={lines_since_flush}")
+                    logger.debug(f"gcs_final_flush | pending_lines={lines_since_flush}")
                     try:
                         blob_writer.flush()
                         self._flush_count += 1
                     except Exception as e:
-                        logger.error(f"[GCS:FLUSH] Final flush error: {e}")
+                        logger.error(f"gcs_final_flush_error | error={e}")
                 
-                logger.info(f"[GCS:WRITER] Exiting processing loop | total_written={local_write_count}")
+                logger.debug(f"gcs_write_loop_exiting | total_written={local_write_count}")
                 break
                 
             except Exception as e:
-                logger.error(f"[GCS:ERROR] Stream error | retry={retry_count}/{max_retries} | error={str(e)[:200]}")
+                logger.error(f"gcs_stream_error | retry={retry_count}/{max_retries}, error={str(e)[:200]}")
                 blob_writer = None
                 retry_count += 1
                 
                 if retry_count < max_retries:
                     backoff = min(2 ** retry_count, 30)
-                    logger.warning(f"[GCS:RETRY] Retrying in {backoff}s | attempt={retry_count + 1}/{max_retries}")
+                    logger.warning(f"gcs_upload_retrying | attempt={retry_count + 1}/{max_retries}, next_retry_delay={backoff}s")
                     time.sleep(backoff)
         
         if retry_count >= max_retries:
-            logger.error(f"[GCS:ERROR] Max retries exceeded | written={local_write_count} | queue_remaining={self._queue.qsize()}")
+            logger.error(f"gcs_upload_all_retries_failed | written={local_write_count}, queue_remaining={self._queue.qsize()}")
         
         if blob_writer:
             try:
-                logger.info(f"[GCS:CLOSE] Closing stream | total_written={local_write_count}")
+                logger.info(f"gcs_stream_closing | total_written={local_write_count}")
                 blob_writer.close()
-                logger.info(f"[GCS:CLOSE] Stream closed | final_stats: writes={local_write_count}, flushes={self._flush_count}")
+                logger.info(f"gcs_stream_closed | writes={local_write_count}, flushes={self._flush_count}")
             except Exception as e:
-                logger.error(f"[GCS:CLOSE] Error closing stream: {e}")
+                logger.error(f"gcs_stream_close_error | error={e}")
         
-        logger.info(f"[GCS:WRITER] Thread exiting | final_write_count={local_write_count}")
+        logger.debug(f"gcs_writer_thread_exiting | final_write_count={local_write_count}")
 
 
 class TranscriptionStorage:
@@ -229,11 +232,11 @@ class TranscriptionStorage:
             self.gcs_streamer.start()
         
         if use_buffer:
-            logger.info("Using buffered GCS upload (development mode)")
+            logger.info(f"storage_buffering_enabled | mode=buffered, gcs_available=true")
         elif bucket:
-            logger.info("Using streaming GCS upload (production mode)")
+            logger.info(f"storage_streaming_enabled | mode=streaming, gcs_available=true")
         else:
-            logger.info("Using local storage only (no GCS)")
+            logger.info(f"storage_local_mode | mode=local, gcs_available=false")
     
     async def write(self, event: dict):
         """
@@ -251,7 +254,7 @@ class TranscriptionStorage:
         if self.gcs_buffer is not None:
             json_line = json.dumps(event) + "\n"
             self.gcs_buffer.append(json_line)
-            logger.debug(f"Buffered for GCS (total: {len(self.gcs_buffer)} entries)")
+            logger.debug(f"transcription_buffered | entry_count={len(self.gcs_buffer)}")
             return
         
         # Local storage fallback (only when GCS is not configured)
@@ -261,9 +264,9 @@ class TranscriptionStorage:
                 os.makedirs("transcriptions", exist_ok=True)
                 async with aiofiles.open(self.local_path, "a") as f:
                     await f.write(json_line)
-                logger.debug("Stored transcription locally (no GCS)")
+                logger.debug(f"local_fallback_write | file={self.local_path}")
             except Exception as e:
-                logger.error(f"Error storing transcription locally: {e}")
+                logger.error(f"local_write_failed | file={self.local_path}, error={e}")
     
     async def flush(self):
         """
@@ -277,23 +280,23 @@ class TranscriptionStorage:
         """
         # Streaming mode: stop the streamer (will drain queue and close stream)
         if self.gcs_streamer is not None:
-            logger.info("Stopping GCS streamer...")
+            logger.info(f"storage_stream_closing")
             await asyncio.to_thread(self.gcs_streamer.stop)
-            logger.info("GCS streamer stopped")
+            logger.info(f"storage_stream_closed | file={self.gcs_filename}")
             return
         
         # Buffered mode: upload all buffered entries
         if self.gcs_buffer is not None:
             if len(self.gcs_buffer) == 0:
-                logger.warning("No transcript entries to upload to GCS")
+                logger.warning(f"buffer_flush_empty")
                 return
             
             if self.bucket is None:
-                logger.warning("Cannot flush to GCS - bucket not configured")
+                logger.warning(f"buffer_flush_failed | reason=no_bucket")
                 return
             
             try:
-                logger.info(f"Uploading {len(self.gcs_buffer)} transcript entries to GCS (buffered mode)...")
+                logger.info(f"gcs_upload_started | file={self.gcs_filename}, entries={len(self.gcs_buffer)}")
                 blob = self.bucket.blob(self.gcs_filename)
                 transcript_content = "".join(self.gcs_buffer)
                 
@@ -304,6 +307,6 @@ class TranscriptionStorage:
                     content_type="application/x-ndjson"
                 )
                 
-                logger.info(f"Successfully uploaded transcript to GCS: {self.gcs_filename}")
+                logger.info(f"gcs_upload_completed | file={self.gcs_filename}, bytes={len(transcript_content)}")
             except Exception as e:
-                logger.error(f"Error uploading to GCS: {e}")
+                logger.error(f"gcs_upload_failed | file={self.gcs_filename}, error={e}")

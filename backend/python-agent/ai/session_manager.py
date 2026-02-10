@@ -12,11 +12,11 @@ from livekit.agents.voice import room_io
 from livekit.agents.voice.events import ConversationItemAddedEvent
 from livekit.plugins import openai
 
-from config import Config
+from config import Config, get_logger
 from history import ConversationStore
 from .instructions import AGENT_INSTRUCTIONS
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AISessionManager:
@@ -34,6 +34,7 @@ class AISessionManager:
         self.config = config
         self.conversation_store = conversation_store
         self.room_context = room_context or {}
+        self._call_id = self.room_context.get('call_id', 'unknown')
 
         self.ai_voice_enabled = ai_voice_enabled_default
         self.history_restored = False
@@ -56,8 +57,7 @@ class AISessionManager:
         self._room: Optional[rtc.Room] = None
 
         logger.info(
-            "AI session manager initialized (voice=%s)",
-            "enabled" if self.ai_voice_enabled else "disabled",
+            f"ai_session_manager_initialized | voice_default={'enabled' if self.ai_voice_enabled else 'disabled'}"
         )
 
     def set_transcription_emitter(self, emitter: Callable):
@@ -83,7 +83,7 @@ class AISessionManager:
                 api_version=self.config.azure_openai_api_version,
             )
 
-            logger.info("Azure TTS and LLM initialized successfully")
+            logger.info(f"azure_services_initialized | tts={self.config.azure_tts_deployment}, llm={self.config.azure_openai_model}")
             return True
 
         except Exception as e:
@@ -107,7 +107,7 @@ class AISessionManager:
                 tts=self.tts,
             )
 
-            logger.info("AI AgentSession created (tools=%d)", len(tools))
+            logger.info(f"ai_agent_session_created | tools_count={len(tools)}")
             return True
 
         except Exception:
@@ -140,7 +140,7 @@ class AISessionManager:
             if self.ai_voice_enabled:
                 self.agent_session.say("Hello")
 
-            logger.info("AI AgentSession started successfully")
+            logger.info(f"ai_agent_session_started | voice_enabled={self.ai_voice_enabled}")
             return True
 
         except Exception:
@@ -177,6 +177,7 @@ class AISessionManager:
                             "role": "assistant",
                         }
                     )
+                    logger.debug(f"ai_response_sent_to_redis | text_preview={ai_text[:50]}")
 
                 if self._transcription_emitter:
                     await self._transcription_emitter(
@@ -189,6 +190,7 @@ class AISessionManager:
                             "source": "ai",
                         },
                     )
+                    logger.debug(f"ai_response_sent_to_transcription | text_preview={ai_text[:50]}")
 
             asyncio.create_task(handle_item())
 
@@ -205,7 +207,7 @@ class AISessionManager:
                 )
                 if restored > 0:
                     self.history_restored = True
-                    logger.info("Restored %d messages from conversation history", restored)
+                    logger.info(f"conversation_history_restored | messages={restored}")
             except Exception:
                 logger.error("Failed to restore conversation history", exc_info=True)
 
@@ -252,15 +254,13 @@ class AISessionManager:
         # Check if there's a controller and if current speaker is the controller
         if self.controller_participant_id:
             if participant_id != self.controller_participant_id:
-                # Not the controller - just added to history, don't generate response
                 logger.debug(
-                    "Skipping non-controller transcript (speaker=%s, controller=%s)",
-                    participant_id, self.controller_participant_id
+                    f"ai_response_skipped_not_controller | speaker={participant_id}, controller={self.controller_participant_id}"
                 )
                 return
         else:
             # No controller set - don't generate response
-            logger.debug("No controller set, skipping AI response")
+            logger.debug(f"ai_response_skipped_no_controller | speaker={participant_id}")
             return
 
         # Filter out old messages that arrived before AI voice was enabled
@@ -277,12 +277,14 @@ class AISessionManager:
             return
 
         try:
+            logger.info(f"ai_response_reply_started | user_input_preview={transcript_with_speaker[:50]}")
             self.agent_session.generate_reply(user_input=transcript_with_speaker)
-        except Exception:
-            logger.error("Failed to generate AI response", exc_info=True)
+        except Exception as e:
+            logger.error(f"ai_reply_generation_failed | error={str(e)[:100]}", exc_info=True)
 
     def handle_voice_toggle(self, enabled: bool, participant_id: Optional[str] = None, participant_name: Optional[str] = None):
         if enabled == self.ai_voice_enabled:
+            logger.debug(f"ai_voice_toggle_ignored | enabled={enabled}, current_state={self.ai_voice_enabled}, participant_id={participant_id}")
             return
 
         self.ai_voice_enabled = enabled
@@ -295,12 +297,11 @@ class AISessionManager:
             # Record when voice was enabled - only respond to messages after this time
             self._voice_enabled_at = time.time()
             logger.info(
-                "AI voice enabled by %s (%s)",
-                self.controller_name if participant_id else "Unknown", 
-                participant_id or "N/A"
+                f"ai_voice_enabled | controller_name={self.controller_name}, controller_id={participant_id}"
             )
             # Restore conversation history when AI is enabled
             # This ensures the AI has context of messages spoken before it was turned on
+            logger.info(f"history_restore_on_enable | history_restored={self.history_restored}")
             asyncio.create_task(self._restore_history())
             # Broadcast controller change
             asyncio.create_task(self._broadcast_controller_change())
@@ -310,7 +311,7 @@ class AISessionManager:
             self.controller_name = None
             # Reset history flag so we restore again when re-enabled
             self.history_restored = False
-            logger.info("AI voice disabled")
+            logger.info(f"ai_voice_disabled | previous_controller={self.controller_name}")
             # Broadcast controller cleared
             asyncio.create_task(self._broadcast_controller_change())
 
@@ -331,7 +332,7 @@ class AISessionManager:
             # Use LiveKit AgentSession.interrupt() - the correct API for stopping speech
             # force=True ensures even non-interruptible speech is stopped (user explicitly disabled AI)
             interrupt_future = self.agent_session.interrupt(force=True)
-            logger.info("AI speech interruption triggered (force=True)")
+            logger.info(f"ai_speech_interrupted | force=true")
             
             # Fire-and-forget: schedule the future to complete in background
             # We don't await since handle_voice_toggle is synchronous
@@ -379,12 +380,10 @@ class AISessionManager:
                 reliable=True,
             )
             logger.info(
-                "Broadcasted controller change: %s (%s)",
-                self.controller_name or "None",
-                self.controller_participant_id or "None"
+                f"controller_change_broadcasted | controller={self.controller_name}, controller_id={self.controller_participant_id}"
             )
         except Exception:
-            logger.error("Failed to broadcast controller change", exc_info=True)
+            logger.error(f"broadcast_controller_change_failed", exc_info=True)
 
     async def send_controller_state_to_participant(self, participant_identity: str):
         """Send current controller state to a specific participant (for new joiners)."""
@@ -403,12 +402,10 @@ class AISessionManager:
                 destination_identities=[participant_identity],
             )
             logger.info(
-                "Sent controller state to new joiner %s: controller=%s",
-                participant_identity,
-                self.controller_name or "None"
+                f"controller_state_sent_to_joiner | joiner_id={participant_identity}, controller={self.controller_name}"
             )
         except Exception:
-            logger.error("Failed to send controller state to new joiner", exc_info=True)
+            logger.error(f"controller_state_send_failed | joiner_id={participant_identity}", exc_info=True)
 
     async def request_control(self, requester_id: str, requester_name: str):
         """Handle a control request from a participant."""
@@ -419,7 +416,7 @@ class AISessionManager:
             self.ai_voice_enabled = True
             self._voice_enabled_at = time.time()
             await self._broadcast_controller_change()
-            logger.info("Control granted to %s (%s) - no previous controller", requester_name, requester_id)
+            logger.info(f"control_granted_immediate | requester_id={requester_id}, requester_name={requester_name}")
             return True
         
         # Forward request to current controller AND broadcast pending state to all
@@ -449,12 +446,12 @@ class AISessionManager:
                 )
 
                 logger.info(
-                    "Forwarded control request from %s to %s and broadcasted pending state to all",
-                    requester_name, self.controller_name
+                    f"control_request_forwarded | requester_id={requester_id}, requester_name={requester_name}, current_controller={self.controller_name}"
                 )
+                logger.info(f"control_broadcast_pending | requester_id={requester_id}, requester_name={requester_name}")
                 return "forwarded"
             except Exception:
-                logger.error("Failed to forward control request", exc_info=True)
+                logger.error(f"control_request_forward_failed", exc_info=True)
         
         return False
 
@@ -465,10 +462,10 @@ class AISessionManager:
         self.controller_name = new_controller_name
         self.ai_voice_enabled = True
         self._voice_enabled_at = time.time()
+        self._voice_enabled_at = time.time()
         await self._broadcast_controller_change()
         logger.info(
-            "Control transferred from %s to %s",
-            old_controller or "None", new_controller_name
+            f"control_transfer_approved | old_controller={old_controller or 'None'}, new_controller_id={new_controller_id}, new_controller_name={new_controller_name}"
         )
 
     async def release_control(self):
@@ -478,7 +475,7 @@ class AISessionManager:
         self.controller_name = None
         self.ai_voice_enabled = False
         await self._broadcast_controller_change()
-        logger.info("Control released by %s", old_controller or "Unknown")
+        logger.info(f"control_released | previous_controller={old_controller or 'Unknown'}")
 
     def get_controller_info(self) -> dict:
         """Get current controller information."""

@@ -9,8 +9,9 @@ from .storage import TranscriptionStorage
 from .dedup import TranscriptionDeduplicator
 from history import ConversationStore
 from ai import AISessionManager
+from config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TranscriptionHandler:
@@ -32,6 +33,7 @@ class TranscriptionHandler:
         deduplicator: TranscriptionDeduplicator,
         conversation_store: Optional[ConversationStore] = None,
         ai_manager: Optional[AISessionManager] = None,
+        call_id: str = "unknown",
     ):
         """
         Initialize transcription handler.
@@ -48,6 +50,7 @@ class TranscriptionHandler:
         self.deduplicator = deduplicator
         self.conversation_store = conversation_store
         self.ai_manager = ai_manager
+        self._call_id = call_id
     
     async def handle(self, data: dict):
         """
@@ -58,33 +61,43 @@ class TranscriptionHandler:
         """
         # 1. Deduplication check
         if self.deduplicator.is_duplicate(data):
-            logger.debug("[HANDLER] Skipping duplicate transcription event")
+            logger.debug(f"duplicate_transcription_skipped | participant_id={data.get('participant_identity')}, text_hash={hash(data.get('text', '')[:30])}")
             return
         
-        logger.info(
-            "[HANDLER] Processing transcription event",
-            extra={"user": data.get("user"), "text": data.get("text")}
-        )
+        user = data.get("user", "unknown")
+        text = data.get("text", "")[:50]
+        participant_id = data.get('participant_identity')
+        logger.info(f"transcription_event_received | participant_id={participant_id}, user={user}, text_length={len(data.get('text', ''))}")
+        logger.debug(f"transcription_processing_started | participant_id={participant_id}, text_preview={text}")
         
         # 2. Publish to LiveKit room
         await self.publisher.publish(data)
+        logger.debug(f"transcription_published | participant_id={participant_id}")
         
         # 3. Store locally and to GCS
         await self.storage.write(data)
+        logger.debug(f"transcription_stored | participant_id={participant_id}, storage_type=gcs")
         
         # 4. Store in Redis for conversation history (user messages only)
         is_ai_transcript = data.get("source") == "ai" or data.get("user") == "Xyne Automatic"
-        if self.conversation_store is not None and not is_ai_transcript:
-            conversation_entry = {
-                "user": data.get("user"),
-                "text": data.get("text"),
-                "timestamp": data.get("timestamp"),
-                "spoken_at": data.get("spoken_at", data.get("timestamp")),
-                "participant_identity": data.get("participant_identity"),
-                "role": "user"
-            }
-            await self.conversation_store.add_entry(conversation_entry)
+        if self.conversation_store is not None:
+            if not is_ai_transcript:
+                conversation_entry = {
+                    "user": data.get("user"),
+                    "text": data.get("text"),
+                    "timestamp": data.get("timestamp"),
+                    "spoken_at": data.get("spoken_at", data.get("timestamp")),
+                    "participant_identity": data.get("participant_identity"),
+                    "role": "user"
+                }
+                await self.conversation_store.add_entry(conversation_entry)
+                logger.debug(f"conversation_entry_added | participant_id={participant_id}")
+            else:
+                logger.debug(f"ai_message_skipped_from_redis | participant_id={participant_id}, source=ai")
         
         # 5. Route to AI manager for LLM processing
         if self.ai_manager is not None:
+            ai_enabled = self.ai_manager.ai_voice_enabled if hasattr(self.ai_manager, 'ai_voice_enabled') else False
+            is_controller = self.ai_manager.controller_participant_id == data.get('participant_identity') if hasattr(self.ai_manager, 'controller_participant_id') else False
+            logger.debug(f"transcription_routed_to_ai | participant_id={data.get('participant_identity')}, ai_enabled={ai_enabled}, is_controller={is_controller}")
             await self.ai_manager.handle_transcription(data)

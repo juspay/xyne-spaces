@@ -6,8 +6,9 @@ import logging
 import aiohttp
 from livekit.agents.llm import function_tool
 from .utils import log_tool_latency
+from config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def create_ticket_creation_tool(room_context: dict, event_emitter):
@@ -40,6 +41,7 @@ def create_ticket_creation_tool(room_context: dict, event_emitter):
         """
         
         announce = room_context.get("announce_tool")
+        call_id = room_context.get("call_id", "unknown")
         if announce:
             message = (
                 f"I've prepared a ticket titled '{title}' for you to review."
@@ -47,20 +49,22 @@ def create_ticket_creation_tool(room_context: dict, event_emitter):
                 else f"I've prepared a ticket titled '{title}' and suggested assigning it to {assigned_to_name}. Please review and confirm."
             )
             await announce(message)
+            logger.info(f"tool_execution_announcement_sent | tool=create_ticket, message_preview={message[:50]}")
 
         try:    
             backend_url = room_context.get("backend_url")
             api_key = room_context.get("api_key")
-            call_id = room_context.get("call_id")
             board_id = room_context.get("board_id")
 
             if not backend_url or not api_key:
+                logger.error(f"tool_config_missing | tool=create_ticket, missing_fields={'backend_url' if not backend_url else 'api_key'}")
                 return (
                     "I couldn't prepare the ticket because the backend configuration "
                     "is missing. Please contact support."
                 )
 
-            if not call_id:
+            if call_id == "unknown":
+                logger.error(f"tool_config_missing | tool=create_ticket, missing_fields=call_id")
                 return (
                     "I couldn't prepare the ticket because the call ID is missing. "
                     "Please contact support."
@@ -80,8 +84,9 @@ def create_ticket_creation_tool(room_context: dict, event_emitter):
             
             # Emit event to frontend
             await event_emitter("AI_ACTION", create_ticket_action)
-            
-            logger.info(f"[CreateTicket] Sent ticket creation dialog for: {title}")
+            logger.info(f"tool_action_event_emitted | tool=create_ticket, action=CREATE_TICKET")
+
+            logger.info(f"tool_create_ticket_started | title_preview={title[:50]}, board_id={board_id}, assigned_to={assigned_to_name}")
             
             # Format response for voice
             assigned_msg = f" to be assigned to {assigned_to_name}" if assigned_to_name else ""
@@ -90,8 +95,8 @@ def create_ticket_creation_tool(room_context: dict, event_emitter):
                 f"Please review and confirm the details to create the ticket."
             )
 
-        except Exception:
-            logger.error("Unexpected error while preparing ticket creation", exc_info=True)
+        except Exception as e:
+            logger.error(f"tool_create_ticket_failed | error={str(e)[:100]}", exc_info=True)
             return (
                 "I encountered an unexpected error while preparing the ticket. "
                 "Please try again."
@@ -121,21 +126,24 @@ def create_get_my_tickets_tool(room_context: dict):
             A summary of the user's assigned tickets
         """
         announce = room_context.get("announce_tool")
+        call_id = room_context.get("call_id", "unknown")
         if announce:
             await announce("Let me check your tickets.")
-            
+            logger.info(f"tool_execution_announcement_sent | tool=get_my_tickets, message='Let me check your tickets.'")
+
         try:
             backend_url = room_context.get("backend_url")
             api_key = room_context.get("api_key")
-            call_id = room_context.get("call_id")
 
             if not backend_url or not api_key:
+                logger.error(f"tool_config_missing | tool=get_my_tickets, missing_fields={'backend_url' if not backend_url else 'api_key'}")
                 return (
                     "I couldn't fetch your tickets because the backend configuration "
                     "is missing. Please contact support."
                 )
 
-            if not call_id:
+            if call_id == "unknown":
+                logger.error(f"tool_config_missing | tool=get_my_tickets, missing_fields=call_id")
                 return (
                     "I couldn't fetch your tickets because the call ID is missing. "
                     "Please contact support."
@@ -154,15 +162,17 @@ def create_get_my_tickets_tool(room_context: dict):
             if not current_user_id:
                 # If we don't have current speaker, list all participants
                 if not participant_map:
+                    logger.warning(f"tool_user_identity_unknown | tool=get_my_tickets, reason=no_participant_map")
                     return "I need to know who is asking. Could you please identify yourself?"
                 
                 # If only one non-AI participant, use that
-                non_ai_participants = {k: v for k, v in participant_map.items() 
+                non_ai_participants = {k: v for k, v in participant_map.items()
                                        if v != "ai-assistant"}
                 if len(non_ai_participants) == 1:
                     current_user_id = list(non_ai_participants.values())[0]
                 else:
                     participant_names = ", ".join(non_ai_participants.keys())
+                    logger.warning(f"tool_user_identity_unknown | tool=get_my_tickets, reason=multiple_participants, participants={list(non_ai_participants.keys())}")
                     return f"I need to know who is asking. Are you {participant_names}?"
 
             url = f"{backend_url}/api/transcriptionAgent/{call_id}/my-tickets"
@@ -174,6 +184,8 @@ def create_get_my_tickets_tool(room_context: dict):
             params = {"userId": current_user_id, "limit": "5"}
             if status:
                 params["status"] = status.upper()
+            
+            logger.info(f"tool_get_tickets_started | requester_id={current_user_id}, status_filter={status}")
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -204,25 +216,24 @@ def create_get_my_tickets_tool(room_context: dict):
                         summary = "\n".join(ticket_summaries)
                         
                         if count > 5:
+                            logger.info(f"tool_get_tickets_success | tickets_count={count}, returned=5")
                             return f"You have {count} tickets. Here are the 5 most recent:\n{summary}"
                         else:
+                            logger.info(f"tool_get_tickets_success | tickets_count={count}")
                             return f"You have {count} ticket{'s' if count > 1 else ''} assigned:\n{summary}"
 
-                    logger.error(
-                        "Get my tickets failed (status=%s)",
-                        response.status,
-                    )
+                    logger.error(f"tool_get_tickets_failed | status_code={response.status}")
                     return (
                         "I couldn't fetch your tickets due to a server error. "
                         "Please try again."
                     )
 
         except asyncio.TimeoutError:
-            logger.error("Get my tickets request timed out")
+            logger.error(f"tool_get_tickets_failed | error=timeout")
             return "The request timed out. Please try again."
 
-        except Exception:
-            logger.error("Unexpected error while getting tickets", exc_info=True)
+        except Exception as e:
+            logger.error(f"tool_get_tickets_failed | error={str(e)[:100]}", exc_info=True)
             return "I encountered an error while fetching your tickets. Please try again."
 
     return get_my_tickets
@@ -257,19 +268,24 @@ def create_invite_user_tool(room_context: dict, event_emitter):
         """
         # Announce tool usage
         announce = room_context.get("announce_tool")
+        call_id = room_context.get("call_id", "unknown")
         if announce:
             await announce(f"I'm looking for {user_name} to invite.")
+            logger.info(f"tool_execution_announcement_sent | tool=invite_user, message='Looking for {user_name}'")
 
         try:
             backend_url = room_context.get("backend_url")
             api_key = room_context.get("api_key")
-            call_id = room_context.get("call_id")
 
             if not backend_url or not api_key:
+                logger.error(f"tool_config_missing | tool=invite_user, missing_fields={'backend_url' if not backend_url else 'api_key'}")
                 return "I couldn't search for users because the backend configuration is missing."
 
-            if not call_id:
+            if call_id == "unknown":
+                logger.error(f"tool_config_missing | tool=invite_user, missing_fields=call_id")
                 return "I couldn't search for users because the call ID is missing."
+            
+            logger.info(f"tool_invite_user_started | search_term={user_name}")
                 
             # exclude existing participants from search
             participant_map = room_context.get("participant_map", {})
@@ -286,6 +302,7 @@ def create_invite_user_tool(room_context: dict, event_emitter):
                 params["excludeUserIds"] = existing_participant_ids
 
             async with aiohttp.ClientSession() as session:
+                logger.debug(f"tool_invite_user_searching | endpoint={url}, search_term={user_name}")
                 async with session.get(
                     url,
                     params=params,
@@ -293,13 +310,14 @@ def create_invite_user_tool(room_context: dict, event_emitter):
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as response:
                     if response.status != 200:
-                        logger.error(f"User search failed (status={response.status})")
+                        logger.error(f"tool_invite_user_failed | status_code={response.status}, search_term={user_name}")
                         return "I couldn't find any users. Please try again."
                     
                     result = await response.json()
                     users = result.get("users", [])
 
                     if not users:
+                        logger.info(f"tool_invite_user_not_found | search_term={user_name}")
                         return f"I couldn't find anyone named '{user_name}'. Please check the name and try again."
 
                     # Send invite action event to frontend via LiveKit data channel
@@ -315,22 +333,24 @@ def create_invite_user_tool(room_context: dict, event_emitter):
                     
                     # Emit event to frontend
                     await event_emitter("AI_ACTION", invite_action)
-                    
-                    logger.info(f"[InviteUser] Sent invite action for {len(users)} users matching '{user_name}'")
+                    logger.info(f"tool_action_event_emitted | tool=invite_user, action=INVITE_USER")
+
+                    logger.info(f"tool_invite_user_found | search_term={user_name}, results_count={len(users)}")
                     
                     # Format user names for voice response
                     if len(users) == 1:
+                        logger.info(f"tool_invite_user_sent | user_id={users[0].get('id')}, user_name={users[0]['name']}")
                         return f"I found {users[0]['name']}. I've opened the invite dialog for you to send the message."
                     else:
                         names = ", ".join(u['name'] for u in users[:3])
                         return f"I found {len(users)} users matching '{user_name}': {names}. I've opened the invite dialog so you can select who to invite."
 
         except asyncio.TimeoutError:
-            logger.error("User search request timed out")
+            logger.error(f"tool_invite_user_failed | error=timeout, search_term={user_name}")
             return "The request timed out. Please try again."
 
-        except Exception:
-            logger.error("Unexpected error in invite_user tool", exc_info=True)
+        except Exception as e:
+            logger.error(f"tool_invite_user_failed | error={str(e)[:100]}, search_term={user_name}", exc_info=True)
             return "I encountered an error. Please try again."
 
     return invite_user

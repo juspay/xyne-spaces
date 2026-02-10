@@ -5,8 +5,9 @@ import logging
 from typing import Set
 
 from livekit import rtc
+from config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ParticipantTracker:

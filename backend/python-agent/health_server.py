@@ -4,8 +4,9 @@ Runs alongside the LiveKit agent to provide health checks for deployment
 """
 import logging
 from aiohttp import web
+from config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def health_check(request):
