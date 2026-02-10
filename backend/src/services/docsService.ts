@@ -49,6 +49,7 @@ export interface QuartoDocInfo {
     repoUrl: string | null;
     baseBranch: string | null;
     channelId: string | null;
+    channelName: string | null;
     title: string;
     entryFile: string | null;
     quartoDocumentType: string | null;
@@ -123,6 +124,16 @@ export class DocsService {
                 logger.info(`[DocsService] checkExistingDoc - no repoId set for doc: ${existingDoc.id}`);
             }
 
+            // Fetch channel name if channelId is set
+            let channelName: string | null = null;
+            if (existingDoc.channelId) {
+                const channel = await prisma.channel.findUnique({
+                    where: { id: existingDoc.channelId },
+                    select: { name: true },
+                });
+                channelName = channel?.name || null;
+            }
+
             return {
                 id: existingDoc.id,
                 userRepo: existingDoc.userRepo || '',
@@ -131,6 +142,7 @@ export class DocsService {
                 repoUrl,
                 baseBranch,
                 channelId: existingDoc.channelId,
+                channelName,
                 title: existingDoc.title,
                 entryFile: existingDoc.entryFile,
                 quartoDocumentType: existingDoc.quartoDocumentType,
@@ -251,6 +263,7 @@ export class DocsService {
             repoUrl,
             baseBranch,
             channelId: canvas.channelId,
+            channelName: null,
             title: canvas.title,
             entryFile: canvas.entryFile,
             quartoDocumentType: canvas.quartoDocumentType,
