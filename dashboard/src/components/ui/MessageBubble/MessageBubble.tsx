@@ -687,12 +687,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {/* Forwarded message content with left border */}
                   <div className='border-l-4 border-gray-300 pl-3'>
                     <div className='flex items-center gap-2 mb-1'>
-                      {forwardedMessageData.originalSenderId && (
-                        <UserAvatar
-                          userId={forwardedMessageData.originalSenderId}
-                          size={AvatarSize.SM}
-                          showActiveStatus={false}
-                        />
+                      {forwardedMessageData.originalSenderName === 'Xyne Call' ? (
+                        <div className='w-5 h-5 rounded-md flex items-center justify-center bg-gray-100'>
+                          <HuddleIcon color='#4b5563' size={14} />
+                        </div>
+                      ) : (
+                        forwardedMessageData.originalSenderId && (
+                          <UserAvatar
+                            userId={forwardedMessageData.originalSenderId}
+                            size={AvatarSize.SM}
+                            showActiveStatus={false}
+                          />
+                        )
                       )}
                       <span className='text-xs font-medium text-gray-700'>
                         {forwardedMessageData.originalSenderName || 'Unknown User'}

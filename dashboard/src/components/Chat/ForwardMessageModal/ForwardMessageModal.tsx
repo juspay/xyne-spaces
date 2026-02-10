@@ -11,6 +11,7 @@ import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
 import { formatRelativeTimestamp } from '../../../utils/dateUtils';
+import HuddleIcon from '../../icons/HuddleIcon';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import {
   ChannelVisibility,
@@ -239,6 +240,15 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     setInputValue('');
     setTimeout(() => comboboxInputRef.current?.focus(), 0);
   };
+
+  const meta = (message.metadata || {}) as Record<string, unknown>;
+  const contentStr = typeof message.content === 'string' ? message.content : '';
+
+  const isCallMessage =
+    message.msgType === MessageType.SYSTEM &&
+    (meta['isCallMessage'] === true ||
+      meta['callId'] !== undefined ||
+      /started a call|Call ended|joined the call/i.test(contentStr));
 
   const getChannelIcon = (channelId: string): React.ReactNode => {
     const channel = allChannels.find(c => c.id === channelId);
@@ -501,12 +511,18 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           <div className='bg-gray-50 dark:bg-gray-700 rounded-md p-3 border border-gray-200 dark:border-gray-600 max-h-[200px] overflow-y-auto'>
             <div className='flex gap-3'>
               <div className='flex-shrink-0'>
-                <Avatar userId={message.senderId} size='md' />
+                {isCallMessage ? (
+                  <div className='w-10 h-10 rounded-md flex items-center justify-center bg-gray-100'>
+                    <HuddleIcon color='#4b5563' size={20} />
+                  </div>
+                ) : (
+                  <Avatar userId={message.senderId} size='md' />
+                )}
               </div>
               <div className='flex-1 min-w-0'>
                 <div className='flex items-baseline gap-2 mb-1'>
                   <h4 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
-                    {sender?.name || 'User'}
+                    {isCallMessage ? 'Xyne Call' : sender?.name || 'User'}
                   </h4>
                   <span className='text-xs text-gray-500 dark:text-gray-400'>
                     {formatRelativeTimestamp(message.createdAt)}

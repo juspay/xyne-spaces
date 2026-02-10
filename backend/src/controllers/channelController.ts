@@ -367,6 +367,20 @@ export class ChannelController {
         originalSenderInfo = { name: 'Deleted User', picture: null };
       }
 
+      let effectiveSenderName = originalSenderInfo.name || 'Unknown User';
+
+      const meta = originalMessage.metadata as any;
+      const contentStr = typeof originalMessage.content === 'string' ? originalMessage.content : '';
+      
+      const isCall = 
+        (originalMessage.msgType === MessageType.SYSTEM && meta?.isCallMessage === true) ||
+        meta?.callId !== undefined ||
+        /started a call|Call ended|joined the call/i.test(contentStr);
+
+      if (isCall) {
+        effectiveSenderName = 'Xyne Call';
+      }
+
       // Get sender info (read operation, can be outside transaction)
       const senderInfo = await this.getUserInfo(senderId);
 
@@ -374,7 +388,7 @@ export class ChannelController {
       const xmlContent = createForwardedMessageXml({
         originalMessageId: forwardedMessage.originalMessageId,
         originalSenderId: originalMessage.senderId,
-        originalSenderName: originalSenderInfo.name,
+        originalSenderName: effectiveSenderName,
         originalCreatedAt: originalMessage.createdAt.getTime(),
         originalChannelId: originalConversation?.channelId || null,
         originalConversationId: originalMessage.conversationId,
