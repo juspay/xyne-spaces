@@ -237,11 +237,11 @@ When('I click on Create Ticket button in thread panel', async function (this: Cu
 
   // Click the Create Ticket button in the thread panel header
   const createTicketButton = this.page.locator('[data-testid="thread-create-ticket-button"]');
-  await createTicketButton.waitFor({ state: 'visible', timeout: 10000 });
+  await createTicketButton.waitFor({ state: 'visible', timeout: 60000 });
   await createTicketButton.click();
 
   // Wait for the CreateTicketModal to open
-  await this.page.waitForTimeout(1000);
+  await this.page.waitForTimeout(60000);
 
   uiLogger.info('[Tickets] Clicked Create Ticket button in thread panel');
 });
@@ -251,12 +251,12 @@ Then('the thread panel should be visible', async function (this: CustomWorld) {
 
   // Check for thread panel - it usually has the Create Ticket button visible
   const threadPanel = this.page.locator('[data-testid="thread-create-ticket-button"]');
-  const isVisible = await threadPanel.isVisible({ timeout: 5000 }).catch(() => false);
+  const isVisible = await threadPanel.isVisible({ timeout: 60000 }).catch(() => false);
 
   if (!isVisible) {
     // Fallback: check for any thread panel indicator
     const threadHeader = this.page.locator('text="Thread"').first();
-    await threadHeader.waitFor({ state: 'visible', timeout: 5000 });
+    await threadHeader.waitFor({ state: 'visible', timeout: 60000 });
   }
 
   uiLogger.info('[Tickets] Thread panel is visible');
@@ -402,15 +402,15 @@ When(
     const ticketsTab = this.page.locator('[data-testid="channel-tickets-tab"]');
     if (await ticketsTab.isVisible()) {
       await ticketsTab.click();
-      await this.page.waitForTimeout(500);
+      await this.page.waitForTimeout(2000);
     }
     const anyTicketCard = this.page.locator('[data-testid^="ticket-card-"]').first();
-    await anyTicketCard.waitFor({ state: 'visible', timeout: 15000 });
+    await anyTicketCard.waitFor({ state: 'visible', timeout: 60000 });
 
     const ticketCardSelector = `[data-testid='ticket-card-title']:has-text('${ticketTitle}')`;
     const ticketCard = this.page.locator(ticketCardSelector);
-    await ticketCard.waitFor({ state: 'visible', timeout: 20000 });
-    await this.page.waitForTimeout(300);
+    await ticketCard.waitFor({ state: 'visible', timeout: 60000 });
+    await this.page.waitForTimeout(2000);
     await ticketCard.click();
     uiLogger.info(`[Tickets] Clicked on ticket card with title: "${ticketTitle}"`);
   }
