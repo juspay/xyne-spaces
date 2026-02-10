@@ -43,7 +43,7 @@ export const DirectMessageActivity = ({
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} variant='default' contentOnly={true} />
       ) : (
-        <div className='text-[#181B1D] text-sm line-clamp-1 truncate'>
+        <div className='text-[#181B1D] text-sm line-clamp-1 truncate whitespace-normal break-all'>
           <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
         </div>
       )}
