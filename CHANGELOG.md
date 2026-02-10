@@ -1,3 +1,15 @@
+## [1.36.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.35.0...v1.36.0) (2026-02-10)
+
+
+### Features
+
+* custom summary generation flow ([2f9cf1b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2f9cf1b4bcbc6d19601cc5feed48778e9d4c5f09)), closes [#3027](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3027)
+
+
+### Bug Fixes
+
+* adding new models ([2419c3e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2419c3e2a4dd552659f45dfbecd6e23038ecc01e)), closes [#2851](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2851)
+
 ## [1.35.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.34.0...v1.35.0) (2026-02-10)
 
 
