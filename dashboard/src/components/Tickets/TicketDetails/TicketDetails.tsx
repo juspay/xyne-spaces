@@ -28,6 +28,8 @@ import {
   FormEntityType,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { usePlatform } from '../../../hooks/usePlatform';
+import { useRouteContext } from '../../../hooks/useRouteContext';
 import { TicketActivity } from '../TicketActivity';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
 import { UserGroupSelector } from '../CreateTicketModal/UserGroupSelector';
@@ -171,6 +173,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const zero = useZero();
   const navigate = useNavigate();
   const location = useLocation();
+  const { isMobile } = usePlatform();
+  const { baseRoute, buildChannelRoute } = useRouteContext();
 
   // State declarations
   const [editingTitle, setEditingTitle] = useState(false);
@@ -186,6 +190,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const [editingETA, setEditingETA] = useState(false);
   const [etaValue, setETAValue] = useState('');
+  const [showFullDescription, setShowFullDescription] = useState(false);
+  const [needsReadMore, setNeedsReadMore] = useState(false);
+  const descriptionRef = useRef<HTMLDivElement>(null);
 
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId }));
@@ -203,6 +210,29 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       .filter(Boolean) || [];
 
   const qaId = ticketAssignments?.find(a => a.userResponsibility === 'QA')?.userId || null;
+  // Check if description needs truncation by comparing scrollHeight with clientHeight
+  useEffect(() => {
+    if (!descriptionRef.current || showFullDescription) return;
+
+    const checkTruncation = () => {
+      const element = descriptionRef.current;
+      if (element) {
+        const isTruncated = element.scrollHeight > element.clientHeight;
+        setNeedsReadMore(isTruncated);
+      }
+    };
+
+    // Use ResizeObserver for better performance
+    const resizeObserver = new ResizeObserver(checkTruncation);
+    if (descriptionRef.current) {
+      resizeObserver.observe(descriptionRef.current);
+      checkTruncation(); // Initial check
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [ticket?.description, showFullDescription]);
 
   // Query all users for assignee dropdown
   const users = useUsers();
@@ -550,7 +580,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       void zero.mutate(
         mutators.ticket.update({
           id: ticket.id,
-          description: descriptionValue,
+          description: descriptionValue.trim(),
           updatedAt: Date.now(),
         }),
       );
@@ -696,22 +726,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       returnToUrl?: string;
     } | null;
     const isFromMyTickets = !!state?.fromMyTickets;
-    const returnToUrl = state?.returnToUrl;
-    const activeTabParam = state?.activeTab
-      ? `?selectedTab=${encodeURIComponent(state.activeTab)}`
-      : '';
-    if (isFromMyTickets) {
-      void navigate(`/chat/my-tickets`, { replace: true });
-    }
-    //restores Kanban Board filters
-    else if (returnToUrl) {
-      void navigate(returnToUrl, { replace: true });
-      return;
-    } else {
-      // Standard chat navigation
+
+    // On mobile: always navigate to ThreadMessages with details tab
+    if (isMobile) {
       void navigate(
-        `/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}${activeTabParam}`,
-        { replace: true },
+        buildChannelRoute(`${ticket.channelId}/${ticket.conversationId}/${ticket.id}`, {
+          selectedTab: 'details',
+        }),
+      );
+    } else if (isFromMyTickets) {
+      // Desktop: Take them back to the My Tickets list
+      void navigate(`/chat/my-tickets`);
+    } else {
+      // Desktop: Navigate to channel with ticket in minimized view
+      // This mimics the behavior when clicking a ticket card from within the channel
+      const activeTabParam = state?.activeTab
+        ? `?selectedTab=${encodeURIComponent(state.activeTab)}`
+        : '';
+      void navigate(
+        `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}${activeTabParam}`,
       );
     }
   };
@@ -724,7 +757,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!ticket) return;
 
     // Use shareable origin from environment variable
-
     const expandedTicketViewRoute = `${SHAREABLE_ORIGIN}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
     void navigator.clipboard.writeText(expandedTicketViewRoute);
     toast.success('Link copied', {
@@ -918,7 +950,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
                   onClick={() => {
                     void navigate(
-                      `/chat/dir/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
+                      `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
                     );
                   }}
                   title='Summarize thread'
@@ -1013,7 +1045,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <div
             role='button'
             tabIndex={0}
-            className='cursor-text my-3 text-[#181B1D]'
+            className='cursor-text my-3 text-[#181B1D] flex flex-col'
             onClick={() => setEditingDescription(true)}
             onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -1022,9 +1054,37 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               }
             }}
           >
-            <p className='text-sm text-gray-700 leading-relaxed whitespace-pre-wrap break-all'>
+            <p
+              ref={descriptionRef}
+              className={cn(
+                'whitespace-pre-wrap text-gray-700 break-words text-sm',
+                !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
+              )}
+            >
               <RenderMessageWithHTML message={ticket.description || ''} />
             </p>
+            {!showFullDescription && needsReadMore && (
+              <button
+                className='text-xs font-semibold cursor-pointer self-start underline py-1'
+                onClick={event => {
+                  event.stopPropagation();
+                  setShowFullDescription(true);
+                }}
+              >
+                Read More
+              </button>
+            )}
+            {showFullDescription && (
+              <button
+                className='text-xs font-semibold cursor-pointer self-start underline py-1'
+                onClick={event => {
+                  event.stopPropagation();
+                  setShowFullDescription(false);
+                }}
+              >
+                View Less
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1042,12 +1102,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </div>
       )}
       {/* Ticket MetaData Key Value */}
-      <div
-        className={cn(
-          'grid grid-cols-2 gap-x-2 gap-y-4 mt-8 mb-4',
-          expandedView ? 'grid-cols-2' : 'grid-cols-1',
-        )}
-      >
+      <div className='flex flex-col gap-y-4 mt-8 mb-4 w-full'>
         {/* Left Column */}
 
         <div className='space-y-4'>
