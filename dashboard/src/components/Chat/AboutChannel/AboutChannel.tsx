@@ -125,10 +125,10 @@ const AboutChannel = ({ channel, isParticipant }: AboutChannelProps): ReactEleme
         </div>
         <div className='text-[14px] text-[#505B62] py-4'>
           Created By <span className='text-[#0269B3]'>{createdByUser?.name || 'Unknown'}</span> on{' '}
-          {formatDate(channel.createdAt)}
+          <span className='visual-regression-hide'>{formatDate(channel.createdAt)}</span>
         </div>
       </div>
-      <div className='mt-auto p-[12px] text-[12px] flex items-center justify-center text-[#788187] font-light border-t border-[#F2F2F3]'>
+      <div className='mt-auto p-[12px] text-[12px] flex items-center justify-center text-[#788187] font-light border-t border-[#F2F2F3] visual-regression-hide'>
         Channel ID: {channel.id}
       </div>
     </div>

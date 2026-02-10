@@ -97,7 +97,7 @@ const MetricsBar = (): ReactElement => {
         <span className='font-sans font-normal text-xs leading-none tracking-normal text-[var(--metrics-bar-color)]'>
           Active
         </span>
-        <span className='font-sans font-semibold text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] transition-all duration-300 ease-out'>
+        <span className='font-sans font-semibold text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] transition-all duration-300 ease-out visual-regression-hide'>
           {activeCount}
         </span>
       </div>
@@ -111,7 +111,7 @@ const MetricsBar = (): ReactElement => {
         <span className='font-sans font-normal text-xs leading-none tracking-normal text-[var(--metrics-bar-color)]'>
           Messages
         </span>
-        <span className='font-sans font-semibold text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] transition-all duration-300 ease-out'>
+        <span className='font-sans font-semibold text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] transition-all duration-300 ease-out visual-regression-hide'>
           {messagesCount}
         </span>
       </div>
@@ -125,7 +125,7 @@ const MetricsBar = (): ReactElement => {
         <span className='font-sans font-normal text-xs leading-none tracking-normal text-[var(--metrics-bar-color)]'>
           Calls
         </span>
-        <span className='font-sans font-semibold text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] transition-all duration-300 ease-out'>
+        <span className='font-sans font-semibold text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] transition-all duration-300 ease-out visual-regression-hide'>
           {getCallsDisplay()}
         </span>
       </div>
@@ -146,7 +146,7 @@ const MetricsBar = (): ReactElement => {
           <span className='font-sans font-normal text-xs leading-none tracking-normal text-[var(--metrics-bar-color)]'>
             Zero Client ID
           </span>
-          <span className='font-sans font-semibold text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] transition-all duration-300 ease-out'></span>
+          <span className='font-sans font-semibold text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] transition-all duration-300 ease-out visual-regression-hide'></span>
         </button>
       </Tooltip>
     </div>

@@ -37,6 +37,7 @@ import { MentionResult } from '../../ui/Selectors/Selectors.types';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
+import { isTestEnv } from '../../../config';
 
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
@@ -271,7 +272,8 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
 
     const { displayName: channelName } = useChannelDisplayName(channel, context.userID);
     const placeholderText =
-      placeholder || (channelName ? `Message ${channelName}` : 'Type a message...');
+      placeholder ||
+      (channelName ? `Message ${isTestEnv ? '' : channelName}`.trim() : 'Type a message...');
 
     const handleMentionSearch = useCallback(
       (query: string) => {

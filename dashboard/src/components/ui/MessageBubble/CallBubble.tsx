@@ -175,7 +175,9 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
       ) : (
         <>
           {/* Call ended message content */}
-          {message.content && <div className='text-sm text-gray-600'>{message.content}</div>}
+          {message.content && (
+            <div className='text-sm text-gray-600 visual-regression-hide'>{message.content}</div>
+          )}
 
           {/* Attachments */}
           {attachments.length > 0 && (

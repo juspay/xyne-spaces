@@ -20,6 +20,7 @@ const UserAvatar = ({
   return (
     // do not add DIV or SPAN here, it breaks the Avatar component's layout
     <Avatar
+      className='visual-regression-hide'
       src={user?.picture || ''}
       alt={user?.name || 'User avatar'}
       online={showActiveStatus ? user?.presenceStatus?.status === UserPresenceStatus.ONLINE : false}

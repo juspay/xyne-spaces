@@ -258,7 +258,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
               type='text'
               readOnly
               value={viewLink || 'Not available'}
-              className='flex-1 text-sm bg-gray-50'
+              className='flex-1 text-sm bg-gray-50 visual-regression-hide'
               disabled={!viewLink}
             />
             <button

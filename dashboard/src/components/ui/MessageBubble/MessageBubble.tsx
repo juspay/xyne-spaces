@@ -515,7 +515,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               </div>
             ) : (
               <div
-                className={`text-[10px] text-[#868D95] flex items-center gap-1 cursor-pointer hover:underline pt-[5px] ${shouldShowPending ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                className={`text-[10px] text-[#868D95] flex items-center gap-1 cursor-pointer hover:underline pt-[5px] ${shouldShowPending ? '' : 'opacity-0 group-hover:opacity-100'} visual-regression-hide`}
               >
                 {formatTime12HourNoAmPm(message.createdAt)}
                 {shouldShowPending && (
@@ -579,7 +579,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
               <Tooltip content={formatFullTimestamp(message.createdAt)} side={TooltipSide.TOP}>
                 <h3
-                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-[#868D95] cursor-pointer hover:underline transition-all duration-150`}
+                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-[#868D95] cursor-pointer hover:underline transition-all duration-150 visual-regression-hide`}
                 >
                   {context === 'thread'
                     ? formatThreadTimestamp(message.createdAt)
@@ -698,7 +698,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         {forwardedMessageData.originalSenderName || 'Unknown User'}
                       </span>
                       {forwardedMessageData.originalCreatedAt && (
-                        <span className='text-xs text-gray-500'>
+                        <span className='text-xs text-gray-500 visual-regression-hide'>
                           {formatRelativeTimestamp(forwardedMessageData.originalCreatedAt)}
                         </span>
                       )}

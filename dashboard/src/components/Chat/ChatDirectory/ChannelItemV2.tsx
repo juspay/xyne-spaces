@@ -126,7 +126,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
         >
           <span className=''>{getIcon()}</span>
           <span ref={nameRef} className=' text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
-            <span>{displayName}</span>
+            <span className='visual-regression-hide'>{displayName}</span>
             {isDM && (
               <StatusIndicator
                 statusEmoji={dmUser?.presenceStatus?.statusEmoji}

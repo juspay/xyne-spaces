@@ -91,6 +91,7 @@ const App = (): ReactElement => {
                         position='top-right'
                         richColors
                         closeButton
+                        className='visual-regression-hide'
                         toastOptions={{
                           style: {
                             alignItems: 'flex-start',
