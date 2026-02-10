@@ -162,9 +162,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
   const validateField = (field: 'team' | 'phoneNumber' | 'dob', value: string): boolean => {
     setEditError(null);
 
-    if (!value.trim() && field !== 'dob') {
-      setEditError('This field cannot be empty');
-      return false;
+    if (!value.trim()) {
+      return true;
     }
 
     if (field === 'phoneNumber') {
@@ -176,10 +175,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
     }
 
     if (field === 'dob') {
-      if (!value) {
-        setEditError('Please select a date');
-        return false;
-      }
       const selectedDate = new Date(value);
       const today = new Date();
       const age = today.getFullYear() - selectedDate.getFullYear();
@@ -217,11 +212,11 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
     } = {};
 
     if (editingField === 'team') {
-      updateParams.team = editValue.trim();
+      updateParams.team = editValue.trim() || null;
     } else if (editingField === 'phoneNumber') {
-      updateParams.phoneNumber = editValue.trim();
+      updateParams.phoneNumber = editValue.trim() || null;
     } else if (editingField === 'dob') {
-      updateParams.dob = new Date(editValue).getTime();
+      updateParams.dob = editValue ? new Date(editValue).getTime() : null;
     }
 
     zero.mutate(
