@@ -78,6 +78,16 @@ const ThreadList = ({
   });
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Check if the previous message is a system message
+  const isPreviousMessageSystem = (
+    messageIndex: number,
+    messages: typeof threadMessages,
+  ): boolean => {
+    if (messageIndex === 0) return false;
+    const prevMsg = messages[messageIndex - 1];
+    return prevMsg?.msgType === MessageType.SYSTEM;
+  };
+
   const isThreadsRoute = location.pathname.startsWith('/chat/threads');
 
   // Handle collapsible thread logic - only when enableCollapsing is true
@@ -251,6 +261,7 @@ const ThreadList = ({
             threadMessages[messageIndex - 1]?.senderId !== threadMessage.senderId ||
             !!isPreviousMessageAWorkflowMessage ||
             isPreviousMessageAnActivity ||
+            isPreviousMessageSystem(messageIndex, threadMessages) ||
             (!!threadMessages[messageIndex - 1] &&
               Math.abs(
                 new Date(threadMessage.createdAt).getTime() -
@@ -300,6 +311,7 @@ const ThreadList = ({
           index < 2 ||
           !threadMessage ||
           visibleMessages[index - 1]?.senderId !== threadMessage.senderId ||
+          isPreviousMessageSystem(index, visibleMessages) ||
           (!!visibleMessages[index - 1] &&
             Math.abs(
               new Date(threadMessage.createdAt).getTime() -

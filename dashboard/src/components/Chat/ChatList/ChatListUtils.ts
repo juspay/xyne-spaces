@@ -135,6 +135,17 @@ export const shouldShowAvatar = (
     return item.data.senderId;
   };
 
+  // Check if previous message is a system message
+  const isPreviousMessageSystem = (): boolean => {
+    if (prevItem.type === 'conversation') {
+      return prevItem.data.initialMessage?.msgType === MessageType.SYSTEM;
+    }
+    return prevItem.data.msgType === MessageType.SYSTEM;
+  };
+
+  // Always show avatar after a system message
+  if (isPreviousMessageSystem()) return true;
+
   const currentSenderId = getCurrentSenderId(currentItem);
   const prevSenderId = getCurrentSenderId(prevItem);
 
