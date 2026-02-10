@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { CreatePRDModal } from './CreatePRDModal';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
@@ -33,61 +34,48 @@ interface CallBubbleProps {
 /**
  * Button component for generating PRD from call transcript
  */
-const GeneratePRDButton: React.FC<{ callId: string; messageId: string }> = ({
-  callId,
-  messageId,
-}) => {
+const GeneratePRDButton: React.FC<{
+  callId: string;
+  messageId: string;
+  canvasURL?: string | undefined;
+  isCanvasCreated?: boolean;
+}> = ({ callId, messageId, canvasURL: _canvasURL, isCanvasCreated }) => {
   const { generatePRD, isLoading } = useGeneratePRD();
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const handleClick = (): void => {
-    void generatePRD(callId, messageId);
+  const handleGenerate = async (customPrompt?: string): Promise<void> => {
+    // Close the modal immediately
+    setIsModalOpen(false);
+    // Generate PRD - button will show "Generating..." via isLoading state
+    await generatePRD(callId, messageId, customPrompt);
   };
 
   return (
-    <button
-      type='button'
-      onClick={handleClick}
-      disabled={isLoading}
-      className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
-      style={{ color: '#0077FF' }}
-    >
-      {isLoading ? (
-        <>
-          <Loader2 className='w-4 h-4 animate-spin' />
-          <span>Generating...</span>
-        </>
-      ) : (
-        <>
-          <span>Generate PRD</span>
-        </>
-      )}
-    </button>
-  );
-};
+    <>
+      <button
+        type='button'
+        onClick={() => setIsModalOpen(true)}
+        disabled={isLoading}
+        className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
+        style={{ color: '#0077FF' }}
+      >
+        {isLoading ? (
+          <>
+            <Loader2 className='w-4 h-4 animate-spin' />
+            <span>Generating...</span>
+          </>
+        ) : (
+          <span>{isCanvasCreated ? 'Generate Another PRD' : 'Generate PRD'}</span>
+        )}
+      </button>
 
-/**
- * Button component for opening existing PRD canvas
- */
-const OpenPRDButton: React.FC<{ canvasUrl: string }> = ({ canvasUrl }) => {
-  const navigate = useNavigate();
-
-  const handleClick = (): void => {
-    // Extract canvas ID from URL: https://spaces.xyne.juspay.net/chat/canvas/{id}
-    const canvasId = canvasUrl.split('/').pop();
-    if (canvasId) {
-      void navigate(`/chat/canvas/${canvasId}`);
-    }
-  };
-
-  return (
-    <button
-      type='button'
-      onClick={handleClick}
-      className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all'
-      style={{ color: '#0077FF' }}
-    >
-      <span>Open PRD</span>
-    </button>
+      <CreatePRDModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onGenerate={handleGenerate}
+        isLoading={isLoading}
+      />
+    </>
   );
 };
 
@@ -258,12 +246,13 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
           {/* Generate PRD and Detailed Summary buttons for ended calls with transcript */}
           {!isActiveCall && message.hasAttachment && (
             <div className='flex flex-wrap items-center gap-2 mt-2'>
-              {/* PRD Button */}
-              {metadata?.prdCanvasUrl ? (
-                <OpenPRDButton canvasUrl={metadata.prdCanvasUrl} />
-              ) : (
-                <GeneratePRDButton callId={callId} messageId={message.messageId} />
-              )}
+              {/* PRD Button - always show to allow generating multiple PRDs */}
+              <GeneratePRDButton
+                callId={callId}
+                messageId={message.messageId}
+                canvasURL={metadata?.prdCanvasUrl}
+                isCanvasCreated={!!metadata?.prdCanvasUrl}
+              />
 
               {/* Separator */}
               <span className='text-gray-400'>•</span>

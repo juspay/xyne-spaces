@@ -10,6 +10,7 @@ import { CallStatus, CallType, InvitationResponse } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { formatEndedCallMessage } from '@/zero/utils/systemMessagesUtils';
+import z from 'zod';
 
 export class CallController {
   /**
@@ -789,12 +790,19 @@ export class CallController {
 
       // 5. Generate PRD and post to conversation
       const { callDocumentService } = await import('@/services/callDocumentService');
+      const { customPrompt } = z.object({
+        customPrompt: z.string().optional().refine(
+          val => !val || val.length < 5000,
+          "Custom prompt must be less than 5000 characters"
+        ),
+      }).parse(req.body);
       const result = await callDocumentService.generateAndPostPRD(
         callId,
         transcriptContent,
         summary,
         userId,
-        callMessage.conversationId
+        callMessage.conversationId,
+        customPrompt
       );
 
       if (!result.success) {
