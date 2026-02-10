@@ -57,6 +57,11 @@ export const highlightCodeBlocks = (html: string): string => {
       // Convert to HTML string (safe)
       const highlightedHtml = toHtml(tree);
 
+      if (!highlightedHtml || !highlightedHtml.trim()) {
+        codeEl.textContent = raw;
+        return;
+      }
+
       // Replace code content safely
       codeEl.innerHTML = highlightedHtml;
     } catch {
