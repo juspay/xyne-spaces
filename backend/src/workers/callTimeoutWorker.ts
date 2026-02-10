@@ -128,6 +128,14 @@ export class CallTimeoutWorker {
                 type: NotificationType.MISSED_CALL,
                 relatedEntityType: 'call',
                 relatedEntityId: call.externalId,
+                metadata: {
+                    callId: call.externalId,
+                    channelId: call.channelId,
+                    callerId: invitedByUserId,
+                    callerName: recipientName,
+                    callType: call.callType,
+                    reason: 'unavailable'
+                }
             });
 
             // 5. Send "Missed Call" to Recipient
