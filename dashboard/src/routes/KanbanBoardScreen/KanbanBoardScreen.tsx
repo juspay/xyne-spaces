@@ -4,6 +4,8 @@ import { useZero } from '@rocicorp/zero/react';
 import { toast } from 'sonner';
 import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket } from '../../hooks/usePermissions';
+import { usePlatform } from '../../hooks/usePlatform';
+import { useRouteContext } from '../../hooks/useRouteContext';
 import {
   Plus,
   List,
@@ -102,6 +104,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isMobile } = usePlatform();
+  const { baseRoute, buildChannelRoute } = useRouteContext();
   const canCreateTicket = useCanCreateTicket(); // Check ticket permissions
   const zero = useZero();
   const isDraggingRef = useRef(false);
@@ -777,17 +781,35 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     (ticket: Ticket) => {
       const currentUrl = window.location.pathname + window.location.search;
 
-      void navigate(
-        `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`,
-        {
-          state: {
-            fromMyTickets: false,
-            returnToUrl: currentUrl,
+      // On mobile: navigate directly to ThreadMessages route with details tab
+      // On desktop: use tab-based route for expanded view in ConversationPannel
+      if (isMobile) {
+        void navigate(
+          `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
+          {
+            state: {
+              fromMyTickets: false,
+              returnToUrl: currentUrl,
+            },
           },
-        },
-      );
+        );
+      } else {
+        void navigate(
+          buildChannelRoute(ticket.channelId, {
+            tab: 'tickets',
+            ticketId: ticket.id,
+            conversationId: ticket.conversationId,
+          }),
+          {
+            state: {
+              fromMyTickets: false,
+              returnToUrl: currentUrl,
+            },
+          },
+        );
+      }
     },
-    [navigate, channel],
+    [navigate, channel, isMobile, baseRoute, buildChannelRoute],
   );
 
   // Handle ticket creation success
@@ -800,14 +822,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           label: 'View Details',
           onClick: () => {
             void navigate(
-              `/chat/dir/${channel.id}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId || ''}`,
+              buildChannelRoute(channel.id, {
+                tab: 'tickets',
+                ticketId: ticket.id,
+                conversationId: ticket.conversationId || '',
+              }),
             );
           },
         },
         duration: 5000,
       });
     },
-    [navigate, channel],
+    [navigate, channel, buildChannelRoute],
   );
 
   // Get first board for create ticket modal

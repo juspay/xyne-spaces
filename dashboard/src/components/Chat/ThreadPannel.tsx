@@ -86,6 +86,7 @@ export const ThreadMessages = ({
   }>();
 
   const { isMobile } = usePlatform();
+  const { baseRoute, buildChannelRoute } = useRouteContext();
 
   const channelId = propChannelId || paramChannelId;
   const conversationId = propConversationId || paramConversationId;
@@ -171,7 +172,6 @@ export const ThreadMessages = ({
   // Navigation for thread summary
   const navigate = useNavigate();
   const location = useLocation();
-  const { baseRoute } = useRouteContext();
 
   // Check if the route is /threads
   const isThreadsRoute = location.pathname.startsWith('/chat/dir/threads');
@@ -394,7 +394,31 @@ export const ThreadMessages = ({
   const handleCloseTicketDetailsThread = (): void => {
     if (isStandaloneWindow()) {
       window.close();
+      return;
+    }
+
+    const navState = location.state as {
+      fromMyTickets?: boolean;
+      returnToUrl?: string;
+      activeTab?: string;
+    } | null;
+
+    // Check if user came from tickets tab or has a return URL
+    const isFromTickets =
+      location.search.includes('tab=tickets') && location.search.includes('ticketId');
+    const returnToUrl = navState?.returnToUrl;
+
+    if (isMobile && (isFromTickets || returnToUrl)) {
+      // On mobile, navigate to tickets tab if coming from tickets, or use return URL
+      if (returnToUrl) {
+        void navigate(returnToUrl, { replace: true });
+      } else {
+        void navigate(buildChannelRoute(derivedChannelId, { tab: 'tickets' }), {
+          replace: true,
+        });
+      }
     } else {
+      // Navigate to channel (messages tab)
       void navigate(`${baseRoute}/${derivedChannelId}`, { replace: isMobile });
     }
   };
@@ -404,7 +428,11 @@ export const ThreadMessages = ({
 
     standaloneNavigate(
       navigate,
-      `${baseRoute}/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`,
+      buildChannelRoute(ticket.channelId, {
+        tab: 'tickets',
+        ticketId: ticket.id,
+        conversationId: ticket.conversationId,
+      }),
       { state: { activeTab } },
     );
   };
@@ -611,17 +639,19 @@ export const ThreadMessages = ({
             </h3>
           </div>
           <div className='flex gap-x-2'>
-            <Tooltip content='Expand View'>
-              <Button
-                className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
-                variant='ghost'
-                size='sm'
-                onClick={openTicketDetailsExpandedView}
-                aria-label='Open Maximize View'
-              >
-                <Maximize2 size={20} />
-              </Button>
-            </Tooltip>
+            {!isMobile && (
+              <Tooltip content='Expand View'>
+                <Button
+                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  variant='ghost'
+                  size='sm'
+                  onClick={openTicketDetailsExpandedView}
+                  aria-label='Open Maximize View'
+                >
+                  <Maximize2 size={20} />
+                </Button>
+              </Tooltip>
+            )}
             {!isStandaloneWindow() && (
               <Tooltip content='Ask AI'>
                 <Button
@@ -751,7 +781,11 @@ export const ThreadMessages = ({
                     </Button>
                   ) : (
                     <Link
-                      to={`${baseRoute}/${derivedChannelId}`}
+                      to={
+                        isMobile && ticket && location.search.includes('tab=tickets')
+                          ? `${baseRoute}/${derivedChannelId}?tab=tickets`
+                          : `${baseRoute}/${derivedChannelId}`
+                      }
                       className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
                       aria-label='Close thread panel'
                       replace={isMobile}
@@ -1008,7 +1042,11 @@ export const ThreadMessages = ({
                         </Button>
                       ) : (
                         <Link
-                          to={`${baseRoute}/${derivedChannelId}`}
+                          to={
+                            isMobile && ticket && location.search.includes('tab=tickets')
+                              ? `${baseRoute}/${derivedChannelId}?tab=tickets`
+                              : `${baseRoute}/${derivedChannelId}`
+                          }
                           className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
                           aria-label='Close thread panel'
                           replace={isMobile}

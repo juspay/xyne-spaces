@@ -145,7 +145,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
       >
         {/* Icon: Show selected option's icon or nothing */}
         {selectedOption?.icon ? (
-          <span className='flex-shrink-0 flex items-center justify-center size-3.5'>
+          <span className='flex-shrink-0 flex items-center justify-center'>
             {selectedOption.icon}
           </span>
         ) : inputIcon ? (
@@ -200,7 +200,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
       >
         {/* Icon: Show selected option's icon or nothing */}
         {selectedOption?.icon ? (
-          <span className='flex-shrink-0 flex items-center justify-center size-3.5 visual-regression-hide'>
+          <span className='flex-shrink-0 flex items-center justify-center visual-regression-hide'>
             {selectedOption.icon}
           </span>
         ) : inputIcon ? (
