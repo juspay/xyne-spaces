@@ -538,7 +538,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
             </div>
           );
         }}
-        style={{ height: '100%' }}
+        style={{ height: '100%', zIndex: 0 }}
       />
 
       {/* Scroll to bottom button */}
