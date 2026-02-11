@@ -623,8 +623,10 @@ export const ThreadMessages = ({
       <DragAndDropOverlay isVisible={isDragging} />
       {showHeader && (
         <div className='flex gap-2 items-center w-full pt-4 px-4'>
-          <CornerDownRight className='size-4' />
-          <h3 className='text-[17px] font-semibold'>Thread message</h3>
+          <CornerDownRight className='size-4 flex-shrink-0' />
+          <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
+            {isTicketThread && ticket ? ticket.title : 'Thread message'}
+          </h3>
         </div>
       )}
       {derivedTicketId && ticket && !simpleView && (
@@ -634,8 +636,8 @@ export const ThreadMessages = ({
             <span className='text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded flex-shrink-0'>
               {ticket.xyneId}
             </span>
-            <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis'>
-              Thread message
+            <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0'>
+              {ticket.title}
             </h3>
           </div>
           <div className='flex gap-x-2'>
@@ -983,7 +985,9 @@ export const ThreadMessages = ({
               ) : (
                 /* Regular View: Title and action buttons */
                 <>
-                  <h3 className='flex-1 font-semibold text-gray-900'>Thread message</h3>
+                  <h3 className='flex-1 font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
+                    {isTicketThread && ticket ? ticket.title : 'Thread message'}
+                  </h3>
 
                   {/* Action Buttons */}
                   {!underTicketView && (
