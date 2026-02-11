@@ -92,12 +92,14 @@ const envSchema = Joi.object({
   JENKINS_USERNAME: Joi.string().allow('').default(''),
   JENKINS_API_TOKEN: Joi.string().allow('').default(''),
   // OpenCode Configuration
-  OPENCODE_ENABLED: Joi.boolean().default(true),
-  OPENCODE_SPAWN_SERVER: Joi.boolean().default(true),
+  OPENCODE_ENABLED: Joi.boolean().default(false),
+  OPENCODE_SPAWN_SERVER: Joi.boolean().default(false),
   OPENCODE_BASE_URL: Joi.string().uri().default(''),
   OPENCODE_TIMEOUT_MS: Joi.number().default(600000),
-  OPENCODE_AUTO_COMPACT: Joi.boolean().default(true),
+  OPENCODE_AUTO_COMPACT: Joi.boolean().default(false),
   OPENCODE_MODEL: Joi.string().allow('').default(''),
+  // Default workflow executor when not specified
+  DEFAULT_WORKFLOW_EXECUTOR: Joi.string().default(''),
   // oh-my-opencode Plugin Configuration
   OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
   OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default(''),
@@ -154,6 +156,7 @@ export const config = {
   },
   workflow: {
     lockDurationMs: envVars.WORKFLOW_LOCK_DURATION_MS,
+    defaultExecutor: envVars.DEFAULT_WORKFLOW_EXECUTOR,
   },
   fileStorage: {
     provider: envVars.STORAGE_PROVIDER,

@@ -259,9 +259,8 @@ export class WorkflowEngineImpl<
       systemPrompt: agentConfig?.metadata?.description
     }
 
-    const executorType = config.executorType
-    const useOpenCode = executorType === 'opencode' || 
-      (executorType === undefined && appConfig.openCode.enabled)
+    const executorType = config.executorType ?? appConfig.workflow.defaultExecutor
+    const useOpenCode = executorType === 'opencode' && appConfig.openCode.enabled
     
     let result, updatedState, gitInfo
     
