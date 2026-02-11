@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';

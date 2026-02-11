@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from 'react';
-import { useQuery } from '@rocicorp/zero/react';
 import type {
   QueryRequest,
   Schema,
@@ -12,6 +11,7 @@ import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
 import { queryCacheActor } from '../machines/queryCacheMachine';
 import { generateQueryHash } from '../utils/queryHash';
 import { useSelector } from '@xstate/react';
+import { useQuery } from './useQuery';
 
 /**
  * useCachedQuery Hook

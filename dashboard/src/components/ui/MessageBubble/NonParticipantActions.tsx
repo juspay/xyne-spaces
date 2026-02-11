@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../Button/Button';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { ChannelScopeType } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';

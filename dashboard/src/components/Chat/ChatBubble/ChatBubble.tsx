@@ -1,6 +1,6 @@
 import { QueryResultType } from '@rocicorp/zero';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';

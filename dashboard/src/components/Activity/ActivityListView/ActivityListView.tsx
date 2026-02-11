@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
-import { useQuery, useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import {
   Bell,
   AtSign,
@@ -49,6 +49,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { mutators } from '../../../zero/mutators';
 import Button from '../../ui/Button';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useQuery } from '../../../hooks/useQuery';
 import { logger, Event } from '../../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 

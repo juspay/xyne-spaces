@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from './useZero';
 import type { TicketReferenceMapping } from '@xyne/shared';
 import { TicketReferenceRelation } from '@xyne/shared';
 import type { SelectorOption } from '../components/ui/EntitySelector/EntitySelector.types';

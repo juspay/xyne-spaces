@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { useNavigate } from 'react-router-dom';
 import { PauseCircle } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';

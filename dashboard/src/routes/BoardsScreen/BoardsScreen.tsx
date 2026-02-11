@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import type { BoardType } from '@xyne/shared';
 import { BoardForm, BoardsGrid, PageHeader, type BoardWithStages } from '../../components/Board';

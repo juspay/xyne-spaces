@@ -1,8 +1,8 @@
-import { useZero } from '@rocicorp/zero/react';
 import { useCallback } from 'react';
 import { mutators } from '../zero/mutators';
 import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
 import { v4 as uuidv4 } from 'uuid';
+import { useZero } from './useZero';
 
 export interface UseReactionsReturn {
   toggleReaction: (params: { messageId: string; emoji: string; hasReacted: boolean }) => void;

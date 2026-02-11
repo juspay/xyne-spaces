@@ -1,10 +1,10 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { Search, X, Users } from 'lucide-react';
-import { useQuery } from '@rocicorp/zero/react';
 import { createBuilder } from '@rocicorp/zero';
 import { schema } from '@xyne/shared';
 import { Button } from '../../../../ui/Button';
 import Input from '../../../../ui/Input/Input';
+import { useRawQuery } from '../../../../../hooks/useQuery';
 
 const builder = createBuilder(schema);
 
@@ -34,7 +34,7 @@ export const UserGroupSubmenu = ({
 
   // When availableGroupIds is provided, fetch those groups directly (with a reasonable limit)
   // Otherwise, use search term to filter server-side with limit
-  const [allGroupsRaw] = useQuery(
+  const [allGroupsRaw] = useRawQuery(
     availableGroupIds && availableGroupIds.length > 0
       ? builder.user_groups.where('id', 'IN', availableGroupIds.slice(0, 10)).orderBy('name', 'asc')
       : searchTerm.trim()
@@ -43,6 +43,7 @@ export const UserGroupSubmenu = ({
             .orderBy('name', 'asc')
             .limit(20)
         : builder.user_groups.orderBy('name', 'asc').limit(10),
+    'user_groups_submenu',
   );
 
   // Filter groups based on search term client-side when using availableGroupIds

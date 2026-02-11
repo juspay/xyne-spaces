@@ -17,7 +17,7 @@ import { ReactElement, useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '../../utils/classNames';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
 import { RenderMessageWithHTML } from '../../components/Chat/RenderMessageWithHTML/RenderMessageWithHTML';

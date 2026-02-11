@@ -7,6 +7,7 @@ import { AuthData, createMutators } from './mutators';
 import { queries } from './queries';
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
+import { zeroMutationLatency, zeroMutationOperations, zeroQueryLatency, zeroQueryOperations } from '@/services/otel/push/zeroMetrics';
 import {
   createVespaJobsAccumulator,
   VespaJobsAccumulator,
@@ -67,10 +68,12 @@ export function extractAuthDataFromRequest(request: Request): AuthData | undefin
 }
 
 export async function handleMutate(request: Request): Promise<unknown> {
+  const startTime = Date.now();
   // Accumulators for post-processing
   let asyncTasks: (() => Promise<void>)[] = [];
   let vespaJobs: VespaJobsAccumulator = [];
   let sideEffectJobs: SideEffectJobsAccumulator = [];
+  let capturedMutatorName: string | null = null;
 
   const authData = extractAuthDataFromRequest(request);
 
@@ -89,6 +92,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
       dbProvider,
       transact =>
         transact((tx, mutatorName, args) => {
+          capturedMutatorName = mutatorName;
           asyncTasks = [];
           const mutators = createMutators(authData, asyncTasks);
           vespaJobs = createVespaJobsAccumulator();
@@ -102,6 +106,15 @@ export async function handleMutate(request: Request): Promise<unknown> {
         }),
       request
     );
+
+    const latency = Date.now() - startTime;
+    zeroMutationLatency.record(latency, { mutation: capturedMutatorName || 'unknown' });
+    zeroMutationOperations.add(1, { mutation: capturedMutatorName || 'unknown', stage: 'success' });
+
+    logger.info('zero_mutation_success', {
+      latency,
+      mutation: capturedMutatorName,
+    });
 
     Promise.allSettled(asyncTasks.map((task) => task()));
 
@@ -141,12 +154,23 @@ export async function handleMutate(request: Request): Promise<unknown> {
 
     return result;
   } catch (error) {
-    logger.error('Mutate request failed:', error);
+    const latency = Date.now() - startTime;
+    zeroMutationLatency.record(latency, { mutation: capturedMutatorName || 'unknown' });
+    zeroMutationOperations.add(1, { mutation: capturedMutatorName || 'unknown', stage: 'error' });
+
+    logger.error('zero_mutation_error', {
+      latency,
+      mutation: capturedMutatorName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
     throw error;
   }
 }
 
 export async function handleQueries(request: Request): Promise<any> {
+  const startTime = Date.now();
+  let capturedQueryName: string | null = null;
 
   const authData = extractAuthDataFromRequest(request);
   if (!authData) {
@@ -161,6 +185,7 @@ export async function handleQueries(request: Request): Promise<any> {
   try {
     const result = await handleQueryRequest(
       (queryName, args) => {
+        capturedQueryName = queryName;
         const query = mustGetQuery(queries, queryName);
         const context: Context = { userID: authData.sub };
         return query.fn({ args, ctx: context });
@@ -168,9 +193,27 @@ export async function handleQueries(request: Request): Promise<any> {
       schema,
       request
     );
+
+    const latency = Date.now() - startTime;
+    zeroQueryLatency.record(latency, { query: capturedQueryName || 'unknown' });
+    zeroQueryOperations.add(1, { query: capturedQueryName || 'unknown', stage: 'success' });
+
+    logger.info('zero_query_success', {
+      latency,
+      query: capturedQueryName,
+    });
+
     return result;
   } catch (error) {
-    logger.error('Query request failed:', error);
+    const latency = Date.now() - startTime;
+    zeroQueryLatency.record(latency, { query: capturedQueryName || 'unknown' });
+    zeroQueryOperations.add(1, { query: capturedQueryName || 'unknown', stage: 'error' });
+    logger.error('zero_query_error', {
+      latency,
+      query: capturedQueryName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
     throw error;
   }
 }

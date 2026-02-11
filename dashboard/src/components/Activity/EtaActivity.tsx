@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { Activity } from '@xyne/shared';
-import { useQuery } from '@rocicorp/zero/react';
+import { useQuery } from '../../hooks/useQuery';
 import { Ticket } from 'lucide-react';
 import { format } from 'date-fns';
 import { queries } from '../../zero/queries';

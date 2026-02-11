@@ -1,5 +1,6 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
-import { useConnectionState, useZero } from '@rocicorp/zero/react';
+import { useConnectionState } from '@rocicorp/zero/react';
+import { useZero } from '../hooks/useZero';
 import { useQuery as useTanStackQuery } from '@tanstack/react-query';
 import { queries } from '../zero/queries';
 import { useAuthContextValues } from '../hooks/useAuth';

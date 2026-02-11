@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as Select from '@radix-ui/react-select';
 import { Check, ChevronDown, X } from 'lucide-react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button/Button';
 import Input from '../ui/Input/Input';

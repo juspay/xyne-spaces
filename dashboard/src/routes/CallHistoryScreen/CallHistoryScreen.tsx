@@ -10,7 +10,7 @@ import Input from '../../components/ui/Input';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import type { User } from '../../machines/stateMachine';
 import HuddleIcon from '../../components/icons/HuddleIcon';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { CallStatus } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';

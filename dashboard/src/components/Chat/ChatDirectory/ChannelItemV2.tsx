@@ -14,7 +14,7 @@ import Avatar from '../../ui/Avatar/Avatar';
 import useMeasure from '../../../hooks/useMeasure';
 import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { usePlatform } from '../../../hooks/usePlatform';

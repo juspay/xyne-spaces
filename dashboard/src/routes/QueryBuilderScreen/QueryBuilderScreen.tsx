@@ -4,7 +4,7 @@ import QueryBuilder, { type RuleGroupType } from 'react-querybuilder';
 import 'react-querybuilder/dist/query-builder.css';
 import { X, Plus, ChevronLeft, Save } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { useCachedQuery } from '../../../src/hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';

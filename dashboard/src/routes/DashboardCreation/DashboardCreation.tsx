@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';

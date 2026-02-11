@@ -1,7 +1,7 @@
 import { Phone, Video, PhoneOff } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useEffect, useRef, useMemo, useCallback } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
 import { useAuth } from '../../../hooks/useAuth';
 import { callActor } from '../../../machines/callMachine';

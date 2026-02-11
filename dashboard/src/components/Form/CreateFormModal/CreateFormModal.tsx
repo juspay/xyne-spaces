@@ -1,7 +1,7 @@
 import { ReactElement, useEffect, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { Plus, Trash2, Edit2, X } from 'lucide-react';
 import { Form, FormContextType, FormEntityType, FormFieldType, FormFields } from '@xyne/shared';
 import { Dialog } from '../../ui/Dialog/Dialog';

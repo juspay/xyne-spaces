@@ -29,7 +29,7 @@ import { channelService } from '../../../services/Chat/channelService';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { useAuth } from '../../../hooks/useAuth';
 import { toast } from 'sonner';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import SearchUser from '../SearchUser/SearchUser';
 import type { User } from '@xyne/shared';
 

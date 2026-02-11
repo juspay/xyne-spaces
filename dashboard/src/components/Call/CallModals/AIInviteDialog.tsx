@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import Button from '../../ui/Button';
 import { Check } from 'lucide-react';

@@ -13,7 +13,7 @@ import {
   GridReadyEvent,
 } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { Calendar, Check, User } from 'lucide-react';

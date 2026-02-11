@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 import { Button, ButtonType, ButtonSize } from '@juspay/blend-design-system';
 import { UserPlus } from 'lucide-react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import {
   mixpanelService,

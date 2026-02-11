@@ -8,7 +8,7 @@ import ChannelInformation from '../ChannelInformation/ChannelInformation';
 import { getTargetUserIdForCall } from '../ConversationHeader/ConversationHeader.utils';
 import { CallTrigger } from '../../Call/CallTrigger/CallTrigger';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useChannel } from '../../../hooks/useChannels';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';

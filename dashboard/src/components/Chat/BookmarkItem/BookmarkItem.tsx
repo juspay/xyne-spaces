@@ -1,7 +1,7 @@
 import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useNavigate, type NavigateFunction } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useChannel } from '../../../hooks/useChannels';
 import { Check, Clock } from 'lucide-react';

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
 import { User } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
