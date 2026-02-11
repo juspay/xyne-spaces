@@ -1,3 +1,10 @@
+## [1.40.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.40.0...v1.40.1) (2026-02-11)
+
+
+### Bug Fixes
+
+* reducing workflow execution table ([186e8b0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/186e8b030eb48cba52dea30293ef588ca71e91b0)), closes [#2968](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2968)
+
 ## [1.40.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.39.0...v1.40.0) (2026-02-11)
 
 
