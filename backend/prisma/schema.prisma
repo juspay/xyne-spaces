@@ -1126,6 +1126,7 @@ model ChannelUserStatus {
   isStarred                 Boolean     @default(false)
   isClosed                  Boolean     @default(false) // Track if user has closed/hidden this DM
   unreadCount               Int         @default(0) // Track unread count for this channel
+  selectedBoardId           String?     // Track user's preferred board for this channel
 
   @@unique([channelId, userId]) // Prevent duplicate participants
   @@index([channelId]) // Fast channel participant lookup

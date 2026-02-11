@@ -844,6 +844,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         },
       ),
+      updateSelectedBoardId: defineMutator(
+        z.object({ channelId: z.string(), boardId: z.string().nullable() }),
+        async ({ tx, args: { channelId, boardId } }) => {
+          const userStatus = await tx.run(zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', authData.sub)
+            .one());
+
+          if (!userStatus) {
+            throw new Error('No channel user status found');
+          }
+
+          await tx.mutate.channel_user_status.update({
+            id: userStatus.id,
+            selectedBoardId: boardId,
+          });
+        },
+      ),
       updateParticipantRole: defineMutator(
         z.object({
           channelId: z.string(),

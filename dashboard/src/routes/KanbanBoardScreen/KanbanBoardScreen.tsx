@@ -42,10 +42,11 @@ import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { useDragAndDrop } from '../../hooks/useDragAndDrop';
-import { useChannel } from '../../hooks/useChannels';
+import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { queries } from '../../zero/queries';
-import { Ticket, FormEntityValues, FormFieldType } from '@xyne/shared';
-import { TicketStatusV2 } from '@xyne/shared';
+import { mutators } from '../../zero/mutators';
+import type { Ticket, FormEntityValues } from '@xyne/shared';
+import { TicketStatusV2, FormFieldType } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
   getStageColor,
@@ -194,6 +195,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return 'all'; // Show all projects
   }, [viewModeProp, projectIdParam, boardId, channel]);
 
+  // Get user's channel status for selectedBoardId persistence
+  const channelUserStatus = useGetChannelUserStatus(channelId || '') as
+    | { selectedBoardId?: string }
+    | undefined;
+  const selectedBoardIdFromDb: string | undefined = channelUserStatus?.selectedBoardId;
+
   // Use XState machine for filter persistence
   const [searchParams, setSearchParams] = useSearchParams();
   const [state, send] = useMachine(ticketFiltersMachine);
@@ -208,10 +215,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       boardId: boardId,
       viewMode: viewMode,
       enabled: true,
+      selectedBoardIdFromDb,
       searchParams,
       setSearchParams,
     });
-  }, [send, channelId, projectIdParam, boardId, viewMode, searchParams, setSearchParams]);
+  }, [
+    send,
+    channelId,
+    projectIdParam,
+    boardId,
+    viewMode,
+    selectedBoardIdFromDb,
+    searchParams,
+    setSearchParams,
+  ]);
 
   // Sync URL changes to machine (browser back/forward)
   useEffect(() => {
@@ -261,8 +278,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         type: 'SET_FILTERS',
         filters: nextFilters,
       });
+
+      // Persist selected board to DB for channel views
+      if (channelId && viewMode === 'project') {
+        const selectedBoardId = nextFilters.boards?.[0] ?? null;
+        const currentBoardId = filters.boards?.[0] ?? null;
+        if (selectedBoardId !== currentBoardId) {
+          void zero.mutate(
+            mutators.channel.updateSelectedBoardId({
+              channelId,
+              boardId: selectedBoardId,
+            }),
+          );
+        }
+      }
     },
-    [send],
+    [send, channelId, viewMode, filters.boards, zero],
   );
 
   // Setup sensors for drag and drop
@@ -933,41 +964,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
     return availableColumns.filter(col => col.key !== 'status');
   }, [layoutView, availableColumns]);
-
-  //detects when switching back to kanban
-  useEffect(() => {
-    // Skip auto-selection for my-tickets, user-tickets, and group-tickets views
-    // because users should see all their tickets across all boards
-    if (isMyTicketsView) {
-      return;
-    }
-
-    // Safety Checks
-    if (!state.matches('initialized')) return;
-    if (!allBoards || allBoards.length === 0) return;
-
-    const isAllBoardsSelected =
-      !filters.boards || filters.boards.length === 0 || filters.boards.length === allBoards.length;
-
-    if (layoutView === 'kanban' && isAllBoardsSelected) {
-      const firstBoard = allBoards[0];
-      if (!firstBoard) return;
-
-      const firstBoardId = firstBoard.id;
-
-      // Check if this specific board ID is ALREADY the only one selected.
-      //  to stop infinite re-renders due to url change
-      const isAlreadySet = filters.boards?.length === 1 && filters.boards[0] === firstBoardId;
-
-      // Only update if it's NOT already set
-      if (!isAlreadySet) {
-        setFilters({
-          ...filters,
-          boards: [firstBoardId],
-        });
-      }
-    }
-  }, [layoutView, state.value, filters, allBoards, setFilters, viewMode]);
 
   return (
     <div className='flex flex-col h-full w-full bg-gray-50 relative'>

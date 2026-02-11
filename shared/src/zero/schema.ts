@@ -907,6 +907,7 @@ export const channelUserStatusTable = table('channel_user_status')
     isStarred: boolean(),
     isClosed: boolean(),
     unreadCount: number(),
+    selectedBoardId: string().optional(),
   })
   .primaryKey('id');
 
