@@ -1,3 +1,10 @@
+## [1.39.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.38.1...v1.39.0) (2026-02-11)
+
+
+### Features
+
+* added input box filters for mobile also ([10dcd59](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/10dcd59d44fe5c0756b0bde260085af5c3f35c6e)), closes [#2946](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2946)
+
 ## [1.38.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.38.0...v1.38.1) (2026-02-11)
 
 
