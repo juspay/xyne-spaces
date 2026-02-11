@@ -156,6 +156,9 @@ export const PROMPT_NAMES = {
   FIELD_VALUE_DISCOVERY: 'field_value_discovery',
   WEB_SEARCH: 'web_search',
   RESEARCH_AGENT: 'research_agent',
+  TICKET_DESCRIPTION_CLEANER: 'ticket_description_cleaner',
+  CLUSTER_THEME_SINGLE: 'cluster_theme_single',
+  META_THEME_SINGLE: 'meta_theme_single',
 } as const;
 
 export type PromptName = typeof PROMPT_NAMES[keyof typeof PROMPT_NAMES];

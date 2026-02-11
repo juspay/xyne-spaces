@@ -6,6 +6,7 @@ import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { fetchAndMapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
+import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -180,6 +181,17 @@ export class VespaWorker {
 			}
 
 			await handler();
+
+			void vespaPostIngestHooks
+				.run({ schema, docId, jobType, mappedData, userId: job.data.userId })
+				.catch((error) => {
+					logger.error('[VESPA_WORKER] Post-ingest hook failed', {
+						schema,
+						docId,
+						jobType,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				});
 		} catch (error) {
 			logger.error(`[VESPA_WORKER] Failed to process ${jobType} for ${schema}/${docId}:`, error);
 			throw error;

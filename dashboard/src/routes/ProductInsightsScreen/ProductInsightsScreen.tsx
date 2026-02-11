@@ -1,4 +1,4 @@
-import { ReactElement, useState, useMemo, useEffect } from 'react';
+import { ReactElement, useState, useMemo, useEffect, createElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Ticket as TicketIcon,
@@ -12,8 +12,6 @@ import {
 } from 'lucide-react';
 import {
   productInsightsService,
-  Scope,
-  TimeRange,
   MetaTheme,
   Cluster,
   Ticket,
@@ -22,6 +20,8 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
 
 // --- Colors & Utilities ---
 // Use HSL to generate distinct colors dynamically based on the number of items
@@ -348,7 +348,7 @@ const TicketItem = ({
 };
 
 const EmptyState = ({
-  icon: IconComponent,
+  icon,
   message,
 }: {
   icon: React.ComponentType<{ size: number }>;
@@ -356,7 +356,7 @@ const EmptyState = ({
 }): ReactElement => (
   <div className='flex flex-col items-center justify-center h-64 text-gray-400'>
     <div className='p-4 rounded-full bg-gray-50 dark:bg-gray-800 mb-3'>
-      <IconComponent size={24} />
+      {createElement(icon, { size: 24 })}
     </div>
     <p className='text-sm'>{message}</p>
   </div>
@@ -368,16 +368,26 @@ const ProductInsightsScreen = (): ReactElement => {
   const [selectedMetaTheme, setSelectedMetaTheme] = useState<MetaTheme | null>(null);
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
 
-  const [scope, setScope] = useState<Scope>(Scope.INTERNAL);
-  const [timeRange, setTimeRange] = useState<TimeRange>(TimeRange.ALL);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projects] = useCachedQuery(queries.getAllProjects());
+
+  useEffect(() => {
+    if (!projectId && projects && projects.length > 0) {
+      setProjectId(projects[0]!.id);
+    }
+  }, [projectId, projects]);
 
   const {
     data,
     isLoading: loading,
     error: queryError,
   } = useQuery({
-    queryKey: ['productInsights', scope, timeRange],
-    queryFn: () => productInsightsService.getProductInsights({ scope, timeRange }),
+    queryKey: ['productInsights', projectId],
+    queryFn: () =>
+      productInsightsService.getProductInsights({
+        projectId: projectId as string,
+      }),
+    enabled: Boolean(projectId),
   });
 
   const error = queryError
@@ -385,6 +395,13 @@ const ProductInsightsScreen = (): ReactElement => {
       ? queryError.message
       : 'Failed to fetch insights'
     : null;
+  const errorStatus =
+    queryError && typeof (queryError as { status?: number }).status === 'number'
+      ? (queryError as { status?: number }).status
+      : null;
+  const isNotFoundError =
+    errorStatus === 404 ||
+    (queryError instanceof Error && queryError.message.toLowerCase().includes('not found'));
 
   useEffect(() => {
     setSelectedMetaTheme(null);
@@ -435,7 +452,22 @@ const ProductInsightsScreen = (): ReactElement => {
     }
   };
 
-  if (loading) {
+  const totalMetaThemes = data?.meta_themes.length ?? 0;
+  const totalClusters = data ? Object.keys(data.cluster_themes).length : 0;
+  const totalTickets = data
+    ? Object.values(data.cluster_details).reduce((sum, tickets) => sum + tickets.length, 0)
+    : 0;
+  const showInsightsUnavailable = isNotFoundError && !data;
+
+  const projectOptions = useMemo<SelectorOption[]>(() => {
+    return (projects ?? []).map(project => ({
+      value: project.id,
+      label: project.name,
+      icon: null,
+    }));
+  }, [projects]);
+
+  if (projects === undefined || !projectId || loading) {
     return (
       <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
         <div className='flex flex-col items-center gap-3'>
@@ -446,7 +478,21 @@ const ProductInsightsScreen = (): ReactElement => {
     );
   }
 
-  if (error || !data) {
+  if (!projects || projects.length === 0) {
+    return (
+      <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+        <div className='flex flex-col items-center gap-3 max-w-md text-center p-6'>
+          <AlertCircle size={32} className='text-red-500' />
+          <p className='text-sm text-gray-900 dark:text-gray-100 font-medium'>
+            No projects available
+          </p>
+          <p className='text-xs text-gray-500'>Create a project to view insights.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if ((error && !isNotFoundError) || (!data && !isNotFoundError)) {
     return (
       <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
         <div className='flex flex-col items-center gap-3 max-w-md text-center p-6'>
@@ -481,21 +527,15 @@ const ProductInsightsScreen = (): ReactElement => {
           <div className='flex items-center gap-4 text-xs text-gray-500'>
             <div className='flex items-center gap-1.5'>
               <Circle size={8} className='fill-current text-gray-300' />
-              <span>{data.meta_themes.length} Meta Themes</span>
+              <span>{totalMetaThemes} Meta Themes</span>
             </div>
             <div className='flex items-center gap-1.5'>
               <Layers size={12} />
-              <span>{Object.keys(data.cluster_themes).length} Clusters</span>
+              <span>{totalClusters} Clusters</span>
             </div>
             <div className='flex items-center gap-1.5'>
               <Hash size={12} />
-              <span>
-                {Object.values(data.cluster_details).reduce(
-                  (sum, tickets) => sum + tickets.length,
-                  0,
-                )}{' '}
-                Tickets
-              </span>
+              <span>{totalTickets} Tickets</span>
             </div>
           </div>
         </div>
@@ -503,154 +543,153 @@ const ProductInsightsScreen = (): ReactElement => {
         {/* Selectors */}
         <div className='flex items-center gap-4'>
           <div className='flex items-center gap-2'>
-            <label
-              htmlFor='scope-select'
-              className='text-xs font-medium text-gray-600 dark:text-gray-400'
-            >
-              Scope:
-            </label>
-            <select
-              id='scope-select'
-              value={scope}
-              onChange={e => setScope(e.target.value as Scope)}
-              className='px-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2A2A2A] text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500'
-            >
-              <option value={Scope.INTERNAL}>Internal</option>
-              <option value={Scope.EXTERNAL}>External</option>
-            </select>
-          </div>
-
-          <div className='flex items-center gap-2'>
-            <label
-              htmlFor='time-range-select'
-              className='text-xs font-medium text-gray-600 dark:text-gray-400'
-            >
-              Time Range:
-            </label>
-            <select
-              id='time-range-select'
-              value={timeRange}
-              onChange={e => setTimeRange(e.target.value as TimeRange)}
-              className='px-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2A2A2A] text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500'
-            >
-              <option value={TimeRange.ALL}>All</option>
-              <option value={TimeRange.YESTERDAY}>Yesterday</option>
-              <option value={TimeRange.LAST_7_DAYS}>Last 7 Days</option>
-              <option value={TimeRange.LAST_30_DAYS}>Last 30 Days</option>
-            </select>
+            <span className='text-xs font-medium text-gray-600 dark:text-gray-400'>Project:</span>
+            <EntitySelector
+              options={projectOptions}
+              selectedValue={projectId}
+              onSelect={val => {
+                if (val) setProjectId(val);
+              }}
+              placeholder='Select project'
+              searchPlaceholder='Search projects...'
+              showSearch={false}
+              inputClassName='px-1.5 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2A2A2A] text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500'
+              showIndicator={true}
+              width='auto'
+            />
           </div>
         </div>
       </div>
 
       {/* 3-Column Layout */}
       <div className='flex-1 flex overflow-hidden'>
-        {/* Column 1: Meta Themes (Fixed Width) */}
-        <div className='w-[420px] flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E]'>
-          <div className='p-6 border-b border-gray-100 dark:border-gray-800'>
-            <SimplePieChart
-              slices={pieData}
-              onSelect={handleMetaThemeSelect}
-              selectedTheme={selectedMetaTheme}
-              data={data}
-            />
-            <div className='text-center mt-2'>
-              <p className='text-xs font-medium text-gray-400 uppercase tracking-widest'>
-                Select a Theme
+        {showInsightsUnavailable ? (
+          <div className='flex-1 flex items-center justify-center bg-white dark:bg-[#1E1E1E]'>
+            <div className='flex flex-col items-center gap-3 max-w-md text-center p-6'>
+              <AlertCircle size={32} className='text-gray-400' />
+              <p className='text-sm text-gray-900 dark:text-gray-100 font-medium'>
+                Insights not available
+              </p>
+              <p className='text-xs text-gray-500'>
+                Not enough tickets found or insights not generated for this project.
               </p>
             </div>
           </div>
-          <div className='flex-1 overflow-y-auto p-4 scrollbar-sleek bg-gray-50/50 dark:bg-[#1E1E1E]'>
-            {data.meta_themes.map((theme, index) => (
-              <MetaThemeItem
-                key={index}
-                theme={theme}
-                color={getThemeColor(index, data.meta_themes.length)}
-                isSelected={selectedMetaTheme?.meta_theme === theme.meta_theme}
-                onClick={() => handleMetaThemeSelect(theme)}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Column 2: Clusters (Fixed Width) */}
-        <div className='w-[480px] flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#1a1a1a]'>
-          <div className='p-[18.5px] border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E] sticky top-0 z-10 flex justify-between items-center'>
-            <h2 className='text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2'>
-              <Layers size={14} />
-              <span>Impacted Clusters</span>
-            </h2>
-            {selectedMetaTheme && (
-              <span className='text-[10px] bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-gray-500'>
-                {selectedMetaTheme.impacted_clusters.length}
-              </span>
-            )}
-          </div>
-          <div className='flex-1 overflow-y-auto p-6 scrollbar-sleek'>
-            {selectedMetaTheme ? (
-              ((): ReactElement[] => {
-                const maxCount = selectedMetaTheme.impacted_clusters.reduce(
-                  (max, cid) => Math.max(max, data.cluster_details[cid]?.length || 0),
-                  0,
-                );
-                const sortedClusters = [...selectedMetaTheme.impacted_clusters].sort((a, b) => {
-                  const countA = data.cluster_details[a]?.length || 0;
-                  const countB = data.cluster_details[b]?.length || 0;
-                  return countB - countA;
-                });
-                return sortedClusters
-                  .map(clusterId => {
-                    const cluster = data.cluster_themes[clusterId];
-                    if (!cluster) return null;
-                    const count = data.cluster_details[clusterId]?.length || 0;
-                    return (
-                      <ClusterBarItem
-                        key={clusterId}
-                        cluster={cluster}
-                        isSelected={selectedClusterId === clusterId}
-                        onClick={() => setSelectedClusterId(clusterId)}
-                        count={count}
-                        maxCount={maxCount}
-                      />
-                    );
-                  })
-                  .filter((item): item is ReactElement => item !== null);
-              })()
-            ) : (
-              <EmptyState icon={PieChartIcon} message='Select a theme to view clusters' />
-            )}
-          </div>
-        </div>
-
-        {/* Column 3: Tickets (Flexible Width) */}
-        <div className='flex-1 flex flex-col bg-gray-100 dark:bg-[#141414]'>
-          <div className='p-5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E] sticky top-0 z-10 min-h-[57px] flex items-center'>
-            <h2 className='text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2'>
-              <TicketIcon size={14} />
-              <span>Associated Tickets</span>
-            </h2>
-          </div>
-          <div className='flex-1 overflow-y-auto p-6 scrollbar-sleek'>
-            {selectedClusterId ? (
-              <div className='max-w-3xl mx-auto w-full'>
-                {data.cluster_details[selectedClusterId]?.map(ticket => (
-                  <TicketItem
-                    key={ticket.docId}
-                    ticket={ticket}
-                    ticketData={ticketDataMap.get(ticket.docId)}
+        ) : (
+          data && (
+            <>
+              {/* Column 1: Meta Themes (Fixed Width) */}
+              <div className='w-[420px] flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E]'>
+                <div className='p-6 border-b border-gray-100 dark:border-gray-800'>
+                  <SimplePieChart
+                    slices={pieData}
+                    onSelect={handleMetaThemeSelect}
+                    selectedTheme={selectedMetaTheme}
+                    data={data}
                   />
-                ))}
-                {(!data.cluster_details[selectedClusterId] ||
-                  data.cluster_details[selectedClusterId]?.length === 0) && (
-                  <div className='text-center p-8 text-gray-500'>
-                    No tickets found for this cluster.
+                  <div className='text-center mt-2'>
+                    <p className='text-xs font-medium text-gray-400 uppercase tracking-widest'>
+                      Select a Theme
+                    </p>
                   </div>
-                )}
+                </div>
+                <div className='flex-1 overflow-y-auto p-4 scrollbar-sleek bg-gray-50/50 dark:bg-[#1E1E1E]'>
+                  {data.meta_themes.map((theme, index) => (
+                    <MetaThemeItem
+                      key={index}
+                      theme={theme}
+                      color={getThemeColor(index, data.meta_themes.length)}
+                      isSelected={selectedMetaTheme?.meta_theme === theme.meta_theme}
+                      onClick={() => handleMetaThemeSelect(theme)}
+                    />
+                  ))}
+                </div>
               </div>
-            ) : (
-              <EmptyState icon={Layers} message='Select a cluster to view tickets' />
-            )}
-          </div>
-        </div>
+
+              {/* Column 2: Clusters (Fixed Width) */}
+              <div className='w-[480px] flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#1a1a1a]'>
+                <div className='p-[18.5px] border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E] sticky top-0 z-10 flex justify-between items-center'>
+                  <h2 className='text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2'>
+                    <Layers size={14} />
+                    <span>Impacted Clusters</span>
+                  </h2>
+                  {selectedMetaTheme && (
+                    <span className='text-[10px] bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-gray-500'>
+                      {selectedMetaTheme.impacted_clusters.length}
+                    </span>
+                  )}
+                </div>
+                <div className='flex-1 overflow-y-auto p-6 scrollbar-sleek'>
+                  {selectedMetaTheme ? (
+                    ((): ReactElement[] => {
+                      const maxCount = selectedMetaTheme.impacted_clusters.reduce(
+                        (max, cid) => Math.max(max, data.cluster_details[cid]?.length || 0),
+                        0,
+                      );
+                      const sortedClusters = [...selectedMetaTheme.impacted_clusters].sort(
+                        (a, b) => {
+                          const countA = data.cluster_details[a]?.length || 0;
+                          const countB = data.cluster_details[b]?.length || 0;
+                          return countB - countA;
+                        },
+                      );
+                      return sortedClusters
+                        .map(clusterId => {
+                          const cluster = data.cluster_themes[clusterId];
+                          if (!cluster) return null;
+                          const count = data.cluster_details[clusterId]?.length || 0;
+                          return (
+                            <ClusterBarItem
+                              key={clusterId}
+                              cluster={cluster}
+                              isSelected={selectedClusterId === clusterId}
+                              onClick={() => setSelectedClusterId(clusterId)}
+                              count={count}
+                              maxCount={maxCount}
+                            />
+                          );
+                        })
+                        .filter((item): item is ReactElement => item !== null);
+                    })()
+                  ) : (
+                    <EmptyState icon={PieChartIcon} message='Select a theme to view clusters' />
+                  )}
+                </div>
+              </div>
+
+              {/* Column 3: Tickets (Flexible Width) */}
+              <div className='flex-1 flex flex-col bg-gray-100 dark:bg-[#141414]'>
+                <div className='p-5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E] sticky top-0 z-10 min-h-[57px] flex items-center'>
+                  <h2 className='text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2'>
+                    <TicketIcon size={14} />
+                    <span>Associated Tickets</span>
+                  </h2>
+                </div>
+                <div className='flex-1 overflow-y-auto p-6 scrollbar-sleek'>
+                  {selectedClusterId ? (
+                    <div className='max-w-3xl mx-auto w-full'>
+                      {data.cluster_details[selectedClusterId]?.map(ticket => (
+                        <TicketItem
+                          key={ticket.docId}
+                          ticket={ticket}
+                          ticketData={ticketDataMap.get(ticket.docId)}
+                        />
+                      ))}
+                      {(!data.cluster_details[selectedClusterId] ||
+                        data.cluster_details[selectedClusterId]?.length === 0) && (
+                        <div className='text-center p-8 text-gray-500'>
+                          No tickets found for this cluster.
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <EmptyState icon={Layers} message='Select a cluster to view tickets' />
+                  )}
+                </div>
+              </div>
+            </>
+          )
+        )}
       </div>
     </div>
   );

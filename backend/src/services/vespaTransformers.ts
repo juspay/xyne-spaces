@@ -309,6 +309,7 @@ export interface VespaTicketDocument {
   title: string;
   workflowType: string;
   description: string;
+  description_clean?: string;
   createdBy: string;
   updatedAt: number;
   createdAt: number;
@@ -457,4 +458,3 @@ export function transformUserToVespa(
   logger.debug(`[VESPA_TRANSFORMER] User transformed:`, JSON.stringify(vespaDoc, null, 2));
   return vespaDoc;
 }
-

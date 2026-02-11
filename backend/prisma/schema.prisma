@@ -1690,6 +1690,7 @@ model Bookmark {
 enum VespaInsertionStatus {
   PENDING
   FAILED
+  FAILED_MAX_RETRIES
   @@schema("public")
 }
 
@@ -1697,6 +1698,7 @@ enum VespaOperationType {
   INSERT
   UPDATE
   DELETE
+  POST_INGEST_CLEAN
   @@schema("public")
 }
 
@@ -1704,7 +1706,7 @@ model VespaInsertionLogs {
   id           String                @id @default(cuid())
   entityId     String
   entityType   String
-  type         VespaOperationType    // INSERT | UPDATE | DELETE
+  type         VespaOperationType    // INSERT | UPDATE | DELETE | POST_INGEST_CLEAN
   status       VespaInsertionStatus  @default(PENDING)
   namespace    String?
   cluster      String?

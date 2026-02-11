@@ -9,6 +9,35 @@ import {
   projectSchema,
   ticketSchema,
 } from '@/vespa/src/types';
+import { ChannelType, Prisma } from '@prisma/client';
+
+type BackfillFilters = {
+  channelType?: ChannelType;
+};
+
+function parseBackfillFilters(raw: unknown): BackfillFilters | null {
+  if (!raw) return null;
+  if (typeof raw !== 'string') {
+    throw new Error('filters must be a JSON string');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('filters must be valid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('filters must be a JSON object');
+  }
+  const obj = parsed as Record<string, unknown>;
+  const channelType = typeof obj.channelType === 'string' ? obj.channelType.trim() : undefined;
+
+  if (channelType && channelType.toUpperCase() !== ChannelType.EMAIL) {
+    throw new Error('Only channelType=EMAIL is supported currently');
+  }
+
+  return channelType ? { channelType: ChannelType.EMAIL } : null;
+}
 
 /**
  * Admin controller for Vespa backfill operations
@@ -265,7 +294,11 @@ export class AdminBackfillController {
    * Only backfills tickets updated within the specified time range
    * If no timeframe is provided, backfills all tickets
    */
-  private static async backfillTickets(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+  private static async backfillTickets(
+    cutoffTime?: Date,
+    fromTime?: Date | null,
+    filters?: BackfillFilters | null,
+  ): Promise<number> {
     let timeRange: string;
     let whereClause: any = {};
 
@@ -293,21 +326,39 @@ export class AdminBackfillController {
       whereClause = {}; // No time filter
     }
 
-    logger.info(`🔄 Backfilling tickets ${timeRange}...`);
+    const filterLabel = filters?.channelType === ChannelType.EMAIL ? ' (channelType=EMAIL)' : '';
+    logger.info(`🔄 Backfilling tickets ${timeRange}${filterLabel}...`);
 
     let skip = 0;
     let totalQueued = 0;
 
     while (true) {
       logger.debug(`[Backfill] Fetching tickets batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
-
-      const tickets = await db.ticket.findMany({
-        where: whereClause,
-        take: AdminBackfillController.BATCH_SIZE,
-        skip,
-        orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' }, // Use updatedAt if filtering by time, otherwise createdAt
-        select: { id: true } // Only select ID initially
-      });
+      //Todo: The ticket itself should contain ticketType as email or other types instead of joining with channel. This will optimize the query and speed up the backfill process. For now, we are joining with channel to filter by email type tickets.
+      const tickets = filters?.channelType === ChannelType.EMAIL
+        ? await db.$queryRaw<{ id: string }[]>(Prisma.sql`
+            SELECT t.id
+            FROM "tickets" t
+            JOIN "channels" ch ON ch.id = t."channelId"
+            WHERE ch.type = ${ChannelType.EMAIL}::"ChannelType"
+            ${cutoffTime && fromTime
+              ? Prisma.sql`AND t."updatedAt" >= ${fromTime} AND t."updatedAt" <= ${cutoffTime}`
+              : cutoffTime
+              ? Prisma.sql`AND t."updatedAt" <= ${cutoffTime}`
+              : Prisma.sql``}
+            ${cutoffTime
+              ? Prisma.sql`ORDER BY t."updatedAt" ASC`
+              : Prisma.sql`ORDER BY t."createdAt" ASC`}
+            LIMIT ${AdminBackfillController.BATCH_SIZE}
+            OFFSET ${skip};
+          `)
+        : await db.ticket.findMany({
+            where: whereClause,
+            take: AdminBackfillController.BATCH_SIZE,
+            skip,
+            orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' }, // Use updatedAt if filtering by time, otherwise createdAt
+            select: { id: true } // Only select ID initially
+          });
 
       if (tickets.length === 0) {
         logger.debug('[Backfill] No more tickets found.');
@@ -355,6 +406,7 @@ export class AdminBackfillController {
       // Get query parameters
       const schemasParam = req.query.schemas as string | undefined;
       const fromTimestampParam = req.query.fromTimestamp as string | undefined;
+      const filtersParam = req.query.filters as string | undefined;
 
       // Determine which schemas to backfill
       const requestedSchemas = schemasParam
@@ -396,6 +448,32 @@ export class AdminBackfillController {
         return;
       }
 
+
+      let filters: BackfillFilters | null = null;
+      if (filtersParam) {
+        try {
+          filters = parseBackfillFilters(filtersParam);
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid filters parameter',
+            message: error instanceof Error ? error.message : 'Invalid filters parameter',
+            timestamp: new Date().toISOString(),
+          } as ApiResponse);
+          return;
+        }
+      }
+
+      if (filters && !schemasToBackfill.includes('tickets')) {
+        res.status(400).json({
+          success: false,
+          error: 'Filters are only supported for tickets backfill',
+          message: 'Remove filters or include tickets in schemas.',
+          timestamp: new Date().toISOString(),
+        } as ApiResponse);
+        return;
+      }
+
       logger.info(`📊 Backfilling schemas: ${schemasToBackfill.join(', ')}`);
 
       // Get initial queue stats
@@ -416,6 +494,7 @@ export class AdminBackfillController {
         fromTimestamp: fromTime ? fromTime.toISOString() : null,
         initialQueueStats: initialStats,
         statusEndpoint: '/api/admin/vespa-backfill/stats',
+        filters: filters ?? null,
       };
 
       // Add time info based on whether we have a timeframe
@@ -438,7 +517,13 @@ export class AdminBackfillController {
 
       // Execute backfill asynchronously in the background (fire and forget)
       // No await here - let it run independently
-      AdminBackfillController.executeBackfillInBackground(schemasToBackfill, backfillJobId, cutoffTime, fromTime)
+      AdminBackfillController.executeBackfillInBackground(
+        schemasToBackfill,
+        backfillJobId,
+        cutoffTime,
+        fromTime,
+        filters,
+      )
         .catch((error) => {
           logger.error(`❌ Background backfill failed for job ${backfillJobId}:`, error);
         });
@@ -463,7 +548,8 @@ export class AdminBackfillController {
     schemasToBackfill: string[],
     backfillJobId: string,
     cutoffTime?: Date,
-    fromTime?: Date | null
+    fromTime?: Date | null,
+    filters?: BackfillFilters | null,
   ): Promise<void> {
     try {
       const timeRangeStr = cutoffTime
@@ -488,7 +574,7 @@ export class AdminBackfillController {
       }
 
       if (schemasToBackfill.includes('tickets')) {
-        stats.tickets = await AdminBackfillController.backfillTickets(cutoffTime, fromTime);
+        stats.tickets = await AdminBackfillController.backfillTickets(cutoffTime, fromTime, filters);
       }
 
       const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);

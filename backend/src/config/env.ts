@@ -61,12 +61,18 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
-  ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
+    ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
+  PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default(''),
+  PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
   // Working Hours Configuration (in IST)
   WORKING_HOUR_START: Joi.number().default(11),
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
+  ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(true),
+  ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
+  TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
+  TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
   LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
   LANGFUSE_SECRET_KEY: Joi.string().allow('').default(''),
   LANGFUSE_PUBLIC_KEY: Joi.string().allow('').default(''),
@@ -225,6 +231,12 @@ export const config = {
     baseUrl: envVars.LITELLM_BASE_URL,
     apiKey: envVars.LITELLM_API_KEY,
   },
+  productInsights: {
+    recluster: {
+      cron: envVars.PRODUCT_INSIGHTS_RECLUSTER_CRON,
+      windowDays: envVars.PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS,
+    },
+  },
   messageClassifier: {
     url: envVars.MESSAGE_CLASSIFIER_URL,
     timeoutMs: envVars.MESSAGE_CLASSIFIER_TIMEOUT_MS,
@@ -272,6 +284,12 @@ export const config = {
     pluginEnabled: envVars.OPENCODE_PLUGIN_ENABLED,
     pluginVersion: envVars.OPENCODE_PLUGIN_VERSION,
   },
+  ticketDescriptionClean: {
+    model: envVars.TICKET_DESC_CLEAN_MODEL,
+    maxRetries: envVars.TICKET_DESC_CLEAN_MAX_RETRIES,
+  },
+  workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
+  ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   otel: {
     baseUrl: envVars.OTEL_BASE_URL,

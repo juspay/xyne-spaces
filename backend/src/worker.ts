@@ -7,6 +7,7 @@ import { eventPollingService } from './workflows/services/event-polling-service'
 import { registerAllWorkflows } from '@/workflows'
 import { vespaWorker } from './workers/vespaWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
+import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
 import { gcsPollingService } from './services/gcsPollingService'
 import { notificationWorker } from '@/notification-service/consumers/notificationWorker'
 import { notificationService as realTimeNotificationService } from '@/notification-service'
@@ -44,11 +45,17 @@ class WorkerService {
       const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
       const activityClassificationEnabled =
         process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
+      const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
       const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
+      const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
 
       if (vespaEnabled) {
         await vespaWorker.start()
-        await workerScheduler.start();
+        if (workerSchedulerEnabled) {
+          await workerScheduler.start()
+        } else {
+          logger.info('Worker scheduler is disabled (ENABLE_WORKER_SCHEDULER=false)')
+        }
       } else if (notificationWorkerEnabled) {
         logger.info('Starting notification worker service...')
         // Redis connection is required for notification worker checks
@@ -77,6 +84,12 @@ class WorkerService {
         await activityClassificationWorkerService.start()
       }
 
+      if (ticketCleanupEnabled) {
+        logger.info('Starting ticket cleanup worker service...')
+        await ticketCleanupWorkerService.start()
+      }
+
+
       process.on('SIGINT', () => this.shutdown())
       process.on('SIGTERM', () => this.shutdown())
 
@@ -94,11 +107,15 @@ class WorkerService {
       const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
       const activityClassificationEnabled =
         process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
+      const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
       const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
+      const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
 
       if (vespaEnabled) {
         await vespaWorker.shutdown()
-        await workerScheduler.stop();
+        if (workerSchedulerEnabled) {
+          await workerScheduler.stop()
+        }
       } else if (notificationWorkerEnabled) {
         await notificationWorker.shutdown()
         await callTimeoutWorker.shutdown()
@@ -116,6 +133,9 @@ class WorkerService {
 
       if (activityClassificationEnabled) {
         await activityClassificationWorkerService.stop()
+      }
+      if (ticketCleanupEnabled) {
+        await ticketCleanupWorkerService.stop()
       }
 
       await DatabaseClient.disconnect()

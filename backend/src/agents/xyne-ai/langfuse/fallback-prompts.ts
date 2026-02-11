@@ -415,6 +415,138 @@ Note: The tool streams results as computed. Response includes:
 - confidence: HIGH/MEDIUM/LOW confidence level in the analysis`;
 
 /**
+ * Fallback prompt for ticket description cleaning
+ */
+const TICKET_DESCRIPTION_CLEANER_FALLBACK = `You are cleaning support tickets for semantic embeddings and clustering.
+
+Bigger picture:
+- We will generate embeddings from the cleaned DESCRIPTION and cluster tickets.
+- Clusters will be used to infer themes of issues (recurring problems, root-cause patterns, outage categories, integration issues, etc.).
+- Therefore the cleaned DESCRIPTION must preserve the core issue signal and remove repeatable noise that causes false similarity across unrelated tickets.
+
+Input:
+A ticket object with:
+- title (string)
+- description (string; may contain email threads, headers, boilerplate, logs, links, MIME metadata, encrypted blobs)
+- description_images (array of URLs)
+
+Task:
+Return a cleaned version of the ticket text optimized for clustering, using judgment (not rigid rules).
+
+Output requirements (STRICT):
+- Output JSON only. No code fences, no markdown, no extra text.
+- JSON must contain exactly these two keys: "title" and "description".
+- Do not include any other keys.
+- "title" may be lightly cleaned (remove prefixes like RE:, [RESOLVED], [COMPLETED], excessive tags) but keep meaning.
+- "description" is the cleaned, compact, information-dense text.
+
+Guiding principles:
+1) Preserve meaning that helps cluster by issue/theme:
+   - The problem statement (what failed, symptoms, impact).
+   - Stable technical signals: error codes/messages, gateway/bank/system names, payment method, txn type, API endpoint names, status transitions, callback anomalies, environment (prod/sandbox).
+   - Keep only the minimum log lines that explain the failure (1-5 lines). Prefer summarizing long logs.
+
+2) Remove or compress content that creates false clusters:
+   - Repeated disclaimers and boilerplate: "do not reply", working hours auto-replies, greetings, signatures, legal notices.
+   - Long quoted email threads and headers: From/To/Cc/Sent/Message-Id/References/Received/X-* headers.
+   - Tracking pixels, newsletter footers, unsubscribe/subscribe blocks, marketing content.
+   - MIME/transport metadata: Content-Type, boundaries, encodings, SPF/DKIM/DMARC, "Message hops", etc.
+   - Feedback/survey reminders: if no real issue, reduce to "feedback request".
+
+3) Remove gibberish / encrypted / high-entropy noise:
+   - Base64 blobs, opaque tracking strings, long hashes/tokens, random-looking encrypted strings.
+   - Do not keep raw gibberish. Replace with short placeholders only if needed: [TOKEN], [HASH], [BASE64], [TRACKING_URL].
+
+4) Normalize over-specific identifiers that hurt clustering:
+   - Replace unique IDs unless they define the theme:
+     order_id / request_id / UUIDs / message-id -> [ORDER_ID], [REQUEST_ID], [UUID]
+   - Keep merchant/app identifier only if it helps theme discovery; otherwise generalize as [MERCHANT].
+
+5) Links and images:
+   - Do not keep raw long URLs. Replace with short labels: "docs link", "feedback link".
+   - Do not include description_images URLs in the text. If the text says "[see image]", keep that phrase.
+
+6) Downtime/incidents:
+   - Keep: bank/system, channel, scheduled vs unscheduled, start/end window, current status (completed/resolved/monitoring).
+   - Drop the rest.
+
+Length discipline:
+- Aim for 1-12 sentences.
+- Prefer compact, information-dense description over verbosity.
+- If the ticket is clearly not a support issue (newsletter/marketing), set description to a short label like:
+  "Non-support content: newsletter/marketing" (still keep a cleaned title).
+
+Now clean the given ticket and return JSON only with keys: title, description.
+Return only the json object and nothing else.
+`;
+
+/**
+ * Fallback prompt for single cluster theme generation
+ */
+const CLUSTER_THEME_SINGLE_FALLBACK = `You are a product support taxonomy expert.
+
+The user message will be a JSON object:
+{
+  "cluster_id": "cluster_...",
+  "tickets": [
+    { "docId": "...", "title": "...", "description": "..." }
+  ]
+}
+
+Task:
+- Infer ONE theme for this cluster only.
+- Write a concise title and description based strictly on ticket evidence.
+
+Output (STRICT):
+Return ONLY JSON with exactly these keys:
+{
+  "theme_title": "<3-7 words, noun phrase>",
+  "theme_description": "<1-3 sentences describing the common issue>"
+}
+
+Rules:
+- Use only information present in tickets.
+- Keep wording product/engineering support oriented.
+- If tickets are noisy/mixed, say so clearly in the description.
+- No markdown, no code fences, no extra keys, no extra text.
+`;
+
+/**
+ * Fallback prompt for single meta-theme generation
+ */
+const META_THEME_SINGLE_FALLBACK = `You are a product insights analyst.
+
+The user message will be a JSON object:
+{
+  "impacted_clusters": ["cluster_1", "cluster_2"],
+  "impacted_cluster_themes": [
+    {
+      "cluster_id": "cluster_1",
+      "theme_title": "...",
+      "theme_description": "..."
+    }
+  ]
+}
+
+Task:
+- Create ONE higher-level meta theme name and description for this group.
+- Base your reasoning on the provided impacted cluster themes only.
+
+Output (STRICT):
+Return ONLY JSON with exactly these keys:
+{
+  "meta_theme": "<short higher-level pattern name>",
+  "description": "<1-3 sentences explaining the shared pattern>"
+}
+
+Rules:
+- Do not invent or alter cluster membership.
+- Summarize what is common across impacted clusters.
+- If relation is weak, use a broad but accurate umbrella label.
+- No markdown, no code fences, no extra keys, no extra text.
+`;
+
+/**
  * Map of prompt names to their fallback values
  * Uses exact prompt names as keys (same as PROMPT_NAMES values in prompts.ts)
  */
@@ -428,6 +560,9 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'field_value_discovery': FIELD_VALUE_DISCOVERY_FALLBACK,
   'web_search': WEB_SEARCH_FALLBACK,
   'research_agent': RESEARCH_AGENT_FALLBACK,
+  'ticket_description_cleaner': TICKET_DESCRIPTION_CLEANER_FALLBACK,
+  'cluster_theme_single': CLUSTER_THEME_SINGLE_FALLBACK,
+  'meta_theme_single': META_THEME_SINGLE_FALLBACK,
 };
 
 /**
