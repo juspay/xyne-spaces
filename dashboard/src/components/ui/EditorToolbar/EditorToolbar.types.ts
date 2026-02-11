@@ -9,3 +9,12 @@ export interface EmojiPickerButtonProps {
   onEmojiSelect: (emoji: EmojiClickData) => void;
   disabled?: boolean;
 }
+
+export interface MobileEditorToolbarProps {
+  editor: Editor | null;
+  onClose: () => void;
+  onSend: () => void;
+  hasContent: boolean;
+  isSending: boolean;
+  disabled: boolean;
+}

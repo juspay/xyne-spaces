@@ -1,28 +1,42 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { EditorContent } from '@tiptap/react';
 import type { Editor } from '@tiptap/react';
+import { ArrowUp, AtSign, Paperclip } from 'lucide-react';
+import { MobileEditorToolbar } from '../EditorToolbar/MobileEditorToolbar';
+import { EmojiPickerButton } from '../EditorToolbar';
+import type { EmojiClickData } from 'emoji-picker-react';
 
 export interface MobileEditorProps {
   editor: Editor | null;
   content: string;
   allAttachments: File[];
   isSending: boolean;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
   emojiSizeClass: string;
   onAttachClick: () => void;
   onSend: () => void;
-  placeholder?: string;
+  placeholder?: string | undefined;
+  showMentions?: boolean | undefined;
+  onMentionClick?: (() => void) | undefined;
+  onChannelClick?: (() => void) | undefined;
+  onShowFormattingToolbar?: (() => void) | undefined;
+  onCloseFormattingToolbar?: (() => void) | undefined;
+  showFormattingToolbar?: boolean | undefined;
+  showEmojiPicker?: boolean | undefined;
+  onEmojiSelect?: ((emojiData: EmojiClickData) => void) | undefined;
+  attachmentPreviewComponent?: React.ReactNode | undefined;
   hideSendButton?: boolean;
   showAttachButton?: boolean;
 }
 
 /**
  * MobileEditor - Mobile-optimized input layout for chat messages.
- * - Attachment button on the left
- * - Editor content in the middle
- * - Send button on the right
+ * - Collapsed (unfocused + empty): single row — attachment | placeholder | send
+ * - Expanded (focused or has content): editor on top, toolbar (Aa, Emoji, @, #) below
  *
- * This component is rendered inside InputBox for mobile viewports only.
+ * IMPORTANT: EditorContent is always rendered in the same DOM position to prevent
+ * ProseMirror DOM detach/reattach issues on mobile that cause typed text (especially
+ * @ and # triggers) to become invisible.
  */
 export const MobileEditor: React.FC<MobileEditorProps> = ({
   editor,
@@ -36,94 +50,275 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
   placeholder,
   hideSendButton = false,
   showAttachButton = true,
+  showMentions = false,
+  onMentionClick,
+  onChannelClick,
+  showFormattingToolbar = false,
+  onCloseFormattingToolbar,
+  onShowFormattingToolbar,
+  showEmojiPicker = false,
+  onEmojiSelect,
+  attachmentPreviewComponent,
 }) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const [hasBlockFormatting, setHasBlockFormatting] = useState(false);
+  const [keepExpanded, setKeepExpanded] = useState(false);
   const hasContent = content.length > 0 || allAttachments.length > 0;
-  const isEmpty = !content && allAttachments.length === 0;
+
+  // Check if editor is truly empty (no text, no lists, no blockquotes, no formatting)
+  const isEmpty = !content && allAttachments.length === 0 && !hasBlockFormatting;
+
+  const isCollapsed = !isFocused && isEmpty && !keepExpanded;
+
+  // Track editor focus state and block formatting changes
+  useEffect(() => {
+    if (!editor) return;
+
+    const handleFocus = () => {
+      setIsFocused(true);
+      setKeepExpanded(false);
+    };
+
+    const handleBlur = () => {
+      setIsFocused(false);
+    };
+
+    const handleTransaction = () => {
+      const active =
+        editor.isActive('bulletList') ||
+        editor.isActive('orderedList') ||
+        editor.isActive('blockquote') ||
+        editor.isActive('codeBlock');
+      setHasBlockFormatting(active);
+    };
+
+    editor.on('focus', handleFocus);
+    editor.on('blur', handleBlur);
+    editor.on('transaction', handleTransaction);
+
+    return () => {
+      if (editor) {
+        editor.off('focus', handleFocus);
+        editor.off('blur', handleBlur);
+        editor.off('transaction', handleTransaction);
+      }
+    };
+  }, [editor]);
+
+  const handleEditorClick = (): void => {
+    if (!editor?.isFocused) {
+      editor?.commands.focus();
+    }
+  };
 
   return (
-    <div className='flex items-end w-full'>
-      {/* Attachment button on LEFT */}
-      {showAttachButton && (
-        <div className='pl-3 pb-3.5 flex items-center'>
+    <div className='flex flex-col w-full'>
+      {/*
+        EditorContent — always mounted in this exact DOM position.
+        In collapsed state, visually hidden via h-0 + overflow-hidden so the
+        ProseMirror DOM is never detached/reattached.
+      */}
+      <div className={isCollapsed ? 'h-0 overflow-hidden' : 'px-3 pt-2'}>
+        <div
+          className={`
+            relative py-2.5 px-3 min-h-[44px] cursor-text
+            ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}
+          `}
+          onClick={handleEditorClick}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleEditorClick();
+            }
+          }}
+          role='button'
+          tabIndex={0}
+        >
+          {isEmpty && (
+            <div className='absolute inset-0 px-3 py-3.5 text-muted-foreground text-[15px] leading-relaxed truncate pointer-events-none select-none'>
+              {placeholder}
+            </div>
+          )}
+          <EditorContent
+            editor={editor}
+            className={`
+              chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-relaxed break-words text-[15px]
+              text-foreground
+              ${emojiSizeClass}
+              [&_p.is-editor-empty:before]:hidden
+            `}
+          />
+        </div>
+      </div>
+
+      {/* Attachment Previews - Between Editor and Icons */}
+      {attachmentPreviewComponent}
+
+      {/* Collapsed: single row — attachment | placeholder | send */}
+      {isCollapsed && (
+        <div
+          className='flex items-center gap-2 px-3 py-2 min-h-[52px] cursor-text'
+          onClick={handleEditorClick}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleEditorClick();
+            }
+          }}
+          role='button'
+          tabIndex={0}
+        >
           <button
             type='button'
-            onClick={onAttachClick}
+            onClick={e => {
+              e.stopPropagation();
+              onAttachClick();
+            }}
             disabled={disabled || isSending}
-            className='text-foreground hover:text-muted-foreground transition-colors'
+            className='p-2 text-foreground hover:text-muted-foreground transition-colors flex-shrink-0'
             aria-label='Attach files'
             onMouseDown={e => e.preventDefault()}
           >
-            <svg
-              width='22'
-              height='22'
-              viewBox='0 0 24 24'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='2'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-            >
-              <path d='m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48' />
-            </svg>
+            <Paperclip className='h-5 w-5' />
+          </button>
+
+          <div className='flex-1 text-muted-foreground text-[15px] leading-relaxed truncate cursor-text'>
+            {placeholder}
+          </div>
+
+          <button
+            type='button'
+            disabled={true}
+            className='p-2 rounded-full bg-muted/30 text-muted-foreground cursor-not-allowed scale-90 opacity-70 flex items-center justify-center flex-shrink-0'
+            aria-label='Send message'
+          >
+            <ArrowUp className='h-5 w-5' strokeWidth={2.5} />
           </button>
         </div>
       )}
 
-      {/* Editor Content */}
-      <div
-        className={`
-          relative flex-1 py-2.5 px-3 min-h-[44px]
-          ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}
-        `}
-      >
-        {isEmpty && (
-          <div className='absolute inset-0 px-3 py-3.5 text-muted-foreground text-[15px] leading-relaxed truncate pointer-events-none select-none'>
-            {placeholder}
-          </div>
-        )}
-        <EditorContent
-          editor={editor}
-          className={`
-            chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-relaxed break-words text-[15px]
-            text-foreground
-            ${emojiSizeClass}
-            [&_p.is-editor-empty:before]:hidden
-          `}
-        />
-      </div>
+      {/* Expanded: toolbar row with Aa, Emoji, @, #, send */}
+      {!isCollapsed && (
+        <div className='flex items-center gap-1 px-3 pb-2 min-h-[52px]'>
+          {!showFormattingToolbar ? (
+            <>
+              {/* Attachment button */}
+              {showAttachButton && (
+                <button
+                  type='button'
+                  onClick={onAttachClick}
+                  disabled={disabled || isSending}
+                  className='p-2 text-foreground hover:text-muted-foreground transition-colors'
+                  aria-label='Attach files'
+                  onMouseDown={e => e.preventDefault()}
+                >
+                  <Paperclip className='h-5 w-5' />
+                </button>
+              )}
 
-      {/* Send button on RIGHT */}
-      {!hideSendButton && (
-        <div className='pr-3 pb-2.5 flex items-center'>
-          <button
-            type='button'
-            onClick={onSend}
-            disabled={disabled || isSending || !hasContent}
-            className={`
-              p-2 rounded-full transition-all duration-300 flex items-center justify-center
-              ${
-                hasContent
-                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30 transform hover:scale-105 active:scale-95'
-                  : 'bg-muted/30 text-muted-foreground cursor-not-allowed scale-90 opacity-70'
-              }
-            `}
-            aria-label='Send message'
-            data-testid='send-message-button'
-          >
-            <svg
-              width='20'
-              height='20'
-              viewBox='0 0 24 24'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='2.5'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-            >
-              <path d='m5 12 7-7 7 7' />
-              <path d='M12 19V5' />
-            </svg>
-          </button>
+              {/* Aa Button - Text Formatting */}
+              <button
+                type='button'
+                onClick={() => onShowFormattingToolbar?.()}
+                className='p-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors'
+                aria-label='Text formatting'
+                onMouseDown={e => e.preventDefault()}
+              >
+                <span className='text-gray-600 font-semibold text-base'>Aa</span>
+              </button>
+
+              {/* Emoji Picker Button */}
+              {showEmojiPicker && onEmojiSelect && (
+                <div
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    setKeepExpanded(true);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setKeepExpanded(true);
+                    }
+                  }}
+                  role='button'
+                  tabIndex={0}
+                >
+                  <EmojiPickerButton
+                    onEmojiSelect={emoji => {
+                      setKeepExpanded(false);
+                      onEmojiSelect(emoji);
+                    }}
+                    disabled={disabled || isSending}
+                  />
+                </div>
+              )}
+
+              {/* @ Mention Button */}
+              {showMentions && onMentionClick && (
+                <button
+                  type='button'
+                  onClick={() => {
+                    editor?.chain().focus().insertContent('@').run();
+                    onMentionClick();
+                  }}
+                  className='p-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors'
+                  aria-label='Mention user'
+                  onMouseDown={e => e.preventDefault()}
+                >
+                  <AtSign className='h-4 w-4 text-gray-600' />
+                </button>
+              )}
+
+              {/* # Channel Button */}
+              {showMentions && onChannelClick && (
+                <button
+                  type='button'
+                  onClick={() => {
+                    editor?.chain().focus().insertContent('#').run();
+                    onChannelClick();
+                  }}
+                  className='p-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors'
+                  aria-label='Mention channel'
+                  onMouseDown={e => e.preventDefault()}
+                >
+                  <span className='text-gray-600 font-semibold text-base'>#</span>
+                </button>
+              )}
+
+              {/* Spacer to push send button to the right */}
+              <div className='flex-1'></div>
+
+              {/* Send button - Last */}
+              {!hideSendButton && (
+                <button
+                  type='button'
+                  onClick={onSend}
+                  disabled={disabled || isSending || !hasContent}
+                  className={`
+                p-2 rounded-full transition-all duration-300 flex items-center justify-center
+                ${
+                  hasContent
+                    ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30 transform hover:scale-105 active:scale-95'
+                    : 'bg-muted/30 text-muted-foreground cursor-not-allowed scale-90 opacity-70'
+                }
+              `}
+                  aria-label='Send message'
+                  data-testid='send-message-button'
+                >
+                  <ArrowUp className='h-5 w-5' strokeWidth={2.5} />
+                </button>
+              )}
+            </>
+          ) : (
+            <MobileEditorToolbar
+              editor={editor}
+              onClose={() => onCloseFormattingToolbar?.()}
+              onSend={onSend}
+              hasContent={hasContent}
+              isSending={isSending}
+              disabled={disabled}
+            />
+          )}
         </div>
       )}
     </div>

@@ -39,8 +39,18 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
   };
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40'>
-      <div className='w-[520px] rounded-lg bg-white text-gray-900 shadow-xl'>
+    <div
+      className='fixed inset-0 z-50 flex items-center justify-center bg-black/40'
+      onMouseDown={e => e.stopPropagation()}
+      onTouchStart={e => e.stopPropagation()}
+      onKeyDown={e => {
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+        }
+      }}
+      role='presentation'
+    >
+      <div className='w-full max-w-[520px] mx-4 rounded-lg bg-white text-gray-900 shadow-xl'>
         {/* Header */}
         <div className='flex items-center justify-between px-6 py-4 border-b'>
           <h2 className='text-lg font-semibold'>Add emoji</h2>

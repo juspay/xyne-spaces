@@ -1,3 +1,8 @@
 export { EditorToolbar } from './EditorToolbar';
 export { EmojiPickerButton } from './EmojiPickerButton';
-export type { EditorToolbarProps, EmojiPickerButtonProps } from './EditorToolbar.types';
+export { MobileEditorToolbar } from './MobileEditorToolbar';
+export type {
+  EditorToolbarProps,
+  EmojiPickerButtonProps,
+  MobileEditorToolbarProps,
+} from './EditorToolbar.types';
