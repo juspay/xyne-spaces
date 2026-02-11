@@ -1,7 +1,7 @@
 // Workflow poller for background execution
 
 import os from 'os'
-import { repositories } from '@/database/repositories'
+import { repositories, WorkflowExecutionWithState } from '@/database/repositories'
 import { workflowRegistry } from '../registry/workflowRegistry'
 import { createWorkflowEngineWithDB } from '../factory'
 import { WorkflowExecutionStatus, WorkflowType } from '../types/workflow-enums'
@@ -16,7 +16,6 @@ import {
   WorkflowExternalWaitException,
 } from '../exceptions/workflow-exceptions'
 import { workflowStatusSyncService } from '../services/workflowStatusSyncService'
-import { WorkflowExecution } from '@prisma/client'
 import { notificationHooks } from '@/hooks/notificationHooks'
 import { cleanupRepository } from '@framework'
 import { generateConsolidatedKnowledgeLearnings } from '../utils/knowledge-generator'
@@ -83,7 +82,7 @@ export class WorkflowPoller {
 
   private async pollAndExecute(): Promise<boolean> {
     const allowedWorkflowType = process.env.WORKFLOW_TYPE
-    const pendingExecutions: WorkflowExecution[] = await repositories.workflowExecutions.findByStatus('PENDING', allowedWorkflowType, 1)
+    const pendingExecutions: WorkflowExecutionWithState[] = await repositories.workflowExecutions.findByStatus('PENDING', allowedWorkflowType, 1)
 
     if (pendingExecutions.length === 0) {
       this.currentInterval = this.config.maxInterval
@@ -97,7 +96,7 @@ export class WorkflowPoller {
     return true
   }
 
-  private async tryProcessExecution(execution: WorkflowExecution): Promise<void> {
+  private async tryProcessExecution(execution: WorkflowExecutionWithState): Promise<void> {
     // Try to acquire lock
     const lockAcquired = await this.lockService.tryAcquireLock(execution.id, this.workerId)
 
@@ -122,7 +121,7 @@ export class WorkflowPoller {
   };
 }
 
-  private async handleWorkflowError(execution: WorkflowExecution, error: Error): Promise<void> {
+  private async handleWorkflowError(execution: WorkflowExecutionWithState, error: Error): Promise<void> {
     try {
       if (error instanceof WorkflowLockLostException) {
         return
@@ -177,7 +176,7 @@ export class WorkflowPoller {
     }
   }
 
-  private async executeWorkflow(execution: WorkflowExecution): Promise<void> {
+  private async executeWorkflow(execution: WorkflowExecutionWithState): Promise<void> {
     // Update status to RUNNING
     await workflowStatusSyncService.updateWorkflowExecution(execution.id, {
       status: WorkflowExecutionStatus.RUNNING

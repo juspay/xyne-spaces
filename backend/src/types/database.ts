@@ -94,8 +94,14 @@ export type WorkflowWithExecutions = Prisma.WorkflowGetPayload<{
 // Note: WorkflowWithTicket removed - no FK relation between Workflow and Ticket
 
 export type WorkflowExecution = Prisma.WorkflowExecutionGetPayload<{}>;
-export type CreateWorkflowExecutionInput = Prisma.WorkflowExecutionCreateInput;
-export type UpdateWorkflowExecutionInput = Prisma.WorkflowExecutionUpdateInput;
+export type CreateWorkflowExecutionInput = Prisma.WorkflowExecutionCreateInput & {
+  context?: string | null;
+  output?: string | null;
+};
+export type UpdateWorkflowExecutionInput = Prisma.WorkflowExecutionUpdateInput & {
+  context?: string | null;
+  output?: string | null;
+};
 export type FullWorkflowExecution = Prisma.WorkflowExecutionGetPayload<{
   include: {
     workflow: true;
