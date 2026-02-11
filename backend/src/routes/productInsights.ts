@@ -6,7 +6,7 @@ const router = Router();
 
 /**
  * GET /api/productInsights
- * Query params: scope, time_range
+ * Query params: project_id
  */
 router.get(
   '/',

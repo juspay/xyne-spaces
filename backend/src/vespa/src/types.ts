@@ -164,6 +164,7 @@ export interface VespaTicketDocument extends VespaDocument {
   title: string;
   workflowType: string;
   description: string;
+  description_clean?: string;
   ticketType: string;
   priority: TicketPriority;
   stage: string;

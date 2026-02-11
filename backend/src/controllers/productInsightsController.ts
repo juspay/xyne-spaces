@@ -5,14 +5,13 @@ import { z } from 'zod';
 
 // Validation schema
 const ProductInsightsQuerySchema = z.object({
-  scope: z.string(),
-  time_range: z.string()
+  project_id: z.string(),
 });
 
 export class ProductInsightsController {
   /**
    * GET /api/productInsights
-   * Fetch product insights from GCS based on scope and time_range
+   * Fetch product insights from GCS based on project_id
    */
   async getProductInsights(req: Request, res: Response): Promise<void> {
     try {
@@ -28,19 +27,18 @@ export class ProductInsightsController {
         return;
       }
 
-      const { scope, time_range } = result.data;
+      const { project_id } = result.data;
 
-      logger.info(`Fetching product insights: scope=${scope}, time_range=${time_range}`);
+      logger.info(`Fetching product insights: project_id=${project_id}`);
 
       // Fetch insights from service
-      const insights = await productInsightsService.getInsights(scope, time_range);
+      const insights = await productInsightsService.getInsights(project_id);
 
       res.status(200).json({
         success: true,
         data: insights,
         metadata: {
-          scope,
-          time_range,
+          project_id,
           timestamp: new Date().toISOString()
         }
       });

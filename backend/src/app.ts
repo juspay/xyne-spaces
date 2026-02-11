@@ -68,6 +68,7 @@ import xyneAIRoutes from '@/routes/xyneAI';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
+import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
@@ -208,6 +209,8 @@ export class App {
     }
     // Ticket duplicate backfill route (always available, no vespa flag)
     this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
+    // Product insights recluster route (admin-only)
+    this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
 
     // Application backfill admin routes (auth required)
     this.app.use('/api/admin/applications', authMiddleware.authenticate, applicationBackfillRoutes);
