@@ -9,7 +9,7 @@
  * - Integration with FilePreviewModal
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Download, FileText, Trash2, Video } from 'lucide-react';
 import {
   formatFileSize,
@@ -360,7 +360,8 @@ const ActionTray: React.FC<{
 const InlineTextFile: React.FC<{
   attachmentId: string;
   fileName: string;
-}> = ({ attachmentId, fileName }) => {
+  metadata?: Record<string, unknown>;
+}> = ({ attachmentId, fileName, metadata }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -376,11 +377,26 @@ const InlineTextFile: React.FC<{
   };
 
   const isLargeFile = fileData ? fileData.size > 10 * 1024 : false; // 10KB
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
+
+  const meta = metadata as { type?: string; version?: number } | undefined;
+  const prevVersionRef = useRef(meta?.version || 0);
+
+  useEffect(() => {
+    const currentVersion = meta?.version;
+    const prevVersion = prevVersionRef.current;
+    if (prevVersion !== undefined && currentVersion !== undefined && currentVersion > prevVersion) {
+      setRefetchTrigger(prev => prev + 1);
+    }
+    prevVersionRef.current = currentVersion || 0;
+  }, [meta?.version, meta?.type]);
 
   useEffect(() => {
     const fetchFile = async (): Promise<void> => {
       try {
-        const blob = await createPreviewUrl(attachmentId);
+        const blob = await createPreviewUrl(attachmentId, {
+          forceRefresh: refetchTrigger > 0,
+        });
         const file = new File([blob], fileName, { type: 'text/plain' });
         setFileData(file);
       } catch (err) {
@@ -391,7 +407,7 @@ const InlineTextFile: React.FC<{
     };
 
     void fetchFile();
-  }, [attachmentId, fileName]);
+  }, [attachmentId, fileName, refetchTrigger]);
 
   if (isLoading) {
     return (
@@ -694,7 +710,14 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment
 
   // Render inline text viewer for .txt files using existing TxtViewer component
   if (isTextFile && !compact) {
-    return <InlineTextFile attachmentId={attachment.id} fileName={attachment.originalFilename} />;
+    const metadata = attachment.metadata as Record<string, unknown> | null;
+    return (
+      <InlineTextFile
+        attachmentId={attachment.id}
+        fileName={attachment.originalFilename}
+        {...(metadata && { metadata })}
+      />
+    );
   }
 
   // Render inline video player for video files (Slack-like behavior)

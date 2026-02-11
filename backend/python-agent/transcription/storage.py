@@ -43,7 +43,9 @@ class GCSStreamer:
         self._drop_count = 0
         self._flush_count = 0
         self._call_id = filename.replace('transcriptions/', '').replace('.jsonl', '')
-        
+        self._has_uploaded = False
+
+        logger.info(f"[GCS:STREAMER] Initialized | file={filename} | queue_max_size=2000")
         logger.info(f"gcs_streamer_initialized | queue_max_size=2000")
     
     def start(self):
@@ -85,6 +87,10 @@ class GCSStreamer:
                     f"elapsed={join_elapsed:.2f}s, writes={self._write_count}, "
                     f"drops={self._drop_count}, flushes={self._flush_count}"
                 )
+
+    def has_uploaded(self) -> bool:
+        """Check if any entries were uploaded."""
+        return self._has_uploaded
     
     def write(self, data: dict):
         """Queue data for writing to GCS (non-blocking)."""
@@ -163,17 +169,17 @@ class GCSStreamer:
                 
                 logger.debug(f"gcs_write_loop_exiting | total_written={local_write_count}")
                 break
-                
+
             except Exception as e:
                 logger.error(f"gcs_stream_error | retry={retry_count}/{max_retries}, error={str(e)[:200]}")
                 blob_writer = None
                 retry_count += 1
-                
+
                 if retry_count < max_retries:
                     backoff = min(2 ** retry_count, 30)
                     logger.warning(f"gcs_upload_retrying | attempt={retry_count + 1}/{max_retries}, next_retry_delay={backoff}s")
                     time.sleep(backoff)
-        
+
         if retry_count >= max_retries:
             logger.error(f"gcs_upload_all_retries_failed | written={local_write_count}, queue_remaining={self._queue.qsize()}")
         
@@ -183,9 +189,11 @@ class GCSStreamer:
                 blob_writer.close()
                 logger.info(f"gcs_stream_closed | writes={local_write_count}, flushes={self._flush_count}")
             except Exception as e:
-                logger.error(f"gcs_stream_close_error | error={e}")
-        
-        logger.debug(f"gcs_writer_thread_exiting | final_write_count={local_write_count}")
+                logger.error(f"[GCS:CLOSE] Error closing stream: {e}")
+
+        # Track if any entries were uploaded
+        self._has_uploaded = local_write_count > 0
+        logger.info(f"[GCS:WRITER] Thread exiting | uploaded={self._has_uploaded}")
 
 
 class TranscriptionStorage:
@@ -224,13 +232,16 @@ class TranscriptionStorage:
         # GCS settings
         self.gcs_filename = f"transcriptions/{safe_call_id}.jsonl" if bucket else None
         self.gcs_buffer = [] if use_buffer else None
-        
+
         # GCS streamer for production mode (real-time streaming)
         self.gcs_streamer: Optional[GCSStreamer] = None
         if bucket and not use_buffer:
             self.gcs_streamer = GCSStreamer(bucket, self.gcs_filename)
             self.gcs_streamer.start()
-        
+
+        # Track if any entries were uploaded to GCS
+        self._has_uploaded = False
+
         if use_buffer:
             logger.info(f"storage_buffering_enabled | mode=buffered, gcs_available=true")
         elif bucket:
@@ -241,7 +252,7 @@ class TranscriptionStorage:
     async def write(self, event: dict):
         """
         Store transcription event to GCS (streaming or buffered) or local filesystem.
-        
+
         Args:
             event: Transcription event data
         """
@@ -249,14 +260,14 @@ class TranscriptionStorage:
         if self.gcs_streamer is not None:
             self.gcs_streamer.write(event)
             return
-        
+
         # Buffered mode: collect in memory for later flush
         if self.gcs_buffer is not None:
             json_line = json.dumps(event) + "\n"
             self.gcs_buffer.append(json_line)
             logger.debug(f"transcription_buffered | entry_count={len(self.gcs_buffer)}")
             return
-        
+
         # Local storage fallback (only when GCS is not configured)
         if self.bucket is None:
             try:
@@ -266,8 +277,8 @@ class TranscriptionStorage:
                     await f.write(json_line)
                 logger.debug(f"local_fallback_write | file={self.local_path}")
             except Exception as e:
-                logger.error(f"local_write_failed | file={self.local_path}, error={e}")
-    
+                logger.error(f"Error storing transcription locally: {e}")
+
     async def flush(self):
         """
         Flush/finalize transcription storage.
@@ -282,7 +293,8 @@ class TranscriptionStorage:
         if self.gcs_streamer is not None:
             logger.info(f"storage_stream_closing")
             await asyncio.to_thread(self.gcs_streamer.stop)
-            logger.info(f"storage_stream_closed | file={self.gcs_filename}")
+            self._has_uploaded = self.gcs_streamer.has_uploaded()
+            logger.info(f"GCS streamer stopped, has_uploaded={self._has_uploaded}")
             return
         
         # Buffered mode: upload all buffered entries
@@ -299,14 +311,20 @@ class TranscriptionStorage:
                 logger.info(f"gcs_upload_started | file={self.gcs_filename}, entries={len(self.gcs_buffer)}")
                 blob = self.bucket.blob(self.gcs_filename)
                 transcript_content = "".join(self.gcs_buffer)
-                
+
                 # Run blocking upload in thread pool
                 await asyncio.to_thread(
                     blob.upload_from_string,
                     transcript_content,
                     content_type="application/x-ndjson"
                 )
-                
-                logger.info(f"gcs_upload_completed | file={self.gcs_filename}, bytes={len(transcript_content)}")
+
+                # Track that entries were uploaded
+                self._has_uploaded = True
+                logger.info(f"Successfully uploaded transcript to GCS: {self.gcs_filename}")
             except Exception as e:
-                logger.error(f"gcs_upload_failed | file={self.gcs_filename}, error={e}")
+                logger.error(f"Error uploading to GCS: {e}")
+
+    def has_uploaded_entries(self) -> bool:
+        """Check if any transcript entries were successfully uploaded to GCS."""
+        return self._has_uploaded

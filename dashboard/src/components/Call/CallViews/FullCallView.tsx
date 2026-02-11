@@ -11,6 +11,7 @@ import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { roomActor } from '../../../machines/roomMachine';
+import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -55,6 +56,7 @@ export function FullCallView({
   isChatOpen,
   conversationId,
   pendingControlRequest,
+  room,
   onToggleMic,
   onToggleCamera,
   onToggleScreenShare,
@@ -133,14 +135,19 @@ export function FullCallView({
   return (
     <div
       className={cn(
-        'h-screen bg-gradient-to-br from-gray-900 to-gray-950 relative overflow-hidden transition-all duration-300',
+        'h-screen bg-gradient-to-br from-gray-900 to-gray-950 flex flex-col overflow-hidden transition-all duration-300',
       )}
     >
+      {/* Connection Status Indicators Bar */}
+      <div className='flex justify-end items-center px-4 py-3'>
+        <ConnectionStatusIndicators room={room} />
+      </div>
+
       <CallStateTransition connectionState={connectionState} machineState={machineState}>
         {focusedScreenShare ? (
           // Screen share layout with sidebar
           <div
-            className='h-full w-full pb-32 sm:pb-36 transition-all duration-300'
+            className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300'
             style={{ paddingRight: isSidebarOpen ? 'min(500px, 100vw)' : '0' }}
           >
             <ScreenShareView
@@ -157,7 +164,7 @@ export function FullCallView({
         ) : (
           // Normal grid layout when no screen share
           <div
-            className='h-full w-full p-2 sm:p-4 pb-32 sm:pb-36 transition-all duration-300'
+            className='flex-1 w-full p-2 sm:p-4 pb-32 sm:pb-36 transition-all duration-300'
             style={{ paddingRight: isSidebarOpen ? 'min(500px, 100vw)' : '0' }}
           >
             <ParticipantGrid

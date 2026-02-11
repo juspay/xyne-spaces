@@ -81,6 +81,13 @@ export const Event = {
   LIVEKIT_HEARTBEAT: 'livekit_heartbeat',
   LIVEKIT_ROOM_DISCONNECTED: 'livekit_room_disconnected',
   LIVEKIT_PARTICIPANT_DISCONNECTED: 'livekit_participant_disconnected',
+  LIVEKIT_SOCKET_CONNECTING: 'livekit_socket_connecting',
+  LIVEKIT_SOCKET_CONNECTED: 'livekit_socket_connected',
+  LIVEKIT_SOCKET_RECONNECTING: 'livekit_socket_reconnecting',
+  LIVEKIT_SOCKET_DISCONNECTED: 'livekit_socket_disconnected',
+  LIVEKIT_RTC_CONNECTING: 'livekit_rtc_connecting',
+  LIVEKIT_RTC_CONNECTED: 'livekit_rtc_connected',
+  LIVEKIT_RTC_DISCONNECTED: 'livekit_rtc_disconnected',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

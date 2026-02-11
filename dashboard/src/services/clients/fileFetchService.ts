@@ -11,6 +11,7 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 
 export interface FetchOptions {
   abortController?: AbortController;
+  forceRefresh?: boolean;
 }
 
 const resolveUrl = (source: string): string => {
@@ -100,8 +101,15 @@ export const downloadFile = async (
 /**
  * Create blob URL for preview
  */
-export const createPreviewUrl = async (source: string): Promise<Blob> => {
+export const createPreviewUrl = async (
+  source: string,
+  options?: { forceRefresh?: boolean },
+): Promise<Blob> => {
   const url = resolveUrl(source);
+
+  if (options?.forceRefresh) {
+    queryClient.removeQueries({ queryKey: ['preview-blob', url] });
+  }
 
   return queryClient.fetchQuery<Blob>({
     queryKey: ['preview-blob', url],
