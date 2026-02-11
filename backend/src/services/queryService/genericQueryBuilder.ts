@@ -43,6 +43,9 @@ export class GenericQueryBuilder {
   private getModel(entityType: FormEntityType) {
     const modelMap: Record<FormEntityType, any> = {
       [FormEntityType.TICKET]: this.prisma.ticket,
+      [FormEntityType.SUB_TICKET]: this.prisma.subTicket,
+      [FormEntityType.RELEASE_ENV_FORM]: this.prisma.releaseChangeType,
+      [FormEntityType.RELEASE_MIGRATION_FORM]: this.prisma.releaseChangeType,
       // Add other allowed entity types here as needed
     };
 
@@ -604,7 +607,7 @@ export class GenericQueryBuilder {
     if (operator === 'isEmpty') {
       if (fieldMetadata.type === 'DateTime') {
         if (fieldMetadata.isRequired) {
-          return {}; 
+          return {};
         }
         return { [field]: null };
       }

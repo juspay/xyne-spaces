@@ -1,12 +1,13 @@
 import { ReactElement } from 'react';
 import { Button, ButtonType } from '@juspay/blend-design-system';
-import type { Stage } from '@xyne/shared';
+import type { Stage, BoardType } from '@xyne/shared';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 
 // Board type from Zero query with related stages
 export interface BoardWithStages {
   readonly id: string;
   readonly name: string;
+  readonly boardType: BoardType;
   readonly projectId: string;
   readonly createdBy: string;
   readonly updatedBy: string | null;

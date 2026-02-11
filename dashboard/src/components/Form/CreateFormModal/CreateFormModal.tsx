@@ -88,7 +88,7 @@ export const CreateFormModal = ({
       reset({
         formName: form.formName,
         formDescription: form.formDescription || '',
-        contextType: form.contextType as FormContextType,
+        contextType: form.contextType,
         entityType: form.entityType,
       });
 

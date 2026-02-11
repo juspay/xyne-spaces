@@ -35,6 +35,7 @@ export const SubTicketModal = ({
       channelId={ticket?.conversation?.channelId || ''}
       projectId={ticket?.projectId || ''}
       isFromSubTicket={true}
+      parentTicketId={ticketId}
       onTicketCreated={createdTicket => {
         // Create SubTicket and mapping using Zero mutators
         const subTicketId = uuidv4();

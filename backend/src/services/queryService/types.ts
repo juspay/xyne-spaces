@@ -6,6 +6,9 @@ import { FormEntityType } from '@prisma/client';
  */
 export const ENTITY_TYPE_TO_PRISMA_MODEL: Record<FormEntityType, string> = {
   [FormEntityType.TICKET]: 'Ticket',
+  [FormEntityType.SUB_TICKET]: 'SubTicket',
+  [FormEntityType.RELEASE_ENV_FORM]: "ReleaseChangeType",
+  [FormEntityType.RELEASE_MIGRATION_FORM]: "ReleaseChangeType",
 } as const;
 
 /**

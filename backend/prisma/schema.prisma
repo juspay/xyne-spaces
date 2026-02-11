@@ -309,6 +309,7 @@ model Ticket {
   userGroupId      String?            // User group to which the ticket belongs
   boardId          String            // Board to which the ticket belongs
   stageName        String            // Current stage of the ticket
+  ticketType       String?           
 
   @@index([status])
   @@index([assignedTo, status])
@@ -321,6 +322,7 @@ model Ticket {
   @@index([merchantId])
   @@index([merchantId, createdAt])
   @@index([channelId, merchantId])
+  @@index([ticketType])
   @@map("tickets")
   @@schema("public")
 }
@@ -1029,6 +1031,7 @@ model Project {
 model Board {
   id          String    @id @default(cuid())
   name        String    @unique
+  boardType   BoardType @default(DEFAULT)
   projectId   String    // Project ID (no FK constraint)
   createdBy   String    // User ID (no FK constraint)
   updatedBy   String?   // User ID (no FK constraint)
@@ -1750,11 +1753,40 @@ enum FormFieldType {
 
 enum FormContextType {
   BOARD
+  RELEASE_CHANGE
+  @@schema("public")
+}
+
+enum BoardType {
+  DEFAULT
+  RELEASE
   @@schema("public")
 }
 
 enum FormEntityType {
   TICKET
+  SUB_TICKET
+  RELEASE_MIGRATION_FORM
+  RELEASE_ENV_FORM
+  @@schema("public")
+}
+
+// Lookup value types for dynamic enumeration values
+enum LookupType {
+  TICKET_TYPE
+  @@schema("public")
+}
+
+// Lookup values table - stores dynamic enumeration values for various entities
+model LookupValue {
+  id        String          @id @default(cuid())
+  type      LookupType // Category/type of lookup value
+  value     String          // The actual value
+  createdAt DateTime        @default(now())
+
+  @@unique([type, value])
+  @@index([type])
+  @@map("lookup_values")
   @@schema("public")
 }
 
@@ -1869,4 +1901,124 @@ model Merchant {
 
 
 
+
+// ============================================================================
+// RELEASE MANAGEMENT MODELS
+// ============================================================================
+
+// Release Management Enums
+
+enum ApplicationReleaseTicketStatus {
+  NOT_TESTED
+  TESTING
+  PASSED
+  FAILED
+  EXCLUDED
+  @@schema("public")
+}
+
+enum ReleaseEventType {
+  RELEASE
+  TICKET
+  SUBTICKET
+  TESTING
+  SYSTEM
+  CANVAS
+  @@schema("public")
+}
+
+
+// Services that can be released
+model Application {
+  id              String    @id @default(cuid())
+  name            String
+  projectId       String    // Project ID (no FK constraint)
+  boardId         String    // Board ID (no FK constraint)
+  channelId       String?   // Channel ID (no FK constraint)
+  regex           String    // Used to identify service 
+  repoUrl         String
+  deployedCommit  String?   // Used to identify the commit that is currently deployed
+  lastDeployedAt  DateTime?
+  ownerTeam       String
+  createdAt       DateTime  @default(now())
+
+  @@index([projectId])
+  @@index([channelId])
+  @@index([boardId])
+  @@map("applications")
+  @@schema("public")
+}
+
+// Individual application releases under a parent release ticket
+// Mapping between application release and actual dev tickets
+model ApplicationReleaseTicket {
+  id                    String                          @id @default(cuid())
+  applicationReleaseId  String                          // SubTicket ID from ApplicationRelease
+  ticketId              String                          // Ticket ID in the actual dev board
+  title                 String
+  status                ApplicationReleaseTicketStatus  @default(NOT_TESTED)
+  testedBy              String?                         // User ID (no FK constraint)
+  testedAt              DateTime?
+  failureReason         String?
+  createdAt             DateTime                        @default(now())
+
+  @@index([applicationReleaseId])
+  @@index([ticketId])
+  @@index([status])
+  @@map("application_release_tickets")
+  @@schema("public")
+}
+
+
+// Captures all events tied to the release for audit trail
+model ReleaseEvent {
+  id                    String            @id @default(cuid())
+  releaseId             String            // Always present - Release ticket ID
+  applicationReleaseId  String?           // App-specific events (SubTicket ID)
+  eventType             ReleaseEventType
+  eventName             String            // Specific action
+  message               String            // Human-readable message
+  userId                String?           // NULL = system event
+  userName              String?           // Name of the user
+  channelId             String            // Channel where release lives
+  conversationId        String            // Thread for this release
+  payload               Json?             // Flat, event-specific data
+  createdAt             DateTime          @default(now())
+
+  @@index([releaseId])
+  @@index([applicationReleaseId])
+  @@index([channelId, conversationId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("release_events")
+  @@schema("public")
+}
+
+model ReleaseChange {
+  id                    String         @id @default(cuid())
+  releaseId             String         // Release ticket ID
+  applicationReleaseId  String?        // Application release ID (SubTicket ID)
+  applicationId         String?        // Application ID
+  approvedBy            String?        // User ID (no FK constraint)
+  approvedAt            DateTime?
+  createdAt             DateTime       @default(now())
+
+  @@index([releaseId])
+  @@index([applicationReleaseId])
+  @@index([applicationId])
+  @@map("release_changes")
+  @@schema("public")
+}
+
+model ReleaseChangeType {
+  id              String   @id @default(cuid())
+  applicationId   String   // Application ID
+  changeType      String   // e.g., "env", "migrations", "database", etc.
+
+  @@index([id])
+  @@index([applicationId])
+  @@index([changeType])
+  @@map("release_change_types")
+  @@schema("public")
+}
 

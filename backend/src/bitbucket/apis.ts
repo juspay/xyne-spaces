@@ -220,7 +220,7 @@ export class BitbucketManager {
     description: string
   ) {
     try {
-      const buildStatusUrl = `${config.bitbucket.BaseUrl}/rest/build-status/1.0/commits/${commitHash}`;
+      const buildStatusUrl = `${config.bitbucket.baseUrl}/rest/build-status/1.0/commits/${commitHash}`;
       const payload = {
         state,
         key,

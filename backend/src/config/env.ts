@@ -112,8 +112,12 @@ const envSchema = Joi.object({
   OTEL_EXPORT_INTERVAL_MS: Joi.number().default(60000),
   BITBUCKET_WEBHOOK_SECRET: Joi.string().default(''),
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
-  BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
+  // Bitbucket Configuration
+  BITBUCKET_BASE_URL: Joi.string().default(''),
+  BITBUCKET_USERNAME: Joi.string().allow('').default(''),
+  BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
+  BITBUCKET_TOKEN: Joi.string().allow('').default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -236,7 +240,8 @@ export const config = {
     apiToken: envVars.BITBUCKET_AUTH,
     apiUsername: envVars.BITBUCKET_USERNAME,
     sshBaseUrl: envVars.BITBUCKET_SSH_BASE_URL,
-     BaseUrl: envVars.BITBUCKET_BASE_URL,
+    baseUrl: envVars.BITBUCKET_BASE_URL,
+    password: envVars.BITBUCKET_PASSWORD,
   },
   workingHours: {
     start: envVars.WORKING_HOUR_START,

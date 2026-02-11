@@ -3,6 +3,7 @@
  */
 
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
+import type { BoardType } from '@xyne/shared';
 
 import type { TicketStatusV2, PRStatusEvent } from '@xyne/shared';
 
@@ -19,12 +20,14 @@ export interface BoardStageData {
 export interface CreateBoardFormData {
   name: string;
   projectId: string;
+  boardType: BoardType;
   stages: BoardStageData[];
 }
 
 export interface UpdateBoardFormData {
   name?: string;
   projectId?: string;
+  boardType?: BoardType;
   metadata?: ReadonlyJSONValue;
   stages?: BoardStageData[];
   formIds?: string[] | null;

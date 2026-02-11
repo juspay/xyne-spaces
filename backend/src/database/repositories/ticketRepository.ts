@@ -4,7 +4,7 @@ import { websocketService } from '@/services/websocketService';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
-import { PRActivityValue } from '@xyne/shared';
+import { BaseTicketType, PRActivityValue } from '@xyne/shared';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -50,7 +50,7 @@ export class TicketRepository {
 
     // Get the stage - use provided stageName if it exists in stages, otherwise use first stage
     let selectedStage = stages[0]; // Default to first stage
-    
+
     if (data.stageName) {
       const foundStage = stages.find(stage => stage.name === data.stageName);
       if (foundStage) {
@@ -98,10 +98,22 @@ export class TicketRepository {
         closedAt: data.closedAt,
         closedBy: data.closedBy,
         merchantId: data.merchantId,
+        ticketType: data.ticketType,
         ...(data.createdAt && { createdAt: data.createdAt }),
       }
     });
 
+    const isHotFix = ticket.ticketType === BaseTicketType.Hotfix
+    // If it's a hotfix, add 'hotfix' tag to the ticket
+    if (isHotFix) {
+      await prisma.ticketTag.create({
+        data: {
+          ticketId: ticket.id,
+          name: 'hotfix'
+        }
+      })
+      logger.info(`Hotfix tag added to ticket ${ticket.id}`);
+    }
     // Track user activity using Redis Set - O(1) operation, no DB query
     websocketService.trackUserActivity(data.createdBy)
       .catch(err => logger.error('Failed to track user activity after ticket creation:', err));
@@ -160,9 +172,9 @@ export class TicketRepository {
    * @param prActivityData - Optional PR activity data (only used when source is WEBHOOK)
    */
   async updateTicketStage(
-    ticketId: string, 
-    newStageName: string, 
-    updatedBy: string, 
+    ticketId: string,
+    newStageName: string,
+    updatedBy: string,
     source: ActivitySource = ActivitySource.INTERNAL,
     prActivityData?: {
       prEvent: PRStatusEvent;
@@ -387,12 +399,6 @@ export class TicketRepository {
       }
     });
   }
-  async getTicketByXyneId(xyneId: string) {
-    return await prisma.ticket.findFirst({
-      where: { xyneId }
-    });
-  }
-
   /**
    * Get human-readable action text for PR event
    * @private
@@ -403,7 +409,25 @@ export class TicketRepository {
       [PRStatusEvent.UPDATED]: 'updated',
       [PRStatusEvent.MERGED]: 'merged',
       [PRStatusEvent.DECLINED]: 'declined',
-     };
+    };
     return actionMap[event] || 'updated';
+  }
+
+  /**
+   * Get ticket by XYNE ID (e.g., "XYNE-123")
+   */
+  async getTicketByXyneId(xyneId: string) {
+    return await prisma.ticket.findUnique({
+      where: { xyneId }
+    });
+  }
+
+  /**
+   * Get ticket by ID with id and xyneId selection
+   */
+  async getTicketById(ticketId: string) {
+    return await prisma.ticket.findUnique({
+      where: { id: ticketId }
+    });
   }
 }

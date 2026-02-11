@@ -31,7 +31,9 @@ import { DatabaseClient } from '@/database/client';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { vespaService } from '@/services/vespaSearch';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
-import { FormContextType, FormEntityType } from '@xyne/shared';
+import { BaseTicketType, FormContextType, FormEntityType } from '@xyne/shared';
+import { CommitAnalysisController } from './commitAnalysisController';
+import { isReleaseTicket } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 const DUPLICATE_REFERENCE_LIMIT = 10;
@@ -44,6 +46,7 @@ export class TicketController {
   private channelParticipantRepository: ChannelParticipantRepository;
   private messageRepository: MessageRepository;
   private messageAttachmentRepository: MessageAttachmentRepository;
+  private commitAnalysisController: CommitAnalysisController;
 
   constructor() {
     this.ticketRepository = new TicketRepository();
@@ -53,6 +56,7 @@ export class TicketController {
     this.channelParticipantRepository = new ChannelParticipantRepository();
     this.messageRepository = new MessageRepository();
     this.messageAttachmentRepository = new MessageAttachmentRepository();
+    this.commitAnalysisController = new CommitAnalysisController();
   }
 
   /**
@@ -194,8 +198,9 @@ export class TicketController {
         excludedChatAttachmentIds,
         tags,
         merchantId,
-      }: CreateTicketRequest = req.body;
-
+        parentTicketId,
+        ticketType
+      }: CreateTicketRequest & { parentTicketId?: string } = req.body;
       // Validate excludedChatAttachmentIds if provided
       if (excludedChatAttachmentIds && !Array.isArray(excludedChatAttachmentIds)) {
         res.status(400).json({ error: 'Invalid format for excludedChatAttachmentIds. Must be an array of strings.' });
@@ -219,7 +224,6 @@ export class TicketController {
 
       // Extract dynamic fields if present (support both string and string[] for MULTI_SELECT)
       const dynamicFields = (req.body.dynamicFields as Record<string, string | string[]>) || {};
-
       const requiredFields = { title, description, projectId, boardId };
       for (const [field, value] of Object.entries(requiredFields)) {
         if (!value) {
@@ -348,6 +352,8 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
+            ticketType,
+            dynamicFields: dynamicFields as Record<string, string>,
           });
 
           // Update conversation with ticketId
@@ -372,7 +378,7 @@ export class TicketController {
 
           // Get existing CHAT attachments from the FIRST MESSAGE ONLY and convert them to TICKET attachments (excluding any that user chose to exclude)
           let existingChatAttachments: MessageAttachment[] = [];
-          
+
           if (existingConversation.initialMessageId) {
             // Only get attachments from the initial/first message of the conversation
             existingChatAttachments = await this.messageAttachmentRepository.findByMessageId(
@@ -425,6 +431,8 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
+            ticketType,
+            dynamicFields: dynamicFields as Record<string, string>,
           });
 
           await this.messageRepository.createWithExecutionId({
@@ -472,7 +480,7 @@ export class TicketController {
         await this.channelRepository.updateLastActivity(ticketChannelId);
       }
 
-       // Create TicketTag records for each tag
+      // Create TicketTag records for each tag
       if (tags && tags.length > 0) {
         try {
           await prisma.ticketTag.createMany({
@@ -489,36 +497,36 @@ export class TicketController {
       }
 
 
-        // Queue Vespa job in background - worker will handle all processing
-        vespaQueue.addJob({
-          schema: ticketSchema,
-          jobType: "feed",
-          docId: ticket.id,
-          userId: userId
-        }).catch(async (error) => {
-          logger.error('Error queuing Vespa job for ticket:', error);
-          // Log failed insertion to Postgres for later retry
-          try {
-            const vespaLogs = db.vespaInsertionLogs;
-            if (vespaLogs) {
-              await vespaLogs.create({
-                data: {
-                  status: "FAILED",
-                  type: "INSERT",
-                  entityId: ticket.id,
-                  entityType: ticketSchema,
-                  namespace: NAMESPACE,
-                  errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
-                  errorDetails: JSON.stringify(error),
-                  userId: userId,
-                  createdAt: new Date(),
-                },
-              });
-            }
-          } catch (dbError) {
-            logger.error('Failed to log Vespa insertion error to database:', dbError);
+      // Queue Vespa job in background - worker will handle all processing
+      vespaQueue.addJob({
+        schema: ticketSchema,
+        jobType: "feed",
+        docId: ticket.id,
+        userId: userId
+      }).catch(async (error) => {
+        logger.error('Error queuing Vespa job for ticket:', error);
+        // Log failed insertion to Postgres for later retry
+        try {
+          const vespaLogs = db.vespaInsertionLogs;
+          if (vespaLogs) {
+            await vespaLogs.create({
+              data: {
+                status: "FAILED",
+                type: "INSERT",
+                entityId: ticket.id,
+                entityType: ticketSchema,
+                namespace: NAMESPACE,
+                errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+                errorDetails: JSON.stringify(error),
+                userId: userId,
+                createdAt: new Date(),
+              },
+            });
           }
-        });
+        } catch (dbError) {
+          logger.error('Failed to log Vespa insertion error to database:', dbError);
+        }
+      });
 
       // Create FormEntityValues records for dynamic fields
       if (Object.keys(dynamicFields).length > 0) {
@@ -624,6 +632,40 @@ export class TicketController {
       };
 
       res.status(201).json(response);
+
+      // Trigger commit analysis 
+      const deployedCommitId = dynamicFields?.['deployedCommitId'] as string;
+      const newCommitId = dynamicFields?.['newCommitId'] as string;
+      const branch = dynamicFields?.['branch'] as string;
+
+      if (isReleaseTicket(ticket.ticketType as BaseTicketType) && deployedCommitId && newCommitId && branch) {
+        // TODO: Replace hardcoded values with actual configuration from project/board settings
+        const workspace = 'XYNE';
+        const repoSlug = 'xyne-spaces';
+
+        this.commitAnalysisController.analyzeCommits({
+          workspace,
+          repoSlug,
+          conversationId: ticket.conversationId,
+          userId: finalCreatedBy,
+          channelId: ticket.channelId || undefined,
+          newCommitId,
+          deployedCommitId,
+          branch,
+          parentTicketId,
+          userName: req.user?.name,
+          isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
+        }).then((result) => {
+          if (result.success) {
+            logger.info(`[Ticket Creation] Commit analysis completed for ticket ${ticket.xyneId}`);
+          } else {
+            logger.error(`[Ticket Creation] Commit analysis failed for ticket ${ticket.xyneId}:`, result.error);
+          }
+        }).catch((error) => {
+          logger.error(`[Ticket Creation] Commit analysis error for ticket ${ticket.xyneId}:`, error);
+        });
+      }
+
     } catch (error) {
       logger.error('Error creating ticket:', error);
 
@@ -837,7 +879,7 @@ export class TicketController {
 
       let stepTitle = 'Human Intervention Required';
       let responseSchema = null;
-      
+
       if (pendingStep.data) {
         try {
           const stepData = JSON.parse(pendingStep.data);

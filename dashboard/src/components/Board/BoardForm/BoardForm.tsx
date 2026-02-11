@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect } from 'react';
-import { TextInput } from '@juspay/blend-design-system';
+import { TextInput, SingleSelect } from '@juspay/blend-design-system';
 import { X } from 'lucide-react';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
@@ -11,6 +11,7 @@ import {
   FormContextType,
   TicketStatusV2,
   PRStatusEvent,
+  BoardType,
   type BoardMetadata,
   type TicketFormConfig,
 } from '@xyne/shared';
@@ -61,6 +62,7 @@ export const BoardForm = ({
   const isEdit = !!board;
   const [name, setName] = useState(board?.name || '');
   const [projectId, setProjectId] = useState(board?.projectId || providedProjectId || '');
+  const [boardType, setBoardType] = useState<BoardType>(board?.boardType || BoardType.DEFAULT);
   const [selectedFormIds, setSelectedFormIds] = useState<Set<string>>(new Set());
 
   // Initialize ticket form config from board metadata
@@ -331,6 +333,7 @@ export const BoardForm = ({
           const updateData: {
             name?: string;
             projectId?: string;
+            boardType?: BoardType;
             metadata?: ReadonlyJSONValue;
             stages?: Array<{
               id?: string;
@@ -348,6 +351,9 @@ export const BoardForm = ({
           }
           if (projectId !== board.projectId) {
             updateData.projectId = projectId;
+          }
+          if (boardType !== board.boardType) {
+            updateData.boardType = boardType;
           }
 
           // Always include metadata with ticket form config and transfer flag
@@ -393,6 +399,7 @@ export const BoardForm = ({
           await onSubmit({
             name: name.trim(),
             projectId,
+            boardType,
             stages: stages.map(stage => ({
               name: stage.name.trim(),
               eta: parseInt(stage.eta),
@@ -429,6 +436,24 @@ export const BoardForm = ({
           onChange={e => setName(e.target.value)}
           placeholder='Enter board name'
           required
+          disabled={isLoading}
+        />
+      </div>
+
+      <div>
+        <SingleSelect
+          label='Board Type'
+          placeholder='Select board type'
+          items={[
+            {
+              items: Object.values(BoardType).map(type => ({
+                label: type.charAt(0) + type.slice(1).toLowerCase(),
+                value: type,
+              })),
+            },
+          ]}
+          selected={boardType}
+          onSelect={selected => setBoardType(selected as BoardType)}
           disabled={isLoading}
         />
       </div>

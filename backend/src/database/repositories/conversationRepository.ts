@@ -205,7 +205,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
   }
 
   async migrateConversationsToChannel(
-    conversationIds: string[], 
+    conversationIds: string[],
     targetChannelId: string
   ): Promise<number> {
     if (conversationIds.length === 0) {
@@ -224,5 +224,16 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     });
 
     return result.count;
+  }
+
+  /**
+   * Get ticket ID by conversation ID
+   */
+  async getTicketIdByConversationId(conversationId: string): Promise<string | null> {
+    const conversation = await this.db.conversation.findUnique({
+      where: { conversationId },
+      select: { ticketId: true }
+    });
+    return conversation?.ticketId || null;
   }
 }

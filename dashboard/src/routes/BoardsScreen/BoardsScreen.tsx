@@ -1,6 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { useZero } from '@rocicorp/zero/react';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
+import type { BoardType } from '@xyne/shared';
 import { BoardForm, BoardsGrid, PageHeader, type BoardWithStages } from '../../components/Board';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -35,6 +36,7 @@ const BoardsScreen = (): ReactElement => {
     data: {
       name?: string;
       projectId?: string;
+      boardType?: BoardType;
       metadata?: ReadonlyJSONValue;
       stages?: Array<{
         name: string;
@@ -69,6 +71,7 @@ const BoardsScreen = (): ReactElement => {
       boardId,
       ...(data.name !== undefined && { name: data.name }),
       ...(data.projectId !== undefined && { projectId: data.projectId }),
+      ...(data.boardType !== undefined && { boardType: data.boardType }),
       ...(data.metadata !== undefined && { metadata: data.metadata }),
       ...(data.stages !== undefined && { stages: data.stages }),
       ...(stageIds !== undefined && { stageIds }),
