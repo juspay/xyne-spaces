@@ -38,6 +38,7 @@ export type TicketFiltersEvent =
       boardId?: string | undefined;
       viewMode?: string | undefined;
       enabled?: boolean | undefined;
+      selectedBoardIdFromDb?: string | null | undefined;
       searchParams: URLSearchParams;
       setSearchParams: (
         params: URLSearchParams | ((prev: URLSearchParams) => URLSearchParams),
@@ -303,17 +304,29 @@ export const ticketFiltersMachine = setup({
       let viewType: 'status' | 'stage' | 'board' = 'stage';
 
       if (enabled) {
-        // Priority: URL > Storage > Default
+        const storageData = loadFromStorage(storageKey);
+
+        const boardFromUrl = urlFilters.boards?.length ? urlFilters.boards : undefined;
+        const boardFromDb = event.selectedBoardIdFromDb ? [event.selectedBoardIdFromDb] : undefined;
+        const boardFilter = boardFromUrl ?? boardFromDb;
+
         if (Object.keys(urlFilters).length > 0) {
-          filters = urlFilters;
+          filters = { ...urlFilters };
         } else {
-          filters = loadFromStorage(storageKey).filters;
+          filters = storageData.filters;
+        }
+
+        if (boardFilter) {
+          filters = { ...filters, boards: boardFilter };
+        } else {
+          const { boards: _, ...filtersWithoutBoards } = filters;
+          filters = filtersWithoutBoards;
         }
 
         if (urlViewType === 'status' || urlViewType === 'stage' || urlViewType === 'board') {
           viewType = urlViewType;
         } else {
-          viewType = loadFromStorage(storageKey).viewType || 'stage';
+          viewType = storageData.viewType || 'stage';
         }
       }
 
@@ -410,7 +423,8 @@ export const ticketFiltersMachine = setup({
      */
     saveToStorage: ({ context }) => {
       if (!context.enabled) return;
-      saveToStorage(context.storageKey, context.filters, context.viewType);
+      const { boards: _, ...filtersWithoutBoards } = context.filters;
+      saveToStorage(context.storageKey, filtersWithoutBoards, context.viewType);
     },
 
     /**
