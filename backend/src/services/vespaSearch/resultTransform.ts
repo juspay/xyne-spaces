@@ -7,7 +7,8 @@ import {
   importedChannelFields,
   User,
   Channel,
-  importedTicketFields
+  importedTicketFields,
+  VespaFileDocument
 } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 
@@ -48,6 +49,8 @@ export interface TransformedSearchResult {
     fileName?: string;
     fileSize?: number;
     mimeType?: string;
+    internalUrl?: string;
+    originalUrl?: string;
   };
   debugInfo?: {
     matchfeatures?: Record<string, any>;
@@ -214,11 +217,15 @@ function transformSingleHit(
     case 'message':
       result = transformMessage(hit, doc as VespaChatMessageDocument & importedChannelFields);
       break;
-
-   // case 'attachment':
+    
+    // case 'attachment':
     // case 'chat_attachment':
     //   result = transformAttachment(hit, doc as VespaChatAttachmentDocument, userMap, channelMap);
     //   break;
+
+   case 'file':
+      result = transformFile(hit, doc as VespaFileDocument);
+      break;
 
     case 'ticket':
       result = transformTicket(hit, doc as VespaTicketDocument & importedTicketFields, userMap);
@@ -380,56 +387,45 @@ function transformMessage(
 }
 
 /**
- * Transform attachment document
+ * Transform file document
  */
-// function transformAttachment(
-//   hit: VespaSearchHit,
-//   doc: VespaChatAttachmentDocument,
-//   userMap: UserMap,
-//   channelMap: ChannelMap,
-// ): TransformedSearchResult {
-//   const senderName = userMap[doc.userId]?.name || 'Unknown';
-//   const fileSize = formatFileSize(doc.size);
-//   const channelName = channelMap[doc.channelId]?.name || doc.channelName || 'Unknown Channel';
+function transformFile(
+  hit: VespaSearchHit,
+  doc: VespaFileDocument,
+): TransformedSearchResult {
 
-//   // Handle potentially invalid createdAt timestamp
-//   let timestamp = '';
-//   try {
-//     if (doc.createdAt) {
-//       const date = new Date(doc.createdAt);
-//       if (!isNaN(date.getTime())) {
-//         timestamp = formatTimestamp(date.toISOString());
-//       }
-//     }
-//   } catch (error) {
-//     logger.warn('Invalid createdAt for attachment:', doc.docId, doc.createdAt);
-//   }
+  // Handle potentially invalid createdAt timestamp
+  let timestamp = '';
+  try {
+    if (doc.createdAt) {
+      const date = new Date(doc.createdAt);
+      if (!isNaN(date.getTime())) {
+        timestamp = formatTimestamp(date.toISOString());
+      }
+    }
+  } catch (error) {
+    logger.warn('Invalid createdAt for attachment:', doc.docId, doc.createdAt);
+  }
 
-//   return {
-//     id: doc.docId,
-//     type: 'attachment',
-//     title: doc.title || doc.filename,
-//     subtitle: `Shared by ${senderName}`,
-//     context: doc.filename,
-//     relevanceScore: hit.relevance,
-//     avatar: doc.userId,
-//     metadata: {
-//       timestamp: timestamp || 'N/A',
-//       channelName: channelName,
-//       fileSize: fileSize,
-//     },
-//     searchContext: {
-//       channelId: doc.channelId,
-//       channelTitle: channelName,
-//       senderId: doc.userId,
-//       senderName: senderName,
-//       attachmentId: doc.docId,
-//       fileName: doc.filename,
-//       fileSize: doc.size,
-//       mimeType: doc.mimeType,
-//     },
-//   };
-// }
+  return {
+    id: doc.docId,
+    type: 'attachment',
+    title: doc.fileName,
+    subtitle: doc.description,
+    context: doc.fileName,
+    relevanceScore: hit.relevance,
+    avatar: doc.ownerId,
+    metadata: {
+      timestamp: timestamp || 'N/A',
+    },
+    searchContext: {
+      attachmentId: doc.docId,
+      fileName: doc.fileName,
+      originalUrl: doc.urlOriginal,
+      internalUrl: doc.urlInternal
+    },
+  };
+}
 
 /**
  * Transform ticket document

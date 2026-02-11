@@ -6,6 +6,7 @@ export const attachmentSchema = 'chat_attachment';
 export const channelSchema = 'chat_container';
 export const projectSchema = 'project';
 export const userSchema = 'user';
+export const fileSchema = 'file'
 
 export type VespaSchema =
   | typeof ticketSchema
@@ -14,6 +15,7 @@ export type VespaSchema =
   | typeof channelSchema
   | typeof userSchema
   | typeof projectSchema
+  | typeof fileSchema
 
   export const VESPA_SCHEMAS: VespaSchema[] = [
     ticketSchema,
@@ -22,6 +24,7 @@ export type VespaSchema =
     channelSchema,
     projectSchema,
     userSchema,
+    fileSchema
   ];
 
 // Deprecated: Use VESPA_SCHEMAS instead
@@ -33,6 +36,7 @@ export enum VespaDocType {
   CHANNEL = 'channel',
   PROJECT = 'project',
   USER = 'user',
+  FILE = 'file'
 }
 
 export interface VespaDocument {
@@ -211,13 +215,35 @@ export interface VespaUserDocument extends VespaDocument {
   personalizationLastUpdated?: number;
 }
 
+export interface VespaFileDocument extends VespaDocument {
+  fileName: string;
+  description: string;
+  chunks: string[];
+  chunks_pos: string[];
+  image_chunks: string[];
+  image_chunks_pos: string[];
+  metadata: string;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  ownerId: string;
+  permissions: string[]
+  urlInternal: string,
+  urlOriginal: string,
+  fileSize: number,
+  isPrivate: boolean,
+  mimeType: string,
+  subApp: string,
+}
+
 export type VespaSearchResult =
   | VespaChatContainerDocument
   | VespaChatAttachmentDocument
   | VespaChatMessageDocument
   | VespaTicketDocument
   | VespaProjectDocument
-  | VespaUserDocument;
+  | VespaUserDocument
+  | VespaFileDocument;
 
 export interface VespaSearchHit {
   id: string;
@@ -269,6 +295,7 @@ export type SchemaDataMap = {
   [projectSchema]: VespaProjectDocument;
   [ticketSchema]: VespaTicketDocument;
   [userSchema]: VespaUserDocument;
+  [fileSchema]: VespaFileDocument;
 };
 
 export const schemaToDocType: Record<VespaSchema, VespaDocType> = {
@@ -278,6 +305,7 @@ export const schemaToDocType: Record<VespaSchema, VespaDocType> = {
   [ticketSchema]: VespaDocType.TICKET,
   [userSchema]: VespaDocType.USER,
   [attachmentSchema]: VespaDocType.ATTACHMENT,
+  [fileSchema]: VespaDocType.FILE
 };
 
 export interface MatchFeatures {

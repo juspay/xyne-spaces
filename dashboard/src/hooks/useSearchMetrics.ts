@@ -523,7 +523,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         try {
           if (shouldUseVespa) {
             const limit = BACKEND_RESULTS_LIMIT;
-            const apps = `${VespaApps.CHAT},${VespaApps.TICKET}`;
+            const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
@@ -565,8 +565,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.type = VespaDocTypes.MESSAGES;
               searchFilters.apps = VespaApps.CHAT;
             } else if (activeTab === TabType.ATTACHMENTS) {
-              searchFilters.type = VespaDocTypes.ATTACHMENTS;
-              searchFilters.apps = VespaApps.CHAT;
+              searchFilters.type = VespaDocTypes.FILES;
+              searchFilters.apps = VespaApps.FILE;
             } else if (activeTab === TabType.TICKETS) {
               searchFilters.type = VespaDocTypes.TICKETS;
               searchFilters.apps = VespaApps.TICKET;
@@ -848,8 +848,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchFilters.type = VespaDocTypes.MESSAGES;
           searchFilters.apps = VespaApps.CHAT;
         } else if (activeTab === TabType.ATTACHMENTS) {
-          searchFilters.type = VespaDocTypes.ATTACHMENTS;
-          searchFilters.apps = VespaApps.CHAT;
+          searchFilters.type = VespaDocTypes.FILES;
+          searchFilters.apps = VespaApps.FILE;
         } else if (activeTab === TabType.TICKETS) {
           searchFilters.type = VespaDocTypes.TICKETS;
           searchFilters.apps = VespaApps.TICKET;

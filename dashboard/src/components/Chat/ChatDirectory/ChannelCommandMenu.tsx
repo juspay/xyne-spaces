@@ -56,6 +56,7 @@ import {
   SearchMessageForSummary,
 } from '../../../services/summarizeService';
 import { SearchSummaryModal, SummaryModalState } from './SearchSummaryModal';
+import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 
 type BotChatState =
   | { status: 'idle' }
@@ -69,6 +70,11 @@ type BotChatState =
     }
   | { status: 'error'; message: string };
 
+function stripHtmlTags(html: string): string {
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return div.textContent || html;
+}
 const ChannelCommandItem = ({
   channel,
   currentUserID,
@@ -269,6 +275,14 @@ const ChannelCommandMenu = ({
   const summaryRequestIdRef = useRef(0);
   // Track the last search query that triggered a summary fetch
   const lastSummaryQueryRef = useRef('');
+
+  // File preview modal state
+  const [previewFile, setPreviewFile] = useState<{
+    fileName: string;
+    fileUrl: string;
+    mimeType: string;
+    fileSize: number;
+  } | null>(null);
 
   const DISPLAY_LIMIT = 5;
 
@@ -711,6 +725,19 @@ const ChannelCommandMenu = ({
       console.error('Navigation failed:', err);
     }
   };
+
+  const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
+    if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
+      return;
+    }
+
+    setPreviewFile({
+      fileName: result.title,
+      fileUrl: result.searchContext.internalUrl,
+      mimeType: result.searchContext.mimeType || 'application/octet-stream',
+      fileSize: result.searchContext.fileSize || 0,
+    });
+  }, []);
 
   const getChannelIcon = (channel: Channel): ReactElement => {
     if (isDMChannel(channel.scopeType)) {
@@ -1395,15 +1422,17 @@ const ChannelCommandMenu = ({
                           </div>
                         )}
 
-                      {/* 4. Messages and Tickets (from backend) */}
+                      {/* 4. Messages, Tickets, and Attachments (from backend) */}
                       {backendResults.length > 0 && (
                         <>
-                          {['conversation', 'ticket']
+                          {['conversation', 'ticket', 'attachment']
                             .filter(type => {
                               if (activeTab === TabType.ALL) return true;
                               if (activeTab === TabType.MESSAGES && type === 'conversation')
                                 return true;
                               if (activeTab === TabType.TICKETS && type === 'ticket') return true;
+                              if (activeTab === TabType.ATTACHMENTS && type === 'attachment')
+                                return true;
                               return false;
                             })
                             .map(type => {
@@ -1426,6 +1455,7 @@ const ChannelCommandMenu = ({
                                         key={result.id}
                                         result={result}
                                         onSelect={res => handleBackendResultSelect(res, index + 1)}
+                                        onPreview={handleFilePreview}
                                       />
                                     ))}
                                   </Command.Group>
@@ -1540,6 +1570,7 @@ const ChannelCommandMenu = ({
                                         key={result.id}
                                         result={result}
                                         onSelect={res => handleBackendResultSelect(res, index + 1)}
+                                        onPreview={handleFilePreview}
                                       />
                                     ))}
                                     {isUserType && hasMore && (
@@ -1627,6 +1658,18 @@ const ChannelCommandMenu = ({
           error={summaryError}
         />
       </div>
+
+      {/* File Preview Modal */}
+      {previewFile && (
+        <FilePreviewModal
+          isOpen={!!previewFile}
+          onClose={() => setPreviewFile(null)}
+          fileName={stripHtmlTags(previewFile.fileName)}
+          fileUrl={previewFile.fileUrl}
+          mimeType={previewFile.mimeType}
+          fileSize={previewFile.fileSize}
+        />
+      )}
     </Command.Dialog>
   );
 };
