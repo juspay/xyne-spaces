@@ -69,9 +69,6 @@ export interface RoomContext {
   callType: CallType;
   participants: ParticipantInfo[];
   connectionState: ConnectionState;
-  isMicEnabled: boolean;
-  isCameraEnabled: boolean;
-  isScreenSharing: boolean;
   error: string | null;
   externalId: string | null;
   zero: Zero | null;
@@ -748,8 +745,8 @@ export const roomMachine = setup({
         participantList.push({
           identity: localParticipant.identity,
           name: localParticipant.name || 'You',
-          isCameraEnabled: context.isCameraEnabled,
-          isMicrophoneEnabled: context.isMicEnabled,
+          isCameraEnabled: localParticipant.isCameraEnabled,
+          isMicrophoneEnabled: localParticipant.isMicrophoneEnabled,
           isScreenShareEnabled: localParticipant.isScreenShareEnabled,
           isLocal: true,
           participant: localParticipant,
@@ -760,18 +757,15 @@ export const roomMachine = setup({
           participantList.push({
             identity: participant.identity,
             name: participant.name || participant.identity,
-            isCameraEnabled: participant.isCameraEnabled,
-            isMicrophoneEnabled: participant.isMicrophoneEnabled,
-            isScreenShareEnabled: participant.isScreenShareEnabled,
+            isCameraEnabled: participant.isCameraEnabled ?? false,
+            isMicrophoneEnabled: participant.isMicrophoneEnabled ?? false,
+            isScreenShareEnabled: participant.isScreenShareEnabled ?? false,
             isLocal: false,
             participant: participant,
           });
         });
 
         return participantList;
-      },
-      isScreenSharing: ({ context }) => {
-        return context.room?.localParticipant.isScreenShareEnabled ?? context.isScreenSharing;
       },
     }),
 
@@ -794,8 +788,6 @@ export const roomMachine = setup({
       callType: ({ event }) => (event.type === 'CONNECT' ? event.callType : CallType.VIDEO),
       externalId: ({ event }) => (event.type === 'CONNECT' ? event.externalId : null),
       zero: ({ event }) => (event.type === 'CONNECT' ? event.zero : null),
-      isCameraEnabled: ({ event }) =>
-        event.type === 'CONNECT' ? event.callType === CallType.VIDEO : true,
     }),
 
     cleanupRoom: ({ context }) => {
@@ -811,9 +803,6 @@ export const roomMachine = setup({
       serverUrl: () => null,
       participants: () => [],
       connectionState: () => ConnectionState.Disconnected,
-      isMicEnabled: () => false,
-      isCameraEnabled: () => true,
-      isScreenSharing: () => false,
       error: () => null,
       callId: () => null,
       channelId: () => null,
@@ -847,7 +836,7 @@ export const roomMachine = setup({
         const enableTracksAndSelectDevices = async (): Promise<void> => {
           try {
             // First, enable tracks and wait for them to be created
-            await context.room!.localParticipant.setMicrophoneEnabled(context.isMicEnabled);
+            await context.room!.localParticipant.setMicrophoneEnabled(true);
 
             // This triggers the ActiveDeviceChanged event that the UI listens to
             await context.room!.switchActiveDevice('audioinput', 'default');
@@ -941,9 +930,6 @@ export const roomMachine = setup({
     callType: CallType.VIDEO,
     participants: [],
     connectionState: ConnectionState.Disconnected,
-    isMicEnabled: false,
-    isCameraEnabled: false,
-    isScreenSharing: false,
     error: null,
     externalId: null,
     zero: null,
@@ -1086,7 +1072,6 @@ export const roomMachine = setup({
               token: ({ event }) => event.output.token,
               serverUrl: ({ event }) => event.output.livekitUrl,
               callType: ({ event }) => event.output.callType,
-              isCameraEnabled: () => false,
               roomLink: ({ event }) => event.output.roomLink,
               channelId: ({ event }) => event.output.channelId,
               targetUserIds: ({ event }) => event.output.targetUserIds || [],
@@ -1139,7 +1124,6 @@ export const roomMachine = setup({
               token: ({ event }) => event.output.token,
               serverUrl: ({ event }) => event.output.livekitUrl,
               callType: () => CallType.AUDIO,
-              isCameraEnabled: () => false,
               callId: ({ event }) => event.output.callId,
               roomLink: ({ event }) => event.output.roomLink,
               channelId: ({ context }) => {
@@ -1262,10 +1246,6 @@ export const roomMachine = setup({
         },
       },
       entry: [
-        // Enable mic by default when connected to ensure audio tracks are published
-        assign({
-          isMicEnabled: () => true,
-        }),
         'enableLocalTracks',
         'updateParticipants',
         'writeCallToDB',
@@ -1290,65 +1270,55 @@ export const roomMachine = setup({
           },
         },
         TOGGLE_MIC: {
-          actions: assign({
-            isMicEnabled: ({ context }) => {
-              const newState = !context.isMicEnabled;
-              if (context.isNativeMode) {
-                reactNativeBridge.livekitToggleMic(newState);
-              } else if (context.room) {
-                void context.room.localParticipant.setMicrophoneEnabled(newState);
-              }
-              return newState;
-            },
-          }),
+          actions: ({ context }) => {
+            if (context.isNativeMode) {
+              // Get current state from participants
+              const localParticipant = context.participants.find(p => p.isLocal);
+              const currentState = localParticipant?.isMicrophoneEnabled ?? false;
+              reactNativeBridge.livekitToggleMic(!currentState);
+            } else if (context.room) {
+              const currentState = context.room.localParticipant.isMicrophoneEnabled;
+              void context.room.localParticipant.setMicrophoneEnabled(!currentState);
+            }
+          },
         },
         TOGGLE_CAMERA: {
-          actions: assign({
-            isCameraEnabled: ({ context }) => {
-              const newState = !context.isCameraEnabled;
-              if (context.isNativeMode) {
-                reactNativeBridge.livekitToggleCamera(newState);
-              } else if (context.room) {
-                void context.room.localParticipant.setCameraEnabled(newState);
-              }
-              return newState;
-            },
-          }),
+          actions: ({ context }) => {
+            if (context.isNativeMode) {
+              const localParticipant = context.participants.find(p => p.isLocal);
+              const currentState = localParticipant?.isCameraEnabled ?? false;
+              reactNativeBridge.livekitToggleCamera(!currentState);
+            } else if (context.room) {
+              const currentState = context.room.localParticipant.isCameraEnabled;
+              void context.room.localParticipant.setCameraEnabled(!currentState);
+            }
+          },
         },
         TOGGLE_SCREEN_SHARE: {
-          actions: [
-            assign({
-              isScreenSharing: ({ context }) => !context.isScreenSharing,
-            }),
-            ({ context }): void => {
-              const newState = context.isScreenSharing;
-              if (context.isNativeMode) {
-                reactNativeBridge.livekitToggleScreenShare(newState);
-              } else if (context.room) {
-                void context.room.localParticipant
-                  .setScreenShareEnabled(newState, {
-                    // Request 4K resolution for maximum quality capture
-                    resolution: {
-                      width: 3840,
-                      height: 2160,
-                      frameRate: 30,
-                    },
-                  })
-                  .catch((error: Error) => {
-                    // User cancelled or error occurred, revert the state
-                    // eslint-disable-next-line no-console
-                    console.log('Screen share toggle cancelled or failed:', error);
-                    // Send event to revert the state
-                    roomActor.send({ type: 'SCREEN_SHARE_FAILED' });
-                  });
-              }
-            },
-          ],
-        },
-        SCREEN_SHARE_FAILED: {
-          actions: assign({
-            isScreenSharing: ({ context }) => !context.isScreenSharing,
-          }),
+          actions: ({ context }): void => {
+            if (context.isNativeMode) {
+              // Get current state from participants
+              const localParticipant = context.participants.find(p => p.isLocal);
+              const currentState = localParticipant?.isScreenShareEnabled ?? false;
+              reactNativeBridge.livekitToggleScreenShare(!currentState);
+            } else if (context.room) {
+              const currentState = context.room.localParticipant.isScreenShareEnabled;
+              void context.room.localParticipant
+                .setScreenShareEnabled(!currentState, {
+                  // Request 4K resolution for maximum quality capture
+                  resolution: {
+                    width: 3840,
+                    height: 2160,
+                    frameRate: 30,
+                  },
+                })
+                .catch((error: Error) => {
+                  // User cancelled or error occurred
+                  // eslint-disable-next-line no-console
+                  console.log('Screen share toggle cancelled or failed:', error);
+                });
+            }
+          },
         },
         TOGGLE_VIEW: {
           actions: assign({
@@ -1753,15 +1723,9 @@ export const roomMachine = setup({
           }
         },
       ],
-      on: {
-        CONNECT: {
-          target: 'connecting',
-          actions: ['createRoom', 'storeConnectionParams', 'clearError'],
-        },
-        DISCONNECT: {
-          target: 'idle',
-          actions: ['clearContext'],
-        },
+      always: {
+        target: 'idle',
+        actions: ['clearContext', 'clearError'],
       },
     },
   },

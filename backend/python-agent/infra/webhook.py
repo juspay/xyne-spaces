@@ -14,7 +14,7 @@ class WebhookNotifier:
         self.api_key = api_key
         self.max_retries = max_retries
 
-    async def notify_transcript_ready(self, call_id: str) -> bool:
+    async def notify_transcript_ready(self, call_id: str, has_transcript: bool = True) -> bool:
         if not self.backend_url or not self.api_key:
             logger.error("[WEBHOOK] API failed: backend URL or API key not configured")
             return False
@@ -24,6 +24,7 @@ class WebhookNotifier:
             "x-api-key": self.api_key,
             "Content-Type": "application/json",
         }
+        payload = {"hasTranscript": has_transcript}
 
         for attempt in range(self.max_retries):
             try:
@@ -31,10 +32,11 @@ class WebhookNotifier:
                     async with session.post(
                         url,
                         headers=headers,
+                        json=payload,
                         timeout=aiohttp.ClientTimeout(total=30),
                     ) as response:
                         if response.status in (200, 204):
-                            logger.info(f"[WEBHOOK] API success for call {call_id}")
+                            logger.info(f"[WEBHOOK] API success for call {call_id}, has_transcript={has_transcript}")
                             return True
                         if response.status == 401:
                             break
@@ -46,5 +48,5 @@ class WebhookNotifier:
             if attempt < self.max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
 
-        logger.error(f"[WEBHOOK] API failed for call {call_id}")
+        logger.error(f"[WEBHOOK] API failed for call {call_id}, has_transcript={has_transcript}")
         return False

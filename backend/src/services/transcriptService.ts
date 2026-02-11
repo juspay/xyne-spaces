@@ -128,9 +128,6 @@ export interface TicketSuggestion {
 export class TranscriptService {
   private transcriptBucket: Bucket;
   private storage: Storage;
-  private summaryAgent: Agent | null = null;
-  private titleAgent: Agent | null = null;
-  private ticketAgent: Agent | null = null;
 
   constructor() {
     // Initialize dedicated GCS storage for transcripts
@@ -148,22 +145,20 @@ export class TranscriptService {
     logger.info(
       `TranscriptService initialized with transcript bucket: ${config.gcs.transcriptionBucketName}`
     );
-
-    // Initialize separate agents for parallel execution
-    this.initializeAgents();
   }
 
   /**
-   * Initialize three separate agents for parallel AI generation
+   * Create a fresh Agent instance for each request
+   * This prevents state pollution and BUSY errors between concurrent requests
    */
-  private initializeAgents(): void {
+  private createAgent(): Agent | null {
     try {
       const apiKey = config.llm.litellmApiKey;
       const baseUrl = config.llm.litellmBaseUrl;
 
       if (!apiKey || !baseUrl) {
         logger.warn('LiteLLM credentials not configured. AI features will be disabled.');
-        return;
+        return null;
       }
 
       const agentConfig = {
@@ -173,7 +168,7 @@ export class TranscriptService {
             config: {
               apiKey,
               baseUrl,
-              timeout: 120000,
+              timeout: 300000,
             },
           },
           defaultModel: config.llm.litellmModel || 'glm-latest',
@@ -181,12 +176,12 @@ export class TranscriptService {
         tools: {
           enabled: [],
           config: {},
-          execution: { timeout: 120000 },
+          execution: { timeout: 300000 },
         },
         execution: {
           maxTurns: 1,
           mode: 'single' as const,
-          timeouts: { llm: 120000 },
+          timeouts: { llm: 300000 },
           limits: {},
           errorHandling: {},
         },
@@ -195,14 +190,10 @@ export class TranscriptService {
         },
       };
 
-      // Create three independent agents for parallel execution
-      this.summaryAgent = Agent.create(agentConfig);
-      this.titleAgent = Agent.create(agentConfig);
-      this.ticketAgent = Agent.create(agentConfig);
-
-      logger.info(`Initialized 3 AI agents for parallel execution (model: ${config.llm.litellmModel || 'glm-latest'})`);
+      return Agent.create(agentConfig);
     } catch (error) {
-      logger.error('Failed to initialize AI agents:', error);
+      logger.error('Failed to create AI agent:', error);
+      return null;
     }
   }
 
@@ -216,7 +207,9 @@ export class TranscriptService {
       logger.info(`[${callId}] transcript_processing_started | message_id=${messageId}`);
 
       // 0. Check if transcript attachment already exists to avoid redundant processing
-      logger.info(`[${callId}] attachment_exists_check | message_id=${messageId}, attachment_type=transcript`);
+      logger.info(
+        `[${callId}] attachment_exists_check | message_id=${messageId}, attachment_type=transcript`
+      );
       const transcriptAttachment =
         await repositories.messageAttachments.findTranscriptByMessageId(messageId);
 
@@ -234,7 +227,9 @@ export class TranscriptService {
         logger.error(`[${callId}] call_not_found`);
         return;
       }
-      logger.info(`[${callId}] call_found | status=${call.status}, created_by=${call.createdByUserId}`);
+      logger.info(
+        `[${callId}] call_found | status=${call.status}, created_by=${call.createdByUserId}`
+      );
 
       // Note: Status check removed - webhook only fires when room disconnects,
       // which means all users have left (agent is always the last to leave)
@@ -243,12 +238,12 @@ export class TranscriptService {
       logger.info(`[${callId}] message_lookup_started | message_id=${messageId}`);
       const callMessage = await repositories.messages.findById(messageId);
       if (!callMessage) {
-        logger.warn(
-          `[${callId}] message_not_found | message_id=${messageId}`
-        );
+        logger.warn(`[${callId}] message_not_found | message_id=${messageId}`);
         return;
       }
-      logger.info(`[${callId}] message_found | message_id=${messageId}, conversation_id=${callMessage.conversationId}`);
+      logger.info(
+        `[${callId}] message_found | message_id=${messageId}, conversation_id=${callMessage.conversationId}`
+      );
 
       // 3. Retrieve transcript from GCS or local file
       const transcriptContent = await this.retrieveTranscript(callId);
@@ -265,44 +260,42 @@ export class TranscriptService {
         logger.error(`[${callId}] transcript_parsing_failed | entries_count=0`);
         throw new Error(`No valid transcript entries found for call: ${callId}`);
       }
-      const uniqueSpeakers = new Set(entries.map(e => e.user)).size;
-      logger.info(`[${callId}] transcript_parsed | entries_count=${entries.length}, speakers_count=${uniqueSpeakers}`);
+      const uniqueSpeakers = new Set(entries.map((e) => e.user)).size;
+      logger.info(
+        `[${callId}] transcript_parsed | entries_count=${entries.length}, speakers_count=${uniqueSpeakers}`
+      );
 
       // 5. Format as plain text (usernames are already included in transcript entries)
       logger.info(`[${callId}] transcript_formatting_started | format=plain_text`);
       const formattedTranscript = this.formatTranscript(entries, callId);
-      logger.info(`[${callId}] transcript_formatted | format=plain_text, characters_count=${formattedTranscript.length}`);
+      logger.info(
+        `[${callId}] transcript_formatted | format=plain_text, characters_count=${formattedTranscript.length}`
+      );
 
-      // 6. Post-process transcript: translate to English
-      logger.info(`[${callId}] translation_started | source_language=auto, target_language=english`);
-      const translationStart = Date.now();
-      const processedTranscript = await this.postProcessTranscript(formattedTranscript);
-      logger.info(`[${callId}] translation_completed | duration_ms=${Date.now() - translationStart}`);
+      // 6. Upload raw formatted transcript immediately (no translation yet - non-blocking)
+      const txtGcsPath = await this.uploadFormattedTranscript(callId, formattedTranscript);
 
-      // 7. Upload processed transcript to GCS as .txt file
-      logger.info(`[${callId}] formatted_transcript_upload_started | gcs_path=attachments/${callId}_formatted.txt`);
-      const txtGcsPath = await this.uploadFormattedTranscript(callId, processedTranscript);
-      logger.info(`[${callId}] formatted_transcript_uploaded | gcs_path=${txtGcsPath}, bytes_uploaded=${processedTranscript.length}`);
-
-      // 8. Keep the original JSONL file for debugging/archival purposes
+      // 7. Keep the original JSONL file for debugging/archival purposes
       // Note: Not deleting the JSONL file as it may be useful for troubleshooting
 
-      // 9. Build GCS URL using transcript bucket
+      // 8. Build GCS URL using transcript bucket
       const gcsUrl = `gs://${config.gcs.transcriptionBucketName}/${txtGcsPath}`;
 
-      // 10. Calculate metadata
+      // 9. Calculate metadata
       const firstTimestamp = entries[0].timestamp;
       const lastTimestamp = entries[entries.length - 1].timestamp;
       const durationSeconds = Math.round(lastTimestamp - firstTimestamp);
       const uniqueParticipants = Array.from(new Set(entries.map((e) => e.user))).filter(Boolean);
 
       // 11. Create attachment linked to the existing call message
-      logger.info(`[${callId}] attachment_creation_started | message_id=${messageId}, attachment_type=transcript`);
+      logger.info(
+        `[${callId}] attachment_creation_started | message_id=${messageId}, attachment_type=transcript`
+      );
       const attachment = await repositories.messageAttachments.create({
         entityId: messageId,
         entityType: AttachmentEntityType.CHAT,
         originalFilename: `call_transcript.txt`,
-        size: processedTranscript.length,
+        size: formattedTranscript.length,
         mimetype: 'text/plain',
         url: gcsUrl,
         uploadedByUserId: call.createdByUserId,
@@ -316,22 +309,32 @@ export class TranscriptService {
           participantCount: uniqueParticipants.length,
         },
       });
-      logger.info(`[${callId}] attachment_created | attachment_id=${attachment.id}, gcs_url=${gcsUrl}`);
+      logger.info(
+        `[${callId}] attachment_created | attachment_id=${attachment.id}, gcs_url=${gcsUrl}`
+      );
 
-      // 12. Save transcript URL to Call record for easier access (used by recordings feature)
+      // 11. Save transcript URL to Call record for easier access (used by recordings feature)
       await repositories.calls.update(call.id, {
         transcript: gcsUrl,
       });
       logger.info(`[${callId}] call_record_updated | fields_updated=transcript`);
 
-      // 13. Update the call message to indicate it has an attachment
+      // 12. Update the call message to indicate it has an attachment
       await repositories.messages.update(messageId, {
         hasAttachment: true,
       });
 
       logger.info(`[${callId}] transcript_processing_completed | message_id=${messageId}`);
+
+      // 13. Fire-and-forget: Translate transcript asynchronously in background
+      // This updates the same GCS file without blocking the response
+      this.translateTranscriptAsync(callId, txtGcsPath).catch((err) => {
+        logger.error(`[${callId}] background_translation_failed | error=${err}`);
+      });
     } catch (error) {
-      logger.error(`[${callId}] transcript_processing_failed | message_id=${messageId}, error=${error}`);
+      logger.error(
+        `[${callId}] transcript_processing_failed | message_id=${messageId}, error=${error}`
+      );
       // Throw error to allow controller to return proper error response
       throw error;
     }
@@ -340,6 +343,8 @@ export class TranscriptService {
   /**
    * Retrieve transcript from dedicated transcript GCS bucket
    * Returns raw JSONL content or null if not found
+   *
+   * TEST MODE: Set USE_TEST_TRANSCRIPT=true to use local transcript.json file
    */
   private async retrieveTranscript(callId: string): Promise<string | null> {
     const gcsPath = `transcriptions/${callId}.jsonl`;
@@ -360,7 +365,9 @@ export class TranscriptService {
       logger.info(`[${callId}] gcs_download_started`);
       const downloadStart = Date.now();
       const [buffer] = await file.download();
-      logger.info(`[${callId}] gcs_download_completed | bytes_downloaded=${buffer.length}, duration_ms=${Date.now() - downloadStart}`);
+      logger.info(
+        `[${callId}] gcs_download_completed | bytes_downloaded=${buffer.length}, duration_ms=${Date.now() - downloadStart}`
+      );
       return buffer.toString('utf-8');
     } catch (error) {
       logger.error(`[${callId}] gcs_download_failed | error=${error}, gcs_path=${gcsPath}`);
@@ -474,7 +481,9 @@ export class TranscriptService {
       },
     });
 
-    logger.info(`[${callId}] gcs_upload_completed | type=formatted_transcript, gcs_path=${filepath}`);
+    logger.info(
+      `[${callId}] gcs_upload_completed | type=formatted_transcript, gcs_path=${filepath}`
+    );
     return filepath;
   }
 
@@ -530,13 +539,65 @@ export class TranscriptService {
   }
 
   /**
+   * Translate transcript asynchronously in background (fire-and-forget)
+   * Downloads raw transcript from GCS, translates it, and overwrites the same file
+   * @param callId - The external call ID
+   * @param gcsPath - The GCS path to the transcript file
+   */
+  private async translateTranscriptAsync(callId: string, gcsPath: string): Promise<void> {
+    try {
+      logger.info(`Starting background translation for call: ${callId}`);
+
+      // 1. Download raw transcript from GCS
+      const file = this.transcriptBucket.file(gcsPath);
+      const [buffer] = await file.download();
+      const rawTranscript = buffer.toString('utf-8');
+
+      // 2. Translate the transcript
+      const translatedTranscript = await this.postProcessTranscript(rawTranscript);
+
+      // 3. Re-upload translated version (overwrites the same file)
+      await file.save(Buffer.from(translatedTranscript, 'utf-8'), {
+        contentType: 'text/plain',
+        metadata: {
+          callId,
+          type: 'transcript',
+          translated: 'true',
+        },
+      });
+
+      // 4. Update database attachment metadata to mark as translated
+      const attachments = await repositories.messageAttachments.findByCallId(callId);
+
+      if (attachments.length > 0) {
+        const transcriptAttachment = attachments[0];
+        const current = await repositories.messageAttachments.findById(transcriptAttachment.id);
+        const currentMetadata = (current?.metadata as Record<string, any>) || {}; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+        await repositories.messageAttachments.updateVersion(transcriptAttachment.id, {
+          ...currentMetadata,
+        });
+        logger.info(`Updated database attachment metadata for call: ${callId}`);
+      } else {
+        logger.warn(`No attachment found in database for call: ${callId}`);
+      }
+
+      logger.info(`Successfully completed background translation for call: ${callId}`);
+    } catch (error) {
+      logger.error(`Failed to translate transcript in background for call ${callId}:`, error);
+    }
+  }
+
+  /**
    * Post-process transcript: translate to English
+   * Handles long transcripts by chunking them into smaller pieces
    * @param transcript - The formatted transcript text
    * @returns Post-processed transcript or original if processing fails
    */
   async postProcessTranscript(transcript: string): Promise<string> {
-    if (!this.summaryAgent) {
-      logger.warn('Agent not initialized. Skipping transcript post-processing.');
+    const agent = this.createAgent();
+    if (!agent) {
+      logger.warn('Agent creation failed. Skipping transcript post-processing.');
       return transcript;
     }
 
@@ -549,29 +610,95 @@ IMPORTANT:
 - Do not modify, fix, or improve the text beyond translation
 - Do not add new lines or remove existing ones
 - Do not add commentary or explanations
+- Do not use placeholders like "[...]" or "[content continues]"
 - Preserve the exact line-by-line structure: [MM:SS] Speaker Name: text
+- Translate EVERY line completely, do not skip or truncate any content
 
 Output ONLY the processed transcript, nothing else.`;
 
     try {
-      const result = await this.summaryAgent.execute({
-        messages: [createSystemMessage(systemInstructions),
-        createUserMessage(transcript)],
-      });
+      const lines = transcript.split('\n').filter((l) => l.trim());
+      const MAX_LINES_PER_CHUNK = 100;
 
-      if (!['completed', 'max_turns'].includes(result.status as string)) {
-        logger.warn('Failed to post-processed transcript, using original');
-        return transcript;
+      if (lines.length <= MAX_LINES_PER_CHUNK) {
+        const result = await agent.execute({
+          messages: [createSystemMessage(systemInstructions), createUserMessage(transcript)],
+        });
+
+        if (!['completed', 'max_turns'].includes(result.status as string)) {
+          logger.warn('Failed to post-process transcript, using original');
+          return transcript;
+        }
+
+        const last = result.messages.at(-1);
+        if (!last || !('content' in last) || !last.content) {
+          logger.warn('No content in post-processing result, using original');
+          return transcript;
+        }
+
+        const processedTranscript = last.content.trim();
+        logger.info('Successfully post-processed transcript (translation)');
+        return processedTranscript;
       }
 
-      const last = result.messages.at(-1);
-      if (!last || !('content' in last) || !last.content) {
-        logger.warn('No content in post-processing result, using original');
-        return transcript;
+      // For long transcripts, process in chunks CONCURRENTLY
+      logger.info(
+        `Transcript has ${lines.length} lines, processing in chunks of ${MAX_LINES_PER_CHUNK}`
+      );
+
+      // Split into chunks
+      const chunkPromises: Array<Promise<string>> = [];
+      for (let i = 0; i < lines.length; i += MAX_LINES_PER_CHUNK) {
+        const chunkLines = lines.slice(i, i + MAX_LINES_PER_CHUNK);
+        const chunkText = chunkLines.join('\n');
+        const chunkIndex = Math.floor(i / MAX_LINES_PER_CHUNK) + 1;
+        const totalChunks = Math.ceil(lines.length / MAX_LINES_PER_CHUNK);
+
+        // Create a fresh agent for each chunk to avoid BUSY errors
+        const chunkPromise = (async () => {
+          const chunkAgent = this.createAgent();
+          if (!chunkAgent) {
+            logger.warn(`Agent creation failed for chunk ${chunkIndex}, using original`);
+            return chunkText;
+          }
+
+          logger.info(
+            `Processing chunk ${chunkIndex}/${totalChunks} (lines ${i + 1}-${i + chunkLines.length})`
+          );
+
+          try {
+            const result = await chunkAgent.execute({
+              messages: [createSystemMessage(systemInstructions), createUserMessage(chunkText)],
+            });
+
+            if (!['completed', 'max_turns'].includes(result.status as string)) {
+              logger.warn(`Failed to process chunk ${chunkIndex}, using original`);
+              return chunkText;
+            }
+
+            const last = result.messages.at(-1);
+            if (!last || !('content' in last) || !last.content) {
+              logger.warn(`No content in chunk ${chunkIndex}, using original`);
+              return chunkText;
+            }
+
+            logger.info(`Chunk ${chunkIndex}/${totalChunks} completed`);
+            return last.content.trim();
+          } catch (error) {
+            logger.error(`Error processing chunk ${chunkIndex}:`, error);
+            return chunkText;
+          }
+        })();
+
+        chunkPromises.push(chunkPromise);
       }
 
-      const processedTranscript = last.content.trim();
-      // Note: callId not available in this context, logged at caller level
+      // Process all chunks in parallel
+      const processedChunks = await Promise.all(chunkPromises);
+      const processedTranscript = processedChunks.join('\n');
+      logger.info(
+        `Successfully post-processed transcript in ${processedChunks.length} chunks (parallel translation)`
+      );
       return processedTranscript;
     } catch (error) {
       logger.error('Error during transcript post-processing:', error);
@@ -586,21 +713,25 @@ Output ONLY the processed transcript, nothing else.`;
    * @returns AI-generated Markdown summary or null if generation fails
    */
   async generateCallSummary(transcript: string, callId?: string): Promise<string | null> {
+    const agent = this.createAgent();
     const logCallId = callId || 'unknown';
-    if (!this.summaryAgent) return null;
+    if (!agent) return null;
 
-    logger.info(`[${logCallId}] ai_summary_generation_started | summary_type=call_summary, model=${config.llm.litellmModel || 'glm-latest'}`);
+    logger.info(
+      `[${logCallId}] ai_summary_generation_started | summary_type=call_summary, model=${config.llm.litellmModel || 'glm-latest'}`
+    );
     const prompt = CALL_SUMMARY_PROMPT.replace('{transcript}', transcript);
 
     const summaryStart = Date.now();
     try {
-      logger.info(`[${logCallId}] ai_summary_api_call | endpoint=${config.llm.litellmBaseUrl}, model=${config.llm.litellmModel || 'glm-latest'}`);
-      const result = await this.summaryAgent.execute({
+      const result = await agent.execute({
         messages: [createUserMessage(prompt)],
       });
 
       if (result.status === 'error' || !result.messages.length) {
-        logger.error(`[${logCallId}] ai_summary_generation_failed | error=empty_response, status=${result.status}`);
+        logger.error(
+          `[${logCallId}] ai_summary_generation_failed | error=empty_response, status=${result.status}`
+        );
         return null;
       }
 
@@ -616,11 +747,15 @@ Output ONLY the processed transcript, nothing else.`;
         return null;
       }
 
-      logger.info(`[${logCallId}] ai_summary_generated | summary_length=${markdownContent.length}, duration_ms=${Date.now() - summaryStart}`);
+      logger.info(
+        `[${logCallId}] ai_summary_generated | summary_length=${markdownContent.length}, duration_ms=${Date.now() - summaryStart}`
+      );
       // Return raw markdown - no sanitization needed for markdown
       return markdownContent;
     } catch (error) {
-      logger.error(`[${logCallId}] ai_summary_generation_failed | error=${error}, duration_ms=${Date.now() - summaryStart}`);
+      logger.error(
+        `[${logCallId}] ai_summary_generation_failed | error=${error}, duration_ms=${Date.now() - summaryStart}`
+      );
       return null;
     }
   }
@@ -631,11 +766,12 @@ Output ONLY the processed transcript, nothing else.`;
    * @returns AI-generated title (max 100 chars) or null if generation fails
    */
   async generateCallTitle(transcript: string): Promise<string | null> {
-    if (!this.titleAgent) return null;
+    const agent = this.createAgent();
+    if (!agent) return null;
 
     const prompt = CALL_TITLE_PROMPT.replace('{transcript}', transcript);
 
-    const result = await this.titleAgent.execute({
+    const result = await agent.execute({
       messages: [createUserMessage(prompt)],
     });
 
@@ -658,20 +794,20 @@ Output ONLY the processed transcript, nothing else.`;
    * @param summary - The AI-generated call summary
    * @returns Array of ticket suggestions or empty array if generation fails
    */
-  async generateTicketSuggestions(
-    transcript: string
-  ): Promise<TicketSuggestion[]> {
-    if (!this.ticketAgent) {
-      logger.warn('Agent not initialized. Skipping ticket suggestions generation.');
+  async generateTicketSuggestions(transcript: string): Promise<TicketSuggestion[]> {
+    const agent = this.createAgent();
+    if (!agent) {
+      logger.warn('Agent creation failed. Skipping ticket suggestions generation.');
       return [];
     }
 
-    const prompt = TICKET_SUGGESTIONS_PROMPT
-      .replace('{transcript}', transcript)
-      .replace('{summary}', 'Summary not available (analyze transcript directly)');
+    const prompt = TICKET_SUGGESTIONS_PROMPT.replace('{transcript}', transcript).replace(
+      '{summary}',
+      'Summary not available (analyze transcript directly)'
+    );
 
     try {
-      const result = await this.ticketAgent.execute({
+      const result = await agent.execute({
         messages: [createUserMessage(prompt)],
       });
 
@@ -739,7 +875,9 @@ Output ONLY the processed transcript, nothing else.`;
     _createdByUserId: string,
     ticketSuggestions?: TicketSuggestion[]
   ) {
-    logger.info(`[postSummaryAsReply] Starting for callId: ${callId}, conversationId: ${conversationId}`);
+    logger.info(
+      `[postSummaryAsReply] Starting for callId: ${callId}, conversationId: ${conversationId}`
+    );
 
     let xyneAutomaticBot;
     try {
@@ -754,7 +892,9 @@ Output ONLY the processed transcript, nothing else.`;
       throw new Error('Xyne Automatic bot not found');
     }
 
-    logger.info(`[postSummaryAsReply] Bot found: ${xyneAutomaticBot.id} (${xyneAutomaticBot.email})`);
+    logger.info(
+      `[postSummaryAsReply] Bot found: ${xyneAutomaticBot.id} (${xyneAutomaticBot.email})`
+    );
 
     // Build markdown content with ticket suggestions in YAML frontmatter
     let fullMarkdownContent = '';
@@ -798,7 +938,9 @@ Output ONLY the processed transcript, nothing else.`;
       },
     });
 
-    logger.info(`[${callId}] summary_posted_as_reply | message_id=${message.messageId}, conversation_id=${conversationId}, sender=${xyneAutomaticBot.id}`);
+    logger.info(
+      `[postSummaryAsReply] Message created: ${message.messageId} in conversation ${conversationId}`
+    );
 
     await repositories.conversations.incrementReplyCount(conversationId);
     logger.info(`[postSummaryAsReply] Reply count incremented for conversation ${conversationId}`);
@@ -807,13 +949,22 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Process call transcript and generate AI summary
    * This is the main orchestration method that:
-   * 1. Processes the transcript (existing functionality)
-   * 2. Generates AI summary
-   * 3. Saves summary to call record
-   * 4. Posts summary to channel
+   * 1. Checks if transcript exists in GCS
+   * 2. Processes the transcript (existing functionality)
+   * 3. Generates AI summary
+   * 4. Saves summary to call record
+   * 5. Posts summary to channel
    */
-  async processCallWithSummary(callId: string, messageId: string): Promise<void> {
+  async processCallWithSummary(
+    callId: string,
+    messageId: string,
+    hasTranscript: boolean = true
+  ): Promise<void> {
     try {
+      if (!hasTranscript) {
+        return;
+      }
+
       // First, process the transcript (existing functionality)
       await this.postCallTranscript(callId, messageId);
 
@@ -827,7 +978,9 @@ Output ONLY the processed transcript, nothing else.`;
       // Get the call message to retrieve conversationId for the reply
       const callMessage = await repositories.messages.findById(messageId);
       if (!callMessage) {
-        logger.error(`[${callId}] message_not_found | message_id=${messageId}, context=summary_generation`);
+        logger.error(
+          `[${callId}] message_not_found | message_id=${messageId}, context=summary_generation`
+        );
         return;
       }
 
@@ -848,28 +1001,30 @@ Output ONLY the processed transcript, nothing else.`;
 
       const startTime = Date.now();
       const [summary, title, ticketSuggestions] = await Promise.all([
-        this.generateCallSummary(formattedTranscript, callId).catch(err => {
+        this.generateCallSummary(formattedTranscript, callId).catch((err) => {
           logger.error(`Failed to generate summary: ${err}`);
           return null;
         }),
-        this.generateCallTitle(formattedTranscript).catch(err => {
+        this.generateCallTitle(formattedTranscript).catch((err) => {
           logger.error(`Failed to generate title: ${err}`);
           return null;
         }),
-        this.generateTicketSuggestions(formattedTranscript).catch(err => {
+        this.generateTicketSuggestions(formattedTranscript).catch((err) => {
           logger.error(`Failed to generate ticket suggestions: ${err}`);
           return [];
-        })
+        }),
       ]);
 
       const duration = Date.now() - startTime;
-      logger.info(`AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`);
+      logger.info(
+        `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`
+      );
 
       if (summary) {
         // Save summary and title to call record
         await repositories.calls.update(call.id, {
           aiSummary: summary,
-          title: title || undefined,  // Update title if generated
+          title: title || undefined, // Update title if generated
         });
         logger.info(`[${callId}] call_record_updated | fields_updated=aiSummary`);
 

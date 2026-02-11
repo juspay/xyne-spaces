@@ -124,9 +124,15 @@ const AppRoot = (): ReactElement => {
     participants,
     activeCalls,
     externalId,
-    isMicEnabled,
+    room,
+    isNativeMode,
   } = callSnapshot.context;
   const machineState = callSnapshot.value;
+
+  // Compute mic state from LiveKit (not stored in context)
+  const isMicEnabled = isNativeMode
+    ? (participants.find(p => p.isLocal)?.isMicrophoneEnabled ?? false)
+    : (room?.localParticipant.isMicrophoneEnabled ?? false);
 
   const isCallActive =
     (typeof machineState === 'object' && 'connected' in machineState) ||

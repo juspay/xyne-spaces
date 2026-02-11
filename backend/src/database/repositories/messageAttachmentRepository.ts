@@ -127,4 +127,30 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findByCallId(callId: string): Promise<MessageAttachment[]> {
+    return await this.db.messageAttachment.findMany({
+      where: {
+        metadata: {
+          path: ['callId'],
+          equals: callId,
+        },
+      },
+    });
+  }
+
+  async updateVersion(id: string, metadata: Record<string, any>): Promise<MessageAttachment> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    // Increment version in metadata
+    const currentVersion = (metadata.version as number) || 0;
+    
+    return await this.db.messageAttachment.update({
+      where: { id },
+      data: { 
+        metadata: {
+          ...metadata,
+          version: currentVersion + 1
+        }
+      },
+    });
+  }
+
 }

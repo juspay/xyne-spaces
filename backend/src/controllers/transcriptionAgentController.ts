@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
@@ -83,8 +84,23 @@ class TranscriptionAgentController {
         });
       }
 
+      // Validate request body
+      const transcriptReadySchema = z.object({
+        hasTranscript: z.boolean().optional(),
+      });
+
+      const validationResult = transcriptReadySchema.safeParse(req.body);
+      if (!validationResult.success) {
+        logger.error(`[TranscriptReady] Invalid request body:`, validationResult.error);
+        res.status(400).json({ success: false, error: 'hasTranscript must be a boolean if provided' });
+        return;
+      }
+
+      const { hasTranscript } = validationResult.data;
+      logger.info(`[TranscriptReady] hasTranscript=${hasTranscript} for call ${callId}`);
+
       // Process transcript and generate AI summary
-      await transcriptService.processCallWithSummary(callId, callMessage.messageId);
+      await transcriptService.processCallWithSummary(callId, callMessage.messageId, hasTranscript);
 
       res.json({ success: true, message: 'Transcript processed successfully' });
     } catch (error) {

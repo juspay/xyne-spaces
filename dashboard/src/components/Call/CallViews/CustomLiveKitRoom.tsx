@@ -39,9 +39,6 @@ export function CustomLiveKitRoom({
   const {
     participants,
     connectionState,
-    isMicEnabled,
-    isCameraEnabled,
-    isScreenSharing,
     isAIAssistantEnabled,
     aiController,
     pendingControlRequest,
@@ -61,6 +58,29 @@ export function CustomLiveKitRoom({
     ticketBoardId,
     isNativeMode,
   } = snapshot.context;
+
+  // Compute state from LiveKit instead of storing in context
+  const localParticipant = isNativeMode
+    ? participants.find(p => p.isLocal)
+    : room?.localParticipant;
+
+  const isMicEnabled = localParticipant
+    ? isNativeMode
+      ? (localParticipant as (typeof participants)[0]).isMicrophoneEnabled
+      : (localParticipant as NonNullable<typeof room>['localParticipant']).isMicrophoneEnabled
+    : false;
+
+  const isCameraEnabled = localParticipant
+    ? isNativeMode
+      ? (localParticipant as (typeof participants)[0]).isCameraEnabled
+      : (localParticipant as NonNullable<typeof room>['localParticipant']).isCameraEnabled
+    : false;
+
+  const isScreenSharing = localParticipant
+    ? isNativeMode
+      ? (localParticipant as (typeof participants)[0]).isScreenShareEnabled
+      : (localParticipant as NonNullable<typeof room>['localParticipant']).isScreenShareEnabled
+    : false;
 
   // Determine simple machine state string for child components
   // Handle nested states like { connected: 'nativeMode' }
