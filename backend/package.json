@@ -125,7 +125,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.9",
-    "@types/node": "^20.10.4",
+    "@types/node": "^20.19.33",
     "@types/pdf-parse": "^1.1.5",
     "@types/supertest": "^2.0.16",
     "@types/uuid": "^9.0.8",

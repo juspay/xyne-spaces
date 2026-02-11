@@ -1,15 +1,34 @@
 import { App } from './app.js';
 import { logger } from '@/utils/logger';
 
-process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
-  logger.error('Unhandled Promise Rejection:', { reason, promise });
-  process.exit(1);
+function serializeError(err: unknown) {
+  if (err instanceof Error) {
+    return {
+      ...err,
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+    };
+  }
+
+  return {
+    message: 'Non-error rejection',
+    value: err,
+  };
+}
+
+process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
+  logger.error('UNHANDLED REJECTION', {
+    error: serializeError(reason),
+  });
 });
 
 process.on('uncaughtException', (error: Error) => {
-  logger.error('Uncaught Exception:', error);
-  process.exit(1);
+  logger.error('UNCAUGHT EXCEPTION', {
+    error: serializeError(error),
+  });
 });
+
 
 const gracefulShutdown = async (signal: string) => {
   logger.info(`Received ${signal}, shutting down gracefully`);
