@@ -1,3 +1,10 @@
+## [1.40.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.39.0...v1.40.0) (2026-02-11)
+
+
+### Features
+
+* Added Wrapper Function for useQuery() and zero.mutate() ([3b2767c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3b2767cbdaec9334ce8aa436b5b5ef4fef3bce90)), closes [#2860](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2860)
+
 ## [1.39.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.38.1...v1.39.0) (2026-02-11)
 
 
