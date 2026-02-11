@@ -129,6 +129,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
     const [emojiSizeClass, setEmojiSizeClass] = useState('text-sm');
+    const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(false);
 
     const [ticketCreated, setTicketCreated] = useState(false);
 
@@ -589,6 +590,37 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       [onChannelSelect],
     );
 
+    const handleEmojiSelect = useCallback(
+      (emojiData: EmojiClickData) => {
+        if (!editor) return;
+
+        const { from } = editor.state.selection;
+        const textBefore = from > 0 ? editor.state.doc.textBetween(from - 1, from) : '';
+        let chain = editor.chain().focus();
+
+        if (textBefore === '@') {
+          chain = chain.deleteRange({ from: from - 1, to: from });
+        }
+
+        if (emojiData.isCustom) {
+          chain
+            .insertContent({
+              type: 'inlineEmoji',
+              attrs: {
+                emojiId: emojiData.emoji,
+                src: emojiData.imageUrl,
+                alt: `:${emojiData.names[0]}:`,
+                title: emojiData.names[0],
+              },
+            })
+            .run();
+        } else {
+          chain.insertContent(emojiData.emoji).run();
+        }
+      },
+      [editor],
+    );
+
     return (
       <div className={`flex-shrink-0 relative ${className}`} data-input-id={id}>
         {features.mentions && (
@@ -640,6 +672,40 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               onAttachClick={handleAttachClick}
               onSend={() => void handleSend()}
               placeholder={placeholder}
+              showMentions={features.mentions}
+              showFormattingToolbar={showMobileFormattingToolbar}
+              onMentionClick={() => {
+                editor?.chain().focus().run();
+              }}
+              onChannelClick={() => {
+                editor?.chain().focus().run();
+              }}
+              onShowFormattingToolbar={() => setShowMobileFormattingToolbar(true)}
+              onCloseFormattingToolbar={() => setShowMobileFormattingToolbar(false)}
+              showEmojiPicker={features.emojiPicker}
+              onEmojiSelect={handleEmojiSelect}
+              attachmentPreviewComponent={
+                features.fileAttachments && allAttachments.length > 0 ? (
+                  <div className='px-3 pb-2 flex flex-wrap gap-3'>
+                    {allAttachments.map((file, index) => (
+                      <AttachmentPreview
+                        key={`${file.name}-${index}`}
+                        file={file}
+                        onRemove={() => handleRemoveAttachment(file)}
+                        onPreview={() => handlePreview(file)}
+                        isUploading={false}
+                        onThumbnailGenerated={(file, thumbnailBlob) => {
+                          setVideoThumbnails(prev => {
+                            const newMap = new Map(prev);
+                            newMap.set(file, thumbnailBlob);
+                            return newMap;
+                          });
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : undefined
+              }
               hideSendButton={hideSendButton}
               showAttachButton={!!features.fileAttachments}
             />
@@ -662,7 +728,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             </div>
           )}
 
-          {features.fileAttachments && allAttachments.length > 0 && (
+          {/* Desktop: Render attachments after editor content */}
+          {!isMobile && features.fileAttachments && allAttachments.length > 0 && (
             <div className='px-3 pb-2 flex flex-wrap gap-3'>
               {allAttachments.map((file, index) => (
                 <AttachmentPreview
@@ -801,38 +868,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 {features.emojiPicker && (
                   // Inside InputBox.tsx -> EmojiPickerButton component
                   <EmojiPickerButton
-                    onEmojiSelect={(emojiData: EmojiClickData) => {
-                      // Type it correctly
-                      if (!editor) return;
-
-                      const { from } = editor.state.selection;
-                      const textBefore = editor.state.doc.textBetween(from - 1, from);
-                      let chain = editor.chain().focus();
-
-                      if (textBefore === '@') {
-                        chain = chain.deleteRange({ from: from - 1, to: from });
-                      }
-
-                      // Check if it's a Custom Emoji or Native
-                      // Custom emojis from emoji-picker-react usually have isCustom: true
-                      if (emojiData.isCustom) {
-                        chain
-                          .insertContent({
-                            type: 'inlineEmoji',
-                            attrs: {
-                              emojiId: emojiData.emoji,
-                              src: emojiData.imageUrl,
-                              alt: `:${emojiData.names[0]}:`,
-                              title: emojiData.names[0],
-                            },
-                          })
-                          .run();
-                      } else {
-                        // It's a NATIVE emoji (e.g., 😂, ❤️)
-                        // Just insert the raw string glyph
-                        chain.insertContent(emojiData.emoji).run();
-                      }
-                    }}
+                    onEmojiSelect={handleEmojiSelect}
                     disabled={disabled || isSending}
                   />
                 )}
