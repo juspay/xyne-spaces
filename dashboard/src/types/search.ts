@@ -58,6 +58,8 @@ export interface SearchContext {
   fileName?: string;
   fileSize?: number;
   mimeType?: string;
+  internalUrl?: string;
+  originalUrl?: string;
 }
 
 export interface PaginatedSearchResults {

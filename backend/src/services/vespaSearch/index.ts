@@ -84,12 +84,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
   try {
     const {
       q,
-      apps = 'slack,ticket,user',
+      apps = 'slack,ticket,user,file',
       offset = 0,
       limit = 20,
       rankProfile,
       // Frontend-compatible filters
-      type,        // 'messages' | 'attachments' | 'channels' | 'tickets'
+      type,        // 'messages' | 'attachments' | 'channels' | 'tickets' | 'files'
       from,        // User name or ID
       in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)
       // Unified filters (work for both slack and ticket)
@@ -156,7 +156,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
         'messages': [VespaDocType.MESSAGE],
         'attachments': [VespaDocType.ATTACHMENT],
         'channels': [VespaDocType.CHANNEL],
-        'tickets': [VespaDocType.TICKET]
+        'tickets': [VespaDocType.TICKET],
+        'files': [VespaDocType.FILE],
       };
       const mappedTypes = typeMapping[type as string];
       if (mappedTypes) {

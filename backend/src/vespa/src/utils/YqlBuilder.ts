@@ -6,10 +6,11 @@ import {
   attachmentSchema,
   userSchema,
   channelSchema,
+  fileSchema,
 } from '../types';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
-type AppName = 'chat' | 'ticket' | 'user';
+type AppName = 'chat' | 'ticket' | 'user' | 'file';
 
 export interface SlackFilters {
   channelId?: string[];
@@ -114,6 +115,9 @@ buildYql(
     if (apps.some(a => a.toLowerCase() === 'user')) {
       appConditions.push(this.buildUserConditions());
     }
+    if (apps.some(a => a.toLowerCase() === 'file')) {
+      appConditions.push(this.buildFileConditions(userId));
+    }
      // Combine app conditions
     if (appConditions.length > 0) {
       whereConditions.push(`(${appConditions.join(' or ')})`);
@@ -134,7 +138,17 @@ private buildUserConditions(): string {
     // User search is simple - just filter by docType
     return `docType contains "user"`;
   }
-
+  /**
+   * Build YQL condition for file search
+   * Applies to file schemas
+   */
+  private buildFileConditions(userId:string): string {
+    // File search
+    const conditions: string[] = [];
+    conditions.push(`docType contains "file"`);
+    conditions.push(`(ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false")`);
+    return conditions.join(' and ');
+  }
   /**
    * Build YQL condition for Slack app
    * Applies to message, channel, and attachment schemas
@@ -310,6 +324,8 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
       chat: [messageSchema, channelSchema, attachmentSchema],
       ticket: [ticketSchema],
       user: [userSchema],
+      file: [fileSchema],
+
     };
 
     const result: Record<string, VespaSchema[]> = {};

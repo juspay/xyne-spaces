@@ -189,8 +189,9 @@ export const navigateToAttachment = (
   navigate: NavigateFunction,
 ): void => {
   const attachmentId = result.searchContext?.attachmentId || result.id;
-
-  if (result.searchContext?.channelId) {
+  if (result.searchContext?.originalUrl) {
+    window.open(result.searchContext.originalUrl, '_blank', 'noopener,noreferrer');
+  } else if (result.searchContext?.channelId) {
     void navigate(`/chat/dir/${result.searchContext.channelId}`, {
       state: {
         attachmentId,

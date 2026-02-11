@@ -15,6 +15,7 @@ export type TabType = (typeof TabType)[keyof typeof TabType];
 export const VespaApps = {
   CHAT: 'chat',
   TICKET: 'ticket',
+  FILE: 'file',
 } as const;
 
 export type VespaApps = (typeof VespaApps)[keyof typeof VespaApps];
@@ -23,6 +24,7 @@ export const VespaDocTypes = {
   MESSAGES: 'messages',
   ATTACHMENTS: 'attachments',
   TICKETS: 'tickets',
+  FILES: 'files',
 } as const;
 
 export type VespaDocTypes = (typeof VespaDocTypes)[keyof typeof VespaDocTypes];

@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { Command } from 'cmdk';
-import { Hash, User, MessageCircle, Ticket, Paperclip } from 'lucide-react';
+import { Hash, User, MessageCircle, Ticket, Paperclip, Eye } from 'lucide-react';
 import { DisplaySearchResult } from '../../../types/search';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import UserAvatar from '../../UserAvatar/UserAvatar';
@@ -10,6 +10,7 @@ import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRen
 interface SearchResultItemProps {
   result: DisplaySearchResult;
   onSelect: (result: DisplaySearchResult) => Promise<void>;
+  onPreview?: (result: DisplaySearchResult) => void;
 }
 
 const getResultIcon = (type: string): ReactElement => {
@@ -45,7 +46,7 @@ const utcToIst = (utcString?: string): string => {
   });
 };
 
-const SearchResultItem = ({ result, onSelect }: SearchResultItemProps): ReactElement => {
+const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps): ReactElement => {
   switch (result.type) {
     case 'user':
       return (
@@ -134,9 +135,27 @@ const SearchResultItem = ({ result, onSelect }: SearchResultItemProps): ReactEle
         >
           {getResultIcon(result.type)}
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-xs text-gray-800 truncate'>{result.title}</div>
-            <div className='text-[11px] text-gray-500'>{result.subtitle}</div>
+            <div className='font-semibold text-xs text-gray-800 truncate'>
+              {' '}
+              <RenderMessageWithHTML message={result.title} />
+            </div>
+            <div className='text-[11px] text-gray-500'>
+              {' '}
+              <RenderMessageWithHTML message={result.subtitle} />
+            </div>
           </div>
+          {onPreview && result.searchContext?.internalUrl && (
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                onPreview(result);
+              }}
+              className='p-1.5 text-gray-500 hover:text-black-700 hover:bg-gray-200 rounded transition-colors'
+              title='Preview file'
+            >
+              <Eye size={14} />
+            </button>
+          )}
         </Command.Item>
       );
 

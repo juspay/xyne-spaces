@@ -195,7 +195,7 @@ export async function validateTicketIds(ticketIds: string[]): Promise<IdValidati
  * @returns Object containing valid and invalid types
  */
 export function validateDocTypes(docTypes: string[]): IdValidationResult {
-  const validDocTypes = ['messages', 'attachments', 'channels', 'tickets', 'users'];
+  const validDocTypes = ['messages', 'attachments', 'channels', 'tickets', 'users', 'files'];
 
   if (!docTypes || docTypes.length === 0) {
     return { valid: [], invalid: [] };
