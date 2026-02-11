@@ -64,7 +64,7 @@ const TicketDisplayMode: React.FC<{
 
   return (
     <div className='w-full mt-2'>
-      <TicketCard ticket={ticket} onClick={handleClick} />
+      <TicketCard ticket={ticket} onClick={handleClick} isConversation={true} />
     </div>
   );
 };

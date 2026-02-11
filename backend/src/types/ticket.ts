@@ -32,6 +32,7 @@ export interface CreateTicketRequest {
   stageName?: string; // Optional stage name for the ticket
   tags?: string[]; // Optional tags for categorization
   merchantId?: string; // Merchant ID to which the ticket is linked
+  ticketType?: string; // Lookup value from lookup_values table (type=TICKET_TYPE)
 
   // Note: xyneId is auto-generated using format XYNE-{sequence_number}
   // Note: stageName is auto-assigned from first stage (sequenceNumber=1) of the board
@@ -60,6 +61,7 @@ export interface GetTicketDetailsResponse {
   projectId: string;
   boardId: string;
   stageName: string;
+  ticketType?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

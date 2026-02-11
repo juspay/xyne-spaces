@@ -24,7 +24,7 @@ interface RenderMessageWithHTMLProps {
 
 const MAX_HTML_LENGTH = 100000;
 
-const URL_REGEX = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/gi;
+const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
 
 const CanvasLink = ({
   href,

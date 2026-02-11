@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Calendar, User, Code2, Tag } from 'lucide-react';
-import { Ticket, TicketTag } from '@xyne/shared';
+import { BaseTicketType, isReleaseTicket, Ticket, TicketTag } from '@xyne/shared';
 import { getPriorityIcon, formatEta, isEtaUrgent } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
 import { useUser, useUsers } from '../../../hooks/useUsers';
@@ -26,6 +26,7 @@ interface TicketCardProps {
   width?: string;
   isCompact?: boolean;
   visibleColumns?: Set<string> | undefined;
+  isConversation?: boolean;
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({
@@ -36,6 +37,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   availableTags = [],
   isCompact = false,
   visibleColumns = new Set(['assignee', 'dueDate', 'priority', 'tags']),
+  isConversation = false,
 }) => {
   const zero = useZero();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -247,6 +249,11 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   // Check if any compact metadata should be shown
   const hasCompactMetadata = isCompact && (showSubStatus || showCreatedAt || showCreatedBy);
 
+  // Check if ticket is from a release
+  const releaseBoardBgColor =
+    isReleaseTicket(ticket.ticketType as BaseTicketType) && isConversation
+      ? 'bg-[#F4FCF3]'
+      : 'bg-[#FDFDFD]';
   return (
     <button
       type='button'
@@ -254,7 +261,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
       data-testid={`ticket-card-${ticket.id}`}
       className={cn(
         width,
-        'text-left bg-[#FDFDFD] rounded-xl border w-full max-w-lg hover:shadow-sm transition-all cursor-pointer group shadow-sm relative container-type-inline overflow-hidden',
+        `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition-all cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
         isCompact ? 'p-3' : 'p-0',
       )}
     >
@@ -398,7 +405,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           </div>
 
           {/* Issue Description: header*/}
-          <div className='bg-[#FDFDFD] rounded-b-xl'>
+          <div className={`${releaseBoardBgColor} rounded-b-xl`}>
             {/* Title */}
             {ticket.title && (
               <h3

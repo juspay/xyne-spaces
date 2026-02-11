@@ -378,11 +378,54 @@ export enum FormFieldType {
 // @ts-ignore TS1294
 export enum FormContextType {
   BOARD = 'BOARD',
+  RELEASE_CHANGE = 'RELEASE_CHANGE',
+}
+
+// @ts-ignore TS1294
+export enum BoardType {
+  DEFAULT = 'DEFAULT',
+  RELEASE = 'RELEASE',
 }
 
 // @ts-ignore TS1294
 export enum FormEntityType {
   TICKET = 'TICKET',
+  SUB_TICKET = 'SUB_TICKET',
+  RELEASE_MIGRATION_FORM = "RELEASE_MIGRATION_FORM",
+  RELEASE_ENV_FORM = "RELEASE_ENV_FORM",
+}
+
+// @ts-ignore TS1294
+export enum LookupType {
+  TICKET_TYPE = 'TICKET_TYPE',
+}
+
+// Release Management Enums
+
+// @ts-ignore TS1294
+export enum ApplicationReleaseTicketStatus {
+  NOT_TESTED = 'NOT_TESTED',
+  TESTING = 'TESTING',
+  PASSED = 'PASSED',
+  FAILED = 'FAILED',
+  EXCLUDED = 'EXCLUDED',
+}
+
+// @ts-ignore TS1294
+export enum EnvChangeType {
+  ADDED = 'ADDED',
+  MODIFIED = 'MODIFIED',
+  REMOVED = 'REMOVED',
+}
+
+// @ts-ignore TS1294
+export enum ReleaseEventType {
+  RELEASE = 'RELEASE',
+  TICKET = 'TICKET',
+  SUBTICKET = 'SUBTICKET',
+  TESTING = 'TESTING',
+  SYSTEM = 'SYSTEM',
+  CANVAS = 'CANVAS',
 }
 
 // Define tables
@@ -464,6 +507,7 @@ export const ticketTable = table('tickets')
     userGroupId: string(),
     boardId: string(),
     stageName: string(),
+    ticketType: string().optional(),
   })
   .primaryKey('id');
 
@@ -558,6 +602,7 @@ export const boardTable = table('boards')
   .columns({
     id: string(),
     name: string(),
+    boardType: enumeration<BoardType>(),
     projectId: string(),
     createdBy: string(),
     updatedBy: string().optional(),
@@ -1081,7 +1126,7 @@ export const canvasTable = table('canvases')
     updatedAt: number(),
     metadata: json().optional(),
     docType: enumeration<DocType>(),
-    userRepo: string().optional(), 
+    userRepo: string().optional(),
     repoId: string().optional(),
     branchName: string().optional(),
     entryFile: string().optional(),
@@ -1224,6 +1269,88 @@ export const queryTable = table('queries')
   })
   .primaryKey('id');
 
+// Lookup Values Table
+export const lookupValueTable = table('lookup_values')
+  .columns({
+    id: string(),
+    type: enumeration<LookupType>(),
+    value: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+// Release Management Tables
+
+
+export const applicationTable = table('applications')
+  .columns({
+    id: string(),
+    name: string(),
+    projectId: string(),
+    boardId: string(),
+    channelId: string().optional(),
+    regex: string(),
+    repoUrl: string(),
+    deployedCommit: string().optional(),
+    lastDeployedAt: number().optional(),
+    ownerTeam: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const applicationReleaseTicketTable = table('application_release_tickets')
+  .columns({
+    id: string(),
+    applicationReleaseId: string(),
+    ticketId: string(),
+    title: string(),
+    status: enumeration<ApplicationReleaseTicketStatus>(),
+    testedBy: string().optional(),
+    testedAt: number().optional(),
+    failureReason: string().optional(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+
+export const releaseEventTable = table('release_events')
+  .columns({
+    id: string(),
+    releaseId: string(),
+    applicationReleaseId: string().optional(),
+    eventType: enumeration<ReleaseEventType>(),
+    eventName: string(),
+    userId: string().optional(),
+    userName: string().optional(),
+    channelId: string(),
+    conversationId: string(),
+    payload: json().optional(),
+    createdAt: number(),
+    message: string()
+  })
+  .primaryKey('id');
+
+
+export const releaseChangeTable = table('release_changes')
+  .columns({
+    id: string(),
+    releaseId: string(),
+    applicationReleaseId: string().optional(),
+    applicationId: string().optional(),
+    approvedBy: string().optional(),
+    approvedAt: number().optional(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const releaseChangeTypeTable = table('release_change_types')
+  .columns({
+    id: string(),
+    applicationId: string(),
+    changeType: string(),
+  })
+  .primaryKey('id');
+
 export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
   .columns({
     id: string(),
@@ -1233,6 +1360,7 @@ export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
     updatedAt: number(),
   })
   .primaryKey('id');
+// Define relationships
 
 export const merchantTable = table('merchants')
   .columns({
@@ -1249,8 +1377,6 @@ export const merchantTableRelationships = relationships(merchantTable, ({ many }
     destSchema: ticketTable,
   }),
 }));
-
-// Define relationships
 
 export const agentTableRelationships = relationships(agentTable, ({ one, many }) => ({
   model: one({
@@ -1342,6 +1468,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ['merchantId'],
     destField: ['mid'],
     destSchema: merchantTable,
+  }),
+  ticketTypeLookup: one({
+    sourceField: ['ticketType'],
+    destField: ['value'],
+    destSchema: lookupValueTable,
   }),
   tags: many({
     sourceField: ['id'],
@@ -1556,6 +1687,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ['id'],
     destField: ['contextId'],
     destSchema: formContextMappingTable,
+  }),
+  applications: many({
+    sourceField: ['id'],
+    destField: ['boardId'],
+    destSchema: applicationTable,
   }),
 }));
 
@@ -2269,6 +2405,53 @@ export const dashboardQueryMappingTableRelationships = relationships(dashboardQu
   }),
 }));
 
+export const lookupValueTableRelationships = relationships(lookupValueTable, ({ many }) => ({
+  tickets: many({
+    sourceField: ['value'],
+    destField: ['ticketType'],
+    destSchema: ticketTable,
+  }),
+}));
+
+// Release Management Relationships
+export const applicationTableRelationships = relationships(applicationTable, ({ one }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+  board: one({
+    sourceField: ['boardId'],
+    destField: ['id'],
+    destSchema: boardTable,
+  }),
+}));
+
+export const applicationReleaseTicketTableRelationships = relationships(applicationReleaseTicketTable, ({ one }) => ({
+  subTicket: one({
+    sourceField: ['applicationReleaseId'],
+    destField: ['id'],
+    destSchema: subTicketTable,
+  }),
+}));
+
+
+export const releaseEventTableRelationships = relationships(releaseEventTable, ({ one }) => ({
+  release: one({
+    sourceField: ['releaseId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  applicationRelease: one({
+    sourceField: ['applicationReleaseId'],
+    destField: ['id'],
+    destSchema: subTicketTable,
+  }),
+}));
+
+
+
+
 // Define schema
 
 export const schema = createSchema({
@@ -2336,6 +2519,11 @@ export const schema = createSchema({
     queryTable,
     dashboardQueryMappingTable,
     merchantTable,
+    lookupValueTable,
+    // Release Management
+    applicationTable,
+    applicationReleaseTicketTable,
+    releaseEventTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -2395,6 +2583,11 @@ export const schema = createSchema({
     queryTableRelationships,
     dashboardQueryMappingTableRelationships,
     merchantTableRelationships,
+    lookupValueTableRelationships,
+    // Release Management
+    applicationTableRelationships,
+    applicationReleaseTicketTableRelationships,
+    releaseEventTableRelationships,
   ],
 });
 
@@ -2460,6 +2653,12 @@ export type Dashboard = Row<typeof schema.tables.dashboards>;
 export type Query = Row<typeof schema.tables.queries>;
 export type DashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
 export type Merchant = Row<typeof schema.tables.merchants>;
+export type LookupValue = Row<typeof schema.tables.lookup_values>;
+
+// Release Management Types
+export type Application = Row<typeof schema.tables.applications>;
+export type ApplicationReleaseTicket = Row<typeof schema.tables.application_release_tickets>;
+export type ReleaseEvent = Row<typeof schema.tables.release_events>;
 
 export type Context = {
   userID: string;

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { BoardType } from '@prisma/client';
 import { BoardRepository } from '../database/repositories/boardRepository';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { logger } from '@/utils/logger';
@@ -14,7 +15,7 @@ export class BoardController {
 
   createBoard = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, projectId, stages } = req.body;
+      const { name, projectId, stages, boardType } = req.body;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -69,6 +70,7 @@ export class BoardController {
         projectId: projectId.trim(),
         createdBy: userId,
         stages: stages && stages.length > 0 ? stages : undefined,
+        boardType: boardType || BoardType.DEFAULT,
       });
 
       res.status(201).json({
@@ -77,6 +79,7 @@ export class BoardController {
         board: {
           id: board.id,
           name: board.name,
+          boardType: board.boardType,
           projectId: board.projectId,
           createdBy: board.createdBy,
           createdAt: board.createdAt,

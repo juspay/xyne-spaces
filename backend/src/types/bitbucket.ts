@@ -247,3 +247,124 @@ export interface RepositoryStats {
   repoName: string;
   count: number;
 }
+
+// Pull Requests by Commit Types
+export interface BitbucketPullRequestsByCommitResponse {
+  values: PullRequestData[];
+  size: number;
+  limit: number;
+  start: number;
+  isLastPage: boolean;
+  nextPageStart: number | null;
+}
+
+// Diffstat Types
+export interface BitbucketDiffstatResponse {
+  values: DiffstatEntry[];
+  size: number;
+  limit: number;
+  start: number;
+  isLastPage: boolean;
+  nextPageStart: number | null;
+}
+
+export interface DiffstatEntry {
+  path: {
+    components: string[];
+    extension?: string;
+    name?: string;
+    parent?: string;
+    toString?: string;
+  };
+  type?: 'ADD' | 'MODIFY' | 'DELETE' | 'RENAME' | 'COPY' | 'MOVE';
+  additions?: number;
+  deletions?: number;
+  source?: {
+    components: string[];
+  };
+  destination?: {
+    components: string[];
+  };
+}
+
+// Commit Changes Types (Bitbucket Server uses /changes endpoint)
+export interface BitbucketChangesResponse {
+  values: ChangeEntry[];
+  size: number;
+  limit: number;
+  start: number;
+  isLastPage: boolean;
+  nextPageStart: number | null;
+}
+
+export interface ChangeEntry {
+  path: {
+    components: string[];
+    extension?: string;
+    name?: string;
+    parent?: string;
+    toString?: string;
+  };
+  type: 'ADD' | 'MODIFY' | 'DELETE' | 'RENAME' | 'COPY' | 'MOVE';
+  srcPath?: {
+    components: string[];
+    toString?: string;
+  };
+  dstPath?: {
+    components: string[];
+    toString?: string;
+  };
+}
+
+// Commits Types
+export interface BitbucketCommitsResponse {
+  values: CommitData[];
+  size: number;
+  limit: number;
+  start: number;
+  isLastPage: boolean;
+  nextPageStart: number | null;
+}
+
+export interface CommitData {
+  id: string;
+  displayId: string;
+  author: {
+    name: string;
+    emailAddress: string;
+    id: number;
+    displayName: string;
+    active: boolean;
+    slug: string;
+    type: string;
+    links: {
+      self: Array<{ href: string }>;
+    };
+  };
+  authorTimestamp: number;
+  message: string;
+  parents: Array<{
+    id: string;
+    displayId: string;
+  }>;
+}
+
+// Pull Request Info (simplified)
+export interface PullRequestInfo {
+  id: number;
+  title: string;
+  state: string;
+  url: string;
+  mergedAt?: string;
+  author: {
+    displayName: string;
+    id: number;
+  };
+}
+
+// Diffstat Summary
+export interface DiffstatSummary {
+  filesChanged: number;
+  linesAdded: number;
+  linesRemoved: number;
+}

@@ -1,4 +1,6 @@
 import { FormsRepository, CreateFormWithFieldsInput } from '../database/repositories/formsRepository';
+import { FormContextType, FormEntityType } from '@xyne/shared';
+import { Prisma } from '@prisma/client';
 
 export class FormService {
   private formsRepository: FormsRepository;
@@ -16,6 +18,33 @@ export class FormService {
   async createFormWithFields(data: CreateFormWithFieldsInput) {
     return await this.formsRepository.createWithFields(data);
   }
+
+  /**
+   * Get form fields by form ID
+   */
+  async findFormFields(formId: string) {
+    return await this.formsRepository.findFormFields(formId);
+  }
+
+  /**
+   * Save multiple form entity values at once
+   */
+  async createManyFormEntityValues(
+    data: Array<{
+      entityId: string;
+      entityType: string;
+      fieldId: string;
+      fieldValue?: string;
+      actualFieldValue: Prisma.InputJsonValue;
+    }>
+  ) {
+    return await this.formsRepository.createManyFormEntityValues(data);
+  }
+
+  async findFormByContextAndEntity(context: FormContextType, entity: FormEntityType) {
+    return await this.formsRepository.findFormByContextAndEntity(context, entity);
+  }
+
 }
 
 // Export a singleton instance

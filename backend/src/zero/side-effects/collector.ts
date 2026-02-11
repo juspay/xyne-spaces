@@ -29,7 +29,7 @@ export async function collectSideEffectJobs(
   }
 
   let previousValue: any = null;
-  if (operation === 'delete' && table === 'conversations' ) {
+  if (operation === 'delete' && table === 'conversations') {
     const entity = await tx.run(zql.conversations.where('conversationId', entityId).one());
     if (entity) {
       previousValue = {

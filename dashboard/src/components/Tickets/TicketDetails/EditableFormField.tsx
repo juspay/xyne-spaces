@@ -152,8 +152,8 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   if (isEditing) {
     if (fieldType === FormFieldType.BOOLEAN) {
       const booleanOptions = [
-        { label: 'True', value: 'true' },
-        { label: 'False', value: 'false' },
+        { label: 'Yes', value: 'true' },
+        { label: 'No', value: 'false' },
       ];
 
       return (

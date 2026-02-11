@@ -24,6 +24,7 @@ import {
   createForwardedMessageXml,
   parseForwardedMessageXml,
   ActivityClassification,
+  BoardType,
 } from '@xyne/shared';
 import { extractAllMentions } from '../utils/mentionParser';
 import { z } from 'zod';
@@ -2392,6 +2393,7 @@ export const mutators = defineMutators({
         boardId: z.string(),
         name: z.string().optional(),
         projectId: z.string().optional(),
+        boardType: z.nativeEnum(BoardType).optional(),
         metadata: z.any().optional(),
         stages: z
           .array(
@@ -2421,6 +2423,7 @@ export const mutators = defineMutators({
           timestamp,
           stageIds = {},
           prStatusMappingIds = {},
+          boardType,
         },
       }) => {
         // Validate board exists
@@ -2450,6 +2453,7 @@ export const mutators = defineMutators({
           id: boardId,
           ...(name !== undefined && { name }),
           ...(projectId !== undefined && { projectId }),
+          ...(boardType !== undefined && { boardType }),
           ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),
           updatedBy: ctx.userID,
           updatedAt: timestamp,

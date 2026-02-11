@@ -81,6 +81,7 @@ import docsRoutes from '@/routes/docs';
 import testAuthRoutes from '@/routes/testAuth';
 import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
+import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
@@ -91,6 +92,7 @@ import { bitbucketWebhookMiddleware } from './middleware/bitbucketWebhookValidat
 import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
 import emojiRoutes from '@/routes/emojis';
+import applicationBackfillRoutes from '@/routes/applicationBackfill';
 
 export class App {
   public app: Application;
@@ -166,6 +168,7 @@ export class App {
 
     // Migration routes (body parsing handled in route file)
     this.app.use('/api/migration', migrationRoutes);
+
     this.app.use('/migrate/api/migration', migrationRoutes);
 
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
@@ -179,6 +182,9 @@ export class App {
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
+
+    // Commit analysis routes (auth and ACL required)
+    this.app.use('/api/commits/analyze', authMiddleware.authenticate, commitAnalysisRoutes);
 
     this.app.get('/metrics', metricsEndpoint);
 
@@ -202,6 +208,11 @@ export class App {
     }
     // Ticket duplicate backfill route (always available, no vespa flag)
     this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
+
+    // Application backfill admin routes (auth required)
+    this.app.use('/api/admin/applications', authMiddleware.authenticate, applicationBackfillRoutes);
+
+    // Apply general rate limiter to all API routes from this point onward
 
     // Test-only routes - only register when NODE_ENV=test
     // This will be only used on CI automation testing

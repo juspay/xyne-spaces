@@ -1,4 +1,4 @@
-import { PrismaClient, PRStatusEvent } from '@prisma/client';
+import { PrismaClient, PRStatusEvent, BoardType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { Board, Stage } from '@prisma/client';
 
@@ -13,6 +13,7 @@ export interface CreateBoardInput {
   name: string;
   projectId: string;
   createdBy: string;
+  boardType?: BoardType;
 }
 
 export interface CreateBoardWithStagesInput extends CreateBoardInput {
@@ -71,6 +72,7 @@ export class BoardRepository {
           name: data.name,
           projectId: data.projectId,
           createdBy: data.createdBy,
+          boardType: data.boardType || BoardType.DEFAULT,
         },
       });
 

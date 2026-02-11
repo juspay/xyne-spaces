@@ -3,10 +3,12 @@ import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import {
   AttachmentEntityType,
+  BaseTicketType,
   ChannelScopeType,
   FormContextType,
   FormEntityType,
   FormFieldType,
+  LookupType,
   TicketPriority,
   TicketStatusV2,
   TicketTag,
@@ -26,6 +28,7 @@ import {
   SquareArrowOutUpRight,
   SquareKanban,
   Tag,
+  Ticket,
   User,
   Users,
   WorkflowIcon,
@@ -63,7 +66,8 @@ import { TextShimmer } from './ShimmerText';
 import { UserMultiSelect } from './UserMultiSelect';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import type { BoardMetadata } from '@xyne/shared';
+import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
+import { isReleaseBoard } from '../../../utils/boardUtils';
 
 interface CreateTicketModalProps {
   isOpen: boolean;
@@ -81,6 +85,7 @@ interface CreateTicketModalProps {
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
   ticketSequence?: { current: number; total: number };
+  parentTicketId?: string;
   onBeforeCreate?: (description: string, files: File[]) => Promise<void>;
   onTicketCreated?: (ticket: {
     id: string;
@@ -104,6 +109,7 @@ export interface CreateTicketFormData {
   files: File[];
   dynamicFields: Record<string, string | string[]>;
   merchantId?: string;
+  ticketType?: string;
 }
 
 interface TicketResponse {
@@ -129,6 +135,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   isFromSubTicket = false,
   isFromAI = false,
   ticketSequence,
+  parentTicketId,
   sourceConversation,
   onBeforeCreate,
   onTicketCreated,
@@ -174,6 +181,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // Track dynamic field errors
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
 
+  const hasPopulatedDeployedCommitId = useRef(false);
+
   // File handling state
   const [isDraggingOverModal, setIsDraggingOverModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -218,6 +227,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       files: [],
       dynamicFields: {},
       merchantId: '',
+      ticketType: BaseTicketType.Fix,
     } as CreateTicketFormData,
     onSubmit: async ({ value }) => {
       if (!user) return;
@@ -287,6 +297,45 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [formValues?.boardId, form]);
 
+  useEffect(() => {
+    if (!selectedBoard) return;
+
+    const ticketType = isReleaseBoard(selectedBoard.boardType)
+      ? BaseTicketType.Release
+      : BaseTicketType.Fix;
+    form.setFieldValue('ticketType', ticketType);
+  }, [selectedBoard, form]);
+
+  useEffect(() => {
+    if (!isOpen || !formMapping?.formFields) return;
+    if (!isReleaseBoard(selectedBoard?.boardType)) return;
+
+    const currentDeployedCommitId = getSingleStringValue(
+      formValues?.dynamicFields?.['deployedCommitId'] || '',
+    );
+
+    if (currentDeployedCommitId || hasPopulatedDeployedCommitId.current) return;
+
+    const fetchLatestDeployedCommitId = async () => {
+      try {
+        const response = await apiInstance.get<{ latestCommitId: string }>(
+          '/commits/analyze/latest-deployed-commit',
+        );
+
+        if (response.data?.latestCommitId) {
+          form.setFieldValue('dynamicFields', {
+            ...formValues?.dynamicFields,
+            deployedCommitId: response.data.latestCommitId,
+          });
+          hasPopulatedDeployedCommitId.current = true;
+        }
+      } catch (error) {
+        console.error('Failed to fetch latest deployed commit ID:', error);
+      }
+    };
+
+    void fetchLatestDeployedCommitId();
+  }, [isOpen, formMapping?.formFields, selectedBoard, form]);
   const {
     duplicateCheck,
     // duplicateCandidate,
@@ -310,6 +359,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   const [userGroupOptions] = useCachedQuery(queries.getAllUserGroups());
 
+  const [ticketTypeOptions] = useCachedQuery(
+    queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
+  );
   const users = useUserSearch(assigneeSearchValue, 15);
 
   // Combine chat attachments and shared attachments for display
@@ -365,6 +417,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     if (isOpen) {
       form.reset();
       setHasTitleBeenGenerated(false); // Reset flag when modal opens
+      hasPopulatedDeployedCommitId.current = false;
       // Set initial values after reset to ensure they are applied
       if (initialTitle) {
         form.setFieldValue('title', initialTitle);
@@ -596,6 +649,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
       const attachments = sharedAttachments[sourceId] || [];
       // 2. PROCEED WITH TICKET CREATION
+      let response;
       if (sharedAttachments && attachments.length > 0) {
         const formDataPayload = new FormData();
 
@@ -635,6 +689,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         }
         if (formData.merchantId) {
           formDataPayload.append('merchantId', formData.merchantId);
+        }
+        if (parentTicketId) {
+          formDataPayload.append('parentTicketId', parentTicketId);
+        }
+        if (formData.ticketType) {
+          formDataPayload.append('ticketType', formData.ticketType);
         }
 
         formDataPayload.append('createdBy', user.id);
@@ -678,11 +738,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           formDataPayload.append('fileMetadata', JSON.stringify(fileMetadata));
         }
 
-        const response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
+        response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         processTicketCreationResponse(response, formData.workflowType);
       } else {
         // No files, use JSON
-        const response = await apiInstance.post<TicketResponse>('/tickets', {
+        response = await apiInstance.post<TicketResponse>('/tickets', {
           title: formData.title.trim(),
           description: formData.description.trim(),
           priority: formData.priority,
@@ -695,6 +755,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           projectId,
           createdBy: user.id,
           updatedBy: user.id,
+          ticketType: formData.ticketType,
           ...(sourceConversation && { eta: formData.eta?.toISOString() }),
           ...(formData.tags && formData.tags.length > 0 && { tags: formData.tags }),
           ...(sourceConversation && { sourceConversationId: sourceConversation.conversationId }),
@@ -704,13 +765,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               excludedChatAttachmentIds: Array.from(excludedChatAttachmentIds),
             }),
           ...(formData.merchantId && { merchantId: formData.merchantId }),
+          ...(parentTicketId && { parentTicketId }),
           // Include dynamic fields
           dynamicFields: formData.dynamicFields,
         });
 
         processTicketCreationResponse(response, formData.workflowType);
       }
-
       // Clear shared attachments after successful creation
       clearAttachments(sourceId);
 
@@ -1221,8 +1282,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                           }}
                         >
                           <div className='flex gap-3'>
-                            <Radio value='true'>True</Radio>
-                            <Radio value='false'>False</Radio>
+                            <Radio value='true'>Yes</Radio>
+                            <Radio value='false'>No</Radio>
                           </div>
                         </RadioGroup>
                       )}
@@ -1636,6 +1697,35 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 )}
               </form.Field>
             )}
+
+            {/* Ticket Type Selection */}
+            <form.Field name='ticketType'>
+              {field => {
+                const typeOptions =
+                  ticketTypeOptions?.map(type => ({
+                    label: type.value,
+                    value: type.value,
+                    icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                  })) ?? [];
+
+                return (
+                  <EntitySelector
+                    showSearch={false}
+                    options={typeOptions}
+                    selectedValue={field.state.value || ''}
+                    onSelect={(value: string | null) =>
+                      field.handleChange(value as CreateTicketFormData['ticketType'])
+                    }
+                    searchPlaceholder='ticket type'
+                    placeholder='ticket type'
+                    inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
+                    inputClassName='rounded-md h-7 bg-gray-50'
+                    showClearButton={true}
+                    showIndicator={false}
+                  />
+                );
+              }}
+            </form.Field>
 
             {/* Merchant ID - conditionally rendered */}
             {showMerchantId && (

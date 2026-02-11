@@ -22,6 +22,7 @@ import {
   ActivityClassification,
   PRStatusEvent,
   UserResponsibility,
+  BoardType,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationController } from "@/controllers/conversationController";
@@ -53,7 +54,7 @@ export type AuthData = {
   name: string;
 };
 
-export type ParticipantOperationType = 'participants_added' | 'participants_removed' |  'participants_joined';
+export type ParticipantOperationType = 'participants_added' | 'participants_removed' | 'participants_joined';
 
 const conversationController = new ConversationController();
 
@@ -185,7 +186,7 @@ async function createNonParticipantSystemMessages(
         .where('channelId', channelId)
         .where('userId', userId)
         .one());
-      
+
       if (!participant) {
         // User is not a participant - get their name
         const user = await tx.run(zql.users.where('id', userId).one());
@@ -207,10 +208,10 @@ async function createNonParticipantSystemMessages(
     logger.info(`📝 [NON-PARTICIPANT] Creating system message for ${nonParticipants.length} non-participants`);
 
     // Generate HTML content with mentions (matching format of regular messages)
-    const mentionSpans = nonParticipants.map(np => 
+    const mentionSpans = nonParticipants.map(np =>
       `<span data-mention="true" data-mention-type="user" data-user-id="${np.userId}" data-username="${np.userName}" class="mention-text">${np.userName}</span>`
     ).join(', ');
-    
+
     const isMemberInPrivateChannel = channel?.visibility === ChannelVisibility.PRIVATE &&
       senderParticipation?.role === ChannelRole.MEMBER &&
       channel?.scopeType !== ChannelScopeType.GROUP_DM;
@@ -226,7 +227,7 @@ async function createNonParticipantSystemMessages(
       logger.info(`📝 [NON-PARTICIPANT] Adding to existing thread: ${conversationId}`);
 
       const systemMessageId = uuidv4();
-      
+
       await tx.mutate.messages.insert({
         messageId: systemMessageId,
         conversationId: conversationId,
@@ -238,7 +239,7 @@ async function createNonParticipantSystemMessages(
         showInChannel: false,
         createdAt: now,
         visibleTo: senderId,
-        isDeleted:false,
+        isDeleted: false,
         isSent: true,
         metadata: {
           messageSubtype: 'user_not_in_channel',
@@ -283,7 +284,7 @@ async function createNonParticipantSystemMessages(
         showInChannel: false,
         createdAt: now,
         visibleTo: senderId,
-        isDeleted:false,
+        isDeleted: false,
         isSent: true,
         metadata: {
           messageSubtype: 'user_not_in_channel',
@@ -322,38 +323,38 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           channelUserStatusId: z.string(),
           timestamp: z.number(),
         }),
-        async ({tx, args: { channelId, channelParticipantId, channelUserStatusId, timestamp }}) => {
+        async ({ tx, args: { channelId, channelParticipantId, channelUserStatusId, timestamp } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
-        if (!channel) {
-          throw new Error("Channel doesn't exist");
-        }
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
 
-        // Check if channel is public
-        if (channel.visibility !== ChannelVisibility.PUBLIC) {
-          throw new Error('Can only join public channels');
-        }
+          // Check if channel is public
+          if (channel.visibility !== ChannelVisibility.PUBLIC) {
+            throw new Error('Can only join public channels');
+          }
 
-        const joiningUser = await tx.run(zql.users.where('id', authData.sub).one());
-        if (!joiningUser) {
-          throw new Error('Invalid user requesting to join');
-        }
+          const joiningUser = await tx.run(zql.users.where('id', authData.sub).one());
+          if (!joiningUser) {
+            throw new Error('Invalid user requesting to join');
+          }
 
-        // Check if user is already a participant
-        const existingParticipant = await tx.run(zql.channel_participants
-          .where('channelId', channelId)
-          .where('userId', authData.sub)
-          .one());
+          // Check if user is already a participant
+          const existingParticipant = await tx.run(zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', authData.sub)
+            .one());
 
-        if (existingParticipant) {
-          throw new Error('You are already a member of this channel');
-        }
+          if (existingParticipant) {
+            throw new Error('You are already a member of this channel');
+          }
 
-        await addChannelParticipant(tx, channelId, authData.sub, ChannelRole.MEMBER, channelParticipantId, channelUserStatusId, timestamp);
+          await addChannelParticipant(tx, channelId, authData.sub, ChannelRole.MEMBER, channelParticipantId, channelUserStatusId, timestamp);
 
-        // send system message for joined participants
-        const newParticipants = [{userId: authData.sub, userName: authData.name}];
-        const messageSender: AuthData = {name: "system", sub: "system", email: ""}
-        await sendAddAndRemoveParticipantsSystemMessage(tx, {channel, newParticipants, authData: messageSender, operationType: 'participants_joined'})
+          // send system message for joined participants
+          const newParticipants = [{ userId: authData.sub, userName: authData.name }];
+          const messageSender: AuthData = { name: "system", sub: "system", email: "" }
+          await sendAddAndRemoveParticipantsSystemMessage(tx, { channel, newParticipants, authData: messageSender, operationType: 'participants_joined' })
         },
       ),
       promoteToChannel: defineMutator(
@@ -449,12 +450,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       addParticipants: defineMutator(
         z.object({
           channelId: z.string(),
-          userIds: z.array(z.string()), 
+          userIds: z.array(z.string()),
           timestamp: z.number(),
           participantIds: z.record(z.string(), z.string()), // Map userId -> participantId
           userStatusIds: z.record(z.string(), z.string()), // Map userId -> userStatusId
         }),
-        async ({tx, args: { userIds, channelId, timestamp, participantIds, userStatusIds }}) => {
+        async ({ tx, args: { userIds, channelId, timestamp, participantIds, userStatusIds } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error("Channel doesn't exists");
@@ -493,11 +494,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               throw new Error(`userStatusId is required for user ${user.id}`);
             }
             const { added, participantId } = await addChannelParticipant(tx, channelId, user.id, ChannelRole.MEMBER, generatedParticipantId, generatedStatusId, timestamp);
-            
+
             if (!added) {
               continue; // Already a participant
             }
-            
+
             await tx.mutate.channel_participants.update({
               id: participantId,
               lastViewedAt: timestamp,
@@ -510,14 +511,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('channelId', channelId)
               .where('userId', user.id)
               .one());
-            
+
             if (userStatus) {
               await tx.mutate.channel_user_status.update({
                 id: userStatus.id,
                 lastViewedAt: timestamp,
               });
             }
-            
+
             addedUsers.push(user);
           }
 
@@ -530,13 +531,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             channel,
             newParticipants,
             authData,
-            operationType: 'participants_added' 
+            operationType: 'participants_added'
           });
         },
       ),
       removeParticipant: defineMutator(
-        z.object({targetUserId: z.string(), channelId: z.string()}),
-        async ({tx, args: { targetUserId, channelId }}) => {
+        z.object({ targetUserId: z.string(), channelId: z.string() }),
+        async ({ tx, args: { targetUserId, channelId } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error("Channel doesn't exist");
@@ -602,14 +603,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 userName: targetUser.name,
               }],
               authData,
-              operationType: 'participants_removed' 
+              operationType: 'participants_removed'
             });
           }
         },
       ),
       leaveChannel: defineMutator(
-        z.object({channelId: z.string()}),
-        async ({tx, args: { channelId }}) => {
+        z.object({ channelId: z.string() }),
+        async ({ tx, args: { channelId } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error('Channel not found');
@@ -644,7 +645,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           conversationId: z.string().optional(),
           timestamp: z.number(),
         }),
-        async ({tx, args: { channelId, conversationId, timestamp }}) => {
+        async ({ tx, args: { channelId, conversationId, timestamp } }) => {
           const participant = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
@@ -668,16 +669,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...updateData,
           });
 
-       const unreadActivities = await tx.run(
-          zql.activities
-            .where('userId', authData.sub)
-            .where('isRead', false)
-            .where('channelId', channelId),
-        );
+          const unreadActivities = await tx.run(
+            zql.activities
+              .where('userId', authData.sub)
+              .where('isRead', false)
+              .where('channelId', channelId),
+          );
 
-        if (unreadActivities.length === 0) {
-          return;
-        }
+          if (unreadActivities.length === 0) {
+            return;
+          }
 
 
           const messageIds = Array.from(
@@ -706,8 +707,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       toggleStarred: defineMutator(
-        z.object({channelId: z.string()}),
-        async ({tx, args: { channelId }}) => {
+        z.object({ channelId: z.string() }),
+        async ({ tx, args: { channelId } }) => {
           const participation = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
@@ -724,8 +725,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       closeDm: defineMutator(
-        z.object({channelId: z.string()}),
-        async ({tx, args: { channelId }}) => {
+        z.object({ channelId: z.string() }),
+        async ({ tx, args: { channelId } }) => {
           const participation = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
@@ -750,7 +751,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           conversationParticipantId: z.string(),
         }),
-        async ({tx, args: { channelId, description, messageId, conversationId, timestamp, conversationParticipantId }}) => {
+        async ({ tx, args: { channelId, description, messageId, conversationId, timestamp, conversationParticipantId } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error("Channel doesn't exist");
@@ -794,7 +795,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Create the system message
           const systemMessageContent = `set the channel description to: ${description}`;
-          
+
           await tx.mutate.messages.insert({
             messageId,
             conversationId,
@@ -826,8 +827,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       reopenDm: defineMutator(
-        z.object({channelId: z.string()}),
-        async ({tx, args: { channelId }}) => {
+        z.object({ channelId: z.string() }),
+        async ({ tx, args: { channelId } }) => {
           const participation = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
@@ -853,7 +854,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           messageId: z.string(),
           conversationParticipantId: z.string(),
         }),
-        async ({tx, args: { channelId, targetUserId, newRole, timestamp, conversationId, messageId, conversationParticipantId }}) => {
+        async ({ tx, args: { channelId, targetUserId, newRole, timestamp, conversationId, messageId, conversationParticipantId } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error("Channel doesn't exist");
@@ -870,8 +871,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           // Check if requesting user has admin privileges (ADMIN role or channel creator)
-          const requestingUserIsAdmin = 
-            requestingUserParticipation.role === ChannelRole.ADMIN || 
+          const requestingUserIsAdmin =
+            requestingUserParticipation.role === ChannelRole.ADMIN ||
             channel.createdBy === authData.sub;
 
           if (!requestingUserIsAdmin) {
@@ -929,7 +930,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Create the system message
           const systemMessageContent = `changed ${targetUser.name}'s role to ${newRole}`;
-          
+
           await tx.mutate.messages.insert({
             messageId,
             conversationId,
@@ -974,14 +975,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           messageId: z.string(),
           timestamp: z.number()
         }),
-        async ({tx, args: { channelId, content, type, conversationId, messageId, timestamp }}) => {
+        async ({ tx, args: { channelId, content, type, conversationId, messageId, timestamp } }) => {
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
-         
+
           const participant = await tx.run(zql.channel_participants
             .where('userId', authData.sub)
             .where('channelId', channelId)
@@ -1081,7 +1082,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Add mentioned users as MENTIONED participants within Zero transaction
           const mentions = extractAllMentions(content);
           logger.info('[MENTION]:', mentions.userIds.length, mentions.groupIds.length, messageId);
-          
+
           if (mentions.userIds.length > 0) {
             for (const userId of mentions.userIds) {
               // Skip if this is the author (already added above)
@@ -1094,7 +1095,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .where('conversationId', conversationId)
                 .where('userId', userId)
                 .one());
-              
+
               // Only add if not already a participant
               if (!existingParticipant) {
                 await tx.mutate.conversation_participants.insert({
@@ -1188,240 +1189,240 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       sessionId: undefined, // New conversation, no session yet
                     });
 
-                  // Consume the stream to trigger bot processing and message persistence
-                  if (result.stream) {
-                    for await (const event of result.stream) {
-                      if (event.type === 'error') {
-                        logger.error(`[MUTATOR-BOT-NEW-DM] Bot error for message ${message.messageId}:`, event.error);
+                    // Consume the stream to trigger bot processing and message persistence
+                    if (result.stream) {
+                      for await (const event of result.stream) {
+                        if (event.type === 'error') {
+                          logger.error(`[MUTATOR-BOT-NEW-DM] Bot error for message ${message.messageId}:`, event.error);
+                        }
                       }
                     }
+                  } finally {
+                    // Stop "bot is typing" indicator
+                    const remainingTypingUsers = await typingService.stopTypingInConversation(conversationId, botUserId);
+                    await typingService.broadcastTypingUpdate(conversationId, remainingTypingUsers, false, 'typing_stop');
                   }
-                } finally {
-                  // Stop "bot is typing" indicator
-                  const remainingTypingUsers = await typingService.stopTypingInConversation(conversationId, botUserId);
-                  await typingService.broadcastTypingUpdate(conversationId, remainingTypingUsers, false, 'typing_stop');
                 }
               }
+            } catch (botError) {
+              logger.error(`[MUTATOR-BOT-NEW-DM] Failed to execute bot for message ${message.messageId}:`, botError);
             }
-          } catch (botError) {
-            logger.error(`[MUTATOR-BOT-NEW-DM] Failed to execute bot for message ${message.messageId}:`, botError);
-          }
-        });
-      },
-    ),
-    togglePin: defineMutator(
-      z.object({ conversationId: z.string() }),
-      async ({ tx, args: { conversationId } }) => {
-        const conversation = await tx.run(
-          zql.conversations.where('conversationId', conversationId).one(),
-        );
-
-        if (!conversation) {
-          throw new Error("Conversation doesn't exist");
-        }
-
-        await tx.mutate.conversations.update({
-          conversationId,
-          pinned: !conversation.pinned,
-        });
-      },
-    ),
-    forwardMessage: defineMutator(
-      z.object({
-        targetChannelId: z.string(),
-        originalMessageId: z.string(),
-        optionalMessage: z.string().max(10000, 'Optional message too long').optional(),
-        conversationId: z.string(),
-        messageId: z.string(),
-        timestamp: z.number(),
-        conversationParticipantId: z.string()
-      }),
-      async ({
-        tx,
-        args: {
-          targetChannelId,
-          originalMessageId,
-          optionalMessage,
-          conversationId,
-          messageId,
-          timestamp,
-          conversationParticipantId,
+          });
         },
-      }) => {
-        // Verify target channel exists
-        const targetChannel = await tx.run(zql.channels.where('id', targetChannelId).one());
-        if (!targetChannel) {
-          throw new Error('Target channel not found');
-        }
+      ),
+      togglePin: defineMutator(
+        z.object({ conversationId: z.string() }),
+        async ({ tx, args: { conversationId } }) => {
+          const conversation = await tx.run(
+            zql.conversations.where('conversationId', conversationId).one(),
+          );
 
-        // Verify user is a participant of the target channel
-        const participation = await tx.run(
-          zql.channel_participants
-            .where('channelId', targetChannelId)
-            .where('userId', authData.sub)
-            .one()
-        );
-        if (!participation) {
-          throw new Error('You are not a participant of the target channel');
-        }
+          if (!conversation) {
+            throw new Error("Conversation doesn't exist");
+          }
 
-        // Get the original message
-        const originalMessage = await tx.run(
-          zql.messages.where('messageId', originalMessageId).one()
-        );
-        if (!originalMessage) {
-          throw new Error('Original message not found');
-        }
+          await tx.mutate.conversations.update({
+            conversationId,
+            pinned: !conversation.pinned,
+          });
+        },
+      ),
+      forwardMessage: defineMutator(
+        z.object({
+          targetChannelId: z.string(),
+          originalMessageId: z.string(),
+          optionalMessage: z.string().max(10000, 'Optional message too long').optional(),
+          conversationId: z.string(),
+          messageId: z.string(),
+          timestamp: z.number(),
+          conversationParticipantId: z.string()
+        }),
+        async ({
+          tx,
+          args: {
+            targetChannelId,
+            originalMessageId,
+            optionalMessage,
+            conversationId,
+            messageId,
+            timestamp,
+            conversationParticipantId,
+          },
+        }) => {
+          // Verify target channel exists
+          const targetChannel = await tx.run(zql.channels.where('id', targetChannelId).one());
+          if (!targetChannel) {
+            throw new Error('Target channel not found');
+          }
 
-        // Get original sender info
-        const originalSender = await tx.run(
-          zql.users.where('id', originalMessage.senderId).one()
-        );
-
-        // Get original message's conversation to find the channel
-        const originalConversation = await tx.run(
-          zql.conversations.where('conversationId', originalMessage.conversationId).one()
-        );
-
-        // Verify user is a participant of the origin channel (where the message is being forwarded from)
-        if (originalConversation?.channelId) {
-          const originParticipation = await tx.run(
+          // Verify user is a participant of the target channel
+          const participation = await tx.run(
             zql.channel_participants
-              .where('channelId', originalConversation.channelId)
+              .where('channelId', targetChannelId)
               .where('userId', authData.sub)
               .one()
           );
-          if (!originParticipation) {
-            throw new Error('You are not a participant of the origin channel');
+          if (!participation) {
+            throw new Error('You are not a participant of the target channel');
           }
-        }
 
-        // Handle re-forwarding: if the original message is already forwarded,
-        // parse the XML to get the optionalText and use that as content (if exists)
-        // When using optionalText, don't include attachments (it's either optionalText OR message content with attachments)
-        const isReForwarding = originalMessage.msgType === MessageType.FORWARDED;
-        let forwardedContent = originalMessage.content;
-        let useOptionalText = false;
-
-        if (isReForwarding) {
-          const parsedForwarded = parseForwardedMessageXml(originalMessage.content);
-          if (parsedForwarded?.optionalText) {
-            forwardedContent = parsedForwarded.optionalText;
-            useOptionalText = true;
-          } else if (parsedForwarded?.content) {
-            forwardedContent = parsedForwarded.content;
+          // Get the original message
+          const originalMessage = await tx.run(
+            zql.messages.where('messageId', originalMessageId).one()
+          );
+          if (!originalMessage) {
+            throw new Error('Original message not found');
           }
-        }
 
-        // Get original message attachments (only if not using optionalText)
-        const originalAttachments = useOptionalText
-          ? []
-          : await tx.run(zql.message_attachments.where('entityId', originalMessageId));
+          // Get original sender info
+          const originalSender = await tx.run(
+            zql.users.where('id', originalMessage.senderId).one()
+          );
 
-        const now = timestamp;
+          // Get original message's conversation to find the channel
+          const originalConversation = await tx.run(
+            zql.conversations.where('conversationId', originalMessage.conversationId).one()
+          );
 
-        // Create conversation for the forwarded message
-        await tx.mutate.conversations.insert({
-          conversationId,
-          channelId: targetChannelId,
-          createdBy: authData.sub,
-          initialMessageId: messageId,
-          lastActivityAt: now,
-          replyCount: 0,
-          pinned: false,
-          metadata: undefined,
-          createdAt: now,
-        });
+          // Verify user is a participant of the origin channel (where the message is being forwarded from)
+          if (originalConversation?.channelId) {
+            const originParticipation = await tx.run(
+              zql.channel_participants
+                .where('channelId', originalConversation.channelId)
+                .where('userId', authData.sub)
+                .one()
+            );
+            if (!originParticipation) {
+              throw new Error('You are not a participant of the origin channel');
+            }
+          }
 
-        // Create the forwarded message with XML content structure
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const attachmentsArray = originalAttachments as MessageAttachment[];
+          // Handle re-forwarding: if the original message is already forwarded,
+          // parse the XML to get the optionalText and use that as content (if exists)
+          // When using optionalText, don't include attachments (it's either optionalText OR message content with attachments)
+          const isReForwarding = originalMessage.msgType === MessageType.FORWARDED;
+          let forwardedContent = originalMessage.content;
+          let useOptionalText = false;
 
-        // Create XML content for the forwarded message
-        const xmlContent = createForwardedMessageXml({
-          originalMessageId,
-          originalSenderId: originalMessage.senderId,
-          originalSenderName: originalSender?.name || 'Unknown User',
-          originalCreatedAt: originalMessage.createdAt as number,
-          originalChannelId: originalConversation?.channelId || null,
-          originalConversationId: originalMessage.conversationId,
-          optionalText: optionalMessage || null,
-          content: forwardedContent,
-        });
+          if (isReForwarding) {
+            const parsedForwarded = parseForwardedMessageXml(originalMessage.content);
+            if (parsedForwarded?.optionalText) {
+              forwardedContent = parsedForwarded.optionalText;
+              useOptionalText = true;
+            } else if (parsedForwarded?.content) {
+              forwardedContent = parsedForwarded.content;
+            }
+          }
 
-        await tx.mutate.messages.insert({
-          messageId,
-          conversationId,
-          senderId: authData.sub,
-          content: xmlContent,
-          msgType: MessageType.FORWARDED,
-          hasAttachment: attachmentsArray.length > 0,
-          edited: false,
-          isDeleted: false,
-          isSent: true,
-          showInChannel: false,
-          createdAt: now,
-          metadata: undefined,
-        });
+          // Get original message attachments (only if not using optionalText)
+          const originalAttachments = useOptionalText
+            ? []
+            : await tx.run(zql.message_attachments.where('entityId', originalMessageId));
 
-        // Copy attachments from the original message
-        for (const attachment of attachmentsArray) {
-          if (!attachment) continue;
-          await tx.mutate.message_attachments.insert({
-            id: uuidv4(),
-            entityId: messageId,
-            entityType: attachment.entityType,
-            originalFilename: attachment.originalFilename,
-            size: attachment.size,
-            mimetype: attachment.mimetype,
-            url: attachment.url,
-            thumbnailUrl: attachment.thumbnailUrl,
-            uploadedByUserId: authData.sub,
+          const now = timestamp;
+
+          // Create conversation for the forwarded message
+          await tx.mutate.conversations.insert({
+            conversationId,
+            channelId: targetChannelId,
             createdBy: authData.sub,
-            storageProvider: attachment.storageProvider,
-            conversationId: conversationId,
-            metadata: attachment.metadata,
+            initialMessageId: messageId,
+            lastActivityAt: now,
+            replyCount: 0,
+            pinned: false,
+            metadata: undefined,
             createdAt: now,
           });
-        }
 
-        // Update channel last activity
-        await tx.mutate.channels.update({
-          id: targetChannelId,
-          lastActivityAt: now,
-        });
+          // Create the forwarded message with XML content structure
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const attachmentsArray = originalAttachments as MessageAttachment[];
 
-        // Update user's last viewed time
-        const userStatus = await tx.run(
-          zql.channel_user_status
-            .where('channelId', targetChannelId)
-            .where('userId', authData.sub)
-            .one()
-        );
-        if (userStatus) {
-          await tx.mutate.channel_user_status.update({
-            id: userStatus.id,
-            lastViewedAt: now,
-            lastViewedConversationId: conversationId,
+          // Create XML content for the forwarded message
+          const xmlContent = createForwardedMessageXml({
+            originalMessageId,
+            originalSenderId: originalMessage.senderId,
+            originalSenderName: originalSender?.name || 'Unknown User',
+            originalCreatedAt: originalMessage.createdAt as number,
+            originalChannelId: originalConversation?.channelId || null,
+            originalConversationId: originalMessage.conversationId,
+            optionalText: optionalMessage || null,
+            content: forwardedContent,
           });
+
+          await tx.mutate.messages.insert({
+            messageId,
+            conversationId,
+            senderId: authData.sub,
+            content: xmlContent,
+            msgType: MessageType.FORWARDED,
+            hasAttachment: attachmentsArray.length > 0,
+            edited: false,
+            isDeleted: false,
+            isSent: true,
+            showInChannel: false,
+            createdAt: now,
+            metadata: undefined,
+          });
+
+          // Copy attachments from the original message
+          for (const attachment of attachmentsArray) {
+            if (!attachment) continue;
+            await tx.mutate.message_attachments.insert({
+              id: uuidv4(),
+              entityId: messageId,
+              entityType: attachment.entityType,
+              originalFilename: attachment.originalFilename,
+              size: attachment.size,
+              mimetype: attachment.mimetype,
+              url: attachment.url,
+              thumbnailUrl: attachment.thumbnailUrl,
+              uploadedByUserId: authData.sub,
+              createdBy: authData.sub,
+              storageProvider: attachment.storageProvider,
+              conversationId: conversationId,
+              metadata: attachment.metadata,
+              createdAt: now,
+            });
+          }
+
+          // Update channel last activity
+          await tx.mutate.channels.update({
+            id: targetChannelId,
+            lastActivityAt: now,
+          });
+
+          // Update user's last viewed time
+          const userStatus = await tx.run(
+            zql.channel_user_status
+              .where('channelId', targetChannelId)
+              .where('userId', authData.sub)
+              .one()
+          );
+          if (userStatus) {
+            await tx.mutate.channel_user_status.update({
+              id: userStatus.id,
+              lastViewedAt: now,
+              lastViewedConversationId: conversationId,
+            });
+          }
+
+          // Add creator as conversation participant
+          await tx.mutate.conversation_participants.insert({
+            id: conversationParticipantId,
+            conversationId,
+            userId: authData.sub,
+            participationType: ConversationParticipation.AUTHOR,
+            joinedAt: now,
+          });
+
+          logger.info(
+            `📤 [MUTATOR-FORWARD] Message ${originalMessageId} forwarded to channel ${targetChannelId} as ${messageId}`
+          );
         }
-
-        // Add creator as conversation participant
-        await tx.mutate.conversation_participants.insert({
-          id: conversationParticipantId,
-          conversationId,
-          userId: authData.sub,
-          participationType: ConversationParticipation.AUTHOR,
-          joinedAt: now,
-        });
-
-        logger.info(
-          `📤 [MUTATOR-FORWARD] Message ${originalMessageId} forwarded to channel ${targetChannelId} as ${messageId}`
-        );
-      }
-    ),
-  },
-  messages: {
+      ),
+    },
+    messages: {
       send: defineMutator(
         z.object({
           conversationId: z.string(),
@@ -1432,7 +1433,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           messageId: z.string(),
           childConversationId: z.string().optional()
         }),
-        async ({tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId }}) => {
+        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId } }) => {
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -1489,13 +1490,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               }
             });
             // Track user activity using Redis Set - O(1) operation, no DB query
-          asyncTasks.push(async () => {
-            try {
-              await websocketService.trackUserActivity(authData.sub);
-            } catch (error) {
-              logger.error(`❌ [MUTATOR-CREATE-REPLY] Failed to track user activity for reply message ${message.messageId}:`, error);
-            }
-          });
+            asyncTasks.push(async () => {
+              try {
+                await websocketService.trackUserActivity(authData.sub);
+              } catch (error) {
+                logger.error(`❌ [MUTATOR-CREATE-REPLY] Failed to track user activity for reply message ${message.messageId}:`, error);
+              }
+            });
           }
 
           await tx.mutate.conversations.update({
@@ -1504,8 +1505,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             lastActivityAt: timestamp,
           });
 
-          if ( showInChannel) {
-            if(!childConversationId) {
+          if (showInChannel) {
+            if (!childConversationId) {
               throw new Error('Child conversation ID is required when showInChannel is true');
             }
 
@@ -1523,13 +1524,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           const mostRecentPrevMsg = await tx.run(zql.messages
-          .where('conversationId', message.conversationId)
-          .where('createdAt', '<', message.createdAt)
-          .orderBy('createdAt', 'desc')
-          .limit(1)
-          .one());
+            .where('conversationId', message.conversationId)
+            .where('createdAt', '<', message.createdAt)
+            .orderBy('createdAt', 'desc')
+            .limit(1)
+            .one());
 
-          if(mostRecentPrevMsg?.showInChannel && mostRecentPrevMsg.childConversationId) {
+          if (mostRecentPrevMsg?.showInChannel && mostRecentPrevMsg.childConversationId) {
             await tx.mutate.conversations.update({
               conversationId: mostRecentPrevMsg.childConversationId,
               replyCount: 1,
@@ -1589,7 +1590,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (channel.scopeType === ChannelScopeType.DM) {
             const dmParticipants = await tx.run(zql.channel_participants
               .where('channelId', channel.id));
-            
+
             for (const dmParticipant of dmParticipants) {
               // Skip if this is the sender 
               if (dmParticipant.userId === authData.sub) {
@@ -1601,7 +1602,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .where('conversationId', conversationId)
                 .where('userId', dmParticipant.userId)
                 .one());
-              
+
               // Only add if not already a participant
               if (!existingConvParticipant) {
                 await tx.mutate.conversation_participants.insert({
@@ -1676,7 +1677,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 // Don't throw - message creation should succeed even if link preview fails
               }
             }
-            
+
             // Create search index entry
             try {
               await repositories.messageSearch.upsert(
@@ -1750,8 +1751,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       update: defineMutator(
-        z.object({messageId: z.string(), content: z.string().optional()}),
-        async ({tx, args: { messageId, content }}) => {
+        z.object({ messageId: z.string(), content: z.string().optional() }),
+        async ({ tx, args: { messageId, content } }) => {
           const message = await tx.run(zql.messages.where('messageId', messageId).one());
           if (!message) {
             throw new Error('Message not available');
@@ -1890,21 +1891,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (content !== undefined) {
             asyncTasks.push(async () => {
-                try {
-                  // For forwarded messages, index both the forwarded content and the optionalText
-                  // For regular messages, just index the content
-                  let contentToIndex = content;
-                  if (isForwardedMessage) {
-                    const parsedForwarded = parseForwardedMessageXml(message.content);
-                    contentToIndex = `${parsedForwarded?.content || ''} ${content}`.trim();
-                  }
-                  await repositories.messageSearch.upsert(
-                    messageId,
-                    generatePlainTextContent(contentToIndex)
-                  );
-                } catch (error) {
-                  logger.error('Failed to update message search index:', error);
+              try {
+                // For forwarded messages, index both the forwarded content and the optionalText
+                // For regular messages, just index the content
+                let contentToIndex = content;
+                if (isForwardedMessage) {
+                  const parsedForwarded = parseForwardedMessageXml(message.content);
+                  contentToIndex = `${parsedForwarded?.content || ''} ${content}`.trim();
                 }
+                await repositories.messageSearch.upsert(
+                  messageId,
+                  generatePlainTextContent(contentToIndex)
+                );
+              } catch (error) {
+                logger.error('Failed to update message search index:', error);
+              }
             });
           }
         },
@@ -1918,7 +1919,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           reactionId: z.string().optional(),
           countId: z.string().optional(),
         }),
-        async ({tx, args: { messageId, emojiName, action, timestamp, reactionId, countId }}) => {
+        async ({ tx, args: { messageId, emojiName, action, timestamp, reactionId, countId } }) => {
           const decodedEmoji = decodeURIComponent(emojiName);
           if (!decodedEmoji.trim() || decodedEmoji.length > 100) {
             throw new Error('Invalid Emoji');
@@ -1987,14 +1988,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
 
-          // Track user activity using Redis Set - O(1) operation, no DB query
-          asyncTasks.push(async () => {
-            try {
-              await websocketService.trackUserActivity(authData.sub);
-            } catch (error) {
-              logger.error(`❌ [MUTATOR-REACT] Failed to track user activity for reaction add:`, error);
-            }
-          });
+            // Track user activity using Redis Set - O(1) operation, no DB query
+            asyncTasks.push(async () => {
+              try {
+                await websocketService.trackUserActivity(authData.sub);
+              } catch (error) {
+                logger.error(`❌ [MUTATOR-REACT] Failed to track user activity for reaction add:`, error);
+              }
+            });
 
           } else if (action === 'remove') {
             const reactionRow = await tx.run(zql.reactions
@@ -2032,7 +2033,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           childConversationId: z.string(),
           timestamp: z.number(),
         }),
-        async ({tx, args: { messageId, showInChannel, childConversationId, timestamp }}) => {
+        async ({ tx, args: { messageId, showInChannel, childConversationId, timestamp } }) => {
           if (!showInChannel) {
             throw new Error('This action only supports sending messages to the channel.');
           }
@@ -2064,7 +2065,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const conversation = await tx.run(zql.conversations
             .where('conversationId', message.conversationId)
             .one());
-                              
+
           if (!conversation) {
             throw new Error('Conversation not found');
           }
@@ -2105,13 +2106,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           userIds: z.array(z.string()),
           channelId: z.string()
         }),
-        async ({tx, args: { messageId, action, userIds, channelId }}) => {
+        async ({ tx, args: { messageId, action, userIds, channelId } }) => {
           // Get and validate the system message with visibility filter
           const message = await tx.run(zql.messages
             .where('messageId', messageId)
             .where('visibleTo', authData.sub)
             .one());
-          
+
           if (!message || message.msgType !== MessageType.SYSTEM) {
             throw new Error('Invalid system message');
           }
@@ -2125,7 +2126,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (action === 'add' || action === 'add_all') {
             // Add users to channel (with validation)
             const validUsers = [];
-            
+
             for (const userId of userIds) {
               // Verify user exists
               const user = await tx.run(zql.users.where('id', userId).one());
@@ -2133,15 +2134,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
               const participantId = uuidv4();
               const channelUserStatusId = uuidv4();
-              
+
               // Use utility function to properly add participant and update count
               const { added } = await addChannelParticipant(tx, channelId, userId, ChannelRole.MEMBER, participantId, channelUserStatusId, Date.now());
-              
+
               if (added) {
                 validUsers.push({ userId, userName: user.name });
               }
             }
-            
+
             // Send system message for added participants
             if (validUsers.length > 0) {
               const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -2158,24 +2159,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // 4️⃣ Delete the system message after taking action
           logger.info(`🗑️ [NON-PARTICIPANT] Deleting system message ${messageId} after action`);
-          
+
           // Get the conversation for this system message
           const systemMessageConversation = await tx.run(zql.conversations
             .where('conversationId', message.conversationId)
             .one());
           // Delete the system message
           await tx.mutate.messages.delete({ messageId });
-          
+
           // Update conversation if this was the initial message
           if (systemMessageConversation) {
             if (systemMessageConversation.initialMessageId === messageId) {
               // This was the initial message - delete the entire conversation
-              await tx.mutate.conversations.delete({ 
-                conversationId: systemMessageConversation.conversationId 
+              await tx.mutate.conversations.delete({
+                conversationId: systemMessageConversation.conversationId
               });
-            } 
+            }
           }
-          
+
           // Clean up asynchronously
           asyncTasks.push(async () => {
             try {
@@ -2188,8 +2189,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       delete: defineMutator(
-        z.object({messageId: z.string()}),
-        async ({tx, args: { messageId }}) => {
+        z.object({ messageId: z.string() }),
+        async ({ tx, args: { messageId } }) => {
           const message = await tx.run(zql.messages.where("messageId", messageId).one());
 
           if (!message) {
@@ -2250,16 +2251,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Get all OTHER messages in the conversation (excluding the one being deleted)
           const allMessages = await tx.run(zql.messages
             .where('conversationId', message.conversationId));
-          
+
           const otherMessages = allMessages.filter(m => m.messageId !== messageId);
-          
+
           const isInitialMessage = conversation.initialMessageId === messageId;
           const hasReplies = otherMessages.length > 0;
           const shouldSoftDelete = isInitialMessage && hasReplies;
-          
+
           // Clean up MENTIONED participants within Zero transaction
           const mentions = extractAllMentions(message.content);
-          
+
           if (mentions.userIds.length > 0) {
             // For each mentioned user, check if they're still mentioned elsewhere
             for (const userId of mentions.userIds) {
@@ -2268,14 +2269,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 const msgMentions = extractAllMentions(msg.content);
                 return msgMentions.userIds.includes(userId);
               });
-              
+
               // If not mentioned elsewhere, check if they're a MENTIONED participant and remove them
               if (!stillMentioned && userId !== conversation.createdBy) {
                 const participant = await tx.run(zql.conversation_participants
                   .where('conversationId', message.conversationId)
                   .where('userId', userId)
                   .one());
-                
+
                 // Only delete if they're MENTIONED type (keep AUTHOR participants for now)
                 if (participant && participant.participationType === ConversationParticipation.MENTIONED) {
                   await tx.mutate.conversation_participants.delete({
@@ -2285,22 +2286,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               }
             }
           }
-          
+
           // Clean up AUTHOR participant if this was their only message
           const senderId = message.senderId;
-          
+
           // Check if sender has any other messages in this conversation
           const otherMessagesFromSender = otherMessages.filter(
             msg => msg.senderId === senderId
           );
-          
+
           // If this was their only message, remove their AUTHOR participant
           if (otherMessagesFromSender.length === 0) {
             const senderParticipant = await tx.run(zql.conversation_participants
               .where('conversationId', message.conversationId)
               .where('userId', senderId)
               .one());
-            
+
             // Remove AUTHOR participant (they have no more messages)
             if (senderParticipant && senderParticipant.participationType === ConversationParticipation.AUTHOR) {
               await tx.mutate.conversation_participants.delete({
@@ -2309,14 +2310,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-                  // Handle showInChannel viewNewerReplies updates when deleting a message
+          // Handle showInChannel viewNewerReplies updates when deleting a message
           // Check if there are any messages after this one with showInChannel=true
-        const messagesAfterThis = await tx.run(zql.messages
-          .where('conversationId', message.conversationId)
-          .where('createdAt', '>', message.createdAt)
-          .limit(1)
-          .one());
-          
+          const messagesAfterThis = await tx.run(zql.messages
+            .where('conversationId', message.conversationId)
+            .where('createdAt', '>', message.createdAt)
+            .limit(1)
+            .one());
+
           // If no messages below, check for a message above
           if (!messagesAfterThis) {
             const messageAbove = await tx.run(zql.messages
@@ -2325,7 +2326,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .orderBy('createdAt', 'desc')
               .limit(1)
               .one());
-            
+
             // If there's a message above with showInChannel, set its replyCount to 0
             if (messageAbove?.childConversationId && messageAbove.showInChannel) {
               await tx.mutate.conversations.update({
@@ -2350,10 +2351,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             // SCENARIO 2: Hard Delete (Reply OR Root with no replies)
             await tx.mutate.messages.delete({ messageId });
 
-            const isInitialMessageDeleted = 
-              otherMessages.length === 1 && 
+            const isInitialMessageDeleted =
+              otherMessages.length === 1 &&
               otherMessages[0] &&
-              otherMessages[0].messageId === conversation.initialMessageId && 
+              otherMessages[0].messageId === conversation.initialMessageId &&
               otherMessages[0].isDeleted === true;
 
             const shouldDeleteConversation = otherMessages.length === 0 || isInitialMessageDeleted;
@@ -2361,10 +2362,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             if (shouldDeleteConversation) {
               // Delete the conversation
               await tx.mutate.conversations.delete({ conversationId: conversation.conversationId });
-              
+
               // Clean up the ghost root message if it exists so we don't leave orphaned data
               if (isInitialMessageDeleted) {
-                 await tx.mutate.messages.delete({ messageId: otherMessages[0].messageId });
+                await tx.mutate.messages.delete({ messageId: otherMessages[0].messageId });
               }
             } else {
               // Just a normal reply deletion, update the count
@@ -2410,8 +2411,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
     },
     messageAttachment: {
       delete: defineMutator(
-        z.object({attachmentId: z.string()}),
-        async ({tx, args: { attachmentId }}) => {
+        z.object({ attachmentId: z.string() }),
+        async ({ tx, args: { attachmentId } }) => {
           const attachment = await tx.run(zql.message_attachments
             .where('id', attachmentId)
             .one());
@@ -2496,7 +2497,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           creatorParticipantId: z.string(),
           targetParticipantIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({tx, args: { channelId, callType, targetUserIds, externalId, roomLink, timestamp, callId, creatorParticipantId, targetParticipantIds = {} }}) => {
+        async ({ tx, args: { channelId, callType, targetUserIds, externalId, roomLink, timestamp, callId, creatorParticipantId, targetParticipantIds = {} } }) => {
           const now = timestamp;
 
           // Create system message for the call (will be shown as overlay while active)
@@ -2521,7 +2522,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             lastActivityAt: now,
             createdAt: now,
             updatedAt: now,
-            metadata: { 
+            metadata: {
               systemMessageId,
               conversationId,
             },
@@ -2587,12 +2588,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       join: defineMutator(
-        z.object({ 
-          callId: z.string(), 
-          timestamp: z.number(), 
-          participantId: z.string().optional() 
+        z.object({
+          callId: z.string(),
+          timestamp: z.number(),
+          participantId: z.string().optional()
         }),
-        async ({tx, args: { callId, timestamp, participantId }}) => {
+        async ({ tx, args: { callId, timestamp, participantId } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
 
           if (!call) {
@@ -2638,8 +2639,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       leave: defineMutator(
-        z.object({callId: z.string(), timestamp: z.number()}),
-        async ({tx, args: { callId, timestamp }}) => {
+        z.object({ callId: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { callId, timestamp } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
 
           if (!call) {
@@ -2676,7 +2677,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // If no active participants remain, end the call and update system message
           if (activeParticipants.length === 0) {
             const endedAt = now;
-            
+
             await tx.mutate.calls.update({
               id: call.id,
               status: CallStatus.ENDED,
@@ -2712,7 +2713,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             if (callDurationSeconds > 60) {
               // Convert duration to minutes (rounded to 1 decimal place)
               const callDurationMinutes = Math.round((callDurationSeconds / 60) * 10) / 10;
-              
+
               asyncTasks.push(async () => {
                 try {
                   await Promise.all([
@@ -2726,12 +2727,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
 
-        }
-      },
+          }
+        },
       ),
       reject: defineMutator(
-        z.object({callId: z.string(), timestamp: z.number()}),
-        async ({tx, args: { callId, timestamp }}) => {
+        z.object({ callId: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { callId, timestamp } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
 
           if (!call) {
@@ -2753,8 +2754,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       invite: defineMutator(
-        z.object({callId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), participantIds: z.record(z.string(), z.string())}),
-        async ({tx, args: { callId, userIds, timestamp, participantIds = {} }}) => {
+        z.object({ callId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), participantIds: z.record(z.string(), z.string()) }),
+        async ({ tx, args: { callId, userIds, timestamp, participantIds = {} } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call || call.status !== CallStatus.ACTIVE) {
             throw new Error('Call not found');
@@ -2807,8 +2808,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
     },
     activities: {
       markAsRead: defineMutator(
-        z.object({activityId: z.string()}),
-        async ({tx, args: { activityId }}) => {
+        z.object({ activityId: z.string() }),
+        async ({ tx, args: { activityId } }) => {
           const activity = await tx.run(zql.activities.where('id', activityId).one());
 
           if (!activity) {
@@ -2832,13 +2833,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }),
         async ({ tx, args: { actorAction, classification } }) => {
           let query = zql.activities
-            .where('userId', authData.sub)  
+            .where('userId', authData.sub)
             .where('isRead', false);
 
           if (actorAction) {
             query = query.where('actorAction', actorAction);
           }
-          if(classification) {
+          if (classification) {
             query = query.where('classification', classification);
           }
 
@@ -2860,7 +2861,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 channelIdCounts.set(activity.channelId, currentCount + 1);
               }
             });
-            
+
             const uniqueChannelIds = Array.from(channelIdCounts.keys());
             const channelUserStatuses = await tx.run(
               zql.channel_user_status
@@ -2881,8 +2882,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       markActivitiesSeenByMessageId: defineMutator(
-        z.object({messageId: z.string()}),
-        async ({tx, args: { messageId }}) => {
+        z.object({ messageId: z.string() }),
+        async ({ tx, args: { messageId } }) => {
           const messageActivities = await tx.run(zql.activities
             .where(({ or, cmp }) => or(
               cmp('actionSource', 'message'),
@@ -2921,8 +2922,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       markThreadActivitiesAsRead: defineMutator(
-        z.object({conversationId: z.string()}),
-        async ({tx, args: { conversationId }}) => {
+        z.object({ conversationId: z.string() }),
+        async ({ tx, args: { conversationId } }) => {
           const conversation = await tx.run(zql.conversations
             .where('conversationId', conversationId)
             .one());
@@ -2969,25 +2970,25 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       markMissedCallsAsRead: defineMutator(
-  z.object({}),
-  async ({ tx, ctx, }) => {
-    let query = zql.activities
-      .where('userId', ctx.userID)
-      .where('actorAction', 'missed_call')
-      .where('isRead', false);
-    
-    const unreadMissedCalls = await tx.run(query);
-    
-    if (unreadMissedCalls.length > 0) {
-      await Promise.all(unreadMissedCalls.map(activity => 
-        tx.mutate.activities.update({
-          id: activity.id,
-          isRead: true,
-        })
-      ));
-    }
-  },
-),
+        z.object({}),
+        async ({ tx, ctx, }) => {
+          let query = zql.activities
+            .where('userId', ctx.userID)
+            .where('actorAction', 'missed_call')
+            .where('isRead', false);
+
+          const unreadMissedCalls = await tx.run(query);
+
+          if (unreadMissedCalls.length > 0) {
+            await Promise.all(unreadMissedCalls.map(activity =>
+              tx.mutate.activities.update({
+                id: activity.id,
+                isRead: true,
+              })
+            ));
+          }
+        },
+      ),
     },
     ticket: {
       update: defineMutator(
@@ -3005,21 +3006,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           metadata: z.any().optional(),
           updatedAt: z.number(),
         }),
-        async ({tx, args: params}) => {
+        async ({ tx, args: params }) => {
           const ticket = await tx.run(zql.tickets.where("id", params.id).one());
           if (!ticket) throw new Error("Ticket not found");
 
           // ACL Business Logic: Check ticket transfer permission for assignedTo or userGroupId changes
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
           const isUserGroupChanging = params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId;
-          
+
           if ((isAssigneeChanging || isUserGroupChanging) && ticket.userGroupId) {
             // Get board to check if transfer is restricted
             const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
-            
+
             if (board?.metadata && typeof board.metadata === 'object') {
               const metadata = board.metadata as BoardMetadata;
-              
+
               // If board has transfer restriction enabled
               if (metadata.isAllowedToTransfer === true) {
                 // User must be part of the current user group with proper responsibility
@@ -3029,11 +3030,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     .where("userGroupId", ticket.userGroupId)
                     .one()
                 );
-                
+
                 if (!userGroupMapping) {
                   throw new Error('You must be a member of the current user group to modify this ticket');
                 }
-                
+
                 // Check responsibility from the mapping
                 const responsibility = userGroupMapping.responsibility;
                 if (responsibility !== UserResponsibility.MANAGER && responsibility !== UserResponsibility.TEAM_LEAD) {
@@ -3071,17 +3072,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
 
           const subTickets = await tx.run(zql.sub_tickets.where("mappedTicketId", params.id).one());
-        
-          if(subTickets) {
+
+          if (subTickets) {
             let progression: string | undefined = undefined;
-            if(params.stageName) {
+            if (params.stageName) {
               const stages = await tx.run(zql.stages.where("boardId", ticket.boardId).orderBy("sequenceNumber", "asc"));
               const stageNumber = stages.findIndex(v => v.name === params.stageName);
-              if(stageNumber !== -1) {
+              if (stageNumber !== -1) {
                 progression = `${stageNumber + 1}/${stages.length}`;
               }
             }
-            if(params.assignedTo || progression) {
+            if (params.assignedTo || progression) {
               await tx.mutate.sub_tickets.update({
                 id: subTickets.id,
                 assignedTo: params.assignedTo ? params.assignedTo : subTickets.assignedTo,
@@ -3139,7 +3140,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const activityId = uuidv4();
             const messageId = uuidv4();
             const timestamp = params.updatedAt;
-            
+
             asyncTasks.push(async () => {
               try {
                 const assignmentResult = await ticketAssignmentService.assignTicket({
@@ -3168,7 +3169,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   if (ticket.conversationId) {
                     const user = await tx.run(zql.users.where('id', authData.sub).one());
                     const assignedUser = await tx.run(zql.users.where('id', assignmentResult.assignedUserId).one());
-                    
+
                     if (user && assignedUser) {
                       await tx.mutate.messages.insert({
                         messageId: messageId,
@@ -3243,7 +3244,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             } else if (activity.activityType === 'ASSIGNED_TO') {
               if (activity.value.newValue) {
                 const newAssignee = await tx.run(zql.users.where('id', activity.value.newValue).one());
-                if (activity.value.newValue === authData.sub ) {
+                if (activity.value.newValue === authData.sub) {
                   activityMessage = `${userName} self-assigned the ticket`;
                 } else {
                   activityMessage = `${userName} assigned to ${newAssignee?.name || 'someone'}`;
@@ -3299,7 +3300,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           assignedTo: z.string().nullable(),
           timestamp: z.number(),
         }),
-        async ({tx, args: { ticketId, assignedTo, timestamp }}) => {
+        async ({ tx, args: { ticketId, assignedTo, timestamp } }) => {
           // Validate ticket exists
           const ticket = await tx.run(zql.tickets.where("id", ticketId).one());
           if (!ticket) {
@@ -3317,7 +3318,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
 
           const subTickets = await tx.run(zql.sub_tickets.where("mappedTicketId", ticketId).one());
-          if(subTickets && assignedTo !== null) {
+          if (subTickets && assignedTo !== null) {
             await tx.mutate.sub_tickets.update({
               id: subTickets.id,
               assignedTo: assignedTo
@@ -3327,7 +3328,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Sync workload mappings for both old and new assignees
           if (ticket.userGroupId && ticket.boardId) {
             const usersToSync = [oldAssignedTo, assignedTo].filter(Boolean) as string[];
-            
+
             for (const userId of usersToSync) {
               await syncUserWorkloadMapping(tx, userId, ticket, authData.sub);
             }
@@ -3442,8 +3443,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
     },
     project: {
       update: defineMutator(
-        z.object({projectId: z.string(), name: z.string().optional(), description: z.string().optional(), timestamp: z.number()}),
-        async ({tx, args: { projectId, name, description, timestamp }}) => {
+        z.object({ projectId: z.string(), name: z.string().optional(), description: z.string().optional(), timestamp: z.number() }),
+        async ({ tx, args: { projectId, name, description, timestamp } }) => {
           // Validate project exists
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
@@ -3469,8 +3470,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       delete: defineMutator(
-        z.object({projectId: z.string()}),
-        async ({tx, args: { projectId }}) => {
+        z.object({ projectId: z.string() }),
+        async ({ tx, args: { projectId } }) => {
           // Validate project exists
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
@@ -3487,11 +3488,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
     userGroup: {
       update: defineMutator(
-        z.object({userGroupId: z.string(), name: z.string().optional(), alias: z.string().optional(), description: z.string().optional(), userResponsibilityUpdates: z.record(z.string(), z.nativeEnum(UserResponsibility)).optional(), timestamp: z.number()}),
-        async ({tx, args: { userGroupId, name, alias, description, userResponsibilityUpdates, timestamp }}) => {
+        z.object({ userGroupId: z.string(), name: z.string().optional(), alias: z.string().optional(), description: z.string().optional(), userResponsibilityUpdates: z.record(z.string(), z.nativeEnum(UserResponsibility)).optional(), timestamp: z.number() }),
+        async ({ tx, args: { userGroupId, name, alias, description, userResponsibilityUpdates, timestamp } }) => {
           // Get all user groups to check for duplicates in a single query
           const allUserGroups = await tx.run(zql.user_groups);
-          
+
           // Find the current user group
           const userGroup = allUserGroups.find(ug => ug.id === userGroupId);
           if (!userGroup) {
@@ -3532,11 +3533,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const currentUserMapping = await tx.run(
               zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', authData.sub).one(),
             );
-            
+
             if (!currentUserMapping) {
               throw new Error('You must be a member of this group to update responsibilities');
             }
-            
+
             if (currentUserMapping.responsibility !== 'MANAGER' && currentUserMapping.responsibility !== 'TEAM_LEAD') {
               throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can update user responsibilities');
             }
@@ -3553,13 +3554,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 });
               }
             }
-            
+
             // Verify at least one MANAGER or TEAM_LEAD remains after updates
             const updatedMappings = await tx.run(zql.user_group_mappings.where('userGroupId', userGroupId));
             const hasLeadership = updatedMappings.some(
               m => m.responsibility === 'MANAGER' || m.responsibility === 'TEAM_LEAD'
             );
-            
+
             if (!hasLeadership) {
               throw new Error('User group must have at least one MANAGER or TEAM_LEAD');
             }
@@ -3567,8 +3568,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       delete: defineMutator(
-        z.object({userGroupId: z.string()}),
-        async ({tx, args: { userGroupId }}) => {
+        z.object({ userGroupId: z.string() }),
+        async ({ tx, args: { userGroupId } }) => {
           // Validate user group exists
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
@@ -3604,8 +3605,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       addUsers: defineMutator(
-        z.object({userGroupId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), mappingIds: z.record(z.string(), z.string())}),
-        async ({tx, args: { userGroupId, userIds, timestamp, mappingIds }}) => {
+        z.object({ userGroupId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), mappingIds: z.record(z.string(), z.string()) }),
+        async ({ tx, args: { userGroupId, userIds, timestamp, mappingIds } }) => {
           // Validate user group exists
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
@@ -3625,12 +3626,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Fetch existing mappings to avoid duplicates
           const existingMappings = await Promise.all(
-            userIds.map(userId => 
+            userIds.map(userId =>
               tx.run(zql.user_group_mappings
                 .where('userGroupId', userGroupId)
                 .where('userId', userId)
                 .one())
-          )
+            )
           );
           const existingUserIds = new Set(
             existingMappings.filter((m): m is NonNullable<typeof m> => m !== undefined).map(m => m.userId)
@@ -3657,8 +3658,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       removeUsers: defineMutator(
-        z.object({userGroupId: z.string(), userIds: z.array(z.string())}),
-        async ({tx, args: { userGroupId, userIds }}) => {
+        z.object({ userGroupId: z.string(), userIds: z.array(z.string()) }),
+        async ({ tx, args: { userGroupId, userIds } }) => {
           // Validate user group exists
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
@@ -3667,12 +3668,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Find all mappings to be removed in a single query
           const mappingsToRemove = await Promise.all(
-            userIds.map(userId => 
+            userIds.map(userId =>
               tx.run(zql.user_group_mappings
                 .where('userGroupId', userGroupId)
                 .where('userId', userId)
                 .one())
-          )
+            )
           );
 
           // Delete the found mappings
@@ -3692,6 +3693,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           boardId: z.string(),
           name: z.string().optional(),
           projectId: z.string().optional(),
+          boardType: z.nativeEnum(BoardType).optional(),
           metadata: z.any().optional(),
           stages: z
             .array(
@@ -3708,7 +3710,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           stageIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({tx, args: { boardId, name, projectId, metadata, stages, timestamp, stageIds = {} }}) => {
+        async ({ tx, args: { boardId, name, projectId, boardType, metadata, stages, timestamp, stageIds = {} } }) => {
           // Validate board exists
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
@@ -3736,6 +3738,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: boardId,
             ...(name !== undefined && { name }),
             ...(projectId !== undefined && { projectId }),
+            ...(boardType !== undefined && { boardType }),
             ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),
             updatedBy: authData.sub,
             updatedAt: timestamp,
@@ -3869,8 +3872,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }
       ),
       delete: defineMutator(
-        z.object({boardId: z.string()}),
-        async ({tx, args: { boardId }}) => {
+        z.object({ boardId: z.string() }),
+        async ({ tx, args: { boardId } }) => {
           // Validate board exists
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
@@ -3919,8 +3922,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
     },
     ticketTag: {
       create: defineMutator(
-        z.object({ticketId: z.string(), tagName: z.string(), tagId: z.string()}),
-        async ({tx, args: { ticketId, tagName, tagId }}) => {
+        z.object({ ticketId: z.string(), tagName: z.string(), tagId: z.string() }),
+        async ({ tx, args: { ticketId, tagName, tagId } }) => {
           // Validate tag name
           if (!tagName || !tagName.trim()) {
             throw new Error('Tag name cannot be empty');
@@ -3947,8 +3950,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       delete: defineMutator(
-        z.object({tagId: z.string()}),
-        async ({tx, args: { tagId }}) => {
+        z.object({ tagId: z.string() }),
+        async ({ tx, args: { tagId } }) => {
           // Validate tag exists
           const tag = await tx.run(zql.ticket_tags.where('id', tagId).one());
           if (!tag) {
@@ -3971,7 +3974,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           referenceId: z.string(),
         }),
-        async ({tx, ctx, args: { sourceTicketId, targetTicketId, relationType, timestamp, referenceId }}) => {
+        async ({ tx, ctx, args: { sourceTicketId, targetTicketId, relationType, timestamp, referenceId } }) => {
           const existingReference = await tx.run(zql.ticket_reference_mappings
             .where('sourceTicketId', sourceTicketId)
             .where('targetTicketId', targetTicketId)
@@ -4048,7 +4051,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           relationType: z.nativeEnum(TicketReferenceRelation),
           timestamp: z.number(),
         }),
-        async ({tx, args: { id, relationType, timestamp }}) => {
+        async ({ tx, args: { id, relationType, timestamp } }) => {
           const reference = await tx.run(zql.ticket_reference_mappings.where('id', id).one());
           if (!reference) {
             throw new Error('Ticket reference not found');
@@ -4115,8 +4118,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       delete: defineMutator(
-        z.object({id: z.string()}),
-        async ({tx, args: { id }}) => {
+        z.object({ id: z.string() }),
+        async ({ tx, args: { id } }) => {
           const reference = await tx.run(zql.ticket_reference_mappings.where('id', id).one());
           if (!reference) {
             throw new Error('Ticket reference not found');
@@ -4192,7 +4195,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           participantId: z.string(),
         }),
-        async ({tx, args: { id, title, channelId, viewAccessId, editAccessId, visibility, content, timestamp, participantId }}) => {
+        async ({ tx, args: { id, title, channelId, viewAccessId, editAccessId, visibility, content, timestamp, participantId } }) => {
           const now = timestamp;
 
           await tx.mutate.canvases.insert({
@@ -4242,7 +4245,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           participantIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({tx, args: { canvasId, userIds, role, timestamp, participantIds = {} }}) => {
+        async ({ tx, args: { canvasId, userIds, role, timestamp, participantIds = {} } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
             throw new Error("Canvas doesn't exist");
@@ -4260,11 +4263,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const isEditor =
             requestingUserParticipant && requestingUserParticipant.role === CanvasRole.EDITOR;
-          
+
           if (!isOwner && !isEditor) {
             throw new Error('Only canvas owners or editors can add participants');
           }
-          
+
           // Prevent editors from adding OWNERS
           if (role === CanvasRole.OWNER && requestingUserParticipant?.role === CanvasRole.EDITOR) {
             throw new Error('Editors cannot grant owner role');
@@ -4310,7 +4313,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           canvasId: z.string(),
           userId: z.string(),
         }),
-        async ({tx, args: { canvasId, userId }}) => {
+        async ({ tx, args: { canvasId, userId } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
             throw new Error("Canvas doesn't exist");
@@ -4364,7 +4367,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           role: z.nativeEnum(CanvasRole),
           timestamp: z.number(),
         }),
-        async ({tx, args: { canvasId, userId, role, timestamp }}) => {
+        async ({ tx, args: { canvasId, userId, role, timestamp } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
             throw new Error("Canvas doesn't exist");
@@ -4429,7 +4432,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           isCollaborative: z.boolean().optional(),
           timestamp: z.number(),
         }),
-        async ({tx, args: params}) => {
+        async ({ tx, args: params }) => {
           // Verify user has edit access
           const canvas = await tx.run(zql.canvases.where('id', params.id).one());
           if (!canvas) {
@@ -4476,8 +4479,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       delete: defineMutator(
-        z.object({id: z.string()}),
-        async ({tx, args: { id }}) => {
+        z.object({ id: z.string() }),
+        async ({ tx, args: { id } }) => {
           const canvas = await tx.run(zql.canvases.where('id', id).one());
           if (!canvas) {
             throw new Error('Canvas not found');
@@ -4500,7 +4503,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           bookmarkId: z.string(),
         }),
-        async ({tx, args: { entityId, entityType, metadata, timestamp, bookmarkId }}) => {
+        async ({ tx, args: { entityId, entityType, metadata, timestamp, bookmarkId } }) => {
           // Check if bookmark already exists
           const existing = await tx.run(zql.bookmarks
             .where('userId', authData.sub)
@@ -4528,7 +4531,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           entityId: z.string(),
           entityType: z.nativeEnum(BookmarkEntityType),
         }),
-        async ({tx, args: { entityId, entityType }}) => {
+        async ({ tx, args: { entityId, entityType } }) => {
           const bookmark = await tx.run(zql.bookmarks
             .where('userId', authData.sub)
             .where('entityId', entityId)
@@ -4550,7 +4553,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           entityType: z.nativeEnum(BookmarkEntityType),
           metadata: z.any(),
         }),
-        async ({tx, args: { entityId, entityType, metadata }}) => {
+        async ({ tx, args: { entityId, entityType, metadata } }) => {
           const bookmark = await tx.run(zql.bookmarks
             .where('userId', authData.sub)
             .where('entityId', entityId)
@@ -4580,13 +4583,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           profileId: z.string(),
         }),
-        async ({tx, args: params}) => {
+        async ({ tx, args: params }) => {
           // Check if profile already exists to get the ID
           const existingProfile = await tx.run(zql.user_profiles
             .where('userId', authData.sub)
             .one());
 
-          const profileId =  existingProfile?.id || params.profileId;
+          const profileId = existingProfile?.id || params.profileId;
           if (!profileId) {
             throw new Error('profileId is required');
           }
@@ -4630,7 +4633,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           presenceId: z.string(),
         }),
-        async ({tx, args: { statusEmoji, statusContent, statusExpiryAt, assignmentUnavailableUntil, timestamp, presenceId }}) => {
+        async ({ tx, args: { statusEmoji, statusContent, statusExpiryAt, assignmentUnavailableUntil, timestamp, presenceId } }) => {
           // Decode and validate emoji if provided
           let validatedEmoji: string | undefined;
           if (statusEmoji) {
@@ -4710,7 +4713,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           complexityScoreId: z.string().optional(),
           mappingIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({tx, args: { userGroupId, userStates, boardWeight, expertiseMappings, timestamp, stateIds = {}, complexityScoreId, mappingIds = {} }}) => {
+        async ({ tx, args: { userGroupId, userStates, boardWeight, expertiseMappings, timestamp, stateIds = {}, complexityScoreId, mappingIds = {} } }) => {
           const now = timestamp;
 
           // Validate user group exists
@@ -4902,7 +4905,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
-      form: {
+    form: {
       update: defineMutator(
         z.object({
           formId: z.string(),
@@ -4927,12 +4930,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (!form) {
             throw new Error('Form not found');
           }
-  
+
           // Check if user is the form creator
           if (form.createdBy !== ctx.userID) {
             throw new Error('Only the form creator can update the form');
           }
-  
+
           // Update form description if provided
           if (formDescription !== undefined) {
             await tx.mutate.forms.update({
@@ -4941,28 +4944,28 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               updatedAt: timestamp,
             });
           }
-    
-              // Handle field operations if provided
-            if (fields) {
-              const existingFields = await tx.run(zql.form_fields.where('formId', formId));
-              const fieldsToBeDeleted = existingFields.filter(field => !fields.map(f => f.id).includes(field.id))
-              
-              const now = timestamp;
-    
-              for (const field of fieldsToBeDeleted) {
-                  // Delete the field
-                  await tx.mutate.form_fields.delete({
-                    id: field.id,
-                  });
-              }
-    
-              for (const field of fields) {
-                if (field.id) {
-                  // Check if field actually exists in the database
-                  const existingField = existingFields.find(f => f.id === field.id);
-                  
-                  if (existingField) {
-                    // Update existing field
+
+          // Handle field operations if provided
+          if (fields) {
+            const existingFields = await tx.run(zql.form_fields.where('formId', formId));
+            const fieldsToBeDeleted = existingFields.filter(field => !fields.map(f => f.id).includes(field.id))
+
+            const now = timestamp;
+
+            for (const field of fieldsToBeDeleted) {
+              // Delete the field
+              await tx.mutate.form_fields.delete({
+                id: field.id,
+              });
+            }
+
+            for (const field of fields) {
+              if (field.id) {
+                // Check if field actually exists in the database
+                const existingField = existingFields.find(f => f.id === field.id);
+
+                if (existingField) {
+                  // Update existing field
                   const updateData: {
                     id: string;
                     formId: string;
@@ -4993,48 +4996,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   }
 
                   await tx.mutate.form_fields.update(updateData);
-                  } else {
-                    // Field has ID but doesn't exist in DB - treat as new field
-                    const insertData: {
-                      id: string;
-                      formId: string;
-                      fieldName: string;
-                      fieldType: FormFieldType;
-                      createdAt: number;
-                      updatedAt: number;
-                      fieldEnum?: ReadonlyJSONValue;
-                      isOptional?: boolean;
-                    } = {
-                      id: field.id,
-                      formId: formId,
-                      fieldName: field.fieldName.trim(),
-                      fieldType: field.fieldType,
-                      createdAt: now,
-                      updatedAt: now,
-                    };
-
-                    // Add fieldEnum if present
-                    if (field.fieldEnum && field.fieldEnum.length > 0) {
-                      const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
-                      if (nonEmptyOptions.length > 0) {
-                        insertData.fieldEnum = nonEmptyOptions;
-                      }
-                    }
-
-                    // Add isOptional if defined
-                    if (field.isOptional !== undefined) {
-                      insertData.isOptional = field.isOptional;
-                    }
-
-                    await tx.mutate.form_fields.insert(insertData);
-                  }
-
                 } else {
-                  // Create new field
-                  const newFieldId = fieldIds[existingFields.length];
-                  if (!newFieldId) {
-                    throw new Error(`fieldId is required for new field at index ${existingFields.length}`);
-                  }
+                  // Field has ID but doesn't exist in DB - treat as new field
                   const insertData: {
                     id: string;
                     formId: string;
@@ -5045,7 +5008,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     fieldEnum?: ReadonlyJSONValue;
                     isOptional?: boolean;
                   } = {
-                    id: newFieldId,
+                    id: field.id,
                     formId: formId,
                     fieldName: field.fieldName.trim(),
                     fieldType: field.fieldType,
@@ -5068,11 +5031,51 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
                   await tx.mutate.form_fields.insert(insertData);
                 }
+
+              } else {
+                // Create new field
+                const newFieldId = fieldIds[existingFields.length];
+                if (!newFieldId) {
+                  throw new Error(`fieldId is required for new field at index ${existingFields.length}`);
+                }
+                const insertData: {
+                  id: string;
+                  formId: string;
+                  fieldName: string;
+                  fieldType: FormFieldType;
+                  createdAt: number;
+                  updatedAt: number;
+                  fieldEnum?: ReadonlyJSONValue;
+                  isOptional?: boolean;
+                } = {
+                  id: newFieldId,
+                  formId: formId,
+                  fieldName: field.fieldName.trim(),
+                  fieldType: field.fieldType,
+                  createdAt: now,
+                  updatedAt: now,
+                };
+
+                // Add fieldEnum if present
+                if (field.fieldEnum && field.fieldEnum.length > 0) {
+                  const nonEmptyOptions = field.fieldEnum.filter(opt => opt.trim() !== '');
+                  if (nonEmptyOptions.length > 0) {
+                    insertData.fieldEnum = nonEmptyOptions;
+                  }
+                }
+
+                // Add isOptional if defined
+                if (field.isOptional !== undefined) {
+                  insertData.isOptional = field.isOptional;
+                }
+
+                await tx.mutate.form_fields.insert(insertData);
               }
             }
-          },
-        ),
-      },
+          }
+        },
+      ),
+    },
     formContextMapping: {
       upsert: defineMutator(
         z.object({
@@ -5100,8 +5103,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
 
-          await tx.mutate.forms_context_mapping.insert({
-            id: mappingId,
+            await tx.mutate.forms_context_mapping.insert({
+              id: mappingId,
               contextId,
               contextType,
               entityType,

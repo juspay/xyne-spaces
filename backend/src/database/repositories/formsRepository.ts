@@ -1,6 +1,6 @@
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { BaseRepository } from './base';
-import { Form, Prisma } from '@prisma/client';
+import { Form, FormFields, Prisma } from '@prisma/client';
 
 export interface CreateFormInput {
   formName: string;
@@ -116,6 +116,49 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
   async delete(id: string): Promise<Form> {
     return await this.db.form.delete({
       where: { id },
+    });
+  }
+
+  async findFormByContextAndEntity(context: FormContextType, entity: FormEntityType): Promise<Form | null> {
+    return await this.db.form.findFirst({
+      where: {
+        contextType: context,
+        entityType: entity,
+      },
+    });
+  }
+
+  /**
+   * Get form fields by form ID
+   */
+  async findFormFields(formId: string): Promise<FormFields[]> {
+    return await this.db.formFields.findMany({
+      where: { formId },
+    });
+  }
+
+
+  /**
+   * Save multiple form entity values at once
+   */
+  async createManyFormEntityValues(
+    data: Array<{
+      entityId: string;
+      entityType: string;
+      fieldId: string;
+      fieldValue?: string;
+      actualFieldValue: Prisma.InputJsonValue;
+    }>
+  ): Promise<{ count: number }> {
+    return await this.db.formEntityValues.createMany({
+      data: data.map(item => ({
+        entityId: item.entityId,
+        entityType: item.entityType,
+        fieldId: item.fieldId,
+        fieldValue: item.fieldValue || '',
+        actualFieldValue: item.actualFieldValue as Prisma.InputJsonValue,
+      })),
+      skipDuplicates: true,
     });
   }
 }

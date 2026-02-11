@@ -5,6 +5,7 @@ import {
   DocType,
   FormContextType,
   FormEntityType,
+  LookupType,
 } from '@xyne/shared';
 import { z } from 'zod';
 import {
@@ -969,4 +970,11 @@ export const queries = defineQueries({
   getCustomEmojiByName: defineQuery(z.object({ name: z.string() }), ({ args: { name } }) => {
     return zql.custom_emojis.where('name', name).related('creator').one();
   }),
+
+  lookupValuesByType: defineQuery(
+    z.object({ type: z.nativeEnum(LookupType) }),
+    ({ args: { type } }) => {
+      return zql.lookup_values.where('type', type).orderBy('createdAt', 'asc');
+    },
+  ),
 });
