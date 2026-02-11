@@ -10,6 +10,8 @@ import { createGunzip } from 'zlib';
 import { pipeline } from 'stream/promises';
 import log from 'electron-log/main';
 import { config } from '../app/config';
+import { Logger } from './logger/Logger';
+import ElectronEvent from './logger/electron-events';
 
 export interface CodeServerStatus {
     isRunning: boolean;
@@ -110,8 +112,10 @@ class CodeServerService {
         const binaryPath = this.getBinaryPath();
         try {
             fs.accessSync(binaryPath, fs.constants.X_OK);
+            Logger.debug(ElectronEvent.CODE_SERVER_BINARY_CHECK, { installed: true, binaryPath }, 'CodeServer');
             return true;
         } catch {
+            Logger.debug(ElectronEvent.CODE_SERVER_BINARY_CHECK, { installed: false, binaryPath }, 'CodeServer');
             return false;
         }
     }
@@ -133,7 +137,7 @@ class CodeServerService {
         const isZip = downloadUrl.endsWith('.zip');
         const tempFile = path.join(binaryDir, isZip ? 'temp.zip' : 'temp.tar.gz');
 
-        log.info(`[CodeServer] Downloading from: ${downloadUrl}`);
+        Logger.info(ElectronEvent.CODE_SERVER_DOWNLOAD_START, { downloadUrl }, 'CodeServer');
 
         try {
             // Ensure binary directory exists
@@ -160,10 +164,10 @@ class CodeServerService {
                 fs.chmodSync(binaryPath, 0o755);
             }
 
-            log.info('[CodeServer] Binary installed successfully');
+            Logger.info(ElectronEvent.CODE_SERVER_DOWNLOAD_COMPLETE, {}, 'CodeServer');
         } catch (error) {
             this.lastError = `Download failed: ${error instanceof Error ? error.message : String(error)}`;
-            log.error('[CodeServer]', this.lastError);
+            Logger.logError(ElectronEvent.CODE_SERVER_DOWNLOAD_FAILED, error, {}, 'CodeServer');
             throw error;
         } finally {
             this.isDownloading = false;
@@ -284,10 +288,12 @@ class CodeServerService {
 
         for (let port = portRangeStart; port <= portRangeEnd; port++) {
             if (await this.isPortAvailable(port)) {
+                Logger.info(ElectronEvent.CODE_SERVER_PORT_ALLOCATED, { port }, 'CodeServer');
                 return port;
             }
         }
 
+        Logger.error(ElectronEvent.CODE_SERVER_ERROR, { error: `No available ports in range ${portRangeStart}-${portRangeEnd}` }, 'CodeServer');
         throw new Error(`No available ports in range ${portRangeStart}-${portRangeEnd}`);
     }
 
@@ -421,6 +427,7 @@ class CodeServerService {
         }
 
         log.info(`[CodeServer] Starting process: ${binaryPath} ${args.join(' ')}`);
+        Logger.info(ElectronEvent.CODE_SERVER_PROCESS_SPAWN, { binaryPath, port, args: args.join(' ') }, 'CodeServer');
 
         this.process = spawn(binaryPath, args, {
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -443,25 +450,25 @@ class CodeServerService {
 
         // Handle process exit
         this.process.on('exit', (code, signal) => {
-            log.info(`[CodeServer] Process exited with code ${code}, signal ${signal}`);
+            Logger.info(ElectronEvent.CODE_SERVER_PROCESS_EXIT, { code, signal }, 'CodeServer');
             this.process = null;
 
             // Auto-restart logic with backoff
             if (code !== 0 && this.restartAttempts < this.maxRestartAttempts) {
                 this.restartAttempts++;
                 const backoff = this.restartBackoffMs * Math.pow(2, this.restartAttempts - 1);
-                log.info(`[CodeServer] Attempting restart in ${backoff}ms (attempt ${this.restartAttempts}/${this.maxRestartAttempts})`);
+                Logger.info(ElectronEvent.CODE_SERVER_RESTART, { attempt: this.restartAttempts, maxAttempts: this.maxRestartAttempts, backoffMs: backoff }, 'CodeServer');
 
                 setTimeout(() => {
                     this.startCodeServer().catch((err) => {
-                        log.error('[CodeServer] Restart failed:', err);
+                        Logger.logError(ElectronEvent.CODE_SERVER_ERROR, err, { context: 'restart_failed' }, 'CodeServer');
                     });
                 }, backoff);
             }
         });
 
         this.process.on('error', (err) => {
-            log.error('[CodeServer] Process error:', err);
+            Logger.logError(ElectronEvent.CODE_SERVER_ERROR, err, {}, 'CodeServer');
             this.lastError = `Process error: ${err.message}`;
         });
 
@@ -472,6 +479,7 @@ class CodeServerService {
         await this.waitForServerReady(port);
 
         const url = `http://127.0.0.1:${port}`;
+        Logger.info(ElectronEvent.CODE_SERVER_READY, { url, port, pid: this.process?.pid }, 'CodeServer');
         log.info(`[CodeServer] Running at ${url}`);
         return url;
     }
@@ -513,7 +521,7 @@ class CodeServerService {
      */
     public async stopCodeServer(): Promise<void> {
         if (this.process) {
-            log.info('[CodeServer] Stopping process...');
+            Logger.info(ElectronEvent.CODE_SERVER_STOP, {}, 'CodeServer');
 
             // Try graceful shutdown first
             this.process.kill('SIGTERM');
@@ -523,6 +531,7 @@ class CodeServerService {
                 const timeout = setTimeout(() => {
                     if (this.process) {
                         log.warn('[CodeServer] Force killing process...');
+                        Logger.warn(ElectronEvent.CODE_SERVER_FORCE_KILL, { pid: this.process.pid }, 'CodeServer');
                         this.process.kill('SIGKILL');
                     }
                     resolve();
@@ -543,7 +552,7 @@ class CodeServerService {
             this.currentPort = null;
             this.saveState({ port: null, pid: null });
 
-            log.info('[CodeServer] Process stopped');
+            Logger.info(ElectronEvent.CODE_SERVER_STOPPED, {}, 'CodeServer');
         }
 
         // Clear all active sessions
@@ -654,11 +663,15 @@ class CodeServerService {
             if (this.workspaceExists(executionId)) {
                 // Workspace exists, pull updates
                 log.info(`[CodeServer] Workspace exists for ${executionId}, pulling updates...`);
+                Logger.info(ElectronEvent.CODE_SERVER_GIT_PULL_START, { executionId, workspacePath, branch }, 'CodeServer');
                 await this.gitPull(workspacePath, branch);
+                Logger.info(ElectronEvent.CODE_SERVER_GIT_PULL_SUCCESS, { executionId, workspacePath, branch }, 'CodeServer');
             } else {
                 // Clone the repository
                 log.info(`[CodeServer] Cloning ${repoUrl} branch ${branch} for ${executionId}...`);
+                Logger.info(ElectronEvent.CODE_SERVER_GIT_CLONE_START, { repoUrl, branch, executionId, workspacePath }, 'CodeServer');
                 await this.gitClone(repoUrl, branch, workspacePath);
+                Logger.info(ElectronEvent.CODE_SERVER_GIT_CLONE_SUCCESS, { repoUrl, branch, executionId, workspacePath }, 'CodeServer');
             }
 
             if (commitHash && !branch) {
@@ -671,10 +684,12 @@ class CodeServerService {
             log.info(`[CodeServer] Workspace ready at ${workspacePath}`);
             // Track active session
             this.activeSessions.add(workspacePath);
+            Logger.info(ElectronEvent.CODE_SERVER_SESSION_REGISTER, { workspacePath, totalSessions: this.activeSessions.size }, 'CodeServer');
             log.info(`[CodeServer] Registered session: ${workspacePath}. Total: ${this.activeSessions.size}`);
             return { success: true, workspacePath };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
+            Logger.logError(ElectronEvent.CODE_SERVER_GIT_CLONE_FAILED, error, { repoUrl, branch, executionId, workspacePath }, 'CodeServer');
             log.error(`[CodeServer] Git operation failed: ${errorMessage}`);
             return { success: false, workspacePath, error: errorMessage };
         }
@@ -824,6 +839,7 @@ class CodeServerService {
         const workspacePath = this.getWorkspacePath(executionId);
         if (fs.existsSync(workspacePath)) {
             log.info(`[CodeServer] Deleting workspace: ${workspacePath}`);
+            Logger.info(ElectronEvent.CODE_SERVER_WORKSPACE_DELETE, { executionId, workspacePath }, 'CodeServer');
             fs.rmSync(workspacePath, { recursive: true, force: true });
         }
     }
@@ -859,6 +875,7 @@ class CodeServerService {
         // Delete workspaces beyond keepCount
         for (let i = keepCount; i < workspaces.length; i++) {
             log.info(`[CodeServer] Cleaning old workspace: ${workspaces[i].name}`);
+            Logger.info(ElectronEvent.CODE_SERVER_WORKSPACE_CLEAN, { workspaceName: workspaces[i].name, workspacePath: workspaces[i].path }, 'CodeServer');
             fs.rmSync(workspaces[i].path, { recursive: true, force: true });
         }
     }
@@ -985,6 +1002,7 @@ class CodeServerService {
             statusCheck.on('close', (statusCode) => {
                 if (statusCode !== 0 || statusOutput.trim().length === 0) {
                     // No changes to stash
+                    Logger.debug(ElectronEvent.CODE_SERVER_GIT_STASH, { repoPath, hadChanges: false }, 'CodeServer');
                     resolve({ success: true, hadChanges: false });
                     return;
                 }
@@ -1016,8 +1034,10 @@ class CodeServerService {
                     stashProcess.on('close', (stashCode) => {
                         if (stashCode === 0) {
                             log.info(`[CodeServer] Stashed changes in ${repoPath}`);
+                            Logger.info(ElectronEvent.CODE_SERVER_GIT_STASH, { repoPath, hadChanges: true, success: true }, 'CodeServer');
                             resolve({ success: true, hadChanges: true });
                         } else {
+                            Logger.error(ElectronEvent.CODE_SERVER_GIT_STASH, { repoPath, hadChanges: true, success: false, error: stashStderr }, 'CodeServer');
                             resolve({ success: false, hadChanges: true, error: stashStderr });
                         }
                     });
@@ -1036,6 +1056,7 @@ class CodeServerService {
         baseBranch?: string
     ): Promise<{ success: boolean; created: boolean; error?: string }> {
         return new Promise((resolve) => {
+            Logger.info(ElectronEvent.CODE_SERVER_GIT_CHECKOUT_START, { repoPath, branchName, baseBranch }, 'CodeServer');
             log.info(`[CodeServer] Fetching all branches from origin...`);
             const fetchProcess = spawn('git', ['fetch', 'origin', '--prune'], {
                 cwd: repoPath,
@@ -1069,6 +1090,7 @@ class CodeServerService {
                 checkoutProcess.on('close', (checkoutCode) => {
                     if (checkoutCode === 0) {
                         log.info(`[CodeServer] Checked out existing local branch: ${branchName}`);
+                        Logger.info(ElectronEvent.CODE_SERVER_GIT_CHECKOUT_SUCCESS, { repoPath, branchName, source: 'local' }, 'CodeServer');
                         resolve({ success: true, created: false });
                         return;
                     }
@@ -1088,6 +1110,7 @@ class CodeServerService {
                     remoteCheckoutProcess.on('close', (remoteCode) => {
                         if (remoteCode === 0) {
                             log.info(`[CodeServer] Checked out branch from remote: ${branchName}`);
+                            Logger.info(ElectronEvent.CODE_SERVER_GIT_CHECKOUT_SUCCESS, { repoPath, branchName, source: 'remote' }, 'CodeServer');
                             resolve({ success: true, created: false });
                             return;
                         }
@@ -1095,6 +1118,7 @@ class CodeServerService {
                         log.info(`[CodeServer] Remote checkout also failed: ${remoteStderr.trim()}`);
 
                         if (!baseBranch) {
+                            Logger.error(ElectronEvent.CODE_SERVER_GIT_CHECKOUT_FAILED, { repoPath, branchName, error: 'No base branch provided' }, 'CodeServer');
                             resolve({ success: false, created: false, error: `Branch ${branchName} doesn't exist locally or on remote, and no base branch provided` });
                             return;
                         }
@@ -1144,8 +1168,10 @@ class CodeServerService {
                                 createProcess.on('close', (createCode) => {
                                     if (createCode === 0) {
                                         log.info(`[CodeServer] Created and checked out branch: ${branchName}`);
+                                        Logger.info(ElectronEvent.CODE_SERVER_GIT_BRANCH_CREATE, { repoPath, branchName, baseBranch }, 'CodeServer');
                                         resolve({ success: true, created: true });
                                     } else {
+                                        Logger.error(ElectronEvent.CODE_SERVER_GIT_CHECKOUT_FAILED, { repoPath, branchName, error: createStderr }, 'CodeServer');
                                         resolve({ success: false, created: false, error: createStderr });
                                     }
                                 });
@@ -1169,9 +1195,11 @@ class CodeServerService {
 
         if (this.repoExists(repoName)) {
             log.info(`[CodeServer] Repo already exists: ${repoPath}`);
+            Logger.debug(ElectronEvent.CODE_SERVER_GIT_CLONE_START, { repoUrl, repoPath, alreadyExists: true }, 'CodeServer');
             return { success: true, repoPath };
         }
 
+        Logger.info(ElectronEvent.CODE_SERVER_GIT_CLONE_START, { repoUrl, repoPath, repoName }, 'CodeServer');
         log.info(`[CodeServer] Cloning repo ${repoUrl} to ${repoPath}`);
 
         return new Promise((resolve) => {
@@ -1188,13 +1216,16 @@ class CodeServerService {
             cloneProcess.on('close', (code) => {
                 if (code === 0) {
                     log.info(`[CodeServer] Successfully cloned ${repoName}`);
+                    Logger.info(ElectronEvent.CODE_SERVER_GIT_CLONE_SUCCESS, { repoUrl, repoPath, repoName }, 'CodeServer');
                     resolve({ success: true, repoPath });
                 } else {
+                    Logger.error(ElectronEvent.CODE_SERVER_GIT_CLONE_FAILED, { repoUrl, repoPath, repoName, error: stderr }, 'CodeServer');
                     resolve({ success: false, repoPath, error: stderr });
                 }
             });
 
             cloneProcess.on('error', (err) => {
+                Logger.logError(ElectronEvent.CODE_SERVER_GIT_CLONE_FAILED, err, { repoUrl, repoPath, repoName }, 'CodeServer');
                 resolve({ success: false, repoPath, error: err.message });
             });
         });
@@ -1216,8 +1247,11 @@ class CodeServerService {
         stashedChanges: boolean;
         error?: string;
     }> {
+        Logger.info(ElectronEvent.CODE_SERVER_WORKSPACE_PREPARE_START, { repoUrl, baseBranch, ticketBranchName }, 'CodeServer');
+        
         if (!repoUrl || repoUrl.trim() === '') {
             log.warn(`[CodeServer] Attempted to edit a local doc (no repo URL) - branch: ${ticketBranchName}`);
+            Logger.warn(ElectronEvent.CODE_SERVER_WORKSPACE_PREPARE_FAILED, { ticketBranchName, error: 'No repo URL' }, 'CodeServer');
             return { 
                 success: false, 
                 workspacePath: '', 
@@ -1268,12 +1302,14 @@ class CodeServerService {
         // Step 4: Checkout ticket branch
         const checkoutResult = await this.checkoutBranch(repoPath, ticketBranchName, baseBranch);
         if (!checkoutResult.success) {
+            Logger.error(ElectronEvent.CODE_SERVER_WORKSPACE_PREPARE_FAILED, { repoPath, ticketBranchName, error: checkoutResult.error }, 'CodeServer');
             return { success: false, workspacePath: repoPath, stashedChanges: stashResult.hadChanges, error: checkoutResult.error };
         }
 
         log.info(`[CodeServer] Workspace ready at ${repoPath} on branch ${ticketBranchName}`);
         // Track active session
         this.activeSessions.add(repoPath);
+        Logger.info(ElectronEvent.CODE_SERVER_WORKSPACE_PREPARE_SUCCESS, { repoPath, ticketBranchName, stashedChanges: stashResult.hadChanges, totalSessions: this.activeSessions.size }, 'CodeServer');
         log.info(`[CodeServer] Registered session: ${repoPath}. Total: ${this.activeSessions.size}`);
         return {
             success: true,
@@ -1302,6 +1338,7 @@ class CodeServerService {
     public clearActiveSessions(): void {
         const count = this.activeSessions.size;
         this.activeSessions.clear();
+        Logger.info(ElectronEvent.CODE_SERVER_SESSION_CLEAR, { clearedCount: count }, 'CodeServer');
         log.info(`[CodeServer] Cleared ${count} active sessions`);
     }
 }

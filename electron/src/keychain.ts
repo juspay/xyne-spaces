@@ -3,8 +3,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
-import { Logger } from './services/logger/pre-enrollment-logger';
+import { Logger } from './services/logger/Logger';
 import { EnrollmentEvent } from './services/logger/enrollment-events';
+import { devicePasswordPopup } from './services/enrollmentMetrics';
+import { safeRecordMetric } from './services/telemetry';
+import { app } from 'electron';
 
 const execAsync = promisify(exec);
 const writeFileAsync = promisify(fs.writeFile);
@@ -96,10 +99,23 @@ class KeychainService {
             // Import into Keychain
             const importCmd = `security import "${p12Path}" -k "$(security login-keychain | xargs)" -f pkcs12 -P "changeit" -x ${trustFlags}`;
             await execAsync(importCmd);
+            safeRecordMetric(() => {
+                devicePasswordPopup.add(1, { 
+                    success: 'true',
+                    reason: 'certificate_import',
+                    buildVersion: app.getVersion(),
+                });
+            });
             Logger.info(EnrollmentEvent.CERTIFICATE_IMPORT_SUCCESS, { label: this.label });
 
         } catch (e: any) {
-            console.error("Import failed:", e.stderr || e.message);
+            safeRecordMetric(() => {
+                devicePasswordPopup.add(1, { 
+                    success: 'false',
+                    reason: 'certificate_import_failure',
+                    buildVersion: app.getVersion(),
+                });
+            });
             throw new Error(`Keychain Import Failed: ${e.stderr || e.message}`);
         } finally {
             // Cleanup

@@ -5,6 +5,8 @@ import log from 'electron-log/main';
 import https from 'https';
 import http from 'http';
 import { config } from '../app/config';
+import { Logger } from './logger/Logger';
+import ElectronEvent from './logger/electron-events';
 
 const DEFAULT_PORT = 49231;
 
@@ -151,7 +153,7 @@ class AgentAuthService {
       return;
     }
 
-    log.info('[AgentAuth] Authorization request from:', authRequest.agentName);
+    Logger.info(ElectronEvent.AGENT_AUTH_REQUEST, { agentName: authRequest.agentName, agentType: authRequest.agentType }, 'AgentAuth');
 
     // Show consent dialog to user
     const approval = await this.showConsentDialog(authRequest);
@@ -161,6 +163,7 @@ class AgentAuthService {
         status: 'denied',
         reason: 'User rejected the request'
       };
+      Logger.info(ElectronEvent.AGENT_AUTH_DENIED, { agentName: authRequest.agentName }, 'AgentAuth');
       this.sendJson(res, 403, response);
       return;
     }
@@ -185,7 +188,7 @@ class AgentAuthService {
       expiresAt
     };
 
-    log.info(`[AgentAuth] Access granted to ${authRequest.agentName} until ${new Date(expiresAt).toISOString()}`);
+    Logger.info(ElectronEvent.AGENT_AUTH_GRANTED, { agentName: authRequest.agentName, expiresAt, duration: approval.duration }, 'AgentAuth');
     this.sendJson(res, 200, response);
   }
 

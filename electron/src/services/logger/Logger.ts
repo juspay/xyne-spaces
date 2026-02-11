@@ -10,18 +10,22 @@ import log from 'electron-log/main';
 import { v4 as uuidv4 } from 'uuid';
 import type { EnrollmentEventType, LogLevel } from './enrollment-events';
 import * as os from 'os';
-import { net } from 'electron';
+import { net, app } from 'electron';
 import si from 'systeminformation';
 import { config } from '../../app/config';
+import { ElectronEventType } from './electron-events';
+
+type EventType = EnrollmentEventType | ElectronEventType;
 
 interface LogEntry {
   sessionId: string;
   platformName: string;
+  electronVersion: string;
   emailId: string | null;
   timestamp: string;
   level: LogLevel;
   hostname: string;
-  event: EnrollmentEventType;
+  event: EventType;
   [key: string]: unknown;
 }
 
@@ -32,9 +36,10 @@ const LogLevelNames: Record<LogLevel, string> = {
   3: 'ERROR',
 };
 
-class PreEnrollmentLogger {
+class LoggerService {
   private sessionId: string;
   private platformName: string = 'electron';
+  private electronVersion: string;
   private emailId: string | null = null;
   private logs: LogEntry[] = [];
   private flushInProgress: boolean = false;
@@ -47,9 +52,18 @@ class PreEnrollmentLogger {
 
   constructor() {
     this.sessionId = uuidv4();
+    this.electronVersion = app.getVersion();
     // Use a non-mTLS endpoint for pre-enrollment logs
     this.loggerUrl = `${config.UNPROTECTED_URL}/godel/events`;
     this.startBackgroundFlush();
+  }
+
+  /**
+   * Switch to post-enrollment (mTLS protected) endpoint
+   */
+  enablePostEnrollmentLogging(): void {
+    this.loggerUrl = `${config.BACKEND_URL}/godel/events`;
+    log.info('[EnrollmentLogger] Switched to post-enrollment endpoint:', this.loggerUrl);
   }
 
   /**
@@ -74,47 +88,47 @@ class PreEnrollmentLogger {
   /**
    * Log a debug event
    */
-  debug(event: EnrollmentEventType, extraFields?: Record<string, unknown>): void {
-    this.addLog(0, event, extraFields);
+  debug(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+    this.addLog(0, event, extraFields, logType);
   }
 
   /**
    * Log an info event
    */
-  info(event: EnrollmentEventType, extraFields?: Record<string, unknown>): void {
-    this.addLog(1, event, extraFields);
+  info(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+    this.addLog(1, event, extraFields, logType);
   }
 
   /**
    * Log a warning event
    */
-  warn(event: EnrollmentEventType, extraFields?: Record<string, unknown>): void {
-    this.addLog(2, event, extraFields);
+  warn(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+    this.addLog(2, event, extraFields, logType);
   }
 
   /**
    * Log an error event
    */
-  error(event: EnrollmentEventType, extraFields?: Record<string, unknown>): void {
-    this.addLog(3, event, extraFields);
+  error(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+    this.addLog(3, event, extraFields, logType);
   }
 
   /**
    * Log an error with exception details
    */
-  logError(event: EnrollmentEventType, error: unknown, extraFields?: Record<string, unknown>): void {
+  logError(event: EventType, error: unknown, extraFields?: Record<string, unknown>, logType?: string): void {
     const errorDetails = {
       ...(extraFields || {}),
       error_message: error instanceof Error ? error.message : String(error),
       error_stack: error instanceof Error ? error.stack : undefined,
     };
-    this.error(event, errorDetails);
+    this.error(event, errorDetails, logType);
   }
 
   /**
    * Add a log entry
    */
-  private async addLog(level: LogLevel, event: EnrollmentEventType, extraFields?: Record<string, unknown>): Promise<void> {
+  private async addLog(level: LogLevel, event: EventType, extraFields?: Record<string, unknown>, logType?: string): Promise<void> {
     if (!this.isEnabled) {
       return;
     }
@@ -124,6 +138,7 @@ class PreEnrollmentLogger {
     const logEntry: LogEntry = {
       sessionId: this.sessionId,
       platformName: this.platformName,
+      electronVersion: this.electronVersion,
       emailId: this.emailId,
       timestamp: new Date().toISOString(),
       level,
@@ -138,7 +153,7 @@ class PreEnrollmentLogger {
       level: LogLevelNames[level] ?? 'UNKNOWN',
     };
 
-    log.info('[EnrollmentLogger]', JSON.stringify(logEntryWithLevelName));
+    log.info(`[${logType ?? 'EnrollmentLogger'}]`, JSON.stringify(logEntryWithLevelName));
     this.logs.push(logEntry);
 
     // Auto-flush if batch size reached
@@ -172,7 +187,7 @@ class PreEnrollmentLogger {
 
     this.sendLogsWithRetry(logsToPush)
       .catch((error) => {
-        log.error('[EnrollmentLogger] Failed to push logs after all retries:', error);
+        log.error('[Logger] Failed to push logs after all retries:', error);
         // Re-add logs to queue on failure
         this.logs.unshift(...logsToPush);
       })
@@ -193,7 +208,7 @@ class PreEnrollmentLogger {
         return;
       } catch (error) {
         lastError = error;
-        log.error(`[EnrollmentLogger] Attempt ${attempt + 1} failed:`, error);
+        log.error(`[Logger] Attempt ${attempt + 1} failed:`, error);
 
         if (attempt < this.maxRetries) {
           const delayMs = Math.pow(2, attempt) * 1000; // Exponential backoff
@@ -228,7 +243,7 @@ class PreEnrollmentLogger {
       const text = await response.text();
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
-    log.info(`[EnrollmentLogger] sent logs to backend url: ${this.loggerUrl}`);
+    log.info(`[Logger] sent logs to backend url: ${this.loggerUrl}`);
   }
 
   /**
@@ -240,4 +255,4 @@ class PreEnrollmentLogger {
 }
 
 // Export singleton instance
-export const Logger = new PreEnrollmentLogger();
+export const Logger = new LoggerService();

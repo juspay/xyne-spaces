@@ -10,9 +10,10 @@ import { codeServerService } from '../services/code-server';
 import { docsPublishService } from '../services/docs-publish';
 import { agentAuthService } from '../services/agent-auth';
 import { BrowserWindow } from 'electron';
-import { Logger } from '../services/logger/pre-enrollment-logger';
+import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
+import ElectronEvent from '../services/logger/electron-events';
 
 // Forward logs to renderer process
 (log.transports as any).forwardToRenderer = (message: any) => {
@@ -32,6 +33,7 @@ import { startVersionChecker, stopVersionChecker } from '../services/version-che
 };
 import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
 import { initializeUIUpdater } from '../services/ui-updater';
+import { initializeTelemetry } from '../services/telemetry';
 
 // Initialize electron-log for main process
 log.initialize();
@@ -58,6 +60,9 @@ export function getIsQuitting(): boolean {
 // Handle before-quit to allow Cmd+Q to actually quit the app
 app.on('before-quit', async () => {
   isQuitting = true;
+  
+  // Log app quit event
+  Logger.info(ElectronEvent.APP_QUIT, {}, 'App');
 
   // Stop version checker
   stopVersionChecker();
@@ -65,25 +70,25 @@ app.on('before-quit', async () => {
   // Gracefully stop agent auth server
   try {
     await agentAuthService.stopServer();
-    log.info('[App] Agent auth server stopped gracefully');
+    Logger.info(ElectronEvent.AGENT_AUTH_SERVER_STOP, {}, 'App');
   } catch (error) {
-    log.error('[App] Failed to stop agent auth server:', error);
+    Logger.logError(ElectronEvent.AGENT_AUTH_SERVER_START_FAILED, error, {}, 'App');
   }
 
   // Gracefully stop docs publish server
   try {
     await docsPublishService.stopServer();
-    log.info('[App] Docs publish server stopped gracefully');
+    Logger.info(ElectronEvent.DOCS_PUBLISH_SERVER_STOP, {}, 'App');
   } catch (error) {
-    log.error('[App] Failed to stop docs publish server:', error);
+    Logger.logError(ElectronEvent.DOCS_PUBLISH_SERVER_START_FAILED, error, {}, 'App');
   }
 
   // Gracefully stop code-server when app is quitting
   try {
     await codeServerService.stopCodeServer();
-    log.info('[App] Code server stopped gracefully');
+    Logger.info(ElectronEvent.CODE_SERVER_STOP, {}, 'App');
   } catch (error) {
-    log.error('[App] Failed to stop code server:', error);
+    Logger.logError(ElectronEvent.CODE_SERVER_ERROR, error, {}, 'App');
   }
 });
 
@@ -105,6 +110,7 @@ async function initializeApp(): Promise<void> {
     setupCustomProtocol();
   }
 
+  initializeTelemetry();
   setupMTLS();
   setupRequestInterceptor();
   setupIpcHandlers();
@@ -167,12 +173,13 @@ function startAgentAuthServerInBackground(): void {
  * Start code-server in the background without blocking app startup
  */
 function startCodeServerInBackground(): void {
+  Logger.info(ElectronEvent.CODE_SERVER_START, {}, 'App');
   codeServerService.startCodeServer()
     .then((url) => {
-      log.info(`[App] Code server started automatically at ${url}`);
+      Logger.info(ElectronEvent.CODE_SERVER_STARTED, { url }, 'App');
     })
     .catch((error) => {
-      log.error('[App] Failed to auto-start code server:', error);
+      Logger.logError(ElectronEvent.CODE_SERVER_START_FAILED, error, {}, 'App');
       // Don't block the app if code-server fails to start
     });
 }
@@ -183,29 +190,30 @@ function startCodeServerInBackground(): void {
 function startDocsPublishServerInBackground(): void {
   docsPublishService.setBackendUrl(config.BACKEND_URL);
 
+  Logger.info(ElectronEvent.DOCS_PUBLISH_SERVER_START, {}, 'App');
   docsPublishService.startServer()
     .then((port) => {
-      log.info(`[App] Docs publish server started on port ${port}`);
+      Logger.info(ElectronEvent.DOCS_PUBLISH_SERVER_STARTED, { port }, 'App');
     })
     .catch((error) => {
-      log.error('[App] Failed to start docs publish server:', error);
+      Logger.logError(ElectronEvent.DOCS_PUBLISH_SERVER_START_FAILED, error, {}, 'App');
     });
 }
 
 function setupAppStateListeners(): void {
   // Monitor window focus/blur events
   app.on('browser-window-focus', (_event, window) => {
-    Logger.info(EnrollmentEvent.APP_TRANSITION_TO_FOREGROUND, {
+    Logger.info(ElectronEvent.APP_TRANSITION_TO_FOREGROUND, {
       windowId: window.id,
       windowTitle: window.getTitle(),
-    });
+    }, 'App');
   });
 
   app.on('browser-window-blur', (_event, window) => {
-    Logger.info(EnrollmentEvent.APP_TRANSITION_TO_BACKGROUND, {
+    Logger.info(ElectronEvent.APP_TRANSITION_TO_BACKGROUND, {
       windowId: window.id,
       windowTitle: window.getTitle(),
-    });
+    }, 'App');
   });
 }
 

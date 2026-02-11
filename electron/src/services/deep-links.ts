@@ -3,7 +3,7 @@ import path from 'path';
 import { config } from '../app/config';
 import { setCookiesFromHeaders } from './cookies';
 import log from 'electron-log/main';
-import { Logger } from './logger/pre-enrollment-logger';
+import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 
 let mainWindow: BrowserWindow | null = null;

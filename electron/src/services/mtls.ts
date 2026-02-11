@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { keychain } from '../keychain';
 import log from 'electron-log/main';
-import { Logger } from './logger/pre-enrollment-logger';
+import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 
 export async function setupMTLS() {
