@@ -1,3 +1,10 @@
+## [1.38.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.38.0...v1.38.1) (2026-02-11)
+
+
+### Bug Fixes
+
+* Added env for default executor ([37d8600](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/37d8600b2e899afccc61eaf3496a09f81df847e6)), closes [#3037](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3037)
+
 ## [1.38.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.37.0...v1.38.0) (2026-02-11)
 
 
