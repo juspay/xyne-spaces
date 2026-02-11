@@ -1,4 +1,4 @@
-import { useQuery } from '@rocicorp/zero/react';
+import { useQuery } from '../../../hooks/useQuery';
 import { QueryResultType } from '@rocicorp/zero';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { queries } from '../../../zero/queries';

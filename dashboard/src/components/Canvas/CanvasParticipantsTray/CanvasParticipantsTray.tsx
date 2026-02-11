@@ -6,7 +6,7 @@ import type { User } from '../../../machines/stateMachine';
 import { useUsers } from '../../../hooks/useUsers';
 import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { toast } from 'sonner';
 

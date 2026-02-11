@@ -15,7 +15,7 @@ import {
   MessageSquare,
   Search,
 } from 'lucide-react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import type { TicketPriority } from '@xyne/shared';
 import { TextInput, TextArea, Button, ButtonType, SingleSelect } from '@juspay/blend-design-system';
 import ThreadList from '../../Chat/ThreadList/ThreadList';

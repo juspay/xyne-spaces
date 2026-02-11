@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useSelector } from '@xstate/react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from './useZero';
 import { roomActor } from '../machines/roomMachine';
 import { CallType } from '@xyne/shared';
 import { reactNativeBridge } from '../utils/reactNativeBridge';

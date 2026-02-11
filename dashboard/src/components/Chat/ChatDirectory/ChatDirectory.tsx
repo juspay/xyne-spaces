@@ -35,7 +35,7 @@ import {
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
 
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { Accordion } from 'radix-ui';
 import ChannelItemV2 from './ChannelItemV2';

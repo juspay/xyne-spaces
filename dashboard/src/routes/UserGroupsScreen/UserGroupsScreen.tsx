@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button/Button';

@@ -3,7 +3,7 @@ import { roomActor } from '../../../machines/roomMachine';
 import { createPortal } from 'react-dom';
 import { RoomAudioRenderer } from '@livekit/components-react';
 import { CustomLiveKitRoom } from '../CallViews/CustomLiveKitRoom';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { useEffect } from 'react';
 import { queries } from '../../../zero/queries';
 import { callService } from '../../../services/Call/callService';

@@ -1,6 +1,6 @@
 import { ReactElement, useState } from 'react';
 import { X, User, SmilePlus, Copy, PauseCircle } from 'lucide-react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { useAuth } from '../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
 import Avatar from '../ui/Avatar/Avatar';

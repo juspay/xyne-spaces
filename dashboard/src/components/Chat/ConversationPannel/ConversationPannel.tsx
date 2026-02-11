@@ -1,6 +1,6 @@
 import { ReactElement, useEffect, useRef, useMemo } from 'react';
 import { queries } from '../../../zero/queries';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import {
   useChannel,
   useGetChannelUserStatus,

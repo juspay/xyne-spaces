@@ -1,6 +1,6 @@
 import { ReactElement, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import { toast } from 'sonner';
 import { ArrowLeft, Edit2 } from 'lucide-react';

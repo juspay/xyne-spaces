@@ -13,7 +13,7 @@ import ConversationPannel from '../ConversationPannel/ConversationPannel';
 import CanvasScreen from '../../Canvas/CanvasScreen';
 import { ChannelSummary, ThreadSummary } from '../Summary';
 import { ThreadMessages } from '../ThreadPannel';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';

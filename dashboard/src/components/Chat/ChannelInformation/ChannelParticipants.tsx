@@ -17,7 +17,7 @@ import {
   Channel,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';

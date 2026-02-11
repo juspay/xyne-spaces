@@ -21,7 +21,7 @@ import {
 } from '@xyne/shared';
 import { channelService } from '../../../services/Chat/channelService';
 import { useNavigate } from 'react-router-dom';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { v4 as uuidv4 } from 'uuid';
 import { mutators } from '../../../zero/mutators';
 import { InputBox } from '../../ui/InputBox';

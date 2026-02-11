@@ -22,7 +22,7 @@ import {
 } from '../../../services/Analytics/mixpanelService';
 import { MobileProfileMenu } from '../../ui/MobileProfileMenu/MobileProfileMenu';
 
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { Accordion } from 'radix-ui';
 import MobileChannelItem from './MobileChannelItem';

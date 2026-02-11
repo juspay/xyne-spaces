@@ -1,6 +1,6 @@
 import { ReactElement, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { Activity } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useChannel } from '../../hooks/useChannels';

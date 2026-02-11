@@ -31,7 +31,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useWindowWidth } from '../../../hooks/useWindowWidth';
 import { toast } from 'sonner';
 import { Modal, ButtonType } from '@juspay/blend-design-system';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 
 interface MessageAttachmentProps {

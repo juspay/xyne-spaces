@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
 import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket } from '../../hooks/usePermissions';

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { roomActor } from '../../machines/roomMachine';

@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useCallback, useMemo, memo, forwardRef } from 'react';
-import { useQuery } from '@rocicorp/zero/react';
+import { useQuery } from '../../../hooks/useQuery';
 import { MessageCircle, Hash, Loader2 } from 'lucide-react';
 import { Virtuoso, Components } from 'react-virtuoso';
 import { queries } from '../../../zero/queries';

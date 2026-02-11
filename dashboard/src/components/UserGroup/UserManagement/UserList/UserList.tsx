@@ -1,5 +1,5 @@
 import { ReactElement, useState, useMemo, useRef } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../../hooks/useZero';
 import { toast } from 'sonner';
 import { SingleSelect } from '@juspay/blend-design-system';
 import { Button } from '../../../ui/Button/Button';

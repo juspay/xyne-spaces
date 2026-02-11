@@ -6,6 +6,10 @@ export {
   zeroSocketConnectionRetriesPerRequest,
   zeroSocketSessionDuration,
   zeroSocketEventsTotal,
+  zeroMutationLatency,
+  zeroMutationOperations,
+  zeroQueryLatency,
+  zeroQueryOperations,
 } from './zeroMetrics';
 
 export {

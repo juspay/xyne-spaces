@@ -4,7 +4,7 @@ import { CanvasVisibility, CanvasRole } from '@xyne/shared';
 import type { Canvas } from '../Canvas.types';
 import type { User } from '@xyne/shared';
 import { Globe, Crown, Shield, Eye, X, CornerDownRight } from 'lucide-react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useAuth } from '../../../hooks/useAuth';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';

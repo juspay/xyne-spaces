@@ -6,7 +6,7 @@ import { Check, ChevronDown, SmilePlus, X } from 'lucide-react';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button/Button';
 import Input from '../ui/Input/Input';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { DEFAULT_STATUS_EMOJI, EXPIRY_OPTIONS, calculateExpiryTime } from '../../utils/statusUtils';
 import { v4 as uuidv4 } from 'uuid';

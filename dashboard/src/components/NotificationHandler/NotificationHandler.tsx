@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useAuthContext } from '../../providers/AuthProvider';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { callActor } from '../../machines/callMachine';
 import { v4 as uuidv4 } from 'uuid';

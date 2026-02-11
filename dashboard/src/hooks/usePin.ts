@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
-import { useZero } from '@rocicorp/zero/react';
 import { toast } from 'sonner';
 import { mutators } from '../zero/mutators';
+import { useZero } from './useZero';
 
 export interface UsePinReturn {
   togglePin: (conversationId: string) => void;

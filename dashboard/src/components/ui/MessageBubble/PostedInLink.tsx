@@ -1,11 +1,11 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@rocicorp/zero/react';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { Hash, Lock, MessageSquare, CornerUpRight } from 'lucide-react';
 import { useChannel } from '../../../hooks/useChannels';
 import { queries } from '../../../zero/queries';
 import { Tooltip } from '../Tooltip';
+import { useQuery } from '../../../hooks/useQuery';
 
 interface PostedInLinkProps {
   originalChannelId: string;

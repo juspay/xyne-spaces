@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Ticket } from '../../hooks/useTickets';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { Modal, Breadcrumb } from '@juspay/blend-design-system';
 import { toast } from 'sonner';
 import SearchUser from '../ui/SearchUser/SearchUser';

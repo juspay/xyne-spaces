@@ -9,7 +9,7 @@ import Tooltip from '../../ui/Tooltip';
 import { isElectronApp } from '../../../utils/electronApp';
 import { OpenIDEModal } from '../OpenIDEModal';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { TagSelector } from '../TicketTable/TagSelector';
 import Avatar from '../../ui/Avatar/Avatar';

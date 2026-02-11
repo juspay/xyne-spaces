@@ -13,6 +13,8 @@ const localRules = {
   rules: {
     'no-fetch-use-axios': require('./eslint-rules/no-fetch-use-axios.cjs'),
     'no-rocicorp-define-query': require('../shared/eslint-rules/no-rocicorp-define-query.cjs'),
+    'no-rocicorp-use-query': require('./eslint-rules/no-rocicorp-use-query.cjs'),
+    'no-rocicorp-use-zero': require('./eslint-rules/no-rocicorp-use-zero.cjs'),
     'no-date-now-or-uuid-in-mutators': require('./eslint-rules/no-date-now-or-uuid-in-mutators.cjs'),
   }
 };
@@ -77,6 +79,8 @@ export default tseslint.config(
       "react/prop-types": "off",
       "local-rules/no-fetch-use-axios": "error",
       "local-rules/no-rocicorp-define-query": "error",
+      "local-rules/no-rocicorp-use-query": "error",
+      "local-rules/no-rocicorp-use-zero": "error",
       "local-rules/no-date-now-or-uuid-in-mutators": "error",
     },
   },

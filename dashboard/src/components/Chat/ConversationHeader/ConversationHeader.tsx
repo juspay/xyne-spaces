@@ -1,6 +1,6 @@
 import { useState, JSX, cloneElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import useMeasure from '../../../hooks/useMeasure';
 import { Star, Users2 } from 'lucide-react';

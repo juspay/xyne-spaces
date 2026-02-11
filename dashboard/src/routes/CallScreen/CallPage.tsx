@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { roomActor } from '../../machines/roomMachine';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 import { usePlatform } from '../../hooks/usePlatform';
 /**
  * CallPage handles deep-linked call URLs (/call/:callId)

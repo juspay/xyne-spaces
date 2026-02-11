@@ -1,5 +1,5 @@
 import { ReactElement, useState, useRef, useEffect } from 'react';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { Channel } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import Button from '../../ui/Button';

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../../ui/Button';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
 import { User, ChannelScopeType, MessageType } from '@xyne/shared';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { toast } from 'sonner';
 import { Checkbox } from '@juspay/blend-design-system';

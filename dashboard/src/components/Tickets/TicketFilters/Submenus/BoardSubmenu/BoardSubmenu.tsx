@@ -1,9 +1,9 @@
 import { ReactElement, useMemo } from 'react';
 import { Check } from 'lucide-react';
-import { useQuery } from '@rocicorp/zero/react';
 import { createBuilder } from '@rocicorp/zero';
 import { schema } from '@xyne/shared';
 import { Button } from '../../../../ui/Button/Button';
+import { useRawQuery } from '../../../../../hooks/useQuery';
 
 interface BoardSubmenuProps {
   selectedBoards: string[];
@@ -20,10 +20,11 @@ export const BoardSubmenu = ({
   projectId,
 }: BoardSubmenuProps): ReactElement => {
   const builder = createBuilder(schema);
-  const [allBoardsRaw] = useQuery(
+  const [allBoardsRaw] = useRawQuery(
     projectId
       ? builder.boards.where('projectId', projectId).orderBy('name', 'asc')
       : builder.boards.orderBy('name', 'asc'),
+    'boards_submenu',
   );
 
   const availableBoardIdSet = useMemo(() => {

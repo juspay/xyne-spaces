@@ -23,7 +23,7 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import { isElectronApp } from '../../../utils/electronApp';
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { Ticket, Repo } from '@xyne/shared';
 import { toast } from 'sonner';
 import { queries } from '../../../zero/queries';

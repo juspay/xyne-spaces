@@ -2,7 +2,8 @@ import React, { ReactElement, useState, useMemo, useCallback, useEffect, useRef 
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { queries } from '../../../zero/queries';
 import { ChannelVisibility, ChannelScopeType, ChannelRole, Channel } from '@xyne/shared';
-import { useZero, useQuery } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
+import { useQuery } from '../../../hooks/useQuery';
 import { QueryResultType } from '@rocicorp/zero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
