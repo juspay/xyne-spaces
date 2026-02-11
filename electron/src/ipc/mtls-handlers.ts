@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { app, ipcMain } from 'electron';
 import * as os from 'os';
 import * as path from 'path';
 import log from 'electron-log/main';
@@ -7,8 +7,10 @@ import { keychain } from '../keychain';
 import { config } from '../app/config';
 import { getBundledUIUrl } from '../services/custom-protocol';
 import { getMainWindow } from '../window/manager';
-import { Logger } from '../services/logger/pre-enrollment-logger';
+import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
+import { safeRecordMetric } from '../services/telemetry';
+import { dashboardLoad, enrollmentDone } from '../services/enrollmentMetrics';
 
 const MAX_RETRIES = 3;
 
@@ -20,6 +22,12 @@ const MAX_RETRIES = 3;
 async function urlLoadWithRetry(fn: () => Promise<void>, attempts = 0): Promise<void> {
     try {
         await fn();
+        safeRecordMetric(() => {
+            dashboardLoad.add(1, {
+                success: 'true',
+                buildVersion: app.getVersion(),
+            });
+        });
     } catch (error) {
         const mainWindow = getMainWindow();
 
@@ -30,7 +38,6 @@ async function urlLoadWithRetry(fn: () => Promise<void>, attempts = 0): Promise<
         const loading_page = path.join(__dirname, '..', '..', 'assets', 'loading.html');
         await mainWindow.loadFile(loading_page);
         Logger.logError(EnrollmentEvent.URL_LOAD_FAILED, error);
-        
         // If we haven't exceeded max retries, try again
         if (attempts < MAX_RETRIES) {
             Logger.info(EnrollmentEvent.LOAD_URL_RETRY, { retry_attempt: attempts + 1 });
@@ -39,6 +46,13 @@ async function urlLoadWithRetry(fn: () => Promise<void>, attempts = 0): Promise<
         else {
             // Max retries exceeded - show error page
             Logger.logError(EnrollmentEvent.URL_LOAD_FAILED, error);
+            safeRecordMetric(() => {
+                dashboardLoad.add(1, {
+                    success: 'false',
+                    error: 'max_retries_exceeded',
+                    buildVersion: app.getVersion(),
+                });
+            });
             
             // Load error page with helpful message about system popup approval
             const errorPage = path.join(__dirname, '..', '..', 'assets', 'timeout-error.html');
@@ -73,7 +87,7 @@ export function setupMTLSIpcHandlers(): void {
                 certificate_imported: true,
                 next_step: 'loading_frontend'
             });
-
+            
             const bundledUrl = getBundledUIUrl();
             const frontendUrl = config.useBundledUI ? bundledUrl : config.FRONTEND_URL;
             const mainWindow = getMainWindow();
@@ -87,6 +101,14 @@ export function setupMTLSIpcHandlers(): void {
                 Logger.info(EnrollmentEvent.LOAD_URL, { fallback: true });
                 void event.sender.loadURL(frontendUrl);
             }
+            safeRecordMetric(() => {
+                enrollmentDone.add(1, {
+                    success: 'true',
+                    buildVersion: app.getVersion(),
+                });
+            });
+            // Switch logger to use protected URL
+            Logger.enablePostEnrollmentLogging();
             return result;
         } catch (error) {
             Logger.logError(EnrollmentEvent.CERTIFICATE_STORAGE_FAILED, error);

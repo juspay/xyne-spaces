@@ -6,6 +6,8 @@ import { app, session, net } from 'electron';
 import log from 'electron-log/main';
 import archiver from 'archiver';
 import { getMainWindow } from '../window/manager';
+import { Logger } from './logger/Logger';
+import ElectronEvent from './logger/electron-events';
 
 const PORT_FILE_NAME = 'docs-publish-port';
 
@@ -181,11 +183,13 @@ class DocsPublishService {
             if (fs.existsSync(outputDir)) {
                 // Remove all files and directories recursively
                 fs.rmSync(outputDir, { recursive: true, force: true });
+                Logger.info(ElectronEvent.DOCS_PUBLISH_CLEAR_OUTPUT_DIR, { outputDir }, 'DocsPublish');
                 log.info(`[DocsPublish] Cleared output directory: ${outputDir}`);
             }
             // Recreate the directory
             fs.mkdirSync(outputDir, { recursive: true });
         } catch (error) {
+            Logger.logError(ElectronEvent.DOCS_PUBLISH_CLEAR_OUTPUT_DIR, error, { outputDir }, 'DocsPublish');
             log.error('[DocsPublish] Failed to clear output directory:', error);
             throw error;
         }
@@ -386,8 +390,11 @@ class DocsPublishService {
         docType: string = 'docs'
     ): Promise<{ success: boolean; docsUrl?: string; error?: string }> {
         if (!this.backendUrl) {
+            Logger.warn(ElectronEvent.DOCS_PUBLISH_UPLOAD_FAILED, { error: 'Backend URL not configured' }, 'DocsPublish');
             return { success: false, error: 'Backend URL not configured' };
         }
+
+        Logger.info(ElectronEvent.DOCS_PUBLISH_UPLOAD_START, { title, userRepo, branchName, channelId, docType, zipSize: zipBuffer.length }, 'DocsPublish');
 
         try {
             // Get cookies from Electron session
@@ -395,6 +402,7 @@ class DocsPublishService {
             const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
 
             if (!cookieString || cookies.length === 0) {
+                Logger.warn(ElectronEvent.DOCS_PUBLISH_UPLOAD_FAILED, { error: 'Not authenticated' }, 'DocsPublish');
                 return { success: false, error: 'Not authenticated - no session cookies found' };
             }
 
@@ -499,11 +507,14 @@ class DocsPublishService {
                         try {
                             const jsonResponse = JSON.parse(responseData);
                             if (response.statusCode === 200 && jsonResponse.success) {
+                                Logger.info(ElectronEvent.DOCS_PUBLISH_UPLOAD_SUCCESS, { docsUrl: jsonResponse.docsUrl, userRepo, title }, 'DocsPublish');
                                 resolve({ success: true, docsUrl: jsonResponse.docsUrl });
                             } else {
+                                Logger.warn(ElectronEvent.DOCS_PUBLISH_UPLOAD_FAILED, { statusCode: response.statusCode, error: jsonResponse.error, userRepo }, 'DocsPublish');
                                 resolve({ success: false, error: jsonResponse.error || `Upload failed with status ${response.statusCode}` });
                             }
                         } catch {
+                            Logger.error(ElectronEvent.DOCS_PUBLISH_UPLOAD_FAILED, { error: 'Invalid response from server', responseData: responseData.substring(0, 200) }, 'DocsPublish');
                             log.error('[DocsPublish] Failed to parse response:', responseData);
                             resolve({ success: false, error: 'Invalid response from server' });
                         }
@@ -511,6 +522,7 @@ class DocsPublishService {
                 });
 
                 request.on('error', (error) => {
+                    Logger.logError(ElectronEvent.DOCS_PUBLISH_UPLOAD_FAILED, error, { userRepo, title }, 'DocsPublish');
                     log.error('[DocsPublish] Request error:', error);
                     resolve({ success: false, error: error.message });
                 });
@@ -519,6 +531,7 @@ class DocsPublishService {
                 request.end();
             });
         } catch (error) {
+            Logger.logError(ElectronEvent.DOCS_PUBLISH_UPLOAD_FAILED, error, { userRepo, title }, 'DocsPublish');
             log.error('[DocsPublish] Upload failed:', error);
             return { success: false, error: error instanceof Error ? error.message : 'Upload failed' };
         }
@@ -587,6 +600,7 @@ class DocsPublishService {
         }
 
         this.isRestarting = true;
+        Logger.info(ElectronEvent.DOCS_PUBLISH_SERVER_RESTART, {}, 'DocsPublish');
         try {
             this.server = null;
             this.currentPort = null;
@@ -595,6 +609,7 @@ class DocsPublishService {
             const port = await this.startServer();
             log.info(`[DocsPublish] Server restarted successfully on port ${port}`);
         } catch (error) {
+            Logger.logError(ElectronEvent.DOCS_PUBLISH_SERVER_START_FAILED, error, { context: 'restart' }, 'DocsPublish');
             log.error('[DocsPublish] Failed to restart server:', error);
         } finally {
             this.isRestarting = false;
@@ -707,11 +722,13 @@ class DocsPublishService {
                 const { outputPath, projectPath } = request;
 
                 if (!outputPath || !fs.existsSync(outputPath)) {
+                    Logger.warn(ElectronEvent.DOCS_PUBLISH_REQUEST_RECEIVED, { error: 'Invalid output path', outputPath }, 'DocsPublish');
                     res.writeHead(400);
                     res.end(JSON.stringify({ success: false, error: 'Invalid output path' }));
                     return;
                 }
 
+                Logger.info(ElectronEvent.DOCS_PUBLISH_REQUEST_RECEIVED, { outputPath, projectPath: projectPath || 'not provided' }, 'DocsPublish');
                 log.info(`[DocsPublish] Received publish request for: ${outputPath}`);
                 log.info(`[DocsPublish] Project path: ${projectPath || 'not provided'}`);
 
@@ -734,13 +751,16 @@ class DocsPublishService {
                 const { repoName, branchName, remoteUrl } = gitInfo;
                 // Combine repo and branch into userRepo format
                 const userRepo = `${repoName}/${branchName}`;
+                Logger.info(ElectronEvent.DOCS_PUBLISH_GIT_INFO, { userRepo, repoName, branchName, remoteUrl: remoteUrl || 'none' }, 'DocsPublish');
                 log.info(`[DocsPublish] Git info: ${userRepo}`);
 
                 const existingDoc = await this.checkExistingDoc(userRepo);
                 if (existingDoc) {
+                    Logger.info(ElectronEvent.DOCS_PUBLISH_EXISTING_DOC_CHECK, { userRepo, existingChannelId: existingDoc.channelId, existingTitle: existingDoc.title }, 'DocsPublish');
                     log.info(`[DocsPublish] Existing doc found in channel: ${existingDoc.channelId}`);
                     
                     if (!request.forceReplace && existingDoc.channelId !== request.channelId) {
+                        Logger.info(ElectronEvent.DOCS_PUBLISH_CONFLICT, { userRepo, existingChannelId: existingDoc.channelId, requestedChannelId: request.channelId }, 'DocsPublish');
                         log.info('[DocsPublish] Returning conflict - doc exists in different channel');
                         res.writeHead(409);
                         res.end(JSON.stringify({
@@ -779,8 +799,10 @@ class DocsPublishService {
                 const docType = this.detectDocType(outputPath);
                 log.info(`[DocsPublish] Detected doc type: ${docType}`);
 
+                Logger.info(ElectronEvent.DOCS_PUBLISH_ZIP_CREATE_START, { outputPath, title, docType }, 'DocsPublish');
                 log.info('[DocsPublish] Creating zip from root output directory...');
                 const zipBuffer = await this.createZip(outputPath);
+                Logger.info(ElectronEvent.DOCS_PUBLISH_ZIP_CREATE_COMPLETE, { zipSize: zipBuffer.length, title }, 'DocsPublish');
                 log.info(`[DocsPublish] Created zip: ${zipBuffer.length} bytes`);
 
                 log.info('[DocsPublish] Uploading to backend...');
@@ -875,6 +897,7 @@ class DocsPublishService {
                     return;
                 }
 
+                Logger.info(ElectronEvent.DOCS_PUBLISH_OPEN_TICKET_THREAD, { ticketId }, 'DocsPublish');
                 log.info(`[DocsPublish] Opening ticket thread for: ${ticketId}`);
 
                 // Send IPC message to the main window to open the thread
@@ -907,11 +930,14 @@ class DocsPublishService {
         parsedUrl: URL
     ): Promise<void> {
         if (!this.backendUrl) {
+            Logger.warn(ElectronEvent.DOCS_PUBLISH_SHARE_TARGETS_REQUEST, { error: 'Backend URL not configured' }, 'DocsPublish');
             log.warn('[DocsPublish] Backend URL not configured for share-targets request');
             res.writeHead(503, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: false, targets: [], error: 'Backend URL not configured', code: 'BACKEND_NOT_CONFIGURED' }));
             return;
         }
+
+        Logger.info(ElectronEvent.DOCS_PUBLISH_SHARE_TARGETS_REQUEST, { channelId: parsedUrl.searchParams.get('channelId') }, 'DocsPublish');
 
         try {
             const cookies = await session.defaultSession.cookies.get({ url: this.backendUrl });
@@ -956,10 +982,13 @@ class DocsPublishService {
 
         req.on('end', async () => {
             if (!this.backendUrl) {
+                Logger.warn(ElectronEvent.DOCS_PUBLISH_SHARE_DOC_REQUEST, { error: 'Backend URL not configured' }, 'DocsPublish');
                 res.writeHead(500);
                 res.end(JSON.stringify({ success: false, error: 'Backend URL not configured' }));
                 return;
             }
+
+            Logger.info(ElectronEvent.DOCS_PUBLISH_SHARE_DOC_REQUEST, {}, 'DocsPublish');
 
             try {
                 const cookies = await session.defaultSession.cookies.get({ url: this.backendUrl });

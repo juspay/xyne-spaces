@@ -57,11 +57,15 @@ export const EnrollmentEvent = {
   NETWORK_ERROR: 'network_error',
   UNKNOWN_ERROR: 'unknown_error',
 
-  //app went to background 
-  APP_TRANSITION_TO_BACKGROUND: 'app_transition_to_background',
-  
-  //app came to foreground
-  APP_TRANSITION_TO_FOREGROUND: 'app_transition_to_foreground',
+
+
+  // OpenTelemetry
+  OTEL_INIT_SUCCESS: 'otel_init_success',
+  OTEL_INIT_FAILED: 'otel_init_failed',
+  OTEL_METRIC_ERROR: 'otel_metric_error',
+  OTEL_SHUTDOWN_SUCCESS: 'otel_shutdown_success',
+  OTEL_SHUTDOWN_FAILED: 'otel_shutdown_failed',
+  OTEL_NO_PROVIDER: 'otel_no_provider',
   
 } as const;
 

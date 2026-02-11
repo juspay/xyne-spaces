@@ -6,8 +6,8 @@ import { setupMTLSIpcHandlers } from './mtls-handlers';
 import { config } from '../app/config';
 import { codeServerService } from '../services/code-server';
 import { docsPublishService } from '../services/docs-publish';
-import { Logger as enrollmentLogger } from '../services/logger/pre-enrollment-logger';
 import { performHardReload } from '../services/version-checker';
+import { Logger } from '../services/logger/Logger';
 
 let previewBrowserView: BrowserView | null = null;
 
@@ -208,7 +208,7 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on('set-user-email', (_event, email: string) => {
     if (email && typeof email === 'string') {
-      enrollmentLogger.setEmailId(email);
+      Logger.setEmailId(email);
     }
   });
 

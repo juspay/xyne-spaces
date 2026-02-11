@@ -1,0 +1,86 @@
+const ElectronEvent = {
+    // App lifecycle events
+    APP_QUIT: 'app_quit',
+    APP_TRANSITION_TO_BACKGROUND: 'app_transition_to_background',
+    APP_TRANSITION_TO_FOREGROUND: 'app_transition_to_foreground',
+    UNCAUGHT_EXCEPTION: 'uncaught_exception',
+    UNHANDLED_REJECTION: 'unhandled_rejection',
+    
+    // Agent Auth events
+    AGENT_AUTH_SERVER_STOP: 'agent_auth_server_stop',
+    AGENT_AUTH_SERVER_START_FAILED: 'agent_auth_server_start_failed',
+    AGENT_AUTH_REQUEST: 'agent_auth_request',
+    AGENT_AUTH_DENIED: 'agent_auth_denied',
+    AGENT_AUTH_GRANTED: 'agent_auth_granted',
+    
+    // Code Server events
+    CODE_SERVER_START: 'code_server_start',
+    CODE_SERVER_STARTED: 'code_server_started',
+    CODE_SERVER_STOP: 'code_server_stop',
+    CODE_SERVER_STOPPED: 'code_server_stopped',
+    CODE_SERVER_ERROR: 'code_server_error',
+    CODE_SERVER_START_FAILED: 'code_server_start_failed',
+    CODE_SERVER_DOWNLOAD_START: 'code_server_download_start',
+    CODE_SERVER_DOWNLOAD_COMPLETE: 'code_server_download_complete',
+    CODE_SERVER_DOWNLOAD_FAILED: 'code_server_download_failed',
+    CODE_SERVER_PROCESS_EXIT: 'code_server_process_exit',
+    CODE_SERVER_RESTART: 'code_server_restart',
+    CODE_SERVER_BINARY_CHECK: 'code_server_binary_check',
+    CODE_SERVER_PORT_ALLOCATED: 'code_server_port_allocated',
+    CODE_SERVER_PROCESS_SPAWN: 'code_server_process_spawn',
+    CODE_SERVER_READY: 'code_server_ready',
+    CODE_SERVER_FORCE_KILL: 'code_server_force_kill',
+    
+    // Code Server Git Workspace events
+    CODE_SERVER_GIT_CLONE_START: 'code_server_git_clone_start',
+    CODE_SERVER_GIT_CLONE_SUCCESS: 'code_server_git_clone_success',
+    CODE_SERVER_GIT_CLONE_FAILED: 'code_server_git_clone_failed',
+    CODE_SERVER_GIT_PULL_START: 'code_server_git_pull_start',
+    CODE_SERVER_GIT_PULL_SUCCESS: 'code_server_git_pull_success',
+    CODE_SERVER_GIT_PULL_FAILED: 'code_server_git_pull_failed',
+    CODE_SERVER_GIT_CHECKOUT_START: 'code_server_git_checkout_start',
+    CODE_SERVER_GIT_CHECKOUT_SUCCESS: 'code_server_git_checkout_success',
+    CODE_SERVER_GIT_CHECKOUT_FAILED: 'code_server_git_checkout_failed',
+    CODE_SERVER_GIT_STASH: 'code_server_git_stash',
+    CODE_SERVER_GIT_BRANCH_CREATE: 'code_server_git_branch_create',
+    CODE_SERVER_WORKSPACE_PREPARE_START: 'code_server_workspace_prepare_start',
+    CODE_SERVER_WORKSPACE_PREPARE_SUCCESS: 'code_server_workspace_prepare_success',
+    CODE_SERVER_WORKSPACE_PREPARE_FAILED: 'code_server_workspace_prepare_failed',
+    CODE_SERVER_WORKSPACE_DELETE: 'code_server_workspace_delete',
+    CODE_SERVER_WORKSPACE_CLEAN: 'code_server_workspace_clean',
+    CODE_SERVER_SESSION_REGISTER: 'code_server_session_register',
+    CODE_SERVER_SESSION_CLEAR: 'code_server_session_clear',
+    
+    // Docs Publish events
+    DOCS_PUBLISH_SERVER_START: 'docs_publish_server_start',
+    DOCS_PUBLISH_SERVER_STARTED: 'docs_publish_server_started',
+    DOCS_PUBLISH_SERVER_STOP: 'docs_publish_server_stop',
+    DOCS_PUBLISH_SERVER_START_FAILED: 'docs_publish_server_start_failed',
+    DOCS_PUBLISH_SERVER_RESTART: 'docs_publish_server_restart',
+    DOCS_PUBLISH_REQUEST_RECEIVED: 'docs_publish_request_received',
+    DOCS_PUBLISH_GIT_INFO: 'docs_publish_git_info',
+    DOCS_PUBLISH_EXISTING_DOC_CHECK: 'docs_publish_existing_doc_check',
+    DOCS_PUBLISH_CONFLICT: 'docs_publish_conflict',
+    DOCS_PUBLISH_ZIP_CREATE_START: 'docs_publish_zip_create_start',
+    DOCS_PUBLISH_ZIP_CREATE_COMPLETE: 'docs_publish_zip_create_complete',
+    DOCS_PUBLISH_UPLOAD_START: 'docs_publish_upload_start',
+    DOCS_PUBLISH_UPLOAD_SUCCESS: 'docs_publish_upload_success',
+    DOCS_PUBLISH_UPLOAD_FAILED: 'docs_publish_upload_failed',
+    DOCS_PUBLISH_CLEAR_OUTPUT_DIR: 'docs_publish_clear_output_dir',
+    DOCS_PUBLISH_SHARE_TARGETS_REQUEST: 'docs_publish_share_targets_request',
+    DOCS_PUBLISH_SHARE_DOC_REQUEST: 'docs_publish_share_doc_request',
+    DOCS_PUBLISH_OPEN_TICKET_THREAD: 'docs_publish_open_ticket_thread',
+    
+    // UI Update events
+    UI_UPDATE_CHECK_START: 'ui_update_check_start',
+    UI_UPDATE_CHECK_FAILED: 'ui_update_check_failed',
+    UI_UPDATE_AVAILABLE: 'ui_update_available',
+    UI_UPDATE_NOT_AVAILABLE: 'ui_update_not_available',
+    UI_UPDATE_DOWNLOAD_START: 'ui_update_download_start',
+    UI_UPDATE_DOWNLOAD_FAILED: 'ui_update_download_failed',
+    UI_UPDATE_DOWNLOAD_COMPLETE: 'ui_update_download_complete',
+    } as const;
+
+export type ElectronEventType = (typeof ElectronEvent)[keyof typeof ElectronEvent];
+
+export default ElectronEvent;

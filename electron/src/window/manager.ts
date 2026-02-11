@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, dialog, Menu, MenuItem } from 'electron';
+import { BrowserWindow, shell, dialog, Menu, MenuItem, app } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
@@ -10,9 +10,12 @@ import { codeServerService } from '../services/code-server';
 import { getBundledUIUrl } from '../services/custom-protocol';
 
 import { keychain } from '../keychain';
-import { Logger } from '../services/logger/pre-enrollment-logger';
+import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
+import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
+import { safeRecordMetric } from '../services/telemetry';
+import type { Counter } from '@opentelemetry/api';
 
 let mainWindow: BrowserWindow | null = null;
 let isCompactMode = false;
@@ -41,75 +44,45 @@ export async function loadApp(window: BrowserWindow) {
     log.info("[WindowManager] MTLS Identity Present:", mtls);
 
     if (!mtls) {
-      try{
-        const targetUrl = config.MTLS_FRONTEND_URL;
-        log.info('[WindowManager] Loading MTLS frontend:', targetUrl);
-        Logger.info(EnrollmentEvent.MTLS_FRONTEND_LOAD, {
-          url: targetUrl,
-          has_certificate: false,
-        });
-        void loadUrl(window, targetUrl);
-        return;
-      }
-      catch(error){
-        Logger.logError(EnrollmentEvent.MTLS_FRONTEND_LOAD_FAILED, error);
-      }
-    } else {
-      // Certificate exists, validate it before loading dashboard
-      log.info('[WindowManager] Validating certificate health');
-      const validationWindow = new BrowserWindow({
-        show: false,  // Keep it hidden
-        webPreferences: {
-          nodeIntegration: false,
-          contextIsolation: true,
-          preload: path.join(__dirname, '..', 'preload.js'),
-        },
+      const targetUrl = config.MTLS_FRONTEND_URL;
+      Logger.info(EnrollmentEvent.MTLS_FRONTEND_LOAD, {
+        url: targetUrl,
+        has_certificate: false,
       });
-
-      try {
-        const healthUrl = `${config.BACKEND_URL}/api/health`;
-        log.info('[WindowManager] Loading health check URL for certificate validation:', healthUrl);
-        await validationWindow.loadURL(healthUrl);
-        
-        Logger.info(EnrollmentEvent.HEALTH_CHECK_SUCCESS, {
-          certificate_exists: true,
-          validation_passed: true,
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        
-        if (isCertificateError(errorMessage)) {
-          Logger.logError(EnrollmentEvent.CERTIFICATE_REVOKED, error, {
-            error_at: 'certificate_validation',
-          });
-          await handleCertificateError({ errorDescription: errorMessage });
-          return; // Don't load dashboard if certificate is invalid
-        } else {
-          Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, {
-            error_at: 'handleCertificateError in loadApp',
-          });
-        }
-      } finally {
-        validationWindow.destroy();
+      void loadUrl(window, targetUrl, mtlsFrontendLoaded);
+      return;
+    } else {
+      const isHealthy = await certificateHealthCheck();
+      if (!isHealthy) {
+        return; // certificateHealthCheck will handle the error case and redirect to enrollment
       }
     }
   }
+      
+  // Enable post-enrollment logging after successful mTLS validation
+  Logger.enablePostEnrollmentLogging();
+
+  safeRecordMetric(() => {
+    enrollmentSkipped.add(1, { 
+      success: 'true',
+      has_certificate: 'true',
+      buildVersion: app.getVersion(),
+    });
+  });
 
   if (config.useBundledUI) {
     const bundledUrl = getBundledUIUrl();
-    log.info('[WindowManager] Loading bundled UI from:', bundledUrl);
     Logger.info(EnrollmentEvent.DASHBOARD_LOAD, {
       url: bundledUrl,
     });
-    void loadUrl(window, bundledUrl);
+    void loadUrl(window, bundledUrl, dashboardLoad);
     return;
   }
   else {
-    log.info('[WindowManager] Loading frontend URL:', config.FRONTEND_URL);
     Logger.info(EnrollmentEvent.DASHBOARD_LOAD, {
       url: config.FRONTEND_URL,
     });
-    void loadUrl(window, config.FRONTEND_URL);
+    void loadUrl(window, config.FRONTEND_URL, dashboardLoad);
     return;
   }
 }
@@ -331,12 +304,65 @@ function setupSpellcheckerContextMenu(window: BrowserWindow): void {
   log.info('[WindowManager] Spellchecker context menu configured');
 }
 
-export async function loadUrl(window: BrowserWindow, url: string): Promise<void> {
+export async function loadUrl(window: BrowserWindow, url: string, counter: Counter): Promise<void> {
   try {
     await window.loadURL(url);
+    safeRecordMetric(() => {
+      counter.add(1, { 
+        success: 'true',
+        buildVersion: app.getVersion(),
+      });
+    });
   } catch (error) {
-    console.error("Failed to load application URL:", error);
+    safeRecordMetric(() => {
+      counter.add(1, { 
+        success: 'false',
+        error: 'url_load_error',
+        buildVersion: app.getVersion(),
+      });
+    });
     const errorPage = path.join(__dirname, '..', '..', 'assets', 'load-error.html');
     void window.loadFile(errorPage);
+  }
+}
+
+export async function certificateHealthCheck() {
+  // Certificate exists, validate it before loading dashboard
+  log.info('[WindowManager] Validating certificate health');
+  const validationWindow = new BrowserWindow({
+    show: false,  // Keep it hidden
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '..', 'preload.js'),
+    },
+  });
+
+  try {
+    const healthUrl = `${config.BACKEND_URL}/api/health`;
+    log.info('[WindowManager] Loading health check URL for certificate validation:', healthUrl);
+    await validationWindow.loadURL(healthUrl);
+    
+    Logger.info(EnrollmentEvent.HEALTH_CHECK_SUCCESS, {
+      certificate_exists: true,
+      validation_passed: true,
+    });
+    return true;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    if (isCertificateError(errorMessage)) {
+      Logger.logError(EnrollmentEvent.CERTIFICATE_REVOKED, error, {
+        error_at: 'certificate_validation',
+      });
+      await handleCertificateError({ errorDescription: errorMessage });
+      return false;
+    } else {
+      Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, {
+        error_at: 'handleCertificateError in loadApp',
+      });
+    }
+  } finally {
+    validationWindow.destroy();
   }
 }
