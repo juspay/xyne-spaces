@@ -7,6 +7,7 @@ export interface LogContext {
   zeroClientId?: string;
   zeroClientGroupId?: string;
   sessionId?: string;
+  clientSessionId?: string;
   email?: string;
 }
 

@@ -35,8 +35,10 @@ export interface WorkerMessage {
     extraFields?: Record<string, unknown> | undefined;
     logs?: LogEntry[] | undefined;
     notificationWsId?: string | undefined;
+    notificationSocketState?: string | undefined;
     zeroClientId?: string | undefined;
     zeroClientGroupId?: string | undefined;
+    zeroSocketState?: string | undefined;
     loggerBaseUrl?: string | undefined;
     flushIntervalInMs?: number | undefined;
     maxBatchSize?: number | undefined;
@@ -129,11 +131,18 @@ class LoggerWorker {
       if (this.notificationWsId !== null) {
         (logEntry as Record<string, unknown>)['notificationWsId'] = this.notificationWsId;
       }
+      if (payload.notificationSocketState !== undefined) {
+        (logEntry as Record<string, unknown>)['notificationSocketState'] =
+          payload.notificationSocketState;
+      }
       if (this.zeroClientID !== null) {
         (logEntry as Record<string, unknown>)['zeroClientId'] = this.zeroClientID;
       }
       if (this.zeroClientGroupID !== null) {
         (logEntry as Record<string, unknown>)['zeroClientGroupId'] = this.zeroClientGroupID;
+      }
+      if (payload.zeroSocketState !== undefined) {
+        (logEntry as Record<string, unknown>)['zeroSocketState'] = payload.zeroSocketState;
       }
 
       console.log(JSON.stringify(logEntry));

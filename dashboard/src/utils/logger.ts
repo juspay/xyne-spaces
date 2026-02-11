@@ -13,6 +13,25 @@ export const LogLevel = {
 
 export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 
+export const NotificationSocketState = {
+  CONNECTED: 'connected',
+  DISCONNECTED: 'disconnected',
+} as const;
+
+export type NotificationSocketState =
+  (typeof NotificationSocketState)[keyof typeof NotificationSocketState];
+
+export const ZeroSocketState = {
+  CONNECTING: 'connecting',
+  CONNECTED: 'connected',
+  DISCONNECTED: 'disconnected',
+  NEEDS_AUTH: 'needs-auth',
+  ERROR: 'error',
+  CLOSED: 'closed',
+} as const;
+
+export type ZeroSocketState = (typeof ZeroSocketState)[keyof typeof ZeroSocketState];
+
 export const Event = {
   API_CALL_SUCCESSFUL: 'api_call_successful',
   API_CALL_FAILED: 'api_call_failed',
@@ -122,6 +141,8 @@ export class Logger implements LoggerConfig {
   zeroClientID?: string | null;
   zeroClientGroupID?: string | null;
   private worker: Worker | null = null;
+  private notificationSocketState: NotificationSocketState = NotificationSocketState.DISCONNECTED;
+  private zeroSocketState: ZeroSocketState = ZeroSocketState.DISCONNECTED;
 
   constructor(config: { platform_name: Platform }) {
     this.sessionId = uuidv4();
@@ -220,6 +241,14 @@ export class Logger implements LoggerConfig {
       });
   }
 
+  setNotificationSocketState(state: NotificationSocketState): void {
+    this.notificationSocketState = state;
+  }
+
+  setZeroSocketState(state: ZeroSocketState): void {
+    this.zeroSocketState = state;
+  }
+
   private postLogMessage(
     level: LogLevel,
     event: EventType,
@@ -229,6 +258,8 @@ export class Logger implements LoggerConfig {
       const payload: WorkerMessage['payload'] = {
         level,
         event,
+        notificationSocketState: this.notificationSocketState,
+        zeroSocketState: this.zeroSocketState,
       };
       if (extraFields !== undefined) {
         payload.extraFields = extraFields;
