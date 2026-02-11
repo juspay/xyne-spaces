@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanelService';
 import { API_BASE_URL } from '../../config';
-import { logger, Logger } from '../../utils/logger';
+import { logger, Logger, NotificationSocketState } from '../../utils/logger';
 import {
   socketConnectionAttemptDuration,
   socketConnectionTotalDuration,
@@ -94,6 +94,8 @@ class WebSocketService {
           logger.setNotificationWsId(this.socket.id);
         }
 
+        logger.setNotificationSocketState(NotificationSocketState.CONNECTED);
+
         logger.info(Logger.Event.WEBSOCKET_CONNECTED, {
           latencyMs: attemptLatency,
           totalLatencyMs: totalLatency,
@@ -132,6 +134,8 @@ class WebSocketService {
         this.isConnected = false;
         this.reconnectionStartTime = Date.now();
         this.connectionPromise = null; // Clear the promise on disconnect
+
+        logger.setNotificationSocketState(NotificationSocketState.DISCONNECTED);
 
         // Track WebSocket disconnection
         const durationMs = this.connectionStartTime ? Date.now() - this.connectionStartTime : 0;
@@ -180,6 +184,8 @@ class WebSocketService {
 
         this.isConnected = false;
         this.connectionPromise = null; // Clear the promise on error
+
+        logger.setNotificationSocketState(NotificationSocketState.DISCONNECTED);
         logger.error(Logger.Event.WEBSOCKET_CONNECTION_FAILED, { reason: error });
 
         safeRecordMetric(() => {
@@ -196,6 +202,8 @@ class WebSocketService {
       // Set up error handlers
       this.socket.on('error', (error: Error) => {
         const errorMessage = error instanceof Error ? error.message : String(error);
+
+        logger.setNotificationSocketState(NotificationSocketState.DISCONNECTED);
         logger.error(Logger.Event.WEBSOCKET_CONNECTION_FAILED, { reason: error });
 
         safeRecordMetric(() => {

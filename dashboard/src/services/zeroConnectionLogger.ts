@@ -1,6 +1,6 @@
 import { useRef, useEffect } from 'react';
 import type { ConnectionState } from '@rocicorp/zero';
-import { logger, Logger } from '../utils/logger';
+import { logger, Logger, ZeroSocketState } from '../utils/logger';
 import {
   zeroSocketConnectionAttemptDuration,
   zeroSocketConnectionTotalDuration,
@@ -28,6 +28,8 @@ export function useZeroConnectionLogger(state: ConnectionState) {
   useEffect(() => {
     switch (state.name) {
       case 'connecting': {
+        logger.setZeroSocketState(ZeroSocketState.CONNECTING);
+
         const attemptLatency = connectionStartTime.current
           ? Date.now() - connectionStartTime.current
           : 0;
@@ -60,6 +62,8 @@ export function useZeroConnectionLogger(state: ConnectionState) {
       }
 
       case 'connected': {
+        logger.setZeroSocketState(ZeroSocketState.CONNECTED);
+
         const attemptLatency = connectionStartTime.current
           ? Date.now() - connectionStartTime.current
           : 0;
@@ -93,6 +97,8 @@ export function useZeroConnectionLogger(state: ConnectionState) {
       }
 
       case 'disconnected': {
+        logger.setZeroSocketState(ZeroSocketState.DISCONNECTED);
+
         const sessionDurationDisconnected = getSessionDuration();
         safeRecordMetric(() => {
           logger.warn(Logger.Event.ZERO_SOCKET_DISCONNECTED, {
@@ -117,6 +123,8 @@ export function useZeroConnectionLogger(state: ConnectionState) {
       }
 
       case 'needs-auth': {
+        logger.setZeroSocketState(ZeroSocketState.NEEDS_AUTH);
+
         const sessionDurationNeedsAuth = getSessionDuration();
         logger.error(Logger.Event.ZERO_SOCKET_AUTH_REQUIRED, {
           reason: state.reason,
@@ -141,6 +149,8 @@ export function useZeroConnectionLogger(state: ConnectionState) {
       }
 
       case 'error': {
+        logger.setZeroSocketState(ZeroSocketState.ERROR);
+
         const errorAttemptLatency = connectionStartTime.current
           ? Date.now() - connectionStartTime.current
           : 0;
@@ -169,6 +179,8 @@ export function useZeroConnectionLogger(state: ConnectionState) {
       }
 
       case 'closed': {
+        logger.setZeroSocketState(ZeroSocketState.CLOSED);
+
         const sessionDurationClosed = getSessionDuration();
         logger.info(Logger.Event.ZERO_SOCKET_CONNECTION_CLOSED, {
           reason: state.reason,
