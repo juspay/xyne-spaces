@@ -1,3 +1,10 @@
+## [1.38.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.37.0...v1.38.0) (2026-02-11)
+
+
+### Features
+
+* add retrieval for attachment search ([e6f7beb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e6f7beb9b1e1a294d0f25f809dcab770cf660136)), closes [#3035](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3035)
+
 ## [1.37.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.36.0...v1.37.0) (2026-02-11)
 
 
