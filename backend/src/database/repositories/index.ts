@@ -6,6 +6,16 @@ export {
   WorkflowRepository,
   WorkflowExecutionRepository
 } from './workflows';
+export {
+  stitchExecutionState,
+  stitchExecutionStateMany,
+  createExecutionState,
+  updateExecutionState,
+  deleteExecutionState,
+  upsertExecutionState,
+  getExecutionState,
+  type WorkflowExecutionWithState,
+} from './workflowExecutionStateUtils';
 export { TicketRepository } from './ticketRepository';
 export { WorkflowStepRepository } from './workflowSteps';
 export { AgentStepRepository } from './agentSteps';

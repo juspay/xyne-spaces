@@ -14,6 +14,14 @@ import {
   QueryOptions,
 } from '@/types/database';
 import { TicketStatusV2 } from '@prisma/client';
+import {
+  stitchExecutionState,
+  stitchExecutionStateMany,
+  createExecutionState,
+  updateExecutionState,
+  deleteExecutionState,
+  WorkflowExecutionWithState,
+} from './workflowExecutionStateUtils';
 
 export class TicketRepository extends BaseRepository<Ticket, CreateTicketInput, UpdateTicketInput> {
   constructor() {
@@ -170,44 +178,69 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
     super('workflowExecution');
   }
 
-  async create(data: CreateWorkflowExecutionInput): Promise<WorkflowExecution> {
-    return await this.db.workflowExecution.create({
-      data,
+  async create(data: CreateWorkflowExecutionInput & { context?: string | null; output?: string | null }): Promise<WorkflowExecutionWithState> {
+    // Extract context and output from data (they go to state table)
+    const { context, output, ...executionData } = data as any;
+    
+    const execution = await this.db.workflowExecution.create({
+      data: executionData,
     });
+
+    // Create state record with context and output
+    if (context !== undefined || output !== undefined) {
+      await createExecutionState(execution.id, context, output);
+    }
+
+    return { ...execution, context: context ?? null, output: output ?? null };
   }
 
-  async findById(id: string): Promise<WorkflowExecution | null> {
-    return await this.db.workflowExecution.findUnique({
+  async findById(id: string): Promise<WorkflowExecutionWithState | null> {
+    const execution = await this.db.workflowExecution.findUnique({
       where: { id },
     });
+    return stitchExecutionState(execution);
   }
 
-  async findMany(options?: QueryOptions): Promise<WorkflowExecution[]> {
+  async findMany(options?: QueryOptions): Promise<WorkflowExecutionWithState[]> {
     const { skip, take, orderBy, where } = options || {};
 
-    return await this.db.workflowExecution.findMany({
+    const executions = await this.db.workflowExecution.findMany({
       skip,
       take,
       orderBy,
       where,
     });
+    return stitchExecutionStateMany(executions);
   }
 
-  async update(id: string, data: UpdateWorkflowExecutionInput): Promise<WorkflowExecution> {
-    return await this.db.workflowExecution.update({
+  async update(id: string, data: UpdateWorkflowExecutionInput & { context?: string | null; output?: string | null }): Promise<WorkflowExecutionWithState> {
+    // Extract context and output from data (they go to state table)
+    const { context, output, ...executionData } = data as any;
+    
+    const execution = await this.db.workflowExecution.update({
       where: { id },
-      data,
+      data: executionData,
     });
+
+    // Update state record if context or output provided
+    if (context !== undefined || output !== undefined) {
+      await updateExecutionState(id, { context, output });
+    }
+
+    return stitchExecutionState(execution) as Promise<WorkflowExecutionWithState>;
   }
 
   async delete(id: string): Promise<WorkflowExecution> {
+    // Delete state first
+    await deleteExecutionState(id);
+    
     return await this.db.workflowExecution.delete({
       where: { id },
     });
   }
 
-  async findFullExecution(id: string): Promise<FullWorkflowExecution | null> {
-    return await this.db.workflowExecution.findUnique({
+  async findFullExecution(id: string): Promise<(FullWorkflowExecution & { context: string | null; output: string | null }) | null> {
+    const execution = await this.db.workflowExecution.findUnique({
       where: { id },
       include: {
         workflow: true,
@@ -216,9 +249,10 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
         workflowSteps: true,
       },
     });
+    return stitchExecutionState(execution);
   }
 
-  async findByStatus(status: string, workflowType?: string, limit?: number): Promise<WorkflowExecution[]> {
+  async findByStatus(status: string, workflowType?: string, limit?: number): Promise<WorkflowExecutionWithState[]> {
     const whereClause: any = { status }
     
     if (workflowType) {
@@ -231,7 +265,7 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
       ]
     }
     
-    return await this.db.workflowExecution.findMany({
+    const executions = await this.db.workflowExecution.findMany({
       where: whereClause,
       include: {
         workflow: true,
@@ -240,19 +274,21 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
       orderBy: { createdAt: 'asc' },
       take: limit,
     });
+    return stitchExecutionStateMany(executions);
   }
 
-  async findByWorkflowId(workflowId: string): Promise<WorkflowExecution[]> {
-    return await this.db.workflowExecution.findMany({
+  async findByWorkflowId(workflowId: string): Promise<WorkflowExecutionWithState[]> {
+    const executions = await this.db.workflowExecution.findMany({
       where: { workflowId },
       include: {
         workflowSteps: true,
       },
     });
+    return stitchExecutionStateMany(executions);
   }
 
-  async findPendingExecutions(): Promise<WorkflowExecution[]> {
-    return await this.db.workflowExecution.findMany({
+  async findPendingExecutions(): Promise<WorkflowExecutionWithState[]> {
+    const executions = await this.db.workflowExecution.findMany({
       where: {
         status: {
           in: ['NEW', 'PENDING', 'SCHEDULED'],
@@ -262,13 +298,15 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
         createdAt: 'asc',
       },
     });
+    return stitchExecutionStateMany(executions);
   }
 
-  async findChildExecutions(parentId: string): Promise<WorkflowExecution[]> {
-    return await this.db.workflowExecution.findMany({
+  async findChildExecutions(parentId: string): Promise<WorkflowExecutionWithState[]> {
+    const executions = await this.db.workflowExecution.findMany({
       where: {
         parentWorkflowExecutionId: parentId,
       },
     });
+    return stitchExecutionStateMany(executions);
   }
 }

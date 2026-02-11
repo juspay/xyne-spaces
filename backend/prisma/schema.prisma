@@ -470,6 +470,17 @@ model WorkflowExecution {
   @@schema("public")
 }
 
+model WorkflowExecutionState {
+  id                  String  @id @default(cuid())
+  workflowExecutionId String  @unique
+  context             String? // For child executions - initial context (JSON)
+  output              String? // Execution-specific output (typed result)
+
+  @@index([workflowExecutionId])
+  @@map("workflow_execution_states")
+  @@schema("workflow")
+}
+
 model WorkflowExecutionLock {
   id                  String   @id @default(cuid())
   workflowExecutionId String   @unique

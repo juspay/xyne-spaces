@@ -1,6 +1,7 @@
 import { Workflow, WorkflowExecution, WorkflowStep } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import {logger} from '@/utils/logger';
+import { getExecutionState } from './workflowExecutionStateUtils';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -296,7 +297,9 @@ export class WorkflowRepository {
 
     // Extract gitInfo from the execution's steps
     // const gitInfo = this.extractGitInfoFromSteps(execution.workflowSteps)
-    const gitInfoFromOutput = execution.output ? this.extractGitInfoFromSteps([JSON.parse(execution.output)]) : null;;
+    // Fetch state (context/output) for this execution
+    const executionState = await getExecutionState(execution.id);
+    const gitInfoFromOutput = executionState.output ? this.extractGitInfoFromSteps([JSON.parse(executionState.output)]) : null;;
 
     // Return in same format as getCombinedWorkflowStepsLightWithMetadata (with workflows array)
     // This ensures frontend can use the same parsing logic
@@ -312,7 +315,7 @@ export class WorkflowRepository {
         sourceStepsId: execution.sourceStepsId,
         createdAt: execution.createdAt,
         updatedAt: execution.updatedAt,
-        output: execution.output ? JSON.parse(execution.output) : null,
+        output: executionState.output ? JSON.parse(executionState.output) : null,
         steps: processedSteps,
         executionMetadata: executionMetadata,
         // Git info for diff view (only available if baseCommitHash exists)
@@ -337,7 +340,6 @@ export class WorkflowRepository {
             createdAt: true,
             updatedAt: true,
             workflowId: true,
-            output: true,
             workflowSteps: {
               select: {
                 id: true,
@@ -367,21 +369,34 @@ export class WorkflowRepository {
 
     if (!workflows || workflows.length === 0) return null;
 
-    // Build lookup maps
+    // Fetch all execution states for the executions
+    const allExecutionIds = workflows.flatMap(w => w.workflowExecutions.map(e => e.id));
+    const states = await prisma.workflowExecutionState.findMany({
+      where: { workflowExecutionId: { in: allExecutionIds } }
+    });
+    const stateMap = new Map(states.map(s => [s.workflowExecutionId, s]));
+
+    // Build lookup maps (with state stitched in)
     const allExecutions = new Map();
     const stepsByExecution = new Map();
     const executionsBySourceStep = new Map();
 
     workflows.forEach(workflow => {
-      workflow.workflowExecutions.forEach(execution => {
-        allExecutions.set(execution.id, execution);
+      workflow.workflowExecutions.forEach((execution: any) => {
+        const state = stateMap.get(execution.id);
+        const executionWithState = {
+          ...execution,
+          context: state?.context ?? null,
+          output: state?.output ?? null,
+        };
+        allExecutions.set(execution.id, executionWithState);
         stepsByExecution.set(execution.id, execution.workflowSteps);
 
         if (execution.parentWorkflowExecutionId && execution.sourceStepsId) {
           if (!executionsBySourceStep.has(execution.sourceStepsId)) {
             executionsBySourceStep.set(execution.sourceStepsId, []);
           }
-          executionsBySourceStep.get(execution.sourceStepsId).push(execution);
+          executionsBySourceStep.get(execution.sourceStepsId).push(executionWithState);
         }
       });
     });
@@ -410,7 +425,6 @@ export class WorkflowRepository {
             createdAt: true,
             updatedAt: true,
             workflowId: true,
-            output: true,
             workflowSteps: {
               select: {
                 id: true,
@@ -443,20 +457,33 @@ export class WorkflowRepository {
       return null;
     }
 
-    // Build lookup maps
+    // Fetch all execution states for the executions
+    const allExecutionIds = workflow.workflowExecutions.map(e => e.id);
+    const states = await prisma.workflowExecutionState.findMany({
+      where: { workflowExecutionId: { in: allExecutionIds } }
+    });
+    const stateMap = new Map(states.map(s => [s.workflowExecutionId, s]));
+
+    // Build lookup maps (with state stitched in)
     const allExecutions = new Map();
     const stepsByExecution = new Map();
     const executionsBySourceStep = new Map();
 
-    workflow.workflowExecutions.forEach(execution => {
-      allExecutions.set(execution.id, execution);
+    workflow.workflowExecutions.forEach((execution: any) => {
+      const state = stateMap.get(execution.id);
+      const executionWithState = {
+        ...execution,
+        context: state?.context ?? null,
+        output: state?.output ?? null,
+      };
+      allExecutions.set(execution.id, executionWithState);
       stepsByExecution.set(execution.id, execution.workflowSteps);
 
       if (execution.parentWorkflowExecutionId && execution.sourceStepsId) {
         if (!executionsBySourceStep.has(execution.sourceStepsId)) {
           executionsBySourceStep.set(execution.sourceStepsId, []);
         }
-        executionsBySourceStep.get(execution.sourceStepsId).push(execution);
+        executionsBySourceStep.get(execution.sourceStepsId).push(executionWithState);
       }
     });
 
@@ -517,9 +544,16 @@ export class WorkflowRepository {
         orderBy: { createdAt: 'asc' }
       });
 
+      // Fetch states for agent executions
+      const agentExecutionIds = agentExecutions.map(e => e.id);
+      const agentStates = await prisma.workflowExecutionState.findMany({
+        where: { workflowExecutionId: { in: agentExecutionIds } }
+      });
+      const agentStateMap = new Map(agentStates.map(s => [s.workflowExecutionId, s]));
 
       // Structure the data to match the old enhancedStepDetails format
       const expandedExecutions = agentExecutions.map(execution => {
+        const state = agentStateMap.get(execution.id);
         const executionSteps = execution.workflowSteps.map(execStep => {
           // Parse step data if it exists
           let parsedData = null;
@@ -540,7 +574,7 @@ export class WorkflowRepository {
         return {
           executionId: execution.id,
           status: execution.status,
-          output: execution.output,
+          output: state?.output ?? null,
           steps: executionSteps,
           isFromAgentExecution: true,
           parentStepName: step.stepName

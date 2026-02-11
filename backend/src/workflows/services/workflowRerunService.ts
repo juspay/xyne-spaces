@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { WorkflowRepository } from '@/database/repositories/workflowRepository';
 import { WorkflowExecutionStatus } from '@/workflows/types/workflow-enums';
+import { createExecutionState, getExecutionState } from '@/database/repositories/workflowExecutionStateUtils';
 
 interface RerunResult {
   rerunExecutionId: string;
@@ -62,19 +63,23 @@ export class WorkflowRerunService {
     }
 
     // Create rerun from start with updated context
+    const contextString = typeof updatedContext === 'string' 
+      ? updatedContext 
+      : JSON.stringify(updatedContext);
+    
     const rerunExecution = await this.db.workflowExecution.create({
       data: {
         workflow: { connect: { id: workflow.id } },
         workflowType: rootExecution.workflowType,
-        context: typeof updatedContext === 'string' 
-          ? updatedContext 
-          : JSON.stringify(updatedContext),
         status: WorkflowExecutionStatus.PENDING,
         tag: 'rerun',
         parentWorkflowExecution: { connect: { id: rootExecution.id } },
         sourceStepsId: null // NULL = rerun from start
       }
     });
+
+    // Create state with context
+    await createExecutionState(rerunExecution.id, contextString, null);
 
     return {
       rerunExecutionId: rerunExecution.id,
@@ -117,18 +122,23 @@ export class WorkflowRerunService {
     // Use root execution for context and as parent
     const executionToUse = rootExecution;
 
+    // Get the context from the state table
+    const executionState = await getExecutionState(executionToUse.id);
+
     // Create rerun execution with tag='rerun', sourceStepsId=null (indicates rerun from start)
     const rerunExecution = await this.db.workflowExecution.create({
       data: {
         workflow: { connect: { id: executionToUse.workflowId } },
         workflowType: executionToUse.workflowType,
-        context: executionToUse.context,
         status: WorkflowExecutionStatus.PENDING,
         tag: 'rerun',
         parentWorkflowExecution: { connect: { id: executionToUse.id } },
         sourceStepsId: null // NULL indicates rerun from start (no specific restore point)
       }
     });
+
+    // Create state with context from source execution
+    await createExecutionState(rerunExecution.id, executionState.context, null);
 
     const usedRootExecution = executionToUse.id !== sourceExecution.id;
 
