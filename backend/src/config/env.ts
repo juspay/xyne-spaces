@@ -44,6 +44,9 @@ const envSchema = Joi.object({
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   // Zoho Integration
   ZOHO_AUTO_WORKFLOW_ENABLED: Joi.boolean().default(true),
+  // SAM Service Configuration
+  SAM_BASE_URL: Joi.string().uri().default(''),
+  SAM_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
   LIVEKIT_API_KEY: Joi.string().default(''),
   LIVEKIT_API_SECRET: Joi.string().default(''),
@@ -206,6 +209,10 @@ export const config = {
     : [],
   zoho: {
     autoWorkflowEnabled: envVars.ZOHO_AUTO_WORKFLOW_ENABLED,
+  },
+  sam: {
+    baseUrl: envVars.SAM_BASE_URL,
+    apiKey: envVars.SAM_API_KEY,
   },
   livekit: {
     apiKey: envVars.LIVEKIT_API_KEY,

@@ -83,6 +83,8 @@ import testAuthRoutes from '@/routes/testAuth';
 import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
 import commitAnalysisRoutes from '@/routes/commitAnalysis';
+import meetCallbackRoutes from '@/routes/meetCallback';
+import { verifySamCallback } from '@/middleware/samCallbackAuth';
 import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
@@ -191,6 +193,9 @@ export class App {
 
     this.app.use('/api/health', healthRoutes);
     this.app.use('/api/email', emailRoutes);
+
+    // Meet callback route (API key auth - called by SAM service)
+    this.app.use('/api/meet', verifySamCallback, meetCallbackRoutes);
 
     // Bundle serving routes (public, no auth required - frontend static assets)
     this.app.use('/api/bundles', bundleRoutes);

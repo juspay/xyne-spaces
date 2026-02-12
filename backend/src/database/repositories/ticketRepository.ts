@@ -400,6 +400,30 @@ export class TicketRepository {
     });
   }
   /**
+   * Find ticket by conversation ID with minimal fields for meet callback
+   */
+  async findByConversationIdForMeet(conversationId: string) {
+    return await prisma.ticket.findFirst({
+      where: { conversationId },
+      select: { xyneId: true, metadata: true },
+    });
+  }
+
+  /**
+   * Find ticket by xyneId with minimal fields for meet callback
+   */
+  async findByXyneIdForMeet(xyneId: string) {
+    return await prisma.ticket.findFirst({
+      where: { xyneId },
+      select: {
+        id: true,
+        conversationId: true,
+        title: true,
+      },
+    });
+  }
+
+  /**
    * Get human-readable action text for PR event
    * @private
    */

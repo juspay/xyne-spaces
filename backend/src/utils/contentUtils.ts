@@ -1,5 +1,16 @@
 import { convert } from 'html-to-text';
-import {logger} from '@/utils/logger';
+import DOMPurify from 'isomorphic-dompurify';
+import { logger } from '@/utils/logger';
+
+/**
+ * Sanitize text to prevent XSS by stripping all HTML tags
+ * Uses DOMPurify with no allowed tags for maximum security
+ * Use this for user-generated content that should be plain text
+ */
+export function sanitizeHtml(text: string): string {
+  if (!text) return '';
+  return DOMPurify.sanitize(text, { ALLOWED_TAGS: [] });
+}
 
 /**
  * Converts HTML content to plain text for search indexing
