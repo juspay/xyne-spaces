@@ -334,10 +334,15 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                   >
                     <button
                       type='button'
-                      className='relative flex w-full cursor-pointer select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors hover:bg-gray-200 rounded text-gray-900 text-left'
-                      onClick={() => handleSelect(option.value)}
+                      disabled={option.disabled}
+                      className={`relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left ${
+                        option.disabled
+                          ? 'cursor-not-allowed opacity-50 text-gray-400'
+                          : 'cursor-pointer text-gray-900 hover:bg-gray-200'
+                      }`}
+                      onClick={() => !option.disabled && handleSelect(option.value)}
                       onKeyDown={(e): void => {
-                        if (e.key === 'Enter' || e.key === ' ') {
+                        if ((e.key === 'Enter' || e.key === ' ') && !option.disabled) {
                           e.preventDefault();
                           handleSelect(option.value);
                         }

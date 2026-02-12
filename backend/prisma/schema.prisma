@@ -111,6 +111,9 @@ enum ActivityType {
   USER_GROUP_ID
   PR_REVIEWER
   QA
+  STAGE_CHANGE_REQUEST
+  STAGE_CHANGE_APPROVED
+  STAGE_CHANGE_REJECTED
   @@schema("public")
 }
 
@@ -1768,6 +1771,7 @@ enum FormFieldType {
 enum FormContextType {
   BOARD
   RELEASE_CHANGE
+  STAGE
   @@schema("public")
 }
 
@@ -1855,6 +1859,7 @@ model FormEntityValues {
   entityId        String   // ID of the entity (e.g., ticketId, userId, etc.)
   entityType      String   // Type of entity (e.g., "TICKET", "USER", etc.)
   fieldId         String   // Reference to FormFieldsMapping.id
+  contextId       String?  // Context ID (e.g., stageId) for scoping values per context
   fieldValue      String   // Value stored as String (backward compatibility)
   actualFieldValue Json?   // Value stored as Json for structured data (parse based on fieldType)
   createdAt       DateTime @default(now())
@@ -1862,7 +1867,7 @@ model FormEntityValues {
 
   @@index([entityId, entityType])
   @@index([fieldId])
-  @@unique([entityId, entityType, fieldId]) // One value per field per entity
+  @@unique([entityId, entityType, fieldId, contextId]) // One value per field per entity per context
   @@map("form_entity_values")
   @@schema("public")
 }
@@ -1914,7 +1919,18 @@ model Merchant {
 }
 
 
+model StageApprovers {
+  id                   String       @id @default(cuid())
+  userId               String
+  stageId              String       // Stage ID (no FK constraint)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime?    @updatedAt
 
+  @@unique([stageId, userId])
+  @@index([stageId])
+  @@map("stage_approvers")
+  @@schema("public")
+}
 
 // ============================================================================
 // RELEASE MANAGEMENT MODELS
@@ -2036,3 +2052,31 @@ model ReleaseChangeType {
   @@schema("public")
 }
 
+enum TicketStageRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+
+  @@schema("public")
+}
+
+model TicketStageRequest {
+  id              String                    @id @default(cuid())
+  ticketId        String
+  stageId         String
+  formId          String?
+  status          TicketStageRequestStatus @default(DRAFT)
+  submittedBy     String
+  reviewedBy      String?
+  updatedBy       String
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@index([ticketId])
+  @@index([stageId])
+  @@index([formId])
+  @@unique([ticketId, stageId])
+  @@map("ticket_stage_requests")
+  @@schema("public")
+}

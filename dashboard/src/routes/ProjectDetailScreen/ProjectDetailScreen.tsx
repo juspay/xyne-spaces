@@ -68,18 +68,30 @@ const ProjectDetailScreen = (): ReactElement => {
       projectId?: string;
       metadata?: ReadonlyJSONValue;
       stages?: Array<{
+        id?: string;
         name: string;
         eta: number;
         sequenceNumber: number;
         defaultTicketStatusV2?: string;
         prStatuses?: PRStatusEvent[];
+        formId?: string;
       }>;
       formIds?: string[] | null;
+      stageFormMappings?: Array<{
+        stageId: string;
+        formId: string;
+        mappingId: string;
+      }>;
+      stageApprovers?: Array<{
+        stageId: string;
+        approverIds: string[];
+      }>;
     },
   ): Promise<void> => {
+    // Preserve existing stage IDs, only generate new IDs for stages without one
     const stageIds = data.stages?.reduce(
       (acc, stage) => {
-        acc[stage.sequenceNumber] = uuidv4();
+        acc[stage.sequenceNumber] = stage.id || uuidv4();
         return acc;
       },
       {} as Record<string, string>,
@@ -95,6 +107,46 @@ const ProjectDetailScreen = (): ReactElement => {
       },
       {} as Record<string, string>,
     );
+    // Build stageFormMappings using the preserved/new stageIds
+    // Use the stageFormMappings passed from BoardForm, or build from stages if not provided
+    const stageFormMappings: Array<{ stageId: string; formId: string; mappingId: string }> =
+      data.stageFormMappings ||
+      (() => {
+        const mappings: Array<{ stageId: string; formId: string; mappingId: string }> = [];
+        if (data.stages && stageIds) {
+          data.stages.forEach(stage => {
+            if (stage.formId) {
+              const stageId = stage.id || stageIds[stage.sequenceNumber];
+              if (stageId) {
+                mappings.push({
+                  stageId,
+                  formId: stage.formId,
+                  mappingId: uuidv4(),
+                });
+              }
+            }
+          });
+        }
+        return mappings;
+      })();
+
+    // Build stageApprovers with resolved stage IDs
+    // sa.stageId is either:
+    // - The actual stage UUID (for existing stages)
+    // - The sequenceNumber as string (for new stages, which will be looked up in stageIds)
+    const stageApprovers =
+      data.stageApprovers
+        ?.map(sa => {
+          const resolvedStageId = stageIds?.[sa.stageId] || sa.stageId;
+          if (!resolvedStageId) {
+            return null;
+          }
+          return {
+            stageId: resolvedStageId,
+            approverIds: sa.approverIds,
+          };
+        })
+        .filter((sa): sa is { stageId: string; approverIds: string[] } => sa !== null) || [];
 
     const boardMutation = zero.mutate(
       mutators.board.update({
@@ -105,6 +157,8 @@ const ProjectDetailScreen = (): ReactElement => {
         ...(data.stages !== undefined && { stages: data.stages }),
         ...(stageIds !== undefined && { stageIds }),
         ...(prStatusMappingIds !== undefined && { prStatusMappingIds }),
+        ...(stageFormMappings.length > 0 && { stageFormMappings }),
+        ...(stageApprovers.length > 0 && { stageApprovers }),
         timestamp: Date.now(),
       }),
     );

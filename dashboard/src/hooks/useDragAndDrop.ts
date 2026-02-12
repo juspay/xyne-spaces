@@ -1,10 +1,13 @@
 import { useCallback, useState } from 'react';
 import { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
+import { toast } from 'sonner';
 import type { Ticket, TicketStatusV2 } from '@xyne/shared';
+import { TicketStageRequestStatus } from '@xyne/shared';
 import type { Zero } from '@rocicorp/zero';
 import { mutators } from '../zero/mutators';
 import type { Stage } from '../routes/KanbanBoardScreen/KanbanBoardScreen.types';
+import { useAuth } from './useAuth';
 
 interface UseDragAndDropProps {
   localTickets: Ticket[];
@@ -12,7 +15,25 @@ interface UseDragAndDropProps {
   zero: Zero;
   stages: Stage[];
   mode: 'stage' | 'status'; // 'stage' for board view, 'status' for project/all view
-  stagesByBoardMap?: Map<string, Stage[]>; // For board-wise view
+  onStageFormRequired?: (data: {
+    ticket: Ticket;
+    targetStage: Stage;
+    formId: string;
+    hasApprovers: boolean;
+  }) => void;
+  onBackwardStageChange?: (data: {
+    ticket: Ticket;
+    stageName: string;
+    fromSequenceNumber: number;
+    newStatus?: TicketStatusV2;
+  }) => void;
+  stageFormMap?: Map<string, string>; // Map of stageId -> formId
+  stageFormSubmissions?: Array<{
+    id: string;
+    stageId: string;
+    status: TicketStageRequestStatus;
+    formId?: string | null;
+  }>;
 }
 
 export const useDragAndDrop = ({
@@ -21,13 +42,17 @@ export const useDragAndDrop = ({
   zero,
   stages,
   mode,
-  stagesByBoardMap,
+  onStageFormRequired,
+  onBackwardStageChange,
+  stageFormMap = new Map(),
+  stageFormSubmissions = [],
 }: UseDragAndDropProps): {
   activeTicket: Ticket | null;
   handleDragStart: (event: DragStartEvent) => void;
   handleDragEnd: (event: DragEndEvent) => void;
 } => {
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+  const { user: currentUser } = useAuth();
 
   const handleDragStart = useCallback(
     (event: DragStartEvent): void => {
@@ -52,25 +77,135 @@ export const useDragAndDrop = ({
       if (!activeTicket) return;
 
       if (mode === 'stage') {
-        // Board view or board-wise view: Update stageName
+        // Board view: Update stageName
         const newStageId = overTicket?.stageName || over.id;
-
-        // Find target stage in the appropriate stage list
-        let targetStage: Stage | undefined;
-        if (stagesByBoardMap) {
-          // For board-wise view, search across all boards
-          const allBoardStages = Array.from(stagesByBoardMap.values()).flat();
-          targetStage = allBoardStages.find(s => s.id === newStageId || s.name === newStageId);
-        } else {
-          // For single board view
-          targetStage = stages.find(s => s.id === newStageId || s.name === newStageId);
-        }
+        const targetStage = stages.find(s => s.id === newStageId || s.name === newStageId);
 
         const newStageName = targetStage?.name;
         const newStatus = targetStage?.defaultTicketStatusV2;
 
         // Handle moving to a different stage
         if (newStageName && activeTicket.stageName !== newStageName) {
+          const currentStage = stages.find(s => s.name === activeTicket.stageName);
+
+          if (currentStage && targetStage) {
+            // Check if board has any stage with approvers
+            const boardHasStagesWithApproval =
+              stages.some(s => s.approvers && s.approvers.length > 0) ?? false;
+            // Check if board has any stage with forms
+            const boardHasStagesWithForms = stageFormMap.size > 0;
+            // Enforce sequential movement if board has EITHER approvers OR forms
+            const shouldEnforceSequentialMovement =
+              boardHasStagesWithApproval || boardHasStagesWithForms;
+
+            if (shouldEnforceSequentialMovement) {
+              // Check if moving backward
+              const isMovingBackward =
+                targetStage.sequenceNumber !== undefined &&
+                currentStage.sequenceNumber !== undefined &&
+                targetStage.sequenceNumber < currentStage.sequenceNumber;
+
+              if (isMovingBackward) {
+                // Trigger callback to show confirmation dialog
+                onBackwardStageChange?.({
+                  ticket: activeTicket,
+                  stageName: newStageName,
+                  fromSequenceNumber: targetStage.sequenceNumber!,
+                  ...(newStatus !== undefined && { newStatus }),
+                });
+                return;
+              }
+
+              // Forward movement - enforce sequential movement
+              const isNextStage =
+                currentStage.sequenceNumber !== undefined &&
+                targetStage.sequenceNumber === currentStage.sequenceNumber + 1;
+
+              if (!isNextStage) {
+                // Block movement - only sequential forward movement allowed
+                toast.warning('Can only move to next stage in this Board');
+                return;
+              }
+
+              // Check if target stage requires approval (has approvers)
+              const targetStageApprovers = targetStage.approvers;
+              const targetStageFormId = stageFormMap.get(targetStage.id);
+              const hasApprovers = targetStageApprovers && targetStageApprovers.length > 0;
+
+              // CASE 1: Stage has approvers → requires approval (with or without form)
+              if (hasApprovers) {
+                const isApprover =
+                  targetStageApprovers.some(a => a.userId === currentUser?.id) ?? false;
+
+                if (!isApprover) {
+                  // If form exists, open modal for form submission + approval
+                  if (targetStageFormId) {
+                    onStageFormRequired?.({
+                      ticket: activeTicket,
+                      targetStage,
+                      formId: targetStageFormId,
+                      hasApprovers: true,
+                    });
+                    return;
+                  }
+
+                  // No form, create approval request (to be approved from TicketDetails)
+                  const rejectedApproval = stageFormSubmissions?.find(
+                    s =>
+                      s.stageId === targetStage.id &&
+                      s.status === TicketStageRequestStatus.REJECTED &&
+                      !s.formId,
+                  );
+
+                  if (rejectedApproval) {
+                    // Update the rejected request to submitted
+                    void zero.mutate(
+                      mutators.ticketStageRequest.upsert({
+                        id: rejectedApproval.id,
+                        ticketId: activeTicket.id,
+                        stageId: targetStage.id,
+                        status: TicketStageRequestStatus.SUBMITTED,
+                        updatedBy: currentUser?.id || '',
+                        updatedAt: Date.now(),
+                        requestActivityId: crypto.randomUUID(),
+                      }),
+                    );
+                    toast.success('Stage change request resubmitted for approval');
+                  } else {
+                    // Create a new approval request
+                    void zero.mutate(
+                      mutators.ticketStageRequest.upsert({
+                        id: crypto.randomUUID(),
+                        ticketId: activeTicket.id,
+                        stageId: targetStage.id,
+                        status: TicketStageRequestStatus.SUBMITTED,
+                        updatedBy: currentUser?.id || '',
+                        updatedAt: Date.now(),
+                        requestActivityId: crypto.randomUUID(),
+                      }),
+                    );
+                    toast.success('Stage change request submitted for approval');
+                  }
+                  return;
+                }
+              }
+              // CASE 2: Stage has NO approvers → no approval needed
+              else {
+                // If form exists, open modal for form submission only (no approval)
+                if (targetStageFormId) {
+                  onStageFormRequired?.({
+                    ticket: activeTicket,
+                    targetStage,
+                    formId: targetStageFormId,
+                    hasApprovers: false,
+                  });
+                  return;
+                }
+                // No form, directly update stage (no approval needed)
+              }
+            }
+          }
+
           // Update local state immediately for smooth UI
           setLocalTickets(prev =>
             prev.map(t =>
@@ -139,7 +274,18 @@ export const useDragAndDrop = ({
         }
       }
     },
-    [localTickets, setLocalTickets, zero, stages, mode, stagesByBoardMap],
+    [
+      localTickets,
+      setLocalTickets,
+      zero,
+      stages,
+      mode,
+      onStageFormRequired,
+      onBackwardStageChange,
+      stageFormMap,
+      stageFormSubmissions,
+      currentUser,
+    ],
   );
 
   return {

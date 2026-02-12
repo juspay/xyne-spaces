@@ -15,6 +15,8 @@ export interface BoardStageData {
   sequenceNumber: number;
   defaultTicketStatusV2?: TicketStatusV2;
   prStatuses?: PRStatusEvent[];
+  approverIds?: string[];
+  formId?: string; // Optional form for approval
 }
 
 export interface CreateBoardFormData {
@@ -31,6 +33,15 @@ export interface UpdateBoardFormData {
   metadata?: ReadonlyJSONValue;
   stages?: BoardStageData[];
   formIds?: string[] | null;
+  stageFormMappings?: Array<{
+    stageId: string;
+    formId: string;
+    mappingId: string;
+  }>;
+  stageApprovers?: Array<{
+    stageId: string;
+    approverIds: string[];
+  }>;
 }
 
 export type BoardFormData = CreateBoardFormData | UpdateBoardFormData;

@@ -1,12 +1,13 @@
 import { FormContextType, FormEntityType } from '@xyne/shared';
 
 // Available context types
-export const FORM_CONTEXT_TYPES = [FormContextType.BOARD];
+export const FORM_CONTEXT_TYPES = [FormContextType.BOARD, FormContextType.STAGE];
 export type FormContextTypeLocal = FormContextType;
 
 // Mapping of context types to their supported entity types
 export const FORM_ENTITY_TYPES: Partial<Record<FormContextType, readonly FormEntityType[]>> = {
   [FormContextType.BOARD]: [FormEntityType.TICKET, FormEntityType.SUB_TICKET],
+  [FormContextType.STAGE]: [FormEntityType.TICKET],
 };
 
 export type FormEntityTypeLocal = FormEntityType;

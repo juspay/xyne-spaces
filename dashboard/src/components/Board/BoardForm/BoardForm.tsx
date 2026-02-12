@@ -1,11 +1,13 @@
-import { ReactElement, useState, useEffect } from 'react';
+import { ReactElement, useState, useEffect, useRef, useMemo } from 'react';
 import { TextInput, SingleSelect } from '@juspay/blend-design-system';
 import { X } from 'lucide-react';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { Button } from '../../../components/ui/Button';
 import { MultiSelect } from '../../../components/ui/MultiSelect';
+import SearchUser from '../../../components/ui/SearchUser/SearchUser';
 import { type BoardFormProps } from './types';
+import { useUsers } from '../../../hooks/useUsers';
 import BoardFormSelector from '../BoardFormSelector/BoardFormSelector';
 import {
   FormContextType,
@@ -14,10 +16,32 @@ import {
   BoardType,
   type BoardMetadata,
   type TicketFormConfig,
+  type User,
 } from '@xyne/shared';
 import { DEFAULT_STAGES_TEMPLATE } from './templates/defaultStagesTemplate';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { BoardTicketFormConfig, DEFAULT_CONFIG } from '../BoardTicketFormConfig';
+
+// Component to display a single approver chip with user name
+const ApproverChip: React.FC<{
+  userName: string;
+  onRemove: () => void;
+  disabled?: boolean;
+}> = ({ userName, onRemove, disabled }) => {
+  return (
+    <span className='inline-flex items-center gap-1 rounded-md bg-blue-100 px-2 py-0.5 text-xs font-medium text-gray-800'>
+      {userName}
+      <button
+        type='button'
+        onClick={onRemove}
+        className='ml-0.5 rounded-full p-0.5 text-gray-500 hover:bg-gray-300 hover:text-gray-800'
+        disabled={disabled}
+      >
+        <X size={12} />
+      </button>
+    </span>
+  );
+};
 
 interface Stage {
   id?: string;
@@ -27,6 +51,9 @@ interface Stage {
   sequenceNumber: string;
   defaultTicketStatusV2: TicketStatusV2;
   prStatuses?: PRStatusEvent[];
+  approverIds: string[];
+  selectedApprovers: User[];
+  formId?: string | undefined;
 }
 
 type StageTemplateType = 'none' | 'default';
@@ -50,6 +77,8 @@ const createEmptyStage = (sequenceNumber: number): Stage => ({
   sequenceNumber: String(sequenceNumber),
   defaultTicketStatusV2: TicketStatusV2.STARTED,
   prStatuses: [],
+  approverIds: [],
+  selectedApprovers: [],
 });
 
 export const BoardForm = ({
@@ -84,10 +113,21 @@ export const BoardForm = ({
     boardMetadata?.isAllowedToTransfer ?? false,
   );
 
-  // Fetch all BOARD context forms
-  const [forms] = useCachedQuery(
-    queries.getFormsByContextType({ contextType: FormContextType.BOARD }),
+  const [allForms] = useCachedQuery(queries.getAllForms());
+
+  // Memoize forms to prevent infinite re-render loops
+  const forms = useMemo(
+    () => allForms?.filter(f => f.contextType === FormContextType.BOARD) || [],
+    [allForms],
   );
+  const stageForms = useMemo(
+    () => allForms?.filter(f => f.contextType === FormContextType.STAGE) || [],
+    [allForms],
+  );
+
+  // Fetch all users for displaying approver names
+  const allUsers = useUsers();
+  const userMap = useMemo(() => new Map(allUsers.map(u => [u.id, u.name])), [allUsers]);
 
   // Set initial form IDs from mappings
   useEffect(() => {
@@ -158,6 +198,11 @@ export const BoardForm = ({
             readonly prStatus: PRStatusEvent;
             readonly createdAt: number;
           }[];
+          readonly approvers?: readonly {
+            readonly id: string;
+            readonly userId: string;
+            readonly stageId: string;
+          }[];
         }[])
       : [];
 
@@ -166,39 +211,70 @@ export const BoardForm = ({
     !isEdit ? 'none' : 'none',
   );
 
-  // Separate user stages from managed stages when loading board
-  const initialUserStages =
-    boardStages.length > 0
-      ? boardStages.map((s, idx) => ({
-          id: s.id,
-          tempId: Date.now() + idx,
-          name: s.name,
-          eta: String(s.eta),
-          sequenceNumber: String(s.sequenceNumber),
-          defaultTicketStatusV2: s.defaultTicketStatusV2 || TicketStatusV2.STARTED,
-          // Transform prStatusMappings to prStatuses array
-          prStatuses: s.prStatusMappings
-            ? s.prStatusMappings.map((m: { prStatus: PRStatusEvent }) => m.prStatus)
-            : [],
-        }))
-      : [
-          {
-            tempId: Date.now(),
-            name: '',
-            eta: '',
-            sequenceNumber: '1',
-            defaultTicketStatusV2: TicketStatusV2.STARTED,
-            prStatuses: [],
-          },
-        ];
-
-  const [stages, setStages] = useState<Stage[]>(initialUserStages);
+  // Initialize stages state - empty initially
+  const [stages, setStages] = useState<Stage[]>([
+    {
+      tempId: Date.now(),
+      name: '',
+      eta: '',
+      sequenceNumber: '1',
+      defaultTicketStatusV2: TicketStatusV2.STARTED,
+      prStatuses: [],
+      approverIds: [],
+      selectedApprovers: [],
+    },
+  ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch projects using Zero
   const [projects] = useCachedQuery(queries.getAllProjects());
   const loadingProjects = projects === undefined;
+
+  // Track if we've initialized stages from board data to prevent re-syncing
+  const hasInitializedStages = useRef(false);
+
+  // Reset initialization flag when board ID changes (when opening modal for different board)
+  useEffect(() => {
+    if (board?.id) {
+      hasInitializedStages.current = false;
+    }
+  }, [board?.id]);
+
+  // Sync stages with board data ONLY on initial mount (when editing)
+  useEffect(() => {
+    if (isEdit && boardStages.length > 0 && !hasInitializedStages.current) {
+      hasInitializedStages.current = true;
+
+      const loadedStages = boardStages.map((s, idx) => {
+        const mappedForm = stageForms?.find(form =>
+          form.formContextMappings?.some(
+            mapping => mapping.contextId === s.id && mapping.contextType === FormContextType.STAGE,
+          ),
+        );
+
+        // Extract approverIds from s.approvers which contains user data
+        const approverIds = s.approvers?.map(a => a.userId) ?? [];
+
+        return {
+          id: s.id,
+          tempId: Date.now() + idx,
+          name: s.name,
+          eta: String(s.eta),
+          sequenceNumber: String(s.sequenceNumber),
+          defaultTicketStatusV2: s.defaultTicketStatusV2 || TicketStatusV2.STARTED,
+          prStatuses: s.prStatusMappings
+            ? s.prStatusMappings.map((m: { prStatus: PRStatusEvent }) => m.prStatus)
+            : [],
+          approverIds,
+          selectedApprovers: [],
+          formId: mappedForm?.id,
+        };
+      });
+      setStages(loadedStages);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardStages, stageForms]); // Run when board data is available, but ref prevents re-runs
 
   // Sync stages with template selection
   useEffect(() => {
@@ -213,6 +289,8 @@ export const BoardForm = ({
             eta: stage.eta,
             sequenceNumber: stage.sequenceNumber,
             defaultTicketStatusV2: stage.defaultTicketStatusV2,
+            approverIds: [],
+            selectedApprovers: [],
           }));
           const nextSequenceNumber = templateStages.length + 1;
           return [...templateStages, createEmptyStage(nextSequenceNumber)];
@@ -235,12 +313,11 @@ export const BoardForm = ({
         eta: '',
         sequenceNumber: String(nextSequenceNumber),
         defaultTicketStatusV2: TicketStatusV2.STARTED,
+        approverIds: [],
+        selectedApprovers: [],
       },
     ]);
   };
-  useEffect(() => {
-    console.log(stages);
-  }, [stages]);
 
   const removeStage = (index: number): void => {
     if (stages.length === 1) return;
@@ -251,7 +328,7 @@ export const BoardForm = ({
   const updateStage = (
     index: number,
     field: keyof Stage,
-    value: string | TicketStatusV2 | PRStatusEvent[],
+    value: string | TicketStatusV2 | boolean | PRStatusEvent[] | User[] | string[],
   ): void => {
     const newStages = [...stages];
     const currentStage = newStages[index];
@@ -342,8 +419,20 @@ export const BoardForm = ({
               sequenceNumber: number;
               defaultTicketStatusV2: TicketStatusV2;
               prStatuses?: PRStatusEvent[];
+              requiresApproval?: boolean;
+              approverIds?: string[];
+              formId?: string;
             }>;
             formIds?: string[] | null;
+            stageFormMappings?: Array<{
+              stageId: string;
+              formId: string;
+              mappingId: string;
+            }>;
+            stageApprovers?: Array<{
+              stageId: string;
+              approverIds: string[];
+            }>;
           } = {};
 
           if (name.trim() !== board.name) {
@@ -361,6 +450,7 @@ export const BoardForm = ({
             ...boardMetadata,
             ticketFormConfig: ticketFormConfig,
             isAllowedToTransfer: isAllowedToTransfer,
+            hasStagesWithApproval: stages.some(s => s.approverIds.length > 0),
           } as ReadonlyJSONValue;
 
           // Always include stages for update
@@ -371,7 +461,24 @@ export const BoardForm = ({
             sequenceNumber: parseInt(stage.sequenceNumber),
             defaultTicketStatusV2: stage.defaultTicketStatusV2,
             prStatuses: stage.prStatuses || [],
+            approverIds: stage.approverIds ?? [],
+            ...(stage.formId && { formId: stage.formId }),
           }));
+
+          // Collect stageApprovers for stages that require approval
+          // Include stages with empty approverIds to allow deletion of all approvers
+          const stageApprovers = stages
+            .filter(stage => stage.approverIds !== undefined)
+            .map(stage => ({
+              // For existing stages use id, for new stages use sequenceNumber as key
+              // Backend will look up stageIds[sequenceNumber] to get the generated UUID
+              stageId: stage.id || stage.sequenceNumber,
+              approverIds: stage.approverIds,
+            }));
+
+          if (stageApprovers.length > 0) {
+            updateData.stageApprovers = stageApprovers;
+          }
 
           // Include form IDs if they changed
           const currentFormIds =
@@ -389,13 +496,23 @@ export const BoardForm = ({
             const currentSorted = currentFormIds.sort();
 
             if (JSON.stringify(newFormIds) !== JSON.stringify(currentSorted)) {
-              updateData.formIds = newFormIds.length > 0 ? newFormIds : null;
+              if (newFormIds.length > 0) {
+                updateData.formIds = newFormIds;
+              }
             }
           }
 
           await onSubmit(updateData);
         } else {
           // Create mode - send all fields
+          // Collect stageApprovers for stages that have approvers
+          const stageApprovers = stages
+            .filter(stage => stage.approverIds.length > 0)
+            .map(stage => ({
+              stageId: stage.tempId.toString(), // Use tempId as placeholder, will be resolved by backend
+              approverIds: stage.approverIds,
+            }));
+
           await onSubmit({
             name: name.trim(),
             projectId,
@@ -406,7 +523,10 @@ export const BoardForm = ({
               sequenceNumber: parseInt(stage.sequenceNumber),
               defaultTicketStatusV2: stage.defaultTicketStatusV2,
               prStatuses: stage.prStatuses || [],
+              approverIds: stage.approverIds ?? [],
+              ...(stage.formId && { formId: stage.formId }),
             })),
+            ...(stageApprovers.length > 0 && { stageApprovers }),
           });
         }
       } catch (err) {
@@ -584,6 +704,80 @@ export const BoardForm = ({
                         helperText='Tickets will move to this stage when these PR events occur'
                         className='text-xs'
                       />
+                    </div>
+
+                    {/* Approvers Selector */}
+                    <div className='mt-2'>
+                      <p className='block text-xs text-gray-500 mb-1'>Stage Approvers</p>
+
+                      {/* Display existing approvers as removable chips */}
+                      {stage.approverIds && stage.approverIds.length > 0 && (
+                        <div className='flex flex-wrap gap-2 mb-2'>
+                          {stage.approverIds.map(userId => {
+                            const userName = userMap.get(userId) || userId;
+                            return (
+                              <ApproverChip
+                                key={userId}
+                                userName={userName}
+                                onRemove={() => {
+                                  const newApproverIds =
+                                    stage.approverIds?.filter(id => id !== userId) ?? [];
+                                  updateStage(index, 'approverIds', newApproverIds);
+                                }}
+                                disabled={isLoading}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* SearchUser only for adding new approvers */}
+                      <SearchUser
+                        excludeUserIds={stage.approverIds ?? []}
+                        selectedUsers={[]}
+                        onUsersChange={users => {
+                          const newApproverIds = [
+                            ...(stage.approverIds ?? []),
+                            ...users.map(u => u.id),
+                          ];
+                          updateStage(index, 'approverIds', newApproverIds);
+                        }}
+                        placeholder='Search and add approvers...'
+                        label=''
+                        hintText='Search by name or email to add approvers.'
+                        disabled={
+                          isLoading
+                            ? { value: true, reason: 'Cannot add approvers while saving' }
+                            : { value: false }
+                        }
+                      />
+                    </div>
+
+                    {/* Optional Form Selector */}
+                    <div className='mt-2'>
+                      <label
+                        htmlFor={`stage-form-${index}`}
+                        className='block text-xs text-gray-500 mb-1'
+                      >
+                        Optional Form (leave empty for approval only)
+                      </label>
+                      <select
+                        id={`stage-form-${index}`}
+                        value={stage.formId || ''}
+                        onChange={e => {
+                          updateStage(index, 'formId', e.target.value);
+                        }}
+                        disabled={isLoading || !stageForms}
+                        className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+                      >
+                        <option value=''>No form required</option>
+                        {stageForms?.map(form => (
+                          <option key={form.id} value={form.id}>
+                            {form.formName}
+                            {form.formDescription ? ` - ${form.formDescription}` : ''}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                   {stages.length > 1 && (

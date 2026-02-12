@@ -24,7 +24,15 @@ const BoardsScreen = (): ReactElement => {
   const handleCreateBoard = async (data: {
     name?: string;
     projectId?: string;
-    stages?: Array<{ name: string; eta: number; sequenceNumber: number }>;
+    stages?: Array<{
+      name: string;
+      eta: number;
+      sequenceNumber: number;
+      defaultTicketStatusV2?: string;
+      prStatuses?: PRStatusEvent[];
+      approverIds?: string[];
+      formId?: string;
+    }>;
   }): Promise<void> => {
     // Only called in create mode, so we know all fields are present
     await apiInstance.post('/boards', data);
@@ -39,18 +47,31 @@ const BoardsScreen = (): ReactElement => {
       boardType?: BoardType;
       metadata?: ReadonlyJSONValue;
       stages?: Array<{
+        id?: string;
         name: string;
         eta: number;
         sequenceNumber: number;
         defaultTicketStatusV2?: string;
         prStatuses?: PRStatusEvent[];
+        approverIds?: string[];
+        formId?: string | undefined;
       }>;
       formIds?: string[] | null;
+      stageFormMappings?: Array<{
+        stageId: string;
+        formId: string;
+        mappingId: string;
+      }>;
+      stageApprovers?: Array<{
+        stageId: string;
+        approverIds: string[];
+      }>;
     },
   ): void => {
+    // Preserve existing stage IDs, only generate new IDs for stages without one
     const stageIds = data.stages?.reduce(
       (acc, stage) => {
-        acc[stage.sequenceNumber] = uuidv4();
+        acc[stage.sequenceNumber] = stage.id || uuidv4();
         return acc;
       },
       {} as Record<string, string>,
@@ -67,6 +88,24 @@ const BoardsScreen = (): ReactElement => {
       {} as Record<string, string>,
     );
 
+    // Use the stageFormMappings passed from BoardForm, or build from stages if not provided
+    const stageFormMappings: Array<{ stageId: string; formId: string; mappingId: string }> =
+      data.stageFormMappings || [];
+
+    const stageApprovers =
+      data.stageApprovers
+        ?.map(sa => {
+          const resolvedStageId = stageIds?.[sa.stageId] || sa.stageId;
+          if (!resolvedStageId) {
+            return null;
+          }
+          return {
+            stageId: resolvedStageId,
+            approverIds: sa.approverIds,
+          };
+        })
+        .filter((sa): sa is { stageId: string; approverIds: string[] } => sa !== null) || [];
+
     const mutatorArgs = {
       boardId,
       ...(data.name !== undefined && { name: data.name }),
@@ -76,6 +115,8 @@ const BoardsScreen = (): ReactElement => {
       ...(data.stages !== undefined && { stages: data.stages }),
       ...(stageIds !== undefined && { stageIds }),
       ...(prStatusMappingIds !== undefined && { prStatusMappingIds }),
+      ...(stageFormMappings.length > 0 && { stageFormMappings }),
+      ...(stageApprovers.length > 0 && { stageApprovers }),
       timestamp: Date.now(),
     };
 

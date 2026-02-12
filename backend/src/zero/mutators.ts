@@ -23,6 +23,7 @@ import {
   PRStatusEvent,
   UserResponsibility,
   BoardType,
+  TicketStageRequestStatus,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationController } from "@/controllers/conversationController";
@@ -3722,6 +3723,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 sequenceNumber: z.number(),
                 defaultTicketStatusV2: z.string().optional(),
                 prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
+                approverIds: z.array(z.string()).optional(),
+                formId: z.string().optional(),
               })
             )
             .optional(),
@@ -3870,7 +3873,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             // 2. Delete stages that are no longer present
             for (const existingStage of existingStages) {
               if (!incomingStageIds.has(existingStage.id)) {
-                // Delete PR status mappings first
+                // Delete stage approvers first
+                const existingApprovers = await tx.run(
+                  zql.stage_approvers.where('stageId', existingStage.id)
+                );
+                for (const approver of existingApprovers) {
+                  await tx.mutate.stage_approvers.delete({
+                    id: approver.id,
+                  });
+                }
+
+                // Delete PR status mappings
                 const existingMappings = await tx.run(
                   zql.stage_pr_status_mappings.where('stageId', existingStage.id)
                 );
@@ -3884,6 +3897,70 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 await tx.mutate.stages.delete({
                   id: existingStage.id,
                 });
+              }
+            }
+
+            // First, delete all existing STAGE context form mappings for this board
+            for (const stage of existingStages) {
+              const existingMappings = await tx.run(
+                zql.forms_context_mapping
+                  .where('contextId', stage.id)
+                  .where('contextType', FormContextType.STAGE),
+              );
+              for (const mapping of existingMappings) {
+                await tx.mutate.forms_context_mapping.delete({
+                  id: mapping.id,
+                });
+              }
+            }
+
+            // Process formId and approvers from stages array
+            // Get all stages (both existing and newly created)
+            const allStages = await tx.run(zql.stages.where('boardId', boardId));
+            const sequenceToStageId = new Map(allStages.map(s => [String(s.sequenceNumber), s.id]));
+
+            for (const stage of stages) {
+              // Resolve stageId
+              let stageId = stage.id;
+              if (!stageId && stage.sequenceNumber) {
+                stageId = sequenceToStageId.get(String(stage.sequenceNumber));
+              }
+
+              if (!stageId) {
+                continue;
+              }
+
+              // Create form mapping if formId is provided
+              if (stage.formId) {
+                await tx.mutate.forms_context_mapping.insert({
+                  id: `${stageId}-form-mapping`,
+                  contextId: stageId,
+                  contextType: FormContextType.STAGE,
+                  entityType: FormEntityType.TICKET,
+                  formId: stage.formId,
+                });
+              }
+
+              // Delete all existing approvers for this stage
+              const existingApprovers = await tx.run(
+                zql.stage_approvers.where('stageId', stageId),
+              );
+              for (const existing of existingApprovers) {
+                await tx.mutate.stage_approvers.delete({
+                  id: existing.id,
+                });
+              }
+
+              // Insert new approvers if provided
+              if (stage.approverIds && stage.approverIds.length > 0) {
+                for (const approverId of stage.approverIds) {
+                  await tx.mutate.stage_approvers.insert({
+                    id: `${stageId}-${approverId}`,
+                    userId: approverId,
+                    stageId: stageId,
+                    createdAt: now,
+                  });
+                }
               }
             }
           }
@@ -3917,6 +3994,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Delete all stages first
           const stages = await tx.run(zql.stages.where('boardId', boardId));
           for (const stage of stages) {
+            // Delete stage approvers for this stage
+            const approvers = await tx.run(zql.stage_approvers.where('stageId', stage.id));
+            for (const approver of approvers) {
+              await tx.mutate.stage_approvers.delete({
+                id: approver.id,
+              });
+            }
+
             // Delete PR status mappings for this stage
             const mappings = await tx.run(zql.stage_pr_status_mappings.where('stageId', stage.id));
             for (const mapping of mappings) {
@@ -5164,8 +5249,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           fieldId: z.string(),
           newValue: z.array(z.string()),
           timestamp: z.number(),
+          contextId: z.string().optional(),
         }),
-        async ({ tx, args: { id, entityId, entityType, fieldId, newValue, timestamp } }) => {
+        async ({ tx, args: { id, entityId, entityType, fieldId, newValue, timestamp, contextId } }) => {
           // Fetch the form field to determine field type
           const formField = await tx.run(zql.form_fields.where('id', fieldId).one());
 
@@ -5185,6 +5271,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             entityId,
             entityType,
             fieldId,
+            ...(contextId && { contextId }),
             fieldValue: '',
             actualFieldValue,
             createdAt: timestamp,
@@ -5330,5 +5417,240 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
+    ticketStageRequest: {
+      upsert: defineMutator(
+        z.object({
+          id: z.string(),
+          ticketId: z.string(),
+          stageId: z.string(),
+          formId: z.string().optional(),
+          status: z.nativeEnum(TicketStageRequestStatus),
+          updatedBy: z.string(),
+          updatedAt: z.number(),
+          reviewedBy: z.string().optional(),
+          requestActivityId: z.string().optional(),
+          approvedActivityId: z.string().optional(),
+          rejectedActivityId: z.string().optional(),
+        }),
+        async ({
+          tx,
+          args: {
+            id,
+            ticketId,
+            stageId,
+            formId,
+            status,
+            updatedBy,
+            updatedAt,
+            reviewedBy,
+            requestActivityId,
+            approvedActivityId,
+            rejectedActivityId,
+          },
+        }) => {
+          const existingApproval = await tx.run(zql.ticket_stage_requests.where('id', id).one());
+
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          const stage = await tx.run(zql.stages.where('id', stageId).one());
+
+          if (!ticket) {
+            throw new Error('Ticket not found');
+          }
+          if (!stage) {
+            throw new Error('Stage not found');
+          }
+
+          // Get actor name for activity messages
+          const actor = await tx.run(zql.users.where('id', updatedBy).one());
+
+          // Prepare payload - preserve immutable fields from existing record
+          const payload = {
+            id,
+            ticketId,
+            stageId,
+            ...(formId && { formId }),
+            status,
+            updatedBy,
+            updatedAt,
+            ...(existingApproval
+              ? {
+                  submittedBy: existingApproval.submittedBy,
+                  createdAt: existingApproval.createdAt,
+                }
+              : {
+                  submittedBy: updatedBy,
+                  createdAt: updatedAt,
+                }),
+            ...(reviewedBy !== undefined && { reviewedBy }),
+          };
+
+          // Upsert ticket stage request
+          await tx.mutate.ticket_stage_requests.upsert(payload);
+
+          // Handle activities based on whether this is create or update
+          if (!existingApproval && requestActivityId) {
+            // Create message for approval request
+            const actorName = actor?.name || 'Someone';
+            const hasForm = !!formId;
+            const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
+
+            await tx.mutate.messages.insert({
+              messageId: requestActivityId,
+              conversationId: ticket.conversationId,
+              senderId: updatedBy,
+              content: `${actorName} ${actionText} ${stage.name}`,
+              msgType: MessageType.SYSTEM,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: false,
+              showInChannel: false,
+              createdAt: payload.createdAt,
+              metadata: {
+                activityType: ActivityType.STAGE_CHANGE_REQUEST,
+                isTicketActivity: true,
+                fromStage: ticket.stageName,
+                toStage: stage.name,
+                hasForm,
+              },
+            });
+          } else if (
+            status === TicketStageRequestStatus.SUBMITTED &&
+            existingApproval?.status === TicketStageRequestStatus.REJECTED &&
+            requestActivityId
+          ) {
+            // Resubmitting a rejected request - create a new message
+            const actorName = actor?.name || 'Someone';
+            const hasForm = !!formId;
+            const actionText = hasForm ? 'resubmitted the form for' : 'resubmitted the approval request for';
+
+            await tx.mutate.messages.insert({
+              messageId: requestActivityId,
+              conversationId: ticket.conversationId,
+              senderId: updatedBy,
+              content: `${actorName} ${actionText} ${stage.name}`,
+              msgType: MessageType.SYSTEM,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: false,
+              showInChannel: false,
+              createdAt: updatedAt,
+              metadata: {
+                activityType: ActivityType.STAGE_CHANGE_REQUEST,
+                isTicketActivity: true,
+                fromStage: ticket.stageName,
+                toStage: stage.name,
+                hasForm,
+                isResubmission: true,
+              },
+            });
+          } else if (
+            status === TicketStageRequestStatus.APPROVED &&
+            existingApproval?.status !== TicketStageRequestStatus.APPROVED &&
+            approvedActivityId
+          ) {
+            // If status changed to approved, move ticket to the stage
+            await tx.mutate.tickets.update({
+              id: ticket.id,
+              stageName: stage.name,
+              ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+              updatedAt,
+            });
+
+            // Create message for approval
+            const actorName = actor?.name || 'Someone';
+            const hasForm = !!formId;
+            const actionText = hasForm ? 'approved the form for' : 'approved the stage change to';
+
+            await tx.mutate.messages.insert({
+              messageId: approvedActivityId,
+              conversationId: ticket.conversationId,
+              senderId: updatedBy,
+              content: `${actorName} ${actionText} ${stage.name}`,
+              msgType: MessageType.SYSTEM,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: false,
+              showInChannel: false,
+              createdAt: updatedAt,
+              metadata: {
+                activityType: ActivityType.STAGE_CHANGE_APPROVED,
+                isTicketActivity: true,
+                stageName: stage.name,
+                hasForm,
+              },
+            });
+          } else if (
+            status === TicketStageRequestStatus.REJECTED &&
+            existingApproval?.status !== TicketStageRequestStatus.REJECTED &&
+            rejectedActivityId
+          ) {
+            // Create message for rejection
+            const actorName = actor?.name || 'Someone';
+            const hasForm = !!formId;
+            const actionText = hasForm ? 'rejected the form for' : 'rejected the stage change to';
+
+            await tx.mutate.messages.insert({
+              messageId: rejectedActivityId,
+              conversationId: ticket.conversationId,
+              senderId: updatedBy,
+              content: `${actorName} ${actionText} ${stage.name}`,
+              msgType: MessageType.SYSTEM,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: false,
+              showInChannel: false,
+              createdAt: updatedAt,
+              metadata: {
+                activityType: ActivityType.STAGE_CHANGE_REJECTED,
+                isTicketActivity: true,
+                stageName: stage.name,
+                hasForm,
+              },
+            });
+          }
+        },
+      ),
+    },
+    cleanupStageApprovals: defineMutator(
+      z.object({
+        ticketId: z.string(),
+        fromSequenceNumber: z.number(),
+      }),
+      async ({ tx, args: { ticketId, fromSequenceNumber } }) => {
+        // Get all stages for this ticket's board
+        const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+        if (!ticket) {
+          throw new Error('Ticket not found');
+        }
+
+        const boardStages = await tx.run(zql.stages.where('boardId', ticket.boardId));
+        const stagesToDelete = boardStages.filter(s => s.sequenceNumber > fromSequenceNumber);
+
+        if (stagesToDelete.length === 0) {
+          return;
+        }
+
+        const stageIdsToDelete = stagesToDelete.map(s => s.id);
+
+        // Delete ticket stage requests for stages being moved past
+        const requestsToDelete = await tx.run(
+          zql.ticket_stage_requests
+            .where('ticketId', ticketId)
+            .where(({ or, cmp }) =>
+              or(
+                ...stageIdsToDelete.map(stageId => cmp('stageId', stageId)),
+              ),
+            ),
+        );
+
+        for (const request of requestsToDelete) {
+          await tx.mutate.ticket_stage_requests.delete({ id: request.id });
+        }
+      },
+    ),
   });
 }

@@ -171,10 +171,9 @@ export const groupTicketsByStage = (
       return;
     }
 
+    // Match ticket to stage by name (case-insensitive)
     const matchingStage = stages.find(
-      s =>
-        s.name.toLowerCase() === ticket.stageName?.toLowerCase() ||
-        s.id === ticket.stageName?.toLowerCase().replace(/\s+/g, '_'),
+      s => s.name.toLowerCase() === ticket.stageName?.toLowerCase(),
     );
 
     const stageId = matchingStage?.id || stages[0]?.id || 'backlog';
