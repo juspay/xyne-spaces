@@ -1,3 +1,17 @@
+## [1.41.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.40.1...v1.41.0) (2026-02-12)
+
+
+### Features
+
+* : Added attachment support in xyne ai ([fca8508](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fca8508e15ca4df5012d679b92e9ca85119ace17)), closes [#2477](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2477)
+* Add ticket search as filter ([2efd374](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2efd3741f45d8261f2e18169e9911dc86801558d)), closes [#2982](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2982)
+* stage maker checker ([6760796](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/67607963d090aa10c10d2af2e05f3753e3e5c5df)), closes [#2732](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2732)
+
+
+### Bug Fixes
+
+* Removed expanded ticket view for mobile cases ([ea8baa2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ea8baa27f7dcfe9025ec9e6538d21306b3408011)), closes [#3062](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3062)
+
 ## [1.40.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.40.0...v1.40.1) (2026-02-11)
 
 
