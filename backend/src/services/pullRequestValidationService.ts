@@ -5,7 +5,7 @@ import { logger } from '@/utils/logger';
 
 // Bitbucket PR validation configuration constants
 const BITBUCKET_PR_CONFIG = {
-  PR_TITLE_PATTERN: /^XYNE-(\d+):/,
+  PR_TITLE_PATTERN: /^XYNE-\s*(\d+)\s*:/,
   ERROR_MESSAGES: {
     INVALID_FORMAT: 'PR title must follow format: XYNE-####: description',
     TICKET_NOT_FOUND: (ticketId: string) => `Ticket ${ticketId} does not exist`,
@@ -64,7 +64,8 @@ export class PullRequestValidationService {
     const permission = this.checkBuildStatusPermission(authorEmail || '');
     try {
       logger.debug(`[PR-Validation] Validating PR ${prId}: ${prTitle}`);
-      const ticketIdMatch = prTitle.match(BITBUCKET_PR_CONFIG.PR_TITLE_PATTERN);
+      const normalizedTitle = prTitle.trim();
+      const ticketIdMatch = normalizedTitle.match(BITBUCKET_PR_CONFIG.PR_TITLE_PATTERN);
       
       if (!ticketIdMatch) {
         const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.INVALID_FORMAT;
