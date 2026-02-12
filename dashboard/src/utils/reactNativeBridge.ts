@@ -96,6 +96,7 @@ export const NativeInboundMessageType = nativeInboundMessageTypeValues;
 
 const nativeOutboundMessageTypeValues = {
   WEB_APP_READY: 'WEB_APP_READY',
+  WEB_ROUTE_READY: 'WEB_ROUTE_READY',
   REQUEST_GOOGLE_SIGN_IN: 'REQUEST_GOOGLE_SIGN_IN',
   WEB_SIGN_OUT: 'WEB_SIGN_OUT',
   AUTH_STATE_SYNC: 'AUTH_STATE_SYNC',
@@ -275,6 +276,9 @@ type ReactNativeOutboundPayloadMap = {
   WEB_APP_READY: {
     path: string;
     version: string;
+  };
+  WEB_ROUTE_READY: {
+    path: string;
   };
   REQUEST_GOOGLE_SIGN_IN: {
     reason?: string;
@@ -491,6 +495,10 @@ class ReactNativeBridge {
     payload: ReactNativeOutboundPayloadMap[typeof NativeOutboundMessageType.SAVE_FILE_TO_DEVICE],
   ): boolean {
     return this.send(NativeOutboundMessageType.SAVE_FILE_TO_DEVICE, payload);
+  }
+
+  notifyRouteReady(path: string): boolean {
+    return this.send(NativeOutboundMessageType.WEB_ROUTE_READY, { path });
   }
   // LiveKit native bridge methods
   livekitConnect(payload: LiveKitConnectPayload): boolean {
