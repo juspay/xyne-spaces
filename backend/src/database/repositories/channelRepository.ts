@@ -207,12 +207,16 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async getDMChannel(userId1: string, userId2: string): Promise<Channel | null> {
-    // For DM channels, we create a name using sorted user IDs
+    // Self-DM: channel name is stored as single userId, scopeType DM
+    if (userId1 === userId2) {
+      return await this.db.channel.findFirst({
+        where: { name: userId1, scopeType: ChannelScopeType.DM },
+      });
+    }
+    // For 1:1 DM channels, name is sorted user IDs joined by comma
     const name = [userId1, userId2].sort().join(",");
     return await this.db.channel.findFirst({
-      where: {
-       name: name
-      }
+      where: { name },
     });
   }
 

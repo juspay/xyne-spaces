@@ -11,7 +11,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { useUserSearch } from '../../../hooks/useUsers';
 
 interface SearchUserProps {
-  excludeUserIds: string[];
+  excludeUserIds?: string[];
   selectedUsers: User[];
   onUsersChange: (users: User[]) => void;
   placeholder?: string;
@@ -26,7 +26,7 @@ interface SearchUserProps {
 }
 
 export const SearchUser: React.FC<SearchUserProps> = ({
-  excludeUserIds,
+  excludeUserIds = [],
   selectedUsers,
   onUsersChange,
   placeholder = 'Search and add users...',
@@ -70,7 +70,8 @@ export const SearchUser: React.FC<SearchUserProps> = ({
 
       // Exclude users that are already selected or in the exclude list
       const isExcluded =
-        excludeUserIds.includes(user.id) || selectedUsers.some(selected => selected.id === user.id);
+        excludeUserIds?.includes(user.id) ||
+        selectedUsers.some(selected => selected.id === user.id);
 
       return !isExcluded;
     });

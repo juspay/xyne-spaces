@@ -60,7 +60,8 @@ export const DmListItem = ({
   const getPreviewText = (): string => {
     if (!lastMessage) return 'No messages yet';
 
-    const prefix = lastMessage.senderId === context.userID ? 'You: ' : '';
+    const isSelfDm = avatarUserId === context.userID;
+    const prefix = lastMessage.senderId === context.userID && !isSelfDm ? 'You: ' : '';
 
     // Handle forwarded messages - content is XML, need to parse it
     if (
