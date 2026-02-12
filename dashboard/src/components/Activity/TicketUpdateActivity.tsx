@@ -123,7 +123,9 @@ export const TicketUpdateActivity = ({
   const ticketIdValue = activity.ticketId || activity.actionSourceId;
   const config = getActivityConfig(activity.actorAction);
 
-  const targetPath = `/chat/activity/${ticket.channelId}?tab=tickets&ticketId=${ticketIdValue}&conversationId=${ticket.conversationId}`;
+  // On mobile: will navigate to minimized view with details tab
+  // On desktop: will navigate to tab-based route in ConversationPannel
+  const targetPath = `/chat/activity/${ticket.channelId}/${ticket.conversationId}/${ticketIdValue}?selectedTab=details`;
 
   const isPRAction = activity.actorAction.startsWith('ticket_pr_');
   const expandedContent = (

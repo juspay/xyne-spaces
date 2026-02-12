@@ -24,8 +24,9 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
     return null;
   }
 
-  // Use path-based route format for ticket navigation
-  const targetPath = `/chat/dir/${activity.channelId || ticket?.conversation?.channelId}/${ticket?.conversationId}/${activity.actionSourceId}?selectedTab=details`;
+  // On mobile: will navigate to minimized view with details tab
+  // On desktop: will navigate to tab-based route in ConversationPannel
+  const targetPath = `/chat/activity/${activity.channelId || ticket?.conversation?.channelId}/${ticket?.conversationId}/${activity.actionSourceId}?selectedTab=details`;
 
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
