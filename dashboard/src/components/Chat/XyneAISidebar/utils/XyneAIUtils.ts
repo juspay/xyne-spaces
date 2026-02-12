@@ -194,7 +194,11 @@ export function parseStreamingContent(content: string): StreamingParsedContent {
     // JSON format parsing (legacy)
     const summaryMatch = cleaned.match(/"summary"\s*:\s*"([^"]*)(")?/);
     if (summaryMatch && summaryMatch[1]) {
-      summary = summaryMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      summary = summaryMatch[1]
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/\\`/g, '`')
+        .replace(/\\\\/g, '\\');
     }
 
     const keypointsMatch = cleaned.match(/"keypoints"\s*:\s*"([^"]*)(")?/);
@@ -202,6 +206,7 @@ export function parseStreamingContent(content: string): StreamingParsedContent {
       const keypointsStr = keypointsMatch[1]
         .replace(/\\n/g, '\n')
         .replace(/\\"/g, '"')
+        .replace(/\\`/g, '`')
         .replace(/\\\\/g, '\\');
 
       const points = keypointsStr
