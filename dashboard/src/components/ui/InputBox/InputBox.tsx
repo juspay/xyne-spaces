@@ -1027,7 +1027,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
                             content || allAttachments.length > 0
                               ? 'bg-primary text-white hover:bg-primary/90'
-                              : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-50'
+                              : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-80'
                           }`}
                           aria-label='Send message'
                           data-testid='send-message-button'

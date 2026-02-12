@@ -41,7 +41,6 @@ import { Accordion } from 'radix-ui';
 import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
 import ChannelCommandMenu from './ChannelCommandMenu';
-import { useShortcutById } from '../../../shortcuts';
 import { useUnreadThreadsCount } from '../../../hooks/useUnreadThreadsCount';
 
 const ChatDirectory = ({
@@ -64,11 +63,6 @@ const ChatDirectory = ({
 
   // Get unread counts for all channels (for DMs)
   const unreadCounts = useAllUnreadCount();
-
-  // Keyboard shortcut for composing new message (opens DM modal)
-  useShortcutById('message.compose', () => {
-    setShowAddDmForm(true);
-  });
 
   const createChannelMutation = useMutation({
     mutationFn: (data: CreateChannelFormData) => channelService.createChannel(data),
@@ -175,8 +169,11 @@ const ChatDirectory = ({
     createChannelMutation.mutate(data);
   };
 
+  // only use drawer/modal for mobile view otherwise change route
   const handleAddDirectMessage = (): void => {
-    setShowAddDmForm(true);
+    if (isMobile) {
+      setShowAddDmForm(true);
+    } else void navigate(`/chat/search?mode=dm`);
   };
 
   const handleAddDmSubmit = (data: CreateDmFormData): void => {

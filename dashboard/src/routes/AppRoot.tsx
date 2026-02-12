@@ -1,4 +1,4 @@
-import { createBrowserRouter, Outlet, useLocation } from 'react-router-dom';
+import { createBrowserRouter, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import SplashScreen from './SplashScreen/SplashScreen';
 import ProtectedRoute from '../components/Auth/ProtectedRoute';
 import { useActivityTracker } from '../hooks/useActivityTracker';
@@ -85,9 +85,15 @@ const AppRoot = (): ReactElement => {
   const xyneAILeftPanelRef = useRef<ImperativePanelHandle>(null);
   const xyneAIRightPanelRef = useRef<ImperativePanelHandle>(null);
 
+  const navigate = useNavigate();
+
   // Shortcuts help modal state
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));
+  useShortcutById(
+    'global.composeMessage',
+    () => void navigate('/chat/search?mode=dm', { replace: true }),
+  );
 
   // Set panel refs when component mounts
   useEffect(() => {
