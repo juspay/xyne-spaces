@@ -1365,36 +1365,42 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               }
             }}
           >
-            <p
-              ref={descriptionRef}
-              className={cn(
-                'whitespace-pre-wrap text-gray-700 break-words text-sm',
-                !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
-              )}
-            >
-              <RenderMessageWithHTML message={ticket.description || ''} />
-            </p>
-            {!showFullDescription && needsReadMore && (
-              <button
-                className='text-xs font-semibold cursor-pointer self-start underline py-1'
-                onClick={event => {
-                  event.stopPropagation();
-                  setShowFullDescription(true);
-                }}
-              >
-                Read More
-              </button>
-            )}
-            {showFullDescription && (
-              <button
-                className='text-xs font-semibold cursor-pointer self-start underline py-1'
-                onClick={event => {
-                  event.stopPropagation();
-                  setShowFullDescription(false);
-                }}
-              >
-                View Less
-              </button>
+            {!ticket.description ? (
+              <p className='text-sm text-gray-400 italic'>Add description</p>
+            ) : (
+              <>
+                <p
+                  ref={descriptionRef}
+                  className={cn(
+                    'whitespace-pre-wrap text-gray-700 break-all text-sm',
+                    !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
+                  )}
+                >
+                  <RenderMessageWithHTML message={ticket.description} />
+                </p>
+                {!showFullDescription && needsReadMore && (
+                  <button
+                    className='text-xs font-semibold cursor-pointer self-start underline py-1'
+                    onClick={event => {
+                      event.stopPropagation();
+                      setShowFullDescription(true);
+                    }}
+                  >
+                    Read More
+                  </button>
+                )}
+                {showFullDescription && (
+                  <button
+                    className='text-xs font-semibold cursor-pointer self-start underline py-1'
+                    onClick={event => {
+                      event.stopPropagation();
+                      setShowFullDescription(false);
+                    }}
+                  >
+                    View Less
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}
