@@ -68,18 +68,6 @@ When('I click on {string}', async function (this: CustomWorld, selector: string)
   await this.page.click(selector);
 });
 
-When('I click on the id {string}', async function (this: CustomWorld, testId: string) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  uiLogger.info(`[UI] Clicking on id: ${testId}`);
-
-  const element = this.page.locator(`[id="${testId}"]`).first();
-  await element.waitFor({ state: 'visible', timeout: 10000 });
-  await element.click();
-
-  uiLogger.info(`[UI] Clicked on id: ${testId}`);
-});
-
 When('I click on text {string}', async function (this: CustomWorld, text: string) {
   if (!this.page) throw new Error('Browser not initialized');
 
@@ -141,7 +129,7 @@ When(
     uiLogger.info(`[UI] Clicking on first button in: ${selector}`);
 
     const container = this.page.locator(selector).first();
-    await container.waitFor({ state: 'visible', timeout: 10000 });
+    await container.waitFor({ state: 'visible' });
 
     let firstButton = container.locator('button').first();
 

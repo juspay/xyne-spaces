@@ -11,8 +11,9 @@ Feature: Create Ticket from Channel Tickets Tab with Attachment
 
   @ticket-from-tickets-tab-with-attachment
   Scenario: Create a ticket from Tickets tab with attachment
-    When I click on the channel Tickets tab
-    When I click on Create Ticket button in Tickets tab
+    When I click on "[data-testid='channel-tab-tickets']"
+    And I click on "[data-testid='kanban-create-ticket-button']"
+    And I wait for "[data-testid='ticket-title-input']" to appear
     And I type "Design Mockup Review Required" on the element "[data-testid='ticket-title-input']"
     And I type "Please review the attached design mockups for the new dashboard" on the element "[data-testid='ticket-description-input']"
     And I attach a test file to the ticket
@@ -20,6 +21,5 @@ Feature: Create Ticket from Channel Tickets Tab with Attachment
     And I click on text "Medium" in the element "[data-testid='ticket-priority-selector-options']"
     And I click on "[data-testid='ticket-status-selector']"
     And I click on text "Todo" in the element "[data-testid='ticket-status-selector-options']"
-    And I select a workflow if available
     And I click on "[data-testid='ticket-submit-button']"
-    And I wait for "[data-testid='create-ticket-modal']" to disappear
+    And I wait for "[data-testid='ticket-title-input']" to disappear

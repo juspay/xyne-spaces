@@ -32,6 +32,7 @@ export function EndCallModal({
       onClose={onClose}
       title='End the call or just leave?'
       subtitle="You can just leave the call if you don't want to end it for everyone else"
+      testId='end-call-modal'
       buttons={[
         {
           label: 'Just leave the call',

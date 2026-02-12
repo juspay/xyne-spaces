@@ -29,6 +29,7 @@ BeforeAll(async function () {
   const browserType = config.browser;
   cucumberLogger.info(`Launching Global Browser: ${browserType}\n`);
   const launcher = getBrowserLauncher(browserType);
+
   scope.browser = await launcher.launch({
     headless: config.headless,
   });

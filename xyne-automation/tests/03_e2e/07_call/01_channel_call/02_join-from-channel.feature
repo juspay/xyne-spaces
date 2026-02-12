@@ -11,7 +11,7 @@ Feature: Join Call from Channel
     And I wait for "[data-testid='chat-list-loading']" to disappear
     And I should see "A call is going on" in the element "[data-testid='virtuoso-item-list']"
     And I click on "[data-testid='start-call-button']"
-    Then I should see the element "[data-testid='call-window']"
+    Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"
     And I click on "[data-testid='end-call-button']"
     Then I should not see "[data-testid='call-window']"
@@ -23,7 +23,7 @@ Feature: Join Call from Channel
     And I wait for "[data-testid='chat-list-loading']" to disappear
     And I should see "A call is going on" in the element "[data-testid='virtuoso-item-list']"
     And I click on "[data-testid='join-button']"
-    Then I should see the element "[data-testid='call-window']"
+    Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"
     And I click on "[data-testid='end-call-button']"
     Then I should not see "[data-testid='call-window']"

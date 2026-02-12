@@ -24,7 +24,6 @@ Feature: Ticket Creation with Attachments E2E Flow
     And I click on text "user:user2-browser.name" in the element "[data-testid='ticket-assignee-selector-options']"
     And I click on "[data-testid='ticket-priority-selector']"
     And I click on text "High" in the element "[data-testid='ticket-priority-selector-options']"
-    And I select a workflow if available
     And I click the button with text "Create Ticket"
-    And I wait for "[data-testid='create-ticket-modal']" to disappear
+    And I wait for "[data-testid='ticket-title-input']" to disappear
 
