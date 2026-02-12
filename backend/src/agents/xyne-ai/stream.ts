@@ -2,10 +2,11 @@
  * Xyne AI Streaming Execution
  */
 
-import type { Message } from '@xynehq/jaf';
+import type { Message, Attachment } from '@xynehq/jaf';
 import { Streaming } from '@xynehq/jaf';
 
 import { logger } from '../../utils/logger.js';
+import { config } from '../../config/env.js';
 
 import {
   sessionStore,
@@ -17,6 +18,7 @@ import {
 import { getAndClearSessionMappings, type MessageMappings, type StreamProvider, type StreamEventCallback } from './tools/index.js';
 import { createOnEventHandler } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
+import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
 
 import type {
   XyneAIRequest,
@@ -152,39 +154,61 @@ export interface XyneAIStreamRequest extends XyneAIRequest {
 export async function* xyneAIStream(
   request: XyneAIStreamRequest
 ): AsyncGenerator<XyneAIStreamChunk, void, unknown> {
-  const { query, sessionId, channelIds, conversationId, userId, currentTimestamp, onStreamEvent, researchContext } = request;
-  
+  const { query, sessionId, channelIds, conversationId, userId, currentTimestamp, attachments, onStreamEvent, researchContext } = request;
+
   const timestamp = currentTimestamp || getCurrentTimestamp();
   const source: 'thread' | 'channel' = conversationId ? 'thread' : 'channel';
-  
+
   const sessionContext: SessionContext = {channelIds, userId };
   const { session, isNewSession } = await getOrCreateSession(sessionId, sessionContext);
-  
-  logger.info(`[XyneAI] [${session.sessionId}] Starting query. isNew: ${isNewSession}, source: ${source}`);
-  
-  // Store user message
-  const updatedSessionAfterUser = await sessionStore.addUserMessage(session.sessionId, query, timestamp);
+
+  logger.info(`[XyneAI] [${session.sessionId}] Starting query. isNew: ${isNewSession}, source: ${source}, attachments: ${attachments?.length || 0}`);
+
+  yield { type: 'start', sessionId: session.sessionId, isNewSession };
+
+  // Store user message with attachments
+  const updatedSessionAfterUser = await sessionStore.addUserMessage(session.sessionId, query, timestamp, attachments);
   if (!updatedSessionAfterUser) {
     logger.error(`[XyneAI] [${session.sessionId}] Failed to add user message - session not found`);
     yield { type: 'error', error: 'Session not found' };
     yield { type: 'end' };
     return;
   }
-  
+
   // Get history BEFORE the current user message (exclude the one we just added)
   const historyMessages = formatHistoryForJAF(updatedSessionAfterUser.history.slice(0, -1));
-  
+
+  // Convert attachments to JAF format
+  let jafAttachments: Attachment[] = [];
+
+  try {
+    jafAttachments = convertAttachmentsToJAF(attachments);
+  } catch (error) {
+    logger.error(`[XyneAI] [${session.sessionId}] Failed to convert attachments:`, error);
+    yield {
+      type: 'error',
+      error: `Failed to process attachments: ${error instanceof Error ? error.message : 'Unknown error'}`
+    };
+    yield { type: 'end' };
+    return;
+  }
+
   // Convert history messages to JAF Message format (content must be string)
   const messages: Message[] = [
     ...historyMessages.map(msg => ({
       role: msg.role as 'user' | 'assistant',
       content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+      ...(msg.role === 'user' && msg.attachments ? { attachments: msg.attachments } : {}),
     })),
-    { role: 'user' as const, content: query },
+    {
+      role: 'user' as const,
+      content: query,
+      ...(jafAttachments.length > 0 && { attachments: jafAttachments }),
+    },
   ];
   
   const streamProvider = getStreamProvider();
-  
+
   const agentContext = {
     channelIds,
     conversationId,
@@ -202,9 +226,22 @@ export async function* xyneAIStream(
       userNameToId: new Map<string, string>(),
     },
   };
-  
+
+  const LITELLM_API_KEY = config.litellm.apiKey;
+  const MODEL_NAME = 'kimi-latest';
+  const VISION_MODEL_NAME = 'kimi-latest';
+
+  // Determine which model to use based on attachments
+  // Only use vision model for images; documents/files are converted to text by JAF
+  const hasImageAttachment = attachments?.some(att => att.mime_type?.startsWith('image/'));
+
+  const modelName = hasImageAttachment ? VISION_MODEL_NAME : MODEL_NAME;
+  const apiKey = LITELLM_API_KEY;
+
+  logger.info(`[XyneAI] [${session.sessionId}] Using model: ${modelName} (hasImageAttachment: ${hasImageAttachment})`);
+
   const onEventHandler = createOnEventHandler();
-  const runStream = await createAgentRunner(source, agentContext, messages, onEventHandler);
+  const runStream = await createAgentRunner(source, agentContext, messages, modelName, apiKey, onEventHandler);
   
   let accumulatedContent = '';
   let currentTraceId: string | undefined;

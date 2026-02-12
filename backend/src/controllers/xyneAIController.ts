@@ -10,6 +10,17 @@ import { researchAgentService } from '@/services/researchAgentService';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
+// Validate base64 string
+const isValidBase64 = (str: string): boolean => {
+  if (!str || str.length === 0) return false;
+  // Base64 regex: only allows valid base64 characters (A-Z, a-z, 0-9, +, /, =)
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+  if (!base64Regex.test(str)) return false;
+  // Check if length is valid (must be multiple of 4)
+  if (str.length % 4 !== 0) return false;
+  return true;
+};
+
 // Research context schema - selected product or repository from frontend
 const ResearchContextSchema = z.object({
   type: z.enum(['product', 'repository']),
@@ -25,6 +36,13 @@ const XyneAIRequestSchema = z.object({
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   web_search_enabled: z.boolean().optional().default(false), // Enable/disable web search tool, defaults to false
   research_context: ResearchContextSchema.optional().nullable(), // Selected product/repository from frontend
+  attachments: z.array(z.object({
+    data: z.string().min(1, 'Attachment data cannot be empty').refine(isValidBase64, {
+      message: 'Invalid base64 data format',
+    }),
+    mime_type: z.string().min(1, 'MIME type is required'),
+    filename: z.string().optional(),
+  })).optional(),
 });
 
 // Feedback request validation schema
@@ -40,24 +58,25 @@ const FeedbackRequestSchema = z.object({
 export class XyneAIController {
   /**
    * POST /api/xyne-ai
-   * 
+   *
    * Body:
    * - query: string (required)
    * - session_id: string (optional) - UUID for session continuity
    * - channel_id: string (required)
    * - conversation_id: string (optional) - when opened from thread
+   * - attachments: array (optional) - file attachments with base64 data, mime_type, and optional filename
    */
   query = async (req: Request, res: Response): Promise<void> => {
     const parseResult = XyneAIRequestSchema.safeParse(req.body);
     if (!parseResult.success) {
-      res.status(400).json({ 
-        error: 'Invalid input', 
+      res.status(400).json({
+        error: 'Invalid input',
         details: parseResult.error.errors.map(e => ({ field: e.path.join('.'), message: e.message }))
       });
       return;
     }
 
-    const { query, session_id, channel_ids, conversation_id, web_search_enabled, research_context } = parseResult.data;
+    const { query, session_id, channel_ids, conversation_id, web_search_enabled, research_context, attachments } = parseResult.data;
 
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -124,6 +143,7 @@ export class XyneAIController {
         channelIds: channel_ids,
         conversationId: conversation_id,
         userId,
+        attachments,
         userInfo,
         webSearchEnabled: web_search_enabled,
         researchContext: research_context || undefined,  // Selected product/repository from frontend

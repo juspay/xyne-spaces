@@ -1,22 +1,45 @@
 /**
  * Types for Xyne AI Session Storage
- * 
+ *
  * Message content structure by role (matches stream events):
  * - user: { query: string, timestamp: string }
  * - tool (input): { type: "tool_input", toolName: string, input: unknown }
  * - tool (output): { type: "tool_output", toolName: string, content: unknown }
  * - assistant: { summary: string, keyPoints: KeyPointWithCitation[] }
+ *
+ * Note: Attachments are no longer stored in the data column.
+ * They are uploaded to GCS and metadata is stored in the attachment column.
  */
 
-export type { Citation, KeyPointWithCitation, XyneAIOutput } from '../types';
+export type { Citation, KeyPointWithCitation, XyneAIOutput, AttachmentData } from '../types';
 
-import type { XyneAIOutput } from '../types';
+import type { XyneAIOutput, AttachmentData } from '../types';
 export type AgentOutput = XyneAIOutput;
 
-// User message content structure
+/**
+ * GCS Attachment Metadata
+ * Stored in WorkflowStep.attachment column as JSON string
+ */
+export interface AttachmentMetadata {
+  attachment_id: string;  // Unique ID for this attachment
+  url: string;            // GCS path (e.g., "attachments/ASKAI/session_abc/...")
+  mime_type: string;      // MIME type (e.g., "image/png")
+  file_name: string;      // Sanitized filename
+  size: number;           // File size in bytes
+}
+
+/**
+ * User message content structure
+ *
+ * Note: attachments are NOT stored in the data column.
+ * They are uploaded to GCS (metadata in attachment column).
+ * When building history, convertMessagesToHistory() fetches them from GCS
+ * and populates this attachments field with base64 data for JAF.
+ */
 export interface UserMessageContent {
   query: string;
   timestamp: string;
+  attachments?: AttachmentData[];  // Populated by fetching from GCS (not from DB)
 }
 
 // User message

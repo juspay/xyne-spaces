@@ -11,6 +11,7 @@
 import { randomUUID } from 'crypto';
 import { db } from '../../../database/client.js';
 import { logger } from '../../../utils/logger.js';
+import type { AttachmentMetadata } from './types.js';
 
 
 const ASK_AI_WORKFLOW_NAME = 'Ask AI';
@@ -32,6 +33,7 @@ export interface MessageData {
   sessionId: string;
   role: XyneAIMessageRole;
   content: unknown;
+  attachment?: AttachmentMetadata[];  // GCS attachment metadata from attachment column
   traceId?: string;
   feedback?: XyneAIFeedback | null;
   createdAt: Date;
@@ -43,7 +45,7 @@ export interface XyneAIMemoryProvider {
   getSession(sessionId: string): Promise<SessionData | null>;
   updateSessionMetadata(sessionId: string, metadata: Record<string, unknown>): Promise<boolean>;
   deleteSession(sessionId: string): Promise<boolean>;
-  addMessage(sessionId: string, role: XyneAIMessageRole, content: unknown, traceId?: string): Promise<MessageData>;
+  addMessage(sessionId: string, role: XyneAIMessageRole, content: unknown, traceId?: string, attachmentMetadata?: AttachmentMetadata[]): Promise<MessageData>;
   getMessages(sessionId: string): Promise<MessageData[]>;
   getRecentMessages(sessionId: string, limit?: number): Promise<MessageData[]>;
   updateMessageFeedback(messageId: string, feedback: XyneAIFeedback | null): Promise<boolean>;
@@ -187,10 +189,17 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     sessionId: string,
     role: XyneAIMessageRole,
     content: unknown,
+    traceId?: string,
+    attachmentMetadata?: AttachmentMetadata[]
   ): Promise<MessageData> => {
     try {
       const messageId = randomUUID();
-      
+
+      // Convert attachment metadata to JSON string for storage
+      const attachmentJson = attachmentMetadata && attachmentMetadata.length > 0
+        ? JSON.stringify(attachmentMetadata)
+        : null;
+
       const step = await db.workflowStep.create({
         data: {
           id: messageId,
@@ -198,6 +207,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
           stepExecutorType: 'agent',
           stepName: role,
           data: JSON.stringify(content),
+          attachment: attachmentJson,
         },
       });
       
@@ -213,6 +223,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
         sessionId,
         role,
         content,
+        traceId,
         createdAt: step.createdAt,
         updatedAt: step.updatedAt,
       };
@@ -222,22 +233,36 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     }
   };
 
-  const parseStepToMessage = (step: { 
-    id: string; 
-    workflowExecutionId: string; 
+  const parseStepToMessage = (step: {
+    id: string;
+    workflowExecutionId: string;
     stepName: string | null;
-    data: string | null; 
-    createdAt: Date; 
+    data: string | null;
+    attachment: string | null;
+    createdAt: Date;
     updatedAt: Date;
   }): MessageData | null => {
     if (!step.data || !step.stepName) return null;
     
     try {
+      // Parse attachment metadata if exists
+      let attachmentMetadata: AttachmentMetadata[] | undefined;
+      if (step.attachment) {
+        try {
+          const parsed = JSON.parse(step.attachment);
+          // Handle both array and single object formats
+          attachmentMetadata = Array.isArray(parsed) ? parsed : [parsed];
+        } catch (error) {
+          logger.warn(`[XyneAIMemoryProvider] Failed to parse attachment metadata for step ${step.id}:`, error);
+        }
+      }
+
       return {
         messageId: step.id,
         sessionId: step.workflowExecutionId,
         role: step.stepName as XyneAIMessageRole,
         content: JSON.parse(step.data),
+        attachment: attachmentMetadata,
         createdAt: step.createdAt,
         updatedAt: step.updatedAt,
       };
@@ -251,6 +276,15 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
       const steps = await db.workflowStep.findMany({
         where: { workflowExecutionId: sessionId, stepExecutorType: 'agent' },
         orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          workflowExecutionId: true,
+          stepName: true,
+          data: true,
+          attachment: true,
+          createdAt: true,
+          updatedAt: true,
+        },
       });
       
       return steps.map(parseStepToMessage).filter((msg): msg is MessageData => msg !== null);
@@ -266,6 +300,15 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
         where: { workflowExecutionId: sessionId, stepExecutorType: 'agent' },
         orderBy: { createdAt: 'desc' },
         take: limit,
+        select: {
+          id: true,
+          workflowExecutionId: true,
+          stepName: true,
+          data: true,
+          attachment: true, 
+          createdAt: true,
+          updatedAt: true,
+        },
       });
       
       return steps.reverse().map(parseStepToMessage).filter((msg): msg is MessageData => msg !== null);

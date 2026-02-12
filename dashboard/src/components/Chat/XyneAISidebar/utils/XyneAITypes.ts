@@ -27,6 +27,12 @@ export interface SummarizerOutput {
   keyPoints: SummarizerKeyPoint[];
 }
 
+export interface MessageAttachment {
+  filename: string;
+  mimeType: string;
+  data: string; // base64 data
+}
+
 export interface Message {
   id: string;
   type: 'user' | 'bot';
@@ -51,4 +57,5 @@ export interface Message {
   isAborted?: boolean; // Flag set when message was aborted due to page reload
   traceId?: string; // Langfuse trace ID for feedback
   feedback?: 0 | 1 | 2; // 0 = no feedback, 1 = like, 2 = dislike
+  attachments?: MessageAttachment[]; // Attachments sent with the message
 }

@@ -1,9 +1,15 @@
 import { useCallback, useRef, useEffect } from 'react';
-import { BASE_URL } from '../../../../services/clients/apiClient';
-import { parsePartialSummarizerJSON } from '../../../../utils/partialJsonParser';
-import type { Message } from '../utils/XyneAITypes';
-import { parseStreamingContent, transformToolOutput } from '../utils/XyneAIUtils';
-import { generateToolInputStatus } from '../utils/toolInputStatus';
+import { BASE_URL } from '../services/clients/apiClient';
+import { parsePartialSummarizerJSON } from '../utils/partialJsonParser';
+import type {
+  Message,
+  MessageAttachment,
+} from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import {
+  parseStreamingContent,
+  transformToolOutput,
+} from '../components/Chat/XyneAISidebar/utils/XyneAIUtils';
+import { generateToolInputStatus } from '../components/Chat/XyneAISidebar/utils/toolInputStatus';
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import type { ResearchContext } from '@xyne/shared';
 
@@ -49,7 +55,7 @@ export const useXyneAIStream = ({
   }, []);
 
   const submitQuery = useCallback(
-    async (query: string): Promise<void> => {
+    async (query: string, attachments: MessageAttachment[] = []): Promise<void> => {
       if (!query.trim()) return;
 
       // Add user message
@@ -58,6 +64,7 @@ export const useXyneAIStream = ({
         type: 'user',
         content: query,
         timestamp: new Date(),
+        ...(attachments.length > 0 && { attachments }),
       };
 
       setMessages(prev => [...prev, userMessage]);
@@ -86,6 +93,14 @@ export const useXyneAIStream = ({
       abortControllerRef.current = abortController;
 
       try {
+        // Format attachments for API
+        const apiAttachments = attachments.map(att => ({
+          data: att.data,
+          // eslint-disable-next-line @typescript-eslint/naming-convention
+          mime_type: att.mimeType,
+          filename: att.filename,
+        }));
+
         // eslint-disable-next-line local-rules/no-fetch-use-axios
         const response = await fetch(`${BASE_URL}/xyne-ai`, {
           method: 'POST',
@@ -109,6 +124,7 @@ export const useXyneAIStream = ({
             research_context: researchContext
               ? { type: researchContext.type, name: researchContext.name }
               : null,
+            ...(apiAttachments.length > 0 && { attachments: apiAttachments }),
           }),
           signal: abortController.signal,
         });
