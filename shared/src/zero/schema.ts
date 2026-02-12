@@ -164,6 +164,9 @@ export enum ActivityType {
   USER_GROUP_ID = 'USER_GROUP_ID',
   PR_REVIEWER = 'PR_REVIEWER',
   QA = 'QA',
+  STAGE_CHANGE_REQUEST = 'STAGE_CHANGE_REQUEST',
+  STAGE_CHANGE_APPROVED = 'STAGE_CHANGE_APPROVED',
+  STAGE_CHANGE_REJECTED = 'STAGE_CHANGE_REJECTED',
 }
 
 // @ts-ignore TS1294
@@ -379,12 +382,14 @@ export enum FormFieldType {
 export enum FormContextType {
   BOARD = 'BOARD',
   RELEASE_CHANGE = 'RELEASE_CHANGE',
+  STAGE = 'STAGE',
 }
 
 // @ts-ignore TS1294
 export enum BoardType {
   DEFAULT = 'DEFAULT',
   RELEASE = 'RELEASE',
+  
 }
 
 // @ts-ignore TS1294
@@ -426,6 +431,14 @@ export enum ReleaseEventType {
   TESTING = 'TESTING',
   SYSTEM = 'SYSTEM',
   CANVAS = 'CANVAS',
+}
+
+// @ts-ignore TS1294
+export enum TicketStageRequestStatus {
+  DRAFT = 'DRAFT',
+  SUBMITTED = 'SUBMITTED',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
 }
 
 // Define tables
@@ -1237,8 +1250,34 @@ export const formEntityValuesTable = table('form_entity_values')
     entityId: string(),
     entityType: string(),
     fieldId: string(),
+    contextId: string().optional(),
     fieldValue: string(),
     actualFieldValue: json().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const stageApproversTable = table('stage_approvers')
+  .columns({
+    id: string(),
+    userId: string(),
+    stageId: string(),
+    createdAt: number(),
+    updatedAt: number().optional(),
+  })
+  .primaryKey('id');
+
+export const ticketStageRequestTable = table('ticket_stage_requests')
+  .columns({
+    id: string(),
+    ticketId: string(),
+    stageId: string(),
+    formId: string().optional(),
+    status: enumeration<TicketStageRequestStatus>(),
+    submittedBy: string(),
+    reviewedBy: string().optional(),
+    updatedBy: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1498,6 +1537,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: ticketActivityTable,
   }),
+  ticketStageRequests: many({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: ticketStageRequestTable,
+  }),
   subTicketMappings: many({
     sourceField: ['id'],
     destField: ['ticketId'],
@@ -1715,6 +1759,16 @@ export const stageTableRelationships = relationships(stageTable, ({ one, many })
     destField: ['stageId'],
     destSchema: stagePRStatusMappingTable,
   }),
+  approvers: many({
+    sourceField: ['id'],
+    destField: ['stageId'],
+    destSchema: stageApproversTable,
+  }),
+  formContextMappings: many({
+    sourceField: ['id'],
+      destField: ['contextId'],
+      destSchema: formContextMappingTable,
+    }),
 }));
 
 export const stagePRStatusMappingTableRelationships = relationships(
@@ -2352,6 +2406,11 @@ export const formContextMappingTableRelationships = relationships(formContextMap
     destField: ['formId'],
     destSchema: formFieldsTable,
   }),
+  stage: one({
+    sourceField: ['contextId'],
+    destField: ['id'],
+    destSchema: stageTable,
+  }),
 }));
 
 export const formFieldsTableRelationships = relationships(formFieldsTable, ({ one, many }) => ({
@@ -2372,6 +2431,14 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
     sourceField: ['fieldId'],
     destField: ['id'],
     destSchema: formFieldsTable,
+  }),
+}));
+
+export const ticketStageRequestTableRelationships = relationships(ticketStageRequestTable, ({ one }) => ({
+  form: one({
+    sourceField: ['formId'],
+    destField: ['id'],
+    destSchema: formTable,
   }),
 }));
 
@@ -2514,6 +2581,8 @@ export const schema = createSchema({
     formContextMappingTable,
     formFieldsTable,
     formEntityValuesTable,
+    stageApproversTable,
+    ticketStageRequestTable,
     dashboardTable,
     queryTable,
     dashboardQueryMappingTable,
@@ -2578,6 +2647,7 @@ export const schema = createSchema({
     formContextMappingTableRelationships,
     formFieldsTableRelationships,
     formEntityValuesTableRelationships,
+    ticketStageRequestTableRelationships,
     dashboardTableRelationships,
     queryTableRelationships,
     dashboardQueryMappingTableRelationships,
@@ -2648,6 +2718,8 @@ export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
 export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
+export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
+export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;
 export type Dashboard = Row<typeof schema.tables.dashboards>;
 export type Query = Row<typeof schema.tables.queries>;
 export type DashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;

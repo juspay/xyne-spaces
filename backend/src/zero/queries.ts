@@ -172,6 +172,7 @@ export const queries = defineQueries({
       .related('referencesIn', (ref) => ref.related('sourceTicket'))
       .related('entity')
       .related('conversation')
+      .related('ticketStageRequests', a => a.related('form'))
       .one();
   }),
 
@@ -482,8 +483,12 @@ export const queries = defineQueries({
     return zql.boards
       .where('projectId', projectId)
       .orderBy('createdAt', 'asc')
-      .related('stages', stagesQuery =>
-        stagesQuery.orderBy('sequenceNumber', 'asc').related('prStatusMappings')
+      .related('stages', (stagesQuery) =>
+        stagesQuery
+          .orderBy('sequenceNumber', 'asc')
+          .related('prStatusMappings')
+          .related('formContextMappings')
+          .related('approvers'),
       )
       .related('formContextMappings', mappingQuery =>
         mappingQuery.related('formFields')
@@ -494,6 +499,8 @@ export const queries = defineQueries({
     zql.stages
       .where('boardId', boardId)
       .orderBy('sequenceNumber', 'asc')
+      .related('approvers')
+      .related('formContextMappings')
   ),
 
   stagesByBoards: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) =>
@@ -595,8 +602,11 @@ export const queries = defineQueries({
     return zql.boards
       .orderBy('createdAt', 'desc')
       .related('project')
-      .related('stages', (stagesQuery) =>
-        stagesQuery.orderBy('sequenceNumber', 'asc')
+      .related('stages', stagesQuery =>
+        stagesQuery
+          .orderBy('sequenceNumber', 'asc')
+          .related('approvers')
+          .related('formContextMappings'),
       );
   }),
 
@@ -895,7 +905,10 @@ export const queries = defineQueries({
     return zql.repos.orderBy('name', 'asc');
   }),
   getAllForms: defineQuery(() => {
-    return zql.forms.orderBy('createdAt', 'desc');
+    return zql.forms
+      .related('formFields')
+      .related('formContextMappings')
+      .orderBy('createdAt', 'desc')
   }),
   // Query for form fields by form ID
   getFormFieldsByFormId: defineQuery(z.object({ formId: z.string() }), ({ args: { formId } }) => {

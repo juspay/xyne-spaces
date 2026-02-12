@@ -37,6 +37,7 @@ import {
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { TicketFiltersDropdown } from '../../components/Tickets/TicketFilters';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
+import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
@@ -45,8 +46,14 @@ import { useDragAndDrop } from '../../hooks/useDragAndDrop';
 import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
-import type { Ticket, FormEntityValues } from '@xyne/shared';
-import { TicketStatusV2, FormFieldType } from '@xyne/shared';
+import type { Ticket, FormEntityValues, TicketStageRequest } from '@xyne/shared';
+import {
+  TicketStatusV2,
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  TicketStageRequestStatus,
+} from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
   getStageColor,
@@ -70,6 +77,8 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useUsers } from '../../hooks/useUsers';
 import { useUserGroups } from '../../hooks/useUserGroup';
 import { stateMachineActor } from '../../machines/stateMachine';
+import { Dialog } from '../../components/ui/Dialog';
+import Button from '../../components/ui/Button';
 
 interface BoardKanbanScreenProps {
   viewMode?: 'my-tickets' | `user-tickets` | 'group-tickets';
@@ -121,6 +130,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
   const [isComfortView, setIsComfortView] = useState(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // Stage form modal state
+  const [stageFormModal, setStageFormModal] = useState<{
+    ticket: Ticket;
+    targetStage: Stage;
+    sourceStageName: string;
+    formId: string;
+    hasApprovers: boolean;
+  } | null>(null);
+
+  // Backward movement confirmation dialog state
+  const [showBackwardConfirmDialog, setShowBackwardConfirmDialog] = useState(false);
+  const [backwardStageChange, setBackwardStageChange] = useState<{
+    stageName: string;
+    fromSequenceNumber: number;
+    newStatus?: TicketStatusV2;
+    ticketId: string;
+  } | null>(null);
 
   // Dynamic grouping options based on form fields
   const groupTickets = (tickets: Ticket[], criterion: GroupByType) => {
@@ -436,10 +463,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       stagesDataForFilteredBoard.forEach(stage => {
         const stageName = stage.name;
         if (!uniqueStagesMap.has(stageName)) {
+          const formId =
+            stage.formContextMappings?.find(
+              (m: { contextType: FormContextType; entityType: FormEntityType; formId: string }) =>
+                m.contextType === FormContextType.STAGE && m.entityType === FormEntityType.TICKET,
+            )?.formId ?? null;
           uniqueStagesMap.set(stageName, {
-            id: stageName.toLowerCase().replace(/\s+/g, '_'),
+            id: stage.id, // Use actual stage UUID
             name: stageName,
             color: getStageColor(stageName),
+            sequenceNumber: stage.sequenceNumber,
+            defaultTicketStatusV2: stage.defaultTicketStatusV2,
+            formId,
+            approvers: stage.approvers,
           });
         }
       });
@@ -454,19 +490,26 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         stagesDataForFilteredBoard.length > 0
       ) {
         // Aggregate unique stages from all boards in the channel's project
-        // Deduplicate by normalized ID to prevent duplicate columns
+        // Deduplicate by name to prevent duplicate columns
         const uniqueStagesById = new Map<string, Stage>();
 
         stagesDataForFilteredBoard.forEach(stage => {
           const stageName = stage.name.trim();
-          const normalizedId = stageName.toLowerCase().replace(/\s+/g, '_');
 
-          // Only add if we haven't seen this ID before (prevents duplicate columns)
-          if (!uniqueStagesById.has(normalizedId)) {
-            uniqueStagesById.set(normalizedId, {
-              id: normalizedId,
+          // Only add if we haven't seen this stage name before (prevents duplicate columns)
+          if (!uniqueStagesById.has(stageName)) {
+            const formId =
+              stage.formContextMappings?.find(
+                (m: { contextType: FormContextType; entityType: FormEntityType; formId: string }) =>
+                  m.contextType === FormContextType.STAGE && m.entityType === FormEntityType.TICKET,
+              )?.formId ?? null;
+            uniqueStagesById.set(stageName, {
+              id: stage.id, // Use actual stage UUID
               name: stageName,
               color: getStageColor(stageName),
+              sequenceNumber: stage.sequenceNumber,
+              defaultTicketStatusV2: stage.defaultTicketStatusV2,
+              formId,
             });
           }
         });
@@ -510,10 +553,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       stagesDataForFilteredBoard.forEach(stage => {
         const stageName = stage.name;
         if (!uniqueStagesMap.has(stageName)) {
+          const formId =
+            stage.formContextMappings?.find(
+              (m: { contextType: FormContextType; entityType: FormEntityType; formId: string }) =>
+                m.contextType === FormContextType.STAGE && m.entityType === FormEntityType.TICKET,
+            )?.formId ?? null;
           uniqueStagesMap.set(stageName, {
-            id: stageName.toLowerCase().replace(/\s+/g, '_'),
+            id: stage.id, // Use actual stage UUID
             name: stageName,
             color: getStageColor(stageName),
+            sequenceNumber: stage.sequenceNumber,
+            defaultTicketStatusV2: stage.defaultTicketStatusV2,
+            formId,
+            approvers: stage.approvers,
           });
         }
       });
@@ -678,6 +730,46 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Fetch all form entity values (cached and used across all boards)
   const [allFormEntityValues] = useCachedQuery(queries.getAllFormEntityValues());
 
+  // Create a map of stageId -> formId for quick lookup (from stages.formId)
+  const stageFormMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (stages) {
+      stages.forEach(stage => {
+        if (stage.formId) {
+          map.set(stage.id, stage.formId);
+        }
+      });
+    }
+    return map;
+  }, [stages]);
+
+  // Extract stage form submissions from tickets (now included via .related('ticketStageApprovals'))
+  const stageFormSubmissions = useMemo(() => {
+    const submissions: Array<{
+      id: string;
+      stageId: string;
+      status: TicketStageRequestStatus;
+      formId?: string | null;
+    }> = [];
+
+    for (const ticket of localTickets) {
+      const requests = (ticket as Ticket & { ticketStageRequests?: TicketStageRequest[] })
+        ?.ticketStageRequests;
+      if (!Array.isArray(requests) || requests.length === 0) continue;
+
+      submissions.push(
+        ...requests.map((request: TicketStageRequest) => ({
+          id: request.id,
+          stageId: request.stageId,
+          status: request.status,
+          formId: request.formId,
+        })),
+      );
+    }
+
+    return submissions;
+  }, [localTickets]);
+
   const tagsByTicketId = useMemo(() => {
     return createTagsByTicketIdMap(allTags);
   }, [allTags]);
@@ -806,6 +898,38 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return map;
   }, [allUserGroups]);
 
+  // Handler for when stage form is required
+  const handleStageFormRequired = useCallback(
+    (data: { ticket: Ticket; targetStage: Stage; formId: string; hasApprovers: boolean }) => {
+      // Find the source stage (current stage of the ticket)
+      const sourceStage = stages.find(s => s.name === data.ticket.stageName);
+      setStageFormModal({
+        ...data,
+        sourceStageName: sourceStage?.name || data.ticket.stageName,
+      });
+    },
+    [stages],
+  );
+
+  // Handler for backward stage change confirmation
+  const handleBackwardStageChange = useCallback(
+    (data: {
+      ticket: Ticket;
+      stageName: string;
+      fromSequenceNumber: number;
+      newStatus?: TicketStatusV2;
+    }) => {
+      setBackwardStageChange({
+        stageName: data.stageName,
+        fromSequenceNumber: data.fromSequenceNumber,
+        ...(data.newStatus !== undefined && { newStatus: data.newStatus }),
+        ticketId: data.ticket.id,
+      });
+      setShowBackwardConfirmDialog(true);
+    },
+    [],
+  );
+
   // Use drag and drop hook
   const dragDropMode = useMemo(() => {
     // For channel tickets: use view type to determine mode
@@ -822,6 +946,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     zero,
     stages,
     mode: dragDropMode,
+    onStageFormRequired: handleStageFormRequired,
+    onBackwardStageChange: handleBackwardStageChange,
+    stageFormMap,
+    stageFormSubmissions,
   });
 
   useEffect(() => {
@@ -1411,6 +1539,74 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           selectedBoardId={firstBoardId}
           onTicketCreated={handleTicketCreated}
         />
+      )}
+
+      {/* Stage Form Modal */}
+      {stageFormModal && (
+        <StageFormModal
+          isOpen={!!stageFormModal}
+          onClose={() => setStageFormModal(null)}
+          ticket={stageFormModal.ticket}
+          targetStage={stageFormModal.targetStage}
+          sourceStageName={stageFormModal.sourceStageName}
+          formId={stageFormModal.formId}
+          hasApprovers={stageFormModal.hasApprovers ?? false}
+          onSuccess={() => {
+            setStageFormModal(null);
+          }}
+        />
+      )}
+
+      {/* Backward movement confirmation dialog */}
+      {backwardStageChange && (
+        <Dialog
+          open={showBackwardConfirmDialog}
+          onOpenChange={setShowBackwardConfirmDialog}
+          title='Confirm Stage Change'
+        >
+          <div className='p-6'>
+            <p className='text-sm text-gray-600 mb-6'>
+              Moving to a previous stage will clear all status change requests for status after this
+              one. These requests will need to be submitted again. Do you want to continue?
+            </p>
+
+            <div className='flex justify-end gap-3'>
+              <Button variant='secondary' onClick={() => setShowBackwardConfirmDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (backwardStageChange) {
+                    // Clean up stage approvals and form entity values for stages being skipped
+                    void zero.mutate(
+                      mutators.cleanupStageApprovals({
+                        ticketId: backwardStageChange.ticketId,
+                        fromSequenceNumber: backwardStageChange.fromSequenceNumber,
+                      }),
+                    );
+
+                    // Directly update the stage for backward movement
+                    void zero.mutate(
+                      mutators.ticket.update({
+                        id: backwardStageChange.ticketId,
+                        stageName: backwardStageChange.stageName,
+                        ...(backwardStageChange.newStatus && {
+                          statusV2: backwardStageChange.newStatus,
+                        }),
+                        updatedAt: Date.now(),
+                      }),
+                    );
+
+                    setShowBackwardConfirmDialog(false);
+                  }
+                }}
+                className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
+              >
+                Confirm
+              </Button>
+            </div>
+          </div>
+        </Dialog>
       )}
     </div>
   );

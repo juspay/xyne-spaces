@@ -17,8 +17,17 @@ import {
   Sparkles,
   Calendar,
   SquareKanban,
+  Eye,
+  AlertCircle,
 } from 'lucide-react';
-import type { SubTicket, TicketReferenceMapping, FormFields, FormEntityValues } from '@xyne/shared';
+import type {
+  SubTicket,
+  Ticket,
+  TicketReferenceMapping,
+  FormFields,
+  FormEntityValues,
+  TicketStageRequest,
+} from '@xyne/shared';
 import {
   TicketPriority,
   TicketStatusV2,
@@ -26,6 +35,7 @@ import {
   FormFieldType,
   FormContextType,
   FormEntityType,
+  TicketStageRequestStatus,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -47,6 +57,7 @@ import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
 import { mutators } from '../../../zero/mutators';
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
+import { useAuth } from '../../../hooks/useAuth';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import {
@@ -56,10 +67,12 @@ import {
 } from '../../../hooks/useTicketReferences';
 import { TicketStatusIcon as TicketStageIcon } from '../TicketStatus/TicketStatusIcon';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
-import { formatETADisplay, getLocalISOString } from '../utils';
+import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
 import { cn } from '../../ui/Drawer';
 import Button from '../../ui/Button';
+import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
+import { StageFormModal } from '../StageFormModal/StageFormModal';
 import Tooltip from '../../ui/Tooltip';
 import WorkflowTriggerModal from '../../Workflow/WorkflowTriggerModal';
 import { SHAREABLE_ORIGIN } from '../../../config';
@@ -75,10 +88,13 @@ const formatTimestamp = (timestamp: number): string => {
 };
 
 interface StageInfo {
+  id: string;
   boardId: string;
   name: string;
   sequenceNumber: number;
-  defaultTicketStatusV2?: string;
+  defaultTicketStatusV2?: TicketStatusV2;
+  approvers?: readonly { userId: string; stageId: string }[];
+  formId?: string | null;
 }
 
 const getStageProgress = (
@@ -128,7 +144,11 @@ interface TicketReferenceWithTicket extends TicketReferenceMapping {
 
 // Type for form entity values with the related form field
 interface FormEntityValueWithField extends FormEntityValues {
-  formField?: FormFields;
+  formField?: FormFields & {
+    form?: {
+      formContextMappings?: Array<{ contextId: string; contextType: string }>;
+    };
+  };
 }
 
 interface TicketDetailsProps {
@@ -188,11 +208,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [mappedTicketId, setMappedTicketId] = useState<string | null>(null);
   const [tagSearchQuery, setTagSearchQuery] = useState('');
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
+  const [stageFormModal, setStageFormModal] = useState<{
+    ticket: typeof ticket;
+    targetStage: StageInfo;
+    sourceStageName: string;
+    formId: string;
+    isReviewer?: boolean;
+    hasApprovers: boolean;
+  } | null>(null);
   const [editingETA, setEditingETA] = useState(false);
   const [etaValue, setETAValue] = useState('');
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [needsReadMore, setNeedsReadMore] = useState(false);
   const descriptionRef = useRef<HTMLDivElement>(null);
+  const [showBackwardConfirmDialog, setShowBackwardConfirmDialog] = useState(false);
+  const [backwardStageChange, setBackwardStageChange] = useState<{
+    stageName: string;
+    fromSequenceNumber: number;
+    newStatus?: TicketStatusV2;
+  } | null>(null);
 
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId }));
@@ -239,11 +273,53 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   // Query all user groups for activity display
   const userGroups = useUserGroups();
+  const { user: currentUser } = useAuth();
 
   // Query stages if ticket has a boardId
   const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: ticket?.boardId ?? '' }), {
     enabled: !!ticket?.boardId,
   });
+
+  // Create a map of stageId -> formId for quick lookup (from stages.formContextMappings)
+  const stageFormMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (stages) {
+      stages.forEach(stage => {
+        if (stage.formContextMappings && stage.formContextMappings.length > 0) {
+          stage.formContextMappings
+            .filter(mapping => mapping.contextType === FormContextType.STAGE)
+            .forEach(mapping => {
+              map.set(mapping.contextId, mapping.formId);
+            });
+        }
+      });
+    }
+    return map;
+  }, [stages]);
+
+  // Create stages array with formId and approvers included
+  const stagesWithFormInfo = useMemo(() => {
+    if (!stages) return [];
+    return stages.map(stage => ({
+      ...stage,
+      formId: stageFormMap.get(stage.id) ?? null,
+    }));
+  }, [stages, stageFormMap]);
+
+  // Check if board has stages with approval (for sequential movement enforcement)
+  const boardHasStagesWithApproval = useMemo(() => {
+    return stages?.some(s => s.approvers && s.approvers.length > 0) ?? false;
+  }, [stages]);
+
+  // Check if board has stages with forms (for sequential movement enforcement)
+  const boardHasStagesWithForms = useMemo(() => {
+    return stageFormMap.size > 0;
+  }, [stageFormMap]);
+
+  // Enforce sequential movement if board has EITHER approvers OR forms
+  const shouldEnforceSequentialMovement = useMemo(() => {
+    return boardHasStagesWithApproval || boardHasStagesWithForms;
+  }, [boardHasStagesWithApproval, boardHasStagesWithForms]);
 
   // Query channel if ticket has conversation with channelId
   const channelId = ticket?.conversation?.channelId;
@@ -350,6 +426,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         fieldId: formField.id,
         entityId: ticketId,
         entityType: FormEntityType.TICKET,
+        contextId: '', // Default empty for board-level form fields
         fieldValue: '',
         actualFieldValue: null,
         createdAt: Date.now(),
@@ -358,6 +435,94 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       };
     });
   }, [formMapping, formEntityValues, ticketId]);
+
+  const formsToShow = useMemo(() => {
+    const result: Array<{
+      type: 'request' | 'form';
+      id: string;
+      stageId: string;
+      formId: string;
+      status?: TicketStageRequestStatus;
+      createdAt: number;
+      updatedAt: number;
+      form?: { formName: string };
+    }> = [];
+
+    // Get current ticket stage sequence number to limit formEntityValues (not requests)
+    const currentTicketStage = stagesWithFormInfo?.find(s => s.name === ticket?.stageName);
+    const currentStageSeq = currentTicketStage?.sequenceNumber;
+
+    // Track which stageIds we already have forms for (to avoid duplicates)
+    const stagesWithForm = new Set<string>();
+
+    // Show ALL ticketStageRequests (these are active requests, show regardless of current stage)
+    if (ticket?.ticketStageRequests) {
+      ticket.ticketStageRequests.forEach(req => {
+        const stage = stagesWithFormInfo?.find(s => s.id === req.stageId);
+        const hasApprovers = stage?.approvers && stage.approvers.length > 0;
+
+        if (hasApprovers) {
+          const form = (req as TicketStageRequest & { form?: { formName: string } }).form;
+          result.push({
+            type: 'request',
+            id: req.id,
+            stageId: req.stageId,
+            formId: req.formId || '',
+            status: req.status,
+            createdAt: req.createdAt,
+            updatedAt: req.updatedAt,
+            ...(form && { form }),
+          });
+          stagesWithForm.add(req.stageId);
+        }
+      });
+    }
+
+    // Show formEntityValues only for stages up to current stage (stale data)
+    if (formEntityValues && stagesWithFormInfo && currentStageSeq !== undefined) {
+      // Group formEntityValues by contextId (stageId)
+      const contextIdsWithValue = new Set(
+        (formEntityValues as FormEntityValueWithField[])
+          .filter(fev => fev.contextId)
+          .map(fev => fev.contextId!),
+      );
+
+      contextIdsWithValue.forEach(contextId => {
+        // Skip if we already have a request for this stage
+        if (stagesWithForm.has(contextId)) {
+          return;
+        }
+
+        // Find which stage this contextId belongs to
+        const stage = stagesWithFormInfo.find(s => s.id === contextId);
+        if (stage && stage.formId) {
+          // Only show forms for stages up to current ticket stage (filter stale data)
+          if (stage.sequenceNumber !== undefined && stage.sequenceNumber > currentStageSeq) {
+            return;
+          }
+
+          // Find the earliest createdAt from form entity values for this context
+          const formValues = (formEntityValues as FormEntityValueWithField[]).filter(
+            fev => fev.contextId === contextId,
+          );
+          const createdAt = Math.min(...formValues.map(fev => fev.createdAt || Date.now()));
+          const updatedAt = Math.max(...formValues.map(fev => fev.updatedAt || Date.now()));
+
+          result.push({
+            type: 'form',
+            id: `form-${contextId}`,
+            stageId: stage.id,
+            formId: stage.formId,
+            createdAt,
+            updatedAt,
+            form: { formName: stage.name + ' Form' },
+          });
+        }
+      });
+    }
+
+    return result;
+  }, [ticket?.ticketStageRequests, formEntityValues, stagesWithFormInfo, ticket?.stageName]);
 
   const tags = ticket?.tags;
   // Extract unique tags from all project tickets
@@ -452,6 +617,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     referenceStages.forEach(stage => {
       const existing = stageMap.get(stage.boardId) ?? [];
       existing.push({
+        id: stage.id,
         boardId: stage.boardId,
         name: stage.name,
         sequenceNumber: stage.sequenceNumber,
@@ -619,11 +785,156 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const handleStageChange = (stageName: string): void => {
-    // Find the stage's default ticket status
-    const boardStages = ticket.boardId ? stagesByBoardId.get(ticket.boardId) : undefined;
-    const targetStage = boardStages?.find(s => s.name === stageName);
-    const newStatus = targetStage?.defaultTicketStatusV2 as TicketStatusV2 | undefined;
+    if (!ticket) return;
 
+    // Find the stage's default ticket status
+    const boardStages = stages; // Use the current board's stages, not related tickets
+    const targetStage = boardStages?.find(s => s.name === stageName);
+    const currentStage = boardStages?.find(s => s.name === ticket.stageName);
+    const newStatus = targetStage?.defaultTicketStatusV2;
+
+    // Check if target stage requires approval (has approvers)
+    const targetStageApprovers = targetStage?.approvers;
+    const targetStageFormId = targetStage ? stageFormMap.get(targetStage.id) : undefined;
+    const hasApprovers = targetStageApprovers && targetStageApprovers.length > 0;
+
+    // CASE 1: Target stage has a form → open form modal regardless of approval settings
+    if (targetStageFormId && currentStage && targetStage) {
+      // Enforce sequential movement when form exists
+      const isMovingBackward = targetStage.sequenceNumber < currentStage.sequenceNumber;
+
+      if (isMovingBackward) {
+        setBackwardStageChange({
+          stageName,
+          fromSequenceNumber: targetStage.sequenceNumber,
+          ...(newStatus !== undefined && { newStatus }),
+        });
+        setShowBackwardConfirmDialog(true);
+        return;
+      }
+
+      const isNextStage = targetStage.sequenceNumber === currentStage.sequenceNumber + 1;
+
+      if (!isNextStage) {
+        toast.error('Sequential movement only', {
+          description: 'You can only move to the next stage',
+        });
+        return;
+      }
+
+      // Open form modal for everyone (approvers and non-approvers)
+      setStageFormModal({
+        ticket,
+        targetStage,
+        sourceStageName: currentStage.name,
+        formId: targetStageFormId,
+        isReviewer: false,
+        hasApprovers: hasApprovers ?? false,
+      });
+      return;
+    }
+
+    // CASE 2: Board has approval workflow and target stage has approvers (but no form)
+    if (shouldEnforceSequentialMovement && currentStage && targetStage && hasApprovers) {
+      const isMovingBackward = targetStage.sequenceNumber < currentStage.sequenceNumber;
+
+      if (isMovingBackward) {
+        setBackwardStageChange({
+          stageName,
+          fromSequenceNumber: targetStage.sequenceNumber,
+          ...(newStatus !== undefined && { newStatus }),
+        });
+        setShowBackwardConfirmDialog(true);
+        return;
+      }
+
+      const isNextStage = targetStage.sequenceNumber === currentStage.sequenceNumber + 1;
+
+      if (!isNextStage) {
+        toast.error('Sequential movement only', {
+          description: 'You can only move to the next stage',
+        });
+        return;
+      }
+
+      // Stage has approvers but no form
+      const targetStageApproversList = targetStage.approvers;
+      const isApprover = targetStageApproversList.some(a => a.userId === currentUser?.id);
+
+      if (!isApprover) {
+        const ticketStageRequests = (
+          ticket as Ticket & { ticketStageRequests?: readonly TicketStageRequest[] }
+        )?.ticketStageRequests;
+        const rejectedRequest = ticketStageRequests?.find(
+          (s: TicketStageRequest) =>
+            s.stageId === targetStage.id &&
+            s.status === TicketStageRequestStatus.REJECTED &&
+            !s.formId,
+        );
+
+        if (rejectedRequest) {
+          // Update the rejected request to submitted
+          void zero.mutate(
+            mutators.ticketStageRequest.upsert({
+              id: rejectedRequest.id,
+              ticketId: ticket.id,
+              stageId: targetStage.id,
+              status: TicketStageRequestStatus.SUBMITTED,
+              updatedBy: currentUser?.id || '',
+              updatedAt: Date.now(),
+              requestActivityId: uuidv4(),
+            }),
+          );
+          toast.success('Approval Requested', {
+            description: 'Your stage change has been resubmitted for approval.',
+          });
+        } else {
+          // Create a new approval request
+          void zero.mutate(
+            mutators.ticketStageRequest.upsert({
+              id: uuidv4(),
+              ticketId: ticket.id,
+              stageId: targetStage.id,
+              status: TicketStageRequestStatus.SUBMITTED,
+              updatedBy: currentUser?.id || '',
+              updatedAt: Date.now(),
+              requestActivityId: uuidv4(),
+            }),
+          );
+          toast.success('Approval Requested', {
+            description: 'Your stage change has been submitted for approval.',
+          });
+        }
+        return;
+      }
+    }
+
+    // CASE 3: Board has approval workflow - check movement restrictions even for stages without approvers/forms
+    if (shouldEnforceSequentialMovement && currentStage && targetStage) {
+      // Check if moving backward
+      const isMovingBackward = targetStage.sequenceNumber < currentStage.sequenceNumber;
+
+      if (isMovingBackward) {
+        // Show confirmation dialog
+        setBackwardStageChange({
+          stageName,
+          fromSequenceNumber: targetStage.sequenceNumber,
+          ...(newStatus !== undefined && { newStatus }),
+        });
+        setShowBackwardConfirmDialog(true);
+        return;
+      }
+      const isNextStage = targetStage.sequenceNumber === currentStage.sequenceNumber + 1;
+
+      if (!isNextStage) {
+        toast.error('Sequential movement only', {
+          description: 'You can only move to the next stage',
+        });
+        return;
+      }
+    }
+
+    // Default: Direct stage update
     void zero.mutate(
       mutators.ticket.update({
         id: ticket.id,
@@ -1349,7 +1660,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <TicketKeyValuePair
             ticketKey='Status'
             value={
-              <div data-testid='ticket-detail-status-selector'>
+              <div data-testid='ticket-detail-status-selector' className='flex items-center gap-2'>
                 <Selector
                   items={stages}
                   selectedValue={ticket.stageName}
@@ -1357,7 +1668,41 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   placeholder='Set Status'
                   icon={<TicketStatusIcon size={14} />}
                   noBorder={true}
+                  isItemDisabled={item => {
+                    if (!shouldEnforceSequentialMovement) return false;
+                    const currentStageSeq = stages?.find(
+                      s => s.name === ticket.stageName,
+                    )?.sequenceNumber;
+                    if (currentStageSeq === undefined || item.sequenceNumber === undefined)
+                      return false;
+
+                    if (item.sequenceNumber > currentStageSeq) {
+                      return item.sequenceNumber !== currentStageSeq + 1;
+                    }
+                    // Moving backward: allow to any previous stage
+                    return false;
+                  }}
                 />
+                {/* Show alert icon if there's a pending request for the next stage */}
+                {(() => {
+                  if (!ticket.ticketStageRequests || !stagesWithFormInfo) return null;
+                  const currentStage = stagesWithFormInfo.find(s => s.name === ticket.stageName);
+                  if (!currentStage) return null;
+                  const nextStage = stagesWithFormInfo.find(
+                    s => s.sequenceNumber === currentStage.sequenceNumber + 1,
+                  );
+                  if (!nextStage) return null;
+                  const hasPendingRequest = ticket.ticketStageRequests.some(
+                    req =>
+                      req.status === TicketStageRequestStatus.SUBMITTED &&
+                      req.stageId === nextStage.id,
+                  );
+                  return hasPendingRequest ? (
+                    <Tooltip content='Pending Status Approval'>
+                      <AlertCircle size={14} className='text-orange-500' />
+                    </Tooltip>
+                  ) : null;
+                })()}
               </div>
             }
           />
@@ -1492,6 +1837,303 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         </div>
       )}
+
+      {/* Stage Forms Section */}
+      {formsToShow.length > 0 && (
+        <div className='my-4'>
+          <div className='flex items-center gap-3 mb-4'>
+            <p className='text-base font-semibold text-gray-900'>Status Change Requests</p>
+            <span className='inline-flex items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'>
+              {formsToShow.length}
+            </span>
+          </div>
+
+          <div className='space-y-1'>
+            {formsToShow
+              .sort((a, b) => b.createdAt - a.createdAt)
+              .map(item => {
+                const stage = stagesWithFormInfo?.find(s => s.id === item.stageId);
+                const isSubmitted = item.status === TicketStageRequestStatus.SUBMITTED;
+                const isRejected = item.status === TicketStageRequestStatus.REJECTED;
+                const isApproved = item.status === TicketStageRequestStatus.APPROVED;
+                const isDraft = item.status === TicketStageRequestStatus.DRAFT;
+                const isApprover =
+                  stage?.approvers?.some(a => a.userId === currentUser?.id) ?? false;
+                const hasApprovers = stage?.approvers && stage.approvers.length > 0;
+
+                // Find previous stage
+                const currentStageSeq = stage?.sequenceNumber ?? 0;
+                const previousStage = stagesWithFormInfo?.find(
+                  s => s.sequenceNumber === currentStageSeq - 1,
+                );
+
+                return (
+                  <div key={item.id} className='py-2'>
+                    <div className='flex items-center justify-between gap-4'>
+                      <div className='flex items-center gap-4 flex-1 min-w-0'>
+                        {/* Form Name or Stage Name */}
+                        <p className='text-base font-medium text-gray-900'>
+                          {item.formId
+                            ? (item.form?.formName ?? 'Form')
+                            : `Stage: ${stage?.name || 'Unknown Stage'}`}
+                        </p>
+
+                        {/* Old Stage -> New Stage */}
+                        <p className='text-sm text-gray-500'>
+                          {previousStage?.name || 'Start'} &rarr; {stage?.name || 'Unknown Stage'}
+                        </p>
+
+                        {/* Status Badge - only show for stages with approvers */}
+                        {hasApprovers &&
+                          item.status &&
+                          (() => {
+                            const config = getStatusBadgeConfig(item.status);
+                            return config ? (
+                              <span className={config.className.replace('text-xs', 'text-sm')}>
+                                {config.label}
+                              </span>
+                            ) : null;
+                          })()}
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className='flex items-center gap-2 shrink-0'>
+                        {hasApprovers ? (
+                          // Stages WITH approvers: Show approval workflow buttons
+                          <>
+                            {/* Draft status - allow user to continue/edit the form */}
+                            {isDraft && item.formId && (
+                              <button
+                                onClick={() =>
+                                  setStageFormModal({
+                                    ticket,
+                                    targetStage: stage ?? {
+                                      id: item.stageId,
+                                      name: 'Unknown Stage',
+                                      sequenceNumber: 0,
+                                      boardId: ticket.boardId || '',
+                                    },
+                                    sourceStageName: previousStage?.name || 'Unknown Stage',
+                                    formId: item.formId,
+                                    isReviewer: false,
+                                    hasApprovers: true,
+                                  })
+                                }
+                                className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                              >
+                                Continue Draft
+                              </button>
+                            )}
+                            {isDraft && !item.formId && (
+                              <button
+                                onClick={() => {
+                                  void zero.mutate(
+                                    mutators.ticketStageRequest.upsert({
+                                      id: item.id,
+                                      ticketId: ticket.id,
+                                      stageId: item.stageId,
+                                      status: TicketStageRequestStatus.SUBMITTED,
+                                      updatedBy: currentUser?.id || '',
+                                      updatedAt: Date.now(),
+                                      requestActivityId: uuidv4(),
+                                    }),
+                                  );
+                                  toast.success('Request submitted for approval');
+                                }}
+                                className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                              >
+                                Submit Request
+                              </button>
+                            )}
+                            {isSubmitted && item.formId && (
+                              <>
+                                {!isApprover && (
+                                  <button
+                                    onClick={() =>
+                                      setStageFormModal({
+                                        ticket,
+                                        targetStage: stage ?? {
+                                          id: item.stageId,
+                                          name: 'Unknown Stage',
+                                          sequenceNumber: 0,
+                                          boardId: ticket.boardId || '',
+                                        },
+                                        sourceStageName: previousStage?.name || 'Unknown Stage',
+                                        formId: item.formId,
+                                        isReviewer: false,
+                                        hasApprovers: true,
+                                      })
+                                    }
+                                    className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
+                                    aria-label='View form'
+                                  >
+                                    <Eye size={16} />
+                                  </button>
+                                )}
+                                {isApprover && (
+                                  <button
+                                    onClick={() =>
+                                      setStageFormModal({
+                                        ticket,
+                                        targetStage: stage ?? {
+                                          id: item.stageId,
+                                          name: 'Unknown Stage',
+                                          sequenceNumber: 0,
+                                          boardId: ticket.boardId || '',
+                                        },
+                                        sourceStageName: previousStage?.name || 'Unknown Stage',
+                                        formId: item.formId,
+                                        isReviewer: true,
+                                        hasApprovers: true,
+                                      })
+                                    }
+                                    className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg flex items-center gap-2 bg-blue-500 text-white hover:bg-blue-600'
+                                  >
+                                    View request
+                                  </button>
+                                )}
+                              </>
+                            )}
+                            {isApproved && item.formId && (
+                              <button
+                                onClick={() =>
+                                  setStageFormModal({
+                                    ticket,
+                                    targetStage: stage ?? {
+                                      id: item.stageId,
+                                      name: 'Unknown Stage',
+                                      sequenceNumber: 0,
+                                      boardId: ticket.boardId || '',
+                                    },
+                                    sourceStageName: previousStage?.name || 'Unknown Stage',
+                                    formId: item.formId,
+                                    isReviewer: false,
+                                    hasApprovers: true,
+                                  })
+                                }
+                                className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
+                                aria-label='View form'
+                              >
+                                <Eye size={16} />
+                              </button>
+                            )}
+                            {isSubmitted && !item.formId && isApprover && (
+                              <>
+                                <button
+                                  onClick={() =>
+                                    void zero.mutate(
+                                      mutators.ticketStageRequest.upsert({
+                                        id: item.id,
+                                        ticketId: ticket.id,
+                                        stageId: item.stageId,
+                                        status: TicketStageRequestStatus.APPROVED,
+                                        updatedBy: currentUser?.id || '',
+                                        updatedAt: Date.now(),
+                                        approvedActivityId: uuidv4(),
+                                      }),
+                                    )
+                                  }
+                                  className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-green-500 text-white hover:bg-green-600'
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    void zero.mutate(
+                                      mutators.ticketStageRequest.upsert({
+                                        id: item.id,
+                                        ticketId: ticket.id,
+                                        stageId: item.stageId,
+                                        status: TicketStageRequestStatus.REJECTED,
+                                        updatedBy: currentUser?.id || '',
+                                        updatedAt: Date.now(),
+                                        rejectedActivityId: uuidv4(),
+                                      }),
+                                    )
+                                  }
+                                  className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600'
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                            {isRejected && item.formId && (
+                              <button
+                                onClick={() =>
+                                  setStageFormModal({
+                                    ticket,
+                                    targetStage: stage ?? {
+                                      id: item.stageId,
+                                      name: 'Unknown Stage',
+                                      sequenceNumber: 0,
+                                      boardId: ticket.boardId || '',
+                                    },
+                                    sourceStageName: previousStage?.name || 'Unknown Stage',
+                                    formId: item.formId,
+                                    isReviewer: isApprover,
+                                    hasApprovers: true,
+                                  })
+                                }
+                                className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                              >
+                                Resubmit
+                              </button>
+                            )}
+                            {isRejected && !item.formId && (
+                              <button
+                                onClick={() => {
+                                  void zero.mutate(
+                                    mutators.ticketStageRequest.upsert({
+                                      id: item.id,
+                                      ticketId: ticket.id,
+                                      stageId: item.stageId,
+                                      status: TicketStageRequestStatus.SUBMITTED,
+                                      updatedBy: currentUser?.id || '',
+                                      updatedAt: Date.now(),
+                                      requestActivityId: uuidv4(),
+                                    }),
+                                  );
+                                  toast.success('Stage change request resubmitted for approval');
+                                }}
+                                className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                              >
+                                Resubmit request
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          // Stages WITHOUT approvers: Just show View Form button
+                          <button
+                            onClick={() =>
+                              setStageFormModal({
+                                ticket,
+                                targetStage: stage ?? {
+                                  id: item.stageId,
+                                  name: 'Unknown Stage',
+                                  sequenceNumber: 0,
+                                  boardId: ticket.boardId || '',
+                                },
+                                sourceStageName: previousStage?.name || 'Unknown Stage',
+                                formId: item.formId,
+                                isReviewer: false,
+                                hasApprovers: false,
+                              })
+                            }
+                            className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
+                            aria-label='View form'
+                          >
+                            <Eye size={16} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
       {/* Sub-Tickets Section */}
       <div className='mt-6 space-y-6' data-testid='sub-tickets-section'>
         <div>
@@ -1800,6 +2442,71 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           onClose={() => setIsWorkflowModalOpen(false)}
           ticketId={ticket.id}
         />
+      )}
+      {/* Stage Form Modal */}
+      {stageFormModal && (
+        <StageFormModal
+          isOpen={!!stageFormModal}
+          onClose={() => setStageFormModal(null)}
+          ticket={stageFormModal.ticket!}
+          targetStage={stageFormModal.targetStage}
+          sourceStageName={stageFormModal.sourceStageName}
+          formId={stageFormModal.formId}
+          isReviewer={stageFormModal.isReviewer ?? false}
+          hasApprovers={stageFormModal.hasApprovers ?? false}
+          onSuccess={() => setStageFormModal(null)}
+        />
+      )}
+      {/* Backward movement confirmation dialog */}
+      {backwardStageChange && (
+        <Dialog
+          open={showBackwardConfirmDialog}
+          onOpenChange={setShowBackwardConfirmDialog}
+          title='Confirm Stage Change'
+        >
+          <div className='p-6'>
+            <p className='text-sm text-gray-600 mb-6'>
+              Moving to a previous stage will clear all status change requests for status after this
+              one. These requests will need to be submitted again. Do you want to continue?
+            </p>
+
+            <div className='flex justify-end gap-3'>
+              <Button variant='secondary' onClick={() => setShowBackwardConfirmDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (backwardStageChange) {
+                    // Clean up stage approvals and form entity values for stages being skipped
+                    void zero.mutate(
+                      mutators.cleanupStageApprovals({
+                        ticketId: ticket.id,
+                        fromSequenceNumber: backwardStageChange.fromSequenceNumber,
+                      }),
+                    );
+
+                    // Directly update the stage for backward movement
+                    void zero.mutate(
+                      mutators.ticket.update({
+                        id: ticket.id,
+                        stageName: backwardStageChange.stageName,
+                        ...(backwardStageChange.newStatus && {
+                          statusV2: backwardStageChange.newStatus,
+                        }),
+                        updatedAt: Date.now(),
+                      }),
+                    );
+
+                    setShowBackwardConfirmDialog(false);
+                  }
+                }}
+                className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
+              >
+                Confirm
+              </Button>
+            </div>
+          </div>
+        </Dialog>
       )}
     </div>
   );

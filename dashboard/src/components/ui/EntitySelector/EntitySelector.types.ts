@@ -32,6 +32,9 @@ export interface SelectorOption {
 
   /** Optional secondary text (e.g., email for users) */
   subtitle?: string;
+
+  /** Whether this option is disabled and cannot be selected */
+  disabled?: boolean;
 }
 
 /**

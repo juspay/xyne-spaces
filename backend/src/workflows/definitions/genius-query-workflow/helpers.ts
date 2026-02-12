@@ -168,10 +168,11 @@ export const storeMerchantIdInForm = async (
     }
     await prisma.formEntityValues.upsert({
       where: {
-        entityId_entityType_fieldId: {
+        entityId_entityType_fieldId_contextId: {
           entityId: ticketId,
           entityType: 'Ticket',
           fieldId: merchantField.id,
+          contextId: '',
         },
       },
       create: {
@@ -260,10 +261,11 @@ export const storeCategorizationInForms = async (
 
       return prisma.formEntityValues.upsert({
         where: {
-          entityId_entityType_fieldId: {
+          entityId_entityType_fieldId_contextId: {
             entityId: ticketId,
             entityType: 'Ticket',
             fieldId: field.id,
+            contextId: '',
           },
         },
         create: {

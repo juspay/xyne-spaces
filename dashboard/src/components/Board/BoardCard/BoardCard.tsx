@@ -1,7 +1,11 @@
 import { ReactElement } from 'react';
 import { Button, ButtonType } from '@juspay/blend-design-system';
-import type { Stage, BoardType } from '@xyne/shared';
+import type { Stage, StageApprovers, BoardType } from '@xyne/shared';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
+
+export interface StageWithApprovers extends Stage {
+  approvers?: readonly StageApprovers[];
+}
 
 // Board type from Zero query with related stages
 export interface BoardWithStages {
@@ -14,7 +18,7 @@ export interface BoardWithStages {
   readonly createdAt: number;
   readonly updatedAt: number | null;
   readonly metadata?: ReadonlyJSONValue;
-  readonly stages?: readonly Stage[] | Error;
+  readonly stages?: readonly StageWithApprovers[] | Error;
 }
 
 interface BoardCardProps {

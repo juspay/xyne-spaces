@@ -20,6 +20,9 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ me
       case 'STATUS':
       case 'STAGE_NAME':
       case 'PR':
+      case 'STAGE_CHANGE_REQUEST':
+      case 'STAGE_CHANGE_APPROVED':
+      case 'STAGE_CHANGE_REJECTED':
         return <TicketStatusIcon />;
       case 'TAGS':
         return <Tag />;

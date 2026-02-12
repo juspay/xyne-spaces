@@ -5,6 +5,7 @@ import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.type
 interface StatusItem {
   id: string;
   name: string;
+  sequenceNumber?: number;
 }
 
 interface SelectorProps {
@@ -15,6 +16,7 @@ interface SelectorProps {
   isLoading?: boolean;
   icon?: React.ReactElement;
   noBorder?: boolean;
+  isItemDisabled?: (item: StatusItem) => boolean;
 }
 
 /**
@@ -28,14 +30,16 @@ export const Selector: React.FC<SelectorProps> = ({
   isLoading = false,
   icon,
   noBorder,
+  isItemDisabled,
 }) => {
   const options: SelectorOption[] = useMemo(() => {
     return items.map(item => ({
       value: item.name, // Using name as value to match your handleStageChange logic
       label: item.name,
       icon: icon,
+      disabled: isItemDisabled?.(item) ?? false,
     }));
-  }, [items, icon]);
+  }, [items, icon, isItemDisabled]);
 
   return (
     <EntitySelector
