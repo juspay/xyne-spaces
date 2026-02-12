@@ -120,6 +120,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     new Set(['assignee', 'dueDate', 'status', 'priority', 'tags']),
   );
   const [isComfortView, setIsComfortView] = useState(false);
+  const [searchTerm, setSearchTerm] = useState<string>('');
 
   // Dynamic grouping options based on form fields
   const groupTickets = (tickets: Ticket[], criterion: GroupByType) => {
@@ -716,6 +717,25 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       formFieldsById,
     );
 
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.toLowerCase().trim();
+      tickets = tickets.filter(ticket => {
+        const searchableText = [
+          ticket.title || '',
+          ticket.description || '',
+          ticket.xyneId || '',
+          ticket.merchantId || '',
+          ticket.statusV2 || '',
+          ticket.priority || '',
+        ]
+          .join(' ')
+          .toLowerCase();
+
+        return searchableText.includes(searchLower);
+      });
+    }
+
     // Hide Rejected tickets when viewing stage view across all contexts
     const isStageView =
       // Channel stage view
@@ -742,6 +762,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     tagsByTicketId,
     formValuesByTicketId,
     formFieldsById,
+    searchTerm,
   ]);
 
   useEffect(() => {
@@ -995,6 +1016,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     []
                   : []
               }
+              onSearchChange={setSearchTerm}
             />
           </div>
         )}
