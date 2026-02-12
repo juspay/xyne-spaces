@@ -4,7 +4,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { fetchProducts, fetchRepositories } from '../../../../services/researchAgentService';
+import { fetchProducts, fetchRepositories } from '../services/researchAgentService';
 import type { ResearchProduct, ResearchRepository, ResearchContext } from '@xyne/shared';
 
 // Re-export types for convenience

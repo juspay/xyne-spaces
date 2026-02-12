@@ -17,8 +17,10 @@ import type {
   HistoryMessage,
   ToolInputContent,
   ToolOutputContent,
+  AttachmentMetadata,
 } from './types';
-import type { XyneAIOutput } from '../types';
+import type { XyneAIOutput, AttachmentData } from '../types';
+import { uploadXyneAIAttachments } from '../../../services/attachmentUploadService.js';
 
 // Re-export XyneAIFeedback for external use
 export type { XyneAIFeedback };
@@ -96,7 +98,7 @@ class XyneAISessionStore {
       if (!sessionData) return undefined;
       
       const messages = await provider.getMessages(sessionId);
-      const history = convertMessagesToHistory(messages);
+      const history = await convertMessagesToHistory(messages);  // Now async - fetches attachments from GCS
       
       // Extract channelIds and conversationId from metadata
       const metadata = sessionData.metadata || {};
@@ -141,17 +143,36 @@ class XyneAISessionStore {
   // ============================================================================
 
   async addUserMessage(
-    sessionId: string, 
-    query: string, 
+    sessionId: string,
+    query: string,
     timestamp: string,
+    attachments?: AttachmentData[],
     traceId?: string
   ): Promise<XyneAISession | undefined> {
     try {
       const provider = await this.ensureInitialized();
-      
-      const content = { query, timestamp };
-      await provider.addMessage(sessionId, 'USER', content, traceId);
-      logger.info(`[SessionStore] [${sessionId}] Added user message`);
+
+      // Upload attachments to GCS if provided
+      let attachmentMetadata: AttachmentMetadata[] | undefined;
+      if (attachments && attachments.length > 0) {
+        try {
+          attachmentMetadata = await uploadXyneAIAttachments(attachments, sessionId);
+          logger.info(`[SessionStore] [${sessionId}] Successfully uploaded ${attachmentMetadata.length} attachment(s) to GCS`);
+        } catch (error) {
+          logger.error(`[SessionStore] [${sessionId}] Failed to upload attachments to GCS:`, error);
+          throw new Error(`Failed to upload attachments: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+
+      // Store only query and timestamp in data column (no attachments)
+      const content = {
+        query,
+        timestamp,
+      };
+
+      // Pass attachment metadata to provider for storage in attachment column
+      await provider.addMessage(sessionId, 'USER', content, traceId, attachmentMetadata);
+
       return this.get(sessionId);
     } catch (error) {
       logger.error(`[SessionStore] [${sessionId}] Error adding user message:`, error);

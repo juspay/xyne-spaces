@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { ArrowUp, X, Lock, Globe, Code2, Package, Search } from 'lucide-react';
+import { ArrowUp, X, Plus, FileText, Lock, Globe, Code2, Package, Search } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -13,7 +13,7 @@ import { ChannelMentionExtension, channelMentionPluginKey } from '../../../ui/Ti
 import { MentionSelector } from '../../../ui/Selectors';
 import type { MentionResult } from '../../../ui/Selectors/Selectors.types';
 import { usePlatform } from '../../../../hooks/usePlatform';
-import { useResearchOptions, type ResearchContext } from '../hooks/useResearchAgent';
+import { useResearchOptions, type ResearchContext } from '../../../../hooks/useResearchAgent';
 
 // Hash icon component
 const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
@@ -31,6 +31,7 @@ interface XyneAIInputBoxProps {
   onSubmit: () => void;
   onSelectedChannelsChange?: (channelIds: string[]) => void;
   onResearchContextChange?: (context: ResearchContext | null) => void;
+  onAttachmentsChange?: (attachments: Attachment[]) => void;
   isStreaming?: boolean;
   onAbort?: () => void;
   webSearchEnabled?: boolean;
@@ -44,6 +45,17 @@ interface SelectedChannel {
   isPrivate: boolean;
 }
 
+export interface Attachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  file: File;
+  data: string; // base64 encoded data
+  mimeType: string;
+  filename: string;
+}
+
 export const XyneAIInputBox = ({
   channelId,
   channelName,
@@ -53,6 +65,7 @@ export const XyneAIInputBox = ({
   onSubmit,
   onSelectedChannelsChange,
   onResearchContextChange,
+  onAttachmentsChange,
   isStreaming = false,
   onAbort,
   webSearchEnabled = false,
@@ -63,6 +76,7 @@ export const XyneAIInputBox = ({
   const researchDropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const researchSearchInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const hasInitializedDefaultChannel = useRef(false);
   const { isMobile } = usePlatform();
 
@@ -104,6 +118,7 @@ export const XyneAIInputBox = ({
     ];
   });
 
+  const [selectedAttachments, setSelectedAttachments] = useState<Attachment[]>([]);
   const [showChannelDropdown, setShowChannelDropdown] = useState(false);
   const [channelSearchQuery, setChannelSearchQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -207,6 +222,11 @@ export const XyneAIInputBox = ({
     onSelectedChannelsChange?.(channelIds);
   }, [selectedChannels, onSelectedChannelsChange]);
 
+  // Notify parent component when attachments change
+  useEffect(() => {
+    onAttachmentsChange?.(selectedAttachments);
+  }, [selectedAttachments, onAttachmentsChange]);
+
   // Sync inputValue changes from parent to editor
   useEffect(() => {
     if (editor && !editor.isFocused) {
@@ -217,10 +237,12 @@ export const XyneAIInputBox = ({
     }
   }, [inputValue, editor]);
 
-  // Clear editor content when inputValue is empty (after submit)
+  // Clear editor content and attachments when inputValue is empty (after submit)
   useEffect(() => {
     if (inputValue === '' && editor) {
       editor.commands.setContent('');
+      // Also clear attachments when input is cleared
+      setSelectedAttachments([]);
     }
   }, [inputValue, editor]);
 
@@ -271,6 +293,180 @@ export const XyneAIInputBox = ({
   // Handle removing a selected channel pill
   const handleRemoveChannel = (channelIdToRemove: string): void => {
     setSelectedChannels(selectedChannels.filter(ch => ch.id !== channelIdToRemove));
+  };
+
+  // Handle attachment button click
+  const handleAttachmentClick = (): void => {
+    fileInputRef.current?.click();
+  };
+
+  // File size limits
+  const MAX_INDIVIDUAL_FILE_SIZE = 100 * 1024 * 1024; // 100MB in bytes
+  const MAX_TOTAL_SIZE = 200 * 1024 * 1024; // 200MB in bytes
+
+  // Allowed file types
+  const allowedFileTypes = [
+    // Images
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+    // Documents
+    'application/pdf',
+    'text/plain',
+    'text/csv',
+    'text/markdown',
+    // Office
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+    'application/msword', // .doc
+    'application/vnd.ms-excel', // .xls
+    // Data
+    'application/json',
+    'application/xml',
+  ];
+
+  // Validate base64 string
+  const isValidBase64 = (str: string): boolean => {
+    if (!str || str.length === 0) return false;
+    // Base64 regex: only allows valid base64 characters (A-Z, a-z, 0-9, +, /, =)
+    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+    if (!base64Regex.test(str)) return false;
+    // Check if length is valid (must be multiple of 4)
+    if (str.length % 4 !== 0) return false;
+    return true;
+  };
+
+  // Handle file selection
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    // Filter files to only include allowed types
+    const validFiles = Array.from(files).filter(file => {
+      return allowedFileTypes.includes(file.type);
+    });
+
+    if (validFiles.length === 0) {
+      toast.error(
+        'Please select valid file types (images, PDF, text, office documents, or data files).',
+        { duration: 3000 },
+      );
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    // Check individual file size
+    const oversizedFiles = validFiles.filter(file => file.size > MAX_INDIVIDUAL_FILE_SIZE);
+    if (oversizedFiles.length > 0) {
+      const fileNames = oversizedFiles.map(f => f.name).join(', ');
+      toast.error(`File(s) too large: ${fileNames}. Maximum file size is 100MB.`, {
+        duration: 4000,
+      });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    // Calculate total size of existing attachments
+    const existingTotalSize = selectedAttachments.reduce((sum, att) => sum + att.size, 0);
+
+    // Calculate total size of new files
+    const newFilesSize = validFiles.reduce((sum, file) => sum + file.size, 0);
+
+    // Check if total size would exceed limit
+    if (existingTotalSize + newFilesSize > MAX_TOTAL_SIZE) {
+      const totalMB = Math.round((existingTotalSize + newFilesSize) / (1024 * 1024));
+      toast.error(
+        `Total attachment size (${totalMB}MB) exceeds the 200MB limit. Please remove some attachments.`,
+        { duration: 4000 },
+      );
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    // Convert files to base64
+    const filePromises = validFiles.map(
+      file =>
+        new Promise<Attachment>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (): void => {
+            const result = reader.result as string;
+
+            // Extract and validate base64 data using regex
+            const base64Match = result.match(/^data:([^;]+);base64,(.+)$/);
+            if (!base64Match) {
+              reject(
+                new Error(`Invalid file format - not a valid data URL for file: ${file.name}`),
+              );
+              return;
+            }
+
+            const [, detectedMimeType, base64Data] = base64Match;
+
+            // Ensure base64 data is not empty
+            if (!base64Data) {
+              reject(new Error(`Empty file data for file: ${file.name}`));
+              return;
+            }
+
+            // Validate that detected MIME type matches file.type
+            if (detectedMimeType !== file.type) {
+              console.warn(
+                `[XyneAI] MIME type mismatch for ${file.name}: file.type=${file.type}, detected=${detectedMimeType}`,
+              );
+            }
+
+            // Validate base64 format
+            if (!isValidBase64(base64Data)) {
+              reject(new Error(`Invalid base64 data for file: ${file.name}`));
+              return;
+            }
+
+            resolve({
+              id: `${file.name}-${Date.now()}-${Math.random()}`,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              file,
+              data: base64Data,
+              mimeType: file.type,
+              filename: file.name,
+            });
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        }),
+    );
+
+    try {
+      const newAttachments = await Promise.all(filePromises);
+      setSelectedAttachments([...selectedAttachments, ...newAttachments]);
+
+      // Show success message if multiple files were added
+      if (newAttachments.length > 1) {
+        toast.success(`${newAttachments.length} files attached successfully`, { duration: 2000 });
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Error reading files. Please try again.';
+      toast.error(errorMessage, { duration: 3000 });
+    }
+
+    // Reset the file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle removing an attachment
+  const handleRemoveAttachment = (attachmentId: string): void => {
+    setSelectedAttachments(selectedAttachments.filter(att => att.id !== attachmentId));
   };
 
   // Handle "/" button click
@@ -561,20 +757,67 @@ export const XyneAIInputBox = ({
               </button>
             </div>
           )}
+
+          {/* Attachment Pills */}
+          {selectedAttachments.map(attachment => (
+            <div
+              key={attachment.id}
+              className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-[#F2F2F3] flex-shrink-0'
+            >
+              <div className='flex items-center gap-1'>
+                <div className='flex-shrink-0'>
+                  <FileText className='w-3.5 h-3.5 text-gray-600' />
+                </div>
+                <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                  {attachment.name}
+                </span>
+              </div>
+              <button
+                onClick={() => handleRemoveAttachment(attachment.id)}
+                className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                aria-label={`Remove ${attachment.name}`}
+              >
+                <X className='w-3 h-3' />
+              </button>
+            </div>
+          ))}
         </div>
 
-        {/* Input Area */}
+        {/* Input Area - Text only */}
         <div className='relative'>
-          {/* Text Input */}
           <EditorContent
             editor={editor}
-            className="bg-transparent outline-none text-foreground p-2 pr-12 placeholder:text-muted-foreground text-sm font-['Inter']"
+            className="bg-transparent outline-none text-foreground p-2 placeholder:text-muted-foreground text-sm font-['Inter']"
           />
         </div>
 
-        {/* Bottom buttons - Web Search and Submit */}
+        {/* Bottom buttons - Attachment, Web Search Toggle and Submit */}
         <div className='flex items-center justify-between gap-2 px-2'>
           <div className='flex items-center gap-2'>
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type='file'
+              multiple
+              accept='image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,text/markdown,.docx,.xlsx,.doc,.xls,application/json,application/xml'
+              onChange={e => void handleFileChange(e)}
+              className='hidden'
+              aria-label='Upload files'
+            />
+            {/* Attachment button */}
+            <button
+              type='button'
+              onClick={handleAttachmentClick}
+              className='p-1.5 -ml-1.5 rounded-lg hover:bg-gray-100 transition-colors'
+              aria-label='Attach files'
+              title='Attach files'
+            >
+              <Plus className='w-4 h-4 text-gray-600' />
+            </button>
+
+            {/* Divider line */}
+            {onWebSearchToggle && <div className='h-4 w-px bg-gray-300' />}
+
             {/* Web Search Toggle Button */}
             {onWebSearchToggle && (
               <button
@@ -614,7 +857,7 @@ export const XyneAIInputBox = ({
           <button
             onClick={isStreaming ? onAbort : onSubmit}
             disabled={!isStreaming && !inputValue.trim()}
-            className={`absolute ${isMobile ? 'bottom-[5px]' : 'bottom-2'} right-2 p-2 rounded-full transition-colors ${
+            className={`absolute ${isMobile ? 'bottom-[5px] mr-1 mb-1' : 'bottom-2'} right-2 p-2 rounded-full transition-colors ${
               isStreaming
                 ? 'bg-[#FF4F4F] text-white hover:bg-[#E64545]'
                 : inputValue.trim()

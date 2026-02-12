@@ -2,21 +2,21 @@ import { ReactElement, useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChannel } from '../../../hooks/useChannels';
 import { useSelf } from '../../../hooks/useUsers';
+import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { BASE_URL } from '../../../services/clients/apiClient';
 import {
   xyneAIStorage,
   type ConversationHistory as ConversationHistoryType,
 } from '../../../utils/xyneAIStorage';
-import type { Message, SummarizerCitation } from './utils/XyneAITypes';
+import type { Message, SummarizerCitation, MessageAttachment } from './utils/XyneAITypes';
 import { XyneAISuggestions } from './components/XyneAISuggestions';
-import { XyneAIInputBox } from './components/XyneAIInputBox';
+import { XyneAIInputBox, type Attachment } from './components/XyneAIInputBox';
 import { MessageItem } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
-import { useXyneAIStream } from './hooks/useXyneAIStream';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
-import type { ResearchContext } from './hooks/useResearchAgent';
+import type { ResearchContext } from '../../../hooks/useResearchAgent';
 
 interface XyneAISidebarProps {
   channelId: string | null;
@@ -39,6 +39,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
   const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
     null,
   );
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -356,6 +357,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
     setConversationId('');
     setCurrentTraceId(undefined);
     setInputValue('');
+    setAttachments([]);
     setVisibleCharsMap({});
     setShowHistorySidebar(false);
 
@@ -518,15 +520,25 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
   const handleSubmit = useCallback(async (): Promise<void> => {
     if (!inputValue.trim()) return;
     const query = inputValue;
+    const currentAttachments = attachments;
+
+    // Convert attachments to MessageAttachment format for display
+    const messageAttachments: MessageAttachment[] = currentAttachments.map(att => ({
+      filename: att.filename,
+      mimeType: att.mimeType,
+      data: att.data,
+    }));
+
     setInputValue('');
+    setAttachments([]);
 
     // Scroll immediately after clearing input, before query is submitted
     setTimeout(() => {
       scrollToBottom();
     }, 50);
 
-    await submitQuery(query);
-  }, [inputValue, submitQuery, scrollToBottom]);
+    await submitQuery(query, messageAttachments);
+  }, [inputValue, attachments, submitQuery, scrollToBottom]);
 
   return (
     <div
@@ -609,6 +621,7 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
             onSubmit={() => void handleSubmit()}
             onSelectedChannelsChange={setSelectedChannelIds}
             onResearchContextChange={setSelectedResearchContext}
+            onAttachmentsChange={setAttachments}
             isStreaming={messages.some(m => m.isStreaming)}
             onAbort={abortCurrentRequest}
             webSearchEnabled={webSearchEnabled}

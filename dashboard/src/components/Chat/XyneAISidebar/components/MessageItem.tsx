@@ -11,11 +11,13 @@ import {
   type ToolOutput as GeniusToolOutput,
 } from 'cosmic-ai-genius';
 import { Tooltip } from '../../../ui/Tooltip';
+import FileDocumentIcon from '../../../icons/FileDocumentIcon';
 import type {
   Message,
   SummarizerCitation,
   StreamingParsedContent,
   SummarizerKeyPoint,
+  MessageAttachment,
 } from '../utils/XyneAITypes';
 
 // Sanitize text to prevent XSS attacks
@@ -92,6 +94,37 @@ interface MessageItemProps {
   onSummarizerCitationClick: (citation: SummarizerCitation) => void;
   feedbackValue: 'LIKE' | 'DISLIKE' | null;
 }
+
+// Attachment preview component
+const AttachmentPreview = ({ attachment }: { attachment: MessageAttachment }): ReactElement => {
+  const isImage = attachment.mimeType.startsWith('image/');
+
+  return (
+    <div className='flex items-center gap-2 p-2 rounded-lg bg-white border border-gray-200'>
+      {isImage ? (
+        <div className='relative w-full max-w-[200px] rounded overflow-hidden'>
+          <img
+            src={`data:${attachment.mimeType};base64,${attachment.data}`}
+            alt={attachment.filename}
+            className='w-full h-auto'
+          />
+        </div>
+      ) : (
+        <div className='flex items-center gap-2'>
+          <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-gray-100 rounded'>
+            <FileDocumentIcon color='#788187' size={20} />
+          </div>
+          <div className='flex flex-col overflow-hidden'>
+            <span className="text-sm font-medium text-gray-900 font-['Inter'] truncate">
+              {attachment.filename}
+            </span>
+            <span className="text-xs text-gray-500 font-['Inter']">{attachment.mimeType}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const MessageItem = ({
   message,
@@ -194,9 +227,19 @@ export const MessageItem = ({
               }`}
             >
               {message.type === 'user' ? (
-                <p className="text-sm font-['Inter'] whitespace-pre-wrap break-words  font-[450]  tracking-[0] md:leading-relaxed">
-                  {displayContent}
-                </p>
+                <>
+                  {/* Attachment previews */}
+                  {message.attachments && message.attachments.length > 0 && (
+                    <div className='mb-3 space-y-2'>
+                      {message.attachments.map((attachment, index) => (
+                        <AttachmentPreview key={index} attachment={attachment} />
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-sm font-['Inter'] whitespace-pre-wrap break-words  font-[450]  tracking-[0] md:leading-relaxed">
+                    {displayContent}
+                  </p>
+                </>
               ) : (
                 <MessageContent
                   message={message}

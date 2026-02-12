@@ -528,6 +528,7 @@ model WorkflowStep {
   data                String? // JSON string
   status              String?
   markdownSummary     String? // AI-generated markdown summary of checkpoint execution
+  attachment          String? // JSON string
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

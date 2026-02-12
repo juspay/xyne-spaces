@@ -1,14 +1,24 @@
 /**
  * Xyne AI Agent Types
- * 
+ *
  * API request, streaming chunks, and output types.
  */
 
+import type { Attachment } from '@xynehq/jaf';
 import type { UserInfo, ResearchContext } from './tools/index.js';
 
 // ============================================================================
 // Request Types
 // ============================================================================
+
+/**
+ * Attachment data from request
+ */
+export interface AttachmentData {
+  data: string;  // Base64-encoded file content
+  mime_type: string;
+  filename?: string;
+}
 
 export interface XyneAIRequest {
   query: string;
@@ -17,6 +27,7 @@ export interface XyneAIRequest {
   conversationId?: string;
   userId: string;
   currentTimestamp?: string | null;
+  attachments?: AttachmentData[];
   userInfo?: UserInfo;
   webSearchEnabled?: boolean;  // Enable/disable web search tool
   researchContext?: ResearchContext;
@@ -90,6 +101,6 @@ export interface AgentHistoryOutput {
 /**
  * Formatted history message for JAF
  */
-export type FormattedHistoryMessage = 
-  | { role: 'user'; content: string }
+export type FormattedHistoryMessage =
+  | { role: 'user'; content: string; attachments?: Attachment[] }
   | { role: 'assistant'; content: AgentHistoryOutput };

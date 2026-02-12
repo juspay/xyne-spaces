@@ -33,15 +33,13 @@ import {logger} from '@/utils/logger';
 // ============================================================================
 
 const LITELLM_BASE_URL = config.litellm.baseUrl;
-const LITELLM_API_KEY = config.litellm.apiKey;
-const MODEL_NAME = 'minimaxai/minimax-m2';
 
 // ============================================================================
 // Model Provider
 // ============================================================================
 
-function createModelProvider() {
-  return makeLiteLLMProvider(LITELLM_BASE_URL, LITELLM_API_KEY);
+function createModelProvider(apiKey: string) {
+  return makeLiteLLMProvider(LITELLM_BASE_URL, apiKey);
 }
 
 // ============================================================================
@@ -99,13 +97,15 @@ function createAgentRegistry(agent: Agent<XyneAIAgentContext, unknown>) {
 
 function createRunConfig(
   agentRegistry: Map<string, Agent<XyneAIAgentContext, unknown>>,
+  modelName: string,
+  apiKey: string,
   onEvent?: (event: TraceEvent) => void
 ): RunConfig<XyneAIAgentContext> {
   return {
     agentRegistry,
-    modelProvider: createModelProvider() as RunConfig<XyneAIAgentContext>['modelProvider'],
+    modelProvider: createModelProvider(apiKey) as RunConfig<XyneAIAgentContext>['modelProvider'],
     maxTurns: 5,
-    modelOverride: MODEL_NAME,
+    modelOverride: modelName,
     onEvent,
   };
 }
@@ -188,6 +188,8 @@ export async function createAgentRunner(
   source: 'thread' | 'channel',
   context: XyneAIAgentContext,
   messages: Message[],
+  modelName: string,
+  apiKey: string,
   onEvent?: (event: TraceEvent) => void
 ) {
   // Fetch channel info and research data in parallel (single API call for research)
@@ -198,7 +200,7 @@ export async function createAgentRunner(
   
   const { channelNames, contextChannelMap, contextChannelIdToName } = channelInfo;
   const { researchOptions, productNameToId, repositoryNameToId } = researchData;
-  
+
   // Add the pre-computed maps to context
   const enrichedContext: XyneAIAgentContext = {
     ...context,
@@ -207,7 +209,7 @@ export async function createAgentRunner(
     productNameToId,
     repositoryNameToId,
   };
-  
+
   const systemPrompt = await buildAgentPrompt(
     source, 
     context.timestamp, 
@@ -218,8 +220,8 @@ export async function createAgentRunner(
   );
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled);
   const agentRegistry = createAgentRegistry(agent);
-  const runConfig = createRunConfig(agentRegistry, onEvent);
+  const runConfig = createRunConfig(agentRegistry, modelName, apiKey, onEvent);
   const initialState = createInitialState(enrichedContext, messages);
-  
+
   return runStream(initialState, runConfig);
 }

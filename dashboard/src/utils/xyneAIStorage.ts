@@ -2,6 +2,7 @@
  * IndexedDB storage for Genius AI conversation history
  */
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
+import type { MessageAttachment } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
 const DB_NAME = 'XyneAIDB';
 const DB_VERSION = 2; // Incremented for schema change
@@ -25,6 +26,7 @@ export interface StoredMessage {
   channelIdMapping?: Record<string, string>;
   toolOutputs?: GeniusToolOutput[];
   feedback?: 0 | 1 | 2; // 0 = no feedback, 1 = like, 2 = dislike
+  attachments?: MessageAttachment[];
 }
 
 export interface ConversationHistory {
