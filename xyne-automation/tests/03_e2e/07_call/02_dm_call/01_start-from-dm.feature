@@ -10,10 +10,10 @@ Feature: Start Call from Direct Message
     When I open the Xyne-Space at "user1-user2-dm"
     And I wait for "[data-testid='chat-list-loading']" to disappear
     And I click on "[data-testid='start-call-button']"
-    Then I should see the element "[data-testid='call-window']"
+    Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 1 participant in the element "[data-testid='participant-count']"
 
   @start-from-dm @start-from-dm-verify
   Scenario: User2 sees the call in the DM
     Given using browser "user2-browser"
-    Then the element with role dialog should be open
+    And I wait for "[role='dialog'][aria-modal='true']" to appear

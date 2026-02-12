@@ -10,13 +10,13 @@ Feature: Start Call from Group Chat
     When I open the Xyne-Space at "group-chat-1"
     And I wait for "[data-testid='chat-list-loading']" to disappear
     And I click on "[data-testid='start-call-button']"
-    Then I should see the element "[data-testid='call-window']"
+    Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 1 participant in the element "[data-testid='participant-count']"
 
   @start-from-group @start-from-group-verify
   Scenario Outline: <user> sees the call in the group chat
     Given using browser "<browser>"
-    Then the element with role dialog should be open
+    And I wait for "[role='dialog'][aria-modal='true']" to appear
 
     Examples:
       | user  | browser       |

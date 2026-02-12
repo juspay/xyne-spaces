@@ -13,7 +13,7 @@ Then(
     e2eLogger.info(`[Call] Verifying at least ${minCount} participant(s) in ${selector}`);
 
     const element = this.page.locator(selector).first();
-    await element.waitFor({ state: 'visible', timeout: 10000 });
+    await element.waitFor({ state: 'visible' });
 
     // Poll until the count reaches the minimum
     let count = 0;
@@ -27,26 +27,6 @@ Then(
     expect(count).to.be.at.least(minCount);
 
     e2eLogger.info(`[Call] Verified participant count: ${count} (expected at least ${minCount})`);
-  }
-);
-
-Then(
-  'I should see active call in the element {string}',
-  async function (this: CustomWorld, selector: string) {
-    if (!this.page) throw new Error('Browser not initialized');
-
-    e2eLogger.info(`[Call] Verifying active call is visible in: ${selector}`);
-
-    const container = this.page.locator(selector).first();
-    await container.waitFor({ state: 'visible', timeout: 10000 });
-
-    // Look for active call indicator
-    const activeCall = container.locator('[data-testid="Active"]');
-    await activeCall.first().waitFor({ state: 'visible', timeout: 10000 });
-
-    expect(await activeCall.first().isVisible()).to.be.true;
-
-    e2eLogger.info('[Call] Active call is visible');
   }
 );
 
@@ -76,7 +56,7 @@ Then(
     e2eLogger.info(`[Call] Verifying users in active call: ${resolvedUser1}, ${resolvedUser2}`);
 
     const container = this.page.locator(selector).first();
-    await container.waitFor({ state: 'visible', timeout: 10000 });
+    await container.waitFor({ state: 'visible' });
 
     // Find all active call entries within the container
     const activeCallEntries = container.locator('[data-testid="active-call"]');
@@ -118,200 +98,115 @@ Then(
   }
 );
 
-Then('the element with role dialog should be open', async function (this: CustomWorld) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  e2eLogger.info('[Call] Waiting for dialog to be visible');
-
-  const dialog = this.page.locator('[role="dialog"]');
-  await dialog.first().waitFor({ state: 'visible', timeout: 10000 });
-
-  expect(await dialog.first().isVisible()).to.be.true;
-
-  e2eLogger.info('[Call] Dialog is visible');
-});
-
-Then('the element with role dialog should be closed', async function (this: CustomWorld) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  e2eLogger.info('[Call] Waiting for dialog to close');
-
-  const dialog = this.page.locator('[role="dialog"]');
-  await dialog.first().waitFor({ state: 'hidden', timeout: 10000 });
-
-  expect(await dialog.first().isVisible()).to.be.false;
-
-  e2eLogger.info('[Call] Dialog is closed');
-});
-
 When('I dismiss any open dialog', async function (this: CustomWorld) {
   if (!this.page) throw new Error('Browser not initialized');
 
   e2eLogger.info('[Call] Checking for and dismissing any open dialogs');
 
-  const dialog = this.page.locator('[role="dialog"]');
-  const dialogCount = await dialog.count();
+  const dialogSelector = '[role="dialog"][aria-modal="true"]';
+  const dialog = this.page.locator(dialogSelector);
+
+  // First, check if dialog already exists
+  let dialogCount = await dialog.count();
+  let isVisible = false;
 
   if (dialogCount > 0) {
-    const isVisible = await dialog
+    isVisible = await dialog
       .first()
       .isVisible()
       .catch(() => false);
-    if (isVisible) {
-      e2eLogger.info('[Call] Found open dialog, attempting to dismiss it');
+  }
 
-      // Try to find and click the close button (X button) or decline button
-      try {
-        // Look for close button in the dialog
-        const closeButton = dialog
-          .first()
-          .locator('button:has(svg.lucide-x), button[aria-label*="close" i]')
-          .first();
-        const closeButtonCount = await closeButton.count();
-
-        if (closeButtonCount > 0 && (await closeButton.isVisible().catch(() => false))) {
-          await closeButton.click();
-          e2eLogger.info('[Call] Clicked close button to dismiss dialog');
-        } else {
-          // Try decline call button as fallback
-          const declineButton = dialog.first().locator('button:has(svg.lucide-phone-off)').first();
-          const declineButtonCount = await declineButton.count();
-
-          if (declineButtonCount > 0 && (await declineButton.isVisible().catch(() => false))) {
-            await declineButton.click();
-            e2eLogger.info('[Call] Clicked decline button to dismiss dialog');
-          } else {
-            // Last resort: press Escape key
-            await this.page.keyboard.press('Escape');
-            e2eLogger.info('[Call] Pressed Escape key to dismiss dialog');
-          }
-        }
-      } catch {
-        // If clicking fails, try Escape key
-        e2eLogger.info('[Call] Clicking close button failed, trying Escape key');
-        await this.page.keyboard.press('Escape');
-      }
-
-      // Wait for dialog to close
+  // If no dialog is visible, wait a bit for it to appear (e.g., after page navigation)
+  if (!isVisible) {
+    e2eLogger.info('[Call] No dialog visible yet, waiting for dialog to appear (with timeout)');
+    try {
       await dialog
         .first()
-        .waitFor({ state: 'hidden', timeout: 5000 })
+        .waitFor({ state: 'visible', timeout: 3000 })
         .catch(() => {
-          e2eLogger.info('[Call] Dialog may still be visible after dismissal attempt');
+          e2eLogger.info('[Call] No dialog appeared within timeout, nothing to dismiss');
         });
-
-      // Small delay to ensure dialog is fully closed
-      await this.page.waitForTimeout(300);
-    } else {
-      e2eLogger.info('[Call] Dialog exists but is not visible, no action needed');
+      dialogCount = await dialog.count();
+      isVisible =
+        dialogCount > 0 &&
+        (await dialog
+          .first()
+          .isVisible()
+          .catch(() => false));
+    } catch {
+      // Dialog didn't appear, which is fine
+      e2eLogger.info('[Call] No dialog appeared, nothing to dismiss');
     }
+  }
+
+  if (isVisible && dialogCount > 0) {
+    e2eLogger.info('[Call] Found open dialog, attempting to dismiss it');
+
+    // Try to find and click the close button (X button) or decline button
+    try {
+      // Look for close button in the dialog
+      const closeButton = dialog
+        .first()
+        .locator('button:has(svg.lucide-x), button[aria-label*="close" i]')
+        .first();
+      const closeButtonCount = await closeButton.count();
+
+      if (closeButtonCount > 0 && (await closeButton.isVisible().catch(() => false))) {
+        await closeButton.click();
+        e2eLogger.info('[Call] Clicked close button to dismiss dialog');
+      } else {
+        // Try decline call button as fallback
+        const declineButton = dialog.first().locator('button:has(svg.lucide-phone-off)').first();
+        const declineButtonCount = await declineButton.count();
+
+        if (declineButtonCount > 0 && (await declineButton.isVisible().catch(() => false))) {
+          await declineButton.click();
+          e2eLogger.info('[Call] Clicked decline button to dismiss dialog');
+        } else {
+          // Last resort: press Escape key
+          await this.page.keyboard.press('Escape');
+          e2eLogger.info('[Call] Pressed Escape key to dismiss dialog');
+        }
+      }
+    } catch (error) {
+      // If clicking fails, try Escape key
+      e2eLogger.info(`[Call] Clicking close button failed: ${error}, trying Escape key`);
+      await this.page.keyboard.press('Escape');
+    }
+
+    // Wait for dialog to close with retry logic
+    let dialogClosed = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await dialog.first().waitFor({ state: 'hidden', timeout: 2000 });
+        dialogClosed = true;
+        e2eLogger.info('[Call] Dialog successfully dismissed');
+        break;
+      } catch {
+        e2eLogger.info(
+          `[Call] Dialog still visible after dismissal attempt ${attempt + 1}, retrying...`
+        );
+        // Try dismissing again
+        if (attempt < 2) {
+          await this.page.keyboard.press('Escape');
+          await this.page.waitForTimeout(500);
+        }
+      }
+    }
+
+    if (!dialogClosed) {
+      e2eLogger.warn('[Call] Dialog may still be visible after all dismissal attempts');
+    }
+
+    // Small delay to ensure dialog is fully closed
+    await this.page.waitForTimeout(300);
   } else {
-    e2eLogger.info('[Call] No dialog found, nothing to dismiss');
+    e2eLogger.info('[Call] No dialog found or visible, nothing to dismiss');
   }
 
   e2eLogger.info('[Call] Dialog dismissal check complete');
 });
-
-When('I click the accept call button', async function (this: CustomWorld) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  e2eLogger.info('[Call] Clicking accept call button');
-
-  // Target the button that contains the "phone" icon (accept/join call)
-  const acceptButton = this.page.locator('button:has(svg.lucide-phone)');
-  await acceptButton.first().waitFor({ state: 'visible', timeout: 10000 });
-  await acceptButton.first().click();
-
-  e2eLogger.info('[Call] Clicked accept call button');
-});
-
-When('I click the decline call button', async function (this: CustomWorld) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  e2eLogger.info('[Call] Clicking decline call button');
-
-  // Target the button that contains the "phone-off" icon (decline/end call)
-  const declineButton = this.page.locator('button:has(svg.lucide-phone-off)');
-  await declineButton.first().waitFor({ state: 'visible', timeout: 10000 });
-  await declineButton.first().click();
-
-  e2eLogger.info('[Call] Clicked decline call button');
-});
-
-Then(
-  'the element {string} should have attribute {string} equal to {string}',
-  async function (this: CustomWorld, selector: string, attribute: string, expectedValue: string) {
-    if (!this.page) throw new Error('Browser not initialized');
-
-    e2eLogger.info(
-      `[UI] Verifying element ${selector} has attribute ${attribute}="${expectedValue}"`
-    );
-
-    const element = this.page.locator(selector).first();
-    await element.waitFor({ state: 'visible', timeout: 10000 });
-
-    const actualValue = await element.getAttribute(attribute);
-    expect(actualValue).to.equal(expectedValue);
-
-    e2eLogger.info(`[UI] Verified attribute ${attribute}="${actualValue}"`);
-  }
-);
-
-Then(
-  'the element {string} should have attribute {string} and contain {string}',
-  async function (this: CustomWorld, selector: string, attribute: string, expectedContent: string) {
-    if (!this.page) throw new Error('Browser not initialized');
-
-    // Resolve user references
-    const resolvedContent = expectedContent.replace(
-      /user:([^.,\s]+)\.([^,\s]+)/g,
-      (match, browserSession, field) => {
-        for (const [, userData] of this.userData) {
-          if (userData.browserSession === browserSession) {
-            return userData[field as keyof typeof userData] as string;
-          }
-        }
-        throw new Error(`No user found logged in browser session "${browserSession}"`);
-      }
-    );
-
-    e2eLogger.info(
-      `[UI] Verifying element ${selector} has attribute ${attribute} containing "${resolvedContent}"`
-    );
-
-    const element = this.page.locator(selector).first();
-    await element.waitFor({ state: 'visible', timeout: 10000 });
-
-    const actualValue = await element.getAttribute(attribute);
-
-    // Handle both JSON array and plain string
-    let found = false;
-    if (actualValue) {
-      try {
-        // Try to parse as JSON array
-        const parsedArray = JSON.parse(actualValue);
-        if (Array.isArray(parsedArray)) {
-          found = parsedArray.some(
-            (item: unknown) => typeof item === 'string' && item.includes(resolvedContent)
-          );
-        } else {
-          // Not an array, do string include check
-          found = actualValue.includes(resolvedContent);
-        }
-      } catch {
-        // Not valid JSON, do simple string include check
-        found = actualValue.includes(resolvedContent);
-      }
-    }
-
-    expect(
-      found,
-      `Expected attribute "${attribute}" to contain "${resolvedContent}", but got "${actualValue}"`
-    ).to.be.true;
-
-    e2eLogger.info(`[UI] Verified attribute ${attribute} contains "${resolvedContent}"`);
-  }
-);
 
 Then(
   'I should see {string} in the selected users badges',

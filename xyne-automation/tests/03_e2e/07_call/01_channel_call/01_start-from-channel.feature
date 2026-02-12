@@ -11,7 +11,7 @@ Feature: Start Call from Channel
     And I wait for "[data-testid='chat-list-loading']" to disappear
     And I click on "[data-testid='start-call-button']"
     And I click on "[data-testid='confirm-call-button']"
-    Then I should see the element "[data-testid='call-window']"
+    Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 1 participant in the element "[data-testid='participant-count']"
 
   @start-from-channel @start-from-channel-verify

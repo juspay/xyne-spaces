@@ -7,9 +7,9 @@ Feature: Join Call from Direct Message
   @join-from-notification
   Scenario: User can join a call from notification
     Given using browser "user2-browser"
-    Then the element with role dialog should be open
-    When I click the accept call button
-    Then I should see the element "[data-testid='call-window']"
+    And I wait for "[role='dialog'][aria-modal='true']" to appear
+    When I click on "button:has(svg.lucide-phone)"
+    Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"
     And I click on "[data-testid='end-call-button']"
     Then I should not see "[data-testid='call-window']"
@@ -21,7 +21,7 @@ Feature: Join Call from Direct Message
     And I wait for "[data-testid='chat-list-loading']" to disappear
     And I should see "A call is going on" in the element "[data-testid='virtuoso-item-list']"
     And I click on "[data-testid='start-call-button']"
-    Then I should see the element "[data-testid='call-window']"
+    Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"
     And I click on "[data-testid='end-call-button']"
     Then I should not see "[data-testid='call-window']"
@@ -33,7 +33,7 @@ Feature: Join Call from Direct Message
     And I wait for "[data-testid='chat-list-loading']" to disappear
     And I should see "A call is going on" in the element "[data-testid='virtuoso-item-list']"
     And I click on "[data-testid='join-button']"
-    Then I should see the element "[data-testid='call-window']"
+    Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"
     And I click on "[data-testid='end-call-button']"
     Then I should not see "[data-testid='call-window']"
@@ -41,7 +41,7 @@ Feature: Join Call from Direct Message
   @end-call-user1
   Scenario: User1 can end a call
     Given using browser "user1-browser"
+    And I wait for "[data-testid='call-window']" to appear
     And I click on "[data-testid='end-call-button']"
     Then I should not see "[data-testid='call-window']"
-
 
