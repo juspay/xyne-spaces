@@ -46,6 +46,7 @@ export function parsePartialSummarizerJSON(content: string): PartialSummarizerOu
       result.summary = summaryMatch[1]
         .replace(/\\n/g, '\n')
         .replace(/\\"/g, '"')
+        .replace(/\\`/g, '`')
         .replace(/\\\\/g, '\\');
     }
 
@@ -70,6 +71,7 @@ export function parsePartialSummarizerJSON(content: string): PartialSummarizerOu
             const point = pointMatch[1]
               .replace(/\\n/g, '\n')
               .replace(/\\"/g, '"')
+              .replace(/\\`/g, '`')
               .replace(/\\\\/g, '\\');
 
             // Extract citation if available
@@ -118,6 +120,7 @@ export function parsePartialSummarizerJSON(content: string): PartialSummarizerOu
           const point = pointMatch[1]
             .replace(/\\n/g, '\n')
             .replace(/\\"/g, '"')
+            .replace(/\\`/g, '`')
             .replace(/\\\\/g, '\\');
 
           result.keyPoints.push({ point });
@@ -149,7 +152,11 @@ export function extractStreamingText(content: string): string {
     // Extract summary text from incomplete JSON
     const summaryMatch = content.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)(?:")?/);
     if (summaryMatch && summaryMatch[1] !== undefined) {
-      return summaryMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      return summaryMatch[1]
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/\\`/g, '`')
+        .replace(/\\\\/g, '\\');
     }
     return '';
   }

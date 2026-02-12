@@ -539,12 +539,15 @@ const GeniusKeyPoints = ({
 
         return (
           <li key={index} className='flex items-start'>
-            <span className='text-gray-700 text-sm'>
-              <span
-                dangerouslySetInnerHTML={{
-                  __html: point.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'),
+            <span className='text-gray-700 text-sm inline prose prose-sm max-w-none'>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <span>{children}</span>,
                 }}
-              />
+              >
+                {point}
+              </ReactMarkdown>
               {hasValidCitation && messageNumber && !message.isStreaming && (
                 <button
                   type='button'
