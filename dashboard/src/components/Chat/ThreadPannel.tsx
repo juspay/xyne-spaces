@@ -1,6 +1,5 @@
 import { ReactElement, useMemo, useState, useEffect, useRef } from 'react';
-import { useParams, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { useZero } from '../../hooks/useZero';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Button } from '../ui/Button';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
@@ -47,6 +46,7 @@ import { SHAREABLE_ORIGIN } from '../../config';
 
 import { isElectronApp, isStandaloneWindow, standaloneNavigate } from '../../utils/electronApp';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useZero } from '../../hooks/useZero';
 import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
@@ -399,23 +399,34 @@ export const ThreadMessages = ({
 
     const navState = location.state as {
       fromMyTickets?: boolean;
+      fromActivity?: boolean;
+      fromTable?: boolean;
       returnToUrl?: string;
       activeTab?: string;
     } | null;
 
-    // Check if user came from tickets tab or has a return URL
+    // Check if user came from activity, tickets table, tickets tab, or has a return URL
+    const fromActivity = navState?.fromActivity || location.pathname.startsWith('/chat/activity/');
+    const fromTable = navState?.fromTable;
     const isFromTickets =
       location.search.includes('tab=tickets') && location.search.includes('ticketId');
     const returnToUrl = navState?.returnToUrl;
 
-    if (isMobile && (isFromTickets || returnToUrl)) {
-      // On mobile, navigate to tickets tab if coming from tickets, or use return URL
+    if (isMobile) {
       if (returnToUrl) {
+        // Use the return URL if provided
         void navigate(returnToUrl, { replace: true });
-      } else {
+      } else if (fromActivity) {
+        // Navigate back to activity tab
+        void navigate('/chat/activity', { replace: true });
+      } else if (fromTable || isFromTickets) {
+        // Navigate to tickets tab if coming from tickets/table
         void navigate(buildChannelRoute(derivedChannelId, { tab: 'tickets' }), {
           replace: true,
         });
+      } else {
+        // Navigate to channel (messages tab)
+        void navigate(`${baseRoute}/${derivedChannelId}`, { replace: true });
       }
     } else {
       // Navigate to channel (messages tab)
@@ -782,24 +793,13 @@ export const ThreadMessages = ({
                       <X size={20} />
                     </Button>
                   ) : (
-                    <Link
-                      to={
-                        isMobile && ticket && location.search.includes('tab=tickets')
-                          ? `${baseRoute}/${derivedChannelId}?tab=tickets`
-                          : `${baseRoute}/${derivedChannelId}`
-                      }
+                    <button
+                      onClick={handleCloseTicketDetailsThread}
                       className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
                       aria-label='Close thread panel'
-                      replace={isMobile}
-                      onClick={e => {
-                        if (isStandaloneWindow()) {
-                          e.preventDefault();
-                          window.close();
-                        }
-                      }}
                     >
                       <X size={20} />
-                    </Link>
+                    </button>
                   ))}
               </div>
             </div>
@@ -1045,24 +1045,13 @@ export const ThreadMessages = ({
                           <X size={20} />
                         </Button>
                       ) : (
-                        <Link
-                          to={
-                            isMobile && ticket && location.search.includes('tab=tickets')
-                              ? `${baseRoute}/${derivedChannelId}?tab=tickets`
-                              : `${baseRoute}/${derivedChannelId}`
-                          }
+                        <button
+                          onClick={handleCloseTicketDetailsThread}
                           className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
                           aria-label='Close thread panel'
-                          replace={isMobile}
-                          onClick={e => {
-                            if (isStandaloneWindow()) {
-                              e.preventDefault();
-                              window.close();
-                            }
-                          }}
                         >
                           <X size={20} />
-                        </Link>
+                        </button>
                       )}
                     </div>
                   )}

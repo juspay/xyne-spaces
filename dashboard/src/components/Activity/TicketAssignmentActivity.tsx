@@ -29,7 +29,9 @@ export const TicketAssignmentActivity = ({
   const ticketXyneId = ticket.xyneId || activity.ticketId || activity.actionSourceId;
   const ticketIdValue = activity.ticketId || activity.actionSourceId;
 
-  const targetPath = `/chat/activity/${ticket.channelId}?tab=tickets&ticketId=${ticketIdValue}&conversationId=${ticket.conversationId}`;
+  // On mobile: will navigate to minimized view with details tab
+  // On desktop: will navigate to tab-based route in ConversationPannel
+  const targetPath = `/chat/activity/${ticket.channelId}/${ticket.conversationId}/${ticketIdValue}?selectedTab=details`;
 
   // Check if the recipient (activity.userId) is the one who was assigned
   const isRecipientAssigned = ticket.assignedTo === activity.userId;

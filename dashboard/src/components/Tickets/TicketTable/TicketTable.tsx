@@ -35,6 +35,8 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { useNavigate } from 'react-router-dom';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
+import { usePlatform } from '../../../hooks/usePlatform';
+import { useRouteContext } from '../../../hooks/useRouteContext';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -151,6 +153,8 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const zero = useZero();
   const users = useUsers();
   const navigate = useNavigate();
+  const { isMobile } = usePlatform();
+  const { baseRoute, buildChannelRoute } = useRouteContext();
 
   const [gridApi, setGridApi] = useState<GridApi | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
@@ -251,9 +255,35 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 
           const handleTicketClick = () => {
             if (params.data) {
-              void navigate(
-                `/chat/dir/${params.data.channelId}?tab=tickets&ticketId=${params.data.id}&conversationId=${params.data.conversationId}`,
-              );
+              const currentUrl = window.location.pathname + window.location.search;
+
+              // On mobile: navigate directly to ThreadMessages route with details tab
+              // On desktop: use tab-based route for expanded view in ConversationPannel
+              if (isMobile) {
+                void navigate(
+                  `${baseRoute}/${params.data.channelId}/${params.data.conversationId}/${params.data.id}?selectedTab=details`,
+                  {
+                    state: {
+                      fromMyTickets: false,
+                      returnToUrl: currentUrl,
+                    },
+                  },
+                );
+              } else {
+                void navigate(
+                  buildChannelRoute(params.data.channelId, {
+                    tab: 'tickets',
+                    ticketId: params.data.id,
+                    conversationId: params.data.conversationId,
+                  }),
+                  {
+                    state: {
+                      fromMyTickets: false,
+                      returnToUrl: currentUrl,
+                    },
+                  },
+                );
+              }
             }
           };
 
