@@ -10,7 +10,6 @@ import {
   ChevronDown,
   BarChart4Icon,
   Search,
-  Loader2,
   Tag,
   FileText,
   Hash,
@@ -34,10 +33,7 @@ import type { TicketPriority, FormFields } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import * as Popover from '@radix-ui/react-popover';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
-import { DisplaySearchResult } from '../../../types/search';
-import SearchResultItem from '../../Chat/ChatDirectory/SearchResultItem';
 import { TabType } from '../../Chat/ChatDirectory/ChannelCommandMenu.types';
-import { Command } from 'cmdk';
 
 interface FilterMenuItem {
   id: string;
@@ -75,11 +71,11 @@ export const TicketFiltersDropdown = ({
   availableTags,
   hideAssigneeFilter = false,
   formMappings,
-}: TicketFiltersProps): ReactElement => {
+  onSearchChange,
+}: TicketFiltersProps & { onSearchChange?: (searchTerm: string) => void }): ReactElement => {
   const [boardOpen, setBoardOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
@@ -141,15 +137,7 @@ export const TicketFiltersDropdown = ({
   }, [isOpen]);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
-  const {
-    searchResults,
-    setText,
-    isSearching,
-    setActiveTab,
-    paginationState,
-    loadMoreRef,
-    setUseVespaSearch,
-  } = useSearchMetrics({ allChannels: [] });
+  const { setActiveTab, setUseVespaSearch } = useSearchMetrics({ allChannels: [] });
 
   useEffect(() => {
     setActiveTab(TabType.TICKETS);
@@ -225,27 +213,6 @@ export const TicketFiltersDropdown = ({
     }
     return [...FILTER_MENU_ITEMS, ...dynamicFilterItems];
   }, [dynamicFilterItems, selectedBoards]);
-  const handleTicketSelect = (result: DisplaySearchResult): Promise<void> => {
-    const ticketId = result.searchContext?.ticketId || result.id;
-    const channelId = result.searchContext?.channelId;
-    void navigate(`/chat/${channelId}/tickets/${ticketId}`);
-    return Promise.resolve();
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setSearchTerm(value);
-    setText(value);
-    if (value.trim().length > 0 && !searchOpen) {
-      setSearchOpen(true);
-    }
-  };
-
-  useEffect(() => {
-    if (searchResults.length > 0 && searchOpen) {
-      inputRef.current?.focus();
-    }
-  }, [searchResults, searchOpen]);
 
   const handleFilterChange = (key: keyof TicketFilters, value: unknown): void => {
     const newFilters = {
@@ -722,76 +689,25 @@ export const TicketFiltersDropdown = ({
         )}
 
         {/* ticket search */}
-
         <div className='flex-1 max-w-sm'>
-          <Command label='Ticket Search' shouldFilter={false} className='flex flex-col'>
-            <Popover.Root open={searchOpen} onOpenChange={setSearchOpen}>
-              <Popover.Trigger asChild>
-                <div className='relative'>
-                  <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
-                  <input
-                    ref={inputRef}
-                    type='text'
-                    placeholder='Search Ticket'
-                    value={searchTerm}
-                    onChange={handleInputChange}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                        inputRef.current?.focus();
-                      }
-                    }}
-                    className='w-full text-sm bg-white border border-gray-200 text-gray-900 rounded-lg pl-10 pr-3 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
-                  />
-                  {isSearching && (
-                    <div className='absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center justify-center'>
-                      <Loader2 className='w-3 h-3 animate-spin text-gray-400' />
-                    </div>
-                  )}
-                </div>
-              </Popover.Trigger>
-              {searchTerm.trim().length > 0 && (
-                <Popover.Content
-                  side='bottom'
-                  align='start'
-                  sideOffset={6}
-                  onOpenAutoFocus={e => e.preventDefault()}
-                  onCloseAutoFocus={e => e.preventDefault()}
-                  className='z-[60] max-w-[350px] bg-white border border-gray-200 rounded-lg shadow-xl max-h-[400px] flex flex-col overflow-hidden'
-                >
-                  <div className='p-1 overflow-y-auto'>
-                    {searchResults.length > 0 ? (
-                      <Command.List>
-                        {searchResults.map((result: DisplaySearchResult) => (
-                          <SearchResultItem
-                            key={result.id}
-                            result={result}
-                            onSelect={() => handleTicketSelect(result)}
-                          />
-                        ))}
-
-                        {paginationState[TabType.TICKETS]?.hasMore && (
-                          <div
-                            ref={loadMoreRef}
-                            className='py-2 flex justify-center items-center gap-2'
-                          >
-                            <Loader2 className='w-3 h-3 animate-spin text-gray-400' />
-                            <span className='text-[10px] text-gray-400'>Loading more...</span>
-                          </div>
-                        )}
-                      </Command.List>
-                    ) : (
-                      !isSearching &&
-                      searchTerm.trim() !== '' && (
-                        <div className='p-6 text-center'>
-                          <p className='text-xs text-gray-500'>No tickets found</p>
-                        </div>
-                      )
-                    )}
-                  </div>
-                </Popover.Content>
-              )}
-            </Popover.Root>
-          </Command>
+          <div className='relative'>
+            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
+            <input
+              ref={inputRef}
+              type='text'
+              placeholder='Search Tickets'
+              value={searchTerm}
+              onChange={e => {
+                const value = e.target.value;
+                setSearchTerm(value);
+                if (onSearchChange) {
+                  onSearchChange(value);
+                }
+              }}
+              className='w-full text-sm bg-white border border-gray-200 text-gray-900 rounded-lg pl-10 pr-3 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
+              aria-label='Search Tickets'
+            />
+          </div>
         </div>
       </div>
     </div>
