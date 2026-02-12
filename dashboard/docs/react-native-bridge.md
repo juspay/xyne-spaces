@@ -33,6 +33,7 @@ Every message is JSON with this envelope:
 | Type | Payload | Notes |
 | --- | --- | --- |
 | `WEB_APP_READY` | `{ path: string; version: string }` | Sent immediately after initialization so native knows the current route and the deployed app version (`VITE_APP_VERSION` falls back to `web`). |
+| `WEB_ROUTE_READY` | `{ path: string }` | Sent after route transitions (post-render) so native can measure navigation/notification latency. |
 | `REQUEST_GOOGLE_SIGN_IN` | `{ reason?: string }` | Tells the host to launch Google auth. UI shows a spinner until a response arrives. |
 | `WEB_SIGN_OUT` | `{ reason?: string }` | Emitted when the user signs out in the browser so the host can clear its state. |
 | `AUTH_STATE_SYNC` | `{ isAuthenticated: boolean; user?: { id; name; email; picture? } \| null }` | Sent any time the auth context changes so native can mirror the profile. |

@@ -117,6 +117,14 @@ const AppRoot = (): ReactElement => {
   const isOnboarding = location.pathname === '/onboarding';
   const isOnVSCode = location.pathname === '/vscode';
 
+  useEffect(() => {
+    if (!reactNativeBridge.isAvailable()) {
+      return;
+    }
+    const path = `${location.pathname}${location.search}${location.hash}`;
+    reactNativeBridge.notifyRouteReady(path);
+  }, [location]);
+
   // Get call state for mobile header using snapshot
   const callSnapshot = useSelector(roomActor, state => state);
   const {
