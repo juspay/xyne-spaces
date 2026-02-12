@@ -74,6 +74,16 @@ export const shortcuts = {
     allowInInputs: true,
     useKey: true,
   },
+  'global.composeMessage': {
+    keys: 'mod+n',
+    scope: 'global',
+    description: 'Compose a new message',
+    category: 'Navigation',
+    priority: 200,
+    allowInInputs: true,
+    preventDefault: true,
+    useKey: true,
+  },
 
   // ===== SIDEBAR NAVIGATION =====
   'sidebar.resizeLeft': {
@@ -96,13 +106,6 @@ export const shortcuts = {
   },
 
   // ===== MESSAGE ACTIONS =====
-  'message.compose': {
-    keys: 'mod+n',
-    scope: 'channel',
-    description: 'Compose a new message',
-    category: 'Messages',
-    priority: 50,
-  },
   'message.edit': {
     keys: 'e',
     scope: 'channel',

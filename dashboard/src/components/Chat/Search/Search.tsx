@@ -1,15 +1,28 @@
-import { ReactElement } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { ReactElement, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import ComposeDmPanel from '../AddDmForm/ComposeDmPanel';
 import BrowseChannels from '../BrowseChannels/BrowseChannels';
 
 const Search = (): ReactElement => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const mode = searchParams.get('mode');
+
+  // route the user to create dm panenl if no mode
+  useEffect(() => {
+    if (!mode || (mode !== 'channels' && mode !== 'dm')) {
+      void navigate('/chat/search?mode=dm', { replace: true });
+    }
+  }, [mode, navigate]);
 
   // For now, we only support 'channels' mode
   // Future modes could be added here (e.g., 'messages', 'users', etc.)
   if (mode === 'channels') {
     return <BrowseChannels />;
+  }
+
+  if (mode === 'dm') {
+    return <ComposeDmPanel />;
   }
 
   // Default fallback - could be a search mode selector or default search view
