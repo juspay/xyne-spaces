@@ -1,3 +1,16 @@
+## [1.42.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.41.0...v1.42.0) (2026-02-12)
+
+
+### Features
+
+* Added meeting summaries in thread using sam api ([a1f1c33](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a1f1c33b7fcdbe5ab52ced1c953ea5f4161d8d46)), closes [#2753](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2753)
+
+
+### Bug Fixes
+
+* fixed ticket automation timeout issues and optimized ticket creation scenarios ([e210583](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e2105838e9ad4adabf050f1b631e91bd3192678e))
+* stageformModal linting fix ([a504ff4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a504ff4714d846adf397a07fe962e78682106c3f)), closes [#3101](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3101)
+
 ## [1.41.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.40.1...v1.41.0) (2026-02-12)
 
 
