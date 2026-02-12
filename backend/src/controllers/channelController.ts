@@ -227,7 +227,7 @@ export class ChannelController {
       const cleanContent =
         messageContent.replace(/<[^>]*>/g, '').trim() || 'Sent a message';
 
-      // Send notifications to recipients
+      // Send notifications to recipients (skip for self-DMs)
       if (recipientIds.length > 0) {
         await notificationService.createDirectMessageNotifications(
           recipientIds,
@@ -239,7 +239,7 @@ export class ChannelController {
           cleanContent
         );
 
-        // Update unread counts for recipients
+        // Update unread counts for recipients (skip for self-DMs)
         await handleUnreadCount(
           channelId,
           true, // isDMChannel
@@ -485,7 +485,7 @@ export class ChannelController {
         .map(p => p.userId)
         .filter(userId => userId !== senderId);
 
-      // Send notifications to recipients
+      // Send notifications to recipients (skip for self-DMs)
       if (recipientIds.length > 0) {
         await notificationService.createDirectMessageNotifications(
           recipientIds,
@@ -497,7 +497,7 @@ export class ChannelController {
           cleanContent
         );
 
-        // Update unread counts for recipients
+        // Update unread counts for recipients (skip for self-DMs)
         await handleUnreadCount(
           channelId,
           true, // isDMChannel
@@ -1094,8 +1094,12 @@ export class ChannelController {
         let partnerInfo = null;
         if (channel.scopeType === 'DM') {
           const otherParticipant = participants.find(p => p.userId !== userId);
+          // If no other participant, this is a self-DM - use current user info
           if (otherParticipant?.userId) {
             partnerInfo = userMap.get(otherParticipant.userId) || null;
+          } else if (participants.some(p => p.userId === userId)) {
+            // Self-DM case - return current user info
+            partnerInfo = userMap.get(userId) || null;
           }
         }
 
@@ -1162,19 +1166,34 @@ export class ChannelController {
         return;
       }
 
-      // Remove duplicates and filter out current user
-      const uniqueParticipantIds = [...new Set(participantIds)].filter(id => id !== currentUserId);
+      // Remove duplicates
+      const uniqueParticipantIds = [...new Set(participantIds)];
+
+      // Check if this is a self-DM (only current user in participantIds)
+      const isSelfDm = uniqueParticipantIds.length === 1 && uniqueParticipantIds[0] === currentUserId;
 
       if (uniqueParticipantIds.length === 0) {
         res.status(400).json({
           error: 'No valid participants provided',
-          details: 'Cannot create DM with yourself or empty participant list'
+          details: 'Cannot create DM with empty participant list'
+        });
+        return;
+      }
+
+      // For non-self-DMs, filter out current user from other participants
+      const otherParticipantIds = isSelfDm ? [] : uniqueParticipantIds.filter(id => id !== currentUserId);
+
+      // Validate that we have valid participants (either self-DM or at least one other user)
+      if (!isSelfDm && otherParticipantIds.length === 0) {
+        res.status(400).json({
+          error: 'No valid participants provided',
+          details: 'Cannot create DM with empty participant list'
         });
         return;
       }
 
       // Check participant limit (9 others + 1 creator = 10 max)
-      if (uniqueParticipantIds.length > 9) {
+      if (!isSelfDm && otherParticipantIds.length > 9) {
         res.status(400).json({
           error: 'Too many participants',
           details: 'Maximum 9 participants allowed (10 total including creator)',
@@ -1183,26 +1202,136 @@ export class ChannelController {
         return;
       }
 
-      // Validate all participants exist and are active
+      // Validate all participants exist and are active (skip for self-DM)
       const participantUsers = [];
-      for (const participantId of uniqueParticipantIds) {
-        const user = await this.userRepository.findById(participantId);
-        if (!user || user.status !== 'ACTIVE') {
-          res.status(404).json({
-            error: 'Participant not found or inactive',
-            userId: participantId
+      if (!isSelfDm) {
+        for (const participantId of otherParticipantIds) {
+          const user = await this.userRepository.findById(participantId);
+          if (!user || user.status !== 'ACTIVE') {
+            res.status(404).json({
+              error: 'Participant not found or inactive',
+              userId: participantId
+            });
+            return;
+          }
+          participantUsers.push(user);
+        }
+      }
+
+      // Handle self-DM case
+      if (isSelfDm) {
+        // Check if self-DM already exists
+        const existingSelfDm = await this.channelRepository.getDMChannel(currentUserId, currentUserId);
+        if (existingSelfDm) {
+          const conversations = await this.conversationRepository.getChannelConversations(existingSelfDm.id);
+          const participants = await this.channelParticipantRepository.getChannelParticipants(existingSelfDm.id);
+          const unreadCount = await unreadService.getUnreadCountForChannel(existingSelfDm.id, currentUserId);
+
+          // Send message or forwarded message if provided, even for existing self-DM
+          let initialConversation = null;
+          if (forwardedMessage) {
+            initialConversation = await this.sendForwardedMessage(existingSelfDm.id, currentUserId, forwardedMessage);
+          } else if (message && message.trim()) {
+            initialConversation = await this.sendInitialMessage(existingSelfDm.id, currentUserId, message);
+          }
+
+          const currentUserInfo = await this.getUserInfo(currentUserId);
+
+          res.status(200).json({
+            message: 'Self-DM channel already exists',
+            id: existingSelfDm.id,
+            name: existingSelfDm.name,
+            scopeType: existingSelfDm.scopeType,
+            description: existingSelfDm.description,
+            visibility: existingSelfDm.visibility,
+            projectId: existingSelfDm.projectId,
+            conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
+            participantCount: participants.length,
+            unreadCount,
+            lastActivityAt: existingSelfDm.lastActivityAt,
+            createdAt: existingSelfDm.createdAt,
+            isExisting: true,
+            isSelfDm: true,
+            targetUser: {
+              id: currentUserInfo.id,
+              name: currentUserInfo.name,
+              email: currentUserInfo.email,
+              picture: currentUserInfo.picture
+            },
+            initialConversation
           });
           return;
         }
-        participantUsers.push(user);
+
+        // Create new self-DM
+        const channelData: CreateChannelInput = {
+          scopeType: 'DM',
+          name: currentUserId,
+          description: 'Saved messages',
+          visibility: 'PRIVATE',
+          createdBy: currentUserId,
+          projectId: 'default',
+        };
+
+        const channel = await this.channelRepository.create(channelData);
+
+        // Add current user as the only participant
+        await this.channelParticipantRepository.addParticipant(channel.id, currentUserId, 'ADMIN');
+
+        // If message or forwarded message is provided, create initial conversation and message
+        let initialConversation = null;
+        if (forwardedMessage) {
+          initialConversation = await this.sendForwardedMessage(channel.id, currentUserId, forwardedMessage);
+        } else if (message && message.trim()) {
+          initialConversation = await this.sendInitialMessage(channel.id, currentUserId, message);
+        }
+
+        const currentUserInfo = await this.getUserInfo(currentUserId);
+
+        const response = {
+          message: 'Self-DM channel created successfully',
+          id: channel.id,
+          name: channel.name,
+          scopeType: channel.scopeType,
+          description: channel.description,
+          visibility: channel.visibility,
+          projectId: channel.projectId,
+          conversationCount: initialConversation ? 1 : 0,
+          participantCount: 1,
+          unreadCount: 0,
+          lastActivityAt: channel.lastActivityAt,
+          createdAt: channel.createdAt,
+          isSelfDm: true,
+          targetUser: {
+            id: currentUserInfo.id,
+            name: currentUserInfo.name,
+            email: currentUserInfo.email,
+            picture: currentUserInfo.picture
+          },
+          isExisting: false,
+          initialConversation
+        };
+
+        res.status(201).json(response);
+
+        // Queue Vespa job in background for self-DM
+        vespaQueue.addJob({
+          schema: channelSchema,
+          jobType: "feed",
+          docId: channel.id,
+          userId: currentUserId
+        }).catch(error => {
+          logger.error('Error queuing Vespa job for self-DM:', error);
+        });
+        return;
       }
 
       // Determine scope type and handle accordingly
-      const isOneOnOne = uniqueParticipantIds.length === 1;
+      const isOneOnOne = otherParticipantIds.length === 1;
 
       if (isOneOnOne) {
         // Handle 1-on-1 DM (existing logic)
-        const targetUserId = uniqueParticipantIds[0];
+        const targetUserId = otherParticipantIds[0];
         const targetUser = participantUsers[0];
 
         // Check if DM already exists
@@ -1307,7 +1436,7 @@ export class ChannelController {
         });
       } else {
         // Handle Group DM
-        const allMemberIds = [currentUserId, ...uniqueParticipantIds].sort();
+        const allMemberIds = [currentUserId, ...otherParticipantIds].sort();
 
         // Check for existing group DM with same members
         const existingGroupDM = await this.channelRepository.getGroupChannelByMembers(allMemberIds);

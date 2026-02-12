@@ -40,7 +40,12 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
 
   const getConversationTitle = (): string => {
     if (selectedUsers.length === 0) return 'Select people to message';
-    if (selectedUsers.length === 1) return `Message ${selectedUsers[0]?.name || 'Unknown'}`;
+    if (selectedUsers.length === 1) {
+      const user = selectedUsers[0];
+      if (!user) return 'Select people to message';
+      if (user.id === context.userID) return `${user.name} (you)`;
+      return `Message ${user.name || 'Unknown'}`;
+    }
     if (selectedUsers.length <= 3) {
       return selectedUsers.map(u => u.name).join(', ');
     }
@@ -66,9 +71,11 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
           <div className='text-base font-medium text-foreground mb-1'>{getConversationTitle()}</div>
           {selectedUsers.length > 0 && (
             <div className='text-xs text-muted-foreground'>
-              {selectedUsers.length === 1
-                ? 'Direct message'
-                : `Group conversation with ${selectedUsers.length} people`}
+              {selectedUsers.length === 1 && selectedUsers[0]?.id === context.userID
+                ? 'Personal notes and reminders'
+                : selectedUsers.length === 1
+                  ? 'Direct message'
+                  : `Group conversation with ${selectedUsers.length} people`}
             </div>
           )}
         </div>
@@ -76,7 +83,6 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
         {/* User Search */}
         <div>
           <SearchUser
-            excludeUserIds={[context.userID]}
             selectedUsers={selectedUsers}
             onUsersChange={handleUsersChange}
             placeholder='Type to find people...'

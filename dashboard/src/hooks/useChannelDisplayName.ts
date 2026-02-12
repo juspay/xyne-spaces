@@ -43,6 +43,7 @@ export const useChannelDisplayName = (
 
   const allUsers = useUsers();
   const users = allUsers.filter(v => userIdsToFetch.some(u => u === v.id));
+  const currentUser = allUsers.find(u => u.id === currentUserId);
 
   const totalOtherParticipants = useMemo(() => {
     if (!isDMChannel(safeChannel.scopeType)) return 0;
@@ -60,6 +61,21 @@ export const useChannelDisplayName = (
     }
 
     if (!users || users.length === 0) {
+      const allIds = parseDMParticipantIds(safeChannel);
+      const isSelfDm =
+        safeChannel.scopeType === ChannelScopeType.DM &&
+        allIds.length === 1 &&
+        allIds[0] === currentUserId;
+
+      if (isSelfDm) {
+        const userName = `${currentUser?.name} (you)` || 'You';
+        return {
+          displayName: userName,
+          avatarUserId: currentUserId,
+          isLoading: false,
+        };
+      }
+
       return {
         displayName: safeChannel.scopeType === ChannelScopeType.DM ? 'Unknown User' : 'Group Chat',
         avatarUserId: null,
@@ -114,6 +130,8 @@ export const useChannelDisplayName = (
     users,
     userIdsToFetch.length,
     totalOtherParticipants,
+    currentUserId,
+    currentUser,
   ]);
 
   return displayInfo;
