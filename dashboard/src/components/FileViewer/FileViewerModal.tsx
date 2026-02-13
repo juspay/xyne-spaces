@@ -5,6 +5,7 @@ import { detectFileType, formatFileSize } from './utils';
 import { fetchFile, downloadFile } from '../../services/clients/fileFetchService';
 import { downloadAttachment } from '../Chat/MessageAttachment/utils';
 import { usePlatform } from '../../hooks/usePlatform';
+import ThreadMessages from '../Chat/ThreadPannel';
 
 interface FilePreviewModalProps {
   isOpen: boolean;
@@ -14,6 +15,9 @@ interface FilePreviewModalProps {
   mimeType: string;
   fileSize: number;
   attachmentId?: string; // Optional: if provided, use downloadAttachment instead of downloadFile
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
 }
 
 // Inline Loading Component
@@ -83,6 +87,9 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   mimeType,
   fileSize,
   attachmentId,
+  conversationId,
+  channelId,
+  replyCount,
 }) => {
   // Simple state - service handles all caching and complexity
   const [fileData, setFileData] = useState<File | null>(null);
@@ -183,6 +190,8 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
 
   const isImage = fileType?.displayName === 'Image';
 
+  const showThreadPanel = replyCount && replyCount > 0 && conversationId && channelId && !isMobile;
+
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -200,10 +209,51 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
     };
   }, [isImage, fileData]);
 
+  // Helper function to render floating top bar with optional close button
+  const renderFloatingTopBar = (includeCloseButton: boolean): JSX.Element => (
+    <div
+      className={`absolute gap-6 p-5 top-0 left-0 z-20 flex transition-opacity duration-300 ${
+        isHovered ? 'opacity-100' : 'opacity-0'
+      } w-full`}
+    >
+      {/* Gradient overlay - always full width */}
+      <div className='absolute inset-0 bg-gradient-to-b from-black/60 to-transparent w-full' />
+      {/* Content */}
+      <div className='relative flex items-center justify-between w-full'>
+        <div className='flex-1 min-w-0'>
+          <Dialog.Title className='text-base font-medium text-white truncate drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]'>
+            {fileName}
+          </Dialog.Title>
+          <Dialog.Description className='text-xs text-white/90 mt-0.5 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]'>
+            {`${formatFileSize(fileSize)}${fileType ? ` • ${fileType.displayName}` : ''}`}
+          </Dialog.Description>
+        </div>
+        <div className='flex items-center gap-3'>
+          <button
+            onClick={() => void handleDownload()}
+            className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+          >
+            <Download className='h-4 w-4' />
+          </button>
+          {includeCloseButton && (
+            <Dialog.Close asChild>
+              <button
+                className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+                aria-label='Close'
+              >
+                <X className='h-5 w-5' />
+              </button>
+            </Dialog.Close>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <Dialog.Root open={isOpen} onOpenChange={onClose}>
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50' />
+        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50' />
         <Dialog.Content
           className={`fixed z-50 bg-black focus:outline-none 
           data-[state=closed]:fade-out transition-all ease-in-out duration-300
@@ -211,7 +261,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
           ${
             isMobile
               ? 'inset-0 w-screen h-screen' // Fullscreen on mobile
-              : 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[95vw] h-[95vh] rounded-2xl before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
+              : 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[95vw] h-[95vh] rounded-2xl'
           }`}
           style={{
             transformOrigin: 'center',
@@ -225,40 +275,51 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
           onMouseLeave={() => setIsHovered(false)}
         >
           {/* Content - Full surface with padding for floating controls */}
-          <div className='absolute inset-0 flex items-center justify-center bg-white'>
-            <div className='w-full h-full'>{renderContent()}</div>
-          </div>
-
-          {/* Floating Top Bar */}
-          <div
-            className={`absolute bg-gradient-to-b from-black/60 to-transparent gap-6 p-5 w-full top-0 left-0 z-20 flex transition-opacity duration-300 ${
-              isHovered ? 'opacity-100' : 'opacity-0'
-            }`}
-          >
-            <div className='flex-1 min-w-0'>
-              <Dialog.Title className='text-base font-medium text-white truncate drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]'>
-                {fileName}
-              </Dialog.Title>
-              <Dialog.Description className='text-xs text-white/90 mt-0.5 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]'>
-                {`${formatFileSize(fileSize)}${fileType ? ` • ${fileType.displayName}` : ''}`}
-              </Dialog.Description>
-            </div>
-            <div className='flex items-center gap-3'>
-              <button
-                onClick={() => void handleDownload()}
-                className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-              >
-                <Download className='h-4 w-4' />
-              </button>
-              <Dialog.Close asChild>
-                <button
-                  className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-                  aria-label='Close'
-                >
-                  <X className='h-5 w-5' />
-                </button>
-              </Dialog.Close>
-            </div>
+          <div className='absolute inset-0 bg-white'>
+            {showThreadPanel ? (
+              <div className='flex flex-row h-full w-full'>
+                {/* File preview with shadow */}
+                <div className='flex-[7] h-full overflow-hidden relative before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'>
+                  {/* Floating top bar - no close button when thread panel is visible */}
+                  {renderFloatingTopBar(false)}
+                  <div className='relative z-10 h-full w-full flex items-center justify-center'>
+                    {renderContent()}
+                  </div>
+                </div>
+                {/* Thread panel with custom header */}
+                <div className='flex-[3] h-full border-l border-gray-200 bg-white z-10 flex flex-col'>
+                  {/* Custom Thread Header */}
+                  <div className='flex items-center justify-between p-4 border-b border-gray-200 h-14 flex-shrink-0'>
+                    <h3 className='font-semibold text-gray-900'>Thread</h3>
+                    <button
+                      onClick={onClose}
+                      className='p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors'
+                      aria-label='Close'
+                    >
+                      <X className='h-5 w-5' />
+                    </button>
+                  </div>
+                  {/* Thread content without header */}
+                  <div className='flex-1 overflow-hidden'>
+                    <ThreadMessages
+                      channelId={channelId}
+                      conversationId={conversationId}
+                      hideHeader={true}
+                      onClose={onClose}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              // Full content with shadow
+              <div className='relative w-full h-full before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'>
+                {/* Floating top bar - with close button when no thread panel */}
+                {renderFloatingTopBar(true)}
+                <div className='relative z-10 h-full w-full flex items-center justify-center'>
+                  {renderContent()}
+                </div>
+              </div>
+            )}
           </div>
         </Dialog.Content>
       </Dialog.Portal>
