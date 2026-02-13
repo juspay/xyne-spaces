@@ -3,6 +3,7 @@ import { detectPlatform } from '../hooks/usePlatform';
 import { FLUSH_INTERVAL_IN_MS, LOGGER_BASE_URL, MAX_BATCH_SIZE, MAX_RETRIES } from '../config';
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
+import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
 
 export const LogLevel = {
   DEBUG: 'DEBUG',
@@ -121,7 +122,7 @@ export const Event = {
 export type EventType = (typeof Event)[keyof typeof Event];
 
 export interface LogEntry {
-  sessionId: string;
+  clientSessionId: string;
   platformName: Platform;
   emailId: string | null;
   timestamp: number;
@@ -132,7 +133,7 @@ export interface LogEntry {
 }
 
 export interface LoggerConfig {
-  sessionId: string;
+  clientSessionId: string;
   platformName: Platform;
   emailId?: string | null;
   notificationWsId?: string | null;
@@ -143,7 +144,7 @@ export interface LoggerConfig {
 export class Logger implements LoggerConfig {
   static readonly Event = Event;
 
-  sessionId: string;
+  clientSessionId: string;
   platformName: Platform;
   emailId?: string | null;
   notificationWsId?: string | null;
@@ -153,8 +154,8 @@ export class Logger implements LoggerConfig {
   private notificationSocketState: NotificationSocketState = NotificationSocketState.DISCONNECTED;
   private zeroSocketState: ZeroSocketState = ZeroSocketState.DISCONNECTED;
 
-  constructor(config: { platform_name: Platform }) {
-    this.sessionId = uuidv4();
+  constructor(config: { clientSessionId: string; platform_name: Platform }) {
+    this.clientSessionId = config.clientSessionId;
     this.platformName = config.platform_name;
 
     this.initializeWorker();
@@ -168,7 +169,7 @@ export class Logger implements LoggerConfig {
 
       const payload: WorkerMessage['payload'] = {
         platformName: this.platformName,
-        sessionId: this.sessionId,
+        clientSessionId: this.clientSessionId,
         loggerBaseUrl: LOGGER_BASE_URL,
         flushIntervalInMs: FLUSH_INTERVAL_IN_MS,
         maxBatchSize: MAX_BATCH_SIZE,
@@ -318,9 +319,27 @@ export class Logger implements LoggerConfig {
 
 let loggerInstance: Logger | null = null;
 
-export const getLogger = (): Logger => {
+const getClientSessionId = async (): Promise<string | null> => {
+  try {
+    if (window.electronAPI?.getClientSessionId) {
+      return await window.electronAPI.getClientSessionId();
+    } else if (detectReactNativeWebView() && reactNativeBridge.isAvailable()) {
+      return await reactNativeBridge.getClientSessionId();
+    }
+  } catch (error) {
+    console.error('Error getting client session ID for logger:', error);
+  }
+  return null;
+};
+
+export const getLogger = async (): Promise<Logger> => {
   if (!loggerInstance) {
+    const clientSessionId = await getClientSessionId();
+    if (!clientSessionId) {
+      console.warn('Failed to get client session ID from native, generating a new one');
+    }
     loggerInstance = new Logger({
+      clientSessionId: clientSessionId ?? uuidv4(),
       platform_name: detectPlatform(),
     });
     window.addEventListener('beforeunload', () => {
@@ -333,7 +352,7 @@ export const getLogger = (): Logger => {
   return loggerInstance;
 };
 
-export const logger = getLogger();
+export const logger = await getLogger();
 
 export const cleanupLogger = (): void => {
   if (loggerInstance) {

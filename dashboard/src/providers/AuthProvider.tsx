@@ -320,6 +320,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       user: user
         ? {
             id: user.id,
+            email: user.email ?? null,
           }
         : null,
     });

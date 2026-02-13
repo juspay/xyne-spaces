@@ -5,7 +5,7 @@ import type { EventType } from './logger';
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
 export interface LogEntry {
-  sessionId: string;
+  clientSessionId: string;
   platformName: string;
   emailId: string | null;
   timestamp: string;
@@ -28,7 +28,7 @@ export interface WorkerMessage {
     | 'SHUTDOWN';
   payload?: {
     platformName?: string | undefined;
-    sessionId?: string | undefined;
+    clientSessionId?: string | undefined;
     emailId?: string | undefined;
     level?: LogLevel | undefined;
     event?: EventType | undefined;
@@ -48,7 +48,7 @@ export interface WorkerMessage {
 }
 
 class LoggerWorker {
-  private sessionId: string = '';
+  private clientSessionId: string = '';
   private platformName: string = '';
   private emailId: string | null = null;
   private notificationWsId: string | null = null;
@@ -104,7 +104,7 @@ class LoggerWorker {
   private handleInit(payload?: WorkerMessage['payload']): void {
     if (payload?.platformName) {
       this.platformName = payload.platformName;
-      this.sessionId = payload.sessionId ?? uuidv4();
+      this.clientSessionId = payload.clientSessionId ?? uuidv4();
       this.emailId = payload.emailId ?? null;
       this.loggerBaseUrl = payload.loggerBaseUrl ?? '';
       this.flushInterval = payload.flushIntervalInMs ?? 60000;
@@ -118,7 +118,7 @@ class LoggerWorker {
   private handleLog(payload?: WorkerMessage['payload']): void {
     if (payload?.level !== undefined && payload?.event) {
       const logEntry: LogEntry = {
-        sessionId: this.sessionId,
+        clientSessionId: this.clientSessionId,
         platformName: this.platformName,
         emailId: this.emailId,
         timestamp: new Date(Date.now()).toISOString(),

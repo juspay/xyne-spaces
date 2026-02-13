@@ -212,6 +212,10 @@ export function setupIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle('logger:get-client-session-id', () => {
+    return Logger.getClientSessionId();
+  });
+
   ipcMain.on('clear-all-cookies', () => {
     void clearAllCookies();
   });

@@ -136,6 +136,10 @@ export const authMachine = createMachine(
                   localStorage.setItem('user_id', output.user.id);
                   if (output.user.email) {
                     localStorage.setItem('user_email', output.user.email);
+                    // Send email to Electron for logging (only during initial OAuth login)
+                    if (window.electronAPI?.setUserEmail) {
+                      window.electronAPI.setUserEmail(output.user.email);
+                    }
                   }
                 }
 
@@ -408,6 +412,9 @@ export const authMachine = createMachine(
           }
           if (event.user?.email) {
             localStorage.setItem('user_email', event.user.email);
+            if (window.electronAPI?.setUserEmail) {
+              window.electronAPI.setUserEmail(event.user.email);
+            }
           }
         } catch {
           // Silently ignore localStorage write failures (Safari private mode, etc.)

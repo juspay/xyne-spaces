@@ -89,6 +89,7 @@ const nativeInboundMessageTypeValues = {
   // Call actions
   NATIVE_REQUEST_CALLBACK: 'NATIVE_REQUEST_CALLBACK',
   CLOSE_DRAWER: 'CLOSE_DRAWER',
+  GET_CLIENT_SESSION_ID: 'GET_CLIENT_SESSION_ID',
 } as const;
 
 export type NativeInboundMessageType = keyof typeof nativeInboundMessageTypeValues;
@@ -114,6 +115,7 @@ const nativeOutboundMessageTypeValues = {
   START_NOTE_TAKER: 'START_NOTE_TAKER',
   DRAWER_OPENED: 'DRAWER_OPENED',
   DRAWER_CLOSED: 'DRAWER_CLOSED',
+  REQUEST_CLIENT_SESSION_ID: 'REQUEST_CLIENT_SESSION_ID',
 } as const;
 
 export type NativeOutboundMessageType = keyof typeof nativeOutboundMessageTypeValues;
@@ -249,6 +251,10 @@ export interface NativeRequestCallbackPayload {
   callType?: 'AUDIO' | 'VIDEO';
 }
 
+export interface GetClientSessionIdPayload {
+  sessionId: string;
+}
+
 type ReactNativeInboundPayloadMap = {
   GOOGLE_SIGN_IN_RESULT: NativeGoogleSignInResultPayload;
   NATIVE_READY: NativeReadyPayload;
@@ -269,6 +275,7 @@ type ReactNativeInboundPayloadMap = {
   // Pending call state for cold start sync
   NATIVE_PENDING_CALL_STATE: NativePendingCallStatePayload;
   NATIVE_REQUEST_CALLBACK: NativeRequestCallbackPayload;
+  GET_CLIENT_SESSION_ID: GetClientSessionIdPayload;
   CLOSE_DRAWER: undefined;
 };
 
@@ -290,12 +297,14 @@ type ReactNativeOutboundPayloadMap = {
     isAuthenticated: boolean;
     user?: {
       id: string;
+      email: string | null;
     } | null;
   };
   REQUEST_MEDIA_PERMISSIONS: {
     permissions: ('microphone' | 'camera' | 'screenShare')[];
   };
   REQUEST_NATIVE_PUSH_TOKEN: undefined;
+  REQUEST_CLIENT_SESSION_ID: undefined;
   SAVE_FILE_TO_DEVICE: SaveFilePayload;
   // LiveKit native bridge commands
   CALL_INITIATING: {
@@ -533,6 +542,35 @@ class ReactNativeBridge {
 
   startNoteTaker(): boolean {
     return this.send(NativeOutboundMessageType.START_NOTE_TAKER);
+  }
+
+  getClientSessionId(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (!this.isAvailable()) {
+        reject(new Error('React Native bridge not available'));
+        return;
+      }
+
+      // Set up one-time listener for response
+      const unsubscribe = this.on(NativeInboundMessageType.GET_CLIENT_SESSION_ID, message => {
+        unsubscribe();
+        const sessionId = message.payload?.sessionId;
+        if (sessionId) {
+          resolve(sessionId);
+        } else {
+          reject(new Error('No clientSessionId in response'));
+        }
+      });
+
+      // Send request
+      this.send(NativeOutboundMessageType.REQUEST_CLIENT_SESSION_ID);
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        unsubscribe();
+        reject(new Error('Timeout waiting for client session ID'));
+      }, 5000);
+    });
   }
 
   on<T extends NativeInboundMessageType>(type: T, handler: BridgeListener<T>): () => void {

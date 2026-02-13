@@ -108,7 +108,7 @@ apiConfig.interceptors.request.use(
       if (userEmail) {
         config.headers['x-user-email'] = userEmail;
       }
-      const clientSessionId = logger.sessionId;
+      const clientSessionId = logger.clientSessionId;
       if (clientSessionId) {
         config.headers['x-client-session-id'] = clientSessionId;
       }

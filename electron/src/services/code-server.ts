@@ -426,7 +426,6 @@ class CodeServerService {
             args.push('--auth', 'none');
         }
 
-        log.info(`[CodeServer] Starting process: ${binaryPath} ${args.join(' ')}`);
         Logger.info(ElectronEvent.CODE_SERVER_PROCESS_SPAWN, { binaryPath, port, args: args.join(' ') }, 'CodeServer');
 
         this.process = spawn(binaryPath, args, {
@@ -530,7 +529,6 @@ class CodeServerService {
             await new Promise<void>((resolve) => {
                 const timeout = setTimeout(() => {
                     if (this.process) {
-                        log.warn('[CodeServer] Force killing process...');
                         Logger.warn(ElectronEvent.CODE_SERVER_FORCE_KILL, { pid: this.process.pid }, 'CodeServer');
                         this.process.kill('SIGKILL');
                     }
@@ -662,13 +660,11 @@ class CodeServerService {
 
             if (this.workspaceExists(executionId)) {
                 // Workspace exists, pull updates
-                log.info(`[CodeServer] Workspace exists for ${executionId}, pulling updates...`);
                 Logger.info(ElectronEvent.CODE_SERVER_GIT_PULL_START, { executionId, workspacePath, branch }, 'CodeServer');
                 await this.gitPull(workspacePath, branch);
                 Logger.info(ElectronEvent.CODE_SERVER_GIT_PULL_SUCCESS, { executionId, workspacePath, branch }, 'CodeServer');
             } else {
                 // Clone the repository
-                log.info(`[CodeServer] Cloning ${repoUrl} branch ${branch} for ${executionId}...`);
                 Logger.info(ElectronEvent.CODE_SERVER_GIT_CLONE_START, { repoUrl, branch, executionId, workspacePath }, 'CodeServer');
                 await this.gitClone(repoUrl, branch, workspacePath);
                 Logger.info(ElectronEvent.CODE_SERVER_GIT_CLONE_SUCCESS, { repoUrl, branch, executionId, workspacePath }, 'CodeServer');
@@ -838,7 +834,6 @@ class CodeServerService {
     public async deleteWorkspace(executionId: string): Promise<void> {
         const workspacePath = this.getWorkspacePath(executionId);
         if (fs.existsSync(workspacePath)) {
-            log.info(`[CodeServer] Deleting workspace: ${workspacePath}`);
             Logger.info(ElectronEvent.CODE_SERVER_WORKSPACE_DELETE, { executionId, workspacePath }, 'CodeServer');
             fs.rmSync(workspacePath, { recursive: true, force: true });
         }
@@ -874,7 +869,6 @@ class CodeServerService {
 
         // Delete workspaces beyond keepCount
         for (let i = keepCount; i < workspaces.length; i++) {
-            log.info(`[CodeServer] Cleaning old workspace: ${workspaces[i].name}`);
             Logger.info(ElectronEvent.CODE_SERVER_WORKSPACE_CLEAN, { workspaceName: workspaces[i].name, workspacePath: workspaces[i].path }, 'CodeServer');
             fs.rmSync(workspaces[i].path, { recursive: true, force: true });
         }
@@ -1033,7 +1027,6 @@ class CodeServerService {
 
                     stashProcess.on('close', (stashCode) => {
                         if (stashCode === 0) {
-                            log.info(`[CodeServer] Stashed changes in ${repoPath}`);
                             Logger.info(ElectronEvent.CODE_SERVER_GIT_STASH, { repoPath, hadChanges: true, success: true }, 'CodeServer');
                             resolve({ success: true, hadChanges: true });
                         } else {
@@ -1089,7 +1082,6 @@ class CodeServerService {
 
                 checkoutProcess.on('close', (checkoutCode) => {
                     if (checkoutCode === 0) {
-                        log.info(`[CodeServer] Checked out existing local branch: ${branchName}`);
                         Logger.info(ElectronEvent.CODE_SERVER_GIT_CHECKOUT_SUCCESS, { repoPath, branchName, source: 'local' }, 'CodeServer');
                         resolve({ success: true, created: false });
                         return;
@@ -1109,7 +1101,6 @@ class CodeServerService {
 
                     remoteCheckoutProcess.on('close', (remoteCode) => {
                         if (remoteCode === 0) {
-                            log.info(`[CodeServer] Checked out branch from remote: ${branchName}`);
                             Logger.info(ElectronEvent.CODE_SERVER_GIT_CHECKOUT_SUCCESS, { repoPath, branchName, source: 'remote' }, 'CodeServer');
                             resolve({ success: true, created: false });
                             return;
@@ -1167,7 +1158,6 @@ class CodeServerService {
 
                                 createProcess.on('close', (createCode) => {
                                     if (createCode === 0) {
-                                        log.info(`[CodeServer] Created and checked out branch: ${branchName}`);
                                         Logger.info(ElectronEvent.CODE_SERVER_GIT_BRANCH_CREATE, { repoPath, branchName, baseBranch }, 'CodeServer');
                                         resolve({ success: true, created: true });
                                     } else {
@@ -1194,13 +1184,11 @@ class CodeServerService {
         fs.mkdirSync(this.getXyneSpacesDir(), { recursive: true });
 
         if (this.repoExists(repoName)) {
-            log.info(`[CodeServer] Repo already exists: ${repoPath}`);
             Logger.debug(ElectronEvent.CODE_SERVER_GIT_CLONE_START, { repoUrl, repoPath, alreadyExists: true }, 'CodeServer');
             return { success: true, repoPath };
         }
 
         Logger.info(ElectronEvent.CODE_SERVER_GIT_CLONE_START, { repoUrl, repoPath, repoName }, 'CodeServer');
-        log.info(`[CodeServer] Cloning repo ${repoUrl} to ${repoPath}`);
 
         return new Promise((resolve) => {
             const cloneProcess = spawn('git', ['clone', repoUrl, repoPath], {
@@ -1250,7 +1238,6 @@ class CodeServerService {
         Logger.info(ElectronEvent.CODE_SERVER_WORKSPACE_PREPARE_START, { repoUrl, baseBranch, ticketBranchName }, 'CodeServer');
         
         if (!repoUrl || repoUrl.trim() === '') {
-            log.warn(`[CodeServer] Attempted to edit a local doc (no repo URL) - branch: ${ticketBranchName}`);
             Logger.warn(ElectronEvent.CODE_SERVER_WORKSPACE_PREPARE_FAILED, { ticketBranchName, error: 'No repo URL' }, 'CodeServer');
             return { 
                 success: false, 
