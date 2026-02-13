@@ -326,9 +326,78 @@ export async function loadUrl(window: BrowserWindow, url: string, counter: Count
   }
 }
 
-export async function certificateHealthCheck() {
-  // Certificate exists, validate it before loading dashboard
-  log.info('[WindowManager] Validating certificate health');
+const MAX_HEALTH_CHECK_RETRIES = 3;
+
+/**
+ * Validates certificate health with retry logic to handle network timeout issues
+ * Retries up to MAX_HEALTH_CHECK_RETRIES times if loading fails (typically due to network timeout while user approves keychain popup)
+ * Shows error page if all retries are exhausted
+ */
+async function certificateHealthCheckWithRetry(validationWindow: BrowserWindow): Promise<boolean> {
+  let certErrCount = 0;
+
+  for (let attempt = 0; attempt < MAX_HEALTH_CHECK_RETRIES; attempt++) {
+    try {
+      const healthUrl = `${config.BACKEND_URL}/api/health`;
+      
+      // Attempt to load the URL
+      await validationWindow.loadURL(healthUrl);
+
+      Logger.info(EnrollmentEvent.HEALTH_CHECK_SUCCESS, {
+        certificate_exists: true,
+        validation_passed: true,
+        attempts: attempt + 1,
+      });
+      return true;
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isLastAttempt = attempt === MAX_HEALTH_CHECK_RETRIES - 1;
+
+      // Track if this was a certificate error
+      if (isCertificateError(errorMessage)) {
+        Logger.logError(EnrollmentEvent.CERTIFICATE_REVOKED, error, {
+          error_at: 'certificate_validation',
+          attempt: attempt + 1,
+        });
+        certErrCount++;
+      }
+
+      // If we have retries left, log it and continue the loop
+      if (!isLastAttempt) {
+        Logger.info(EnrollmentEvent.LOAD_URL_RETRY, {
+          url: `${config.BACKEND_URL}/api/health`,
+          retry_attempt: attempt + 1,
+        });
+        continue; // Go to next iteration
+      }
+      
+      // --- ALL RETRIES FAILED --- (Code reaches here only on the last attempt)
+
+      if (certErrCount === MAX_HEALTH_CHECK_RETRIES) {
+        // Every single error was a certificate error
+        await handleCertificateError({ errorDescription: errorMessage });
+      } else {
+        // Generic failure (timeout, network, or mixed errors)
+        Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, {
+          error_at: 'certificate_health_check_max_retries',
+          total_attempts: MAX_HEALTH_CHECK_RETRIES,
+        });
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          const errorPage = path.join(__dirname, '..', '..', 'assets', 'timeout-error.html');
+          await mainWindow.loadFile(errorPage);
+        }
+      }
+
+      return false;
+    }
+  }
+
+  return false; // Should not be reachable, but good for type safety
+}
+
+export async function certificateHealthCheck(): Promise<boolean> {
   const validationWindow = new BrowserWindow({
     show: false,  // Keep it hidden
     webPreferences: {
@@ -337,32 +406,8 @@ export async function certificateHealthCheck() {
       preload: path.join(__dirname, '..', 'preload.js'),
     },
   });
-
-  try {
-    const healthUrl = `${config.BACKEND_URL}/api/health`;
-    log.info('[WindowManager] Loading health check URL for certificate validation:', healthUrl);
-    await validationWindow.loadURL(healthUrl);
-    
-    Logger.info(EnrollmentEvent.HEALTH_CHECK_SUCCESS, {
-      certificate_exists: true,
-      validation_passed: true,
-    });
-    return true;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    
-    if (isCertificateError(errorMessage)) {
-      Logger.logError(EnrollmentEvent.CERTIFICATE_REVOKED, error, {
-        error_at: 'certificate_validation',
-      });
-      await handleCertificateError({ errorDescription: errorMessage });
-      return false;
-    } else {
-      Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, {
-        error_at: 'handleCertificateError in loadApp',
-      });
-    }
-  } finally {
-    validationWindow.destroy();
-  }
+  // Certificate exists, validate it before loading dashboard
+  const result = await certificateHealthCheckWithRetry(validationWindow);
+  validationWindow.destroy();
+  return result;
 }

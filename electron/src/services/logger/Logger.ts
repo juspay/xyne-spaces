@@ -18,7 +18,7 @@ import { ElectronEventType } from './electron-events';
 type EventType = EnrollmentEventType | ElectronEventType;
 
 interface LogEntry {
-  sessionId: string;
+  clientSessionId: string;
   platformName: string;
   electronVersion: string;
   emailId: string | null;
@@ -26,6 +26,7 @@ interface LogEntry {
   level: LogLevel;
   hostname: string;
   event: EventType;
+  serialNumber: string;
   [key: string]: unknown;
 }
 
@@ -37,21 +38,21 @@ const LogLevelNames: Record<LogLevel, string> = {
 };
 
 class LoggerService {
-  private sessionId: string;
+  private clientSessionId: string;
   private platformName: string = 'electron';
   private electronVersion: string;
   private emailId: string | null = null;
   private logs: LogEntry[] = [];
   private flushInProgress: boolean = false;
   private flushInterval: number = 60000; // 60 seconds
-  private maxBatchSize: number = 10;
+  private maxBatchSize: number = 20;
   private maxRetries: number = 3;
   private flushTimer: NodeJS.Timeout | null = null;
   private loggerUrl: string;
   private isEnabled: boolean = true;
 
   constructor() {
-    this.sessionId = uuidv4();
+    this.clientSessionId = uuidv4();
     this.electronVersion = app.getVersion();
     // Use a non-mTLS endpoint for pre-enrollment logs
     this.loggerUrl = `${config.UNPROTECTED_URL}/godel/events`;
@@ -64,6 +65,10 @@ class LoggerService {
   enablePostEnrollmentLogging(): void {
     this.loggerUrl = `${config.BACKEND_URL}/godel/events`;
     log.info('[EnrollmentLogger] Switched to post-enrollment endpoint:', this.loggerUrl);
+  }
+
+  getClientSessionId(): string {
+    return this.clientSessionId;
   }
 
   /**
@@ -136,7 +141,7 @@ class LoggerService {
     const systemInfo = await si.system();
 
     const logEntry: LogEntry = {
-      sessionId: this.sessionId,
+      clientSessionId: this.clientSessionId,
       platformName: this.platformName,
       electronVersion: this.electronVersion,
       emailId: this.emailId,
@@ -157,9 +162,9 @@ class LoggerService {
     this.logs.push(logEntry);
 
     // Auto-flush if batch size reached
-    if (this.logs.length >= this.maxBatchSize) {
-      this.flushLogs();
-    }
+    // if (this.logs.length >= this.maxBatchSize) {
+    //   this.flushLogs();
+    // }
   }
 
   /**
@@ -189,7 +194,7 @@ class LoggerService {
       .catch((error) => {
         log.error('[Logger] Failed to push logs after all retries:', error);
         // Re-add logs to queue on failure
-        this.logs.unshift(...logsToPush);
+        // this.logs.unshift(...logsToPush);
       })
       .finally(() => {
         this.flushInProgress = false;
@@ -224,13 +229,6 @@ class LoggerService {
    * Send logs to backend
   */
  private async sendLogs(logs: LogEntry[]): Promise<void> {
-   // In local/dev environment, only send logs if explicitly allowed via env variable
-   if (process.env.NODE_ENV === 'development') {
-     if (!config.sendLogs) {
-       return;
-      }
-    }
-    
     const response = await net.fetch(this.loggerUrl, {
       method: 'POST',
       headers: {

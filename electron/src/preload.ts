@@ -100,6 +100,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkKeys: (commonName: string) => ipcRenderer.invoke('check-keys', commonName),
   getDeviceInfo: () => ipcRenderer.invoke('get-device-info'),
   setUserEmail: (email: string) => ipcRenderer.send('set-user-email', email),
+  getClientSessionId: () => ipcRenderer.invoke('logger:get-client-session-id'),
 
   // Code Server APIs
   codeServer: {

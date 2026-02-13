@@ -40,6 +40,7 @@ export const EnrollmentEvent = {
   AUTH_EXCHANGE_FAILED: 'auth_exchange_failed',
 
   HEALTH_CHECK_SUCCESS: 'health_check_success',
+  HEALTH_CHECK_FAILURE: 'health_check_failure',
 
   DEEP_LINK_OPENED: 'deep_link_opened',
   DEEP_LINK_HANDLING_FAILED: 'deep_link_handling_failed',

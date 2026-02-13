@@ -35,6 +35,9 @@ export interface ElectronAPI {
   installRootCA: (pem: string) => Promise<void>;
   deleteKeys: (commonName: string) => Promise<void>;
   checkKeys: (commonName: string) => Promise<boolean>;
+  getDeviceInfo: () => Promise<unknown>;
+  setUserEmail: (email: string) => void;
+  getClientSessionId: () => Promise<string>;
   toggleCompactMode: () => void;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   codeServer: {
