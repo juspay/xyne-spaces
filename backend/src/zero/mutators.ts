@@ -40,6 +40,8 @@ import { ticketAssignmentService } from '@/services/ticketAssignmentService';
 import { logger } from '@/utils/logger';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
+import { calculateETADeadline } from '@/utils/etaCalculation';
+
 import {
   executionOrchestrator,
   unifiedDMService,
@@ -3110,7 +3112,138 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
+          // STAGE HISTORY TRACKING: Track stage transitions in ticket_stage_eta table
+          if (params.stageName !== undefined && params.stageName !== ticket.stageName) {
 
+            // Fetch current and target stages to determine movement direction
+            const oldStage = await tx.run(zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one());
+            const newStage = await tx.run(zql.stages.where('boardId', ticket.boardId).where('name', params.stageName).one());
+
+            if (!newStage) {
+              logger.warn('[MUTATOR-STAGE-HISTORY] Target stage not found', {
+                ticketId: params.id,
+                stageName: params.stageName,
+                boardId: ticket.boardId
+              });
+            } else {
+              const isForwardMovement = !oldStage || newStage.sequenceNumber > oldStage.sequenceNumber;
+              const now = Date.now();
+
+              if (isForwardMovement) {
+                // FORWARD MOVEMENT: Mark old stage as left, create/reactivate new stage entry
+
+                // 1. Mark current stage as left (if exists)
+                if (oldStage) {
+                  const activeEntries = await tx.run(
+                    zql.ticket_stage_eta
+                      .where('ticketId', params.id)
+                      .where('stageId', oldStage.id)
+                  );
+
+                  const activeEntry = activeEntries.find(e => e.stageLeftAt === null);
+                  if (activeEntry) {
+                    await tx.mutate.ticket_stage_eta.update({
+                      id: activeEntry.id,
+                      stageLeftAt: now,
+                      updatedAt: now,
+                      updatedBy: authData.sub
+                    });
+                  }
+                }
+
+                // 2. Check if target stage entry already exists (re-entry case)
+                const existingEntries = await tx.run(
+                  zql.ticket_stage_eta
+                    .where('ticketId', params.id)
+                    .where('stageId', newStage.id)
+                );
+
+                const existingEntry = existingEntries[0]; // Get first entry if exists
+
+                if (existingEntry) {
+                  // Re-entering a stage - reactivate it
+                  await tx.mutate.ticket_stage_eta.update({
+                    id: existingEntry.id,
+                    stageLeftAt: null,
+                    updatedAt: now,
+                    updatedBy: authData.sub
+                  });
+                } else {
+                  // First time entering this stage - create new entry
+                  const newEntryId = uuidv4();
+                  const stageEtaDeadline = now + newStage.eta * 60 * 60 * 1000;
+                  await tx.mutate.ticket_stage_eta.insert({
+                    id: newEntryId,
+                    ticketId: params.id,
+                    stageId: newStage.id,
+                    stageEnteredAt: now,
+                    stageLeftAt: null,
+                    stageEta: stageEtaDeadline,
+                    createdAt: now,
+                    updatedBy: authData.sub
+                  });
+
+                }
+              } else {
+                // BACKWARD MOVEMENT: Delete all forward stage entries, reactivate target
+
+                // 1. Get all stages with sequenceNumber > target
+                const forwardStages = await tx.run(
+                  zql.stages
+                    .where('boardId', ticket.boardId)
+                );
+                
+                const forwardStageIds = forwardStages
+                  .filter(s => s.sequenceNumber > newStage.sequenceNumber)
+                  .map(s => s.id);
+                
+                // 2. Delete all entries for forward stages
+                if (forwardStageIds.length > 0) {
+                  const allStageEntries = await tx.run(
+                    zql.ticket_stage_eta.where('ticketId', params.id)
+                  );
+
+                  for (const entry of allStageEntries) {
+                    if (forwardStageIds.includes(entry.stageId)) {
+                      await tx.mutate.ticket_stage_eta.delete({ id: entry.id });
+                    }
+                  }
+                }
+
+                // 3. Reactivate target stage entry (or create if doesn't exist)
+                const targetEntries = await tx.run(
+                  zql.ticket_stage_eta
+                    .where('ticketId', params.id)
+                    .where('stageId', newStage.id)
+                );
+
+                const targetEntry = targetEntries[0];
+
+                if (targetEntry) {
+                  await tx.mutate.ticket_stage_eta.update({
+                    id: targetEntry.id,
+                    stageLeftAt: null,
+                    updatedAt: now,
+                    updatedBy: authData.sub
+                  });
+                } else {
+                  // Create new entry if it didn't exist
+                  const stageEtaDeadline = now + newStage.eta * 60 * 60 * 1000;
+                  const newEntryId = uuidv4();
+                  await tx.mutate.ticket_stage_eta.insert({
+                    id: newEntryId,
+                    ticketId: params.id,
+                    stageId: newStage.id,
+                    stageEnteredAt: now,
+                    stageLeftAt: null,
+                    stageEta: stageEtaDeadline,
+                    createdAt: now,
+                    updatedBy: authData.sub
+                  });
+                }
+              }
+            }
+          }
 
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
 
@@ -3364,6 +3497,137 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
+    ticketStageEta: {
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          stageEta: z.number(),
+          updatedAt: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const { id, stageEta, updatedAt } = args;
+
+          // 1. Fetch the OLD ticket stage ETA entry BEFORE updating
+          const oldTicketStageEtaEntry = await tx.run(
+            zql.ticket_stage_eta.where('id', id).one()
+          );
+
+          if (!oldTicketStageEtaEntry) return;
+
+          // Store the old value for activity logging
+          const oldStageEta = oldTicketStageEtaEntry.stageEta;
+
+          // 2. Update the current stage ETA entry
+          await tx.mutate.ticket_stage_eta.update({
+            id,
+            stageEta,
+            updatedAt,
+            updatedBy: authData.sub,
+          });
+
+          // 3. Use the old entry for other data (ticketId, stageId don't change)
+          const ticketStageEtaEntry = oldTicketStageEtaEntry;
+
+          // 3. Fetch the associated ticket
+          const ticket = await tx.run(
+            zql.tickets.where('id', ticketStageEtaEntry.ticketId).one()
+          );
+
+          if (!ticket) return;
+
+          // 4. Fetch the current stage details
+          const currentStage = await tx.run(
+            zql.stages.where('id', ticketStageEtaEntry.stageId).one()
+          );
+
+          if (!currentStage) return;
+
+          // 5. Fetch ALL stages for this board
+          const allBoardStages = await tx.run(
+            zql.stages.where('boardId', ticket.boardId)
+          );
+
+          // 6. Filter to get FUTURE stages (after current stage)
+          const futureStages = allBoardStages
+            .filter(stage => stage.sequenceNumber > currentStage.sequenceNumber)
+            .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+
+          // 7. Calculate total hours needed for future stages
+          const futureStagesHours = futureStages.reduce(
+            (totalHours, stage) => totalHours + stage.eta, 
+            0
+          );
+
+          // 8. Get the NEW current stage deadline (what user just set)
+          const currentStageDeadline = new Date(stageEta);
+
+          // 9. Calculate overall ticket ETA using working hours logic
+          // Starting from: current stage deadline
+          // Adding: working hours for all future stages
+          const overallTicketEta = calculateETADeadline(
+            currentStageDeadline,  // Start from user's new deadline for current stage
+            futureStagesHours      // Add working hours for future stages
+          );
+
+          // 10. Update the ticket's overall ETA
+          await tx.mutate.tickets.update({
+            id: ticket.id,
+            eta: overallTicketEta.getTime(),
+            updatedAt: Date.now(),
+          });
+
+          logger.info('[MUTATOR] Updated ticket ETA', {
+            ticketId: ticket.id,
+            currentStageDeadline: currentStageDeadline.toISOString(),
+            futureStagesHours,
+            newOverallEta: overallTicketEta.toISOString(),
+          });
+
+          // 11. Create ticket activity for stage ETA change
+          const newStageEta = stageEta;
+
+          await tx.mutate.ticket_activities.insert({
+            id: uuidv4(),
+            ticketId: ticket.id,
+            updatedBy: authData.sub,
+            timestamp: Date.now(),
+            activityType: ActivityType.STAGE_ETA,
+            value: {
+              stageName: currentStage.name,
+              oldValue: oldStageEta,
+              newValue: newStageEta,
+            },
+          });
+
+          // 12. Create system message in ticket conversation
+          if (ticket.conversationId) {
+            const user = await tx.run(zql.users.where('id', authData.sub).one());
+            const userName = user?.name || 'Someone';
+            const oldDate = new Date(oldStageEta).toLocaleDateString();
+            const newDate = new Date(newStageEta).toLocaleDateString();
+            const activityMessage = `${userName} updated "${currentStage.name}" stage deadline from ${oldDate} to ${newDate}`;
+
+            await tx.mutate.messages.insert({
+              messageId: uuidv4(),
+              conversationId: ticket.conversationId,
+              senderId: authData.sub,
+              content: activityMessage,
+              msgType: MessageType.SYSTEM,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: true,
+              showInChannel: false,
+              createdAt: Date.now(),
+              metadata: {
+                activityType: 'STAGE_ETA',
+                isTicketActivity: true,
+              },
+            });
+          }
+        }
+      ),
+    },   
     subTicket: {
       create: defineMutator(
         z.object({

@@ -94,7 +94,8 @@ export const queries = defineQueries({
     return zql.tickets
       .orderBy('createdAt', 'desc')
       .related('project')
-      .related('assignments');
+      .related('assignments')
+      .related('stageEtaEntries');
   }),
 
   allWorkflows: defineQuery(() => {
@@ -172,6 +173,7 @@ export const queries = defineQueries({
       .related('referencesIn', (ref) => ref.related('sourceTicket'))
       .related('entity')
       .related('conversation')
+      .related('stageEtaEntries')
       .related('ticketStageRequests', a => a.related('form'))
       .one();
   }),
@@ -991,3 +993,4 @@ export const queries = defineQueries({
     },
   ),
 });
+ 

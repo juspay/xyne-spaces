@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Calendar, User, Code2, Tag } from 'lucide-react';
 import { BaseTicketType, isReleaseTicket, Ticket, TicketTag } from '@xyne/shared';
-import { getPriorityIcon, formatEta, isEtaUrgent } from './TicketCard.utils';
+import { getPriorityIcon, formatEta, isEtaUrgent, isStageEtaOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
@@ -56,6 +56,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
 
   const [isEditingPriority, setIsEditingPriority] = useState(false);
   const [isEditingAssignee, setIsEditingAssignee] = useState(false);
+
+  const isStageOverdue = isStageEtaOverdue(ticket);
 
   const userGroups = useUserGroups();
   const assignedGroup = userGroups.find(
@@ -366,6 +368,27 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         </Tooltip>
                       </button>
                     )}
+                  </div>
+                )}
+                {/* Stage Overdue Badge */}
+                {isStageOverdue && (
+                  <div className='flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 border border-red-200'>
+                    <svg
+                      width='12'
+                      height='12'
+                      viewBox='0 0 12 12'
+                      fill='none'
+                      className='text-red-600'
+                    >
+                      <circle cx='6' cy='6' r='5' stroke='currentColor' strokeWidth='1.5' />
+                      <path
+                        d='M6 3v3.5M6 8.5h.01'
+                        stroke='currentColor'
+                        strokeWidth='1.5'
+                        strokeLinecap='round'
+                      />
+                    </svg>
+                    <span className='text-[10px] font-medium text-red-600'>Stage Overdue</span>
                   </div>
                 )}
                 <div className='hidden sm:block'>

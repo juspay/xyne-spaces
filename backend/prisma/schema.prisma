@@ -98,6 +98,7 @@ enum ActivityType {
   ASSIGNED_TO
   PRIORITY
   ETA
+  STAGE_ETA
   METADATA
   CLOSED_AT
   CLOSED_BY
@@ -417,7 +418,6 @@ model TicketReferenceMapping {
   createdBy      String
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
-
   @@index([sourceTicketId])
   @@index([targetTicketId])
   @@unique([sourceTicketId, targetTicketId, relationType])
@@ -425,6 +425,24 @@ model TicketReferenceMapping {
   @@schema("public")
 }
 
+model TicketStageEta {
+  id                String    @id @default(cuid())
+  ticketId          String    
+  stageId           String  
+  stageEnteredAt    DateTime  
+  stageLeftAt       DateTime? 
+  stageEta          DateTime                 // Deadline = stageEnteredAt + stage.eta hours
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime? @updatedAt
+  updatedBy         String?   // User ID (no FK constraint)
+
+  @@index([ticketId])
+  @@index([ticketId, stageId])
+  @@map("ticket_stage_eta")
+  @@index([stageLeftAt])
+  @@index([stageEta])
+  @@schema("public")
+}
 
 model Workflow {
   id               String    @id @default(cuid())

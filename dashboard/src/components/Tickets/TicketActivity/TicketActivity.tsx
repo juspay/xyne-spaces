@@ -166,6 +166,23 @@ const getActivityDescription = (
         ),
       };
 
+    case ActivityType.STAGE_ETA:
+      return {
+        description: `updated stage deadline`,
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {value?.oldValue ? new Date(value.oldValue).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {value?.newValue ? new Date(value.newValue).toLocaleDateString() : 'none'}
+            </span>
+          </>
+        ),
+      };
+
     case ActivityType.USER_GROUP_ID: {
       const oldGroup = userGroups?.find(g => g.id === value?.oldValue);
       const newGroup = userGroups?.find(g => g.id === value?.newValue);
@@ -332,6 +349,7 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
     case ActivityType.TAGS:
       return <Tag />;
     case ActivityType.ETA:
+    case ActivityType.STAGE_ETA:
       return <Calendar />;
     case ActivityType.SUBTICKET_CREATED:
       return <FileText size={18} className='text-blue-600' />;

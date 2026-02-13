@@ -151,6 +151,7 @@ export enum ActivityType {
   ASSIGNED_TO = 'ASSIGNED_TO',
   PRIORITY = 'PRIORITY',
   ETA = 'ETA',
+  STAGE_ETA = 'STAGE_ETA',
   METADATA = 'METADATA',
   CLOSED_AT = 'CLOSED_AT',
   CLOSED_BY = 'CLOSED_BY',
@@ -596,6 +597,20 @@ export const ticketReferenceMappingTable = table('ticket_reference_mappings')
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const ticketStageEtaTable = table('ticket_stage_eta')
+  .columns({
+    id: string(),
+    ticketId: string(),
+    stageId: string(),
+    stageEnteredAt: number(),
+    stageLeftAt: number().optional(),
+    stageEta: number(),
+    createdAt: number(),
+    updatedBy: string().optional(),
+    updatedAt: number().optional(),
   })
   .primaryKey('id');
 
@@ -1552,6 +1567,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: workflowTable,
   }),
+  stageEtaEntries: many({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: ticketStageEtaTable,
+  }),
   formEntityValues: many({
     sourceField: ['id'],
     destField: ['entityId'],
@@ -1668,6 +1688,22 @@ export const ticketReferenceMappingTableRelationships = relationships(
       sourceField: ['targetTicketId'],
       destField: ['id'],
       destSchema: ticketTable,
+    }),
+  }),
+);
+
+export const ticketStageEtaTableRelationships = relationships(
+  ticketStageEtaTable,
+  ({ one }) => ({
+    ticket: one({
+      sourceField: ['ticketId'],
+      destField: ['id'],
+      destSchema: ticketTable,
+    }),
+    stage: one({
+      sourceField: ['stageId'],
+      destField: ['id'],
+      destSchema: stageTable,
     }),
   }),
 );
@@ -2536,6 +2572,7 @@ export const schema = createSchema({
     ticketEntityMappingTable,
     ticketTagTable,
     ticketReferenceMappingTable,
+    ticketStageEtaTable,
     projectTable,
     boardTable,
     stageTable,
@@ -2606,6 +2643,7 @@ export const schema = createSchema({
     ticketEntityMappingTableRelationships,
     ticketTagTableRelationships,
     ticketReferenceMappingTableRelationships,
+    ticketStageEtaTableRelationships,
     projectTableRelationships,
     attachementTableRelationShips,
     boardTableRelationships,
@@ -2674,6 +2712,7 @@ export type TicketEntityMapping = Row<typeof schema.tables.ticket_entity_mapping
 export type TicketTag = Row<typeof schema.tables.ticket_tags>;
 export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;
 export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_mappings>;
+export type TicketStageEta = Row<typeof schema.tables.ticket_stage_eta>;
 export type Project = Row<typeof schema.tables.projects>;
 export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;

@@ -16,7 +16,14 @@ export interface TicketPreviousValue {
   channelId: string | null;
 }
 
-export type PreviousValue = ConversationPreviousValue | TicketPreviousValue;
+export interface TicketStageEtaPreviousValue {
+  stageEta: number;
+  ticketId: string;
+  stageId: string;
+  updatedBy: string | null;
+}
+
+export type PreviousValue = ConversationPreviousValue | TicketPreviousValue | TicketStageEtaPreviousValue;
 
 export interface SideEffectJobConfig {
   entityType: TableName;
@@ -40,6 +47,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   calls: ['update'],
   tickets: ['update'],
   ticket_assignments: ['insert', 'update'],
+  ticket_stage_eta: ['update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

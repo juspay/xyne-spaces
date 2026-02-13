@@ -17,6 +17,7 @@ import {
   Sparkles,
   Calendar,
   SquareKanban,
+  Clock,
   Eye,
   AlertCircle,
 } from 'lucide-react';
@@ -216,8 +217,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     isReviewer?: boolean;
     hasApprovers: boolean;
   } | null>(null);
-  const [editingETA, setEditingETA] = useState(false);
-  const [etaValue, setETAValue] = useState('');
+
+  const [editingStageETA, setEditingStageETA] = useState(false);
+  const [stageEtaValue, setStageEtaValue] = useState('');
+  const stageEtaInputRef = useRef<HTMLInputElement>(null);
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [needsReadMore, setNeedsReadMore] = useState(false);
   const descriptionRef = useRef<HTMLDivElement>(null);
@@ -335,6 +338,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     enabled: !!ticket?.projectId,
   });
 
+  // Get current active stage entry (where stageLeftAt is null)
+  const currentStageEntry = useMemo(() => {
+    return ticket?.stageEtaEntries?.find(entry => entry.stageLeftAt === null);
+  }, [ticket?.stageEtaEntries]);
+
   // Query ticket attachments
   const [ticketAttachments] = useCachedQuery(queries.attachmentsByTicket({ ticketId }));
 
@@ -343,7 +351,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
-  const etaInputRef = useRef<HTMLInputElement>(null);
 
   // Memoized values
   const createdByUser = useMemo(
@@ -652,11 +659,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (ticket) {
       setTitleValue(ticket.title);
       setDescriptionValue(ticket.description);
-      if (ticket.eta) {
-        setETAValue(getLocalISOString(ticket.eta));
-      }
     }
   }, [ticket]);
+  // Initialize stage ETA edit value when current stage changes
+  useEffect(() => {
+    if (currentStageEntry?.stageEta) {
+      setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
+    }
+  }, [currentStageEntry]);
 
   // Auto-focus inputs when entering edit mode
   useEffect(() => {
@@ -679,13 +689,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
   }, [showTagDropdown]);
 
-  // Auto-focus ETA input when entering edit mode
+  // Auto-focus Stage ETA input when entering edit mode
   useEffect(() => {
-    if (editingETA && etaInputRef.current) {
-      etaInputRef.current.focus();
-      etaInputRef.current.select();
+    if (editingStageETA && stageEtaInputRef.current) {
+      stageEtaInputRef.current.focus();
+      stageEtaInputRef.current.select();
     }
-  }, [editingETA]);
+  }, [editingStageETA]);
 
   // Click outside handlers
   useEffect(() => {
@@ -945,33 +955,41 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
-  const handleETAChange = (): void => {
-    const originalETA = ticket.eta ? getLocalISOString(ticket.eta) : '';
-
-    if (etaValue.trim() === originalETA) {
-      setEditingETA(false);
+  const handleStageETAChange = (): void => {
+    if (!currentStageEntry) {
+      setEditingStageETA(false);
       return;
     }
 
-    if (!etaValue.trim()) {
-      setEditingETA(false);
+    const originalStageETA = currentStageEntry.stageEta
+      ? getLocalISOString(currentStageEntry.stageEta)
+      : '';
+
+    if (stageEtaValue.trim() === originalStageETA) {
+      setEditingStageETA(false);
       return;
     }
 
-    const etaDate = new Date(etaValue);
-    if (isNaN(etaDate.getTime())) {
-      setEditingETA(false);
+    if (!stageEtaValue.trim()) {
+      setEditingStageETA(false);
+      return;
+    }
+
+    const newStageEtaDate = new Date(stageEtaValue);
+    if (isNaN(newStageEtaDate.getTime())) {
+      setEditingStageETA(false);
       return;
     }
 
     void zero.mutate(
-      mutators.ticket.update({
-        id: ticket.id,
-        eta: etaDate.getTime(),
+      mutators.ticketStageEta.update({
+        id: currentStageEntry.id,
+        stageEta: newStageEtaDate.getTime(),
         updatedAt: Date.now(),
       }),
     );
-    setEditingETA(false);
+
+    setEditingStageETA(false);
   };
 
   const handleBoardChange = (boardId: string | null): void => {
@@ -1749,21 +1767,61 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
           {/* ETA */}
           <TicketKeyValuePair
-            ticketKey='ETA'
+            ticketKey='Due Date'
             value={
-              editingETA ? (
-                <div className='flex items-center gap-2' data-testid='ticket-detail-eta-input'>
+              <div
+                role='button'
+                tabIndex={0}
+                data-testid='ticket-detail-eta-display'
+                className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] px-2 py-1 -mx-2 rounded-md border border-transparent'
+              >
+                <Calendar
+                  size={14}
+                  className={
+                    ticket.eta &&
+                    new Date(ticket.eta) < new Date() &&
+                    ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+                    ticket.statusV2 !== TicketStatusV2.CANCELLED
+                      ? 'text-red-500'
+                      : 'text-gray-500'
+                  }
+                />
+                <span>{formatETADisplay(ticket.eta)}</span>
+                {ticket.eta &&
+                  new Date(ticket.eta) < new Date() &&
+                  ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+                  ticket.statusV2 !== TicketStatusV2.CANCELLED && (
+                    <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
+                      Overdue
+                    </span>
+                  )}
+              </div>
+            }
+          />
+          {/* Status Deadline - NEW FIELD */}
+          <TicketKeyValuePair
+            ticketKey='Status Deadline'
+            value={
+              editingStageETA ? (
+                <div
+                  className='flex items-center gap-2'
+                  data-testid='ticket-detail-stage-eta-input'
+                >
                   <input
-                    ref={etaInputRef}
+                    ref={stageEtaInputRef}
                     type='datetime-local'
-                    value={etaValue}
-                    onChange={e => setETAValue(e.target.value)}
-                    onBlur={handleETAChange}
+                    value={stageEtaValue}
+                    onChange={e => setStageEtaValue(e.target.value)}
+                    onBlur={handleStageETAChange}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') handleETAChange();
+                      if (e.key === 'Enter') handleStageETAChange();
                       if (e.key === 'Escape') {
-                        setETAValue(ticket.eta ? getLocalISOString(ticket.eta) : '');
-                        setEditingETA(false);
+                        setStageEtaValue(
+                          currentStageEntry?.stageEta
+                            ? getLocalISOString(currentStageEntry.stageEta)
+                            : '',
+                        );
+                        setEditingStageETA(false);
                       }
                     }}
                     className='text-sm border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
@@ -1773,30 +1831,36 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <div
                   role='button'
                   tabIndex={0}
-                  data-testid='ticket-detail-eta-display'
+                  data-testid='ticket-detail-stage-eta-display'
                   className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] cursor-pointer hover:bg-gray-100 px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-gray-200 transition-colors'
-                  onClick={() => setEditingETA(true)}
+                  onClick={() => setEditingStageETA(true)}
                   onKeyDown={e => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setEditingETA(true);
+                      setEditingStageETA(true);
                     }
                   }}
                 >
-                  <Calendar
+                  <Clock
                     size={14}
                     className={
-                      ticket.eta && new Date(ticket.eta) < new Date()
+                      currentStageEntry?.stageEta &&
+                      new Date(currentStageEntry.stageEta) < new Date() &&
+                      ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+                      ticket.statusV2 !== TicketStatusV2.CANCELLED
                         ? 'text-red-500'
                         : 'text-gray-500'
                     }
                   />
-                  <span>{formatETADisplay(ticket.eta)}</span>
-                  {ticket.eta && new Date(ticket.eta) < new Date() && (
-                    <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
-                      Overdue
-                    </span>
-                  )}
+                  <span>{formatETADisplay(currentStageEntry?.stageEta)}</span>
+                  {currentStageEntry?.stageEta &&
+                    new Date(currentStageEntry.stageEta) < new Date() &&
+                    ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+                    ticket.statusV2 !== TicketStatusV2.CANCELLED && (
+                      <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
+                        Stage Overdue
+                      </span>
+                    )}
                 </div>
               )
             }
