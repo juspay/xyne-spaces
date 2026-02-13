@@ -1,3 +1,15 @@
+## [1.43.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.42.0...v1.43.0) (2026-02-13)
+
+
+### Features
+
+* Create Dm Panel with shortcut cmd+n ([cc75240](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cc75240254234f09c2f477d12fa47003112ad0e3)), closes [#3030](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3030)
+
+
+### Bug Fixes
+
+* added backticks validation fixed rendering of Text [XYNE AI] ([3412d38](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3412d38e578feb31e5cb8e6d21872ed6285be3b9))
+
 ## [1.42.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.41.0...v1.42.0) (2026-02-12)
 
 
