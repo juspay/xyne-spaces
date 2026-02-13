@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useRef, useMemo } from 'react';
+import { ReactElement, useEffect, useRef, useMemo, useCallback } from 'react';
 import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
 import {
@@ -194,11 +194,38 @@ const ConversationPannel = ({
   const tab = searchParams.get('tab') || getDefaultTab();
   const ticketId = searchParams.get('ticketId');
   const conversationId = searchParams.get('conversationId');
+  // Skip mark as read functionality
+  const skipMarkAsReadRef = useRef(false);
+  const setSkipMarkAsRead = useCallback((skip: boolean) => {
+    skipMarkAsReadRef.current = skip;
+  }, []);
+
+  // Track if component has been mounted long enough to be considered "viewed"
+  const hasBeenViewedRef = useRef(false);
 
   useEffect(() => {
     if (!channelId) return;
 
+    // Mark as viewed after a short delay to avoid marking on quick navigation/remounts
+    const viewedTimer = setTimeout(() => {
+      hasBeenViewedRef.current = true;
+    }, 500);
+
     return () => {
+      clearTimeout(viewedTimer);
+
+      if (skipMarkAsReadRef?.current) {
+        skipMarkAsReadRef.current = false;
+        return;
+      }
+
+      // Only mark as viewed if the component was actually viewed
+      if (!hasBeenViewedRef.current) {
+        return;
+      }
+
+      hasBeenViewedRef.current = false;
+
       const payload = {
         channelId,
         ...(latestMessageRef.current?.conversationId && {
@@ -284,7 +311,9 @@ const ConversationPannel = ({
   const effectiveLatestMessage = latestMessage || latestConversationFromXState;
 
   return (
-    <ConversationTabContext.Provider value={{ setActiveTab: handleTabChange }}>
+    <ConversationTabContext.Provider
+      value={{ setActiveTab: handleTabChange, setSkipMarkAsRead, skipMarkAsReadRef }}
+    >
       <div key={`${channelId}-conversation-panel`} className='w-full relative h-full flex flex-col'>
         <ConversationHeader
           channelId={channelId}

@@ -384,6 +384,99 @@ export const mutators = defineMutators({
         }
       },
     ),
+    markChannelUnreadFrom: defineMutator(
+      z.object({
+        channelId: z.string(),
+        messageId: z.string(),
+        conversationId: z.string().optional(),
+      }),
+      async ({ tx, ctx, args: { channelId, messageId, conversationId } }) => {
+        const participant = await tx.run(
+          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participant) {
+          throw new Error(`User ${ctx.userID} is not a participant of channel ${channelId}`);
+        }
+
+        // Validate message exists
+        const message = await tx.run(zql.messages.where('messageId', messageId).one());
+        if (!message) {
+          throw new Error(`Message ${messageId} not found`);
+        }
+
+        const newLastViewedAt = message.createdAt - 1;
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error(`Channel ${channelId} not found`);
+        }
+
+        // Fetch activities with related messages and conversations in a single query
+        const recentActivities = await tx.run(
+          zql.activities
+            .where('userId', ctx.userID)
+            .where('channelId', channelId)
+            .where('createdAt', '>', newLastViewedAt)
+            .related('message', m => m.related('conversation')),
+        );
+
+        // Filter for Root Activities (exclude thread replies and user's own messages)
+        // Is Root if: Message exists AND InitialMessageId == MessageId AND not sent by current user
+        const rootActivities = recentActivities.filter(activity => {
+          if (!activity.messageId || !activity.message) return false;
+          const msg = activity.message;
+          return msg.conversation && msg.conversation.initialMessageId === msg.messageId;
+        });
+
+        let unreadCount = 0;
+
+        if (
+          channel.scopeType === ChannelScopeType.DM ||
+          channel.scopeType === ChannelScopeType.GROUP_DM
+        ) {
+          // For DMs, count conversations not created by the current user
+          const conversations = await tx.run(
+            zql.conversations
+              .where('channelId', channelId)
+              .where('createdAt', '>', newLastViewedAt)
+              .where('createdBy', '!=', ctx.userID),
+          );
+          unreadCount = conversations.length;
+        } else {
+          // For Channels, use the Root Activity count we just calculated
+          unreadCount = rootActivities.length;
+        }
+
+        const updateData: {
+          lastViewedAt: number;
+          unreadCount: number;
+          lastViewedConversationId?: string;
+        } = {
+          lastViewedAt: newLastViewedAt,
+          unreadCount: unreadCount,
+        };
+
+        if (conversationId) {
+          updateData.lastViewedConversationId = conversationId;
+        }
+
+        // Update Channel status
+        await tx.mutate.channel_user_status.update({
+          id: participant.id,
+          ...updateData,
+        });
+
+        // Mark root activities unread sequentially for safer transaction handling
+        // We only update activities that are currently marked as read
+        const activitiesToMarkUnread = rootActivities.filter(a => a.isRead);
+        for (const activity of activitiesToMarkUnread) {
+          await tx.mutate.activities.update({
+            id: activity.id,
+            isRead: false,
+          });
+        }
+      },
+    ),
     toggleStarred: defineMutator(
       z.object({ channelId: z.string() }),
       async ({ tx, ctx, args: { channelId } }) => {

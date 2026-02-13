@@ -11,7 +11,7 @@ export class ActivitiesACL extends BaseACL<'activities'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'activities'>>, tx: Transaction<Schema>): Promise<void> {
-    if (args.isRead) {
+    if (args.isRead !== undefined) {
       const activity = await tx.run(zql.activities.where('id', '=', args.id).where('userId', this.ctx.userID).one());
       if (activity) {
         return;
