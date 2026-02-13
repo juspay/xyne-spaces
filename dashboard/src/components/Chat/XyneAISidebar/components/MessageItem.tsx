@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { Globe, Link } from 'lucide-react';
+import { Globe } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -484,7 +484,10 @@ const SummarizerContent = ({
                 >
                   {keyPoint.point}
                 </ReactMarkdown>
-                {(keyPoint.citation?.conversationId || keyPoint.citation?.url) &&
+                {keyPoint.citation &&
+                  (keyPoint.citation.conversationId ||
+                    keyPoint.citation.externalUrl ||
+                    keyPoint.citation.canvasId) &&
                   !message.isStreaming && (
                     <>
                       {' '}
@@ -496,17 +499,9 @@ const SummarizerContent = ({
                           }
                         }}
                         className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
-                        title={
-                          keyPoint.citation?.url
-                            ? `Open source URL`
-                            : `Jump to message ${keyPoint.citation.messageIndex}`
-                        }
+                        title={`Jump to ${keyPoint.citation.entityType || 'message'} ${keyPoint.citation.messageIndex}`}
                       >
-                        {keyPoint.citation?.url ? (
-                          <Link size={10} />
-                        ) : (
-                          keyPoint.citation.messageIndex
-                        )}
+                        {keyPoint.citation.messageIndex}
                       </button>
                     </>
                   )}

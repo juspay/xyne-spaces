@@ -1,12 +1,21 @@
 /**
  * Fetch Channel Messages Tool
+ *
+ * Enhanced tool that retrieves multiple entity types (messages, attachments, calls, canvas, tickets)
+ * from channels using AIContextService with intelligent date range management and citation tracking.
  */
 
 import { z } from 'zod';
 import { type Tool } from '@xynehq/jaf';
 import { db } from '../../../database/client.js';
 import { logger } from '../../../utils/logger.js';
-import type { XyneAIAgentContext, ToolMessage, ToolResultWithCapping } from './types.js';
+import { aiContextService } from '../../../services/aiContextService.js';
+import type { EnrichedCall } from '../../../services/aiContextService.js';
+import type {
+  XyneAIAgentContext,
+  ToolEntity,
+  EnhancedToolResult,
+} from './types.js';
 import {
   getDescription,
   toIST,
@@ -14,25 +23,259 @@ import {
   getDefaultDateRange,
   resolveChannelNames,
   getNextPrefix,
-  appendSessionMappings,
-  buildMessageMappings,
-  formatToolResultForContext,
+  buildEnhancedCitationMappings,
+  appendEnhancedSessionMappings,
+  formatEnhancedToolResultForContext,
 } from './helpers.js';
+
+// ============================================================================
+// Entity Transform Functions
+// ============================================================================
+
+/**
+ * Transform Message to ToolEntity format
+ */
+function transformMessageToEntity(
+  message: any,
+  index: number,
+  channelId: string,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>
+): ToolEntity {
+  const user = userMap.get(message.senderId);
+  return {
+    entityType: 'message',
+    entityId: message.messageId,
+    entityIndex: index,
+    content: stripHtml(message.content),
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: message.senderId,
+    timestamp: toIST(message.createdAt),
+    channelId,
+    channelName,
+    conversationId: message.conversationId,
+    messageId: message.messageId,
+    hasAttachment: message.hasAttachment,
+  };
+}
+
+/**
+ * Transform MessageAttachment to ToolEntity format
+ */
+function transformAttachmentToEntity(
+  attachment: any,
+  index: number,
+  channelId: string,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>,
+  base64Map: Map<string, string | null | undefined>,
+  exceedsMaxSizeMap: Map<string, boolean>
+): ToolEntity {
+  const user = userMap.get(attachment.uploadedByUserId || attachment.createdBy);
+
+  // Build content: metadata + base64 for supported types
+  let content = `Attachment: ${attachment.originalFilename} (${attachment.mimetype})`;
+
+  // Add file size for large files
+  if (attachment.size) {
+    const sizeMB = (attachment.size / 1024 / 1024).toFixed(2);
+    content += `\nSize: ${sizeMB}MB`;
+  }
+
+  // Add dimensions for images/videos if available
+  if (attachment.width && attachment.height) {
+    content += `\nDimensions: ${attachment.width}x${attachment.height}`;
+  }
+
+  // Check if file exceeded max size
+  const exceedsMaxSize = exceedsMaxSizeMap.get(attachment.id);
+  const base64Data = base64Map.get(attachment.id);
+
+  if (exceedsMaxSize) {
+    // File too large - only metadata available
+    content += `\n[File too large (>200MB) - only metadata available]`;
+  } else if (base64Data) {
+    // Add base64 data URI for supported types
+    content += `\n[File Data]: ${base64Data}`;
+  } else if (attachment.mimetype.startsWith('video/')) {
+    // For videos, explicitly note that data is not included
+    content += `\n[Video data not included - only metadata available]`;
+  }
+
+  return {
+    entityType: 'attachment',
+    entityId: attachment.id,
+    entityIndex: index,
+    content,
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: attachment.uploadedByUserId || attachment.createdBy,
+    timestamp: toIST(attachment.createdAt),
+    channelId,
+    channelName,
+    conversationId: attachment.conversationId,
+    messageId: attachment.entityType === 'CHAT' ? attachment.entityId : undefined,
+    attachmentMimetype: attachment.mimetype,
+    base64Data: base64Data || undefined,
+  };
+}
+
+/**
+ * Transform Call to ToolEntity format
+ */
+function transformCallToEntity(
+  call: EnrichedCall,
+  index: number,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>
+): ToolEntity {
+  const user = userMap.get(call.createdByUserId);
+
+  // Build content with transcript if available
+  let content = `Call: ${call.title || 'Untitled'}\nStatus: ${call.status}`;
+
+  if (call.description) {
+    content += `\nDescription: ${call.description}`;
+  }
+
+  if (call.transcript) {
+    content += `\n\nTranscript:\n${call.transcript}`;
+  } else {
+    content += `\n\n[No transcript available]`;
+  }
+
+  if (call.aiSummary) {
+    content += `\n\nAI Summary:\n${call.aiSummary}`;
+  }
+
+  return {
+    entityType: 'call',
+    entityId: call.id,
+    entityIndex: index,
+    content,
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: call.createdByUserId,
+    timestamp: toIST(call.startedAt),
+    channelId: call.channelId,
+    channelName,
+    conversationId: call.conversationId || undefined,
+    callId: call.id,
+    callStatus: call.status,
+    hasTranscript: !!call.transcript,
+  };
+}
+
+/**
+ * Transform Canvas to ToolEntity format
+ */
+function transformCanvasToEntity(
+  canvas: any,
+  index: number,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>
+): ToolEntity {
+  const user = userMap.get(canvas.createdBy);
+
+  // Build content with full canvas data
+  let content = `Canvas: ${canvas.title}\n`;
+
+  // Include full BlockNote JSON content
+  if (canvas.content) {
+    content += `\nContent (BlockNote JSON):\n${JSON.stringify(canvas.content, null, 2)}`;
+  }
+
+  // Add metadata if available
+  if (canvas.metadata) {
+    content += `\n\nMetadata:\n${JSON.stringify(canvas.metadata, null, 2)}`;
+  }
+
+  // Add document type info for Quarto docs
+  if (canvas.docType === 'Quarto' && canvas.quartoDocumentType) {
+    content += `\n\nQuarto Document Type: ${canvas.quartoDocumentType}`;
+    if (canvas.entryFile) {
+      content += `\nEntry File: ${canvas.entryFile}`;
+    }
+  }
+
+  return {
+    entityType: 'canvas',
+    entityId: canvas.id,
+    entityIndex: index,
+    content,
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: canvas.createdBy,
+    timestamp: toIST(canvas.updatedAt),
+    channelId: canvas.channelId || '',
+    channelName,
+    canvasId: canvas.id,
+  };
+}
+
+/**
+ * Transform Ticket to ToolEntity format
+ */
+function transformTicketToEntity(
+  ticket: any,
+  index: number,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>
+): ToolEntity {
+  const user = userMap.get(ticket.createdBy);
+  const assignee = ticket.assignedTo ? userMap.get(ticket.assignedTo) : null;
+
+  // Build comprehensive ticket content
+  let content = `Ticket [${ticket.xyneId}]: ${ticket.title}\n`;
+  content += `Status: ${ticket.statusV2}\n`;
+  content += `Priority: ${ticket.priority}\n`;
+
+  if (assignee) {
+    content += `Assigned To: ${assignee.name || assignee.email || 'Unknown'}\n`;
+  }
+
+  if (ticket.eta) {
+    content += `ETA: ${toIST(ticket.eta)}\n`;
+  }
+
+  // Include full description
+  if (ticket.description) {
+    content += `\nDescription:\n${ticket.description}`;
+  }
+
+  // Add metadata if available
+  if (ticket.metadata) {
+    content += `\n\nMetadata:\n${JSON.stringify(ticket.metadata, null, 2)}`;
+  }
+
+  return {
+    entityType: 'ticket',
+    entityId: ticket.id,
+    entityIndex: index,
+    content,
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: ticket.createdBy,
+    timestamp: toIST(ticket.createdAt),
+    channelId: ticket.channelId,
+    channelName,
+    conversationId: ticket.conversationId,
+    ticketId: ticket.id,
+    ticketStatus: ticket.statusV2,
+  };
+}
 
 // ============================================================================
 // Implementation
 // ============================================================================
 
 /**
- * Fetch Channel Messages Multi-Channel Implementation
+ * Fetch Channel Messages Multi-Channel Implementation with Multi-Entity Support
  */
 async function fetchChannelMessagesMultiChannelImpl(
   channelIds: string[],
   sessionId: string,
+  userId: string,
   dateFrom?: string,
   dateTo?: string,
   precomputedChannelNameMap?: Map<string, string>
-): Promise<ToolResultWithCapping> {
+): Promise<EnhancedToolResult> {
   try {
     const channelCount = channelIds.length;
     logger.info(`[Tool] [${sessionId}] fetch_channel_messages_multi: channelIds=${JSON.stringify(channelIds)}, channelCount=${channelCount}, dateFrom=${dateFrom}, dateTo=${dateTo}`);
@@ -41,7 +284,7 @@ async function fetchChannelMessagesMultiChannelImpl(
     if (!channelIds || channelIds.length === 0) {
       return {
         success: false,
-        messages: [],
+        entities: [],
         error: 'NO_CHANNEL_CONTEXT: No channels are currently in context. Ask the user to specify which channel they want to summarize. Use field_value_discovery to validate the channel name once provided.',
       };
     }
@@ -50,7 +293,7 @@ async function fetchChannelMessagesMultiChannelImpl(
     if (channelIds.length > 5) {
       return {
         success: false,
-        messages: [],
+        entities: [],
         error: 'Too many channels specified. Maximum 5 channels allowed per summarization.',
       };
     }
@@ -94,7 +337,7 @@ async function fetchChannelMessagesMultiChannelImpl(
     if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
       return {
         success: false,
-        messages: [],
+        entities: [],
         error: 'Invalid date format. Use ISO date format.',
       };
     }
@@ -121,65 +364,236 @@ async function fetchChannelMessagesMultiChannelImpl(
     if (conversations.length === 0) {
       return {
         success: true,
-        messages: [],
-        metadata: { totalCount: 0, dateFrom: fromDate.toISOString(), dateTo: toDate.toISOString() },
+        entities: [],
+        metadata: {
+          totalCount: 0,
+          messageCount: 0,
+          attachmentCount: 0,
+          callCount: 0,
+          canvasCount: 0,
+          ticketCount: 0,
+          dateFrom: fromDate.toISOString(),
+          dateTo: toDate.toISOString()
+        },
       };
     }
 
     // Create a map of conversationId -> channelId for later use
     const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
-    const conversationIds = conversations.map(c => c.conversationId);
 
-    // Fetch messages from all channels
-    const messages = await db.message.findMany({
-      where: {
-        conversationId: { in: conversationIds },
-        createdAt: { gte: fromDate, lte: toDate },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 500,
+    // ============================================================================
+    // Fetch all entity types in parallel using AIContextService
+    // ============================================================================
+
+    const [
+      messagesResults,
+      attachmentsResults,
+      callsResults,
+      canvasesResults,
+      ticketsRaw
+    ] = await Promise.all([
+      // Fetch messages for each conversation
+      Promise.all(
+        conversations.map(c =>
+          aiContextService.getMessagesByConversation(c.conversationId, {
+            timeRange: { start: fromDate, end: toDate }
+          })
+        )
+      ),
+      // Fetch attachments for each conversation
+      Promise.all(
+        conversations.map(c =>
+          aiContextService.getAttachmentsByConversation(c.conversationId)
+        )
+      ),
+      // Fetch calls for each channel
+      Promise.all(
+        channelIds.map(channelId =>
+          aiContextService.getCallsByChannel(channelId, {
+            timeRange: { start: fromDate, end: toDate }
+          })
+        )
+      ),
+      // Fetch canvases for each channel
+      Promise.all(
+        channelIds.map(channelId =>
+          aiContextService.getCanvasesByChannel(channelId, {
+            timeRange: { start: fromDate, end: toDate },
+            dateField: 'updatedAt',
+            userId
+          })
+        )
+      ),
+      // Fetch tickets (raw query for now)
+      db.ticket.findMany({
+        where: {
+          channelId: { in: channelIds },
+          createdAt: { gte: fromDate, lte: toDate }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500
+      })
+    ]);
+
+    // Flatten results
+    const allMessages = messagesResults.flatMap(r => r.data);
+    const allAttachments = attachmentsResults
+      .flatMap(r => r.attachments)
+      .filter(a => new Date(a.createdAt) >= fromDate && new Date(a.createdAt) <= toDate);
+    const allCalls = callsResults.flatMap(r => r.data) as EnrichedCall[];
+    const allCanvases = canvasesResults.flatMap(r => r.data);
+    const allTickets = ticketsRaw;
+
+    // ============================================================================
+    // Fetch base64 for attachments (exclude videos - model cannot analyze them)
+    // Videos will still appear as entities but with metadata only
+    // ============================================================================
+
+    const base64Results = await Promise.all(
+      allAttachments.map(a =>
+        aiContextService.getAttachmentById(a.id, {
+          preferThumbnail: true,
+          excludedCategories: ['video']  // Exclude videos to save context tokens
+        })
+          .catch(err => {
+            logger.warn(`[Tool] [${sessionId}] Failed to fetch base64 for attachment ${a.id}:`, err);
+            return { attachment: null, base64: null };
+          })
+      )
+    );
+
+    const base64Map = new Map(
+      base64Results.map((result, i) => [
+        allAttachments[i].id,
+        result.base64?.dataUri
+      ])
+    );
+
+    // Track attachments that exceeded max size
+    const exceedsMaxSizeMap = new Map(
+      base64Results.map((result, i) => [
+        allAttachments[i].id,
+        result.base64?.exceedsMaxSize || false
+      ])
+    );
+
+    // ============================================================================
+    // Collect all unique user IDs
+    // ============================================================================
+
+    const allUserIds = new Set<string>();
+    allMessages.forEach(m => allUserIds.add(m.senderId));
+    allAttachments.forEach(a => allUserIds.add(a.uploadedByUserId || a.createdBy));
+    allCalls.forEach(c => allUserIds.add(c.createdByUserId));
+    allCanvases.forEach(c => allUserIds.add(c.createdBy));
+    allTickets.forEach(t => {
+      allUserIds.add(t.createdBy);
+      if (t.assignedTo) allUserIds.add(t.assignedTo);
     });
 
-    const senderIds = [...new Set(messages.map(m => m.senderId))];
     const users = await db.user.findMany({
-      where: { id: { in: senderIds } },
+      where: { id: { in: Array.from(allUserIds) } },
       select: { id: true, name: true, email: true },
     });
     const userMap = new Map(users.map(u => [u.id, u]));
 
-    // Format messages with channel info
-    const formattedMessages: ToolMessage[] = messages.map((msg, idx) => {
-      const user = userMap.get(msg.senderId);
+    // ============================================================================
+    // Transform all entities to ToolEntity format
+    // ============================================================================
+
+    const messageEntities: ToolEntity[] = allMessages.map((msg, idx) => {
       const msgChannelId = conversationToChannelMap.get(msg.conversationId) || '';
-      return {
-        messageId: msg.messageId,
-        messageIndex: idx + 1,
-        content: stripHtml(msg.content),
-        authorName: user?.name || user?.email || 'Unknown User',
-        authorId: msg.senderId,
-        timestamp: toIST(msg.createdAt),
-        conversationId: msg.conversationId,
-        channelId: msgChannelId,
-        channelName: channelNameMap.get(msgChannelId) || '',
-        hasAttachment: msg.hasAttachment,
-      };
+      return transformMessageToEntity(
+        msg,
+        idx,
+        msgChannelId,
+        channelNameMap.get(msgChannelId) || '',
+        userMap
+      );
     });
 
-    // Sort by timestamp ascending for chronological order
-    formattedMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-    // Re-index after sorting
-    formattedMessages.forEach((msg, idx) => {
-      msg.messageIndex = idx + 1;
+    const attachmentEntities: ToolEntity[] = allAttachments.map((att, idx) => {
+      const attChannelId = conversationToChannelMap.get(att.conversationId) || '';
+      return transformAttachmentToEntity(
+        att,
+        idx,
+        attChannelId,
+        channelNameMap.get(attChannelId) || '',
+        userMap,
+        base64Map,
+        exceedsMaxSizeMap
+      );
     });
 
-    logger.info(`[Tool] [${sessionId}] fetch_channel_messages_multi: Found ${formattedMessages.length} messages across ${channelCount} channels (${defaults.days} days range)`);
+    const callEntities: ToolEntity[] = allCalls.map((call, idx) =>
+      transformCallToEntity(
+        call,
+        idx,
+        channelNameMap.get(call.channelId) || '',
+        userMap
+      )
+    );
+
+    const canvasEntities: ToolEntity[] = allCanvases.map((canvas, idx) =>
+      transformCanvasToEntity(
+        canvas,
+        idx,
+        channelNameMap.get(canvas.channelId || '') || '',
+        userMap
+      )
+    );
+
+    const ticketEntities: ToolEntity[] = allTickets.map((ticket, idx) =>
+      transformTicketToEntity(
+        ticket,
+        idx,
+        channelNameMap.get(ticket.channelId) || '',
+        userMap
+      )
+    );
+
+    // ============================================================================
+    // Merge and sort all entities chronologically
+    // ============================================================================
+
+    const allEntities: ToolEntity[] = [
+      ...messageEntities,
+      ...attachmentEntities,
+      ...callEntities,
+      ...canvasEntities,
+      ...ticketEntities,
+    ];
+
+    // Sort chronologically by timestamp (newest first)
+    allEntities.sort((a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+
+    // Apply global limit of 500 items (newest 500)
+    const limitedEntities = allEntities.slice(0, 500);
+
+    // Re-index after sorting and limiting
+    limitedEntities.forEach((entity, idx) => {
+      entity.entityIndex = idx + 1;
+    });
+
+    logger.info(
+      `[Tool] [${sessionId}] fetch_channel_messages_multi: Found ${limitedEntities.length} total entities ` +
+      `(${messageEntities.length} messages, ${attachmentEntities.length} attachments, ` +
+      `${callEntities.length} calls, ${canvasEntities.length} canvases, ${ticketEntities.length} tickets) ` +
+      `across ${channelCount} channels (${defaults.days} days range)`
+    );
 
     return {
       success: true,
-      messages: formattedMessages,
+      entities: limitedEntities,
       metadata: {
-        totalCount: formattedMessages.length,
+        totalCount: limitedEntities.length,
+        messageCount: messageEntities.length,
+        attachmentCount: attachmentEntities.length,
+        callCount: callEntities.length,
+        canvasCount: canvasEntities.length,
+        ticketCount: ticketEntities.length,
         dateFrom: fromDate.toISOString(),
         dateTo: toDate.toISOString(),
       },
@@ -191,14 +605,14 @@ async function fetchChannelMessagesMultiChannelImpl(
     logger.error(`[Tool] [${sessionId}] fetch_channel_messages_multi error:`, error);
     return {
       success: false,
-      messages: [],
+      entities: [],
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 }
 
 // ============================================================================
-// Tool Factory
+// JAF Tool Factory
 // ============================================================================
 
 /**
@@ -286,10 +700,10 @@ Example: fetch_channel_messages({ channels: ["genius-discussions"], date_from: "
         
         // Use the resolved channel IDs with pre-computed channel name map
         const channelCount = accessibleChannelIds.length;
-        const result = await fetchChannelMessagesMultiChannelImpl(accessibleChannelIds, context.sessionId, date_from, date_to, context.contextChannelIdToName) as ToolResultWithCapping;
+        const result = await fetchChannelMessagesMultiChannelImpl(accessibleChannelIds, context.sessionId, context.userId, date_from, date_to, context.contextChannelIdToName);
         const prefix = await getNextPrefix(context.sessionId);
-        if (result.success && result.messages.length > 0) {
-          await appendSessionMappings(context.sessionId, buildMessageMappings(result), prefix);
+        if (result.success && result.entities.length > 0) {
+          await appendEnhancedSessionMappings(context.sessionId, buildEnhancedCitationMappings(result), prefix);
         }
         
         // Add info about date range used
@@ -297,15 +711,37 @@ Example: fetch_channel_messages({ channels: ["genius-discussions"], date_from: "
         let dateInfo = '';
         
         if (result.dateRangeCapped && result.requestedDays) {
-          dateInfo = `\n\nNOTE: You requested ${result.requestedDays} days, but with ${channelCount} channel${channelCount > 1 ? 's' : ''} we can only summarize the last ${dateRange.days} days. Showing messages from the last ${dateRange.days} days.`;
+          dateInfo = `\n\nNOTE: You requested ${result.requestedDays} days, but with ${channelCount} channel${channelCount > 1 ? 's' : ''} we can only summarize the last ${dateRange.days} days. Showing content from the last ${dateRange.days} days.`;
         } else if (!date_from) {
           dateInfo = `\n\nDate range: Last ${dateRange.days} days (based on ${channelCount} channel${channelCount > 1 ? 's' : ''})`;
         }
-        
-        return formatToolResultForContext(result, prefix) + dateInfo;
+
+        return formatEnhancedToolResultForContext(result, prefix) + dateInfo;
       }
 
-      return 'Error: Unexpected state - channels validation failed';
+      // Default: use all channels from context with pre-computed channel name map
+      const channelCount = context.channelIds.length;
+      logger.info(`[Tool] fetch_channel_messages called with context.channelIds=${JSON.stringify(context.channelIds)}, channelCount=${channelCount}`);
+
+      // Use multi-channel implementation for all cases
+      const result = await fetchChannelMessagesMultiChannelImpl(context.channelIds, context.sessionId, context.userId, date_from, date_to, context.contextChannelIdToName);
+      const prefix = await getNextPrefix(context.sessionId);
+      if (result.success && result.entities.length > 0) {
+        await appendEnhancedSessionMappings(context.sessionId, buildEnhancedCitationMappings(result), prefix);
+      }
+
+      // Add info about date range used
+      const dateRange = getDefaultDateRange(channelCount);
+      let dateInfo = '';
+
+      // Check if date range was capped
+      if (result.dateRangeCapped && result.requestedDays) {
+        dateInfo = `\n\nNOTE: You requested ${result.requestedDays} days, but with ${channelCount} channel${channelCount > 1 ? 's' : ''} we can only summarize the last ${dateRange.days} days. Showing content from the last ${dateRange.days} days.`;
+      } else if (!date_from) {
+        dateInfo = `\n\nDate range: Last ${dateRange.days} days (based on ${channelCount} channel${channelCount > 1 ? 's' : ''})`;
+      }
+
+      return formatEnhancedToolResultForContext(result, prefix) + dateInfo;
     },
   };
 }

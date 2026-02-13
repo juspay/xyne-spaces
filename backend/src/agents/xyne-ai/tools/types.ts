@@ -118,6 +118,84 @@ export interface ToolResultWithCapping extends ToolResult {
 }
 
 // ============================================================================
+// Enhanced Types for Multi-Entity Support
+// ============================================================================
+
+/**
+ * Entity type discriminator for different content types
+ */
+export type EntityType = 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search';
+
+/**
+ * Enhanced tool entity that can represent any content type
+ */
+export interface ToolEntity {
+  // Common fields
+  entityType: EntityType;
+  entityId: string;  // messageId, attachmentId, callId, canvasId, ticketId
+  entityIndex: number;  // Sequential index within tool call
+  content: string;  // Formatted content for display
+  authorName: string;
+  authorId: string;
+  timestamp: string;  // IST format
+  channelId: string;
+  channelName: string;
+
+  // Entity-specific IDs for citation URL construction
+  conversationId?: string;  // For messages, attachments, calls, tickets
+  messageId?: string;  // For messages and attachments (optional for attachments)
+  canvasId?: string;  // For canvas entities
+  ticketId?: string;  // For ticket entities
+  callId?: string;  // For call entities
+  externalUrl?: string;  // For web search results (external URLs)
+
+  // Additional metadata
+  hasAttachment?: boolean;  // For messages
+  attachmentMimetype?: string;  // For attachments
+  callStatus?: string;  // For calls
+  ticketStatus?: string;  // For tickets
+  hasTranscript?: boolean;  // For calls
+  base64Data?: string;  // For image attachments (data URI)
+}
+
+/**
+ * Enhanced tool result with multiple entity types
+ */
+export interface EnhancedToolResult {
+  success: boolean;
+  entities: ToolEntity[];  // Unified array of all entities
+  error?: string;
+  metadata?: {
+    totalCount: number;
+    messageCount: number;
+    attachmentCount: number;
+    callCount: number;
+    canvasCount: number;
+    ticketCount: number;
+    dateFrom?: string;
+    dateTo?: string;
+  };
+  dateRangeCapped?: boolean;
+  requestedDays?: number;
+  actualDays?: number;
+}
+
+/**
+ * Enhanced citation mappings for different entity types
+ * Frontend builds URLs from this metadata instead of using pre-built URLs
+ */
+export interface EnhancedCitationMappings {
+  entityIdMapping: Record<number, string>;  // index -> entityId
+  entityTypeMapping: Record<number, EntityType>;  // index -> entity type
+  conversationIdMapping: Record<number, string | undefined>;  // index -> conversationId
+  messageIdMapping: Record<number, string | undefined>;  // index -> messageId (for messages/attachments)
+  canvasIdMapping: Record<number, string | undefined>;  // index -> canvasId
+  channelIdMapping: Record<number, string>;  // index -> channelId
+  externalUrlMapping: Record<number, string | undefined>;  // index -> external URL (for web search)
+  isExternalMapping: Record<number, boolean>;  // index -> whether citation is external (web search)
+}
+
+// ============================================================================
 // Message Mappings
 // ============================================================================
 

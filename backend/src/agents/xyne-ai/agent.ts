@@ -104,7 +104,7 @@ function createRunConfig(
   return {
     agentRegistry,
     modelProvider: createModelProvider(apiKey) as RunConfig<XyneAIAgentContext>['modelProvider'],
-    maxTurns: 5,
+    maxTurns: 50,
     modelOverride: modelName,
     onEvent,
   };
