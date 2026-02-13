@@ -24,8 +24,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Button from '../../ui/Button';
-import { emojiActor } from '../../../machines/emojiMachine';
-import { useSelector } from '@xstate/react';
+import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 
 type ReactionWithUser = QueryResultType<
   typeof queries.conversationMessages
@@ -77,8 +76,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   const canCreateTicket = useCanCreateTicket();
   const [emojiOpen, setEmojiOpen] = useState(false);
 
-  // Get custom emojis from XState
-  const customEmojis = useSelector(emojiActor, state => state.context.customEmojis);
+  const { data: customEmojis } = useCustomEmojis();
 
   const handleEmojiOpenChange = (open: boolean): void => {
     setEmojiOpen(open);
@@ -134,7 +132,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               });
               handleEmojiOpenChange(false);
             }}
-            customEmojis={customEmojis}
+            customEmojis={customEmojis || []}
           />
         </Popover>
       )}

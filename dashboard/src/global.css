@@ -345,7 +345,7 @@
   /* Make inline emojis larger in input */
   .chat-input-field .inline-emoji {
     font-size: 1.5em;
-    vertical-align: -0.15em;
+    vertical-align: middle;
     line-height: 1;
   }
 
@@ -943,7 +943,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .jp-message-html .inline-emoji {
   font-size: 1.5em;
   /* 50% larger than text */
-  vertical-align: -0.15em;
+  vertical-align: middle;
   /* Center with text baseline */
   line-height: 1;
 }
@@ -1247,7 +1247,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   width: 1em;
   height: 1em;
   display: inline-block;
-  vertical-align: -0.15em;
+  vertical-align: middle;
   object-fit: contain;
 }
 

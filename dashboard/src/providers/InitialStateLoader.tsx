@@ -12,7 +12,6 @@ import {
 } from '../machines/queryCacheMachine';
 import { UserPermission } from '../machines/stateMachine';
 import { apiInstance } from '../services/clients/apiClient';
-import { emojiActor } from '../machines/emojiMachine';
 import { ReadonlyJSONValue } from '@rocicorp/zero';
 import { websocketService } from '../services/clients/socketClient';
 import { initializeMetrics, cleanupMetrics } from '../services/metricsService';
@@ -379,11 +378,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
 
     if (isQueryCompleted(allUserGroupsDetails)) {
       stateMachineActor.send({ type: 'ADD_ALL_USER_GROUPS', userGroups: allUserGroups });
-    }
-
-    // Fetch custom emojis when user is authenticated
-    if (context.userID && isHydrated) {
-      emojiActor.send({ type: 'FETCH_EMOJIS' });
     }
 
     // eslint-disable-next-line react-hooks/exhaustive-deps

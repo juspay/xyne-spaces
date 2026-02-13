@@ -84,30 +84,44 @@ export type EmojiSizeValue = (typeof EmojiSize)[keyof typeof EmojiSize];
 
 export function isEmojiOnly(text: string): boolean {
   if (!text || !text.trim()) {
-    return false; // Ignore empty or whitespace-only messages
+    return false;
   }
+
   const hasStructuralTags = /<(code|pre|ul|ol|li|blockquote|h[1-6]|table|tr|td|th)[\s>]/i.test(
     text,
   );
   if (hasStructuralTags) {
-    return false; // Has structural content, not emoji-only
+    return false;
   }
 
-  const strippedText = htmlToPlainText(text);
+  // Count custom emoji images via regex
+  const customEmojiPattern = /<img[^>]*data-emoji-id="[^"]*"[^>]*>/gi;
+  const customEmojiMatches = text.match(customEmojiPattern) || [];
+  const customEmojiCount = customEmojiMatches.length;
 
-  if (!strippedText) {
+  // Remove custom emoji images from HTML
+  const textWithoutCustomEmojis = text.replace(customEmojiPattern, '');
+
+  // Now process as before
+  const strippedText = htmlToPlainText(textWithoutCustomEmojis);
+
+  if (!strippedText && customEmojiCount === 0) {
     return false;
   }
 
   const emojiMatches = Array.from(strippedText.matchAll(EMOJI_REGEX));
-  const emojiCount = emojiMatches.length;
+  const unicodeEmojiCount = emojiMatches.length;
+
+  const totalEmojiCount = customEmojiCount + unicodeEmojiCount;
 
   const remainingText = strippedText.replace(EMOJI_REGEX, '').trim();
 
   const isPureEmoji = remainingText.length === 0;
-  const isWithinLimit = emojiCount > 0 && emojiCount <= MAX_LARGE_EMOJIS;
+  const isWithinLimit = totalEmojiCount > 0 && totalEmojiCount <= MAX_LARGE_EMOJIS;
 
-  return isPureEmoji && isWithinLimit;
+  const result = isPureEmoji && isWithinLimit;
+
+  return result;
 }
 
 export function getEmojiFontSizeClass(text: string): string {

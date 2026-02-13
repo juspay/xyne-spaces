@@ -58,6 +58,7 @@ import { SHAREABLE_ORIGIN } from '../../../config';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { SubTicketModal } from '../../Tickets/SubTicketModal/SubTicketModal';
 import { ForwardMessageForm } from '../ForwardMessageModal/ForwardMessageModal';
+import DOMPurify from 'dompurify';
 
 export interface ThreadData {
   replyCount: number;
@@ -369,6 +370,26 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         .catch(() => {
           toast.error('Could not copy message to clipboard');
         });
+
+      // Also copy plain text with emoji replacement (only if there are emoji images)
+      if (contentToCopy.includes('data-emoji="true"')) {
+        const sanitizedContent = DOMPurify.sanitize(contentToCopy);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(sanitizedContent, 'text/html');
+
+        // Replace custom emoji <img> with :emoji_name:
+        doc.querySelectorAll('img[data-emoji="true"]').forEach(img => {
+          const alt = img.getAttribute('alt') || '';
+          img.replaceWith(document.createTextNode(alt));
+        });
+
+        const plainText = doc.body.textContent || '';
+
+        navigator.clipboard
+          .writeText(plainText)
+          .then(() => toast.success('Message copied to clipboard'))
+          .catch(() => toast.error('Could not copy message'));
+      }
     }
   };
 
@@ -411,8 +432,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const doc = parser.parseFromString(message.content, 'text/html');
     const textContent = (doc.body.textContent || '').trim();
 
+    const hasEmoji = doc.querySelectorAll('img[data-emoji="true"]').length > 0;
+
     // Consider it text content only if there's actual text
-    return textContent.length > 0;
+    return textContent.length > 0 || hasEmoji;
   })();
 
   // Only show copy button if there's text content to copy

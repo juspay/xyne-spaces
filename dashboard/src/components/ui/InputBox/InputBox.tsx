@@ -35,6 +35,7 @@ import type { MentionResult } from '../Selectors/Selectors.types';
 import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
 import { ChannelMentionExtension, channelMentionPluginKey } from '../TipTapExtensions';
+import { ColonEmojiExtension } from '../TipTapExtensions/ColonEmojiExtension';
 import type { InputBoxProps } from './InputBox.types';
 import { formatTypingMessage } from './InputBox.utils';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
@@ -51,6 +52,7 @@ import { Dialog } from '../Dialog';
 import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
 import { EmojiClickData } from 'emoji-picker-react';
 import { InlineEmoji } from '../EditorToolbar/InlineEmoji';
+import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 
 const lowlight = createLowlight(common);
 
@@ -218,6 +220,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       setEmojiSizeClass(sizeClass);
     }, []);
 
+    const { data: customEmojis } = useCustomEmojis();
+
+    // Use ref to hold current emojis for the extension to access
+    const customEmojisRef = React.useRef(customEmojis);
+    useEffect(() => {
+      customEmojisRef.current = customEmojis;
+    }, [customEmojis]);
+
     const editor = useEditor({
       extensions: [
         StarterKit.configure({
@@ -265,6 +275,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           },
         }),
         InlineEmoji,
+        ColonEmojiExtension.configure({
+          getCustomEmojis: () => customEmojisRef.current || [],
+        }),
         CodeBlockLowlight.configure({
           lowlight,
           defaultLanguage: 'plaintext',

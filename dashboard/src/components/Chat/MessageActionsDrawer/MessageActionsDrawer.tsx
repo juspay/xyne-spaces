@@ -23,8 +23,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
-import { emojiActor } from '../../../machines/emojiMachine';
-import { useSelector } from '@xstate/react';
+import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 
 type ReactionWithUser = QueryResultType<
   typeof queries.conversationMessages
@@ -76,8 +75,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   const canCreateTicket = useCanCreateTicket();
   const [emojiOpen, setEmojiOpen] = useState(false);
 
-  // Get custom emojis from XState
-  const customEmojis = useSelector(emojiActor, state => state.context.customEmojis);
+  const { data: customEmojis } = useCustomEmojis();
 
   const handleActionClick = (action: () => void): void => {
     action();
@@ -166,7 +164,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                 names: emoji.names,
               });
             }}
-            customEmojis={customEmojis}
+            customEmojis={customEmojis || []}
           />
         </Popover>
 

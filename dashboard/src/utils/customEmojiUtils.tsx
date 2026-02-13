@@ -10,6 +10,7 @@ const isCustomEmoji = (emojiName: string): boolean => {
 const parseCustomEmoji = (emojiName: string): { emojiId: string; name: string } | null => {
   if (!isCustomEmoji(emojiName)) return null;
   // Format: custom:{emojiId}:{name}:{imageUrl}
+
   const parts = emojiName.split(':');
   if (parts.length < 3 || !parts[1] || !parts[2]) return null;
   return {
@@ -37,16 +38,12 @@ const convertCustomEmojiUrls = (htmlContent: string): string => {
     const emojiId = img.getAttribute('data-emoji-id');
     const src = img.getAttribute('src');
 
-    // Only replace blob URLs
-    if (!emojiId || !src || !src.startsWith('blob:')) return;
-
-    img.setAttribute('src', `${API_BASE_URL}/emojis/${emojiId}/stream`);
+    if (!emojiId || !src) return;
 
     // Optional cleanup
     img.setAttribute('data-emoji', 'true');
     img.removeAttribute('emojiid'); // cleanup accidental attr
   });
-
   return doc.body.innerHTML;
 };
 
@@ -55,7 +52,7 @@ const renderEmoji = (emojiName: string): ReactElement => {
   const customEmoji = parseCustomEmoji(emojiName);
   const imageUrl = `${API_BASE_URL}/emojis/${customEmoji?.emojiId}/stream`;
   if (customEmoji) {
-    return <img src={imageUrl} alt={customEmoji.name} className='w-4 h-4 object-contain' />;
+    return <img src={imageUrl} alt={customEmoji.name} className='w-5 h-5 object-contain' />;
   }
   return <span className='text-base leading-none'>{emojiName}</span>;
 };

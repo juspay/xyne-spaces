@@ -143,38 +143,3 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
     reader.readAsDataURL(blob);
   });
 };
-
-/**
- * Fetch emoji images with credentials and return blob URLs
- * Used for custom emoji display in emoji picker
- */
-export const fetchEmojiBlobUrls = async (
-  emojis: { id: string }[],
-): Promise<Record<string, string>> => {
-  const urls: Record<string, string> = {};
-
-  await Promise.all(
-    emojis.map(async emoji => {
-      try {
-        const queryKey = ['emoji-blob', emoji.id];
-        const blob = await queryClient.fetchQuery<Blob>({
-          queryKey,
-          queryFn: async ({ signal }) => {
-            const response = await apiInstance.get(`/emojis/${emoji.id}/stream`, {
-              responseType: 'blob',
-              signal,
-            });
-            return response.data as Blob;
-          },
-          staleTime: 10 * 60 * 1000,
-        });
-        urls[emoji.id] = URL.createObjectURL(blob);
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error(`Failed to fetch emoji ${emoji.id}:`, error);
-      }
-    }),
-  );
-
-  return urls;
-};
