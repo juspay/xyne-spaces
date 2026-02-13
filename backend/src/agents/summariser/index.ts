@@ -50,13 +50,30 @@ export interface SummarizerContext {
 }
 
 /**
+ * Enhanced entity metadata for multi-entity citation support
+ */
+export interface EnhancedEntityMetadata {
+  readonly entityType: 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search';
+  readonly entityId: string;
+  readonly messageId?: string;
+  readonly conversationId?: string;
+  readonly canvasId?: string;
+  readonly callId?: string;
+  readonly ticketId?: string;
+  readonly channelId: string;
+  readonly externalUrl?: string; 
+  readonly isExternal?: boolean;  
+}
+
+/**
  * Input for summarizing a thread
  */
 export interface ThreadSummaryInput {
   readonly messages: readonly ThreadMessage[];
   readonly maxLength?: number;
-  readonly messageIdMapping?: Map<number, string>;  // 1-based index to messageId mapping for citations
-  readonly conversationIdMapping?: Map<number, string>;  // 1-based index to conversationId mapping (for channel summary)
+  readonly messageIdMapping?: Map<number, string>;  // 1-based index to messageId mapping for citations (legacy)
+  readonly conversationIdMapping?: Map<number, string>;  // 1-based index to conversationId mapping (for channel summary, legacy)
+  readonly entityMapping?: Map<number, EnhancedEntityMetadata>;  // NEW: Enhanced entity mapping for multi-entity support
 }
 
 /**
@@ -72,10 +89,23 @@ export interface ThreadMessage {
 
 /**
  * Citation reference linking a key point to a source message
+ * Enhanced to support multiple entity types
  */
 export interface Citation {
   readonly messageIndex: number;  // 1-based index from the input messages
-  readonly messageId: string;     // The actual message ID for linking
+  readonly messageId: string;     // The actual message ID for linking (legacy)
+  readonly conversationId?: string;  // Conversation ID for navigation
+  readonly channelId?: string;    // Channel ID for navigation
+
+  // NEW: Multi-entity support
+  readonly entityType?: 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search';
+  readonly entityId?: string;
+  readonly canvasId?: string;
+  readonly callId?: string;
+  readonly ticketId?: string;
+  readonly externalUrl?: string;  
+  readonly isExternal?: boolean;  
+  readonly isTicket?: boolean;    // Backwards compatibility flag
 }
 
 /**
@@ -206,10 +236,11 @@ GUARDRAILS:
  * Converts to structured format with deterministic counts
  */
 function parseAgentOutput(
-  content: string, 
+  content: string,
   messageIdMapping?: Map<number, string>,
   messageCount: number = 0,
-  participantCount: number = 0
+  participantCount: number = 0,
+  entityMapping?: Map<number, EnhancedEntityMetadata>  // NEW: Enhanced entity mapping
 ): SummaryOutput {
   // Remove <think>...</think> blocks (used by some reasoning models)
   let jsonContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
@@ -237,6 +268,32 @@ function parseAgentOutput(
         const pointNum = index + 1;
         const rawCitation = citations[pointNum];
         const citationMsgIndex = typeof rawCitation === 'number' ? rawCitation : (typeof rawCitation === 'string' ? parseInt(rawCitation, 10) : 1);
+
+        // NEW: Check for enhanced entity mapping first
+        if (entityMapping && entityMapping.has(citationMsgIndex)) {
+          const entity = entityMapping.get(citationMsgIndex)!;
+          return {
+            point,
+            citation: {
+              messageIndex: citationMsgIndex,
+              messageId: entity.messageId || '',
+              conversationId: entity.conversationId,
+              channelId: entity.channelId,
+
+              // Multi-entity fields
+              entityType: entity.entityType,
+              entityId: entity.entityId,
+              canvasId: entity.canvasId,
+              callId: entity.callId,
+              ticketId: entity.ticketId,
+              externalUrl: entity.externalUrl, 
+              isExternal: entity.isExternal,  
+              isTicket: entity.entityType === 'ticket',  // Backwards compatibility
+            },
+          };
+        }
+
+        // FALLBACK: Use legacy messageIdMapping
         return {
           point,
           citation: {
@@ -314,7 +371,8 @@ export async function* summarizeStream(
   const modelProvider = createModelProvider();
 
   const idMapping = input.messageIdMapping;
-  
+  const entityMapping = input.entityMapping;  // NEW: Extract entity mapping
+
   // Calculate deterministic counts from input messages
   const { messageCount, participantCount } = calculateCounts(input.messages);
 
@@ -370,7 +428,7 @@ export async function* summarizeStream(
             }
             // Parse the accumulated content and yield complete event
             try {
-              const parsedOutput = parseAgentOutput(accumulatedContent || content, idMapping, messageCount, participantCount);
+              const parsedOutput = parseAgentOutput(accumulatedContent || content, idMapping, messageCount, participantCount, entityMapping);
               yield {
                 type: 'complete',
                 output: parsedOutput,
@@ -440,7 +498,7 @@ export async function* summarizeStream(
                   content: rawOutput,
                 };
               }
-              finalOutput = parseAgentOutput(rawOutput, idMapping, messageCount, participantCount);
+              finalOutput = parseAgentOutput(rawOutput, idMapping, messageCount, participantCount, entityMapping);
             } else {
               const structuredOutput = rawOutput as SummaryOutput;
               if (!accumulatedContent && structuredOutput.summary) {
@@ -498,6 +556,12 @@ export async function summarizeThread(
 ): Promise<SummaryOutput> {
   const modelProvider = createModelProvider();
 
+  const idMapping = input.messageIdMapping;
+  const entityMapping = input.entityMapping;  // NEW: Extract entity mapping
+
+  // Calculate deterministic counts
+  const { messageCount, participantCount } = calculateCounts(input.messages);
+
   // Format messages for the agent
   const formattedMessages = formatMessagesForAgent(input.messages);
 
@@ -533,7 +597,7 @@ export async function summarizeThread(
     // Parse the output to strip <think> tags and extract JSON
     const rawOutput = result.outcome.output;
     if (typeof rawOutput === 'string') {
-      return parseAgentOutput(rawOutput);
+      return parseAgentOutput(rawOutput, idMapping, messageCount, participantCount, entityMapping);
     }
     return rawOutput as SummaryOutput;
   } else if (result.outcome.status === 'error') {

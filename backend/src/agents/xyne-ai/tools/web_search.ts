@@ -8,8 +8,8 @@ import { type Tool, webSearchTool } from '@xynehq/jaf';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
 import { redisService } from '../../../services/redisService.js';
-import type { XyneAIAgentContext } from './types.js';
-import { getDescription, appendSessionMappings, getNextPrefix } from './helpers.js';
+import type { XyneAIAgentContext, EnhancedCitationMappings } from './types.js';
+import { getDescription, appendEnhancedSessionMappings, getNextPrefix } from './helpers.js';
 import { metrics } from '../../../services/otel/pull/metrics.js';
 
 // ============================================================================
@@ -192,11 +192,20 @@ export function createWebSearchTool(): Tool<{ query: string }, XyneAIAgentContex
                     })
                     .join('\n\n');
 
-                // Store URLs in session mappings for citation linking
+                // Store URLs in enhanced session mappings for citation linking
                 try {
                     const prefix = await getNextPrefix(context.sessionId);
-                    const urlMapping: Record<number, string> = {};
-                    
+
+                    // Build enhanced citation mappings for web search results
+                    const entityIdMapping: Record<number, string> = {};
+                    const entityTypeMapping: Record<number, 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search'> = {};
+                    const externalUrlMapping: Record<number, string | undefined> = {};
+                    const isExternalMapping: Record<number, boolean> = {};
+                    const conversationIdMapping: Record<number, string | undefined> = {};
+                    const messageIdMapping: Record<number, string | undefined> = {};
+                    const canvasIdMapping: Record<number, string | undefined> = {};
+                    const channelIdMapping: Record<number, string> = {};
+
                     // Map result indices to URLs with validation
                     results.slice(0, 30).forEach((r, idx) => {
                         if (r.url) {
@@ -204,7 +213,18 @@ export function createWebSearchTool(): Tool<{ query: string }, XyneAIAgentContex
                                 const parsedUrl = new URL(r.url);
                                 // Only allow http/https protocols
                                 if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
-                                    urlMapping[idx + 1] = r.url;
+                                    const index = idx + 1;
+                                    // For web search, we don't have real entities, so we use the URL as entityId
+                                    entityIdMapping[index] = r.url;
+                                    // Use 'web_search' type for web search results
+                                    entityTypeMapping[index] = 'web_search';
+                                    externalUrlMapping[index] = r.url; // External URL
+                                    isExternalMapping[index] = true; // Mark as external citation
+                                    // Web search results don't have conversation/message/canvas IDs
+                                    conversationIdMapping[index] = undefined;
+                                    messageIdMapping[index] = undefined;
+                                    canvasIdMapping[index] = undefined;
+                                    channelIdMapping[index] = ''; // No channel for web results
                                 } else {
                                     logger.warn(`[Tool] web_search: Skipping invalid URL protocol: ${parsedUrl.protocol}`);
                                 }
@@ -213,17 +233,22 @@ export function createWebSearchTool(): Tool<{ query: string }, XyneAIAgentContex
                             }
                         }
                     });
-                    
-                    // Store URL mapping in Redis
-                    await appendSessionMappings(context.sessionId, {
-                        messageIdMapping: {},
-                        conversationIdMapping: {},
-                        isTicketMapping: {},
-                        channelIdMapping: {},
-                        urlMapping
-                    }, prefix);
-                    
-                    logger.info(`[Tool] web_search: Stored ${Object.keys(urlMapping).length} URLs in session mappings with prefix ${prefix}`);
+
+                    // Store enhanced mapping in Redis
+                    const enhancedMappings: EnhancedCitationMappings = {
+                        entityIdMapping,
+                        entityTypeMapping,
+                        conversationIdMapping,
+                        messageIdMapping,
+                        canvasIdMapping,
+                        channelIdMapping,
+                        externalUrlMapping,
+                        isExternalMapping,
+                    };
+
+                    await appendEnhancedSessionMappings(context.sessionId, enhancedMappings, prefix);
+
+                    logger.info(`[Tool] web_search: Stored ${Object.keys(externalUrlMapping).length} URLs in enhanced session mappings with prefix ${prefix}`);
                 } catch (mappingError) {
                     // Non-blocking error - log but don't fail the tool
                     logger.error('[Tool] web_search: Failed to store URL mappings:', mappingError);

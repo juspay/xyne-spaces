@@ -13,8 +13,16 @@ export interface SummarizerCitation {
   messageId: string;
   conversationId: string;
   channelId?: string; // Optional - may not be available during streaming
-  isTicket?: boolean; // Distinguishes ticket citations from message citations
-  url?: string; // URL from web search results for this citation
+  isTicket?: boolean; // Distinguishes ticket citations from message citations (legacy)
+
+  // NEW: Multi-entity support
+  entityType?: 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search';
+  entityId?: string;
+  canvasId?: string;
+  callId?: string;
+  ticketId?: string;
+  externalUrl?: string;
+  isExternal?: boolean;
 }
 
 export interface SummarizerKeyPoint {

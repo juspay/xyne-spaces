@@ -21,6 +21,7 @@ export type {
   ToolResult,
   ToolResultWithCapping,
   MessageMappings,
+  EnhancedCitationMappings,
   ToolDescriptions,
   ResearchAgentResponse,
 } from './types.js';
@@ -49,7 +50,8 @@ export {
   resolveUserName,
   resolveChannelNames,
   getNextPrefix,
-  appendSessionMappings,
+  appendSessionMappings,  // Legacy - for backward compatibility
+  appendEnhancedSessionMappings,  // New - for multi-entity citations
   getAndClearSessionMappings,
 } from './helpers.js';
 

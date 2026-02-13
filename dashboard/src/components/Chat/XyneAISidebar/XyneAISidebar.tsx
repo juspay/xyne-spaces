@@ -9,6 +9,7 @@ import {
   type ConversationHistory as ConversationHistoryType,
 } from '../../../utils/xyneAIStorage';
 import type { Message, SummarizerCitation, MessageAttachment } from './utils/XyneAITypes';
+import { buildCitationUrl } from './utils/citationUrlBuilder';
 import { XyneAISuggestions } from './components/XyneAISuggestions';
 import { XyneAIInputBox, type Attachment } from './components/XyneAIInputBox';
 import { MessageItem } from './components/MessageItem';
@@ -471,50 +472,29 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
   // Handle Summarizer citation clicks
   const handleSummarizerCitationClick = useCallback(
     (citation: SummarizerCitation): void => {
-      const {
-        conversationId: convId,
-        messageId: msgId,
-        channelId: citationChannelId,
-        isTicket,
-        url,
-      } = citation;
+      // Build URL from citation metadata
+      const url = buildCitationUrl(citation);
 
-      // For web search citations (URL present), open in new tab
-      if (url) {
+      if (!url) {
+        console.warn('[XyneAI] Cannot build URL for citation:', citation);
+        return;
+      }
+
+      // Use explicit isExternal flag to determine routing behavior
+      if (citation.isExternal) {
+        // Open external citations (web search results) in new tab
         window.open(url, '_blank', 'noopener,noreferrer');
-        return;
-      }
-
-      // Use channelId from citation if available, otherwise fallback to current channelId
-      const targetChannelId = citationChannelId || channelId;
-
-      if (!convId || !targetChannelId) return;
-
-      // For ticket citations, use the ticket URL format
-      if (isTicket) {
-        void navigate(
-          `/chat/dir/${targetChannelId}?tab=tickets&ticketId=${convId}&conversationId=${convId}`,
-        );
-        // Close XyneAI modal on mobile
-        if (isMobile) {
-          xyneAIActor.send({ type: 'CLOSE' });
-        }
-        return;
-      }
-
-      // Navigate - XyneAI will stay open via xstate machine
-      if (msgId) {
-        void navigate(`/chat/dir/${targetChannelId}/${convId}#origin=${convId}&messageId=${msgId}`);
       } else {
-        void navigate(`/chat/dir/${targetChannelId}/${convId}`);
+        // Navigate to internal entity citations
+        void navigate(url);
       }
 
-      // Close XyneAI modal on mobile after navigation
+      // Close sidebar on mobile after navigation
       if (isMobile) {
         xyneAIActor.send({ type: 'CLOSE' });
       }
     },
-    [channelId, navigate],
+    [navigate, isMobile],
   );
 
   const handleSubmit = useCallback(async (): Promise<void> => {

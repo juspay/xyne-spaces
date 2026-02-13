@@ -15,7 +15,7 @@ import {
   type SessionContext,
 } from './storage/index.js';
 
-import { getAndClearSessionMappings, type MessageMappings, type StreamProvider, type StreamEventCallback } from './tools/index.js';
+import { getAndClearSessionMappings, type EnhancedCitationMappings, type StreamProvider, type StreamEventCallback } from './tools/index.js';
 import { createOnEventHandler } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
 import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
@@ -69,11 +69,11 @@ function getCurrentTimestamp(): string {
 // ============================================================================
 
 /**
- * Convert raw output to XyneAIOutput
+ * Convert raw output to XyneAIOutput with enhanced entity metadata
  */
 function convertRawToOutput(
   raw: AgentRawOutput,
-  mappings?: MessageMappings,
+  mappings?: EnhancedCitationMappings,
   defaultChannelId?: string
 ): XyneAIOutput {
   const keypointsData = raw.keypoints;
@@ -95,19 +95,33 @@ function convertRawToOutput(
   const keyPoints = points.map((point, index) => {
     const pointNum = index + 1;
     const citationRef = citations[pointNum] || '';
+
+    // Extract enhanced entity metadata from mappings
     const channelId = (mappings?.channelIdMapping as Record<string, string>)?.[citationRef] || defaultChannelId || '';
-    const url = (mappings?.urlMapping as Record<string, string>)?.[citationRef];
-    
+    const entityType = (mappings?.entityTypeMapping as Record<string, string>)?.[citationRef];
+    const entityId = (mappings?.entityIdMapping as Record<string, string>)?.[citationRef];
+    const messageId = (mappings?.messageIdMapping as Record<string, string | undefined>)?.[citationRef];
+    const conversationId = (mappings?.conversationIdMapping as Record<string, string | undefined>)?.[citationRef];
+    const canvasId = (mappings?.canvasIdMapping as Record<string, string | undefined>)?.[citationRef];
+    const externalUrl = (mappings?.externalUrlMapping as Record<string, string | undefined>)?.[citationRef];
+    const isExternal = (mappings?.isExternalMapping as Record<string, boolean>)?.[citationRef] || false;
+
     return {
       point,
       citation: {
         messageIndex: pointNum,
-        messageId: (mappings?.messageIdMapping as Record<string, string>)?.[citationRef] || '',
-        conversationId: (mappings?.conversationIdMapping as Record<string, string>)?.[citationRef] || '',
+        messageId: messageId || '',
+        conversationId: conversationId || '',
         channelId,
         prefixedRef: citationRef,
-        isTicket: (mappings?.isTicketMapping as Record<string, boolean>)?.[citationRef] || false,
-        url,
+        // Legacy field for backwards compatibility
+        isTicket: entityType === 'ticket',
+        // NEW: Enhanced entity metadata
+        entityType,
+        entityId,
+        canvasId,
+        externalUrl,
+        isExternal,
       },
     };
   });
@@ -119,11 +133,11 @@ function convertRawToOutput(
 }
 
 /**
- * Parse LLM string output to XyneAIOutput
+ * Parse LLM string output to XyneAIOutput with enhanced mappings
  */
 function parseStringOutput(
   content: string,
-  mappings?: MessageMappings,
+  mappings?: EnhancedCitationMappings,
   channelId?: string
 ): XyneAIOutput {
   let jsonContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
