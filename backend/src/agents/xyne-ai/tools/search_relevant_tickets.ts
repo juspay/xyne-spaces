@@ -36,15 +36,6 @@ async function searchRelevantTicketsImpl(
   try {
     logger.info(`[Tool] search_relevant_tickets: query="${query}", channelIds=${JSON.stringify(channelIds)}, userId=${userId}`);
 
-    // Handle empty channelIds - ask user for clarification
-    if (!channelIds || channelIds.length === 0) {
-      return {
-        success: false,
-        messages: [],
-        error: 'NO_CHANNEL_CONTEXT: No channels are currently in context. Ask the user to specify which channel they want to search tickets in. Use field_value_discovery to validate the channel name once provided.',
-      };
-    }
-
     // Validate max channels limit
     if (channelIds.length > 5) {
       return {

@@ -170,6 +170,27 @@ const webSearchToolUsedTotal = getOrCreateMetric("web_search_tool_used_total", (
   registers: [register],
 }));
 
+// Counter: Total times attachment was used in Ask AI queries
+const askAIAttachmentUsedTotal = getOrCreateMetric("ask_ai_attachment_used_total", () => new client.Counter({
+  name: "ask_ai_attachment_used_total",
+  help: 'Total number of times attachments were used in Ask AI queries',
+  registers: [register],
+}));
+
+// Counter: Total times Genius tool was used in Ask AI
+const askAIGeniusUsedTotal = getOrCreateMetric("ask_ai_genius_used_total", () => new client.Counter({
+  name: "ask_ai_genius_used_total",
+  help: 'Total number of times Genius tool was used in Ask AI',
+  registers: [register],
+}));
+
+// Counter: Total times Research Agent was used in Ask AI
+const askAIResearchAgentUsedTotal = getOrCreateMetric("ask_ai_research_agent_used_total", () => new client.Counter({
+  name: "ask_ai_research_agent_used_total",
+  help: 'Total number of times Research Agent was used in Ask AI',
+  registers: [register],
+}));
+
 
 // Metrics endpoint
 export const metricsEndpoint = async (_req: Request, res: Response) => {
@@ -212,7 +233,9 @@ export const metrics = {
   askAIQueryDuration,
   askAIContextChannels,
   askAIFeedbackTotal,
-  // Web search metrics
   webSearchEnabledTotal,
   webSearchToolUsedTotal,
+  askAIAttachmentUsedTotal,
+  askAIGeniusUsedTotal,
+  askAIResearchAgentUsedTotal,
 };

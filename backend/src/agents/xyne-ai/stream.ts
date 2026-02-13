@@ -19,6 +19,7 @@ import { getAndClearSessionMappings, type EnhancedCitationMappings, type StreamP
 import { createOnEventHandler } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
 import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
+import { metrics } from '../../services/otel/pull/metrics.js';
 
 import type {
   XyneAIRequest,
@@ -197,6 +198,15 @@ export async function* xyneAIStream(
 
   try {
     jafAttachments = convertAttachmentsToJAF(attachments);
+    
+    // Track attachment usage if any attachments were successfully converted
+    if (jafAttachments.length > 0) {
+      try {
+        metrics.askAIAttachmentUsedTotal.inc();
+      } catch (metricsError) {
+        logger.error('[XyneAI] Error recording attachment metrics:', metricsError);
+      }
+    }
   } catch (error) {
     logger.error(`[XyneAI] [${session.sessionId}] Failed to convert attachments:`, error);
     yield {

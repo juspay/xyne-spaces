@@ -38,15 +38,6 @@ async function searchRelevantMessagesWithFiltersImpl(
   try {
     logger.info(`[Tool] search_relevant_messages_with_filters: query="${query}", channelIds=${JSON.stringify(channelIds)}, userId=${userId}, sender=${sender}`);
 
-    // Handle empty channelIds - ask user for clarification
-    if (!channelIds || channelIds.length === 0) {
-      return {
-        success: false,
-        messages: [],
-        error: 'NO_CHANNEL_CONTEXT: No channels are currently in context. Ask the user to specify which channel they want to search in. Use field_value_discovery to validate the channel name once provided.',
-      };
-    }
-
     // Validate max channels limit
     if (channelIds.length > 5) {
       return {
