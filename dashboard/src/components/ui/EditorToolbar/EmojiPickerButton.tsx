@@ -4,8 +4,7 @@ import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
 import { Smile, X, Image as ImageIcon } from 'lucide-react';
 import type { EmojiPickerButtonProps } from './EditorToolbar.types';
 import { emojiService } from '../../../services/Emoji/emojiService';
-import { emojiActor } from '../../../machines/emojiMachine';
-import { useSelector } from '@xstate/react';
+import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 
 type AddCustomEmojiModalProps = {
   open: boolean;
@@ -30,6 +29,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
   const handleSave = (): void => {
     if (!file || !name) return;
     onSave({ file, name });
+    handleClose();
   };
 
   const handleClose = (): void => {
@@ -141,8 +141,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | undefined>();
 
-  // Get custom emojis from XState
-  const customEmojis = useSelector(emojiActor, state => state.context.customEmojis);
+  const { data: customEmojis, refetch } = useCustomEmojis();
 
   const handleCreateEmoji = async ({ file, name }: { name: string; file: File }): Promise<void> => {
     try {
@@ -152,8 +151,8 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
       // Upload the file and create the emoji
       await emojiService.uploadAndCreateEmoji(file, name);
 
-      // Refresh the emoji list via XState
-      emojiActor.send({ type: 'REFRESH_EMOJIS' });
+      // Refresh the emoji list
+      void refetch();
 
       setShowAddEmoji(false);
       setEmojiOpen(true);

@@ -46,10 +46,9 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
-import { emojiActor } from '../../../machines/emojiMachine';
-import { useSelector } from '@xstate/react';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
 import { TicketSuggestions } from './TicketSuggestions';
+import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -850,7 +849,7 @@ export const ReactionView = ({
   const { user } = useAuth();
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const users = useUsers();
-  const customEmojis = useSelector(emojiActor, state => state.context.customEmojis);
+  const { data: customEmojis } = useCustomEmojis();
 
   const usersById = useMemo(() => {
     const map = new Map<string, { name: string }>();
@@ -977,7 +976,7 @@ export const ReactionView = ({
                   });
                   setEmojiPickerOpen(false);
                 }}
-                customEmojis={customEmojis}
+                customEmojis={customEmojis || []}
               />
             </Popover.Content>
           </>
