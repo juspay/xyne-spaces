@@ -481,6 +481,7 @@ function transformTicket(
       creatorName: creatorName,
       assignedTo: doc.assignedTo,
       assigneeName: assigneeName || undefined,
+      conversationId: doc.convId,
     },
   };
 }
