@@ -8,6 +8,7 @@ import { logger } from '../../../utils/logger.js';
 import { researchAgentService, type ResearchAgentResponse } from '../../../services/researchAgentService.js';
 import type { XyneAIAgentContext } from './types.js';
 import { getDescription } from './helpers.js';
+import { metrics } from '../../../services/otel/pull/metrics.js';
 
 // ============================================================================
 // Types
@@ -142,6 +143,13 @@ export function createResearchAgentTool(): Tool<ResearchAgentArgs, XyneAIAgentCo
             confidence: structuredResponse.confidence,
             follow_ups_count: structuredResponse.follow_ups.length,
           });
+        }
+        
+        // Track Research Agent tool usage
+        try {
+          metrics.askAIResearchAgentUsedTotal.inc();
+        } catch (metricsError) {
+          logger.error('[Tool] research_agent: Error recording metrics:', metricsError);
         }
         
         // Format response for the LLM
