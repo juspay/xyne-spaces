@@ -16,7 +16,7 @@ module.exports = {
   create(context) {
     const filePath = context.getFilename();
     
-    const isHookFile = filePath.endsWith('dashboard/src/hooks/useZero.ts');
+    const isHookFile = filePath.endsWith('/src/hooks/useZero.ts');
 
     return {
       ImportDeclaration(node) {
