@@ -32,6 +32,7 @@ import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
 import SearchUser from '../SearchUser/SearchUser';
 import type { User } from '@xyne/shared';
+import { CommonChannelsSection } from '../../UserProfile/CommonChannelsSection';
 
 interface UserProfileProps {
   userId: string;
@@ -701,6 +702,14 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           ) : null}
         </div>
       </div>
+
+      {!isOwnProfile && currentUser?.id && (
+        <CommonChannelsSection
+          profileUserId={userId}
+          currentUserId={currentUser.id}
+          className='px-6 pb-4'
+        />
+      )}
 
       {/* Status Update Modal - only render for own profile */}
       {isOwnProfile && (
