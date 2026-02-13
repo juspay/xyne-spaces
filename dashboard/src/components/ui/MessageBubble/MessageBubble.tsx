@@ -59,6 +59,9 @@ interface AttachmentsBlockProps {
   attachments: readonly AttachmentType[];
   isMobile: boolean;
   className?: string;
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
 }
 
 /**
@@ -73,6 +76,9 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   attachments,
   isMobile,
   className = '',
+  conversationId,
+  channelId,
+  replyCount,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -123,7 +129,12 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             .filter(attachment => attachment.mimetype.startsWith('video/'))
             .map(attachment => (
               <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
-                <MessageAttachment attachment={attachment} />
+                <MessageAttachment
+                  attachment={attachment}
+                  {...(conversationId && { conversationId })}
+                  {...(channelId && { channelId })}
+                  {...(typeof replyCount === 'number' && { replyCount })}
+                />
               </div>
             ))}
 
@@ -145,7 +156,12 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                       key={attachment.id}
                       className={`flex items-center gap-2 py-2 text-sm ${!isImageOrText ? 'w-[256px] aspect-square' : ''} ${isMobile ? 'flex-shrink-0' : ''}`}
                     >
-                      <MessageAttachment attachment={attachment} />
+                      <MessageAttachment
+                        attachment={attachment}
+                        {...(conversationId && { conversationId })}
+                        {...(channelId && { channelId })}
+                        {...(typeof replyCount === 'number' && { replyCount })}
+                      />
                     </div>
                   );
                 })}
@@ -731,6 +747,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       attachments={attachments}
                       isMobile={isMobile}
                       className='mt-2'
+                      {...(message.conversationId && { conversationId: message.conversationId })}
+                      {...(channelId && { channelId })}
+                      {...(typeof conversation?.replyCount === 'number' && {
+                        replyCount: conversation.replyCount,
+                      })}
                     />
                     {/* Posted in link for forwarded messages */}
                     {forwardedMessageData?.originalChannelId &&
@@ -790,7 +811,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               )}
 
               {!isForwardedMessage && (
-                <AttachmentsBlock attachments={attachments} isMobile={isMobile} />
+                <AttachmentsBlock
+                  attachments={attachments}
+                  isMobile={isMobile}
+                  {...(message.conversationId && { conversationId: message.conversationId })}
+                  {...(channelId && { channelId })}
+                  {...(typeof conversation?.replyCount === 'number' && {
+                    replyCount: conversation.replyCount,
+                  })}
+                />
               )}
               {!contentOnly && (
                 <ReactionView
