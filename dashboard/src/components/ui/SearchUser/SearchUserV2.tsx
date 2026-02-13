@@ -9,6 +9,8 @@ import Button from '../Button';
 interface SearchParticipantsProps {
   options: User[];
   selectedUsers: User[];
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
   onSelect: (users: User[]) => void;
   inputRef?: React.ForwardedRef<HTMLInputElement>;
   isOpen?: boolean;
@@ -20,12 +22,13 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
   options,
   selectedUsers,
   onSelect,
+  searchQuery,
+  onSearchChange,
   inputRef,
   isOpen = false,
   setIsOpen,
   className,
 }) => {
-  const [searchQuery, setSearchQuery] = useState('');
   const [pillsWidth, setPillsWidth] = useState(0);
   const [pillsHeight, setPillsHeight] = useState(0);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
@@ -110,7 +113,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
       const user = options.find(u => u.id === userId);
       if (user) {
         onSelect([...selectedUsers, user]);
-        setSearchQuery('');
+        onSearchChange('');
         setIsOpen?.(false);
       }
     }
@@ -194,7 +197,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
           <BaseCombobox.Input
             ref={inputRef}
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={e => onSearchChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={selectedUsers.length === 0 ? 'Search user by email or name' : ''}
             className={cn(

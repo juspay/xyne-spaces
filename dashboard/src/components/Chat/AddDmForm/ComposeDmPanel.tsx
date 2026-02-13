@@ -1,4 +1,4 @@
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { useForm } from '@tanstack/react-form';
 import { useMutation } from '@tanstack/react-query';
 import { User } from '@xyne/shared';
@@ -30,6 +30,7 @@ export interface CreateDmFormData {
 }
 
 export const ComposeDmPanel: React.FC = () => {
+  const [searchValue, setSearchValue] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isSearchUserOpen, setIsSearchUserOpen] = useState(false);
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
@@ -102,7 +103,7 @@ export const ComposeDmPanel: React.FC = () => {
   );
 
   // Get users matching search query
-  const searchResults = useUserSearch('', 10);
+  const searchResults = useUserSearch(searchValue, 10);
 
   // Filter and map users to items
   const filteredUsers = useMemo(() => {
@@ -203,6 +204,8 @@ export const ComposeDmPanel: React.FC = () => {
                 inputRef={searchUserRef}
                 isOpen={isSearchUserOpen}
                 setIsOpen={setIsSearchUserOpen}
+                searchQuery={searchValue}
+                onSearchChange={setSearchValue}
                 // className='p-0'
               />
               {/* Validation errors */}
