@@ -103,6 +103,21 @@ export class TicketRepository {
       }
     });
 
+    const stageEnteredAt = new Date();
+    const stageEtaDeadline = new Date(
+      stageEnteredAt.getTime() + selectedStage.eta * 60 * 60 * 1000
+    );
+    await prisma.ticketStageEta.create({
+      data: {
+        ticketId: ticket.id,
+        stageId: selectedStage.id,
+        stageEnteredAt: stageEnteredAt,
+        stageLeftAt: null,
+        stageEta: stageEtaDeadline,
+        updatedBy: data.createdBy,
+      }
+    });
+
     const isHotFix = ticket.ticketType === BaseTicketType.Hotfix
     // If it's a hotfix, add 'hotfix' tag to the ticket
     if (isHotFix) {
@@ -187,6 +202,7 @@ export class TicketRepository {
       remainingOpenPRs?: number;
     }
   ) {
+
     // Get current ticket to capture old stage name, boardId, and statusV2
     const currentTicket = await prisma.ticket.findUnique({
       where: { id: ticketId },
@@ -201,14 +217,144 @@ export class TicketRepository {
     const oldStatusV2 = currentTicket.statusV2;
     const stageChanged = oldStageName !== newStageName;
 
-    // Fetch the target stage to get its defaultTicketStatusV2
-    const targetStage = await prisma.stage.findFirst({
-      where: {
-        boardId: currentTicket.boardId,
-        name: newStageName
-      },
-      select: { defaultTicketStatusV2: true }
-    });
+    // Fetch current and target stages to determine movement direction
+    const [currentStage, targetStage] = await Promise.all([
+      prisma.stage.findFirst({
+        where: { boardId: currentTicket.boardId, name: oldStageName },
+        select: { id: true, sequenceNumber: true, defaultTicketStatusV2: true }
+      }),
+      prisma.stage.findFirst({
+        where: { boardId: currentTicket.boardId, name: newStageName },
+        select: { id: true, sequenceNumber: true, defaultTicketStatusV2: true, eta: true }
+      })
+    ]);
+
+    if (!targetStage) {
+      throw new Error(`Target stage "${newStageName}" not found in board ${currentTicket.boardId}`);
+    }
+
+    const isForwardMovement = !currentStage || targetStage.sequenceNumber > currentStage.sequenceNumber;
+    const now = new Date();
+
+    if (isForwardMovement) {
+      // FORWARD MOVEMENT: Mark old stage as left, create/reactivate new stage entry
+      
+      // 1. Mark current stage as left (if exists)
+      if (currentStage) {
+        await prisma.ticketStageEta.updateMany({
+          where: {
+            ticketId: ticketId,
+            stageId: currentStage.id,
+            stageLeftAt: null // Only update active entry
+          },
+          data: {
+            stageLeftAt: now,
+            updatedAt: now,
+            updatedBy: updatedBy
+          }
+        });
+      }
+
+      // 2. Check if target stage entry already exists (re-entry case)
+      const existingEntry = await prisma.ticketStageEta.findFirst({
+        where: {
+          ticketId: ticketId,
+          stageId: targetStage.id
+        }
+      });
+
+      if (existingEntry) {
+        // Re-entering a stage - reactivate it
+        await prisma.ticketStageEta.update({
+          where: { id: existingEntry.id },
+          data: {
+            stageEnteredAt: now, // Update entered time to now
+            stageLeftAt: null, // Mark as active
+            updatedAt: now,
+            updatedBy: updatedBy
+          }
+        });
+      } else {
+        // First time entering this stage - create new entry
+
+        const stageEtaDeadline = new Date(
+          now.getTime() + targetStage.eta * 60 * 60 * 1000
+        );
+        
+        await prisma.ticketStageEta.create({
+          data: {
+            ticketId: ticketId,
+            stageId: targetStage.id,
+            stageEnteredAt: now,
+            stageLeftAt: null,
+            stageEta: stageEtaDeadline,
+            updatedBy: updatedBy
+          }
+        });
+      }
+    } else {
+      // BACKWARD MOVEMENT: Delete all forward stage entries, reactivate target
+      
+      // 1. Get all stageIds with sequenceNumber > target
+      const forwardStages = await prisma.stage.findMany({
+        where: {
+          boardId: currentTicket.boardId,
+          sequenceNumber: { gt: targetStage.sequenceNumber }
+        },
+        select: { id: true }
+      });
+
+      const forwardStageIds = forwardStages.map(s => s.id);
+
+      // 2. Delete all entries for those forward stages
+      if (forwardStageIds.length > 0) {
+        await prisma.ticketStageEta.deleteMany({
+          where: {
+            ticketId: ticketId,
+            stageId: { in: forwardStageIds }
+          }
+        });
+
+      }
+      
+      // 3. Reactivate target stage (set stageLeftAt to null)
+      const targetEntry = await prisma.ticketStageEta.findFirst({
+        where: {
+          ticketId: ticketId,
+          stageId: targetStage.id
+        }
+      });
+
+      if (targetEntry) {
+        // Entry exists - reactivate it
+        await prisma.ticketStageEta.update({
+          where: { id: targetEntry.id },
+          data: {
+            stageLeftAt: null,
+            updatedAt: now,
+            updatedBy: updatedBy
+          }
+        });
+      } else {
+        // Entry doesn't exist (edge case - create it)
+
+        const stageEtaDeadline = new Date(
+          now.getTime() + targetStage.eta * 60 * 60 * 1000
+        );
+        await prisma.ticketStageEta.create({
+          data: {
+            ticketId: ticketId,
+            stageId: targetStage.id,
+            stageEnteredAt: now,
+            stageLeftAt: null,
+            stageEta: stageEtaDeadline,
+            updatedBy: updatedBy
+          }
+        });
+
+
+      }
+    }
 
     const newStatusV2 = targetStage?.defaultTicketStatusV2;
     const statusChanged = newStatusV2 && newStatusV2 !== oldStatusV2;

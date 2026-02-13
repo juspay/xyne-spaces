@@ -8,6 +8,7 @@ import { ConversationsSideEffectHandler } from './tables/conversations-handler';
 import { CallSideEffectHandler } from './tables/call-handler';
 import { TicketsSideEffectHandler } from './tables/tickets-handler';
 import { TicketAssignmentsSideEffectHandler } from './tables/ticket-assignments-handler';
+import { TicketStageEtaSideEffectHandler } from './tables/ticket-stage-eta-handler';
 
 export class SideEffectHandlerFactory {
 
@@ -28,6 +29,8 @@ export class SideEffectHandlerFactory {
         return new TicketsSideEffectHandler(ctx);
       case 'ticket_assignments':
         return new TicketAssignmentsSideEffectHandler(ctx);
+      case 'ticket_stage_eta':
+        return new TicketStageEtaSideEffectHandler(ctx);
         
       default:
         return new BaseSideEffectHandler(ctx);

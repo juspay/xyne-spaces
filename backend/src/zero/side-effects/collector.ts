@@ -104,6 +104,7 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'ticket_sub_ticket_mappings':
     case 'ticket_activities':
     case 'ticket_assignments':
+    case 'ticket_stage_eta':
     case 'ticket_entity_mappings':
     case 'ticket_reference_mappings':
     case 'ticket_tags':

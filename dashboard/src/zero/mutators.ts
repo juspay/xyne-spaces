@@ -2044,6 +2044,22 @@ export const mutators = defineMutators({
       },
     ),
   },
+  ticketStageEta: {
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        stageEta: z.number(),
+        updatedAt: z.number(),
+      }),
+      async ({ tx, args: { id, stageEta, updatedAt } }) => {
+        await tx.mutate.ticket_stage_eta.update({
+          id,
+          stageEta,
+          updatedAt,
+        });
+      },
+    ),
+  },
   subTicket: {
     create: defineMutator(
       z.object({
