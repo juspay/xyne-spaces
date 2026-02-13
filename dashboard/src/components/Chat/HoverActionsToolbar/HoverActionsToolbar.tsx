@@ -49,6 +49,7 @@ interface HoverActionsToolbarProps {
   onBookmark?: () => void;
   isBookmarked?: boolean;
   isPinned?: boolean;
+  onMarkAsUnread?: () => void;
 }
 
 export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
@@ -70,6 +71,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onBookmark,
   isBookmarked = false,
   isPinned = false,
+  onMarkAsUnread,
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -263,6 +265,22 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             ) : (
               <Bookmark className='w-4 h-4' />
             )}
+          </Button>
+        </Tooltip>
+      )}
+
+      {/* Mark as Unread */}
+      {onMarkAsUnread && (
+        <Tooltip content='Mark as Unread' side='top'>
+          <Button
+            variant='ghost'
+            className='size-7 text-[rgba(120,129,135,1)]'
+            onClick={onMarkAsUnread}
+            title='Mark as Unread'
+          >
+            <div className='relative flex items-center justify-center w-4 h-4'>
+              <div className='w-2.5 h-2.5 rounded-full border-2 border-current' />
+            </div>
           </Button>
         </Tooltip>
       )}

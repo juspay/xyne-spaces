@@ -48,6 +48,7 @@ export interface MessageActionsDrawerProps {
   onBookmark?: () => void;
   isBookmarked?: boolean;
   isPinned?: boolean;
+  onMarkAsUnread?: () => void;
 }
 
 export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
@@ -69,6 +70,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   onBookmark,
   isBookmarked = false,
   isPinned = false,
+  onMarkAsUnread,
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -251,6 +253,19 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
           <div className='py-2'>
             <div className='border-t border-gray-200 dark:border-gray-700' />
           </div>
+        )}
+
+        {/* Mark as Unread */}
+        {onMarkAsUnread && (
+          <ActionButton
+            icon={
+              <div className='relative flex items-center justify-center w-5 h-5'>
+                <div className='w-3 h-3 rounded-full border-2 border-current' />
+              </div>
+            }
+            label='Mark as Unread'
+            onClick={() => handleActionClick(onMarkAsUnread)}
+          />
         )}
 
         {/* Edit in Chat */}

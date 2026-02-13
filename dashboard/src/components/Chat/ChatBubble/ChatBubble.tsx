@@ -8,6 +8,7 @@ import { BotBubble } from '../BotBubble';
 import { LinkMetadata, LinkPreview } from '../LinkPreview/LinkPreview';
 import { CanvasPreview } from '../../Canvas/CanvasPreview';
 import { TicketActivityMessage } from '../TicketActivityMessage/TicketActivityMessage';
+import { ConversationTabContext } from '../ConversationTabContext';
 
 import { HoverActionsToolbar } from '../HoverActionsToolbar/HoverActionsToolbar';
 import { useAuthContext } from '../../../providers/AuthProvider';
@@ -109,6 +110,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
   const { editingMessageId, requestEdit, stopEditing } = useEditContext();
+  const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   // Get sender info from useUser hook
   const sender = useUser(message.senderId);
@@ -416,6 +418,27 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     setIsForwardModalOpen(true);
   };
 
+  const handleMarkAsUnread = (): void => {
+    // Prevent parent component from marking as read on unmount
+    setSkipMarkAsRead(true);
+
+    try {
+      void zero.mutate(
+        mutators.channel.markChannelUnreadFrom({
+          channelId,
+          messageId: message.messageId,
+          conversationId: message.conversationId,
+        }),
+      );
+      toast.success('Marked as unread');
+    } catch (error) {
+      console.error('Failed to mark as unread:', error);
+      toast.error('Failed to mark as unread. Please try again.');
+      // Reset the skip flag since the operation failed
+      setSkipMarkAsRead(false);
+    }
+  };
+
   const finishEditing = (): void => {
     setIsEditing(false);
     stopEditing(); // release global lock
@@ -527,6 +550,14 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // by checking if replyCount meets the minimum threshold
   const showViewNewerReplies =
     isShowInChannel && conversation?.replyCount === SHOW_IN_CHANNEL_REPLY_COUNT_CHECK;
+
+  // Check if mark as unread should be shown
+  const shouldShowMarkAsUnread =
+    context === 'channel' &&
+    !isSystemMessage &&
+    !isMessageDeleted &&
+    !isTicketCreationMessage &&
+    message.senderId !== user?.id;
 
   // Render ticket activity message with special styling
   if (isTicketActivity) {
@@ -678,6 +709,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
+              {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
             />
           )}
           {/* Mobile Actions Drawer */}
@@ -727,6 +759,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
+              {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
             />
           )}
         </>
