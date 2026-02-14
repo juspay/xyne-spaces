@@ -8,7 +8,7 @@
 
 import log from 'electron-log/main';
 import { v4 as uuidv4 } from 'uuid';
-import type { EnrollmentEventType, LogLevel } from './enrollment-events';
+import type { EnrollmentEventType } from './enrollment-events';
 import * as os from 'os';
 import { net, app } from 'electron';
 import si from 'systeminformation';
@@ -16,6 +16,15 @@ import { config } from '../../app/config';
 import { ElectronEventType } from './electron-events';
 
 type EventType = EnrollmentEventType | ElectronEventType;
+
+export const LogLevel = {
+  DEBUG: 'DEBUG',
+  INFO: 'INFO',
+  WARN: 'WARN',
+  ERROR: 'ERROR',
+} as const;
+
+export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 
 interface LogEntry {
   clientSessionId: string;
@@ -30,12 +39,6 @@ interface LogEntry {
   [key: string]: unknown;
 }
 
-const LogLevelNames: Record<LogLevel, string> = {
-  0: 'DEBUG',
-  1: 'INFO',
-  2: 'WARN',
-  3: 'ERROR',
-};
 
 class LoggerService {
   private clientSessionId: string;
@@ -45,7 +48,7 @@ class LoggerService {
   private logs: LogEntry[] = [];
   private flushInProgress: boolean = false;
   private flushInterval: number = 60000; // 60 seconds
-  private maxBatchSize: number = 20;
+  // private maxBatchSize: number = 20;
   private maxRetries: number = 3;
   private flushTimer: NodeJS.Timeout | null = null;
   private loggerUrl: string;
@@ -94,28 +97,28 @@ class LoggerService {
    * Log a debug event
    */
   debug(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
-    this.addLog(0, event, extraFields, logType);
+    this.addLog(LogLevel.DEBUG, event, extraFields, logType);
   }
 
   /**
    * Log an info event
    */
   info(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
-    this.addLog(1, event, extraFields, logType);
+    this.addLog(LogLevel.INFO, event, extraFields, logType);
   }
 
   /**
    * Log a warning event
    */
   warn(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
-    this.addLog(2, event, extraFields, logType);
+    this.addLog(LogLevel.WARN, event, extraFields, logType);
   }
 
   /**
    * Log an error event
    */
   error(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
-    this.addLog(3, event, extraFields, logType);
+    this.addLog(LogLevel.ERROR, event, extraFields, logType);
   }
 
   /**
@@ -153,12 +156,7 @@ class LoggerService {
       ...(extraFields || {}),
     };
 
-    const logEntryWithLevelName = {
-      ...logEntry,
-      level: LogLevelNames[level] ?? 'UNKNOWN',
-    };
-
-    log.info(`[${logType ?? 'EnrollmentLogger'}]`, JSON.stringify(logEntryWithLevelName));
+    log.info(`[${logType ?? 'EnrollmentLogger'}]`, JSON.stringify(logEntry));
     this.logs.push(logEntry);
 
     // Auto-flush if batch size reached
