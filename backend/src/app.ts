@@ -51,6 +51,7 @@ import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
 import callRoutes from '@/routes/calls';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
+import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
 import userGroupRoutes from '@/routes/userGroups';
 import attachmentRoutes from '@/routes/attachments';
@@ -180,6 +181,9 @@ export class App {
       webhookLimiter,
       bitbucketWebhookMiddleware.verify, 
       webhookRoutes);
+
+    // LiveKit webhook routes (MUST be before body parser for raw body signature verification)
+    this.app.use('/api/livekit', livekitWebhookRoutes);
 
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
