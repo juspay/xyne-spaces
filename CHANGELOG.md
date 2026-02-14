@@ -1,3 +1,21 @@
+## [1.44.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.43.0...v1.44.0) (2026-02-14)
+
+
+### Features
+
+* : Feature/context service implementation ([366a9ab](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/366a9abcb95766c50fb21cde76dbf875d17b4064)), closes [#2951](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2951)
+* Add more Ask AI metrics ([c2c72df](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c2c72df10e6e51a5f6f7dc4de7cbcda2291c5275)), closes [#3157](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3157)
+* capture relative to  dashboard path in linters for useQuery and uzeZero ([4a5964b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4a5964bc725b7f07216a4f287b7cfe5a9da13fe7)), closes [#3158](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3158)
+* handled new msg indicator for back to channel from other route;added mark as unread ([d61476a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d61476a06eb55f534a517a84a6c0664b607abc7f)), closes [#3112](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3112)
+* Implement recent DMs feature un UserProfile ([7e03787](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7e03787a9611f18283a6233538180edc63eca282)), closes [#2816](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2816)
+* testing webhook with logs ([249d29a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/249d29a767211bd1a4e814ac0ae9eeee436565e3)), closes [#3102](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3102)
+
+
+### Bug Fixes
+
+* Create Dm Panel useZero import fix ([2b4b8f8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2b4b8f8c5628714838bafdefb82d66caebbb1fff)), closes [#3151](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3151)
+* fix ticket navigation in command k ([cbe4e87](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cbe4e87675751430bd4fd74bd338a3f759be7942))
+
 ## [1.43.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.42.0...v1.43.0) (2026-02-13)
 
 
