@@ -1,3 +1,10 @@
+## [1.44.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.44.0...v1.44.1) (2026-02-14)
+
+
+### Bug Fixes
+
+* handle mtls post auth, have log level string type instead of number ([16b2ad0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/16b2ad07711a8951afe1e8e29b15557dfc040e02)), closes [#3186](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3186)
+
 ## [1.44.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.43.0...v1.44.0) (2026-02-14)
 
 
