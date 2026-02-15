@@ -1,3 +1,10 @@
+## [1.44.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.44.1...v1.44.2) (2026-02-15)
+
+
+### Bug Fixes
+
+* Fixed broken ticket navigations in mobile ([ee86e39](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ee86e396bc6a3c914e49d1388fd7ab1ed39cc8b1))
+
 ## [1.44.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.44.0...v1.44.1) (2026-02-14)
 
 
