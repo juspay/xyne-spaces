@@ -26,6 +26,7 @@ import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
 import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface ChatScreenContext {
   shouldStackThread?: boolean;
@@ -58,6 +59,8 @@ const ChatView = (): ReactElement => {
   const channel = useChannel(channelId || '');
   const channelUserStatus = useGetChannelUserStatus(channelId || '');
   const { baseRoute } = useRouteContext();
+  const { isMobile } = usePlatform();
+  const bounds = useMeasure({ ref: chatViewContainerRef, observeResize: true });
 
   // Reopen DM if user navigates to a closed DM (only on navigation, not on data updates)
   useEffect(() => {
@@ -134,6 +137,47 @@ const ChatView = (): ReactElement => {
   const showSecondaryPanel =
     isThreadActive || isCanvasActive || isProfileActive || isChannelSummaryActive;
 
+  // Stack when either narrow view OR parent says to stack (XyneAI > 700px with thread)
+  const shouldStack = bounds.width < 700 || shouldStackThreadFromParent;
+
+  const defaultConversationPannelSize = 50;
+  const minConversationPannelSize = 25;
+  const defaultSecondaryPanelSize = 50;
+  const minSecondaryPanelSize = 40;
+
+  if (channelId === undefined) {
+    void navigate('/chat', { replace: true });
+  }
+
+  // Check for the problematic URL pattern on mobile:
+  // /chat/dir/${channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${conversationId}
+  // On mobile, render ThreadMessages directly instead of the normal ChatView
+  const tab = searchParams.get('tab');
+  const ticketId = searchParams.get('ticketId');
+  const ticketConversationId = searchParams.get('conversationId');
+  const isMobileTicketView =
+    isMobile && tab === 'tickets' && ticketId && ticketConversationId && channelId;
+
+  // Early return for mobile ticket view - render ThreadMessages directly
+  if (isMobileTicketView) {
+    // Navigate to add selectedTab=details to the URL
+    const newSearchParams = new URLSearchParams(searchParams);
+    if (!newSearchParams.has('selectedTab')) {
+      newSearchParams.set('selectedTab', 'details');
+      void navigate(`${location.pathname}?${newSearchParams.toString()}${location.hash}`, {
+        replace: true,
+      });
+    }
+    return (
+      <ThreadMessages
+        channelId={channelId}
+        conversationId={ticketConversationId}
+        ticketId={ticketId}
+        showHeader={false}
+      />
+    );
+  }
+
   // Handler to close channel summary
   const handleCloseChannelSummary = (): void => {
     void navigate(`${baseRoute}/${channelId}`);
@@ -156,19 +200,6 @@ const ChatView = (): ReactElement => {
     const newUrl = `${location.pathname}${searchString ? `?${searchString}` : ''}${location.hash}`;
     void navigate(newUrl, { replace: true });
   };
-
-  const bounds = useMeasure({ ref: chatViewContainerRef, observeResize: true });
-  // Stack when either narrow view OR parent says to stack (XyneAI > 700px with thread)
-  const shouldStack = bounds.width < 700 || shouldStackThreadFromParent;
-
-  const defaultConversationPannelSize = 50;
-  const minConversationPannelSize = 25;
-  const defaultSecondaryPanelSize = 50;
-  const minSecondaryPanelSize = 40;
-
-  if (channelId === undefined) {
-    void navigate('/chat', { replace: true });
-  }
 
   return (
     <div

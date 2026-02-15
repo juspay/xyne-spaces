@@ -54,7 +54,7 @@ const TicketDisplayMode: React.FC<{
     } else if (conversationContext === 'thread') {
       standaloneNavigate(
         navigate,
-        `${baseRoute}/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`,
+        `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
         { event: e },
       );
     } else if (channelId && conversationId) {

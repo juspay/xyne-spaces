@@ -465,8 +465,8 @@ export const ThreadMessages = ({
     if (!ticket) return;
 
     // Use shareable origin from environment variable
-    const expandedTicketViewRoute = `${SHAREABLE_ORIGIN}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
-    void navigator.clipboard.writeText(expandedTicketViewRoute);
+    const minimizedTicketViewRoute = `${SHAREABLE_ORIGIN}/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`;
+    void navigator.clipboard.writeText(minimizedTicketViewRoute);
     toast.success('Link copied', {
       description: 'Ticket link copied to clipboard',
       duration: 3000,

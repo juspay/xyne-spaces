@@ -161,21 +161,20 @@ export const navigateToMessage = (
 /**
  * Navigate to a ticket
  *
- * Navigate to tickets page with selected ticket state
+ * Navigate to minimized view (thread view) with ticket details
  */
 export const navigateToTicket = (result: DisplaySearchResult, navigate: NavigateFunction): void => {
   const ticketId = result.searchContext?.ticketId || result.id;
   const channelId = result.searchContext?.channelId;
   const conversationId = result.searchContext?.conversationId;
 
-  if (!channelId) {
-    toast.error('Cannot navigate to ticket: missing channel information');
+  if (!channelId || !conversationId) {
+    toast.error('Cannot navigate to ticket: missing channel or conversation information');
     return;
   }
 
-  void navigate(
-    `/chat/dir/${channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${conversationId}`,
-  );
+  // Navigate to minimized view (thread view) with details tab
+  void navigate(`/chat/dir/${channelId}/${conversationId}/${ticketId}?selectedTab=details`);
 };
 
 /**
