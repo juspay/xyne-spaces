@@ -102,7 +102,7 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
 
   const handleNavigateToTicket = (created: TicketCreatedInfo) => {
     void navigate(
-      `/chat/dir/${channelId}?tab=tickets&ticketId=${created.ticketId}&conversationId=${created.conversationId}`,
+      `/chat/dir/${channelId}/${created.conversationId}/${created.ticketId}?selectedTab=details`,
     );
   };
 
