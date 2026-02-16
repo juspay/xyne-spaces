@@ -103,10 +103,13 @@ export const useChannelDisplayName = (
         };
       }
 
+      // Get first other participant's ID for avatar
+      const firstOtherParticipantId = users[0]?.id || null;
+
       if (totalOtherParticipants <= 3) {
         return {
           displayName: userNames.join(', '),
-          avatarUserId: null,
+          avatarUserId: firstOtherParticipantId,
           isLoading: false,
         };
       }
@@ -114,7 +117,7 @@ export const useChannelDisplayName = (
       const remainingCount = totalOtherParticipants - 3;
       return {
         displayName: `${visibleNames.join(', ')} and ${remainingCount} other${remainingCount > 1 ? 's' : ''}`,
-        avatarUserId: null,
+        avatarUserId: firstOtherParticipantId,
         isLoading: false,
       };
     }

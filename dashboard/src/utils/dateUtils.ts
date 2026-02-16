@@ -52,6 +52,44 @@ export const formatFullTimestamp = (date: Date | number): string => {
 };
 
 /**
+ * Format elapsed time for list items (DM/channel preview)
+ * - "now" for < 1 min
+ * - "1m".."59m" for < 1 hour
+ * - "1h".."23h" for < 1 day
+ * - "1d".."31d" for up to 31 days
+ * - "1 month".."11 months" then "1 year", "2 years", etc.
+ */
+export const formatElapsedTime = (date: Date | number): string => {
+  const messageDate = new Date(date);
+  const now = new Date();
+  const diffInMs = now.getTime() - messageDate.getTime();
+  const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  const diffInDays = Math.floor(diffInHours / 24);
+
+  if (diffInMinutes < 1) {
+    return 'now';
+  }
+  if (diffInMinutes < 60) {
+    return `${diffInMinutes}m`;
+  }
+  if (diffInHours < 24) {
+    return `${diffInHours}h`;
+  }
+  if (diffInDays <= 31) {
+    return `${diffInDays}d`;
+  }
+
+  const diffInMonths = Math.floor(diffInDays / 30.44);
+  const diffInYears = Math.floor(diffInMonths / 12);
+
+  if (diffInYears >= 1) {
+    return diffInYears === 1 ? '1 year' : `${diffInYears} years`;
+  }
+  return diffInMonths === 1 ? '1 month' : `${diffInMonths} months`;
+};
+
+/**
  * Format relative time (simple) - useful for showing "5m ago", "2h ago", etc.
  * This is commonly used in chat message timestamps
  */
