@@ -268,7 +268,6 @@ export class BitbucketWebhookService {
       context.repoUrl,
       context.prUrl,
       context.numberOfComments,
-      context.prAuthorEmail
     );
   }
 
