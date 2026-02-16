@@ -1,3 +1,10 @@
+## [1.45.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.45.0...v1.45.1) (2026-02-16)
+
+
+### Bug Fixes
+
+* updating zero to 0.25.12 ([565bb2e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/565bb2ec0ae7cb657085b1ce77942768b6b6652f)), closes [#2796](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2796)
+
 ## [1.45.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.44.3...v1.45.0) (2026-02-16)
 
 
