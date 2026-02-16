@@ -50,6 +50,7 @@ import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicke
 import { TicketSuggestions } from './TicketSuggestions';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { hasMessageContent } from '../../../utils/chatUtils';
+import { ProactiveNudgeList } from '../../Chat/Nudges/ProactiveNudgeList';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -342,6 +343,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         channelId={channelId}
         {...(conversation && { conversation })}
         context={context}
+        contentOnly={contentOnly}
         threadInfo={threadInfo}
         channelScopeType={channelScopeType}
         isFirstInThread={isFirstInThread}
@@ -822,6 +824,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {...(typeof conversation?.replyCount === 'number' && {
                     replyCount: conversation.replyCount,
                   })}
+                />
+              )}
+              {!contentOnly && (
+                <ProactiveNudgeList
+                  messageId={message.messageId}
+                  channelId={channelId}
+                  contentOnly={contentOnly}
+                  isMobile={isMobile}
+                  messageType={message.msgType}
+                  isDeleted={message.isDeleted}
+                  nudgeCount={message.nudgeCount ?? 0}
                 />
               )}
               {!contentOnly && (

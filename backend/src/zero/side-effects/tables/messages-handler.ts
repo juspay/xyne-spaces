@@ -15,6 +15,8 @@ import {
 } from '@/utils/mentionUtils';
 import { createDirectMessageActivities } from '@/utils/messageActivityUtils';
 import { ticketNudgeService } from '@/services/ticketNudgeService';
+import { proactiveNudgeWorker } from '@/workers/proactiveNudgeWorker';
+import { logger } from '@/utils/logger';
 
 const LARGE_GROUP_DM_THRESHOLD = 8;
 
@@ -49,6 +51,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     if (!conversation?.channelId) {
       return;
     }
+
+    const isParentMessage = conversation.initialMessageId === messageId;
 
     const { senderId, content, conversationId } = message;
     const { channelId } = conversation;
@@ -93,6 +97,23 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const specialMentions = extractSpecialMentions(content);
     const mentionType = specialMentions.hasChannel ? '@channel' : specialMentions.hasHere ? '@here' : undefined;
 
+    if (channel?.projectId && !isDMChannel && isParentMessage) {
+      void proactiveNudgeWorker
+        .enqueue({
+          messageId,
+          conversationId,
+          channelId,
+          projectId: channel.projectId,
+          senderId,
+        })
+        .catch(error => {
+          logger.error('[ProactiveNudge] Failed to enqueue nudge job', {
+            messageId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }
+
     if (isDMChannel) {
       const dmChannelName = channelParticipants
         .filter(p => channel?.scopeType === 'DM' ? p.userId !== senderId : true)
@@ -114,7 +135,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
-    if (channel?.projectId) {
+    if (channel?.projectId && isParentMessage) {
       void ticketNudgeService.handleMessage({
         channelId,
         conversationId,

@@ -25,6 +25,7 @@ import { ChannelScopeType } from '@xyne/shared';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { PostedInLink } from './PostedInLink';
 import { hasMessageContent } from '../../../utils/chatUtils';
+import { ProactiveNudgeList } from '../../Chat/Nudges/ProactiveNudgeList';
 
 type MessageWithRelations = QueryResultType<typeof queries.conversationMessages>[number];
 
@@ -37,6 +38,7 @@ export interface MobileMessageMyBubbleProps {
   channelId?: string | undefined;
   conversation?: ConversationWithTicket;
   context?: 'channel' | 'thread' | undefined;
+  contentOnly?: boolean;
   threadInfo?:
     | {
         conversationId: string;
@@ -64,6 +66,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   channelId,
   conversation,
   context,
+  contentOnly,
   threadInfo,
   channelScopeType,
   isFirstInThread = false,
@@ -291,6 +294,19 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               </div>
             )}
           </div>
+
+          {!contentOnly && (
+            <ProactiveNudgeList
+              messageId={message.messageId}
+              channelId={channelId}
+              contentOnly={contentOnly}
+              isMobile={true}
+              messageType={message.msgType}
+              isDeleted={message.isDeleted}
+              className='mt-2 w-full'
+              nudgeCount={message.nudgeCount ?? 0}
+            />
+          )}
 
           {/* Reaction View - Outside Bubble */}
           <div className='mt-1 self-end'>

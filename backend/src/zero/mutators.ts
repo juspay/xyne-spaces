@@ -5032,6 +5032,91 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
+    nudges: {
+      dismiss: defineMutator(
+        z.object({
+          nudgeId: z.string(),
+        }),
+        async ({ tx, args: { nudgeId } }) => {
+          const nudge = await tx.run(zql.proactive_nudges.where('id', nudgeId).one());
+          if (!nudge) {
+            throw new Error('Nudge not found');
+          }
+
+          if (nudge.state !== 'ACTIVE') {
+            return;
+          }
+
+          await tx.mutate.proactive_nudges.update({
+            id: nudgeId,
+            state: 'DISMISSED',
+          });
+
+          const message = await tx.run(zql.messages.where('messageId', nudge.messageId).one());
+          if (!message) {
+            return;
+          }
+
+          const activeNudges = await tx.run(
+            zql.proactive_nudges.where('messageId', nudge.messageId).where('state', 'ACTIVE')
+          );
+          await tx.mutate.messages.update({
+            messageId: message.messageId,
+            nudgeCount: activeNudges.length,
+          });
+        },
+      ),
+      act: defineMutator(
+        z.object({
+          nudgeId: z.string(),
+          actionResult: z.any().optional(),
+        }),
+        async ({ tx, args: { nudgeId, actionResult } }) => {
+          const nudge = await tx.run(zql.proactive_nudges.where('id', nudgeId).one());
+          if (!nudge) {
+            throw new Error('Nudge not found');
+          }
+
+          if (nudge.state !== 'ACTIVE') {
+            return;
+          }
+
+          const existingActions =
+            nudge.actions && typeof nudge.actions === 'object' && !Array.isArray(nudge.actions)
+              ? (nudge.actions as Record<string, unknown>)
+              : {};
+
+          await tx.mutate.proactive_nudges.update(
+            actionResult
+              ? {
+                  id: nudgeId,
+                  state: 'ACTED_ON',
+                  actions: {
+                    ...existingActions,
+                    actionResult: actionResult as ReadonlyJSONValue,
+                  },
+                }
+              : {
+                  id: nudgeId,
+                  state: 'ACTED_ON',
+                }
+          );
+
+          const message = await tx.run(zql.messages.where('messageId', nudge.messageId).one());
+          if (!message) {
+            return;
+          }
+
+          const activeNudges = await tx.run(
+            zql.proactive_nudges.where('messageId', nudge.messageId).where('state', 'ACTIVE')
+          );
+          await tx.mutate.messages.update({
+            messageId: message.messageId,
+            nudgeCount: activeNudges.length,
+          });
+        },
+      ),
+    },
     userProfile: {
       upsert: defineMutator(
         z.object({

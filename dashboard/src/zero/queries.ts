@@ -63,6 +63,52 @@ export const queries = defineQueries({
         .related('reactions');
     },
   ),
+
+  messageNudges: defineQuery(
+    z.object({
+      messageId: z.string(),
+      states: z.array(z.string()).optional(),
+    }),
+    ({ ctx, args: { messageId, states } }) => {
+      const effectiveStates = states && states.length > 0 ? states : ['ACTIVE'];
+      let query = zql.proactive_nudges.where('messageId', messageId);
+      if (effectiveStates.length === 1) {
+        const singleState = effectiveStates[0];
+        if (singleState) {
+          query = query.where('state', singleState);
+        }
+      } else if (effectiveStates.length > 1) {
+        query = query.where(helpers =>
+          helpers.or(...effectiveStates.map(value => helpers.cmp('state', '=', value))),
+        );
+      }
+
+      return query
+        .whereExists('message', m =>
+          m
+            .where(helpers =>
+              helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', '=', ctx.userID),
+              ),
+            )
+            .whereExists('conversation', c =>
+              c.whereExists('channel', ch =>
+                ch.where(helpers =>
+                  helpers.or(
+                    helpers.cmp('visibility', ChannelVisibility.PUBLIC),
+                    helpers.and(
+                      helpers.cmp('visibility', ChannelVisibility.PRIVATE),
+                      helpers.exists('participants', p => p.where('userId', ctx.userID)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        )
+        .orderBy('createdAt', 'asc');
+    },
+  ),
   getConversationById: defineQuery(
     z.object({ conversationId: z.string() }),
     ({ ctx, args: { conversationId } }) => {
