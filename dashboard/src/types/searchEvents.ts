@@ -7,12 +7,11 @@
 
 /**
  * Common fields included in all search metric events
+ * Note: timestamp, version, and event_name are handled by the logger automatically
  */
 interface CommonEventFields {
   search_session_id: string;
   user_id: string;
-  timestamp: string; // ISO 8601 format
-  version: string; // Search version for A/B testing (e.g., "v1.0", "v2.0")
 }
 
 /**
@@ -20,7 +19,6 @@ interface CommonEventFields {
  * Triggered when a new search session begins (Cmd+K or first character typed)
  */
 export interface SearchSessionStartEvent extends CommonEventFields {
-  event_name: 'vespa_search_session_start';
   tab: string;
 }
 
@@ -30,7 +28,6 @@ export interface SearchSessionStartEvent extends CommonEventFields {
  * Contains breakdown of results by document type
  */
 export interface SearchImpressionEvent extends CommonEventFields {
-  event_name: 'vespa_search_impression';
   query_text: string;
   total_hits: number;
   latency_ms: number;
@@ -67,7 +64,6 @@ export interface SearchImpressionEvent extends CommonEventFields {
  * Used to calculate CTR and MRR
  */
 export interface SearchClickEvent extends CommonEventFields {
-  event_name: 'vespa_search_click';
   query_text: string;
   clicked_doc_id: string;
   clicked_doc_type: string;
@@ -96,7 +92,6 @@ export interface SearchClickEvent extends CommonEventFields {
  * Used to track dwell time and user engagement with search results
  */
 export interface SearchSessionEndEvent extends CommonEventFields {
-  event_name: 'vespa_search_session_end';
   /**
    * The last query text in the session
    */
@@ -130,7 +125,6 @@ export interface SearchSessionEndEvent extends CommonEventFields {
 }
 
 export interface SearchTabClickEvent extends CommonEventFields {
-  event_name: 'search_tab_click';
   tab: string;
 }
 
