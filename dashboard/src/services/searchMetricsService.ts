@@ -37,14 +37,11 @@ class SearchMetricsService {
   trackSessionStart(searchSessionId: string, userId: string, tab: TabType): void {
     // Log structured event
     const event: SearchSessionStartEvent = {
-      event_name: 'vespa_search_session_start',
       search_session_id: searchSessionId,
       user_id: userId,
-      timestamp: new Date().toISOString(),
-      version: SEARCH_VERSION,
       tab,
     };
-    logger.info(Event.VESPA_SEARCH_SESSION_START, { event });
+    logger.info(Event.VESPA_SEARCH_SESSION_START, event as unknown as Record<string, unknown>);
 
     // Record metrics
     const platform = detectPlatform();
@@ -75,11 +72,8 @@ class SearchMetricsService {
     const words = countWords(params.queryText);
     // Log structured event
     const event: SearchImpressionEvent = {
-      event_name: 'vespa_search_impression',
       search_session_id: params.searchSessionId,
       user_id: params.userId,
-      timestamp: new Date().toISOString(),
-      version: SEARCH_VERSION,
       query_text: params.queryText,
       total_hits: params.totalHits,
       latency_ms: params.latencyMs,
@@ -90,7 +84,7 @@ class SearchMetricsService {
       tab: params.tab,
       ...(params.searchLocation && { search_location: params.searchLocation }),
     };
-    logger.info(Event.VESPA_SEARCH_IMPRESSION, { event });
+    logger.info(Event.VESPA_SEARCH_IMPRESSION, event as unknown as Record<string, unknown>);
     // Record metrics - increment impressions counter for each doc_type in facet_counts
     const platform = detectPlatform();
     Object.entries(params.facetCounts).forEach(([docType, count]) => {
@@ -128,11 +122,8 @@ class SearchMetricsService {
     const words = countWords(params.queryText);
     // Log structured event
     const event: SearchClickEvent = {
-      event_name: 'vespa_search_click',
       search_session_id: params.searchSessionId,
       user_id: params.userId,
-      timestamp: new Date().toISOString(),
-      version: SEARCH_VERSION,
       query_text: params.queryText,
       clicked_doc_id: params.clickedDocId,
       clicked_doc_type: params.clickedDocType,
@@ -143,7 +134,7 @@ class SearchMetricsService {
       ...(params.scrollDepth !== undefined && { scroll_depth: params.scrollDepth }),
       ...(params.resultUrl && { result_url: params.resultUrl }),
     };
-    logger.info(Event.VESPA_SEARCH_CLICK, { event });
+    logger.info(Event.VESPA_SEARCH_CLICK, event as unknown as Record<string, unknown>);
     // Record metrics - increment click counter
     const platform = detectPlatform();
     otelMetrics.safeRecordMetric(() => {
@@ -188,11 +179,8 @@ class SearchMetricsService {
     const words = countWords(params.queryText);
     // Log structured event
     const event: SearchSessionEndEvent = {
-      event_name: 'vespa_search_session_end',
       search_session_id: params.searchSessionId,
       user_id: params.userId,
-      timestamp: new Date().toISOString(),
-      version: SEARCH_VERSION,
       query_text: params.queryText,
       total_impressions: params.totalImpressions,
       dwell_time_ms: params.dwellTimeMs,
@@ -201,7 +189,7 @@ class SearchMetricsService {
       query_text_length: words,
       tab: params.tab,
     };
-    logger.info(Event.VESPA_SEARCH_SESSION_END, { event });
+    logger.info(Event.VESPA_SEARCH_SESSION_END, event as unknown as Record<string, unknown>);
 
     // Record metrics - increment session end counter
     const platform = detectPlatform();
@@ -242,14 +230,11 @@ class SearchMetricsService {
   trackTabClick(params: { searchSessionId: string; userId: string; tab: TabType }): void {
     // Log structured event
     const event: SearchTabClickEvent = {
-      event_name: 'search_tab_click',
       search_session_id: params.searchSessionId,
       user_id: params.userId,
-      timestamp: new Date().toISOString(),
-      version: SEARCH_VERSION,
       tab: params.tab,
     };
-    logger.info(Event.VESPA_SEARCH_TAB_CLICK, { event });
+    logger.info(Event.VESPA_SEARCH_TAB_CLICK, event as unknown as Record<string, unknown>);
 
     // Record metrics - increment tab click counter with tab labels for individual counts
     const platform = detectPlatform();
