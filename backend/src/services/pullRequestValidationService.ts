@@ -5,9 +5,9 @@ import { logger } from '@/utils/logger';
 
 // Bitbucket PR validation configuration constants
 const BITBUCKET_PR_CONFIG = {
-  PR_TITLE_PATTERN: /^XYNE-\s*(\d+)\s*:/,
+  PR_TITLE_PATTERN: /^(?:(?:feat|fix):\s+)?XYNE-\s*(\d+)\s*[:\s]/i,
   ERROR_MESSAGES: {
-    INVALID_FORMAT: 'PR title must follow format: XYNE-####: description',
+    INVALID_FORMAT: 'PR title must follow format: XYNE-####: description OR feat/fix: XYNE-####:subject OR feat/fix: XYNE-#### subject',
     TICKET_NOT_FOUND: (ticketId: string) => `Ticket ${ticketId} does not exist`,
     TICKET_ALREADY_RESOLVED: (ticketId: string) => `Ticket ${ticketId} is already resolved`,
     DUPLICATE_PR: (ticketId: string) =>
