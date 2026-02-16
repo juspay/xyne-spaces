@@ -17,22 +17,31 @@ interface BlockContent {
   content?: BlockContent[];
 }
 
-// --- Helper: Robust Text Extraction ---
-// Recursively extracts text from any block content to match what is rendered in the DOM.
+interface TableCell {
+  type: 'tableCell';
+  content: BlockContent[];
+  props?: Record<string, unknown>;
+}
+
+interface TableRow {
+  cells: (BlockContent[] | TableCell)[];
+}
+
+interface TableContent {
+  rows: TableRow[];
+}
+
 const getBlockText = (content: BlockContent[]): string => {
   if (!content || !Array.isArray(content)) return '';
 
   return content
     .map(item => {
-      // Case 1: Simple Text node
       if (item.type === 'text' && item.text) {
         return item.text;
       }
-      // Case 2: Link or other wrapper with nested content
       if (item.content && Array.isArray(item.content)) {
         return getBlockText(item.content);
       }
-      // Case 3: Fallback for other types that might have a text property
       if (item.text) {
         return item.text;
       }
@@ -41,10 +50,38 @@ const getBlockText = (content: BlockContent[]): string => {
     .join('');
 };
 
+const getTableText = (tableContent: TableContent): string => {
+  if (!tableContent?.rows || !Array.isArray(tableContent.rows)) return '';
+
+  return tableContent.rows
+    .map(row => {
+      if (!row.cells || !Array.isArray(row.cells)) return '';
+      return row.cells
+        .map(cell => {
+          if (Array.isArray(cell)) {
+            return getBlockText(cell);
+          }
+          if (cell.type === 'tableCell' && cell.content) {
+            return getBlockText(cell.content);
+          }
+          return '';
+        })
+        .join('');
+    })
+    .join('');
+};
+
 export const extractTextFromBlocks = (editor: BlockNoteEditor): string => {
   const textParts: string[] = [];
   editor.forEachBlock(block => {
-    const text = getBlockText((block.content || []) as BlockContent[]);
+    let text = '';
+
+    if (block.type === 'table' && block.content) {
+      text = getTableText(block.content as TableContent);
+    } else {
+      text = getBlockText((block.content || []) as BlockContent[]);
+    }
+
     if (text) textParts.push(text);
     return true;
   });
@@ -58,8 +95,13 @@ export const findMatches = (editor: BlockNoteEditor, query: string): SearchMatch
   const lowerQuery = query.toLowerCase();
 
   editor.forEachBlock(block => {
-    // Use the robust extraction here
-    const blockText = getBlockText((block.content || []) as BlockContent[]);
+    let blockText = '';
+
+    if (block.type === 'table' && block.content) {
+      blockText = getTableText(block.content as TableContent);
+    } else {
+      blockText = getBlockText((block.content || []) as BlockContent[]);
+    }
 
     if (!blockText) return true;
 
@@ -87,7 +129,6 @@ export const findMatches = (editor: BlockNoteEditor, query: string): SearchMatch
   return matches;
 };
 
-// --- Helper: Find DOM Position from "Clean" Offset ---
 const getDomPosition = (
   textNodes: Text[],
   targetOffset: number,
@@ -97,15 +138,10 @@ const getDomPosition = (
   for (const node of textNodes) {
     const rawText = node.textContent || '';
 
-    // We filter out "junk" characters that usually don't appear in the data model
-    // but might appear in the DOM (like zero-width spaces or formatting newlines).
-    // Note: We count regular spaces!
     const mapping: number[] = [];
 
     for (let i = 0; i < rawText.length; i++) {
       const char = rawText[i];
-      // Filter logic: Keep everything except explicit formatting noise
-      // If your citations [1] are distinct nodes, they will be counted correctly now.
       if (char && !/^[\n\r\t\u200B\uFEFF]$/.test(char)) {
         mapping.push(i);
       }
@@ -113,10 +149,8 @@ const getDomPosition = (
 
     const validCharsInNode = mapping.length;
 
-    // Is the target offset within this node?
     if (targetOffset < currentGlobalOffset + validCharsInNode) {
       const localCleanIndex = targetOffset - currentGlobalOffset;
-      // Safety check
       if (localCleanIndex < mapping.length) {
         const rawIndex = mapping[localCleanIndex];
         if (rawIndex !== undefined) {
@@ -131,7 +165,6 @@ const getDomPosition = (
   return null;
 };
 
-// --- Highlight Implementation using CSS Custom Highlight API ---
 export const applyHighlights = (
   container: HTMLElement | null,
   matches: SearchMatch[],
@@ -160,7 +193,7 @@ export const applyHighlights = (
     });
 
     Object.entries(matchesByBlock).forEach(([blockId, blockMatches]) => {
-      const blockElement = container.querySelector(`[data-id="${blockId}"]`);
+      const blockElement = container.querySelector('[data-id="' + blockId + '"]');
       if (!blockElement) return;
 
       const textNodes: Text[] = [];
@@ -212,7 +245,7 @@ export const removeHighlights = (_container: HTMLElement | null): void => {
 
 export const scrollToMatch = (container: HTMLElement | null, match: SearchMatch): void => {
   if (!container) return;
-  const blockElement = container.querySelector(`[data-id="${match.blockId}"]`);
+  const blockElement = container.querySelector('[data-id="' + match.blockId + '"]');
   if (blockElement) {
     blockElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
