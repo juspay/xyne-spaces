@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   DataTable,
@@ -12,9 +12,10 @@ import {
 } from '@juspay/blend-design-system';
 import { User } from 'lucide-react';
 
-import { useWorkflows } from '../../hooks/useWorkflows';
+import { useWorkflows, Workflow } from '../../hooks/useWorkflows';
 import { TicketFilters } from './TicketHeader';
 import { useUsers } from '../../hooks/useUsers';
+import { PAGE_SIZE } from './constants';
 
 interface TicketTableProps {
   filters: TicketFilters;
@@ -22,78 +23,75 @@ interface TicketTableProps {
 
 const TicketTable: React.FC<TicketTableProps> = ({ filters }) => {
   const navigate = useNavigate();
-  const { workflows, isLoading } = useWorkflows();
   const users = useUsers();
+  const [cursor, setCursor] = useState<{ id: string; createdAt: number } | null>(null);
+  const [allWorkflows, setAllWorkflows] = useState<Workflow[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
 
-  // Create usersById map for efficient lookup
   const usersById = useMemo(() => {
     const map = new Map(users.map(u => [u.id, u]));
     return map;
   }, [users]);
 
-  const filteredWorkflows = useMemo(() => {
-    let result = workflows;
+  const workflowParams = useMemo(() => {
+    const createdByIds = filters.createdByFilter.map(u => u.id);
+    const assignedToIds = filters.assignedToFilter.map(u => u.id);
 
-    if (filters.searchQuery.trim()) {
-      const q = filters.searchQuery.toLowerCase();
-      result = result.filter(workflow => {
-        const ticket = workflow.ticket;
-        const createdByUser = ticket?.createdBy ? usersById.get(ticket.createdBy) : null;
-        const assignedToUser = ticket?.assignedTo ? usersById.get(ticket.assignedTo) : null;
-        return (
-          ticket?.title?.toLowerCase().includes(q) ||
-          ticket?.xyneId?.toLowerCase().includes(q) ||
-          workflow.workflowName?.toLowerCase().includes(q) ||
-          createdByUser?.name?.toLowerCase().includes(q) ||
-          assignedToUser?.name?.toLowerCase().includes(q)
-        );
-      });
+    return {
+      limit: PAGE_SIZE + 1, // Request 1 extra to detect if there's more data (over-fetch pattern)
+      start: cursor,
+      searchQuery: filters.searchQuery.trim() || undefined,
+      statusFilter: filters.statusFilter.length > 0 ? filters.statusFilter : undefined,
+      workflowTypeFilter:
+        filters.workflowTypeFilter.length > 0 ? filters.workflowTypeFilter : undefined,
+      createdByFilter: createdByIds.length > 0 ? createdByIds : undefined,
+      assignedToFilter: assignedToIds.length > 0 ? assignedToIds : undefined,
+      dateRangeFilter: filters.dateRangeFilter
+        ? {
+            startDate: filters.dateRangeFilter.startDate.getTime(),
+            endDate: filters.dateRangeFilter.endDate.getTime(),
+          }
+        : undefined,
+    };
+  }, [filters, cursor]);
+
+  const { workflows, isLoading, hasMore } = useWorkflows(workflowParams);
+
+  useEffect(() => {
+    setAllWorkflows([]);
+    setCursor(null);
+    setCurrentPage(1);
+  }, [
+    filters.searchQuery,
+    filters.statusFilter,
+    filters.workflowTypeFilter,
+    filters.createdByFilter,
+    filters.assignedToFilter,
+    filters.dateRangeFilter,
+  ]);
+
+  useEffect(() => {
+    setAllWorkflows(prev => {
+      if (!cursor) {
+        return workflows;
+      }
+      const existingIds = new Set(prev.map(w => w.id));
+      const newWorkflows = workflows.filter(w => !existingIds.has(w.id));
+      return [...prev, ...newWorkflows];
+    });
+  }, [workflows, cursor]);
+
+  const loadMore = useCallback(() => {
+    if (!isLoading && hasMore && allWorkflows.length > 0) {
+      const lastWorkflow = allWorkflows[allWorkflows.length - 1];
+      if (lastWorkflow) {
+        setCursor({ id: lastWorkflow.id, createdAt: lastWorkflow.createdAt });
+      }
     }
-
-    if (filters.statusFilter.length > 0) {
-      result = result.filter(workflow => filters.statusFilter.includes(workflow.status));
-    }
-
-    if (filters.workflowTypeFilter.length > 0) {
-      result = result.filter(
-        workflow =>
-          workflow.workflowType && filters.workflowTypeFilter.includes(workflow.workflowType),
-      );
-    }
-
-    if (filters.createdByFilter.length > 0) {
-      const createdByUserIds = filters.createdByFilter.map(user => user.id);
-      result = result.filter(
-        workflow =>
-          workflow.ticket?.createdBy && createdByUserIds.includes(workflow.ticket.createdBy),
-      );
-    }
-
-    if (filters.assignedToFilter.length > 0) {
-      const assignedToUserIds = filters.assignedToFilter.map(user => user.id);
-      result = result.filter(
-        workflow =>
-          workflow.ticket?.assignedTo && assignedToUserIds.includes(workflow.ticket.assignedTo),
-      );
-    }
-
-    if (filters.dateRangeFilter) {
-      const startDate = filters.dateRangeFilter.startDate.getTime();
-      const endDate = filters.dateRangeFilter.endDate.getTime();
-      result = result.filter(workflow => {
-        const workflowDate = workflow.createdAt;
-        return workflowDate >= startDate && workflowDate <= endDate;
-      });
-    }
-
-    return result;
-  }, [workflows, filters, usersById]);
-
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  }, [isLoading, hasMore, allWorkflows]);
 
   const tableData: Record<string, unknown>[] = useMemo(() => {
-    return filteredWorkflows.map(workflow => {
+    return allWorkflows.map(workflow => {
       const ticket = workflow.ticket;
       const createdByUser = ticket?.createdBy ? usersById.get(ticket.createdBy) : null;
       const assignedToUser = ticket?.assignedTo ? usersById.get(ticket.assignedTo) : null;
@@ -108,7 +106,7 @@ const TicketTable: React.FC<TicketTableProps> = ({ filters }) => {
         createdAt: new Date(workflow.createdAt).toISOString(),
       };
     });
-  }, [filteredWorkflows, usersById]);
+  }, [allWorkflows, usersById]);
 
   const columns: ColumnDefinition<Record<string, unknown>>[] = [
     { field: 'ticketId', header: 'Ticket ID', type: ColumnType.TEXT },
@@ -182,31 +180,50 @@ const TicketTable: React.FC<TicketTableProps> = ({ filters }) => {
 
   const handleRowClick = (row: Record<string, unknown>): void => {
     const workflowId = row['id'];
-    const ticketId = workflows.find(w => w.id === workflowId)?.ticketId;
+    const ticketId = allWorkflows.find(w => w.id === workflowId)?.ticketId;
     if (typeof ticketId === 'string' && typeof workflowId === 'string') {
       void navigate(`/tickets/${ticketId}/workflow/${workflowId}`);
     }
   };
 
+  const visibleData = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return tableData.slice(start, end);
+  }, [tableData, currentPage]);
+
   return (
-    <DataTable
-      title=''
-      showHeader={false}
-      enableSearch={false}
-      data={tableData}
-      columns={columns}
-      idField='id'
-      isLoading={isLoading}
-      onRowClick={handleRowClick}
-      serverSidePagination={false}
-      pagination={{
-        currentPage,
-        pageSize,
-        totalRows: tableData.length,
-      }}
-      onPageChange={page => setCurrentPage(page)}
-      onPageSizeChange={size => setPageSize(size)}
-    />
+    <div>
+      <DataTable
+        title=''
+        showHeader={false}
+        enableSearch={false}
+        data={visibleData}
+        columns={columns}
+        idField='id'
+        isLoading={isLoading && allWorkflows.length === 0}
+        onRowClick={handleRowClick}
+        serverSidePagination={true}
+        pagination={{
+          currentPage,
+          pageSize: PAGE_SIZE,
+          totalRows: hasMore ? allWorkflows.length + 1 : allWorkflows.length,
+          pageSizeOptions: [10],
+        }}
+        onPageChange={page => {
+          setCurrentPage(page);
+          if (page * PAGE_SIZE > allWorkflows.length && hasMore && !isLoading) {
+            loadMore();
+          }
+        }}
+        onPageSizeChange={() => {}}
+      />
+      {isLoading && allWorkflows.length > 0 && (
+        <div className='flex justify-center py-4'>
+          <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-gray-600'></div>
+        </div>
+      )}
+    </div>
   );
 };
 
