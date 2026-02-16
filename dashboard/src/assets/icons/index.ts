@@ -7,3 +7,4 @@ export { PinIcon } from './PinIcon';
 export { getWorkflowIcon } from './WorkflowIcons';
 export { TicketPriorityIcon } from './TicketPriorityIcon';
 export { TicketStatusIcon } from './TicketStatusIcon';
+export { SubTicketCountIcon } from './SubTicketCountIcon';

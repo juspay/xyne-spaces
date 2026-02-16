@@ -6,6 +6,7 @@ import { pollingService } from './workflows/services/polling-service'
 import { eventPollingService } from './workflows/services/event-polling-service'
 import { registerAllWorkflows } from '@/workflows'
 import { vespaWorker } from './workers/vespaWorker'
+import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
 import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
 import { gcsPollingService } from './services/gcsPollingService'
@@ -48,6 +49,7 @@ class WorkerService {
       const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
       const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
+      const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
 
       if (vespaEnabled) {
         await vespaWorker.start()
@@ -90,6 +92,11 @@ class WorkerService {
       }
 
 
+      if (proactiveNudgeWorkerEnabled) {
+        logger.info('Starting proactive nudge worker service...')
+        await proactiveNudgeWorker.start()
+      }
+
       process.on('SIGINT', () => this.shutdown())
       process.on('SIGTERM', () => this.shutdown())
 
@@ -110,6 +117,7 @@ class WorkerService {
       const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
       const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
+      const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
 
       if (vespaEnabled) {
         await vespaWorker.shutdown()
@@ -136,6 +144,10 @@ class WorkerService {
       }
       if (ticketCleanupEnabled) {
         await ticketCleanupWorkerService.stop()
+      }
+
+      if (proactiveNudgeWorkerEnabled) {
+        await proactiveNudgeWorker.shutdown()
       }
 
       await DatabaseClient.disconnect()

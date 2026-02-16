@@ -41,6 +41,7 @@ import { BoardComplexityScoresACL } from '../tables/board-complexity-scores-acl'
 import { UserWorkloadMappingsACL } from '../tables/user-workload-mappings-acl';
 import { UserExpertiseMappingsACL } from '../tables/user-expertise-mappings-acl';
 import { StagePRStatusMappingsACL } from '../tables/stage-pr-status-mappings-acl';
+import { ProactiveNudgesACL } from '../tables/proactive-nudges-acl';
 
 export class ACLFactory {
   /**
@@ -99,6 +100,8 @@ export class ACLFactory {
         return new OrganizationsACL(ctx);
       case 'projects':
         return new ProjectAcl(ctx);
+      case 'proactive_nudges':
+        return new ProactiveNudgesACL(ctx);
       case 'pull_requests':
         return new PullRequestsACL(ctx);
       case 'reaction_counts':

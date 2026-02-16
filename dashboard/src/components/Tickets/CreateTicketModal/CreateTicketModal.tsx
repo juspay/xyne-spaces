@@ -1,6 +1,7 @@
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
+import { useZero } from '../../../hooks/useZero';
 import {
   AttachmentEntityType,
   BaseTicketType,
@@ -29,6 +30,7 @@ import {
   SquareKanban,
   Tag,
   Ticket,
+  Trash2,
   User,
   Users,
   WorkflowIcon,
@@ -37,6 +39,7 @@ import {
 import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
 import { useDragDropFiles } from '../../../contexts/DragDropFileContext';
 import { useAuth } from '../../../hooks/useAuth';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
@@ -46,7 +49,9 @@ import { useUserSearch } from '../../../hooks/useUsers';
 import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
+import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
+import { SubTicketCountIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
@@ -79,8 +84,11 @@ interface CreateTicketModalProps {
   selectedBoardName?: string | undefined;
   initialTitle?: string;
   initialDescription?: string;
+  initialSubTickets?: Array<{ title: string; description?: string }>;
   initialAssignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
   initialEta?: Date | null;
+  initialPriority?: TicketPriority | null;
+  initialTags?: string[];
   sourceConversation?: ConversationWithTicket | undefined;
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
@@ -122,6 +130,26 @@ interface FieldErrorProps {
   error?: string | undefined;
 }
 
+type SubTicketDraft = {
+  title: string;
+  description?: string;
+};
+
+const EMPTY_TAGS: string[] = [];
+
+const normalizeSubTicketDrafts = (
+  value?: Array<{ title: string; description?: string }>,
+): SubTicketDraft[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => {
+      const title = item?.title?.trim() ?? '';
+      const description = item?.description?.trim();
+      return description ? { title, description } : { title };
+    })
+    .filter(item => item.title.length > 0);
+};
+
 export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   isOpen,
   onClose,
@@ -130,8 +158,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   selectedBoardId,
   initialTitle = '',
   initialDescription = '',
+  initialSubTickets,
   initialAssignee = null,
   initialEta = null,
+  initialPriority = null,
+  initialTags = EMPTY_TAGS,
   isFromSubTicket = false,
   isFromAI = false,
   ticketSequence,
@@ -140,6 +171,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   onBeforeCreate,
   onTicketCreated,
 }) => {
+  const zero = useZero();
   const { user } = useAuth();
   const {
     droppedFiles: sharedAttachments,
@@ -182,6 +214,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
 
   const hasPopulatedDeployedCommitId = useRef(false);
+  // Prefilled subtickets (used by proactive nudge review flow)
+  const [subTickets, setSubTickets] = useState<SubTicketDraft[]>([]);
+  const [editingSubTicketIndex, setEditingSubTicketIndex] = useState<number | null>(null);
+  const [editingSubTicketTitle, setEditingSubTicketTitle] = useState('');
+  const [editingSubTicketDescription, setEditingSubTicketDescription] = useState('');
 
   // File handling state
   const [isDraggingOverModal, setIsDraggingOverModal] = useState(false);
@@ -215,10 +252,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     defaultValues: {
       title: initialTitle,
       description: initialDescription,
-      priority: null,
+      priority: initialPriority,
       status: TicketStatusV2.TODO as TicketStatusV2,
       eta: initialEta,
-      tags: [],
+      tags: initialTags,
       assignee: initialAssignee,
       userGroupId: null,
       boardId: selectedBoardId || '',
@@ -418,6 +455,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       form.reset();
       setHasTitleBeenGenerated(false); // Reset flag when modal opens
       hasPopulatedDeployedCommitId.current = false;
+      setSubTickets(normalizeSubTicketDrafts(initialSubTickets));
+      setEditingSubTicketIndex(null);
+      setEditingSubTicketTitle('');
+      setEditingSubTicketDescription('');
       // Set initial values after reset to ensure they are applied
       if (initialTitle) {
         form.setFieldValue('title', initialTitle);
@@ -425,12 +466,26 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       if (initialDescription) {
         form.setFieldValue('description', initialDescription);
       }
+      if (initialPriority) {
+        form.setFieldValue('priority', initialPriority);
+      }
+      form.setFieldValue('tags', initialTags);
       if (selectedBoardId) {
         form.setFieldValue('boardId', selectedBoardId);
       }
       resetDuplicateState();
     }
-  }, [isOpen, form, initialTitle, initialDescription, resetDuplicateState, selectedBoardId]);
+  }, [
+    isOpen,
+    form,
+    initialTitle,
+    initialDescription,
+    initialPriority,
+    initialSubTickets,
+    initialTags,
+    resetDuplicateState,
+    selectedBoardId,
+  ]);
 
   // Auto-select first board if none selected or if selected board doesn't exist in current boards
   useEffect(() => {
@@ -520,6 +575,50 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   const handlePreviewFile = (_file: File): void => {
     // File preview handled by Attachments component
+  };
+
+  const beginEditSubTicket = (index: number): void => {
+    const target = subTickets[index];
+    if (!target) return;
+    setEditingSubTicketIndex(index);
+    setEditingSubTicketTitle(target.title);
+    setEditingSubTicketDescription(target.description || '');
+  };
+
+  const saveEditedSubTicket = (): void => {
+    if (editingSubTicketIndex === null) return;
+    const title = editingSubTicketTitle.trim();
+    if (!title) {
+      toast.error('Sub-ticket title cannot be empty');
+      return;
+    }
+
+    setSubTickets(prev => {
+      const next = [...prev];
+      next[editingSubTicketIndex] = {
+        title,
+        ...(editingSubTicketDescription.trim()
+          ? { description: editingSubTicketDescription.trim() }
+          : {}),
+      };
+      return next;
+    });
+    setEditingSubTicketIndex(null);
+    setEditingSubTicketTitle('');
+    setEditingSubTicketDescription('');
+  };
+
+  const deleteSubTicket = (index: number): void => {
+    setSubTickets(prev => prev.filter((_, currentIndex) => currentIndex !== index));
+    if (editingSubTicketIndex === index) {
+      setEditingSubTicketIndex(null);
+      setEditingSubTicketTitle('');
+      setEditingSubTicketDescription('');
+      return;
+    }
+    if (editingSubTicketIndex !== null && index < editingSubTicketIndex) {
+      setEditingSubTicketIndex(editingSubTicketIndex - 1);
+    }
   };
 
   // Helper function to process ticket creation response
@@ -638,6 +737,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       // Split assignee into assignedTo and userGroupId
       const assignedTo = formData.assignee?.type === 'assigneeTo' ? formData.assignee.value : null;
       const userGroupId = formData.assignee?.type === 'userGroup' ? formData.assignee.value : null;
+      let createdTicketResponse: TicketResponse | null = null;
 
       // 1. EXECUTE MESSAGE SENDING FIRST (if handler provided)
       if (onBeforeCreate) {
@@ -739,6 +839,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         }
 
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
+        createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType);
       } else {
         // No files, use JSON
@@ -770,7 +871,27 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           dynamicFields: formData.dynamicFields,
         });
 
+        createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType);
+      }
+      const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
+      if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
+        const baseTimestamp = Date.now();
+        const masterTicketId = createdTicketResponse.id;
+        const masterConversationId = createdTicketResponse.conversationId;
+        subticketsToCreate.forEach((subTicket, index) => {
+          void zero.mutate(
+            mutators.subTicket.create({
+              subTicketId: uuidv4(),
+              mappingId: uuidv4(),
+              timestamp: baseTimestamp + index,
+              title: subTicket.title,
+              ...(subTicket.description ? { description: subTicket.description } : {}),
+              ticketId: masterTicketId,
+              ...(masterConversationId ? { conversationId: masterConversationId } : {}),
+            }),
+          );
+        });
       }
       // Clear shared attachments after successful creation
       clearAttachments(sourceId);
@@ -794,6 +915,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const handleClose = (): void => {
     if (sourceConversation || tab === 'tickets') clearAttachments(sourceId);
     setExcludedChatAttachmentIds(new Set());
+    setEditingSubTicketIndex(null);
+    setEditingSubTicketTitle('');
+    setEditingSubTicketDescription('');
     resetDuplicateState();
     onClose();
   };
@@ -953,14 +1077,17 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Get tag options
   const tagOptions = useMemo(() => {
-    const allTags = [...new Set([...availableTags, ...newTags])];
+    const selectedTags = formValues?.tags ?? [];
+    const allTags = [...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags])];
 
-    return allTags.map((tag, index) => ({
-      label: tag,
-      value: tag,
-      icon: <span className={cn('size-1.5 rounded', TAG_COLORS[index % TAG_COLORS.length])} />,
-    }));
-  }, [availableTags, newTags]);
+    return allTags
+      .filter(tag => typeof tag === 'string' && tag.trim().length > 0)
+      .map((tag, index) => ({
+        label: tag,
+        value: tag,
+        icon: <span className={cn('size-1.5 rounded', TAG_COLORS[index % TAG_COLORS.length])} />,
+      }));
+  }, [availableTags, newTags, initialTags, formValues?.tags]);
 
   // Get required dynamic fields
   const requiredDynamicFields = useMemo(
@@ -995,6 +1122,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     <Dialog
       open={isOpen}
       onOpenChange={handleClose}
+      title='Create Ticket'
+      description='Create and edit ticket details before submitting.'
       data-testid='create-ticket-modal'
       className={cn(
         'w-full max-w-screen-md max-h-1/2 rounded-xl border border-border',
@@ -1126,8 +1255,95 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             )}
           </form.Field>
 
+          {subTickets.length > 0 && (
+            <div className='mt-2 rounded-md border border-[#f0f0f0] bg-[#f9f9f9] p-3'>
+              <div className='mb-2 flex items-center gap-1.5 text-sm font-semibold text-gray-700'>
+                <SubTicketCountIcon className='shrink-0 text-black' />
+                <span>{subTickets.length} Sub-tickets</span>
+              </div>
+              <div className='space-y-2'>
+                {subTickets.map((subTicket, index) => {
+                  const isEditing = editingSubTicketIndex === index;
+                  return (
+                    <div
+                      key={`subticket-${index}`}
+                      className='rounded-lg border border-[#f0f0f0] bg-white p-[11px]'
+                    >
+                      {isEditing ? (
+                        <div className='flex flex-col gap-2'>
+                          <div className='flex items-center justify-between gap-2'>
+                            <div className='flex min-w-0 items-center gap-2'>
+                              <span className='font-mono text-[12px] font-medium leading-[1.1] text-[#8d8d8d]'>
+                                {index + 1}
+                              </span>
+                              <Input
+                                value={editingSubTicketTitle}
+                                onChange={e => setEditingSubTicketTitle(e.target.value)}
+                                placeholder='Sub-ticket title'
+                                className='h-auto border-none p-0 text-[14px] font-medium leading-[18px] text-[#202020] focus-visible:ring-0'
+                              />
+                            </div>
+                            <button
+                              type='button'
+                              onClick={saveEditedSubTicket}
+                              className='text-[14px] leading-[18px] text-[#8d8d8d] hover:text-[#707070]'
+                            >
+                              Done
+                            </button>
+                          </div>
+                          <Textarea
+                            value={editingSubTicketDescription}
+                            onChange={e => setEditingSubTicketDescription(e.target.value)}
+                            placeholder='Sub-ticket description (optional)'
+                            rows={2}
+                            className='min-h-0 resize-none border-none p-0 text-[14px] leading-[18px] text-[#8d8d8d] focus-visible:ring-0'
+                          />
+                        </div>
+                      ) : (
+                        <div className='flex items-start justify-between gap-3'>
+                          <div className='min-w-0 flex-1'>
+                            <div className='flex min-w-0 items-center gap-2'>
+                              <span className='font-mono text-[12px] font-medium leading-[1.1] text-[#8d8d8d]'>
+                                {index + 1}
+                              </span>
+                              <div className='truncate text-[14px] font-medium leading-[18px] text-[#202020]'>
+                                {subTicket.title}
+                              </div>
+                            </div>
+                            {subTicket.description && (
+                              <div className='mt-1 text-[14px] leading-[18px] text-[#8d8d8d]'>
+                                {subTicket.description}
+                              </div>
+                            )}
+                          </div>
+                          <div className='flex shrink-0 items-center gap-4'>
+                            <button
+                              type='button'
+                              onClick={() => beginEditSubTicket(index)}
+                              className='text-[14px] leading-[18px] text-[#adadad] hover:text-[#8d8d8d]'
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type='button'
+                              onClick={() => deleteSubTicket(index)}
+                              aria-label={`Delete subticket ${index + 1}`}
+                              className='text-[#adadad] hover:text-[#8d8d8d]'
+                            >
+                              <Trash2 className='size-[14px]' />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Channel and Board Selection */}
-          <div className='flex items-center gap-2.5'>
+          <div className={cn('flex items-center gap-2.5', subTickets.length > 0 && 'pt-4')}>
             {/* Channel Selection - Only for SubTicket creation */}
             {(isFromSubTicket || isFromAI) && (
               <form.Field

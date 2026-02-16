@@ -12,8 +12,6 @@ import {
   CreateTicketRequest,
   GetTicketDetailsResponse,
   TicketDuplicateCheckRequest,
-  TicketDuplicateCandidate,
-  TicketDuplicateCheckAnalysis,
   TicketDuplicateCheckResponse,
 } from '../types/ticket';
 import { evaluateAssignmentRule } from '../utils/assignmentEngine';
@@ -28,8 +26,6 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
-import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
-import { vespaService } from '@/services/vespaSearch';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { BaseTicketType, FormContextType, FormEntityType } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
@@ -696,7 +692,7 @@ export class TicketController {
         return;
       }
 
-      const { candidates, analysis } = await this.analyzeDuplicateCandidates({
+      const { candidates, analysis } = await ticketDuplicateService.checkDuplicates({
         title,
         description,
         projectId,
@@ -725,7 +721,7 @@ export class TicketController {
   }): Promise<void> {
     try {
       const { ticket, title, description, projectId, userId } = params;
-      const { candidates, analysis } = await this.analyzeDuplicateCandidates({
+      const { candidates, analysis } = await ticketDuplicateService.checkDuplicates({
         title,
         description,
         projectId,
@@ -766,97 +762,6 @@ export class TicketController {
     } catch (error) {
       logger.error('Failed to persist duplicate ticket references', error);
     }
-  }
-
-  private async getDuplicateCandidates(params: {
-    title: string;
-    description: string;
-    projectId: string;
-    userId: string;
-    limit: number;
-    excludeTicketId?: string;
-  }): Promise<TicketDuplicateCandidate[]> {
-    const { title, description, projectId, userId, limit, excludeTicketId } = params;
-    const query = `${title}\n\n${description}`.trim();
-
-    if (!query) {
-      return [];
-    }
-
-    const vespaResults = await vespaService.searchService.searchVespa(
-      query,
-      userId,
-      ['ticket'],
-      {
-        offset: 0,
-        limit,
-        ticket: {
-          projectId: [projectId],
-        },
-      },
-    );
-
-    const hits = vespaResults.root.children || [];
-    const transformedResults = await transformVespaResults(hits, prisma);
-
-    const candidates = transformedResults
-      .filter(result => result.type === 'ticket')
-      .map(result => ({
-        id: result.id,
-        title: result.title,
-        description: result.context || '',
-        boardId: result.searchContext?.boardId,
-        status: result.searchContext?.ticketStatus || result.metadata.status,
-        stage: result.subtitle,
-        relevanceScore: result.relevanceScore,
-        channelId: result.searchContext?.channelId,
-        createdAt: result.metadata.timestamp,
-      }));
-
-    if (!excludeTicketId) {
-      return candidates;
-    }
-
-    return candidates.filter(candidate => candidate.id !== excludeTicketId);
-  }
-
-  private async analyzeDuplicateCandidates(params: {
-    title: string;
-    description: string;
-    projectId: string;
-    userId: string;
-    limit: number;
-    excludeTicketId?: string;
-  }): Promise<{ candidates: TicketDuplicateCandidate[]; analysis: TicketDuplicateCheckAnalysis }> {
-    const { title, description, projectId, userId, limit, excludeTicketId } = params;
-    const candidates = await this.getDuplicateCandidates({
-      title,
-      description,
-      projectId,
-      userId,
-      limit,
-      excludeTicketId,
-    });
-
-    if (candidates.length === 0) {
-      return {
-        candidates,
-        analysis: {
-          isDuplicate: false,
-          duplicateTicketId: null,
-          confidence: 0,
-          reason: 'No similar tickets found.',
-        },
-      };
-    }
-
-    const analysis = await ticketDuplicateService.analyzeDuplicate(
-      { title, description },
-      candidates,
-      { userId, projectId },
-    );
-
-    return { candidates, analysis };
   }
 
   getPendingHumanIntervention = async (req: Request, res: Response): Promise<void> => {

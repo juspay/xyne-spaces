@@ -978,6 +978,7 @@ export const messageTable = table('messages')
     visibleTo: string().optional(),
     createdAt: number(),
     metadata: json().optional(),
+    nudgeCount: number().optional(),
     isSent: boolean(),
   })
   .primaryKey('messageId');
@@ -1085,6 +1086,21 @@ export const notificationPreferenceTable = table('notification_preferences')
     slackEnabled: boolean(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const proactiveNudgeTable = table('proactive_nudges')
+  .columns({
+    id: string(),
+    messageId: string(),
+    type: string(),
+    priority: string(),
+    title: string(),
+    description: string(),
+    evidenceSpans: string(),
+    actions: json().optional(),
+    state: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -2293,6 +2309,14 @@ export const activityTableRelationships = relationships(activityTable, ({ one })
   }),
 }));
 
+export const proactiveNudgeTableRelationships = relationships(proactiveNudgeTable, ({ one }) => ({
+  message: one({
+    sourceField: ['messageId'],
+    destField: ['messageId'],
+    destSchema: messageTable,
+  }),
+}));
+
 export const callTableRelationships = relationships(callTable, ({ one, many }) => ({
   createdByUser: one({
     sourceField: ['createdByUserId'],
@@ -2606,6 +2630,7 @@ export const schema = createSchema({
     activityTable,
     notificationTable,
     notificationPreferenceTable,
+    proactiveNudgeTable,
     callTable,
     callParticipantTable,
     canvasTable,
@@ -2669,6 +2694,7 @@ export const schema = createSchema({
     channelUserStatusTableRelationships,
     reactionTableRelationships,
     activityTableRelationships,
+    proactiveNudgeTableRelationships,
     callTableRelationships,
     callParticipantTableRelationships,
     canvasTableRelationships,
@@ -2744,6 +2770,7 @@ export type CustomEmoji = Row<typeof schema.tables.custom_emojis>;
 export type Activity = Row<typeof schema.tables.activities>;
 export type Notification = Row<typeof schema.tables.notifications>;
 export type NotificationPreference = Row<typeof schema.tables.notification_preferences>;
+export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
 export type Call = Row<typeof schema.tables.calls>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type ConversationParticipant = Row<typeof schema.tables.conversation_participants>;

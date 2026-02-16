@@ -494,6 +494,7 @@ export class App {
     logger.info('Initializing Vespa queue...');
     const { vespaQueue } = await import('@/queues/vespaQueue');
     await vespaQueue.initialize();
+
     this.httpServer.listen(config.port, config.host, () => {
       logger.info(`Server is running on ${config.host}:${config.port} in ${config.env} mode`);
       logger.info('WebSocket server ready for connections');

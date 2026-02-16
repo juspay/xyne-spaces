@@ -1262,6 +1262,7 @@ model Message {
   visibleTo           String?     // null = public (visible to all), userId = visible only to the userId 
   createdAt           DateTime    @default(now())
   metadata            Json?       // Future extensibility
+  nudgeCount          Int?        @default(0) // Proactive nudge count for this message
   isSent              Boolean     @default(true) // Whether the message is sent
   
   // Relations
@@ -1457,6 +1458,43 @@ enum ActivityClassification {
 enum ActivityClassificationJobType {
   SINGLE
   SPECIAL_MENTION_AUDIENCE
+  @@schema("public")
+}
+
+enum NudgeType {
+  EXISTING_TICKET
+  CREATE_TICKET
+  SET_REMINDER
+  ADD_TO_KB
+  REVERSE_KB_LOOKUP
+  THREAD_FOLLOW_UP
+  DECISION_PENDING
+  WAITING_ON_BLOCKED_BY
+  @@schema("public")
+}
+
+// The actual output shown to users
+model ProactiveNudge {
+  id                      String             @id @default(cuid())
+  messageId               String
+
+  type                    NudgeType
+  priority                String             // HIGH, MEDIUM, LOW
+
+  title                   String
+  description             String             @db.Text
+
+  // Interactive Elements
+  evidenceSpans           String             @db.Text // Primary evidence snippet
+  actions                 Json?              // Payload for CTAs and execution results
+
+  state                   String             @default("ACTIVE") // ACTIVE, DISMISSED, ACTED_ON
+
+  createdAt               DateTime           @default(now())
+
+  @@unique([messageId])
+  @@index([state])
+  @@map("proactive_nudges")
   @@schema("public")
 }
 
