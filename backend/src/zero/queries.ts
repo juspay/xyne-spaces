@@ -773,6 +773,77 @@ export const queries = defineQueries({
       return limit ? query.limit(limit) : query;
     }
   ),
+  channelConversationsPaginatedV2: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ createdAt: z.number() }).nullable(),
+      direction: z.literal('forward').or(z.literal('backward')),
+    }),
+    ({ ctx, args: { channelId, limit, start, direction } }) => {
+      let query = zql.conversations
+        .where('channelId', channelId)
+        .related('initialMessage', initialMessageQuery =>
+          initialMessageQuery
+            .where(helpers => {
+              return helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', '=', ctx.userID),
+              );
+            })
+            .related('reactions')
+            .related('reactionCounts')
+            .related('attachments'),
+        )
+        .related('parentMessage')
+        .related('participants', participantQuery =>
+          participantQuery
+            .where('participationType', ConversationParticipation.AUTHOR)
+            .orderBy('joinedAt', 'asc'),
+        )
+        .related('ticket');
+
+      // Apply ordering based on direction
+      const orderDirection = direction === 'forward' ? 'desc' : 'asc';
+      query = query.orderBy('createdAt', orderDirection);
+
+      // Apply cursor pagination if start is provided
+      if (start) {
+        query = query.start({ createdAt: start.createdAt }, { inclusive: direction === 'forward' });
+      }
+
+      // Apply limit
+      return limit ? query.limit(limit) : query;
+    },
+  ),
+  channelLatestMultipleConversations: defineQuery(
+    z.object({ channelId: z.string(), limit: z.number() }),
+    ({ ctx, args: { channelId, limit } }) => {
+      return zql.conversations
+        .where('channelId', channelId)
+        .related('initialMessage', initialMessageQuery =>
+          initialMessageQuery
+            .where(helpers => {
+              return helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', '=', ctx.userID),
+              );
+            })
+            .related('reactions')
+            .related('reactionCounts')
+            .related('attachments'),
+        )
+        .related('parentMessage')
+        .related('participants', participantQuery =>
+          participantQuery
+            .where('participationType', ConversationParticipation.AUTHOR)
+            .orderBy('joinedAt', 'asc'),
+        )
+        .related('ticket')
+        .orderBy('createdAt', 'desc')
+        .limit(limit);
+    },
+  ),
 
   channelLatestConversation: defineQuery(
     z.object({ channelId: z.string() }),
