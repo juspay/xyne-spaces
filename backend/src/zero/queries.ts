@@ -98,9 +98,66 @@ export const queries = defineQueries({
       .related('stageEtaEntries');
   }),
 
-  allWorkflows: defineQuery(() => {
-    return zql.workflows.orderBy('createdAt', 'desc').related('ticket');
-  }),
+  workflowsPaginated: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), createdAt: z.number() }).nullable(),
+      searchQuery: z.string().optional(),
+      statusFilter: z.array(z.string()).optional(),
+      workflowTypeFilter: z.array(z.string()).optional(),
+      createdByFilter: z.array(z.string()).optional(),
+      assignedToFilter: z.array(z.string()).optional(),
+      dateRangeFilter: z
+        .object({ startDate: z.number(), endDate: z.number() })
+        .optional(),
+    }),
+    ({ args: { limit, start, searchQuery, statusFilter, workflowTypeFilter, createdByFilter, assignedToFilter, dateRangeFilter } }) => {
+      let query = zql.workflows;
+
+      if (searchQuery && searchQuery.trim()) {
+        const q = searchQuery.trim();
+        query = query.where((helpers) =>
+          helpers.or(
+            helpers.exists('ticket', (ticket) =>
+              ticket.where('title', 'ILIKE', `%${q}%`)
+            ),
+            helpers.exists('ticket', (ticket) =>
+              ticket.where('xyneId', 'ILIKE', `%${q}%`)
+            ),
+            helpers.cmp('workflowName', 'ILIKE', `%${q}%`)
+          )
+        );
+      }
+
+      if (statusFilter && statusFilter.length > 0) {
+        query = query.where('status', 'IN', statusFilter);
+      }
+
+      if (workflowTypeFilter && workflowTypeFilter.length > 0) {
+        query = query.where('workflowType', 'IN', workflowTypeFilter);
+      }
+
+      if (createdByFilter && createdByFilter.length > 0) {
+        query = query.whereExists('ticket', (ticket) => ticket.where('createdBy', 'IN', createdByFilter));
+      }
+
+      if (assignedToFilter && assignedToFilter.length > 0) {
+        query = query.whereExists('ticket', (ticket) => ticket.where('assignedTo', 'IN', assignedToFilter));
+      }
+
+      if (dateRangeFilter) {
+        query = query.where('createdAt', '>=', dateRangeFilter.startDate).where('createdAt', '<=', dateRangeFilter.endDate);
+      }
+
+      query = query.orderBy('createdAt', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, createdAt: start.createdAt }, { inclusive: false });
+      }
+
+      return query.limit(limit).related('ticket');
+    }
+  ),
 
   ticketsForEmailChannels: defineQuery(() => {
     return zql.tickets
