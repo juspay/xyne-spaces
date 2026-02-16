@@ -485,7 +485,7 @@ export const TicketFiltersDropdown = ({
   };
 
   return (
-    <div className={`relative flex  flex-col sm:w-max ${className}`}>
+    <div className={`relative flex  flex-col w-full ${className}`}>
       <div className='w-max'>
         <Popover.Root open={boardOpen} onOpenChange={setBoardOpen}>
           <Popover.Trigger asChild>
@@ -520,7 +520,7 @@ export const TicketFiltersDropdown = ({
           </Popover.Content>
         </Popover.Root>
       </div>
-      <div className='flex flex-wrap px-1 sm:items-center gap-1 sm:gap-3'>
+      <div className='flex flex-wrap items-center gap-2 sm:gap-3'>
         {!hideAssigneeFilter && (
           <Popover.Root open={assigneeOpen} onOpenChange={setAssigneeOpen}>
             <Popover.Trigger asChild>
@@ -689,7 +689,7 @@ export const TicketFiltersDropdown = ({
         )}
 
         {/* ticket search */}
-        <div className='flex-1 max-w-sm'>
+        <div className=' w-full max-w-56'>
           <div className='relative'>
             <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
             <input
