@@ -130,6 +130,8 @@ export interface LogEntry {
   event: EventType;
   latency?: number | null;
   version: string;
+  pageViewId?: string | null;
+  pageUrl?: string | null;
 }
 
 export interface LoggerConfig {
@@ -153,6 +155,8 @@ export class Logger implements LoggerConfig {
   private worker: Worker | null = null;
   private notificationSocketState: NotificationSocketState = NotificationSocketState.DISCONNECTED;
   private zeroSocketState: ZeroSocketState = ZeroSocketState.DISCONNECTED;
+  private pageViewId: string | null = null;
+  private pageUrl: string | null = null;
 
   constructor(config: { clientSessionId: string; platform_name: Platform }) {
     this.clientSessionId = config.clientSessionId;
@@ -174,7 +178,7 @@ export class Logger implements LoggerConfig {
         flushIntervalInMs: FLUSH_INTERVAL_IN_MS,
         maxBatchSize: MAX_BATCH_SIZE,
         maxRetries: MAX_RETRIES,
-        version: window.__APP_VERSION__ || 'unknown',
+        version: __APP_VERSION__,
       };
       if (this.emailId !== null) {
         payload.emailId = this.emailId;
@@ -259,6 +263,21 @@ export class Logger implements LoggerConfig {
     this.zeroSocketState = state;
   }
 
+  setPageView(pageViewId: string, pageUrl: string): void {
+    this.pageViewId = pageViewId;
+    this.pageUrl = pageUrl;
+    if (this.worker) {
+      const message: WorkerMessage = {
+        type: 'SET_PAGE_VIEW',
+        payload: {
+          pageViewId,
+          pageUrl,
+        },
+      };
+      this.worker.postMessage(message);
+    }
+  }
+
   private postLogMessage(
     level: LogLevel,
     event: EventType,
@@ -270,11 +289,12 @@ export class Logger implements LoggerConfig {
         event,
         notificationSocketState: this.notificationSocketState,
         zeroSocketState: this.zeroSocketState,
+        pageViewId: this.pageViewId,
+        pageUrl: this.pageUrl,
       };
       if (extraFields !== undefined) {
         payload.extraFields = extraFields;
       }
-
       const message: WorkerMessage = {
         type: 'LOG',
         payload,

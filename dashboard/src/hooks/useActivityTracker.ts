@@ -3,6 +3,8 @@ import { useIdleTimer } from 'react-idle-timer';
 import { activityApi } from '../api/activityApi';
 import { ActivityEvent, ActivityStatus, ActivityLogPayload } from '@xyne/shared';
 import { useAuth } from './useAuth';
+import { logger } from '../utils/logger';
+import { v4 as uuidv4 } from 'uuid';
 
 // Idle timeout
 const IDLE_TIMEOUT_MS = 60_000; // 60 seconds
@@ -184,6 +186,9 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
   // Keep the latest pathname ref updated
   useEffect(() => {
     latestPathnameRef.current = currentPathname || window.location.pathname;
+    const pageViewId = uuidv4();
+    const pageUrl = currentPathname || window.location.pathname;
+    logger.setPageView(pageViewId, pageUrl);
   }, [currentPathname]);
 
   // Log initial active state after routing settles (debounced)
