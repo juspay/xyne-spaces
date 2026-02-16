@@ -4,6 +4,13 @@
   "description": "Backend server for Xyne Spaces application",
   "main": "dist/index.js",
   "type": "module",
+  "imports": {
+    "#zero-internal/query-internals": "./node_modules/@rocicorp/zero/out/zql/src/query/query-internals.js",
+    "#zero-internal/pg-query-executor": "./node_modules/@rocicorp/zero/out/zero-server/src/pg-query-executor.js",
+    "#zero-internal/schema": "./node_modules/@rocicorp/zero/out/zero-server/src/schema.js",
+    "#zero-internal/compiler": "./node_modules/@rocicorp/zero/out/z2s/src/compiler.js",
+    "#zero-internal/sql": "./node_modules/@rocicorp/zero/out/z2s/src/sql.js"
+  },
   "scripts": {
     "postinstall": "cd ../shared && npm install && npm run build && cd ../framework && npm install && npm run build",
     "build": "tsc",

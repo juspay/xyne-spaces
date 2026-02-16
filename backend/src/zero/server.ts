@@ -1,6 +1,12 @@
 import { mustGetQuery, mustGetMutator } from '@rocicorp/zero';
 import { handleMutateRequest, handleQueryRequest } from '@rocicorp/zero/server';
 import { zeroNodePg } from '@rocicorp/zero/server/adapters/pg';
+// Zero internal APIs for fallback system (mapped via #imports in package.json)
+import { asQueryInternals } from '#zero-internal/query-internals';
+import { executePostgresQuery } from '#zero-internal/pg-query-executor';
+import { getServerSchema } from '#zero-internal/schema';
+import { compile, extractZqlResult } from '#zero-internal/compiler';
+import { formatPgInternalConvert } from '#zero-internal/sql';
 import { Pool } from 'pg';
 import { Context, schema } from '@xyne/shared';
 import { AuthData, createMutators } from './mutators';
@@ -19,11 +25,13 @@ import {
 } from './side-effects';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { db } from '@/database/client';
+import { DatabaseClient } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
+import { ReplicaPoolManager } from '@/database/replica-pool-manager';
 
 // Create database connection pool
 const isDev = process.env['NODE_ENV'] === 'development';
@@ -33,6 +41,29 @@ const pool = new Pool({
 });
 
 export const dbProvider = zeroNodePg(schema, pool);
+
+const replicaPoolManager = config.database.readReplicaUrls.length > 0
+  ? ReplicaPoolManager.getInstance(
+      config.database.readReplicaUrls,
+      config.database.poolMax,
+      !isDev && !config.isTestEnv
+    )
+  : null;
+
+if (replicaPoolManager) {
+  logger.info(`Initialized ReplicaPoolManager with ${replicaPoolManager.getReplicaCount()} replica(s)`);
+}
+
+let serverSchemaCache: any | null = null;
+
+async function fetchServerSchema(): Promise<any> {
+  if (!serverSchemaCache) {
+    serverSchemaCache = await dbProvider.transaction(async (tx) => {
+      return await getServerSchema(tx.dbTransaction, schema);
+    });
+  }
+  return serverSchemaCache;
+}
 
 export function extractAuthDataFromJWT(encodedJWT?: string): AuthData | undefined {
   if (!encodedJWT) {
@@ -215,5 +246,233 @@ export async function handleQueries(request: Request): Promise<any> {
     });
 
     throw error;
+  }
+}
+
+export async function handleQueriesFallback(request: Request): Promise<any> {
+  const authData = extractAuthDataFromRequest(request);
+  if (!authData) {
+    throw new Error("Unauthorized");
+  }
+
+  const context: Context = { userID: authData.sub };
+
+  try {
+    const body = await request.json();
+    const { queries: queryRequests } = body as {
+      queries: Array<{ name: string; args?: any }>;
+    };
+
+    logger.info(`Fallback executing ${queryRequests.length} queries from read replica`);
+
+    if (!replicaPoolManager) {
+      throw new Error('Read replica not configured. Set DATABASE_READ_REPLICA_URLS environment variable.');
+    }
+
+    const replicaPool = replicaPoolManager.getNextPool();
+    const replicaDbProvider = zeroNodePg(schema, replicaPool) as typeof dbProvider;
+
+    const serverSchema = await fetchServerSchema();
+
+    const results = await Promise.all(
+      queryRequests.map(async (req) => {
+        try {
+          const queryDef = mustGetQuery(queries, req.name);
+          const query = queryDef.fn({
+            args: req.args || {},
+            ctx: context,
+          });
+
+          // @ts-ignore - asQueryInternals works with any Query type at runtime
+          const { ast, format } = asQueryInternals(query);
+
+          logger.debug(`Executing fallback query: ${req.name}`);
+
+          const data = await replicaDbProvider.transaction(async (tx) => {
+            return await executePostgresQuery(
+              tx.dbTransaction,
+              ast,
+              format,
+              schema,
+              serverSchema
+            );
+          });
+
+          return {
+            name: req.name,
+            data,
+          };
+        } catch (error) {
+          logger.error(`Fallback query ${req.name} failed:`, error);
+          throw error;
+        }
+      })
+    );
+
+    return { results };
+  } catch (error) {
+    logger.error('Fallback query request failed:', error);
+    throw error;
+  }
+}
+
+export async function handleQueriesZqlToSql(request: Request): Promise<any> {
+  const authData = extractAuthDataFromRequest(request);
+  if (!authData) {
+    throw new Error("Unauthorized");
+  }
+
+  const context: Context = { userID: authData.sub };
+
+  try {
+    const body = await request.json();
+    const { queries: queryRequests } = body as {
+      queries: Array<{ name: string; args?: any }>;  
+    };
+
+    console.log(`ZQL-to-SQL executing ${queryRequests.length} queries`);
+
+    const serverSchema = await fetchServerSchema();
+    const prisma = DatabaseClient.getInstance();
+
+    const results = await Promise.all(
+      queryRequests.map(async (req) => {
+        try {
+          const queryDef = mustGetQuery(queries, req.name);
+          const query = queryDef.fn({
+            args: req.args || {},
+            ctx: context,
+          });
+
+          // Extract AST and Format from ZQL query
+          // @ts-ignore - asQueryInternals works with any Query type at runtime
+          const { ast, format } = asQueryInternals(query);
+
+          console.log(`Converting ZQL to SQL: ${req.name}`);
+
+          // Use z2s to compile ZQL → SQL
+          const compiledOutput = compile(serverSchema, schema, ast, format);
+          const sqlQuery = formatPgInternalConvert(
+            compiledOutput
+          );
+
+          console.log(`Executing SQL via Prisma:`, sqlQuery.text);
+
+          // Execute via Prisma
+          const pgResult = await prisma.$queryRawUnsafe(
+            sqlQuery.text,
+            ...sqlQuery.values
+          );
+
+          // Handle empty results for singular queries
+          const pgArrayResult = Array.isArray(pgResult) ? pgResult : [pgResult];
+          if (pgArrayResult.length === 0 && format.singular) {
+            return {
+              name: req.name,
+              data: undefined,
+            };
+          }
+
+          // Extract ZQL result from JSON-wrapped response
+          const data = extractZqlResult(pgArrayResult);
+
+          console.log(`Converting ZQL to SQL: ${req.name}`);
+          console.log('Full SQL query:', sqlQuery.text);
+          console.log('SQL length:', sqlQuery.text.length);
+          console.log('Values:', sqlQuery.values);
+
+          return {
+            name: req.name,
+            data,
+          };
+        } catch (error) {
+          console.error(`ZQL-to-SQL query ${req.name} failed:`, error);
+          throw error;
+        }
+      })
+    );
+
+    return { results };
+  } catch (error) {
+    console.error('ZQL-to-SQL request failed:', error);
+    throw error;
+  }
+}
+
+export async function handleMutateFallback(request: Request): Promise<unknown> {
+  const authData = extractAuthDataFromRequest(request);
+  if (!authData) {
+    throw new Error("Unauthorized");
+  }
+
+  let asyncTasks: (() => Promise<void>)[] = [];
+  let vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
+  let sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
+
+  try {
+    const mutation = await request.json() as {
+      name: string;
+      args: any;
+    };
+
+    console.log(`Fallback executing mutation: ${mutation.name}`);
+
+    await dbProvider.transaction(async (tx) => {
+      const mutators = createMutators(authData, asyncTasks);
+      const wrappedTx = wrapTransactionWithACL(
+        tx,
+        { userID: authData.sub },
+        vespaJobs,
+        sideEffectJobs
+      );
+      const mutator = mustGetMutator(mutators, mutation.name);
+      await mutator.fn({
+        tx: wrappedTx,
+        args: mutation.args,
+        ctx: { userID: authData.sub }
+      });
+    });
+    Promise.allSettled(asyncTasks.map(task => task()));
+    Promise.allSettled(
+      vespaJobs.map(async (job) => {
+        try {
+          await vespaQueue.addJob({
+            schema: job.schema,
+            jobType: job.jobType,
+            docId: job.docId,
+            userId: authData.sub,
+            ...(job.jobType === "update" ? { data: job.data } : {})
+          });
+        } catch (err) {
+          try {
+            await db.vespaInsertionLogs.create({
+              data: {
+                status: "FAILED",
+                type: VespaOperationType[job.jobType],
+                entityId: job.docId,
+                entityType: job.schema,
+                namespace: NAMESPACE,
+                errorMessage: `Failed to enqueue a job ${JSON.stringify(err)}`,
+                errorDetails: JSON.stringify(err),
+                userId: authData.sub,
+                createdAt: new Date(),
+              },
+            });
+          } catch (dbError) {
+            console.error(`Failed to log insertion error to database:
+              ${dbError instanceof Error ? dbError.message : String(dbError)}`);
+          }
+        }
+      })
+    );
+    processSideEffectJobs(sideEffectJobs, { userID: authData.sub });
+    return { success: true };
+  } catch (error) {
+    console.error('Fallback mutate request failed:', error);
+    return {
+      success: false,
+      error: "app",
+      message: error instanceof Error ? error.message : "Unknown error"
+    };
   }
 }

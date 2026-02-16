@@ -6,7 +6,7 @@ import React, {
   useRef,
   useImperativeHandle,
 } from 'react';
-import { useZero } from '../../../hooks/useZero';
+import { useZeroWithFallback as useZero } from '../../../hooks/useZeroWithFallback';
 import { toast } from 'sonner';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';

@@ -175,6 +175,8 @@ class WebSocketService {
     // Setup call duration subscription
     this.setupCallDurationSubscription();
 
+    this.setupZeroFallbackConfigSubscription();
+
     logger.info('WebSocket server initialized');
   }
 
@@ -1566,6 +1568,48 @@ class WebSocketService {
       logger.info(`📢 [WS-ALL-TIME-CALL-DURATION] Broadcasted all-time call duration update to all clients: duration=${durationData.duration}`);
     } catch (error) {
       logger.error('❌ [WS-ALL-TIME-CALL-DURATION] Error broadcasting all-time call duration update:', error);
+    }
+  }
+
+  broadcastZeroFallbackConfig(config: { fallbackEnabled: boolean; allowMutations: boolean; pollIntervalMs: number }): void {
+    if (!this.io) {
+      logger.warn('⚠️ [ZERO-FALLBACK] WebSocket server not initialized, cannot broadcast');
+      return;
+    }
+    redisService.broadcastZeroFallbackConfigUpdate(config).catch(error => {
+      logger.error('❌ [ZERO-FALLBACK] Failed to broadcast via Redis:', error);
+    });
+    
+    logger.info(`📢 [ZERO-FALLBACK] Broadcasted config via Redis: fallbackEnabled=${config.fallbackEnabled}, allowMutations=${config.allowMutations}, pollIntervalMs=${config.pollIntervalMs}`);
+  }
+
+  private async setupZeroFallbackConfigSubscription(): Promise<void> {
+    try {
+      await redisService.subscribeToZeroFallbackConfigUpdates((config) => {
+        this.handleZeroFallbackConfigUpdate(config);
+      });
+
+      logger.info('✅ [ZERO-FALLBACK] Fallback config subscription established successfully');
+    } catch (error) {
+      logger.error('❌ [ZERO-FALLBACK] Error setting up fallback config subscription:', error);
+    }
+  }
+
+  private handleZeroFallbackConfigUpdate(config: { fallbackEnabled: boolean; allowMutations: boolean; pollIntervalMs: number; timestamp: Date }): void {
+    try {
+      if (!this.io) {
+        logger.warn('⚠️ [ZERO-FALLBACK] WebSocket server not initialized, cannot broadcast to local clients');
+        return;
+      }
+      this.io.emit('zero_fallback_config_updated', {
+        fallbackEnabled: config.fallbackEnabled,
+        allowMutations: config.allowMutations,
+        pollIntervalMs: config.pollIntervalMs
+      });
+      
+      logger.info(`✅ [ZERO-FALLBACK] Broadcasted config update to all local clients: fallbackEnabled=${config.fallbackEnabled}, allowMutations=${config.allowMutations}, pollIntervalMs=${config.pollIntervalMs}`);
+    } catch (error) {
+      logger.error('❌ [ZERO-FALLBACK] Error broadcasting config update to local clients:', error);
     }
   }
 }

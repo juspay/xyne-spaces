@@ -4,6 +4,7 @@ import { config } from '@/config/env';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
+  private static readReplicaInstance: PrismaClient | null = null;
   private static isConnected = false;
 
   static getInstance(): PrismaClient {
@@ -66,6 +67,17 @@ export class DatabaseClient {
         logger.info('Database disconnected successfully');
       } catch (error) {
         logger.error('Error disconnecting from database:', error);
+        throw error;
+      }
+    }
+
+    if (DatabaseClient.readReplicaInstance) {
+      try {
+        await DatabaseClient.readReplicaInstance.$disconnect();
+        DatabaseClient.readReplicaInstance = null;
+        logger.info('Read replica disconnected successfully');
+      } catch (error) {
+        logger.error('Error disconnecting from read replica:', error);
         throw error;
       }
     }

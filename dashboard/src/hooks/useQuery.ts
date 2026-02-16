@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { useQueryWithFallback } from './useQueryWithFallback';
 import { useQuery as zeroUseQuery } from '@rocicorp/zero/react';
 import type {
   Schema,
@@ -39,7 +40,7 @@ export function useQuery<
     });
   }, [queryName, JSON.stringify(args)]);
 
-  const result = zeroUseQuery(query, options);
+  const result = useQueryWithFallback(query, options);
   const [data, details] = result;
 
   useEffect(() => {

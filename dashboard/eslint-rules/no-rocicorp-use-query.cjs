@@ -16,7 +16,7 @@ module.exports = {
   create(context) {
     const filePath = context.getFilename();
     
-    const isHookFile = filePath.endsWith('/src/hooks/useQuery.ts');
+    const isHookFile = filePath.endsWith('/src/hooks/useQuery.ts') || filePath.endsWith('/src/hooks/useQueryWithFallback.ts');
 
     return {
       ImportDeclaration(node) {
