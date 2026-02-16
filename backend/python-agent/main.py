@@ -326,11 +326,8 @@ async def entrypoint(ctx: JobContext):
     # Connect to room with auto-subscribe to audio only
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     logger.info(f"room_connected | auto_subscribe=AUDIO_ONLY")
-
     # Set the participant name to "Xyne Automatic"
     await ctx.room.local_participant.set_name("Xyne Automatic")
-
-    # Extract room context from metadata for tool use
     room_metadata = {}
     try:
         if ctx.room.metadata:
@@ -448,6 +445,14 @@ async def entrypoint(ctx: JobContext):
     # Initialize tracker with existing participants
     participant_tracker.initialize_from_room(ctx.room)
     logger.info(f"agent_ready | participants={len(participant_tracker.active_participants)}")
+    
+    # Register mute event handlers AFTER agent is fully ready
+    # This ensures agent is set up before we start receiving track events
+    await multi_user_transcriber.start()
+    
+    # Handle any participants already in room
+    multi_user_transcriber.handle_existing_participants()
+    logger.info(f"event_handlers_registered | timing=after_agent_ready")
 
     # Simple wait - let the agent run until LiveKit disconnects it
     # Cleanup happens in participant_disconnected handler before disconnect
@@ -479,4 +484,8 @@ if __name__ == "__main__":
     start_health_server_background()
 
     # Run the LiveKit agent (blocks until shutdown)
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+    cli.run_app(WorkerOptions(
+        entrypoint_fnc=entrypoint,
+        shutdown_process_timeout=60.0,
+        job_memory_warn_mb=4096,
+    ))

@@ -36,6 +36,27 @@ from config import get_logger
 logger = get_logger(__name__)
 
 
+def _load_turn_detector_model():
+    """
+    Load the multilingual turn detector model.
+    Models download automatically and cache in /app/.cache/huggingface.
+    
+    Returns None if loading fails, allowing graceful fallback to VAD-based detection.
+    """
+    try:
+        model = MultilingualModel()
+        logger.info("✓ Turn Detector loaded - context-aware end-of-turn detection enabled")
+        return model
+    except RuntimeError as e:
+        if "no job context found" in str(e):
+            logger.info("Turn Detector will initialize when job context is available")
+        else:
+            logger.error(f"Failed to load Turn Detector: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Turn Detector unavailable: {e}. Using VAD-based detection.")
+        return None
+
 class ResilientSTT(stt.STT):
     """
     STT wrapper with retry logic for handling transient errors.
@@ -143,9 +164,10 @@ class ParticipantTranscriber(Agent):
             call_id: Call ID for logging
             ai_enabled: Whether AI voice is enabled (affects turn detection)
         """
+        turn_detector = _load_turn_detector_model()
         super().__init__(
             instructions="not-needed",
-            turn_detection=MultilingualModel(),
+            turn_detection=turn_detector,
         )
         self.participant_identity = participant_identity
         self.participant_name = participant_name
@@ -273,6 +295,7 @@ class MultiUserTranscriber:
         self._ai_manager: Optional[Any] = None
         self._call_type: Optional[str] = None
         self._stt_model_override: Optional[str] = None  # User's STT model preference from UI
+        self._mute_states: Dict[str, bool] = {}  # Track mute state per participant
         
         # Pre-load VAD model for faster session startup
         self._vad: Optional[silero.VAD] = None
@@ -381,11 +404,28 @@ class MultiUserTranscriber:
         """Emit transcription event via EventBus."""
         await self.bus.emit("TRANSCRIPTION", data)
     
-    def start(self):
-        """Register room event handlers."""
-        self.ctx.room.on("participant_connected", self._on_participant_connected)
-        self.ctx.room.on("participant_disconnected", self._on_participant_disconnected)
-        logger.info(f"transcriber_started")
+    async def start(self):
+        """Start room-level monitoring with track mute/unmute event handlers."""
+        try:
+            # Register participant handlers
+            self.ctx.room.on("participant_connected", self._on_participant_connected)
+            self.ctx.room.on("participant_disconnected", self._on_participant_disconnected)
+            
+            # Register track mute/unmute handlers
+            self.ctx.room.on("track_muted", self._on_track_muted)
+            self.ctx.room.on("track_unmuted", self._on_track_unmuted)
+            
+            # Initialize mute states for existing participants
+            for participant in self.ctx.room.remote_participants.values():
+                for _, publication in participant.track_publications.items():
+                    if publication.kind == rtc.TrackKind.KIND_AUDIO:
+                        self._mute_states[participant.identity] = publication.muted
+                        if publication.muted:
+                            self.set_participant_muted(participant.identity, True)
+            
+            logger.info("transcriber_started | mute_detection=enabled")
+        except Exception as e:
+            logger.error(f"transcriber_start_failed | error={e}", exc_info=True)
     
     async def aclose(self):
         """Clean up all sessions and tasks."""
@@ -396,16 +436,23 @@ class MultiUserTranscriber:
         )
         self._tasks.clear()
         
-        # Close all sessions
+        # Close all per-participant sessions
         await asyncio.gather(
-            *[self._close_session(session) for session in self._sessions.values()],
+            *[self._close_session(session, identity) for identity, session in self._sessions.items()],
             return_exceptions=True
         )
         self._sessions.clear()
+        self._mute_states.clear()
         
-        # Remove event listeners
-        self.ctx.room.off("participant_connected", self._on_participant_connected)
-        self.ctx.room.off("participant_disconnected", self._on_participant_disconnected)
+        # Unregister event handlers from ctx.room
+        try:
+            self.ctx.room.off("participant_connected", self._on_participant_connected)
+            self.ctx.room.off("participant_disconnected", self._on_participant_disconnected)
+            self.ctx.room.off("track_muted", self._on_track_muted)
+            self.ctx.room.off("track_unmuted", self._on_track_unmuted)
+            logger.info("room_event_handlers_unregistered")
+        except Exception as e:
+            logger.warning(f"room_event_handlers_unregister_error | error={e}")
         
         logger.info(f"all_transcriber_sessions_closed | sessions_count={len(self._sessions)}")
     
@@ -450,9 +497,45 @@ class MultiUserTranscriber:
         participant_name = participant.name or participant.identity
         logger.info(f"participant_disconnected | participant_id={participant.identity}, participant_name={participant_name}")
         
-        task = asyncio.create_task(self._close_session(session))
+        task = asyncio.create_task(self._close_session(session, participant.identity))
         self._tasks.add(task)
         task.add_done_callback(lambda t: self._tasks.discard(t))
+    
+    def _on_track_muted(self, publication, participant):
+        """Handle track muted event - stops VAD processing for the participant."""
+        try:
+            logger.info(
+                f"[MUTE-EVENT] track_muted | participant_id={participant.identity}, "
+                f"participant_name={participant.name}, publication_sid={publication.sid}, "
+                f"kind={publication.kind}, source={publication.source}, "
+                f"is_audio={publication.kind == rtc.TrackKind.KIND_AUDIO}, "
+                f"is_microphone={publication.source == rtc.TrackSource.SOURCE_MICROPHONE}"
+            )
+            if publication.kind == rtc.TrackKind.KIND_AUDIO and publication.source == rtc.TrackSource.SOURCE_MICROPHONE:
+                logger.info(f"[MUTE-EVENT] Condition matched - calling set_participant_muted(True) | participant={participant.name}")
+                self.set_participant_muted(participant.identity, True)
+            else:
+                logger.info(f"[MUTE-EVENT] Condition NOT matched - skipping | participant={participant.name}")
+        except Exception as e:
+            logger.error(f"track_muted_error | participant_id={participant.identity}, error={e}", exc_info=True)
+    
+    def _on_track_unmuted(self, participant, publication):
+        """Handle track unmuted event - resumes VAD processing for the participant."""
+        try:
+            logger.info(
+                f"[UNMUTE-EVENT] track_unmuted | participant_id={participant.identity}, "
+                f"participant_name={participant.name}, publication_sid={publication.sid}, "
+                f"kind={publication.kind}, source={publication.source}, "
+                f"is_audio={publication.kind == rtc.TrackKind.KIND_AUDIO}, "
+                f"is_microphone={publication.source == rtc.TrackSource.SOURCE_MICROPHONE}"
+            )
+            if publication.kind == rtc.TrackKind.KIND_AUDIO and publication.source == rtc.TrackSource.SOURCE_MICROPHONE:
+                logger.info(f"[UNMUTE-EVENT] Condition matched - calling set_participant_muted(False) | participant={participant.name}")
+                self.set_participant_muted(participant.identity, False)
+            else:
+                logger.info(f"[UNMUTE-EVENT] Condition NOT matched - skipping | participant={participant.name}")
+        except Exception as e:
+            logger.error(f"track_unmuted_error | participant_id={participant.identity}, error={e}", exc_info=True)
     
     async def _start_session(self, participant: rtc.RemoteParticipant) -> AgentSession:
         """
@@ -493,16 +576,35 @@ class MultiUserTranscriber:
             ),
         )
         
+        # Initialize mute state and check if already muted
+        self._mute_states[participant.identity] = False
+        
+        for _, publication in participant.track_publications.items():
+            if publication.kind == rtc.TrackKind.KIND_AUDIO:
+                logger.info(
+                    f"[MUTE-CHECK] Initial state | participant_id={participant.identity}, "
+                    f"publication.muted={publication.muted}, publication.sid={publication.sid}, "
+                    f"publication.source={publication.source}"
+                )
+                if publication.muted:
+                    self.set_participant_muted(participant.identity, True)
+                break
+        
         return session
     
-    async def _close_session(self, session: AgentSession):
+    async def _close_session(self, session: AgentSession, participant_identity: str = None):
         """
         Close an AgentSession gracefully.
 
         Args:
             session: The session to close
+            participant_identity: The participant's identity (for cleanup)
         """
         try:
+            # Clean up mute state
+            if participant_identity and participant_identity in self._mute_states:
+                del self._mute_states[participant_identity]
+            
             logger.info(f"stt_drain_started")
             await session.drain()
             logger.info(f"stt_drain_completed")
@@ -539,3 +641,35 @@ class MultiUserTranscriber:
             return False
         return getattr(self._ai_manager, 'ai_voice_enabled', False)
     
+    def set_participant_muted(self, participant_identity: str, is_muted: bool):
+        """Control audio input based on mute state to optimize VAD processing."""
+        session = self._sessions.get(participant_identity)
+        participant = self.ctx.room.remote_participants.get(participant_identity)
+        participant_name = participant.name if participant else participant_identity
+        
+        logger.info(
+            f"[SET-MUTED] Called | participant={participant_name}, "
+            f"requested_muted={is_muted}, has_session={session is not None}"
+        )
+        
+        if session is None:
+            logger.warning(f"[SET-MUTED] No session found - early return | participant={participant_name}")
+            return
+        
+        old_state = self._mute_states.get(participant_identity, False)
+        logger.info(
+            f"[SET-MUTED] State check | participant={participant_name}, "
+            f"old_state={old_state}, new_state={is_muted}, state_changed={old_state != is_muted}"
+        )
+        
+        if old_state != is_muted:
+            self._mute_states[participant_identity] = is_muted
+            session.input.set_audio_enabled(not is_muted)
+            
+            logger.info(
+                f"mute_state_changed | participant={participant_name}, "
+                f"muted={is_muted}, vad_active={not is_muted}"
+            )
+        else:
+            logger.info(f"[SET-MUTED] State unchanged - skipping | participant={participant_name}, state={is_muted}")
+
