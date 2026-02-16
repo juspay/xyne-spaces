@@ -48,7 +48,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const { baseRoute } = useRouteContext();
-  const [newestConversation] = useState<Anchor>(initialItem);
+  const [newestConversation, setNewestConversations] = useState<Anchor>(initialItem);
   const [currentNewestConversation, setCurrentNewestConversationId] = useState<Anchor>(initialItem);
   const [oldestConversation, setOldestConversation] = useState<Anchor>(initialItem);
   const [firstItemIndex, setFirstItemIndex] = useState(100000);
@@ -67,6 +67,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
   // Reset pagination anchors when initialItem changes and load messages around it
   useEffect(() => {
     setScrollState({ isAtPosition: false });
+    setNewestConversations(initialItem);
     setOldestConversation(initialItem);
     setCurrentNewestConversationId(initialItem);
   }, [initialItem.conversationId]);
