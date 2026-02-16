@@ -1,3 +1,20 @@
+## [1.45.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.44.3...v1.45.0) (2026-02-16)
+
+
+### Features
+
+* added page fields in logging and corrected version ([9b8fc91](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9b8fc91299bb0c772704da3dd095d80ad46e38c6)), closes [#3278](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3278)
+* proactive nudges (create ticket only) ([a963841](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a96384133ece73e90c770f38fe11273c62cc047a)), closes [#2759](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2759)
+
+
+### Bug Fixes
+
+* fixed CPU issue for agent ([db25665](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/db25665eaeca7a2250e853a32c5d3a6f1a1f2db6))
+* ios double notification fix ([852b077](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/852b077d5018ad1a766fbb363933786812310b2d)), closes [#3155](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3155)
+* Queries for ChatListV3 ([5769545](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5769545abfa078def0f1c5d3e3babb1bc9cd5c35)), closes [#3262](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3262)
+* rendering-fix ([6819fba](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6819fba8a1bc29017a356a091fb3364eed4f272a)), closes [#3263](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3263)
+* update webview bootstrap script to handle bundle error ([e317077](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e317077076674b5133528a097b525d25766952ae)), closes [#3231](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3231)
+
 ## [1.44.3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.44.2...v1.44.3) (2026-02-16)
 
 
