@@ -14,6 +14,8 @@ export interface BaseViewerProps {
   attachmentId?: string;
   width?: number;
   height?: number;
+  initialTime?: number;
+  onExpand?: () => void;
 }
 
 export interface FileTypeConfig<P = BaseViewerProps> {

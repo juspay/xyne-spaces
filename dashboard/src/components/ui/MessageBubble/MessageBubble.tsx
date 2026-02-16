@@ -49,6 +49,7 @@ import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtil
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
 import { TicketSuggestions } from './TicketSuggestions';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { hasMessageContent } from '../../../utils/chatUtils';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -766,27 +767,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
               ) : (
                 <>
-                  <div
-                    className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(message.content)}`}
-                    style={isSystemMessage ? systemMessageStyles : undefined}
-                  >
-                    {isMobile ? (
-                      <ExpandableMessage
-                        message={isWorkflowMessage ? 'Workflow created' : message.content}
-                        showEdited={message.edited}
-                        maxHeight={500}
-                        isSystemMessage={isSystemMessage}
-                      />
-                    ) : (
-                      <div className='jp-message-html inline-block'>
-                        <RenderMessageWithHTML
+                  {hasMessageContent(message.content) && (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(message.content)}`}
+                      style={isSystemMessage ? systemMessageStyles : undefined}
+                    >
+                      {isMobile ? (
+                        <ExpandableMessage
                           message={isWorkflowMessage ? 'Workflow created' : message.content}
                           showEdited={message.edited}
+                          maxHeight={500}
                           isSystemMessage={isSystemMessage}
                         />
-                      </div>
-                    )}
-                  </div>
+                      ) : (
+                        <div className='jp-message-html inline-block'>
+                          <RenderMessageWithHTML
+                            message={isWorkflowMessage ? 'Workflow created' : message.content}
+                            showEdited={message.edited}
+                            isSystemMessage={isSystemMessage}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
 

@@ -100,31 +100,14 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName }) => {
         case 'ArrowRight':
           if (transformRef.current) {
             e.preventDefault();
-            const panStep = 50;
             const {
               positionX: currentX,
               positionY: currentY,
               scale,
             } = transformRef.current.instance.transformState;
 
-            let newX = currentX;
-            let newY = currentY;
-
-            switch (e.code) {
-              case 'ArrowUp':
-                newY = currentY + panStep;
-                break;
-              case 'ArrowDown':
-                newY = currentY - panStep;
-                break;
-              case 'ArrowLeft':
-                newX = currentX + panStep;
-                break;
-              case 'ArrowRight':
-                newX = currentX - panStep;
-                break;
-            }
-
+            const newX = currentX;
+            const newY = currentY;
             transformRef.current.setTransform(newX, newY, scale);
           }
           break;

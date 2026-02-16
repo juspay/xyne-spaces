@@ -10,7 +10,8 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Download, FileText, Trash2, Video } from 'lucide-react';
+import { Download, FileText, Maximize2, MoreVertical, Play, Video } from 'lucide-react';
+import { Menu } from '@base-ui/react/menu';
 import {
   formatFileSize,
   getFileExtension,
@@ -30,9 +31,10 @@ import { useAuthContext } from '../../../providers/AuthProvider';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useWindowWidth } from '../../../hooks/useWindowWidth';
 import { toast } from 'sonner';
-import { Modal, ButtonType } from '@juspay/blend-design-system';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { DownloadButton } from './DownloadButton';
+import { DeleteButton } from './DeleteButton';
 
 interface MessageAttachmentProps {
   attachment: QueryResultType<typeof queries.conversationMessages>[number]['attachments'][number];
@@ -42,6 +44,30 @@ interface MessageAttachmentProps {
   channelId?: string;
   replyCount?: number;
 }
+
+//to check the who can delete and delete the attachment
+const useAttachmentDelete = (attachmentId: string, fileName: string, uploadedByUserId: string) => {
+  const { user } = useAuthContext();
+  const zero = useZero();
+
+  const canDelete = uploadedByUserId === user?.id;
+
+  const handleDelete = (): void => {
+    try {
+      zero.mutate(mutators.messageAttachment.delete({ attachmentId }));
+      toast.success('Attachment deleted', {
+        description: `${fileName} has been deleted successfully.`,
+      });
+    } catch (error) {
+      toast.error(`Failed to delete ${fileName}`, {
+        description: error instanceof Error ? error.message : 'Please try again later.',
+      });
+      throw error;
+    }
+  };
+
+  return { canDelete, handleDelete };
+};
 
 /**
  * Preview component that handles both image and file type previews
@@ -194,147 +220,6 @@ const Preview: React.FC<{
 };
 
 /**
- * Download button with loading and error states
- * Supports overlay variant for dark background
- */
-const DownloadButton: React.FC<{
-  attachmentId: string;
-  fileName: string;
-  variant?: 'default' | 'overlay';
-}> = ({ attachmentId, fileName, variant = 'default' }) => {
-  const [isDownloading, setIsDownloading] = React.useState(false);
-
-  const handleDownload = async (e: React.MouseEvent): Promise<void> => {
-    e.stopPropagation();
-
-    setIsDownloading(true);
-
-    try {
-      await downloadAttachment(attachmentId, fileName);
-    } catch {
-      toast.error(`Failed to download ${fileName}`, {
-        description: 'Please try again later.',
-      });
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  const isOverlay = variant === 'overlay';
-
-  return (
-    <button
-      type='button'
-      onClick={e => void handleDownload(e)}
-      disabled={isDownloading}
-      className={`p-2 rounded-md transition-colors disabled:opacity-50 ${
-        isOverlay
-          ? 'hover:bg-white/20 text-white'
-          : 'hover:bg-gray-200 text-gray-600 flex-shrink-0 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1'
-      }`}
-      title={isDownloading ? 'Downloading...' : 'Download file'}
-      aria-label={isDownloading ? 'Downloading...' : `Download ${fileName}`}
-    >
-      <Download size={isOverlay ? 18 : 14} className={isDownloading ? 'animate-pulse' : ''} />
-    </button>
-  );
-};
-
-/**
- * Delete button with loading and error states
- * Supports overlay variant for dark background
- */
-const DeleteButton: React.FC<{
-  attachmentId: string;
-  fileName: string;
-  variant?: 'default' | 'overlay';
-}> = ({ attachmentId, fileName, variant = 'default' }) => {
-  const [isDeleting, setIsDeleting] = React.useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
-  const zero = useZero();
-
-  const handleDelete = (e: React.MouseEvent): void => {
-    e.stopPropagation();
-    setShowDeleteConfirm(true);
-  };
-
-  const handleConfirmDelete = (): void => {
-    setIsDeleting(true);
-
-    try {
-      zero.mutate(mutators.messageAttachment.delete({ attachmentId }));
-      toast.success('Attachment deleted', {
-        description: `${fileName} has been deleted successfully.`,
-      });
-      setShowDeleteConfirm(false);
-    } catch (error) {
-      toast.error(`Failed to delete ${fileName}`, {
-        description: error instanceof Error ? error.message : 'Please try again later.',
-      });
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  const isOverlay = variant === 'overlay';
-
-  return (
-    <>
-      <button
-        type='button'
-        onClick={handleDelete}
-        disabled={isDeleting}
-        className={`p-2 rounded-md transition-colors ${
-          isOverlay
-            ? 'hover:bg-white/20 text-white hover:text-red-300'
-            : 'flex-shrink-0 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-red-600 dark:hover:text-red-400'
-        }`}
-        title={isDeleting ? 'Deleting...' : 'Delete file'}
-        aria-label={isDeleting ? 'Deleting...' : `Delete ${fileName}`}
-      >
-        <Trash2 size={isOverlay ? 18 : 14} className={isDeleting ? 'animate-pulse' : ''} />
-      </button>
-
-      <div
-        onClick={e => e.stopPropagation()}
-        onKeyDown={e => e.stopPropagation()}
-        role='button'
-        tabIndex={0}
-      >
-        <Modal
-          isOpen={showDeleteConfirm}
-          onClose={() => setShowDeleteConfirm(false)}
-          title='Delete Attachment'
-          subtitle='Are you sure you want to delete this attachment?'
-          showCloseButton={true}
-          closeOnBackdropClick={true}
-          showDivider={true}
-          primaryAction={{
-            text: isDeleting ? 'Deleting...' : 'Delete',
-            onClick: handleConfirmDelete,
-            buttonType: ButtonType.DANGER,
-            loading: isDeleting,
-            disabled: isDeleting,
-          }}
-          secondaryAction={{
-            text: 'Cancel',
-            onClick: () => setShowDeleteConfirm(false),
-            buttonType: ButtonType.SECONDARY,
-          }}
-        >
-          <div className='space-y-3'>
-            <p className='text-sm text-gray-600'>This action cannot be undone.</p>
-            <div className='bg-gray-50 rounded-md p-3 border border-gray-200'>
-              <p className='text-sm font-medium text-gray-900 truncate'>{fileName}</p>
-            </div>
-          </div>
-        </Modal>
-      </div>
-    </>
-  );
-};
-
-/**
  * Slack-style action tray that appears on hover
  * Shows download and delete buttons in top-right corner with dark background
  */
@@ -342,14 +227,13 @@ const ActionTray: React.FC<{
   attachmentId: string;
   fileName: string;
   canDelete: boolean;
-}> = ({ attachmentId, fileName, canDelete }) => {
+  onDelete: () => void | Promise<void>;
+}> = ({ attachmentId, fileName, canDelete, onDelete }) => {
   return (
     <div className='absolute top-2 right-2 z-10 opacity-0 group-hover/attachment:opacity-100 transition-opacity duration-200'>
       <div className='flex items-center justify-between bg-gray-900/80 backdrop-blur-sm rounded-lg p-1 shadow-lg'>
         <DownloadButton attachmentId={attachmentId} fileName={fileName} variant='overlay' />
-        {canDelete && (
-          <DeleteButton attachmentId={attachmentId} fileName={fileName} variant='overlay' />
-        )}
+        {canDelete && <DeleteButton fileName={fileName} variant='overlay' onDelete={onDelete} />}
       </div>
     </div>
   );
@@ -555,14 +439,30 @@ const InlineVideoPlayer: React.FC<{
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailError, setThumbnailError] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const { user } = useAuthContext();
   const { isMobile } = usePlatform();
-  const canDelete = uploadedBy === user?.id;
   const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const { canDelete, handleDelete } = useAttachmentDelete(attachmentId, fileName, uploadedBy);
+
+  const toggleModal = () => {
+    // Exit fullscreen if active before toggling modal
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {
+        // Silently handle fullscreen exit errors
+      });
+    }
+    // Capture current video time before opening modal
+    if (videoRef.current && !isModalOpen) {
+      setCurrentTime(videoRef.current.currentTime);
+    }
+    setIsModalOpen(prev => !prev);
+  };
 
   const dimensions = React.useMemo(() => {
-    const maxWidth = isMobile ? 320 : 360;
-    const maxHeight = isMobile ? 260 : 320;
+    const maxWidth = isMobile ? 320 : 500;
+    const maxHeight = isMobile ? 260 : 400;
     const minWidth = 200;
 
     if (!width || !height) {
@@ -580,11 +480,57 @@ const InlineVideoPlayer: React.FC<{
     }
 
     return { width: finalWidth, height: finalHeight };
-  }, [width, height]);
+  }, [width, height, isMobile]);
+
+  // Create inline menu content (3-dot menu for thumbnail state)
+  const inlineMenuContent = (
+    <Menu.Root>
+      <Menu.Trigger>
+        <button
+          type='button'
+          className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white group-hover:bg-black/80 transition-colors opacity-0 group-hover:opacity-100'
+          title='More options'
+          aria-label='More options'
+        >
+          <MoreVertical className='h-4 w-4' />
+        </button>
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner
+          side='bottom'
+          align='end'
+          sideOffset={4}
+          className='z-50 bg-black rounded-lg shadow-lg border border-gray-700 p-1 min-w-[160px]'
+          onClick={e => e.stopPropagation()}
+        >
+          <Menu.Popup>
+            <div className='flex flex-col gap-1'>
+              <Menu.Item>
+                <DownloadButton
+                  attachmentId={attachmentId}
+                  fileName={fileName}
+                  showLabel
+                  className='text-white'
+                />
+              </Menu.Item>
+              {canDelete && (
+                <Menu.Item>
+                  <DeleteButton fileName={fileName} onDelete={handleDelete} showLabel />
+                </Menu.Item>
+              )}
+            </div>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
 
   // Fetch thumbnail on mount
   useEffect(() => {
-    if (!thumbnailUrl) return;
+    if (!thumbnailUrl) {
+      setLoading(false);
+      return;
+    }
 
     let blobUrl: string | null = null;
 
@@ -612,43 +558,8 @@ const InlineVideoPlayer: React.FC<{
   return (
     <>
       <div style={{ contain: 'layout' }}>
-        {/* Video Header with controls */}
         <div
-          style={{ width: `${dimensions.width}px`, minWidth: `${dimensions.width}px` }}
-          className='flex items-center justify-between mb-1'
-        >
-          <div className='flex text-xs font-medium text-gray-900 truncate  items-center gap-2'>
-            {fileName}
-          </div>
-
-          <div className='flex flex-1 items-center gap-1 flex-shrink-0'>
-            <DownloadButton attachmentId={attachmentId} fileName={fileName} />
-            {canDelete && <DeleteButton attachmentId={attachmentId} fileName={fileName} />}
-          </div>
-        </div>
-
-        {/* Inline Video Player - Compact Slack-like size */}
-        <div
-          role='button'
-          tabIndex={0}
-          className='relative bg-black rounded-lg overflow-hidden border border-gray-200 shadow-sm cursor-pointer'
-          onClick={() => {
-            if (isMobile) {
-              setIsModalOpen(true);
-            } else if (!hasClickedPlay) {
-              setHasClickedPlay(true);
-            }
-          }}
-          onKeyDown={e => {
-            if ((e.key === 'Enter' || e.key === ' ') && !hasClickedPlay) {
-              e.preventDefault();
-              if (isMobile) {
-                setIsModalOpen(true);
-              } else if (!hasClickedPlay) {
-                setHasClickedPlay(true);
-              }
-            }
-          }}
+          className='relative bg-black rounded-lg overflow-hidden border border-gray-200 shadow-sm'
           style={{
             height: dimensions.height,
             width: `${dimensions.width}px`,
@@ -657,9 +568,9 @@ const InlineVideoPlayer: React.FC<{
         >
           {/* Show thumbnail on mobile or until user clicks to play on desktop */}
           {loading ? (
-            <div className='bg-gray-200 animate-pulse flex items-center justify-center' />
+            <div className='bg-gray-200 animate-pulse flex items-center justify-center h-full' />
           ) : !hasClickedPlay || isMobile ? (
-            <>
+            <div className='relative h-full'>
               {thumbnailBlobUrl && !thumbnailError ? (
                 <img
                   style={{
@@ -671,11 +582,41 @@ const InlineVideoPlayer: React.FC<{
                 />
               ) : (
                 // Show video icon if no thumbnail
-                <div className='absolute inset-0 flex items-center justify-center bg-gray-900'>
+                <div className='h-full flex items-center justify-center bg-gray-900'>
                   <Video size={64} className='text-gray-600' />
                 </div>
               )}
-            </>
+              <div className='absolute top-4 right-3'>{inlineMenuContent}</div>
+              <div className='absolute bottom-4 left-3 transition-opacity'>
+                <button
+                  onClick={() => {
+                    if (isMobile) {
+                      setIsModalOpen(true);
+                    } else {
+                      setHasClickedPlay(true);
+                    }
+                  }}
+                  className='p-1 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
+                  title='Play video'
+                  aria-label='Play video'
+                >
+                  <Play className='h-5 w-5' />
+                </button>
+              </div>
+              {/* Expand button for desktop */}
+              {!isMobile && (
+                <div className='absolute bottom-4 right-3 opacity-0 group-hover:opacity-100 transition-opacity'>
+                  <button
+                    onClick={toggleModal}
+                    className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
+                    title='Expand video'
+                    aria-label='Expand video'
+                  >
+                    <Maximize2 className='h-4 w-4' />
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             // Load actual video player only after user clicks (desktop only)
             <VideoViewer
@@ -684,6 +625,9 @@ const InlineVideoPlayer: React.FC<{
               fileName={fileName}
               width={dimensions.width}
               height={dimensions.height}
+              onExpand={toggleModal}
+              menuContent={inlineMenuContent}
+              ref={videoRef}
             />
           )}
         </div>
@@ -701,6 +645,7 @@ const InlineVideoPlayer: React.FC<{
           mimeType={mimeType}
           fileSize={fileSize}
           attachmentId={attachmentId}
+          initialTime={currentTime}
           {...(conversationId && { conversationId })}
           {...(channelId && { channelId })}
           {...(typeof replyCount === 'number' && { replyCount })}
@@ -720,15 +665,18 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
   channelId,
   replyCount,
 }) => {
-  const { user } = useAuthContext();
   const { isMobile } = usePlatform();
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
+
+  const { canDelete, handleDelete } = useAttachmentDelete(
+    attachment.id,
+    attachment.originalFilename,
+    attachment.uploadedByUserId,
+  );
 
   const isTextFile =
     attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');
   const isVideo = isVideoFile(attachment.mimetype);
-
-  const canDelete = attachment.uploadedByUserId === user?.id;
 
   const handleCardClick = (): void => {
     setIsPreviewOpen(true);
@@ -813,6 +761,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
               attachmentId={attachment.id}
               fileName={attachment.originalFilename}
               canDelete={canDelete}
+              onDelete={handleDelete}
             />
           )}
         </div>
