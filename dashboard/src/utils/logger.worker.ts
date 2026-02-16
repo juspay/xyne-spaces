@@ -13,6 +13,8 @@ export interface LogEntry {
   event: EventType;
   latency?: number | null;
   version: string;
+  pageViewId?: string | null;
+  pageUrl?: string | null;
   [key: string]: unknown;
 }
 
@@ -24,6 +26,7 @@ export interface WorkerMessage {
     | 'SET_NOTIFICATION_WS_ID'
     | 'SET_ZERO_CLIENT_ID'
     | 'SET_ZERO_CLIENT_GROUP_ID'
+    | 'SET_PAGE_VIEW'
     | 'FLUSH'
     | 'SHUTDOWN';
   payload?: {
@@ -39,6 +42,8 @@ export interface WorkerMessage {
     zeroClientId?: string | undefined;
     zeroClientGroupId?: string | undefined;
     zeroSocketState?: string | undefined;
+    pageViewId?: string | null | undefined;
+    pageUrl?: string | null | undefined;
     loggerBaseUrl?: string | undefined;
     flushIntervalInMs?: number | undefined;
     maxBatchSize?: number | undefined;
@@ -54,6 +59,8 @@ class LoggerWorker {
   private notificationWsId: string | null = null;
   private zeroClientID: string | null = null;
   private zeroClientGroupID: string | null = null;
+  private pageViewId: string | null = null;
+  private pageUrl: string | null = null;
   private loggerBaseUrl: string = '';
   private version: string = '';
   private logs: LogEntry[] = [];
@@ -90,6 +97,9 @@ class LoggerWorker {
           break;
         case 'SET_ZERO_CLIENT_GROUP_ID':
           this.handleSetZeroClientGroupID(payload);
+          break;
+        case 'SET_PAGE_VIEW':
+          this.handleSetPageView(payload);
           break;
         case 'FLUSH':
           this.handleFlush();
@@ -144,6 +154,12 @@ class LoggerWorker {
       if (payload.zeroSocketState !== undefined) {
         (logEntry as Record<string, unknown>)['zeroSocketState'] = payload.zeroSocketState;
       }
+      if (this.pageViewId !== null) {
+        (logEntry as Record<string, unknown>)['pageViewId'] = this.pageViewId;
+      }
+      if (this.pageUrl !== null) {
+        (logEntry as Record<string, unknown>)['pageUrl'] = this.pageUrl;
+      }
 
       console.log(JSON.stringify(logEntry));
 
@@ -172,6 +188,13 @@ class LoggerWorker {
   private handleSetZeroClientGroupID(payload?: WorkerMessage['payload']): void {
     if (payload?.zeroClientGroupId) {
       this.zeroClientGroupID = payload.zeroClientGroupId;
+    }
+  }
+
+  private handleSetPageView(payload?: WorkerMessage['payload']): void {
+    if (payload?.pageViewId !== undefined && payload?.pageUrl !== undefined) {
+      this.pageViewId = payload.pageViewId;
+      this.pageUrl = payload.pageUrl;
     }
   }
 
