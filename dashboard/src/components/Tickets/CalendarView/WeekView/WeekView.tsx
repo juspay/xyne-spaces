@@ -1,0 +1,104 @@
+import { useState, useMemo } from 'react';
+import { format, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay } from 'date-fns';
+import type { Ticket } from '@xyne/shared';
+import { CompactTicketBadge } from '../CompactTicketBadge';
+import { groupTicketsByDate } from './utils';
+import { DayTicketsModal } from '../DayTicketsModal';
+import type { WeekViewProps } from './types';
+
+export function WeekView({
+  currentDate,
+  tickets,
+  onTicketClick,
+}: WeekViewProps): React.ReactElement {
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+  const startDate = startOfWeek(currentDate);
+  const endDate = endOfWeek(currentDate);
+  const days = eachDayOfInterval({ start: startDate, end: endDate });
+  const ticketsByDate = useMemo(() => groupTicketsByDate(tickets), [tickets]);
+
+  const selectedDateTickets = selectedDate
+    ? ticketsByDate.get(format(selectedDate, 'yyyy-MM-dd')) || []
+    : [];
+
+  return (
+    <>
+      <div className='flex-1 overflow-auto bg-white px-6 py-6'>
+        <div className='bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden'>
+          <div className='grid grid-cols-7 bg-gray-50 border-b border-gray-200'>
+            {days.map(day => {
+              const isToday = isSameDay(day, new Date());
+              return (
+                <div key={format(day, 'yyyy-MM-dd')} className='px-3 py-4 text-center'>
+                  <div className='text-xs font-medium text-gray-400 uppercase tracking-wide mb-1'>
+                    {format(day, 'EEE')}
+                  </div>
+                  <div
+                    className={`text-xl font-semibold ${
+                      isToday ? 'text-blue-500' : 'text-gray-900'
+                    }`}
+                  >
+                    {format(day, 'd')}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className='grid grid-cols-7 auto-rows-fr min-h-[400px]'>
+            {days.map(day => {
+              const dateKey = format(day, 'yyyy-MM-dd');
+              const dayTickets = ticketsByDate.get(dateKey) || [];
+              const isToday = isSameDay(day, new Date());
+
+              return (
+                <button
+                  type='button'
+                  key={dateKey}
+                  onClick={() => dayTickets.length > 0 && setSelectedDate(day)}
+                  className={`p-3 border-r border-gray-100 last:border-r-0 text-left transition-all duration-200 hover:bg-gray-50/50 ${
+                    isToday ? 'bg-blue-50/30' : ''
+                  }`}
+                >
+                  <div className='space-y-2'>
+                    {dayTickets.slice(0, 8).map((ticket: Ticket) => (
+                      <CompactTicketBadge
+                        key={ticket.id}
+                        ticket={ticket}
+                        onClick={e => {
+                          e?.stopPropagation();
+                          onTicketClick(ticket);
+                        }}
+                      />
+                    ))}
+                    {dayTickets.length > 8 && (
+                      <div className='text-xs text-gray-400 pl-1 font-medium'>
+                        +{dayTickets.length - 8} more
+                      </div>
+                    )}
+                    {dayTickets.length === 0 && (
+                      <div className='flex items-center justify-center h-full min-h-[100px]'>
+                        <span className='text-xs text-gray-300'>No tickets</span>
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {selectedDate && (
+        <DayTicketsModal
+          isOpen={!!selectedDate}
+          onClose={() => setSelectedDate(null)}
+          date={selectedDate}
+          tickets={selectedDateTickets}
+          onTicketClick={onTicketClick}
+        />
+      )}
+    </>
+  );
+}
