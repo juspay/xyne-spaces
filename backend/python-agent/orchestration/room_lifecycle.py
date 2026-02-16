@@ -98,11 +98,8 @@ class RoomLifecycle:
                     )
                     self.stt_tasks[participant.sid] = task
         
-        # Start MultiUserTranscriber if using new approach
+        # MultiUserTranscriber event handlers will be registered in main.py after agent is fully ready
         if self.multi_user_transcriber is not None:
-            self.multi_user_transcriber.start()
-            # Handle existing participants already in the room
-            self.multi_user_transcriber.handle_existing_participants()
             logger.info(f"room_lifecycle_initialized | initial_participants={len(self.tracker.active_participants)}")
 
     def get_stt_tasks(self) -> Dict[str, asyncio.Task]:
