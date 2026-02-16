@@ -2,19 +2,17 @@ import { redisService } from './redisService';
 import { logger } from '@/utils/logger';
 
 export async function checkRateLimit(endpoint: string, identifier: string): Promise<boolean> {
-  
-
   try {
     const maxRequests = parseInt(process.env.ZERO_MAX_REQUESTS || '100', 10);
     const windowSeconds = parseInt(process.env.ZERO_REQUEST_WINDOW || '60', 10);
     const redis = redisService.getClient();
     const key = `rate:${endpoint}:${identifier}`;
 
-    // Atomic: Initialize key with TTL if it doesn't exist (SET NX EX)
-    await redis.set(key, 0, 'EX', windowSeconds, 'NX');
+    // Execute INCR and EXPIRE in a single transaction
+    const results = await redis.multi().incr(key).expire(key, windowSeconds, 'NX').exec();
 
-    // Atomic: Increment and get count
-    const count = await redis.incr(key);
+    // results[0] contains [error, count] from INCR
+    const count = results?.[0]?.[1] as number;
 
     return count <= maxRequests;
   } catch (error) {
