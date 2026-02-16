@@ -15,8 +15,9 @@ import { cn } from '../../ui/Dialog';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { queries } from '../../../zero/queries';
-import { formatThreadTimestamp } from '../../../utils/dateUtils';
+import { formatElapsedTime } from '../../../utils/dateUtils';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface DmListItemProps {
   channel: Channel;
@@ -50,10 +51,10 @@ export const DmListItem = ({
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
 
-  // 3. Format Time using formatThreadTimestamp
+  // 3. Format elapsed time (now, 5m, 2h, 3d, 1 month, 2 years, etc.)
   const formatTime = (timestamp?: number): string => {
     if (!timestamp) return '';
-    return formatThreadTimestamp(timestamp);
+    return formatElapsedTime(timestamp);
   };
 
   // 4. Preview Text Logic
@@ -95,6 +96,44 @@ export const DmListItem = ({
       handleClick();
     }
   };
+
+  const { isMobile } = usePlatform();
+
+  if (isMobile) {
+    return (
+      <button
+        className='w-full flex items-start gap-3 px-2 text-left text-select-none active:scale-[0.98] transition-all duration-200'
+        onClick={handleClick}
+        aria-label={`Open conversation with ${displayName}`}
+      >
+        <DMItemAvatar userId={avatarUserId || null} />
+        <div className='w-full flex-1 min-w-0 space-y-1'>
+          <div className='w-full flex items-start justify-between gap-3 min-w-0'>
+            <p className='text-[16px] tracking-[-0.32px] text-[#202020] font-medium min-w-0 line-clamp-2'>
+              {displayName}
+            </p>
+            <p className='shrink-0 text-[14px] tracking-[-0.28px] text-[#BBB]'>
+              {formatTime(lastMessage?.createdAt)}
+            </p>
+          </div>
+          <div className='w-full flex items-start justify-between gap-3 min-w-0'>
+            <div
+              className={cn(
+                'min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-normal leading-[1.35] text-[#838383]',
+              )}
+            >
+              {getPreviewText()}
+            </div>
+            {unreadCount > 0 ? (
+              <div className='font-["Geist_Mono"] text-[14px] font-semibold leading-[1.2] text-[#FFF] shrink-0 bg-[#6276be] flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
+                {unreadCount}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </button>
+    );
+  }
 
   return (
     <div className='w-full border-b border-gray-100 last:border-0 mt-0'>
@@ -147,7 +186,7 @@ export const DmListItem = ({
             </p>
             {unreadCount > 0 && (
               <div className='shrink-0 bg-[#6276be] flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
-                <span className="font-['Geist_Mono'] font-semibold text-[11px] text-white leading-[1.2]">
+                <span className="font-['Geist_Mono'] text-[14px] font-semibold leading-[1.2] text-[#FFF]">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               </div>
@@ -155,6 +194,14 @@ export const DmListItem = ({
           </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+const DMItemAvatar = ({ userId }: { userId: string | null }): ReactElement => {
+  return (
+    <div className='size-[44px] rounded-md shrink-0 flex items-center justify-center overflow-clip mt-[3px]'>
+      <Avatar userId={userId} size='lg' />
     </div>
   );
 };

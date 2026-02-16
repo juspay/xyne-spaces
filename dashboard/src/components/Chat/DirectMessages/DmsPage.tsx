@@ -159,7 +159,7 @@ const DmsPage = (): ReactElement => {
               </p>
             </div>
           ) : (
-            <div className='w-full max-w-full pb-20'>
+            <div className='w-full max-w-full pb-20 space-y-6  pt-4'>
               {filteredDms.map(channel => (
                 <DmListItem
                   key={`dm-${channel.id}`}

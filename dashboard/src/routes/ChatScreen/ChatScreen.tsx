@@ -13,6 +13,7 @@ import {
 } from 'react-resizable-panels';
 import { useUserChannelStatuses } from '../../hooks/useChannels';
 import { TypingStateProvider } from '../../contexts/TypingStateContext';
+import { cn } from '../../utils/classNames';
 
 interface ChatScreenProps {
   shouldStackThread?: boolean;
@@ -60,7 +61,12 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
   // For full-screen pages, we don't need the directory sidebar
   if (isFullScreenPage) {
     return (
-      <main className='h-full relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'>
+      <main
+        className={cn(
+          'h-full relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)]',
+          isMobile ? 'border-none' : 'border-root-border border',
+        )}
+      >
         <Outlet />
       </main>
     );
