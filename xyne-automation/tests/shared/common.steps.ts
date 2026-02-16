@@ -207,6 +207,26 @@ When(
   }
 );
 
+When(
+  'I select a date {int} days from now in the element {string}',
+  async function (this: CustomWorld, days: number, calendarSelector: string) {
+    if (!this.page) throw new Error('Browser not initialized');
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + days);
+    const year = futureDate.getFullYear();
+    const month = futureDate.getMonth();
+    const day = futureDate.getDate();
+    const calendar = this.page.locator(calendarSelector);
+    await calendar.waitFor({ state: 'visible' });
+    const dateButton = calendar.locator(`button[data-date="${year}-${month}-${day}"]`);
+    await dateButton.waitFor({ state: 'visible' });
+    await dateButton.click();
+    uiLogger.info(
+      `[UI] Selected date ${year}-${month + 1}-${day} (${days} days from now) in calendar "${calendarSelector}"`
+    );
+  }
+);
+
 // ============================================
 // UI Assertion Steps
 // ============================================

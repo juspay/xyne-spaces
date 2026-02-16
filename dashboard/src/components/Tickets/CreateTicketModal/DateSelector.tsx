@@ -291,6 +291,7 @@ export const InlineCalendar: React.FC<InlineCalendarProps> = ({
         <div
           role='button'
           tabIndex={0}
+          data-testid='ticket-due-date-selector'
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -324,6 +325,7 @@ export const InlineCalendar: React.FC<InlineCalendarProps> = ({
           onTouchMove={e => {
             e.stopPropagation();
           }}
+          data-testid='ticket-due-date-calendar'
           className='w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden z-50'
           sideOffset={4}
           align='start'

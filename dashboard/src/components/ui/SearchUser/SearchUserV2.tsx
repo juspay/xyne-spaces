@@ -196,6 +196,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
           </div>
           <BaseCombobox.Input
             ref={inputRef}
+            data-testid='user-search-input'
             value={searchQuery}
             onChange={e => onSearchChange(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -217,6 +218,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
               className='z-[100] pointer-events-none'
             >
               <BaseCombobox.Popup
+                data-testid='user-search-results'
                 data-combobox-popup
                 className='border border-[#E1E4EA] min-w-[var(--anchor-width)] max-h-[14rem] rounded-lg bg-white text-gray-900 transition duration-100 origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 shadow-lg pointer-events-auto'
               >

@@ -15,8 +15,8 @@ Feature: Ticket Edit and Sub-Ticket Creation from Tickets Tab E2E Flow
     When I click on ticket card with title "Ticket from Tickets Tab"
     And I click on "[data-testid='ticket-detail-status-selector']"
     And I click on "ul[role='listbox'] li button:has-text('In Progress')"
-    And I click on "[data-testid='ticket-detail-eta-display']"
-    And I set datetime input "[data-testid='ticket-detail-eta-input'] input" to 7 days from now
+    And I click on "[data-testid='ticket-detail-stage-eta-display']"
+    And I set datetime input "[data-testid='ticket-detail-stage-eta-input'] input" to 7 days from now
     And I click on "[data-testid='ticket-detail-priority-selector']"
     And I click on "ul[role='listbox'] li button:has-text('Critical')"
     # Create first sub-ticket - basic
