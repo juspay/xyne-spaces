@@ -1,3 +1,16 @@
+## [1.44.3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.44.2...v1.44.3) (2026-02-16)
+
+
+### Bug Fixes
+
+* added feat/fix: ticketId format for title validation ([ebdb915](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ebdb91539f7a5becb5ff290f754ab7afa5a86deb)), closes [#3180](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3180)
+* changed automation to match recent ui changes ([db5d895](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/db5d895fb6d0bad63ff3e1994713d6a9601dfbcd)), closes [#3229](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3229)
+* fix search logs structure ([efeca5c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/efeca5c51f149e448229d302668583d0cdf37536))
+* Fix the video attachment ([3e00d3e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3e00d3e189d4cb02a61f85bed74cd71ede44b8fe))
+* improved chat dm exp ([718750b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/718750bc3a5a6bd0472dc3a398e067001edd55ea)), closes [#3057](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3057)
+* kanban board filter header overflow responsiveness ([0bbd134](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0bbd13483e76abefc3778f15873d2f170f7fbb97)), closes [#3170](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3170)
+* safe area view fix ([123d41b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/123d41bc9eefda41d7f31e1be9220762bba2b274)), closes [#3162](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3162)
+
 ## [1.44.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.44.1...v1.44.2) (2026-02-15)
 
 
