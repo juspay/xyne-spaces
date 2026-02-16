@@ -277,6 +277,28 @@ class RedisService {
     }
   }
 
+  async broadcastZeroFallbackConfigUpdate(config: { fallbackEnabled: boolean; allowMutations: boolean; pollIntervalMs: number }): Promise<void> {
+    if (!this.publisher) {
+      logger.info('❌ [REDIS-SERVICE] Redis publisher not initialized for Zero fallback config');
+      return;
+    }
+
+    const channel = 'global:zero-fallback-config';
+    const event = {
+      fallbackEnabled: config.fallbackEnabled,
+      allowMutations: config.allowMutations,
+      pollIntervalMs: config.pollIntervalMs,
+      timestamp: new Date()
+    };
+
+    try {
+      await this.publisher.publish(channel, JSON.stringify(event));
+      logger.info('📢 [REDIS-ZERO-FALLBACK] Published config update to Redis:', config);
+    } catch (error) {
+      logger.error('❌ [REDIS-ZERO-FALLBACK] Failed to publish config update:', error);
+    }
+  }
+
   // Subscribe to session channels
   // Global message handler setup flag
   private messageHandlerSetup = false;
@@ -449,6 +471,29 @@ class RedisService {
       // Remove all callbacks and unsubscribe
       await this.unsubscribeFromChannel(channel);
       logger.info(`📊 [REDIS-UNSUB] Unsubscribed from workflow events channel: ${channel}`);
+    }
+  }
+
+  async subscribeToZeroFallbackConfigUpdates(
+    callback: (config: { fallbackEnabled: boolean; allowMutations: boolean; pollIntervalMs: number; timestamp: Date }) => void
+  ): Promise<void> {
+    if (!this.subscriber) {
+      logger.info('❌ [REDIS-SERVICE] Redis subscriber not initialized for Zero fallback config subscription');
+      return;
+    };
+
+    const channel = 'global:zero-fallback-config';
+    if (!this.subscriptionCallbacks.has(channel)) {
+      this.subscriptionCallbacks.set(channel, []);
+    }
+    this.subscriptionCallbacks.get(channel)!.push(callback);
+    this.setupGlobalMessageHandler();
+
+    if (!this.activeSubscriptions.has(channel)) {
+      logger.info('📢 [REDIS-ZERO-FALLBACK] Subscribing to fallback config channel:', channel);
+      await this.subscriber.subscribe(channel);
+      this.activeSubscriptions.add(channel);
+      logger.info('✅ [REDIS-ZERO-FALLBACK] Successfully subscribed to fallback config updates');
     }
   }
 
@@ -684,6 +729,26 @@ class RedisService {
     }
     
     return await this.redis.hdel(key, field);
+  }
+
+  // Zero Fallback Configuration
+  async getZeroFallbackConfig(): Promise<{ fallbackEnabled: boolean; allowMutations: boolean; pollIntervalMs: number }> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const enabled = await this.redis.get('zero:fallback_enabled');
+    const mutations = await this.redis.get('zero:allow_mutations');
+    const pollInterval = await this.redis.get('zero:poll_interval_ms');
+    return {
+      fallbackEnabled: enabled === 'true',
+      allowMutations: mutations === 'true',
+      pollIntervalMs: pollInterval ? parseInt(pollInterval, 10) : 15000, // Default 15 seconds
+    };
+  }
+
+  async setZeroFallbackConfig(config: { fallbackEnabled: boolean; allowMutations: boolean; pollIntervalMs: number }): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    await this.redis.set('zero:fallback_enabled', String(config.fallbackEnabled));
+    await this.redis.set('zero:allow_mutations', String(config.allowMutations));
+    await this.redis.set('zero:poll_interval_ms', String(config.pollIntervalMs));
   }
 
   // Getter for direct Redis access (use sparingly)

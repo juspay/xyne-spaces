@@ -20,6 +20,8 @@ const envSchema = Joi.object({
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
   LOG_FILE_PATH: Joi.string().default(''),
   DATABASE_URL: Joi.string().required(),
+  DATABASE_READ_REPLICA_URLS: Joi.string().optional().default(''),
+  DATABASE_POOL_MAX: Joi.number().default(20),
   WORKFLOW_LOCK_DURATION_MS: Joi.number().default(3600000), // 30 minutes in milliseconds
   API_KEYS_ENABLED: Joi.boolean().default(false),
   API_KEYS_CONFIG: Joi.string().default(''),
@@ -166,6 +168,10 @@ export const config = {
   },
   database: {
     url: envVars.DATABASE_URL,
+    readReplicaUrls: envVars.DATABASE_READ_REPLICA_URLS
+      ? envVars.DATABASE_READ_REPLICA_URLS.split(',').map((url: string) => url.trim()).filter(Boolean)
+      : [],
+    poolMax: envVars.DATABASE_POOL_MAX,
   },
   workflow: {
     lockDurationMs: envVars.WORKFLOW_LOCK_DURATION_MS,

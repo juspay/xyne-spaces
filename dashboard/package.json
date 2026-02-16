@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "lint:errors-only": "eslint .",
+    "lint:errors-only": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit --project tsconfig.app.json --pretty",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",

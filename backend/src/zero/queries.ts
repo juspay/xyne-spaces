@@ -472,8 +472,8 @@ export const queries = defineQueries({
     }
   ),
 
-  projectById: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) =>
-    zql.projects.where('id', id).one()
+  projectById: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) =>
+    zql.projects.where('id', projectId).one()
   ),
 
   ticketsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) =>

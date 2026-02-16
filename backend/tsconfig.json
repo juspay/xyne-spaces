@@ -25,6 +25,11 @@
     "moduleResolution": "bundler",
     "baseUrl": "./src",
     "paths": {
+      "#zero-internal/query-internals": ["../node_modules/@rocicorp/zero/out/zql/src/query/query-internals"],
+      "#zero-internal/pg-query-executor": ["../node_modules/@rocicorp/zero/out/zero-server/src/pg-query-executor"],
+      "#zero-internal/schema": ["../node_modules/@rocicorp/zero/out/zero-server/src/schema"],
+      "#zero-internal/compiler": ["../node_modules/@rocicorp/zero/out/z2s/src/compiler"],
+      "#zero-internal/sql": ["../node_modules/@rocicorp/zero/out/z2s/src/sql"],
       "@xyne/shared": ["../../shared/dist"],
       "@framework": ["../../framework/dist"],
       "@/*": ["*"],
