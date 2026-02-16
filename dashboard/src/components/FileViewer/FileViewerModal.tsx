@@ -15,6 +15,7 @@ interface FilePreviewModalProps {
   mimeType: string;
   fileSize: number;
   attachmentId?: string; // Optional: if provided, use downloadAttachment instead of downloadFile
+  initialTime?: number;
   conversationId?: string;
   channelId?: string;
   replyCount?: number;
@@ -87,6 +88,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   mimeType,
   fileSize,
   attachmentId,
+  initialTime,
   conversationId,
   channelId,
   replyCount,
@@ -155,7 +157,13 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
         const ViewerComponent = fileType.component;
         return (
           <div className={fileType.wrapperClass}>
-            <ViewerComponent source={null} fileName={fileName} attachmentId={attachmentId} />
+            <ViewerComponent
+              source={null}
+              fileName={fileName}
+              attachmentId={attachmentId}
+              onExpand={onClose}
+              {...(initialTime !== undefined && { initialTime })}
+            />
           </div>
         );
       }

@@ -167,3 +167,16 @@ export const isEventFromInput = (event: KeyboardEvent, inputId: string): boolean
   if (!(target instanceof HTMLElement)) return false;
   return Boolean(target.closest(`[data-input-id="${inputId}"]`));
 };
+
+/**
+ * Check if a message has meaningful text content
+ * Returns false for empty strings, whitespace-only strings, or strings with only empty HTML tags
+ */
+export const hasMessageContent = (content: string | undefined | null): boolean => {
+  if (!content) return false;
+  const trimmed = content.trim();
+  if (trimmed === '') return false;
+  // Check if content is just empty HTML tags
+  const textOnly = trimmed.replace(/<[^>]*>/g, '').trim();
+  return textOnly !== '';
+};

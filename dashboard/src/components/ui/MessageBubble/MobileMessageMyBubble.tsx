@@ -24,6 +24,7 @@ import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessage
 import { ChannelScopeType } from '@xyne/shared';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { PostedInLink } from './PostedInLink';
+import { hasMessageContent } from '../../../utils/chatUtils';
 
 type MessageWithRelations = QueryResultType<typeof queries.conversationMessages>[number];
 
@@ -235,16 +236,18 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                 </div>
               </div>
             ) : (
-              <div
-                className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-[16px] leading-[1.5] text-foreground ${getEmojiFontSizeClass(message.content)} ${isSystemMessage ? 'text-muted-foreground italic' : ''}`}
-                style={isSystemMessage ? systemMessageStyles : undefined}
-              >
-                <ExpandableMessage
-                  message={isWorkflowMessage ? 'Workflow created' : message.content}
-                  showEdited={message.edited}
-                  maxHeight={500}
-                />
-              </div>
+              hasMessageContent(message.content) && (
+                <div
+                  className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-[16px] leading-[1.5] text-foreground ${getEmojiFontSizeClass(message.content)} ${isSystemMessage ? 'text-muted-foreground italic' : ''}`}
+                  style={isSystemMessage ? systemMessageStyles : undefined}
+                >
+                  <ExpandableMessage
+                    message={isWorkflowMessage ? 'Workflow created' : message.content}
+                    showEdited={message.edited}
+                    maxHeight={500}
+                  />
+                </div>
+              )
             )}
 
             {conversation?.ticket && !isWorkflowMessage && (
