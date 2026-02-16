@@ -24,6 +24,8 @@ Feature: Ticket Creation with Attachments E2E Flow
     And I click on text "user:user2-browser.name" in the element "[data-testid='ticket-assignee-selector-options']"
     And I click on "[data-testid='ticket-priority-selector']"
     And I click on text "High" in the element "[data-testid='ticket-priority-selector-options']"
+    And I click on "[data-testid='ticket-due-date-selector']"
+    And I select a date 7 days from now in the element "[data-testid='ticket-due-date-calendar']"
     And I click the button with text "Create Ticket"
     And I wait for "[data-testid='ticket-title-input']" to disappear
 

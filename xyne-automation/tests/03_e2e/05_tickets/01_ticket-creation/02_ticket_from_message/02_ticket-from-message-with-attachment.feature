@@ -27,6 +27,8 @@ Feature: Create Ticket from Message with Attachment
     And I click on text "Critical" in the element "[data-testid='ticket-priority-selector-options']"
     And I click on "[data-testid='ticket-status-selector']"
     And I click on text "Todo" in the element "[data-testid='ticket-status-selector-options']"
+    And I click on "[data-testid='ticket-due-date-selector']"
+    And I select a date 5 days from now in the element "[data-testid='ticket-due-date-calendar']"
     And I click the button with text "Create Ticket"
     And I wait for "[data-testid='ticket-title-input']" to disappear
 
@@ -50,5 +52,8 @@ Feature: Create Ticket from Message with Attachment
     And I click on text "High" in the element "[data-testid='ticket-priority-selector-options']"
     And I click on "[data-testid='ticket-status-selector']"
     And I click on text "Todo" in the element "[data-testid='ticket-status-selector-options']"
+    And I click on "[data-testid='ticket-due-date-selector']"
+    And I select a date 3 days from now in the element "[data-testid='ticket-due-date-calendar']"
+
     And I click on "[data-testid='ticket-submit-button']"
     And I wait for "[data-testid='ticket-title-input']" to disappear
