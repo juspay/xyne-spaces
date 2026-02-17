@@ -1,3 +1,18 @@
+## [1.48.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.47.1...v1.48.0) (2026-02-17)
+
+
+### Features
+
+* livekit webhook implementation ([88e66cd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/88e66cd850305b91609958d1900c83ba50931d97)), closes [#3052](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3052)
+* seting lazyConnect as false for worker ([4c65043](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4c65043f4138153b0e8e355e0e0167feb8fa0151)), closes [#3331](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3331)
+
+
+### Bug Fixes
+
+* custom-emoji-rendering ([dc8d9bc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dc8d9bc0362048ca1c534f420b44a9c5fd37cd41)), closes [#3307](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3307)
+* Mobile view Profile Drawer ([984b711](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/984b7115c6914e2b194d93ae57a3f2d4cf2c627c)), closes [#3081](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3081)
+* workflow fixes ([bd80c72](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bd80c72a4c9585a41615d1ef885d2e91633c9fb5)), closes [#2546](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2546)
+
 ## [1.47.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.47.0...v1.47.1) (2026-02-17)
 
 
