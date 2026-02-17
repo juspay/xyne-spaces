@@ -1,3 +1,10 @@
+## [1.45.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.45.1...v1.45.2) (2026-02-17)
+
+
+### Bug Fixes
+
+* Last Activity At should not update for thread replies ([cb11a48](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cb11a48958c95209cd374fc066cf40a1c30ae1a9)), closes [#3247](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3247)
+
 ## [1.45.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.45.0...v1.45.1) (2026-02-16)
 
 
