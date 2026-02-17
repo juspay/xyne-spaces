@@ -401,12 +401,75 @@ export const mutators = defineMutators({
         }
 
         // Validate message exists
-        const message = await tx.run(zql.messages.where('messageId', messageId).one());
+        let message = await tx.run(zql.messages.where('messageId', messageId).one());
         if (!message) {
           throw new Error(`Message ${messageId} not found`);
         }
 
-        const newLastViewedAt = message.createdAt - 1;
+        // If the message is from the current user, find the nearest message from another user
+        if (message.senderId === ctx.userID) {
+          // Get the conversation to find messages before/after this one
+          const currentConversation = await tx.run(
+            zql.conversations.where('conversationId', message.conversationId).one(),
+          );
+          if (!currentConversation) {
+            throw new Error(`Conversation ${message.conversationId} not found`);
+          }
+
+          // First, try to find a conversation ABOVE (before) from another user
+          const previousConversations = await tx.run(
+            zql.conversations
+              .where('channelId', channelId)
+              .where('createdAt', '<', currentConversation.createdAt)
+              .where('createdBy', '!=', ctx.userID)
+              .orderBy('createdAt', 'desc')
+              .limit(1),
+          );
+
+          let targetConversation = previousConversations[0];
+
+          // If no previous conversation from another user, try to find one BELOW (after)
+          if (!targetConversation) {
+            const nextConversations = await tx.run(
+              zql.conversations
+                .where('channelId', channelId)
+                .where('createdAt', '>', currentConversation.createdAt)
+                .where('createdBy', '!=', ctx.userID)
+                .orderBy('createdAt', 'asc')
+                .limit(1),
+            );
+            targetConversation = nextConversations[0];
+          }
+
+          if (!targetConversation) {
+            // No message from another user exists at all, nothing to mark as unread
+            return;
+          }
+
+          // Get the initial message of that conversation
+          const targetMessage = await tx.run(
+            zql.messages.where('messageId', targetConversation.initialMessageId).one(),
+          );
+
+          if (!targetMessage) {
+            // Target message not found, nothing to mark as unread
+            return;
+          }
+
+          // Use the target message instead
+          message = targetMessage;
+        }
+
+        // Get the conversation to use its createdAt for lastViewedAt calculation
+        // We use conversation.createdAt because the UI compares lastViewedAt against conversation.createdAt
+        const messageConversation = await tx.run(
+          zql.conversations.where('conversationId', message.conversationId).one(),
+        );
+        if (!messageConversation) {
+          throw new Error(`Conversation ${message.conversationId} not found`);
+        }
+
+        const newLastViewedAt = messageConversation.createdAt - 1;
         const channel = await tx.run(zql.channels.where('id', channelId).one());
         if (!channel) {
           throw new Error(`Channel ${channelId} not found`);

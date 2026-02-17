@@ -28,6 +28,7 @@ export type ChatListProps = {
   latestConversation: Anchor;
   lastViewedAt?: number | null;
   channelScopeType?: ChannelScopeType | undefined;
+  skipScrollResetRef?: React.MutableRefObject<boolean> | null;
 };
 
 type Anchor = {
@@ -44,6 +45,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
   latestConversation,
   lastViewedAt,
   channelScopeType,
+  skipScrollResetRef,
 }): React.ReactElement => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -66,6 +68,11 @@ const ChatListV2: React.FC<ChatListProps> = ({
 
   // Reset pagination anchors when initialItem changes and load messages around it
   useEffect(() => {
+    // Skip scroll reset if flag is set (e.g., when marking as unread)
+    if (skipScrollResetRef?.current) {
+      skipScrollResetRef.current = false;
+      return;
+    }
     setScrollState({ isAtPosition: false });
     setNewestConversations(initialItem);
     setOldestConversation(initialItem);
