@@ -508,6 +508,7 @@ export const ticketTable = table('tickets')
     assignedTo: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+    statusUpdatedAt: number(),
     merchantId: string().optional(),
     conversationId: string(),
     channelId: string(),

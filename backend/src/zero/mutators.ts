@@ -41,8 +41,7 @@ import { ticketAssignmentService } from '@/services/ticketAssignmentService';
 import { logger } from '@/utils/logger';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
-import { calculateETADeadline } from '@/utils/etaCalculation';
-
+import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import {
   executionOrchestrator,
   unifiedDMService,
@@ -3236,6 +3235,40 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata'] as const;
           const oldAssignedTo = ticket.assignedTo;
           const oldBoardId = ticket.boardId;
+
+          // StatusV2 pause/unpause handling:
+          // - Always track status change timestamp in statusUpdatedAt
+          // - When leaving PAUSED (and ETA isn't explicitly set), push ETA forward by effective paused working duration.
+          // - When ETA is manually changed while PAUSED, reset statusUpdatedAt to restart the pause timer
+          if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2) {
+            updateData.statusUpdatedAt = params.updatedAt;
+
+            const isLeavingPaused =
+              ticket.statusV2 === TicketStatusV2.PAUSED && params.statusV2 !== TicketStatusV2.PAUSED;
+
+            if (isLeavingPaused && params.eta === undefined && ticket.eta) {
+              const pausedAt = ticket.statusUpdatedAt ?? params.updatedAt;
+              const pausedDurationMs = calculateWorkingDurationMs(
+                new Date(pausedAt),
+                new Date(params.updatedAt),
+              );
+
+              if (pausedDurationMs > 0) {
+                const baseMs = Math.max(ticket.eta, pausedAt);
+                const pausedHours = pausedDurationMs / (60 * 60 * 1000);
+                updateData.eta = calculateETADeadline(new Date(baseMs), pausedHours).getTime();
+              }
+            }
+          }
+
+          // Reset pause timer if ETA is manually changed while ticket is PAUSED
+          if (
+            params.eta !== undefined &&
+            params.eta !== ticket.eta &&
+            ticket.statusV2 === TicketStatusV2.PAUSED
+          ) {
+            updateData.statusUpdatedAt = params.updatedAt;
+          }
 
           for (const field of fields) {
             if (params[field] !== undefined && params[field] !== ticket[field]) {

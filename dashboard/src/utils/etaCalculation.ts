@@ -1,20 +1,18 @@
 /**
- * Backend wrapper for ETA calculation utilities.
- * Uses shared implementation from @xyne/shared .
+ * Dashboard wrapper for ETA calculation utilities.
+ * Uses shared implementation from @xyne/shared.
  */
 
 import {
   calculateETADeadline as sharedCalculateETADeadline,
   calculateWorkingDurationMs as sharedCalculateWorkingDurationMs,
-  getWorkingHoursConfig as sharedGetWorkingHoursConfig,
 } from '@xyne/shared';
-import { logger } from './logger';
-import { config } from '@/config/env';
+import { WORKING_HOUR_START, WORKING_HOUR_END } from '../config';
 
-// Working hours from config (in IST)
+// Working hours configuration (in IST)
 const workingHoursConfig = {
-  start: config.workingHours.start,
-  end: config.workingHours.end,
+  start: WORKING_HOUR_START,
+  end: WORKING_HOUR_END,
 };
 
 /**
@@ -25,9 +23,7 @@ const workingHoursConfig = {
  * @returns Date - The calculated ETA deadline (UTC)
  */
 export function calculateETADeadline(assignedAt: Date, totalEtaHours: number): Date {
-  const result = sharedCalculateETADeadline(assignedAt, totalEtaHours, workingHoursConfig);
-  logger.info(`[ETA] Assigned=${assignedAt.toISOString()}, TotalHours=${totalEtaHours}, ETA=${result.toISOString()}`);
-  return result;
+  return sharedCalculateETADeadline(assignedAt, totalEtaHours, workingHoursConfig);
 }
 
 /**
@@ -36,11 +32,4 @@ export function calculateETADeadline(assignedAt: Date, totalEtaHours: number): D
  */
 export function calculateWorkingDurationMs(startUtc: Date, endUtc: Date): number {
   return sharedCalculateWorkingDurationMs(startUtc, endUtc, workingHoursConfig);
-}
-
-/**
- * Get working hours configuration for debugging/display
- */
-export function getWorkingHoursConfig(): { start: number; end: number; perDay: number; offset: number } {
-  return sharedGetWorkingHoursConfig(workingHoursConfig);
 }

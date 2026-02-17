@@ -299,6 +299,7 @@ model Ticket {
   assignedTo       String?           // Foreign key to User
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+  statusUpdatedAt  DateTime          @default(now()) // Timestamp when statusV2 was last changed
   merchantId       String?           // Merchant ID to which the ticket is linked
   conversationId   String            // The xyne chat conversation to which the ticket is linked
   channelId        String            // The channel to which the ticket is linked

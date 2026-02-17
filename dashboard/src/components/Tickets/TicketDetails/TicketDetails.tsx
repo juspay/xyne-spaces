@@ -68,6 +68,7 @@ import {
 } from '../../../hooks/useTicketReferences';
 import { TicketStatusIcon as TicketStageIcon } from '../TicketStatus/TicketStatusIcon';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
+import { calculateETADeadline, calculateWorkingDurationMs } from '../../../utils/etaCalculation';
 import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
 import { cn } from '../../ui/Drawer';
 import Button from '../../ui/Button';
@@ -1865,6 +1866,39 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               )
             }
           />
+
+          {/* Projected deadline (while PAUSED) */}
+          {ticket.statusV2 === TicketStatusV2.PAUSED && (
+            <TicketKeyValuePair
+              ticketKey='projected deadline'
+              value={
+                ticket.statusUpdatedAt ? (
+                  (() => {
+                    const pausedDurationMs = calculateWorkingDurationMs(
+                      new Date(ticket.statusUpdatedAt),
+                      new Date(Date.now()),
+                    );
+
+                    const projectedEta =
+                      ticket.eta && pausedDurationMs > 0
+                        ? calculateETADeadline(
+                            new Date(Math.max(ticket.eta, ticket.statusUpdatedAt)),
+                            pausedDurationMs / (60 * 60 * 1000),
+                          ).getTime()
+                        : (ticket.eta ?? null);
+
+                    return (
+                      <div className='inline-flex items-center gap-2 text-sm text-[#3B4145]'>
+                        <span>{formatETADisplay(projectedEta ?? undefined)}</span>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <span className='text-sm text-gray-500'>-</span>
+                )
+              }
+            />
+          )}
 
           {/* User Group */}
           <TicketKeyValuePair
