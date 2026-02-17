@@ -55,6 +55,18 @@ export interface SearchImpressionEvent extends CommonEventFields {
    * Number of words in the query text
    */
   query_text_length: number;
+  /**
+   * Source of the query text
+   * - KEYBOARD: Default state for manual typing
+   * - CLIPBOARD_PASTE: Triggered when content enters via paste event (Cmd+V / Ctrl+V)
+   */
+  query_source: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+  /**
+   * Whether the pasted content was modified after pasting
+   * - true: User performed manual keystrokes (additions, deletions, backspaces) after paste
+   * - false: Pasted content remains unmodified
+   */
+  is_modified: boolean;
   tab: string;
 }
 
@@ -121,6 +133,18 @@ export interface SearchSessionEndEvent extends CommonEventFields {
    * Number of words in the query text
    */
   query_text_length: number;
+  /**
+   * Source of the query text
+   * - KEYBOARD: Default state for manual typing
+   * - CLIPBOARD_PASTE: Triggered when content enters via paste event (Cmd+V / Ctrl+V)
+   */
+  query_source: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+  /**
+   * Whether the pasted content was modified after pasting
+   * - true: User performed manual keystrokes (additions, deletions, backspaces) after paste
+   * - false: Pasted content remains unmodified
+   */
+  is_modified: boolean;
   tab: string;
 }
 

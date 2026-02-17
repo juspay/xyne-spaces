@@ -67,6 +67,8 @@ class SearchMetricsService {
     facetCounts: Record<string, number>;
     searchTrigger: 'keyboard_shortcut' | 'click' | 'auto_focus';
     searchLocation?: 'global' | 'channel' | 'dm';
+    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+    isModified: boolean;
     tab: TabType;
   }): void {
     const words = countWords(params.queryText);
@@ -81,6 +83,8 @@ class SearchMetricsService {
       is_zero_result: params.totalHits === 0,
       search_trigger: params.searchTrigger,
       query_text_length: words,
+      query_source: params.querySource,
+      is_modified: params.isModified,
       tab: params.tab,
       ...(params.searchLocation && { search_location: params.searchLocation }),
     };
@@ -98,6 +102,8 @@ class SearchMetricsService {
           user_id: params.userId,
           platform: platform,
           query_text_length: words,
+          query_source: params.querySource,
+          is_modified: params.isModified ? 'true' : 'false',
           tab: params.tab,
         });
       });
@@ -174,6 +180,8 @@ class SearchMetricsService {
     dwellTimeMs: number;
     endReason: 'click' | 'abandon' | 'clear' | 'blur';
     totalSessionDurationMs: number;
+    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+    isModified: boolean;
     tab: TabType;
   }): void {
     const words = countWords(params.queryText);
@@ -187,6 +195,8 @@ class SearchMetricsService {
       end_reason: params.endReason,
       total_session_duration_ms: params.totalSessionDurationMs,
       query_text_length: words,
+      query_source: params.querySource,
+      is_modified: params.isModified,
       tab: params.tab,
     };
     logger.info(Event.VESPA_SEARCH_SESSION_END, event as unknown as Record<string, unknown>);
@@ -200,6 +210,8 @@ class SearchMetricsService {
         user_id: params.userId,
         platform: platform,
         query_text_length: words,
+        query_source: params.querySource,
+        is_modified: params.isModified ? 'true' : 'false',
         tab: params.tab,
       });
     });
