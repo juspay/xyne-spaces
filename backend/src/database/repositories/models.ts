@@ -78,4 +78,16 @@ export class ModelRepository extends BaseRepository<Model, CreateModelInput, Upd
     const searchFilter = this.createSearchFilter(searchTerm, ['name', 'provider', 'userDefinedId']);
     return this.findMany({ where: searchFilter });
   }
+  
+  async upsert(userDefinedId: string, data: CreateModelInput): Promise<Model> {
+    return await this.db.model.upsert({
+      where: { userDefinedId },
+      create: data,
+      update: {
+        name: data.name,
+        provider: data.provider,
+        updatedAt: new Date(),
+      },
+    });
+  }
 }

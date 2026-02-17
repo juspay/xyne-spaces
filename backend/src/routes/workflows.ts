@@ -34,7 +34,7 @@ const astParser = new ASTWorkflowParser();
 // GET /api/workflows/types - Get all available workflow types with metadata
 router.get('/types', async (_req, res): Promise<void> => {
   try {
-    const workflowTypesResponse = workflowRegistry.getWorkflowTypesForAPI();
+    const workflowTypesResponse = await workflowRegistry.getWorkflowTypesForAPI();
     res.status(200).json(workflowTypesResponse);
   } catch (error) {
     logger.error('Error fetching workflow types:', error);

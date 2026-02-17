@@ -37,6 +37,7 @@ import {
 } from '../../workflow-types';
 import { WorkflowDefinition, EmptyPreExecuteResult } from '../../registry/workflowRegistry';
 import { WorkflowType, ImageAttachment } from '../../types/workflow-enums';
+import { BaseWorkflowContextSchema, baseContextMapper } from '../../schemas/workflow-schema';
 import { z } from 'zod';
 import * as path from 'path';
 
@@ -57,7 +58,6 @@ import {logger} from '@/utils/logger';
 // =============================================================================
 
 export interface XyneSpacesFeatureContext extends BaseWorkflowContext {
-  ticketId: string;
   title: string;
   description: string;
   baseBranch?: string;
@@ -85,10 +85,9 @@ export interface XyneSpacesFeatureOutput {
 // WORKFLOW IMPLEMENTATION
 // =============================================================================
 
-const XyneSpacesFeatureInputSchema = z.object({
+const XyneSpacesFeatureInputSchema = BaseWorkflowContextSchema.extend({
   title: z.string().min(1, 'Title is required'),
   description: z.string().min(1, 'Description is required'),
-  ticketId: z.string().min(1, 'Ticket ID is required'),
   baseBranch: z.string().optional(),
   repoBranch: z.string().optional(),
   checkoutCommit: z.string().optional(),
@@ -105,7 +104,7 @@ const XyneSpacesFeatureInputSchema = z.object({
 const xyneSpacesFeatureContextMapper = (
   payload: z.infer<typeof XyneSpacesFeatureInputSchema> & { ticketId: string ; title: string; description: string; baseBranch?: string; repoBranch?: string; checkoutCommit?: string; imageAttachments?: ImageAttachment[]; executorType?: ExecutorType }
 ): XyneSpacesFeatureContext => ({
-  ticketId: payload.ticketId,
+  ...baseContextMapper(payload),
   title: payload.title,
   description: payload.description,
   baseBranch: payload.baseBranch,

@@ -89,6 +89,7 @@ import { verifySamCallback } from '@/middleware/samCallbackAuth';
 import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
+import { modelSyncQueue } from '@/queues/modelSyncQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
@@ -424,6 +425,11 @@ export class App {
     logger.info('Initializing metrics sync queue...');
     await metricsSyncQueue.initialize();
     await metricsSyncQueue.runInitialSync();
+
+    // Initialize and start model sync queue (Bull-based scheduling)
+    logger.info('Initializing model sync queue...');
+    await modelSyncQueue.initialize();
+    await modelSyncQueue.runInitialSync();
 
     // Initialize presence cleanup queue (Bull-based scheduling)
     // logger.info('Initializing presence cleanup queue...');

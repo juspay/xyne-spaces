@@ -224,9 +224,9 @@ export abstract class BaseProvider implements LLMProvider {
     }
 
     // Check if model is supported
-    if (!this.supportedModelIds.includes(request.model)) {
-      errors.push(`Model ${request.model} is not supported by provider ${this.providerName}`);
-    }
+    // if (!this.supportedModelIds.includes(request.model)) {
+    //   errors.push(`Model ${request.model} is not supported by provider ${this.providerName}`);
+    // }
 
     // Parameter validation
     if (request.parameters?.temperature !== undefined) {
