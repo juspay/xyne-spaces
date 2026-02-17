@@ -239,6 +239,9 @@ const ChannelCommandMenu = ({
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
+    // Clipboard tracking callbacks
+    onPasteDetected,
+    onManualKeystroke,
   } = useSearchMetrics({
     allChannels,
     onSearchComplete: useCallback((results: DisplaySearchResult[], query: string) => {
@@ -930,6 +933,8 @@ const ChannelCommandMenu = ({
               selectedMentionIndex={selectedMentionIndex}
               setSelectedMentionIndex={setSelectedMentionIndex}
               onInsertMentionReady={handleInsertMentionReady}
+              onPasteDetected={onPasteDetected}
+              onManualKeystroke={onManualKeystroke}
             />
           )}
           {/* Summarize Button - icon only, left of Esc */}

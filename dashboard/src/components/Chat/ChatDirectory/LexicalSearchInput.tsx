@@ -8,6 +8,7 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import { $getRoot, EditorState, $isElementNode, LexicalNode } from 'lexical';
 import { MentionNode, $isMentionNode } from './MentionNode';
 import { MentionPlugin } from './MentionPlugin';
+import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
 import { MentionType } from './ChannelCommandMenu.types';
 import { Search } from 'lucide-react';
@@ -32,6 +33,8 @@ interface LexicalSearchInputProps {
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
   onMentionInserted?: () => void;
+  onPasteDetected?: () => void;
+  onManualKeystroke?: () => void;
 }
 
 function PlaceholderPlugin({ placeholder }: { placeholder?: string }) {
@@ -152,6 +155,8 @@ export function LexicalSearchInput({
   setSelectedMentionIndex,
   onInsertMentionReady,
   onMentionInserted,
+  onPasteDetected,
+  onManualKeystroke,
 }: LexicalSearchInputProps) {
   const initialConfig = {
     namespace: 'SearchInput',
@@ -187,6 +192,12 @@ export function LexicalSearchInput({
           <HistoryPlugin />
           {onChange && <OnChangePluginWrapper onChange={onChange} />}
           {open !== undefined && <AutoFocusPlugin open={open} />}
+          {(onPasteDetected || onManualKeystroke) && (
+            <PastePlugin
+              {...(onPasteDetected && { onPasteDetected })}
+              {...(onManualKeystroke && { onManualKeystroke })}
+            />
+          )}
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}

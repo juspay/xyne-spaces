@@ -23,6 +23,7 @@ import { parseSearchFilters } from '../utils/searchFilterParser';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
+type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
 
 interface UseSearchMetricsOptions {
   searchLocation?: SearchLocation;
@@ -44,6 +45,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const lastQueryTextRef = useRef<string>('');
   const maxQueryLengthTextRef = useRef<string>('');
   const previousTabRef = useRef<TabType>(TabType.ALL);
+
+  // Clipboard tracking state
+  const querySourceRef = useRef<QuerySource>('KEYBOARD');
+  const isModifiedRef = useRef<boolean>(false);
 
   // Search Input State
   const [text, setText] = useState('');
@@ -145,6 +150,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       lastQueryTextRef.current = '';
       maxQueryLengthTextRef.current = '';
 
+      // Reset clipboard tracking for new session
+      querySourceRef.current = 'KEYBOARD';
+      isModifiedRef.current = false;
+
       searchMetricsService.trackSessionStart(
         newSessionId,
         String(context.userID),
@@ -155,6 +164,25 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     },
     [generateSearchSessionId, context.userID],
   );
+
+  /**
+   * Handle paste detected in search input
+   * Sets query_source to CLIPBOARD_PASTE and resets is_modified to false
+   */
+  const handlePasteDetected = useCallback(() => {
+    querySourceRef.current = 'CLIPBOARD_PASTE';
+    isModifiedRef.current = false;
+  }, []);
+
+  /**
+   * Handle manual keystroke detected after paste
+   * Flips is_modified to true
+   */
+  const handleManualKeystroke = useCallback(() => {
+    if (querySourceRef.current === 'CLIPBOARD_PASTE') {
+      isModifiedRef.current = true;
+    }
+  }, []);
 
   /**
    * End the current search session
@@ -193,6 +221,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           dwellTimeMs,
           endReason,
           totalSessionDurationMs,
+          querySource: querySourceRef.current,
+          isModified: isModifiedRef.current,
           tab: previousTabRef.current,
         });
       }
@@ -206,6 +236,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       impressionCountRef.current = 0;
       lastQueryTextRef.current = '';
       maxQueryLengthTextRef.current = '';
+
+      // Reset clipboard tracking
+      querySourceRef.current = 'KEYBOARD';
+      isModifiedRef.current = false;
     },
     [searchSessionId, context.userID],
   );
@@ -231,6 +265,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         latencyMs,
         facetCounts: params.facetCounts,
         searchTrigger: searchTriggerRef.current,
+        querySource: querySourceRef.current,
+        isModified: isModifiedRef.current,
         ...(options.searchLocation && { searchLocation: options.searchLocation }),
         tab: previousTabRef.current,
       });
@@ -1046,6 +1082,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // Input state
     text,
     inputRef,
+
+    // Clipboard tracking callbacks
+    onPasteDetected: handlePasteDetected,
+    onManualKeystroke: handleManualKeystroke,
 
     searchResults,
     isSearching,
