@@ -17,6 +17,8 @@ export interface CreateActivityParams {
   ticketId?: string;
   channelId?: string;
   pullRequestId?: string;
+  canvasId?: string;
+  blockId?: string;
   actorId: string;
   classification?: ActivityClassification;
   classificationConfidence?: number | null;
@@ -56,6 +58,8 @@ export class ActivityService {
         ...(params.callId ? { callId: params.callId } : {}),
         ...(params.ticketId ? { ticketId: params.ticketId } : {}),
         ...(params.pullRequestId ? { pullRequestId: params.pullRequestId } : {}),
+        ...(params.canvasId ? { canvasId: params.canvasId } : {}),
+        ...(params.blockId ? { blockId: params.blockId } : {}),
         channelId: params.channelId,
         actorId: params.actorId,
         ...(params.classification ? { classification: params.classification } : {}),
@@ -108,6 +112,8 @@ export class ActivityService {
         ...(a.reactionId ? { reactionId: a.reactionId } : {}),
         ...(a.callId ? { callId: a.callId } : {}),
         ...(a.ticketId ? { ticketId: a.ticketId } : {}),
+        ...(a.canvasId ? { canvasId: a.canvasId } : {}),
+        ...(a.blockId ? { blockId: a.blockId } : {}),
         channelId: a.channelId,
         actorId: a.actorId,
         ...(a.classification ? { classification: a.classification } : {}),

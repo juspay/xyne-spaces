@@ -15,6 +15,16 @@ export interface CanvasEditorProps {
   editable?: boolean;
   placeholder?: string;
   className?: string;
+  /** When set, @ mention list is scoped to this channel/DM's participants only */
+  channelId?: string | undefined;
+  /** Canvas ID for mention notifications (event-based) */
+  canvasId?: string | undefined;
+  /** Canvas title for mention notifications */
+  canvasTitle?: string | undefined;
+  /** Called when a user/group is selected from @ menu - used for event-based mention notifications */
+  onMentionInsert?: (params: { type: 'user' | 'group'; id: string; blockId: string }) => void;
+  /** When set, focus and scroll to this block on load (e.g. from activity notification) */
+  initialBlockIdToFocus?: string | undefined;
 }
 
 export interface CollaborativeCanvasEditorRef {

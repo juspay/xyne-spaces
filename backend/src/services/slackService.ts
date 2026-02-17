@@ -111,6 +111,25 @@ class SlackService {
     );
   }
 
+  async sendCanvasMentionNotifications(
+    emails: string[],
+    senderName: string,
+    canvasTitle: string,
+    url: string,
+  ): Promise<void> {
+    if (!this.client || emails.length === 0) return;
+
+    const message =`You were mentioned by ${senderName} in canvas "${canvasTitle}": <${url}|View in xyne-spaces>`;
+
+    await Promise.allSettled(
+      emails.map((email) =>
+        this.sendDirectMessageByEmail(email, message).catch((error) =>
+          logger.error('Failed to send Slack canvas mention notification:', error)
+        )
+      )
+    );
+  }
+
   async sendDirectMessageNotifications(
     emails: string[],
     senderName: string,

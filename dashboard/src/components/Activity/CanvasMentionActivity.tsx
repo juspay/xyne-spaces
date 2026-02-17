@@ -1,0 +1,50 @@
+import { ReactElement } from 'react';
+import type { ActivityWithRelated } from '../../types/activity';
+import { AtSign } from 'lucide-react';
+import { ActivityItemCard } from './ActivityItemCard';
+import { useUser } from '../../hooks/useUsers';
+import { useRouteContext } from '../../hooks/useRouteContext';
+
+/**
+ * Renders a canvas mention activity: "X mentioned you in #channel".
+ * Mirrors MessageMentionActivity; actor is derived from canvas.lastEditedBy (the person who saved/mentioned).
+ */
+export const CanvasMentionActivity = ({
+  activity,
+  isExpanded,
+}: {
+  activity: ActivityWithRelated;
+  isExpanded: boolean;
+}): ReactElement | null => {
+  const { baseRoute } = useRouteContext();
+  const canvasId = activity.canvasId ?? undefined;
+  const canvasBlockId = activity.blockId ?? undefined;
+  const canvas = activity.canvas;
+  const actorId = activity.actorId ?? canvas?.lastEditedBy ?? '';
+  const sender = useUser(actorId);
+
+  if (!canvasId || !canvas) return null;
+
+  const targetPath = `${baseRoute}/canvas/${canvasId}${canvasBlockId ? `?blockId=${encodeURIComponent(canvasBlockId)}` : ''}`;
+
+  return (
+    <ActivityItemCard
+      activity={activity}
+      actorId={sender?.id ?? actorId}
+      actorName={sender?.name ?? 'Someone'}
+      channelId={activity.channelId ?? undefined}
+      badgeIcon={<AtSign className='w-4 h-4 text-blue-500' />}
+      badgeColorClass='bg-[#FAFAFA]'
+      description={<span className='text-gray-500 text-sm'>mentioned you in</span>}
+      targetPath={targetPath}
+      isExpanded={isExpanded}
+      className='flex items-start'
+    >
+      <div className='text-[#3B4145] text-sm'>
+        {isExpanded
+          ? `Canvas: ${canvas.title ?? 'Untitled'}`
+          : `View canvas: ${canvas.title ?? 'Untitled'}`}
+      </div>
+    </ActivityItemCard>
+  );
+};

@@ -13,4 +13,9 @@ router.post(
   canvasController.uploadFile
 );
 
+router.post(
+  '/:canvasId/mentions',
+  canvasController.handleMentions
+);
+
 export default router;

@@ -444,6 +444,7 @@ export const queries = defineQueries({
           .related('attachments'),
       )
       .related('reaction')
+      .related('canvas')
       .related('ticket');
   }),
   userActivitiesPaginated: defineQuery(
@@ -480,6 +481,7 @@ export const queries = defineQueries({
             .related('attachments'),
         )
         .related('reaction')
+        .related('canvas')
         .related('ticket');
     },
   ),

@@ -1,4 +1,9 @@
-import type { BlockNoteEditor } from '@blocknote/core';
+import type {
+  BlockNoteEditor,
+  BlockSchema,
+  InlineContentSchema,
+  StyleSchema,
+} from '@blocknote/core';
 
 export interface SearchMatch {
   blockId: string;
@@ -71,7 +76,9 @@ const getTableText = (tableContent: TableContent): string => {
     .join('');
 };
 
-export const extractTextFromBlocks = (editor: BlockNoteEditor): string => {
+export const extractTextFromBlocks = (
+  editor: BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+): string => {
   const textParts: string[] = [];
   editor.forEachBlock(block => {
     let text = '';
@@ -88,7 +95,10 @@ export const extractTextFromBlocks = (editor: BlockNoteEditor): string => {
   return textParts.join('\n');
 };
 
-export const findMatches = (editor: BlockNoteEditor, query: string): SearchMatch[] => {
+export const findMatches = (
+  editor: BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+  query: string,
+): SearchMatch[] => {
   if (!query.trim()) return [];
 
   const matches: SearchMatch[] = [];
