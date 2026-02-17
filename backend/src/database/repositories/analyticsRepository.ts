@@ -1,6 +1,6 @@
 import { DatabaseClient } from '../client';
 import { WorkflowType, getWorkflowTypeDisplayName } from '@/workflows/types/workflow-enums';
-import { getTodayISTDateRange } from '@/utils/dateUtils';
+import { getTodayISTDateRange, IST_OFFSET_MS, HOUR_MS } from '@/utils/dateUtils';
 import {logger} from '@/utils/logger';
 
 export interface AnalyticsFilters {
@@ -141,19 +141,19 @@ export function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lt
       return { gte: startOfToday, lte: now };
       
     case '7d':
-      const start7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const start7d = new Date(now.getTime() - 7 * 24 * HOUR_MS);
       return { gte: start7d, lte: now };
       
     case '30d':
-      const start30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const start30d = new Date(now.getTime() - 30 * 24 * HOUR_MS);
       return { gte: start30d, lte: now };
       
     case '90d':
-      const start90d = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      const start90d = new Date(now.getTime() - 90 * 24 * HOUR_MS);
       return { gte: start90d, lte: now };
       
     default:
-      const startDefault = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const startDefault = new Date(now.getTime() - 7 * 24 * HOUR_MS);
       return { gte: startDefault, lte: now };
   }
 }
@@ -171,6 +171,24 @@ export class AnalyticsRepository {
       select: { id: true }
     });
     return users.map(u => u.id);
+  }
+
+  /**
+   * Helper to generate bucket key for time-series data
+   * Converts timestamps to IST and rounds to hour for hourly grouping
+   */
+  private getBucketKey(timestamp: Date, groupBy: 'day' | 'hour'): string {
+    if (groupBy === 'hour') {
+      // Convert to IST and round to hour to match bucket keys
+      const istTime = timestamp.getTime() + IST_OFFSET_MS;
+      const roundedISTTime = Math.floor(istTime / HOUR_MS) * HOUR_MS;
+      const utcTime = roundedISTTime - IST_OFFSET_MS;
+      return new Date(utcTime).toISOString();
+    } else {
+      // Convert to IST for daily bucketing
+      const istTime = new Date(timestamp.getTime() + IST_OFFSET_MS);
+      return istTime.toISOString().split('T')[0];
+    }
   }
 
   /**
@@ -1259,9 +1277,9 @@ export class AnalyticsRepository {
    * UNIFIED: Get messages exchanged statistics - ALWAYS returns time-series data
    * This replaces the old getMessagesExchanged() and ensures consistency
    */
-  async getMessagesExchanged(filters: AnalyticsFilters): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
+  async getMessagesExchanged(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
     // Always use day groupby for consistency - no more "none" option
-    return this.getMessagesExchangedTimeSeries(filters);
+    return this.getMessagesExchangedTimeSeries(filters, groupBy);
   }
 
   /**
@@ -1452,7 +1470,7 @@ export class AnalyticsRepository {
    * Get messages exchanged time-series data using optimized Prisma ORM aggregation
    * Fetches all messages within date range and processes aggregation in application memory
    */
-  async getMessagesExchangedTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
+  async getMessagesExchangedTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number; channelMessages: number; dmMessages: number; groupDmMessages: number }[]> {
     const dateFilter = getDateFilter(filters);
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter ? dateFilter : { gte: dateFilter };
     const { startDate, endDate } = this.getDateRange(dateCondition);
@@ -1486,8 +1504,10 @@ export class AnalyticsRepository {
     const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
     const channelToScopeMap = new Map(channels.map(c => [c.id, c.scopeType]));
 
-    // Generate complete time buckets for the date range
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    // Generate complete time buckets for the date range based on groupBy
+    const timeBuckets = groupBy === 'hour' 
+      ? this.generateHourlyTimeBuckets(startDate, endDate)
+      : this.generateDailyTimeBuckets(startDate, endDate);
     const bucketData = new Map<string, { total: number; channel: number; dm: number; groupDm: number }>();
 
     // Initialize all buckets with zero values
@@ -1497,9 +1517,7 @@ export class AnalyticsRepository {
 
     // Aggregate messages by date and scope type
     messages.forEach(message => {
-      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-      const istTime = new Date(message.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
-      const dateKey = istTime.toISOString().split('T')[0];
+      const dateKey = this.getBucketKey(message.createdAt, groupBy);
       const channelId = conversationToChannelMap.get(message.conversationId);
       const scopeType = channelId ? channelToScopeMap.get(channelId) : null;
       
@@ -1535,8 +1553,8 @@ export class AnalyticsRepository {
     const buckets: string[] = [];
     
     // Convert start and end dates to IST for proper bucket generation
-    const istStartDate = new Date(startDate.getTime() + (5.5 * 60 * 60 * 1000));
-    const istEndDate = new Date(endDate.getTime() + (5.5 * 60 * 60 * 1000));
+    const istStartDate = new Date(startDate.getTime() + IST_OFFSET_MS);
+    const istEndDate = new Date(endDate.getTime() + IST_OFFSET_MS);
     
     // Initialize currentDate properly in IST
     const currentDate = new Date(istStartDate.toISOString().split('T')[0] + 'T00:00:00.000Z');
@@ -1545,6 +1563,32 @@ export class AnalyticsRepository {
       buckets.push(currentDate.toISOString().split('T')[0]);
       // Use UTC date operations to ensure consistent behavior
       currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+    }
+
+    return buckets;
+  }
+
+  /**
+   * Generate hourly time buckets for a date range
+   * Frontend sends times in user timezone (as UTC). We need to bucket by IST hours
+   * so convert to IST, floor to IST hours, then convert back to UTC for storage
+   */
+  private generateHourlyTimeBuckets(startDate: Date, endDate: Date): string[] {
+    const buckets: string[] = [];
+    
+    // Convert to IST milliseconds
+    const istStartTime = startDate.getTime() + IST_OFFSET_MS;
+    const istEndTime = endDate.getTime() + IST_OFFSET_MS;
+    
+    // Floor both start and end to IST hour (include the hour containing the end time, not the next hour)
+    const startHourIST = Math.floor(istStartTime / HOUR_MS) * HOUR_MS;
+    const endHourIST = Math.floor(istEndTime / HOUR_MS) * HOUR_MS;
+
+    // Generate hourly buckets in IST, but store as UTC equivalents
+    for (let time = startHourIST; time <= endHourIST; time += HOUR_MS) {
+      // Convert back to UTC by subtracting IST offset
+      const utcTime = time - IST_OFFSET_MS;
+      buckets.push(new Date(utcTime).toISOString());
     }
 
     return buckets;
@@ -1762,7 +1806,7 @@ export class AnalyticsRepository {
   /**
    * Get active users with both aggregate and time-series data in single call
    */
-  async getActiveUsersWithChart(filters: AnalyticsFilters): Promise<{
+  async getActiveUsersWithChart(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{
     uniqueUsers: number;
     timeSeries: { date: string; value: number }[];
   }> {
@@ -1819,8 +1863,10 @@ export class AnalyticsRepository {
       })
     ]);
 
-    // Generate time buckets
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    // Generate time buckets based on groupBy
+    const timeBuckets = groupBy === 'hour'
+      ? this.generateHourlyTimeBuckets(startDate, endDate)
+      : this.generateDailyTimeBuckets(startDate, endDate);
     const bucketData = new Map<string, Set<string>>();
 
     // Initialize buckets
@@ -1852,9 +1898,7 @@ export class AnalyticsRepository {
                          ('timestamp' in activity && activity.timestamp);
         
         if (timestamp) {
-          // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-          const istTime = new Date(timestamp.getTime() + (5.5 * 60 * 60 * 1000));
-          const bucketKey = istTime.toISOString().split('T')[0];
+          const bucketKey = this.getBucketKey(timestamp, groupBy);
           if (bucketData.has(bucketKey)) {
             bucketData.get(bucketKey)!.add(userId);
           }
@@ -1923,7 +1967,7 @@ export class AnalyticsRepository {
     messages.forEach(message => {
       if (message.senderId) {
         // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-        const istTime = new Date(message.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+        const istTime = new Date(message.createdAt.getTime() + IST_OFFSET_MS);
         const bucketKey = istTime.toISOString().split('T')[0];
         if (bucketData.has(bucketKey)) {
           const bucket = bucketData.get(bucketKey)!;
@@ -2013,7 +2057,7 @@ export class AnalyticsRepository {
   /**
    * Get active channels time-series data
    */
-  async getActiveChannelsTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+  async getActiveChannelsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
 
     // Build date condition for Prisma query
@@ -2056,8 +2100,10 @@ export class AnalyticsRepository {
     const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
     const defaultChannelIds = new Set(channels.map(c => c.id));
 
-    // Generate time buckets
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    // Generate time buckets based on groupBy
+    const timeBuckets = groupBy === 'hour'
+      ? this.generateHourlyTimeBuckets(startDate, endDate)
+      : this.generateDailyTimeBuckets(startDate, endDate);
     const bucketData = new Map<string, Set<string>>();
 
     // Initialize buckets
@@ -2069,9 +2115,7 @@ export class AnalyticsRepository {
     messages.forEach(message => {
       const channelId = conversationToChannelMap.get(message.conversationId);
       if (channelId && defaultChannelIds.has(channelId)) {
-        // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-        const istTime = new Date(message.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
-        const bucketKey = istTime.toISOString().split('T')[0];
+        const bucketKey = this.getBucketKey(message.createdAt, groupBy);
         if (bucketData.has(bucketKey)) {
           bucketData.get(bucketKey)!.add(channelId);
         }
@@ -2139,7 +2183,7 @@ export class AnalyticsRepository {
     // Group user onboarding by time buckets
     userPresenceRecords.forEach(record => {
       // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-      const istTime = new Date(record.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+      const istTime = new Date(record.createdAt.getTime() + IST_OFFSET_MS);
       const bucketKey = istTime.toISOString().split('T')[0];
       if (bucketData.has(bucketKey)) {
         bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
@@ -2160,7 +2204,7 @@ export class AnalyticsRepository {
   async getMessagesToday(): Promise<number> {
     // Get current time in IST (UTC+5:30)
     const now = new Date();
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    const istTime = new Date(now.getTime() + IST_OFFSET_MS);
     
     // Get start of today in IST
     const startOfTodayIST = new Date(Date.UTC(
@@ -2170,7 +2214,7 @@ export class AnalyticsRepository {
     ));
     
     // Subtract IST offset to get UTC time for start of today IST
-    const startOfTodayUTC = new Date(startOfTodayIST.getTime() - (5.5 * 60 * 60 * 1000));
+    const startOfTodayUTC = new Date(startOfTodayIST.getTime() - IST_OFFSET_MS);
 
     // Count messages from start of today (IST) to now
     const messagesTodayCount = await this.prisma.message.count({
@@ -2212,7 +2256,7 @@ export class AnalyticsRepository {
   async getMessagesTodayTimeSeries(): Promise<{ date: string; value: number }[]> {
     // Get current time in IST (UTC+5:30)
     const now = new Date();
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    const istTime = new Date(now.getTime() + IST_OFFSET_MS);
 
     // Get start of today in IST
     const startOfTodayIST = new Date(Date.UTC(
@@ -2222,10 +2266,10 @@ export class AnalyticsRepository {
     ));
 
     // Subtract IST offset to get UTC time for start of today IST
-    const startOfTodayUTC = new Date(startOfTodayIST.getTime() - (5.5 * 60 * 60 * 1000));
+    const startOfTodayUTC = new Date(startOfTodayIST.getTime() - IST_OFFSET_MS);
 
     // Get messages from today
-    const messageCount = await this.prisma.message.count({
+    const messages = await this.prisma.message.findMany({
       where: {
         createdAt: {
           gte: startOfTodayUTC,
@@ -2233,13 +2277,33 @@ export class AnalyticsRepository {
         },
         msgType: 'USER' // Only count user messages, exclude bot messages
       },
+      select: {
+        createdAt: true
+      }
     });
 
-    // Return single data point for today (not hourly breakdown)
-    return [{
-      date: startOfTodayIST.toISOString().split('T')[0],
-      value: messageCount
-    }];
+    // Generate hourly buckets for today
+    const timeBuckets = this.generateHourlyTimeBuckets(startOfTodayUTC, now);
+    const bucketData = new Map<string, number>();
+
+    // Initialize buckets
+    timeBuckets.forEach(bucket => {
+      bucketData.set(bucket, 0);
+    });
+
+    // Group messages by hour
+    messages.forEach(message => {
+      const bucketKey = this.getBucketKey(message.createdAt, 'hour');
+      if (bucketData.has(bucketKey)) {
+        bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
+      }
+    });
+
+    // Convert to array format
+    return timeBuckets.map(bucketKey => ({
+      date: bucketKey,
+      value: bucketData.get(bucketKey) || 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
   }
 
   /**
@@ -2272,7 +2336,7 @@ export class AnalyticsRepository {
    * Get number of tickets time-series data
    * Only counts tickets created by real users (userType: 'USER'), excludes bot-created tickets
    */
-  async getNumberOfTicketsTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+  async getNumberOfTicketsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
 
     // Build date condition for Prisma query
@@ -2294,8 +2358,10 @@ export class AnalyticsRepository {
       select: { createdAt: true },
     });
 
-    // Generate time buckets
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    // Generate time buckets based on groupBy
+    const timeBuckets = groupBy === 'hour'
+      ? this.generateHourlyTimeBuckets(startDate, endDate)
+      : this.generateDailyTimeBuckets(startDate, endDate);
     const bucketData = new Map<string, number>();
 
     // Initialize buckets
@@ -2305,9 +2371,7 @@ export class AnalyticsRepository {
 
     // Group tickets by time buckets
     tickets.forEach(ticket => {
-      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-      const istTime = new Date(ticket.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
-      const bucketKey = istTime.toISOString().split('T')[0];
+      const bucketKey = this.getBucketKey(ticket.createdAt, groupBy);
       if (bucketData.has(bucketKey)) {
         bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
       }
@@ -2350,7 +2414,7 @@ export class AnalyticsRepository {
    * Get number of canvases time-series data
    * Only counts canvases created by real users (userType: 'USER'), excludes bot-created canvases
    */
-  async getNumberOfCanvasesTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+  async getNumberOfCanvasesTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
 
     // Build date condition for Prisma query
@@ -2372,8 +2436,10 @@ export class AnalyticsRepository {
       select: { lastEditedAt: true },
     });
 
-    // Generate time buckets
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    // Generate time buckets based on groupBy
+    const timeBuckets = groupBy === 'hour'
+      ? this.generateHourlyTimeBuckets(startDate, endDate)
+      : this.generateDailyTimeBuckets(startDate, endDate);
     const bucketData = new Map<string, number>();
 
     // Initialize buckets
@@ -2384,9 +2450,7 @@ export class AnalyticsRepository {
     // Group canvases by time buckets
     canvases.forEach(canvas => {
       if (canvas.lastEditedAt) {
-        // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-        const istTime = new Date(canvas.lastEditedAt.getTime() + (5.5 * 60 * 60 * 1000));
-        const bucketKey = istTime.toISOString().split('T')[0];
+        const bucketKey = this.getBucketKey(canvas.lastEditedAt, groupBy);
         if (bucketData.has(bucketKey)) {
           bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
         }
@@ -2436,7 +2500,7 @@ export class AnalyticsRepository {
   /**
    * Get number of calls time-series data
    */
-  async getNumberOfCallsTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+  async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
 
     // Build date condition for Prisma query
@@ -2465,8 +2529,10 @@ export class AnalyticsRepository {
       return duration > 60;
     });
 
-    // Generate time buckets
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    // Generate time buckets based on groupBy
+    const timeBuckets = groupBy === 'hour'
+      ? this.generateHourlyTimeBuckets(startDate, endDate)
+      : this.generateDailyTimeBuckets(startDate, endDate);
     const bucketData = new Map<string, number>();
 
     // Initialize buckets
@@ -2476,9 +2542,7 @@ export class AnalyticsRepository {
 
     // Group calls by time buckets
     validCalls.forEach(call => {
-      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-      const istTime = new Date(call.startedAt.getTime() + (5.5 * 60 * 60 * 1000));
-      const bucketKey = istTime.toISOString().split('T')[0];
+      const bucketKey = this.getBucketKey(call.startedAt, groupBy);
       if (bucketData.has(bucketKey)) {
         bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
       }
@@ -2533,7 +2597,7 @@ export class AnalyticsRepository {
    * Get total duration of calls time-series data (in minutes per day)
    * Only counts calls that lasted more than 60 seconds
    */
-  async getTotalCallsDurationTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+  async getTotalCallsDurationTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
 
     // Build date condition for Prisma query
@@ -2556,8 +2620,10 @@ export class AnalyticsRepository {
       }
     });
 
-    // Generate time buckets
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    // Generate time buckets based on groupBy
+    const timeBuckets = groupBy === 'hour'
+      ? this.generateHourlyTimeBuckets(startDate, endDate)
+      : this.generateDailyTimeBuckets(startDate, endDate);
     const bucketData = new Map<string, number>();
 
     // Initialize buckets
@@ -2571,9 +2637,7 @@ export class AnalyticsRepository {
       const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
       if (duration <= 60) return;
 
-      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-      const istTime = new Date(call.startedAt.getTime() + (5.5 * 60 * 60 * 1000));
-      const bucketKey = istTime.toISOString().split('T')[0];
+      const bucketKey = this.getBucketKey(call.startedAt, groupBy);
       if (bucketData.has(bucketKey)) {
         bucketData.set(bucketKey, bucketData.get(bucketKey)! + duration);
       }
@@ -2651,7 +2715,7 @@ export class AnalyticsRepository {
   /**
    * Get files shared time-series data
    */
-  async getFilesSharedTimeSeries(filters: AnalyticsFilters): Promise<{ date: string; value: number }[]> {
+  async getFilesSharedTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
     const dateFilter = getDateFilter(filters);
 
     // Build date condition for Prisma query
@@ -2673,8 +2737,10 @@ export class AnalyticsRepository {
       select: { createdAt: true },
     });
 
-    // Generate time buckets
-    const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
+    // Generate time buckets based on groupBy
+    const timeBuckets = groupBy === 'hour'
+      ? this.generateHourlyTimeBuckets(startDate, endDate)
+      : this.generateDailyTimeBuckets(startDate, endDate);
     const bucketData = new Map<string, number>();
 
     // Initialize buckets
@@ -2684,9 +2750,7 @@ export class AnalyticsRepository {
 
     // Group attachments by time buckets
     attachments.forEach(attachment => {
-      // Convert UTC time to IST (UTC+5:30) for proper day bucketing
-      const istTime = new Date(attachment.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
-      const bucketKey = istTime.toISOString().split('T')[0];
+      const bucketKey = this.getBucketKey(attachment.createdAt, groupBy);
       if (bucketData.has(bucketKey)) {
         bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
       }

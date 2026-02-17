@@ -306,6 +306,8 @@ export class AnalyticsController {
    */
   getMessagesExchanged = async (req: Request, res: Response): Promise<void> => {
     try {
+      const groupBy = (req.query.groupBy as 'day' | 'hour' | undefined) ?? 'day';
+      
       const filters: AnalyticsFilters = {
         timeRange: req.query.timeRange as string,
         startDate: req.query.startDate as string,
@@ -313,7 +315,7 @@ export class AnalyticsController {
       };
 
       // Always return time-series data for consistency
-      const messagesExchanged = await this.analyticsRepository.getMessagesExchanged(filters);
+      const messagesExchanged = await this.analyticsRepository.getMessagesExchanged(filters, groupBy);
       
       res.json({
         success: true,
@@ -336,6 +338,8 @@ export class AnalyticsController {
    */
   getActiveUsers = async (req: Request, res: Response): Promise<void> => {
     try {
+      const groupBy = (req.query.groupBy as 'day' | 'hour' | undefined) ?? 'day';
+      
       const filters: AnalyticsFilters = {
         timeRange: req.query.timeRange as string,
         startDate: req.query.startDate as string,
@@ -343,7 +347,7 @@ export class AnalyticsController {
       };
 
       // Always return both unique count and time-series data in a single response
-      const result = await this.analyticsRepository.getActiveUsersWithChart(filters);
+      const result = await this.analyticsRepository.getActiveUsersWithChart(filters, groupBy);
       
       res.json({
         success: true,
@@ -390,7 +394,7 @@ export class AnalyticsController {
    */
   getActiveChannels = async (req: Request, res: Response): Promise<void> => {
     try {
-      const groupBy = req.query.groupBy as 'day' | undefined;
+      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
       const filters: AnalyticsFilters = {
         timeRange: req.query.timeRange as string,
@@ -399,8 +403,8 @@ export class AnalyticsController {
       };
 
       // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day') {
-        const activeChannelsTimeSeries = await this.analyticsRepository.getActiveChannelsTimeSeries(filters);
+      if (groupBy === 'day' || groupBy === 'hour') {
+        const activeChannelsTimeSeries = await this.analyticsRepository.getActiveChannelsTimeSeries(filters, groupBy);
         
         res.json({
           success: true,
@@ -433,7 +437,7 @@ export class AnalyticsController {
    */
   getFilesShared = async (req: Request, res: Response): Promise<void> => {
     try {
-      const groupBy = req.query.groupBy as 'day' | undefined;
+      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
       const filters: AnalyticsFilters = {
         timeRange: req.query.timeRange as string,
@@ -442,8 +446,8 @@ export class AnalyticsController {
       };
 
       // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day') {
-        const filesSharedTimeSeries = await this.analyticsRepository.getFilesSharedTimeSeries(filters);
+      if (groupBy === 'day' || groupBy === 'hour') {
+        const filesSharedTimeSeries = await this.analyticsRepository.getFilesSharedTimeSeries(filters, groupBy);
         
         res.json({
           success: true,
@@ -476,10 +480,10 @@ export class AnalyticsController {
    */
   getMessagesToday = async (req: Request, res: Response): Promise<void> => {
     try {
-      const groupBy = req.query.groupBy as 'day' | undefined;
+      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
 
       // If groupBy is specified, return time-series data (hourly breakdown)
-      if (groupBy === 'day') {
+      if (groupBy === 'day' || groupBy === 'hour') {
         const messagesTodayTimeSeries = await this.analyticsRepository.getMessagesTodayTimeSeries();
         
         res.json({
@@ -513,7 +517,7 @@ export class AnalyticsController {
    */
   getNumberOfTickets = async (req: Request, res: Response): Promise<void> => {
     try {
-      const groupBy = req.query.groupBy as 'day' | undefined;
+      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
       const filters: AnalyticsFilters = {
         timeRange: req.query.timeRange as string,
@@ -522,8 +526,8 @@ export class AnalyticsController {
       };
 
       // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day') {
-        const ticketsTimeSeries = await this.analyticsRepository.getNumberOfTicketsTimeSeries(filters);
+      if (groupBy === 'day' || groupBy === 'hour') {
+        const ticketsTimeSeries = await this.analyticsRepository.getNumberOfTicketsTimeSeries(filters, groupBy);
         
         res.json({
           success: true,
@@ -556,7 +560,7 @@ export class AnalyticsController {
    */
   getNumberOfCanvases = async (req: Request, res: Response): Promise<void> => {
     try {
-      const groupBy = req.query.groupBy as 'day' | undefined;
+      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
       const filters: AnalyticsFilters = {
         timeRange: req.query.timeRange as string,
@@ -565,8 +569,8 @@ export class AnalyticsController {
       };
 
       // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day') {
-        const canvasesTimeSeries = await this.analyticsRepository.getNumberOfCanvasesTimeSeries(filters);
+      if (groupBy === 'day' || groupBy === 'hour') {
+        const canvasesTimeSeries = await this.analyticsRepository.getNumberOfCanvasesTimeSeries(filters, groupBy);
         
         res.json({
           success: true,
@@ -599,7 +603,7 @@ export class AnalyticsController {
    */
   getNumberOfCalls = async (req: Request, res: Response): Promise<void> => {
     try {
-      const groupBy = req.query.groupBy as 'day' | undefined;
+      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
       const filters: AnalyticsFilters = {
         timeRange: req.query.timeRange as string,
@@ -608,8 +612,8 @@ export class AnalyticsController {
       };
 
       // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day') {
-        const callsTimeSeries = await this.analyticsRepository.getNumberOfCallsTimeSeries(filters);
+      if (groupBy === 'day' || groupBy === 'hour') {
+        const callsTimeSeries = await this.analyticsRepository.getNumberOfCallsTimeSeries(filters, groupBy);
         
         res.json({
           success: true,
@@ -642,7 +646,7 @@ export class AnalyticsController {
    */
   getTotalCallsDuration = async (req: Request, res: Response): Promise<void> => {
     try {
-      const groupBy = req.query.groupBy as 'day' | undefined;
+      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
       
       const filters: AnalyticsFilters = {
         timeRange: req.query.timeRange as string,
@@ -651,8 +655,8 @@ export class AnalyticsController {
       };
 
       // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day') {
-        const durationTimeSeries = await this.analyticsRepository.getTotalCallsDurationTimeSeries(filters);
+      if (groupBy === 'day' || groupBy === 'hour') {
+        const durationTimeSeries = await this.analyticsRepository.getTotalCallsDurationTimeSeries(filters, groupBy);
         
         res.json({
           success: true,
