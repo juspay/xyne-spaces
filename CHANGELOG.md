@@ -1,3 +1,17 @@
+## [1.46.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.45.2...v1.46.0) (2026-02-17)
+
+
+### Features
+
+* added drawer to view chat reactions on mobile ([f520850](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f520850a491531be23cc380dadb522977ca135db)), closes [#3179](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3179)
+* User Management System ([fdebafd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fdebafd36c83482cab985d627df125adde112828)), closes [#3055](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3055)
+
+
+### Bug Fixes
+
+* Add query_source and is_modified properties to search events ([0f8aac7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0f8aac7f26fc788fb0bf0ccb610232a717259323)), closes [#3236](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3236)
+* edited automation timeout to 45 sec and retries to 2 ([71b862d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/71b862d85fb0f62ebebb5aaf27f95cd242f78f58)), closes [#3243](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3243)
+
 ## [1.45.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.45.1...v1.45.2) (2026-02-17)
 
 
