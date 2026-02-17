@@ -19,7 +19,7 @@ const common = {
   publishQuiet: true,
   // Retry failed scenarios (override with RETRIES env var)
   retry: (() => {
-    const defaultRetries = process.env.TEST_ENV === 'test' ? 2 : 0;
+    const defaultRetries = process.env.TEST_ENV === 'test' ? 1 : 0;
     if (!process.env.RETRIES) return defaultRetries;
 
     const parsed = parseInt(process.env.RETRIES, 10);
