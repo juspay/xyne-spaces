@@ -176,6 +176,9 @@ export const hasMessageContent = (content: string | undefined | null): boolean =
   if (!content) return false;
   const trimmed = content.trim();
   if (trimmed === '') return false;
+  // Check if content contains custom emoji images (data-emoji="true")
+  const hasCustomEmojis = /<img[^>]*data-emoji="true"[^>]*>/i.test(trimmed);
+  if (hasCustomEmojis) return true;
   // Check if content is just empty HTML tags
   const textOnly = trimmed.replace(/<[^>]*>/g, '').trim();
   return textOnly !== '';
