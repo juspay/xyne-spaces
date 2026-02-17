@@ -1652,13 +1652,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
 
-
-
-          await tx.mutate.channels.update({
-            id: channel.id,
-            lastActivityAt: timestamp,
-          });
-
           const senderParticipation = await tx.run(zql.channel_user_status
             .where('channelId', channel.id)
             .where('userId', authData.sub)
