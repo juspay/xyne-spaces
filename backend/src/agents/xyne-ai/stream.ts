@@ -382,6 +382,10 @@ export async function* xyneAIStream(
               output: parsedOutput,
             };
           } else if (event.data.outcome.status === 'error') {
+            const errTag = event.data.outcome.error._tag;
+            const errDetail = (event.data.outcome.error as any).detail || (event.data.outcome.error as any).reason || '';
+            logger.error(`[XyneAI] [${session.sessionId}] Agent run failed:`, event.data.outcome.error);
+
             // On error, save what we have as fallback
             if (accumulatedContent) {
               const fallbackOutput: XyneAIOutput = {
@@ -390,7 +394,7 @@ export async function* xyneAIStream(
               };
               await sessionStore.addAssistantMessage(session.sessionId, fallbackOutput, currentTraceId);
             }
-            yield { type: 'error', error: event.data.outcome.error._tag };
+            yield { type: 'error', error: errDetail ? `${errTag}: ${errDetail}` : errTag };
           }
           break;
       }
