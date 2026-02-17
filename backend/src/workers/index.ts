@@ -60,8 +60,12 @@ export class WorkerScheduler {
         logger.info('[WORKER_SCHEDULER] Personalization sync scheduled via Bull (every 6 hours)');
 
         // Initialize Product Insights recluster queue
+        const productInsightsRedisConfig = {
+            ...redisService.getRedisConfig(),
+            lazyConnect: false,
+        };
         this.productInsightsQueue = new Bull('product-insights-recluster', {
-            redis: redisService.getRedisConfig(),
+            redis: productInsightsRedisConfig,
         });
 
         this.productInsightsQueue.process(async (job) => {
