@@ -24,6 +24,7 @@ import SupportScreen from './SupportScreen/SupportScreen.tsx';
 import CanvasScreen from '../components/Canvas/CanvasScreen';
 import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
 import CallPage from './CallScreen/CallPage';
+import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
 import { ReactElement, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
@@ -624,6 +625,14 @@ export const router = createBrowserRouter([
         element: (
           <ZeroProvider>
             <CallPage />
+          </ZeroProvider>
+        ),
+      },
+      {
+        path: '/redirected',
+        element: (
+          <ZeroProvider>
+            <CanvasRedirectPage />
           </ZeroProvider>
         ),
       },

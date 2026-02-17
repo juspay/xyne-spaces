@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { BlockNoteEditor } from '@blocknote/core';
+import type {
+  BlockNoteEditor,
+  BlockSchema,
+  InlineContentSchema,
+  StyleSchema,
+} from '@blocknote/core';
 import {
   findMatches,
   applyHighlights,
@@ -9,7 +14,7 @@ import {
 } from '../../../utils/searchUtils';
 
 interface CanvasSearchProps {
-  editor: BlockNoteEditor;
+  editor: BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>;
   containerRef: React.RefObject<HTMLDivElement | null>;
   isOpen: boolean;
   onClose: () => void;

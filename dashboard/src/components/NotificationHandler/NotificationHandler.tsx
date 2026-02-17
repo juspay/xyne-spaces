@@ -37,6 +37,8 @@ interface NotificationData {
       senderName?: string;
       channelTitle?: string;
       messageType?: string;
+      canvasId?: string;
+      blockId?: string;
     };
     createdAt: Date;
   };
@@ -59,6 +61,14 @@ export const NotificationHandler: React.FC = () => {
         // Check if user is currently in VS Code editor
         const isOnVSCode = location.pathname === '/vscode';
 
+        // For canvas notifications, construct actionUrl from data if not provided
+        const canvasActionUrl =
+          !data.notification.actionUrl && data.notification.data?.canvasId
+            ? data.notification.data.blockId
+              ? `/redirected?canvasId=${encodeURIComponent(data.notification.data.canvasId)}&blockId=${encodeURIComponent(data.notification.data.blockId)}`
+              : `/redirected?canvasId=${encodeURIComponent(data.notification.data.canvasId)}`
+            : undefined;
+
         if (
           isElectron &&
           window.electronAPI &&
@@ -67,7 +77,7 @@ export const NotificationHandler: React.FC = () => {
           window.electronAPI.showNotification({
             title: data.notification.title,
             body: data.notification.message,
-            actionUrl: data.notification.actionUrl || '/chat',
+            actionUrl: canvasActionUrl || data.notification.actionUrl || '/chat',
           });
         } else if (!(reactNativeBridge.isAvailable() && suppressNativeToasts)) {
           playNotificationSound();
@@ -75,40 +85,44 @@ export const NotificationHandler: React.FC = () => {
           const toastFn = getToastFn(data.notification.type);
           toastFn(data.notification.title, {
             description: data.notification.message,
-            action: data.notification.actionUrl
-              ? {
-                  label: 'View',
-                  onClick: (): void => {
-                    if (data.notification.actionUrl) {
-                      // If in VS Code editor and notification has thread/conversation data, open thread in editor
-                      if (
-                        isOnVSCode &&
-                        (data.notification.data?.conversationId ||
-                          data.notification.data?.channelId)
-                      ) {
-                        // Dispatch custom event to open thread in VS Code workspace
-                        window.dispatchEvent(
-                          new CustomEvent('vscode-open-thread', {
-                            detail: {
-                              conversationId: data.notification.data.conversationId,
-                              channelId: data.notification.data.channelId,
-                              messageId: data.notification.data.messageId,
-                            },
-                          }),
-                        );
-                      } else {
-                        // Normal navigation behavior
-                        void navigate(data.notification.actionUrl);
+            action:
+              canvasActionUrl || data.notification.actionUrl
+                ? {
+                    label: 'View',
+                    onClick: (): void => {
+                      if (canvasActionUrl || data.notification.actionUrl) {
+                        // If in VS Code editor and notification has thread/conversation data, open thread in editor
+                        if (
+                          isOnVSCode &&
+                          (data.notification.data?.conversationId ||
+                            data.notification.data?.channelId)
+                        ) {
+                          // Dispatch custom event to open thread in VS Code workspace
+                          window.dispatchEvent(
+                            new CustomEvent('vscode-open-thread', {
+                              detail: {
+                                conversationId: data.notification.data.conversationId,
+                                channelId: data.notification.data.channelId,
+                                messageId: data.notification.data.messageId,
+                              },
+                            }),
+                          );
+                        } else {
+                          // Normal navigation behavior
+                          const actionUrl = canvasActionUrl || data.notification.actionUrl;
+                          if (actionUrl) {
+                            void navigate(actionUrl);
+                          }
+                        }
                       }
-                    }
+                    },
+                  }
+                : {
+                    label: 'View',
+                    onClick: (): void => {
+                      void navigate('/chat');
+                    },
                   },
-                }
-              : {
-                  label: 'View',
-                  onClick: (): void => {
-                    void navigate('/chat');
-                  },
-                },
             duration: 5000,
           });
         }

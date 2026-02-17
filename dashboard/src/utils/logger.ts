@@ -117,6 +117,7 @@ export const Event = {
   LIVEKIT_RTC_CONNECTING: 'livekit_rtc_connecting',
   LIVEKIT_RTC_CONNECTED: 'livekit_rtc_connected',
   LIVEKIT_RTC_DISCONNECTED: 'livekit_rtc_disconnected',
+  CANVAS_MENTION_DEBUG: 'canvas_mention_debug',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

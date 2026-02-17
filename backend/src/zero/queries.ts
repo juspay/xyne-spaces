@@ -497,6 +497,7 @@ export const queries = defineQueries({
           .related('attachments')
       )
       .related('reaction')
+      .related('canvas')
       .related('ticket');
   }),
 
@@ -545,6 +546,7 @@ export const queries = defineQueries({
             .related('attachments')
         )
         .related('reaction')
+        .related('canvas')
         .related('ticket');
     }
   ),

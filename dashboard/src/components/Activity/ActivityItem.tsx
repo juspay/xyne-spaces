@@ -1,6 +1,7 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageMentionActivity } from './MessageMentionActivity';
+import { CanvasMentionActivity } from './CanvasMentionActivity';
 import { MessageRepliedActivity } from './MessageRepliedActivity';
 import { ReactionAddedActivity } from './ReactionAddedActivity';
 import { DirectMessageActivity } from './DirectMessageActivity';
@@ -17,6 +18,11 @@ interface ActivityItemProps {
 export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): ReactElement | null => {
   switch (activity.actorAction) {
     case 'mentioned_user':
+      if (activity.canvasId) {
+        return <CanvasMentionActivity activity={activity} isExpanded={isExpanded} />;
+      }
+      return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
+
     case 'group_mention':
       return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
 

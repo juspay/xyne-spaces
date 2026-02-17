@@ -1046,6 +1046,8 @@ export const activityTable = table('activities')
     callId: string().optional(),
     ticketId: string().optional(),
     channelId: string().optional(),
+    canvasId: string().optional(),
+    blockId: string().optional(),
     actorId: string(),
     classification: enumeration<ActivityClassification>(),
     classificationConfidence: number().optional(),
@@ -2301,6 +2303,11 @@ export const activityTableRelationships = relationships(activityTable, ({ one })
     sourceField: ['ticketId'],
     destField: ['id'],
     destSchema: ticketTable,
+  }),
+  canvas: one({
+    sourceField: ['canvasId'],
+    destField: ['id'],
+    destSchema: canvasTable,
   }),
   actor: one({
     sourceField: ['actorId'],

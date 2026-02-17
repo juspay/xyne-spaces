@@ -669,8 +669,18 @@ class NotificationService {
 
   async createNotification(userId: string, data: NotificationData): Promise<void> {
     try {
+      logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
+        userId,
+        notificationType: data.type,
+        title: data.title,
+        message: data.message,
+        relatedEntityType: data.relatedEntityType,
+        relatedEntityId: data.relatedEntityId,
+        actionUrl: data.actionUrl,
+      });
 
       const shouldSendToMobile = await fcmPushService.hasActiveTokens(userId);
+      logger.info(`[NOTIFICATION-SERVICE] Mobile push check for user ${userId}: ${shouldSendToMobile}`);
       
       // 1. Queue mobile push notifications with per-session tracking
       if (shouldSendToMobile) {
@@ -716,6 +726,7 @@ class NotificationService {
       }
 
       // 2. Send real-time WebSocket notification (RAW data, edge will create specific entries)
+      logger.info(`[NOTIFICATION-SERVICE] Sending WebSocket notification to user ${userId}`);
       await realTimeNotificationService.sendNotification(
         userId,
         data.type,
@@ -776,6 +787,92 @@ class NotificationService {
         })
       )
     );
+  }
+
+  /**
+   * Send mention notifications for canvas mentions.
+   * Mirrors message mention flow: when canvas is in a channel, use "You were mentioned in #channelName".
+   */
+  async createCanvasMentionNotifications(
+    userIds: string[],
+    canvasId: string,
+    canvasTitle: string,
+    senderId: string,
+    senderName: string,
+    channelName?: string,
+    blockId?: string,
+  ): Promise<void> {
+    logger.info(`[NOTIFICATION-SERVICE] createCanvasMentionNotifications called`, {
+      userIds,
+      canvasId,
+      canvasTitle,
+      senderId,
+      senderName,
+      channelName,
+    });
+
+    const recipientIds = userIds.filter(id => id !== senderId);
+    logger.info(`[NOTIFICATION-SERVICE] Filtered recipient IDs (excluding sender)`, {
+      originalCount: userIds.length,
+      recipientCount: recipientIds.length,
+      recipientIds,
+      senderId,
+    });
+
+    if (recipientIds.length === 0) {
+      logger.info(`[NOTIFICATION-SERVICE] No recipients after filtering, skipping notification creation`);
+      return;
+    }
+
+    metrics.notificationJobsExpected.inc({ platform: 'desktop', message_type: 'channel' }, recipientIds.length);
+
+    // Mirror message mentions: "You were mentioned in #channelName" when canvas is in a channel
+    const title = channelName
+      ? `You were mentioned in #${channelName}`
+      : `You were mentioned in ${canvasTitle}`;
+    const message = channelName
+      ? `${senderName} mentioned you in #${channelName}`
+      : `${senderName} mentioned you in a canvas`;
+
+    logger.info(`[NOTIFICATION-SERVICE] Creating ${recipientIds.length} canvas mention notifications`, {
+      title,
+      message,
+      recipientIds,
+    });
+
+    const results = await Promise.allSettled(
+      recipientIds.map(userId =>
+        this.createNotification(userId, {
+          title,
+          message,
+          type: NotificationType.MENTION,
+          relatedEntityType: 'canvas',
+          relatedEntityId: canvasId,
+          // actionUrl removed - frontend will construct from data (canvasId, blockId) using CanvasRedirectPage
+          metadata: {
+            canvasId,
+            canvasTitle,
+            senderId,
+            senderName,
+            ...(blockId ? { blockId } : {}),
+          },
+        })
+      )
+    );
+
+    const successCount = results.filter(r => r.status === 'fulfilled').length;
+    const failureCount = results.filter(r => r.status === 'rejected').length;
+
+    logger.info(`[NOTIFICATION-SERVICE] Canvas mention notification creation completed`, {
+      total: recipientIds.length,
+      success: successCount,
+      failures: failureCount,
+      results: results.map((r, idx) => ({
+        userId: recipientIds[idx],
+        status: r.status,
+        error: r.status === 'rejected' ? (r.reason instanceof Error ? r.reason.message : String(r.reason)) : undefined,
+      })),
+    });
   }
 
   async createThreadReplyNotifications(
