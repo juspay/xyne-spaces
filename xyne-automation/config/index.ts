@@ -81,7 +81,7 @@ function getHeadless(env: Environment): boolean {
 
 // Get timeout from env or default
 function getTimeout(): number {
-  const DEFAULT_TIMEOUT = 60000;
+  const DEFAULT_TIMEOUT = 45000;
   if (!process.env.TIMEOUT) return DEFAULT_TIMEOUT;
 
   const parsed = parseInt(process.env.TIMEOUT, 10);
