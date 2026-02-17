@@ -73,6 +73,8 @@ import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts';
 import DocsScreen from './DocsScreen/DocsScreen';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { sharedChatRoutes } from './SharedChatRoutes';
+import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
+import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import DashboardCreation from './DashboardCreation/DashboardCreation';
 import QueryBuilderScreen from './QueryBuilderScreen/QueryBuilderScreen.tsx';
 import Drawer from '../components/ui/Drawer';
@@ -513,11 +515,19 @@ export const router = createBrowserRouter([
               },
               {
                 path: '/tickets',
-                element: <TicketsScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='TICKETS'>
+                    <TicketsScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/product-insights',
-                element: <ProductInsightsScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
+                    <ProductInsightsScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/tickets/:ticketId/workflow/:workflowId',
@@ -533,19 +543,35 @@ export const router = createBrowserRouter([
               },
               {
                 path: '/agents',
-                element: <AgentsScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='AGENTS'>
+                    <AgentsScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/knowledge-base',
-                element: <KnowledgeBaseScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='KNOWLEDGE-BASE'>
+                    <KnowledgeBaseScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/analytics',
-                element: <AnalyticsScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                    <AnalyticsScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/projects',
-                element: <ProjectsScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='PROJECTS'>
+                    <ProjectsScreen />
+                  </ResourceProtectedRoute>
+                ),
                 children: [
                   {
                     index: true,
@@ -567,11 +593,19 @@ export const router = createBrowserRouter([
               },
               {
                 path: '/user-groups',
-                element: <UserGroupsScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='USER-GROUPS'>
+                    <UserGroupsScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/listProjects',
-                element: <ProjectsListView />,
+                element: (
+                  <ResourceProtectedRoute resourceName='LISTPROJECTS'>
+                    <ProjectsListView />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/listProjects/:projectId',
@@ -583,19 +617,35 @@ export const router = createBrowserRouter([
               },
               {
                 path: '/user-groups/:userGroupId/assignment-config',
-                element: <AssignmentConfigWrapper />,
+                element: (
+                  <ResourceProtectedRoute resourceName='USER-GROUPS'>
+                    <AssignmentConfigWrapper />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/analytics-dashboard',
-                element: <DashboardCreation />,
+                element: (
+                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                    <DashboardCreation />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/analytics-dashboard/:dashboardId',
-                element: <QueryBuilderScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                    <QueryBuilderScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/support',
-                element: <SupportScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='SUPPORT'>
+                    <SupportScreen />
+                  </ResourceProtectedRoute>
+                ),
                 children: [
                   {
                     path: ':ticketId',
@@ -609,11 +659,23 @@ export const router = createBrowserRouter([
               },
               {
                 path: '/forms',
-                element: <FormScreen />,
+                element: (
+                  <ResourceProtectedRoute resourceName='FORMS'>
+                    <FormScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: '/docs/*',
                 element: <DocsScreen />,
+              },
+              {
+                path: '/resource-access',
+                element: (
+                  <ResourceProtectedRoute resourceName='USERS'>
+                    <ResourceAccessScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
             ],
           },

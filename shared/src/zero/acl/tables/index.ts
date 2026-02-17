@@ -21,6 +21,8 @@ export { PullRequestsACL } from './pull-requests-acl';
 export { ReactionCountsACL } from './reaction-counts-acl';
 export { ReactionsACL } from './reactions-acl';
 export { ReposACL } from './repos-acl';
+export { ResourcesACL } from './resources-acl';
+export { ResourceAccessACL } from './resource-access-acl';
 export { StagesACL } from './stages-acl';
 export { StagePRStatusMappingsACL } from './stage-pr-status-mappings-acl';
 export { SubTicketsACL } from './sub-tickets-acl';

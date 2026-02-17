@@ -41,6 +41,8 @@ import { BoardComplexityScoresACL } from '../tables/board-complexity-scores-acl'
 import { UserWorkloadMappingsACL } from '../tables/user-workload-mappings-acl';
 import { UserExpertiseMappingsACL } from '../tables/user-expertise-mappings-acl';
 import { StagePRStatusMappingsACL } from '../tables/stage-pr-status-mappings-acl';
+import { ResourcesACL } from '../tables/resources-acl';
+import { ResourceAccessACL } from '../tables/resource-access-acl';
 import { ProactiveNudgesACL } from '../tables/proactive-nudges-acl';
 
 export class ACLFactory {
@@ -108,6 +110,10 @@ export class ACLFactory {
         return new ReactionCountsACL(ctx);
       case 'reactions':
         return new ReactionsACL(ctx);
+      case 'resources':
+        return new ResourcesACL(ctx);
+      case 'resource_access':
+        return new ResourceAccessACL(ctx);
       case 'stages':
         return new StageAcl(ctx);
       case 'stage_pr_status_mappings':

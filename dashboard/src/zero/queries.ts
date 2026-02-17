@@ -417,6 +417,12 @@ export const queries = defineQueries({
   getUsers: defineQuery(() => {
     return zql.users.related('presenceStatus');
   }),
+  getUserProfilesByIds: defineQuery(
+    z.object({ userIds: z.array(z.string()) }),
+    ({ args: { userIds } }) => {
+      return zql.user_profiles.where('userId', 'IN', userIds);
+    },
+  ),
   getUserProfile: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
     return zql.user_profiles.where('userId', userId).one();
   }),
@@ -687,6 +693,17 @@ export const queries = defineQueries({
   getAllUserGroups: defineQuery(() => {
     return zql.user_groups.orderBy('createdAt', 'desc');
   }),
+  // Query for all resources
+  getAllResources: defineQuery(() => {
+    return zql.resources.orderBy('name', 'asc');
+  }),
+  // Query for resource access for a specific user
+  getResourceAccessForUser: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ args: { userId } }) => {
+      return zql.resource_access.where('userId', userId);
+    },
+  ),
   // Query for members of a specific user group
   getUserGroupMembers: defineQuery(
     z.object({ userGroupId: z.string() }),
