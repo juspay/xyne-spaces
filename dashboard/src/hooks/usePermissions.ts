@@ -41,3 +41,10 @@ export const useCanViewAnalytics = (): boolean => {
     permission => permission.resourceName === 'ANALYTICS' && permission.accessType === 'ADMIN',
   );
 };
+
+// Helper to check if user has ADMIN access to a resource
+// NOTE: Currently only ADMIN can see resource-based sidebar items. Change to include READ/WRITE if needed.
+export const useHasResourceAccess = (resourceName: string): boolean => {
+  const permissions = usePermissions();
+  return permissions.some(p => p.resourceName === resourceName && p.accessType === 'ADMIN');
+};

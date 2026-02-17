@@ -10,7 +10,7 @@ import {
 import { Link, useLocation } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { useAuth } from '../../hooks/useAuth';
-import { useHasAdminAccess } from '../../hooks/usePermissions';
+import { usePermissions } from '../../hooks/usePermissions';
 import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
 import { useCanViewAnalytics } from '../../hooks/usePermissions';
 import { isElectronApp } from '../../utils/electronApp';
@@ -35,6 +35,7 @@ import {
   Mic,
   MoreHorizontal,
   Bookmark,
+  ShieldUser,
 } from 'lucide-react';
 
 import Avatar from '../ui/Avatar/Avatar';
@@ -47,6 +48,7 @@ import { StatusIndicator } from '../ui/StatusIndicator';
 import { useMissedCallCount } from '../../hooks/useMissedCallCount';
 import { usePlatform } from '../../hooks/usePlatform';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
+import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 
 const navigationItems = [
   {
@@ -94,6 +96,11 @@ const navigationItems = [
     path: '/listProjects',
     label: 'List Projects',
     icon: <Folder size={16} color='var(--app-sidebar-active-foreground)' />,
+  },
+  {
+    path: '/resource-access',
+    label: 'User Management',
+    icon: <ShieldUser size={18} color='var(--app-sidebar-active-foreground)' />,
   },
   {
     path: '/support',
@@ -164,7 +171,7 @@ const AppSidebar = (): ReactElement => {
   const location = useLocation();
   const { user } = useAuth();
   const currentUser = useSelf();
-  const hasAdminAccess = useHasAdminAccess();
+  const permissions = usePermissions();
   const missedCallCount = useMissedCallCount();
   const { isMobile } = usePlatform();
 
@@ -209,15 +216,18 @@ const AppSidebar = (): ReactElement => {
     location.pathname.includes('threadId') ||
     location.hash.includes('threadId');
 
-  const filteredNavigationItems = useMemo(
-    () =>
-      navigationItems.filter(item => {
-        const adminOnlyPaths = ['/analytics', '/knowledge-base', '/user-groups', '/listProjects'];
-        if (item.path === '/vscode' && !isElectronApp()) return false;
-        return !adminOnlyPaths.includes(item.path) || hasAdminAccess;
-      }),
-    [hasAdminAccess],
-  );
+  const filteredNavigationItems = useMemo(() => {
+    return navigationItems.filter(item => {
+      const resourceName = PATH_TO_RESOURCE[item.path];
+      const requiresAccess = resourceName !== undefined;
+      const hasAccess = requiresAccess
+        ? permissions.some(p => p.resourceName === resourceName && p.accessType === 'ADMIN')
+        : true;
+
+      if (item.path === '/vscode' && !isElectronApp()) return false;
+      return hasAccess;
+    });
+  }, [permissions]);
 
   const handleNavigationClick = (label: string): void => {
     mixpanelService.track(EVENTS.NAVIGATION, { item: label });

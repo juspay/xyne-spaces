@@ -22,6 +22,7 @@ import {
   ActivityClassification,
   PRStatusEvent,
   UserResponsibility,
+  AccessType,
   BoardType,
   TicketStageRequestStatus,
 } from '@xyne/shared';
@@ -5788,6 +5789,59 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
+  resourceAccess: {
+    grant: defineMutator(
+      z.object({
+        grants: z.array(z.object({
+          id: z.string(),
+          userId: z.string(),
+          resourceId: z.string(),
+          accessType: z.nativeEnum(AccessType),
+        })),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { grants, timestamp } }) => {
+        for (const grant of grants) {
+          await tx.mutate.resource_access.insert({
+            id: grant.id,
+            userId: grant.userId,
+            resourceId: grant.resourceId,
+            accessType: grant.accessType as AccessType,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    revoke: defineMutator(
+      z.object({
+        ids: z.array(z.string()),
+      }),
+      async ({ tx, args: { ids } }) => {
+        for (const id of ids) {
+          await tx.mutate.resource_access.delete({ id });
+        }
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        updates: z.array(z.object({
+          id: z.string(),
+          accessType: z.nativeEnum(AccessType),
+        })),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { updates, timestamp } }) => {
+        for (const update of updates) {
+          await tx.mutate.resource_access.update({
+            id: update.id,
+            accessType: update.accessType as AccessType,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+  },
     query: {
       upsert: defineMutator(
         z.object({
