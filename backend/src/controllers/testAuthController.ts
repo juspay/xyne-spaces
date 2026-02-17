@@ -102,9 +102,17 @@ export class TestAuthController {
                         logger.warn(`[${requestId}] Default organization not found`);
                     }
 
-                    const essentialResources = [
+                   const essentialResources = [
                         { name: 'TICKETS', description: 'Ticket management endpoints' },
-                        { name: 'PROJECTS', description: 'Project management endpoints' },
+                        { name: 'KNOWLEDGE-BASE', description: 'Knowledge base management' },
+                        { name: 'ANALYTICS', description: 'Analytics and reporting' },
+                        { name: 'USER-GROUPS', description: 'User group management' },
+                        { name: 'LISTPROJECTS', description: 'Project list view' },
+                        { name: 'USERS', description: 'User management endpoints' },
+                        { name: 'FORMS', description: 'Form management' },
+                        { name: 'SUPPORT', description: 'Support ticket management' },
+                        { name: 'PRODUCT-INSIGHTS', description: 'Product insights and analytics' },
+                        { name: 'PROJECTS', description: 'Project board management' },
                     ];
 
                     for (const resourceData of essentialResources) {
