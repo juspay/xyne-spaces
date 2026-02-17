@@ -51,6 +51,7 @@ import { TicketSuggestions } from './TicketSuggestions';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { hasMessageContent } from '../../../utils/chatUtils';
 import { ProactiveNudgeList } from '../../Chat/Nudges/ProactiveNudgeList';
+import MobileReactionDrawer from './MobileReactionDrawer';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -893,8 +894,14 @@ export const ReactionView = ({
 }): React.ReactNode => {
   const { user } = useAuth();
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [isReactionDrawerOpen, setIsReactionDrawerOpen] = useState(false);
   const users = useUsers();
   const { data: customEmojis } = useCustomEmojis();
+  const { isMobile } = usePlatform();
+
+  // Touch handling refs for long press detection
+  const pressTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const isScrollingRef = React.useRef(false);
 
   const usersById = useMemo(() => {
     const map = new Map<string, { name: string }>();
@@ -944,89 +951,155 @@ export const ReactionView = ({
     (a, b) => a.earliestTimestamp - b.earliestTimestamp,
   );
 
+  const handleReactionDrawerOpenChange = (open: boolean): void => {
+    setIsReactionDrawerOpen(open);
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+
+    // Dismiss keyboard when opening the drawer on mobile
+    if (open && isMobile) {
+      const activeElement = document.activeElement as HTMLElement;
+      if (
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.isContentEditable)
+      ) {
+        activeElement.blur();
+      }
+    }
+  };
+
   return (
-    <div className='flex items-center gap-1 flex-wrap'>
-      {groupedReactionsArray.map(reaction => {
-        const userNames = reaction.users.map(u => u.name).join(', ');
-        const verb = reaction.users.length === 1 ? 'has' : 'have';
-        // For custom emojis, show the emoji name instead of the full ID
-        const displayEmojiName = getEmojiDisplayName(reaction.emojiName);
-        const tooltipContent = `${userNames} ${verb} reacted with ${displayEmojiName}`;
+    <>
+      <div className='flex items-center gap-1 flex-wrap'>
+        {groupedReactionsArray.map(reaction => {
+          const userNames = reaction.users.map(u => u.name).join(', ');
+          const verb = reaction.users.length === 1 ? 'has' : 'have';
+          // For custom emojis, show the emoji name instead of the full ID
+          const displayEmojiName = getEmojiDisplayName(reaction.emojiName);
+          const tooltipContent = `${userNames} ${verb} reacted with ${displayEmojiName}`;
 
-        return (
-          <Tooltip key={reaction.emojiName} content={tooltipContent} side={TooltipSide.TOP}>
-            <button
-              type='button'
-              className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
-                reaction.userHasReacted
-                  ? 'bg-blue-100 border border-blue-400 hover:bg-blue-200'
-                  : 'bg-[#F0F2F5] hover:bg-[#E5E7EB]'
-              }`}
-              onClick={e => {
-                toggleReaction({
-                  messageId: messageId,
-                  emoji: reaction.emojiName,
-                  hasReacted: reaction.userHasReacted,
-                });
-                e.stopPropagation();
-              }}
-            >
-              {renderEmoji(reaction.emojiName)}
-              {reaction.count > 1 && (
-                <span className='text-xs font-medium text-gray-700'>{reaction.count}</span>
-              )}
-            </button>
-          </Tooltip>
-        );
-      })}
-
-      {/* Add Reaction Button */}
-      <Popover.Root open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen} modal={true}>
-        <Popover.Trigger asChild>
-          <button
-            type='button'
-            className='inline-flex items-center justify-center w-6 h-6 rounded-full text-gray-500 bg-[#F0F2F5] hover:bg-[#E5E7EB] cursor-pointer transition-all duration-150'
-            onClick={e => e.stopPropagation()}
-          >
-            <span className='text-sm font-medium'>+</span>
-          </button>
-        </Popover.Trigger>
-        <Popover.Portal>
-          <>
-            {emojiPickerOpen && <div className='fixed inset-0 z-40' />}
-            <Popover.Content
-              side='top'
-              align='start'
-              sideOffset={4}
-              collisionPadding={16}
-              avoidCollisions={true}
-              className='z-50 bg-white rounded-lg shadow-lg'
-            >
-              <EmojiPicker
-                emojiStyle={EmojiStyle.NATIVE}
-                onEmojiClick={emoji => {
-                  // For custom emojis, store the emojiId with a prefix
-                  const emojiName = emoji.isCustom
-                    ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
-                    : emoji.emoji;
-                  // Check if the user has already reacted with this emoji
-                  const hasReacted =
-                    !!user &&
-                    reactions.some(r => r.emojiName === emojiName && r.userId === user.id);
-
+          return (
+            <Tooltip key={reaction.emojiName} content={tooltipContent} side={TooltipSide.TOP}>
+              <button
+                type='button'
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
+                  reaction.userHasReacted
+                    ? 'bg-blue-100 border border-blue-400 hover:bg-blue-200'
+                    : 'bg-[#F0F2F5] hover:bg-[#E5E7EB]'
+                }`}
+                onClick={e => {
                   toggleReaction({
                     messageId: messageId,
-                    emoji: emojiName,
-                    hasReacted,
+                    emoji: reaction.emojiName,
+                    hasReacted: reaction.userHasReacted,
                   });
-                  setEmojiPickerOpen(false);
+                  e.stopPropagation();
                 }}
-                customEmojis={customEmojis || []}
-              />
-            </Popover.Content>
-          </>
-        </Popover.Portal>
-      </Popover.Root>
-    </div>
+                onTouchStart={e => {
+                  if (isMobile) {
+                    e.stopPropagation();
+                    isScrollingRef.current = false;
+
+                    pressTimerRef.current = setTimeout(() => {
+                      if (!isScrollingRef.current) {
+                        handleReactionDrawerOpenChange(true);
+                        isScrollingRef.current = false;
+                      }
+                    }, 600);
+                  }
+                }}
+                onTouchMove={() => {
+                  if (isMobile) {
+                    isScrollingRef.current = true;
+                    if (pressTimerRef.current) {
+                      clearTimeout(pressTimerRef.current);
+                      pressTimerRef.current = null;
+                    }
+                  }
+                }}
+                onTouchEnd={() => {
+                  if (pressTimerRef.current) {
+                    clearTimeout(pressTimerRef.current);
+                    pressTimerRef.current = null;
+                  }
+                }}
+                onTouchCancel={() => {
+                  if (pressTimerRef.current) {
+                    clearTimeout(pressTimerRef.current);
+                    pressTimerRef.current = null;
+                  }
+                }}
+              >
+                {renderEmoji(reaction.emojiName)}
+                {reaction.count > 1 && (
+                  <span className='text-xs font-medium text-gray-700'>{reaction.count}</span>
+                )}
+              </button>
+            </Tooltip>
+          );
+        })}
+
+        {/* Add Reaction Button */}
+        <Popover.Root open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen} modal={true}>
+          <Popover.Trigger asChild>
+            <button
+              type='button'
+              className='inline-flex items-center justify-center w-6 h-6 rounded-full text-gray-500 bg-[#F0F2F5] hover:bg-[#E5E7EB] cursor-pointer transition-all duration-150'
+              onClick={e => e.stopPropagation()}
+            >
+              <span className='text-sm font-medium'>+</span>
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <>
+              {emojiPickerOpen && <div className='fixed inset-0 z-40' />}
+              <Popover.Content
+                side='top'
+                align='start'
+                sideOffset={4}
+                collisionPadding={16}
+                avoidCollisions={true}
+                className='z-50 bg-white rounded-lg shadow-lg'
+              >
+                <EmojiPicker
+                  emojiStyle={EmojiStyle.NATIVE}
+                  onEmojiClick={emoji => {
+                    // For custom emojis, store the emojiId with a prefix
+                    const emojiName = emoji.isCustom
+                      ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
+                      : emoji.emoji;
+                    // Check if the user has already reacted with this emoji
+                    const hasReacted =
+                      !!user &&
+                      reactions.some(r => r.emojiName === emojiName && r.userId === user.id);
+
+                    toggleReaction({
+                      messageId: messageId,
+                      emoji: emojiName,
+                      hasReacted,
+                    });
+                    setEmojiPickerOpen(false);
+                  }}
+                  customEmojis={customEmojis || []}
+                />
+              </Popover.Content>
+            </>
+          </Popover.Portal>
+        </Popover.Root>
+      </div>
+
+      {/* Mobile Reaction Drawer */}
+      {isMobile && (
+        <MobileReactionDrawer
+          isOpen={isReactionDrawerOpen}
+          setIsOpen={handleReactionDrawerOpenChange}
+          reactions={reactions}
+        />
+      )}
+    </>
   );
 };
