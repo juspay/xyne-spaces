@@ -13,6 +13,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { isStatusExpired } from '../../../utils/statusUtils';
 import { StatusIndicator } from '../StatusIndicator';
 import { useCallActions } from '../../../hooks/useCallActions';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 /**
  * UserHoverWrapper Component
@@ -22,6 +23,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
   const { user: currentUser } = useAuth();
   const navigate = useNavigate();
   const { hasTyped } = useTypingState();
+  const { isMobile } = usePlatform();
   const user = useUser(userId);
   const [dmChannelId, setDmChannelId] = useState<string | null>(null);
   const shouldTriggerCallRef = useRef(false);
@@ -94,6 +96,31 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
   }
 
   const isCurrentUser = user.id === currentUser?.id;
+
+  // On mobile: directly navigate to DM on tap (skip popover)
+  if (isMobile) {
+    return (
+      <span
+        role='button'
+        tabIndex={0}
+        onClick={e => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!isCurrentUser) handleSendMessage();
+        }}
+        onKeyDown={e => {
+          if ((e.key === 'Enter' || e.key === ' ') && !isCurrentUser) {
+            e.preventDefault();
+            handleSendMessage();
+          }
+        }}
+        className='cursor-pointer'
+        style={{ display: 'inline' }}
+      >
+        {children}
+      </span>
+    );
+  }
 
   return (
     <HoverCard

@@ -127,6 +127,8 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
           onClick={handleEditorClick}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
+              // Don't intercept when editor has focus — let Enter insert newline, Space insert space
+              if (editor?.isFocused) return;
               e.preventDefault();
               handleEditorClick();
             }
