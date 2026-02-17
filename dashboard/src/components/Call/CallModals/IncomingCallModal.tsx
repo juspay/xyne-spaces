@@ -92,9 +92,7 @@ export function IncomingCallModal(): React.ReactElement | null {
       (p: CallParticipant) => p.userId === user?.id,
     );
     // Exclude if user has already left the call (leftAt !== null) or if not invited
-    return (
-      userParticipant?.response === InvitationResponse.INVITED && userParticipant?.leftAt === null
-    );
+    return userParticipant?.response === InvitationResponse.INVITED;
   });
 
   useEffect(() => {

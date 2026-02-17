@@ -5,9 +5,7 @@ import { useAuthContext } from '../../providers/AuthProvider';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useZero } from '../../hooks/useZero';
-import { mutators } from '../../zero/mutators';
 import { callActor } from '../../machines/callMachine';
-import { v4 as uuidv4 } from 'uuid';
 import { roomActor } from '../../machines/roomMachine';
 import { CallType } from '@xyne/shared';
 
@@ -200,16 +198,9 @@ export const NotificationHandler: React.FC = () => {
             // If there's an active call that was joined, ensure it's in Zero
             if (activeCallId) {
               console.log('[NotificationHandler] Syncing pending join:', activeCallId);
-              // Set native active call ID in callActor FIRST (before Zero mutator)
+              // Set native active call ID in callActor FIRST
               // This immediately prevents IncomingCallModal from showing
               callActor.send({ type: 'SET_NATIVE_ACTIVE_CALL', callId: activeCallId });
-              void zero.mutate(
-                mutators.calls.join({
-                  callId: activeCallId,
-                  timestamp: Date.now(),
-                  participantId: uuidv4(),
-                }),
-              );
               nativeJoinedCallsRef.current.add(activeCallId);
             }
 
@@ -219,17 +210,7 @@ export const NotificationHandler: React.FC = () => {
               // Clear native active call ID in callActor
               callActor.send({ type: 'CLEAR_NATIVE_ACTIVE_CALL' });
               const timestamp = Date.now();
-              // Ensure join is recorded first (idempotent)
-              void zero.mutate(
-                mutators.calls.join({
-                  callId: endedCallId,
-                  timestamp,
-                  participantId: uuidv4(),
-                }),
-              );
-              void zero.mutate(
-                mutators.calls.leave({ callId: endedCallId, timestamp: Date.now() }),
-              );
+              console.log('[NotificationHandler] Call ended:', endedCallId, timestamp);
             }
 
             console.log('[NotificationHandler] Successfully synced pending call state');
@@ -284,20 +265,12 @@ export const NotificationHandler: React.FC = () => {
           try {
             // Track this call as joined via native
             nativeJoinedCallsRef.current.add(callId);
-            // Set native active call ID in callActor FIRST (before Zero mutator)
+            // Set native active call ID in callActor FIRST
             // This immediately prevents IncomingCallModal from showing
             callActor.send({ type: 'SET_NATIVE_ACTIVE_CALL', callId });
-            // Write to Zero DB that user has joined the call
-            void zero.mutate(
-              mutators.calls.join({
-                callId,
-                timestamp: Date.now(),
-                participantId: uuidv4(),
-              }),
-            );
-            console.log('[NotificationHandler] Successfully wrote call join to Zero DB:', callId);
+            console.log('[NotificationHandler] Call started:', callId);
           } catch (error) {
-            console.error('[NotificationHandler] Failed to write call join to Zero:', error);
+            console.error('[NotificationHandler] Failed to handle call start:', error);
           }
         }
       },
@@ -326,29 +299,17 @@ export const NotificationHandler: React.FC = () => {
             // First ensure join was recorded (may have been missed during cold start)
             // This ensures participant has ACCEPTED response before we leave
             if (!nativeJoinedCallsRef.current.has(callId)) {
-              console.log(
-                '[NotificationHandler] Call not tracked, ensuring join before leave:',
-                callId,
-              );
-              void zero.mutate(
-                mutators.calls.join({
-                  callId,
-                  timestamp: Date.now(),
-                  participantId: uuidv4(),
-                }),
-              );
+              console.log('[NotificationHandler] Call not tracked:', callId);
             }
 
             // Clear native active call ID in callActor
             callActor.send({ type: 'CLEAR_NATIVE_ACTIVE_CALL' });
 
-            // Write to Zero DB that user has left the call
-            void zero.mutate(mutators.calls.leave({ callId, timestamp: Date.now() }));
-            console.log('[NotificationHandler] Successfully wrote call leave to Zero DB:', callId);
+            console.log('[NotificationHandler] Call ended:', callId);
             // Remove from tracked calls if present
             nativeJoinedCallsRef.current.delete(callId);
           } catch (error) {
-            console.error('[NotificationHandler] Failed to write call leave to Zero:', error);
+            console.error('[NotificationHandler] Failed to handle call end:', error);
           }
         }
       },

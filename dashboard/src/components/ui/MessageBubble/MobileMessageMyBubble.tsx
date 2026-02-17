@@ -17,6 +17,7 @@ import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessag
 import { MessageMetadata } from './MessageBubble.utils';
 import { CallMessageOverlay } from '../../Chat/CallMessageOverlay/CallMessageOverlay';
 import { WorkflowBubble } from '../../Chat/WorkflowBubble/WorkflowBubble';
+import { useIsCallActive } from '../../../hooks/useCalls';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { ReactionView } from './MessageBubble';
 import { ConversationWithTicket } from './MessageBubble.types';
@@ -82,8 +83,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   const isWorkflowMessage =
     (isSystemMessage && metadata?.workflowId && metadata?.ticketId) ||
     (isBotMessage && metadata?.xyneId && metadata?.ticketId);
-  const isCallMessage = metadata?.isCallMessage === true;
-  const isActiveCall = isCallMessage && metadata?.operation === 'call_active';
+  const isActiveCall = useIsCallActive(metadata?.callId);
 
   // Parse forwarded message XML content
   const forwardedMessageData = useMemo(() => {

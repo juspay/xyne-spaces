@@ -58,30 +58,16 @@ class TranscriptionAgentController {
       // For headless calls (recordingEnabled=true), message is optional
       // Normal calls should always have a system message
       if (!callMessage) {
-        // Headless call without system message - mark call as ended but skip summary
+        // Headless call without system message - skip summary processing
         if (call.recordingEnabled) {
-          logger.info(`[TranscriptReady] Headless call ${callId} - no system message, marking as ended`);
-          await repositories.calls.update(call.id, {
-            status: 'ENDED',
-            endedAt: new Date(),
-          });
-          res.json({ success: true, message: 'Headless call marked as ended' });
+          logger.info(`[TranscriptReady] Headless call ${callId} - no system message, skipping summary`);
+          res.json({ success: true, message: 'Headless call processed' });
           return;
         } else {
           logger.error(`[TranscriptReady] Call message not found for call: ${callId}`);
           res.status(404).json({ success: false, error: 'Call message not found' });
           return;
         }
-      }
-
-      // Mark call as ended BEFORE processing transcript/summary
-      // This ensures endedAt is set even if summary generation fails
-      if (call.status !== 'ENDED') {
-        logger.info(`[TranscriptReady] Marking call ${callId} as ended`);
-        await repositories.calls.update(call.id, {
-          status: 'ENDED',
-          endedAt: new Date(),
-        });
       }
 
       // Validate request body

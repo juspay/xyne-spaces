@@ -7,7 +7,6 @@ import { useZero } from '../../../hooks/useZero';
 import { useEffect } from 'react';
 import { queries } from '../../../zero/queries';
 import { callService } from '../../../services/Call/callService';
-import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 export function GlobalCallOverlay(): React.ReactElement | null {
@@ -59,15 +58,8 @@ export function GlobalCallOverlay(): React.ReactElement | null {
         snapshot.matches('connected');
 
       if (isInCall) {
-        const { externalId: callId, zero: contextZero } = snapshot.context;
-
         // Send disconnect event to clean up properly
         roomActor.send({ type: 'DISCONNECT' });
-
-        // Also directly update database as a fallback
-        if (contextZero && callId) {
-          void contextZero.mutate(mutators.calls.leave({ callId, timestamp: Date.now() }));
-        }
       }
     };
 

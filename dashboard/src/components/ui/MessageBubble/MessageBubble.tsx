@@ -40,6 +40,7 @@ import workflowBotAvatar from './workflowBotAvatar.png';
 import { WorkflowBubble } from '../../Chat/WorkflowBubble/WorkflowBubble';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
+import { useIsCallActive } from '../../../hooks/useCalls';
 import { useUsers, useUser } from '../../../hooks/useUsers';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
 import { useRouteContext } from '../../../hooks/useRouteContext';
@@ -295,7 +296,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     (isSystemMessage && metadata?.workflowId && metadata?.ticketId && !metadata?.messageSubtype) ||
     (isBotMessage && metadata?.xyneId && metadata?.ticketId);
   const isCallMessage = metadata?.isCallMessage === true;
-  const isActiveCall = isCallMessage && metadata?.operation === 'call_active';
+  const isActiveCall = useIsCallActive(metadata?.callId);
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;

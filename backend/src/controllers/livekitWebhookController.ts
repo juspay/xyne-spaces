@@ -2,9 +2,17 @@ import { Request, Response } from 'express';
 import { WebhookReceiver, WebhookEvent } from 'livekit-server-sdk';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { InvitationResponse } from '@prisma/client';
+import { DatabaseClient } from '@/database/client';
+import { repositories } from '@/database/repositories';
+import { v4 as uuidv4 } from 'uuid';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
+
+  private get db() {
+    return DatabaseClient.getInstance();
+  }
 
   constructor() {
     // Initialize webhook receiver with existing API credentials
@@ -25,6 +33,7 @@ class LiveKitWebhookController {
    */
   handleWebhook = async (req: Request, res: Response): Promise<void> => {
     try {
+
       // Verify webhook signature and parse event
       // Note: req.body is a Buffer from express.raw() middleware
       // WebhookReceiver.receive() expects the raw body as a string
@@ -32,13 +41,6 @@ class LiveKitWebhookController {
         req.body.toString('utf8'), 
         req.get('Authorization')
       );
-
-      logger.info(`[LiveKit Webhook] Received event: ${event.event}`, {
-        event: event.event,
-        roomName: event.room?.name,
-        roomSid: event.room?.sid,
-        numParticipants: event.room?.numParticipants,
-      });
 
       // Handle different event types
       switch (event.event) {
@@ -71,55 +73,220 @@ class LiveKitWebhookController {
 
   /**
    * Handle room_started event
+   * Called when a room is first created and becomes active
+   * 
+   * Note: We only log this event. All DB operations happen when the first participant joins.
    */
   private async handleRoomStarted(event: WebhookEvent): Promise<void> {
     const roomName = event.room?.name;
+    if (!roomName) return;
+
     logger.info(`[LiveKit Webhook] Room started: ${roomName}`, {
       sid: event.room?.sid,
       creationTime: event.room?.creationTime ? Number(event.room.creationTime) : undefined,
       metadata: event.room?.metadata,
-      numParticipants: event.room?.numParticipants,
     });
   }
 
   /**
-   * Handle room_finished event
+   * Handle room_finished event - MOST IMPORTANT
+   * 
+   * This is the authoritative signal that the room has closed.
+   * Called when all participants have left and the room is being cleaned up.
+   * This is guaranteed to fire AFTER the room is actually closed.
    */
   private async handleRoomFinished(event: WebhookEvent): Promise<void> {
-    const roomName = event.room?.name;
-    logger.info(`[LiveKit Webhook] Room finished: ${roomName}`, {
+    const callId = event.room?.name;
+    if (!callId) {
+      logger.warn('[LiveKit Webhook] room_finished event missing room name');
+      return;
+    }
+
+    logger.info(`[LiveKit Webhook] Room finished: ${callId}`, {
       sid: event.room?.sid,
       numParticipants: event.room?.numParticipants,
-      metadata: event.room?.metadata,
     });
+
+    try {
+      const now = new Date();
+      
+      // Use repository method to handle room finished atomically (includes system message update)
+      const result = await repositories.calls.handleRoomFinished({
+        callExternalId: callId,
+        endedAt: now,
+      });
+
+      if (!result.call) {
+        logger.error(`[LiveKit Webhook] Call not found: ${callId}`);
+        return;
+      }
+
+      if (result.shouldEndCall) {
+        logger.info(`[LiveKit Webhook] Marked call ${callId} as ENDED`);
+      } else {
+        logger.debug(`[LiveKit Webhook] Call ${callId} already marked as ENDED`);
+      }
+
+      if (result.messageUpdated) {
+        logger.info(`[LiveKit Webhook] Updated system message for call ${callId}`);
+      }
+    } catch (error) {
+      logger.error(`[LiveKit Webhook] Error handling room_finished for ${callId}:`, error);
+      throw error;
+    }
   }
 
   /**
    * Handle participant_joined event
+   * When the first participant joins, create the call record, participants, and system message
    */
   private async handleParticipantJoined(event: WebhookEvent): Promise<void> {
     const roomName = event.room?.name;
     const participant = event.participant;
 
+    if (!participant?.identity || !roomName) return;
+
     logger.info(`[LiveKit Webhook] Participant joined: ${participant?.identity} in room ${roomName}`, {
       sid: participant?.sid,
       name: participant?.name,
-      metadata: participant?.metadata,
     });
+
+    // Skip agent participants
+    if (participant.identity.startsWith('agent-')) {
+      logger.debug(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
+      return;
+    }
+
+    try {
+      // Check if call record already exists
+      let call = await repositories.calls.findByExternalId(roomName);
+      const callNotExist = !call;
+
+      // If call doesn't exist, this is the first participant - create everything using repository
+      if (callNotExist) {
+        logger.info(`[LiveKit Webhook] First participant joined - creating call record for ${roomName}`);
+        
+        // Parse room metadata to get channel info
+        const roomMetadata = event.room?.metadata ? JSON.parse(event.room.metadata) : {};
+        const channelId = roomMetadata.channelId;
+        const createdBy = roomMetadata.createdBy || participant.identity;
+        const callType = roomMetadata.callType;
+
+        if (!channelId) {
+          logger.error(`[LiveKit Webhook] Missing channelId in room metadata for ${roomName}`);
+          return;
+        }
+
+        // Get channel participants for creating participant records
+        const channelParticipants = await repositories.channelParticipants.getChannelParticipants(channelId);
+        const now = new Date();
+
+        // Generate IDs upfront for conversation and message
+        const conversationId = uuidv4();
+        const messageId = uuidv4();
+        const callId = uuidv4();
+
+        // Construct room link
+        const roomLink = `${config.livekit.clientUrl}/call/${roomName}?type=${callType}`;
+
+        // Use repository method to create call with all related records atomically
+        call = await repositories.calls.createCallWithParticipantsAndMessage({
+          callId,
+          roomName,
+          channelId,
+          createdBy,
+          callType,
+          roomLink,
+          joiningUserId: participant.identity,
+          channelParticipants,
+          conversationId,
+          messageId,
+          now,
+        });
+
+        logger.info(`[LiveKit Webhook] Successfully created all records for first participant in call ${roomName}`);
+      } else if (call) {
+        // Call exists, handle subsequent participant join
+        const existingParticipant = await repositories.calls.findParticipant(call.id, participant.identity);
+
+        if (!existingParticipant) {
+          // Create participant if doesn't exist (handles edge cases like external users)
+          await repositories.calls.createParticipant({
+            id: uuidv4(),
+            callId: call.id,
+            userId: participant.identity,
+            invitedBy: call.createdByUserId,
+            invitedAt: new Date(),
+            response: InvitationResponse.ACCEPTED,
+            joinedAt: new Date()
+          });
+          logger.info(`[LiveKit Webhook] Created new participant record for ${participant.identity}`);
+        } else {
+          // Update participant to ACCEPTED with joinedAt timestamp using repository method
+          const now = new Date();
+          await this.db.$transaction(async (tx) => {
+            await repositories.calls.updateParticipantResponse(
+              existingParticipant.id,
+              InvitationResponse.ACCEPTED,
+              now,
+              tx
+            );
+          });
+          logger.info(`[LiveKit Webhook] Updated participant ${participant.identity} to ACCEPTED for call ${roomName}`);
+        }
+      }
+    } catch (error) {
+      logger.error(`[LiveKit Webhook] Error handling participant join:`, error);
+    }
   }
 
   /**
    * Handle participant_left event
    */
   private async handleParticipantLeft(event: WebhookEvent): Promise<void> {
-    const roomName = event.room?.name;
+    const callId = event.room?.name;
     const participant = event.participant;
 
-    logger.info(`[LiveKit Webhook] Participant left: ${participant?.identity} from room ${roomName}`, {
+    if (!participant?.identity || !callId) return;
+
+    logger.info(`[LiveKit Webhook] Participant left: ${participant?.identity} from call ${callId}`, {
       sid: participant?.sid,
       name: participant?.name,
-      metadata: participant?.metadata,
     });
+
+    // Skip agent participants early
+    if (participant.identity.startsWith('agent-')) {
+      logger.debug(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
+      return;
+    }
+
+    try {
+      const now = new Date();
+      
+      // Use repository method to handle participant leave atomically (includes system message update)
+      const result = await repositories.calls.handleParticipantLeave({
+        callExternalId: callId,
+        userId: participant.identity,
+        leftAt: now,
+      });
+
+      if (!result.call) {
+        logger.warn(`[LiveKit Webhook] Call not found or participant not found for leave: ${callId}`);
+        return;
+      }
+
+      logger.info(`[LiveKit Webhook] Marked participant ${participant.identity} as left for call ${callId}`);
+
+      if (result.shouldEndCall) {
+        logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);
+      }
+
+      if (result.messageUpdated) {
+        logger.info(`[LiveKit Webhook] Updated system message for call ${callId}`);
+      }
+    } catch (error) {
+      logger.error(`[LiveKit Webhook] Error handling participant leave:`, error);
+    }
   }
 }
 

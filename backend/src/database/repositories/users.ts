@@ -9,7 +9,7 @@ import {
   PaginationOptions,
   PaginatedResult,
 } from '@/types/database';
-import { AuthProvider, UserStatus } from '@prisma/client';
+import { AuthProvider, Prisma, UserStatus } from '@prisma/client';
 //import { queueUserIngestion } from '@/queues/vespaQueue';
 
 export class UserRepository extends BaseRepository<User, CreateUserInput, UpdateUserInput> {
@@ -403,6 +403,20 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
       data: {
         metadata: updatedMetadata,
       },
+    });
+  }
+
+  /**
+   * Get user names by user IDs
+   * Supports transaction client for atomic operations
+   */
+  async getUserNamesByIds(
+    userIds: string[],
+    tx: Prisma.TransactionClient
+  ): Promise<Array<{ id: string; name: string }>> {
+    return await tx.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, name: true },
     });
   }
 }
