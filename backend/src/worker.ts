@@ -22,6 +22,8 @@ import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 config()
 
 class WorkerService {
+  private isShuttingDown = false
+
   async start(): Promise<void> {
     try {
       // Initialize metrics
@@ -107,6 +109,12 @@ class WorkerService {
   }
 
   async shutdown(): Promise<void> {
+    if (this.isShuttingDown) {
+      logger.info('Shutdown already in progress, ignoring duplicate signal')
+      return
+    }
+    this.isShuttingDown = true
+
     try {
       logger.info('Shutting down worker service...')
       await shutdownOpenCode()

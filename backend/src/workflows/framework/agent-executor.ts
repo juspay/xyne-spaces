@@ -58,7 +58,6 @@ interface AgentTracker {
   childExecutionId: string
   parentExecutionId: string  // Added for workspace events
   latestCommitHash?: string
-  baseCommitHash?: string  // Commit hash before agent started making changes
   commitCount: number
 }
 
@@ -358,7 +357,6 @@ export class AgentExecutor {
 
     // Clone repository if URL is provided
     // Use parentExecutionId for workspace path so all agentic steps in a workflow share the same /tmp/{parentExecutionId} directory
-    let baseCommitHash: string | undefined;
     if (repoUrl) {
       // Publish cloning_started event so frontend can show "Cloning in Remote..." status
       await workspaceEventService.publishCloningStarted(parentExecutionId, childExecutionId);
@@ -380,7 +378,6 @@ export class AgentExecutor {
       logger.info(`🔧 [AGENT-EXECUTOR] Workspace location: /tmp/${parentExecutionId}`);
       repoPath = cloneResult.repoPath;
       branchName = cloneResult.branchName;
-      baseCommitHash = cloneResult.baseCommitHash;
       const extractedData = extractWorkspace(repoUrl);
       projectName = extractedData.projectName
       repoName = extractedData.repoName
@@ -407,7 +404,6 @@ export class AgentExecutor {
       childExecutionId,
       parentExecutionId,
       latestCommitHash: undefined,
-      baseCommitHash,
       commitCount: 0
     }
 
@@ -521,21 +517,20 @@ export class AgentExecutor {
     // Compute and cache git diff BEFORE cleanup (while repo is still available)
     let gitDiff: GitDiffFile[] | undefined
     let diffStats: GitDiffStats | undefined
-    if (repoPath && commitTracker.baseCommitHash && commitTracker.hasCommits) {
-      let diffBaseCommit = commitTracker.baseCommitHash;
-      if (baseBranch) {
-        try {
-          const { stdout } = await execAsync(`git merge-base HEAD origin/${baseBranch}`, { cwd: repoPath });
-          diffBaseCommit = stdout.trim();
-          logger.info(`[AGENT-EXECUTOR] Using merge-base: ${diffBaseCommit.substring(0, 8)} (vs ${baseBranch})`)
-        } catch {
-          logger.info(`[AGENT-EXECUTOR] merge-base failed, using HEAD: ${diffBaseCommit.substring(0, 8)}`)
-        }
-      }
+    let baseCommitHash: string | undefined
 
-      const diffResult = await this.computeGitDiff(repoPath, diffBaseCommit)
-      gitDiff = diffResult.gitDiff
-      diffStats = diffResult.diffStats
+    if (repoPath && baseBranch && commitTracker.hasCommits) {
+      try {
+        const { stdout } = await execAsync(`git merge-base HEAD origin/${baseBranch}`, { cwd: repoPath });
+        baseCommitHash = stdout.trim();
+        logger.info(`[AGENT-EXECUTOR] Using merge-base: ${baseCommitHash.substring(0, 8)} (vs ${baseBranch})`)
+        
+        const diffResult = await this.computeGitDiff(repoPath, baseCommitHash)
+        gitDiff = diffResult.gitDiff
+        diffStats = diffResult.diffStats
+      } catch (error) {
+        logger.error(`[AGENT-EXECUTOR] Failed to compute git diff with merge-base:`, error)
+      }
     }
 
     // Build git info from commit tracker (including cached diff)
@@ -543,7 +538,7 @@ export class AgentExecutor {
       branch: branchName || agentChkConfig.repoInfo?.repoBranch || 'main',
       repoUrl: commitTracker.repoUrl,
       commitHash: commitTracker.latestCommitHash,
-      baseCommitHash: commitTracker.baseCommitHash,
+      baseCommitHash,
       pullRequestUrl: pushResult?.pullRequestUrl,
       pr_link: customPrLink || pushResult?.pullRequestUrl,
       gitDiff,
@@ -622,7 +617,7 @@ export class AgentExecutor {
             updateAgentData = { ...updateAgentData, commitHash: commitHash };
             commitTracker.hasCommits = true;
             commitTracker.latestCommitHash = commitHash;
-            
+                        
             // Push commits immediately so backend can pull them for live workspace viewing
             // This enables cross-pod file viewing without shared storage
             if (repoPath && commitTracker.branchName && commitTracker.repoUrl) {

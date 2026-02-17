@@ -18,7 +18,7 @@
     "start": "tsx dist/index.js",
     "start:prod": "NODE_ENV=production tsx dist/index.js",
     "start:api": "NODE_ENV=production node dist/index.js",
-    "start:worker": "NODE_ENV=production tsx watch src/worker.ts",
+    "start:worker": "NODE_ENV=production tsx dist/worker.js",
     "dev": "dotenv -e .env.local -- sh -c 'NODE_ENV=development CHOKIDAR_USEPOLLING=true tsx watch src/index.ts'",
     "dev:api": "NODE_ENV=development tsx watch src/index.ts",
     "dev:worker": "dotenv -e .env.local -- sh -c 'NODE_ENV=development tsx watch src/worker.ts'",

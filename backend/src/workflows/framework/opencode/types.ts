@@ -299,7 +299,6 @@ export interface OpenCodeCommitTracker {
   childExecutionId: string
   parentExecutionId: string
   latestCommitHash?: string
-  baseCommitHash?: string
   commitCount: number
 }
 

@@ -55,7 +55,7 @@ export const installXyneSpacesDependencies = async (repoPath: string, repoName: 
       await new Promise<void>((resolve, reject) => {
         const needsBuild = pkg === 'shared' || pkg === 'framework'
         const installProcess = needsBuild 
-          ? spawn('bash', ['-c', 'npm install --force && npm run build'], {
+          ? spawn('bash', ['-c', 'NODE_ENV=development npm install --force && npm run build'], {
               cwd: pkgPath,
               stdio: ['inherit', 'pipe', 'pipe']
             })
@@ -487,6 +487,7 @@ Create a comprehensive implementation plan that:
 2. It will be a frontend change always
 3. Specifies exact files to create/modify with correct paths
 4. Don't spend too much time on minor details. Generic plan is fine.
+5. DO NOT include test case and test files creation in the plan unless explicitly requested
 
 # CRITICAL INSTRUCTIONS FOR BACKGROUND TASKS
 
@@ -572,6 +573,7 @@ Implement the feature according to the plan:
 4. Write clean, documented, testable code
 5. Make atomic git commits with clear messages
 6. Don't run any validation. Future steps will handle that.
+7. DO NOT create or add new test cases and test files unless explicitly requested by the user.
 
 # CRITICAL TypeScript Requirements
 
