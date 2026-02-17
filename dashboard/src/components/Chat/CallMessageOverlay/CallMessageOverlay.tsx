@@ -7,6 +7,7 @@ import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useUsers } from '../../../hooks/useUsers';
+import { InvitationResponse } from '@xyne/shared';
 
 interface CallParticipant {
   response: string;
@@ -73,7 +74,7 @@ export function CallMessageOverlay({
   // Get active participants count from call_participants
   const allParticipants = call.participants || [];
   const activeParticipants = allParticipants.filter(
-    (p: CallParticipant) => p.response === 'ACCEPTED' && p.leftAt === null,
+    (p: CallParticipant) => p.response === (InvitationResponse.ACCEPTED as string),
   );
 
   const participantCount = activeParticipants.length;

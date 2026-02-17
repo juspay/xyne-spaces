@@ -2882,11 +2882,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   userName: p.user?.name || 'Unknown User',
                 }));
 
-              if (joinedParticipants.length > 0) {
+                const totalCount = joinedParticipants.length;
+
+              if (totalCount > 0) {
                 await updateCallSystemMessageOnEnd(tx, {
                   messageId: callMetadata.systemMessageId,
                   participants: joinedParticipants,
                   startedAt: call.startedAt,
+                  totalCount,
                   endedAt,
                   callId: call.externalId,
                   currentUserId: authData.sub,

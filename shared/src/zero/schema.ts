@@ -207,6 +207,8 @@ export enum InvitationResponse {
   INVITED = 'INVITED',
   ACCEPTED = 'ACCEPTED',
   DECLINED = 'DECLINED',
+  LEFT = 'LEFT',
+  MISSED = 'MISSED',
 }
 
 // @ts-ignore TS1294

@@ -13,7 +13,6 @@ import {
   DisconnectReason,
 } from 'livekit-client';
 import type { Zero } from '@rocicorp/zero';
-import { mutators } from '../zero/mutators';
 import type { Call } from '@xyne/shared';
 import {
   parseAIDataMessage,
@@ -34,8 +33,7 @@ import {
   detectReactNativeWebView,
   isNativeCallSupported,
 } from '../utils/reactNativeBridge';
-import { v4 as uuidv4 } from 'uuid';
-import { logger, Event, Logger } from '../utils/logger';
+import { logger, Event } from '../utils/logger';
 
 // Set LiveKit log level
 setLogLevel('warn');
@@ -579,7 +577,7 @@ export const roomMachine = setup({
           endForAll: boolean;
         };
       }) => {
-        const { room, externalId, zero, isNativeMode, endForAll } = input;
+        const { room, externalId, isNativeMode, endForAll } = input;
 
         // eslint-disable-next-line no-console
         console.log('[roomMachine] disconnectAndCleanup started', {
@@ -595,16 +593,11 @@ export const roomMachine = setup({
             try {
               await callService.endCallForAll(externalId);
             } catch (error) {
-              logger.error(Logger.Event.API_CALL_FAILED, {
+              logger.error(Event.API_CALL_FAILED, {
                 context: 'roomMachine.disconnectAndCleanup.endForAll',
                 error: error instanceof Error ? error.message : String(error),
               });
               // Continue with disconnect even if API call fails
-            }
-          } else {
-            // Normal disconnect - update database to mark user as left
-            if (zero && externalId) {
-              void zero.mutate(mutators.calls.leave({ callId: externalId, timestamp: Date.now() }));
             }
           }
 
@@ -848,69 +841,6 @@ export const roomMachine = setup({
 
         // Fire and forget, but properly sequenced
         void enableTracksAndSelectDevices();
-      }
-    },
-
-    writeCallToDB: ({ context }) => {
-      if (context.isInitiator) {
-        // Initiator: write full call record via Zero mutator
-        if (context.zero && context.externalId && context.channelId && context.roomLink) {
-          const params: {
-            channelId: string;
-            callType: CallType;
-            targetUserIds?: string[];
-            externalId: string;
-            roomLink: string;
-          } = {
-            channelId: context.channelId,
-            callType: context.callType,
-            externalId: context.externalId,
-            roomLink: context.roomLink,
-          };
-          if (context.targetUserIds && context.targetUserIds.length > 0) {
-            params.targetUserIds = context.targetUserIds;
-          }
-          // Fire and forget - mutator is synchronous but DB write happens async via CDC
-          try {
-            const callId = uuidv4();
-            const creatorParticipantId = uuidv4();
-            const targetParticipantIds = params.targetUserIds?.reduce(
-              (acc, userId) => {
-                acc[userId] = uuidv4();
-                return acc;
-              },
-              {} as Record<string, string>,
-            );
-            context.zero.mutate(
-              mutators.calls.initiate({
-                ...params,
-                timestamp: Date.now(),
-                callId,
-                creatorParticipantId,
-                targetParticipantIds,
-              }),
-            );
-          } catch (error) {
-            // eslint-disable-next-line no-console
-            console.error('Failed to call initiate mutator:', error);
-          }
-        }
-      } else {
-        // Joiner: write participant record only via Zero mutator
-        if (context.zero && context.externalId) {
-          try {
-            context.zero.mutate(
-              mutators.calls.join({
-                callId: context.externalId,
-                timestamp: Date.now(),
-                participantId: uuidv4(),
-              }),
-            );
-          } catch (error) {
-            // eslint-disable-next-line no-console
-            console.error('Failed to call join mutator:', error);
-          }
-        }
       }
     },
 
@@ -1248,7 +1178,6 @@ export const roomMachine = setup({
       entry: [
         'enableLocalTracks',
         'updateParticipants',
-        'writeCallToDB',
         assign({
           callStartTime: () => Date.now(),
         }),
@@ -1573,19 +1502,6 @@ export const roomMachine = setup({
                 console.log(
                   '[roomMachine] NATIVE_CONNECTION_STATE disconnected - transitioning to idle',
                 ),
-              // Update database to mark user as left (must happen before clearContext clears zero/externalId)
-              ({ context }): void => {
-                if (context.zero && context.externalId) {
-                  // eslint-disable-next-line no-console
-                  console.log(
-                    '[roomMachine] Calling mutators.calls.leave for:',
-                    context.externalId,
-                  );
-                  void context.zero.mutate(
-                    mutators.calls.leave({ callId: context.externalId, timestamp: Date.now() }),
-                  );
-                }
-              },
               'clearContext',
             ],
           },
@@ -1646,15 +1562,6 @@ export const roomMachine = setup({
             // Play exit sound
             (): void => {
               playAudio(AUDIO_PATHS.CALL_EXIT);
-            },
-            // Update database to mark user as left
-            ({ event, context }): void => {
-              if (event.type !== 'NATIVE_CALL_ENDED') return;
-              if (context.zero && event.callId) {
-                void context.zero.mutate(
-                  mutators.calls.leave({ callId: event.callId, timestamp: Date.now() }),
-                );
-              }
             },
             'clearContext',
           ],

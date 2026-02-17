@@ -9,7 +9,6 @@ import { websocketService } from '@/services/websocketService';
 import { CallStatus, CallType, InvitationResponse } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
-import { formatEndedCallMessage } from '@/zero/utils/systemMessagesUtils';
 import z from 'zod';
 
 export class CallController {
@@ -35,7 +34,8 @@ export class CallController {
   // POST /api/calls/initiate - Start a new call
   initiateCall = async (req: Request, res: Response): Promise<void> => {
     const correlationId = uuidv4();
-    let callId = 'pending';
+    let callExternalId: string | undefined;
+     
     try {
         const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel } = req.body;
       const userId = req.user?.id;
@@ -123,11 +123,10 @@ export class CallController {
         }
       }
 
-      // No active call or existing call's room is gone - create a new call
-      // Generate unique call ID
-      const callExternalId = uuidv4();
-      callId = callExternalId;
-      logger.info(`[${callExternalId}] creating_new_call | user_id=${userId}, channel_id=${finalChannelId}, call_type=${callType}, correlation_id=${correlationId}`);
+      // No active call or existing call's room is gone - create a new LiveKit room
+      // DB records will be created by webhook when first participant joins
+      callExternalId = uuidv4();
+      logger.info(`[${callExternalId}] creating_new_livekit_room | user_id=${userId}, channel_id=${finalChannelId}, call_type=${callType}, correlation_id=${correlationId}`);
 
       // Fetch channel to get projectId and boardId for room metadata
       const channel = await repositories.channels.findById(finalChannelId);
@@ -136,15 +135,19 @@ export class CallController {
         return;
       }
 
-      // Prepare room metadata for transcription agent
+      // Generate room link
+      const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
+
+      // Create LiveKit room with metadata
+      // The webhook will create all DB records when first participant joins
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
         projectId: channel.projectId,
         callType: isHeadless ? 'HEADLESS' : callType,
         sttModel: sttModel || 'azure',
+        createdBy: userId,
       });
 
-      // Create LiveKit room with metadata
       await livekitService.createRoom({
         name: callExternalId,
         maxParticipants: 100,
@@ -152,8 +155,7 @@ export class CallController {
         metadata: roomMetadata,
       });
 
-      // Generate room link
-      const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
+      logger.info(`[${callExternalId}] livekit_room_created | user_id=${userId}`);
 
       // Generate access token for initiator
       const token = await livekitService.generateAccessToken({
@@ -162,70 +164,17 @@ export class CallController {
         userName: userName || userEmail || 'Unknown',
       });
 
-      // For headless calls, create the Call record in database
-      // (Normal calls create the record via Zero mutator on client-side)
-      if (isHeadless) {
-        await repositories.calls.create({
-          externalId: callExternalId,
-          createdByUserId: userId,
-          channelId: finalChannelId,
-          callType: 'HEADLESS' as CallType, // Use HEADLESS type for recordings
-          status: 'ACTIVE',
-          roomLink,
-          timezone: 'UTC',
-          isRecurring: false,
-          recordingEnabled: true, // Headless calls are recordings
-          startedAt: new Date(),
-        });
-        logger.info(`[${callExternalId}] call_record_created | is_headless=true, channel_id=${finalChannelId}`);
-
-        // Create system message for headless call (so transcript can be attached later)
-        // Generate IDs upfront
-        const conversationId = uuidv4();
-        const messageId = uuidv4();
-
-        // Create conversation first with the message ID we'll use
-        await repositories.conversations.create({
-          conversationId,
-          channelId: finalChannelId,
-          createdBy: userId,
-          initialMessageId: messageId,
-          metadata: {
-            isHeadlessRecording: true,
-            callId: callExternalId,
-          },
-        });
-
-        // Then create the call system message with custom messageId
-        await repositories.messages.createWithExecutionId({
-          conversationId,
-          senderId: 'system',
-          content: `📞 Recording started`,
-          msgType: 'SYSTEM',
-          showInChannel: true,
-          metadata: {
-            isCallMessage: true,  // Required for UI to render call-specific components
-            callId: callExternalId,
-            callType: callType,
-            messageSubtype: 'call_started',
-            isHeadlessRecording: true,
-          },
-        }, messageId);
-
-        logger.info(`Created system message for headless recording: ${callExternalId}`);
-      }
-
-      // Return credentials with resolved channelId
+      // Return credentials - DB records will be created by webhook
       res.json({
         success: true,
         token,
         livekitUrl: livekitService.getServerUrl(),
         externalId: callExternalId,
         roomLink,
-        channelId: finalChannelId, // Include the resolved or provided channelId
+        channelId: finalChannelId,
       });
     } catch (error) {
-      logger.error(`[${callId}] call_initiation_failed | error=${error}`);
+      logger.error(`[${callExternalId || 'unknown'}] call_initiation_failed | error=${error}`);
       res.status(500).json({ success: false, error: 'Failed to initiate call' });
     }
   };
@@ -260,52 +209,23 @@ export class CallController {
         return;
       }
 
-      // Create participant record if it doesn't exist
-      if (call) {
-        const existingParticipant = await db.callParticipant.findFirst({
-          where: {
-            callId: call.id,
-            userId: user.id,
-          },
-        });
-
-        if (!existingParticipant) {
-          // Create new participant record
-          await db.callParticipant.create({
-            data: {
-              id: uuidv4(),
-              callId: call.id,
-              userId: user.id,
-              invitedBy: user.id,
-              invitedAt: new Date(),
-              response: InvitationResponse.ACCEPTED,
-              respondedAt: new Date(),
-              joinedAt: new Date(),
-            },
-          });
-          logger.info(`Created participant record for user ${user.id} joining call ${callId}`);
-        }
-      }
-
       // Generate access token
+      // Participant record will be created/updated by webhook when user actually joins
       const token = await livekitService.generateAccessToken({
         userIdentity: user.id,
         roomName: callId,
         userName: user.name || user.email || 'Unknown',
       });
 
-      // Generate room link for sharing
-      const roomLink = `${livekitService.getClientUrl()}/call/${callId}?type=AUDIO`;
-
       logger.info(`LiveKit credentials generated for user ${user.id} to join call ${callId}`);
 
-      // Return credentials only - frontend will write to DB via Zero mutators after connection
+      // Return credentials - participant record will be handled by webhook
       res.json({
         success: true,
         token,
         livekitUrl: livekitService.getServerUrl(),
         externalId: callId,
-        roomLink,
+        roomLink: call?.roomLink,
       });
     } catch (error) {
       logger.error('Failed to join call:', error);
@@ -329,14 +249,14 @@ export class CallController {
         return;
       }
 
-      logger.info(`Validating ${callIds.length} calls for user ${userId}`);
+      logger.info(`[validateRooms] Validating ${callIds.length} calls for user ${userId}`);
 
       // Validate each call against LiveKit room state
       const validationPromises = callIds.map(async (callId: string) => {
         try {
           // Get call from database
           const call = await repositories.calls.findByExternalId(callId);
-          if (!call || call.status !== 'ACTIVE') {
+          if (!call || call.status !== CallStatus.ACTIVE) {
             return; // Skip if call doesn't exist or is already ended
           }
 
@@ -353,7 +273,7 @@ export class CallController {
           } else {
             // Get actual participant list (more reliable than numParticipants)
             const participants = await livekitService.listParticipants(callId);
-            logger.info(`Room ${callId} - numParticipants: ${roomInfo.numParticipants}, actual participants: ${participants.length}`);
+            logger.info(`[validateRooms] Room ${callId} - numParticipants: ${roomInfo.numParticipants}, actual participants: ${participants.length}`);
 
             // Check if room has no active participants
             if (participants.length === 0) {
@@ -369,8 +289,8 @@ export class CallController {
               status: 'ENDED',
               endedAt,
             });
-            logger.info(`[${callId}] call_status_updated | from=${call.status}, to=ENDED, reason=${reason}`);
-            logger.info(`Transcript will be processed when user views the ended call message`);
+            logger.info(`[validateRooms] [${callId}] call_status_updated | from=${call.status}, to=ENDED, reason=${reason}`);
+            logger.info(`[validateRooms] Transcript will be processed when user views the ended call message`);
 
             // Increment call count and add duration only for calls lasting > 60 seconds
             const callDurationSeconds = (endedAt.getTime() - call.startedAt.getTime()) / 1000;
@@ -383,9 +303,9 @@ export class CallController {
                   websocketService.incrementTodayCallCount(),
                   websocketService.addCallDuration(callDurationMinutes)
                 ]);
-                logger.info(`Successfully updated metrics for call ${callId} (duration: ${callDurationSeconds}s / ${callDurationMinutes}m)`);
+                logger.info(`[validateRooms] Successfully updated metrics for call ${callId} (duration: ${callDurationSeconds}s / ${callDurationMinutes}m)`);
               } catch (err) {
-                logger.error('Failed to update call metrics for auto-ended call:', err);
+                logger.error('[validateRooms] Failed to update call metrics for auto-ended call:', err);
               }
             }
 
@@ -400,11 +320,11 @@ export class CallController {
                   operation: 'call_ended',
                 },
               });
-              logger.info(`Updated message ${systemMessageId} to call_ended for call ${callId}`);
+              logger.info(`[validateRooms] Updated message ${systemMessageId} to call_ended for call ${callId}`);
             }
           }
         } catch (error) {
-          logger.error(`Failed to validate call ${callId}:`, error);
+          logger.error(`[validateRooms] Failed to validate call ${callId}:`, error);
           // Continue with other calls even if one fails
         }
       });
@@ -415,7 +335,7 @@ export class CallController {
       // No response body needed - just acknowledge
       res.status(204).send();
     } catch (error) {
-      logger.error('Failed to validate rooms:', error);
+      logger.error('[validateRooms] Failed to validate rooms:', error);
       res.status(500).json({ success: false, error: 'Failed to validate rooms' });
     }
   };
@@ -951,12 +871,7 @@ export class CallController {
       // Process each user
       for (const targetUserId of userIds) {
         // Check if participant already exists
-        const existingParticipant = await db.callParticipant.findFirst({
-          where: {
-            callId: call.id,
-            userId: targetUserId,
-          },
-        });
+        const existingParticipant = await repositories.calls.findParticipant(call.id, targetUserId);
 
         if (existingParticipant) {
           // Re-invite: update to INVITED if not currently accepted/active
@@ -977,15 +892,13 @@ export class CallController {
           // Already accepted and in call - skip
         } else {
           // Create new participant invitation
-          await db.callParticipant.create({
-            data: {
-              id: uuidv4(),
-              callId: call.id,
-              userId: targetUserId,
-              invitedBy: userId,
-              invitedAt: now,
-              response: InvitationResponse.INVITED,
-            },
+          await repositories.calls.createParticipant({
+            id: uuidv4(),
+            callId: call.id,
+            userId: targetUserId,
+            invitedBy: userId,
+            invitedAt: now,
+            response: InvitationResponse.INVITED,
           });
           invitedUserIds.push(targetUserId);
         }
@@ -1034,13 +947,8 @@ export class CallController {
       }
 
       // Find participant record
-      const participant = await db.callParticipant.findFirst({
-        where: {
-          callId: call.id,
-          userId: userId
-        }
-      });
-
+      const participant = await repositories.calls.findParticipant(call.id, userId);
+      
       if (!participant) {
         logger.warn(`[CallController] Participant not found for decline: callId=${callId}, userId=${userId}`);
         res.status(404).json({ success: false, error: 'Participant not found' });
@@ -1075,94 +983,19 @@ export class CallController {
 
   /**
    * POST /api/calls/:callId/leave
-   * Participant explicitly leaves the call
+   * Legacy endpoint for backward compatibility with older app versions
+   * Returns success immediately without performing any action
+   * The webhook handles all participant leave logic
    */
-  leaveCall = async (req: Request, res: Response): Promise<void> => {
-    const userId = req.user?.id;
-    const { callId } = req.params;
-
-    if (!userId) {
-      res.status(401).json({ success: false, error: 'Unauthorized' });
-      return;
-    }
-
-    if (!callId) {
-      res.status(400).json({ success: false, error: 'Call ID is required' });
-      return;
-    }
-
-    logger.info(`[CallController] User ${userId} leaving call ${callId}`);
-
-    try {
-      // Find call by external ID
-      const call = await repositories.calls.findByExternalId(callId);
-      if (!call) {
-        logger.warn(`[CallController] Call not found for leave: ${callId}`);
-        res.status(404).json({ success: false, error: 'Call not found' });
-        return;
-      }
-
-      // Find participant record
-      const participant = await db.callParticipant.findFirst({
-        where: {
-          callId: call.id,
-          userId: userId
-        }
-      });
-
-      if (!participant) {
-        logger.warn(`[CallController] Participant not found for leave: callId=${callId}, userId=${userId}`);
-        res.status(404).json({ success: false, error: 'Participant not found' });
-        return;
-      }
-
-      if (participant.leftAt) {
-        logger.info(`[CallController] User ${userId} already left call ${callId} at ${participant.leftAt}`);
-        res.json({ success: true });
-        return;
-      }
-
-      const now = new Date();
-
-      // Update participant leftAt
-      await db.callParticipant.update({
-        where: { id: participant.id },
-        data: {
-          leftAt: now,
-        }
-      });
-
-      // Check if any active participants remain
-      // Active = Accepted AND leftAt is null
-      const activeParticipants = await db.callParticipant.findMany({
-        where: {
-          callId: call.id,
-          response: InvitationResponse.ACCEPTED,
-          leftAt: null
-        }
-      });
-
-      if (activeParticipants.length === 0) {
-        logger.info(`[CallController] No active participants remaining for call ${callId}. Ending call.`);
-
-        await repositories.calls.update(call.id, {
-          status: CallStatus.ENDED,
-          endedAt: now,
-        });
-        logger.info(`[${callId}] call_status_updated | from=${call.status}, to=ENDED, reason=no_active_participants`);
-      }
-
-      logger.info(`User ${userId} left call ${callId}`);
-      res.json({ success: true });
-    } catch (error) {
-      logger.error('Failed to leave call:', error);
-      res.status(500).json({ success: false, error: 'Failed to leave call' });
-    }
+  leaveCall = async (_req: Request, res: Response): Promise<void> => {
+    logger.info(`[CallController] Legacy leave call endpoint called - returning success for backward compatibility`);
+    res.json({ success: true });
   };
 
   /**
    * POST /api/calls/:callId/end-for-all
-   * Host ends the call for everyone by removing all participants and marking call as ended
+   * Host ends the call for everyone by removing all participants from LiveKit room
+   * The webhook will handle marking participants as left and updating call status
    */
   endCallForAll = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
@@ -1178,7 +1011,6 @@ export class CallController {
       return;
     }
 
-
     try {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
@@ -1193,54 +1025,8 @@ export class CallController {
         return;
       }
 
-      const now = new Date();
-      const metadata = call.metadata as { systemMessageId?: string } | null;
-      const systemMessageId = metadata?.systemMessageId;
-
-      let messageContent: string | undefined;
-      let durationMs: number | undefined;
-      if (systemMessageId) {
-        const formatted = await formatEndedCallMessage(
-          call.id,
-          call.startedAt,
-          userId
-        );
-        messageContent = formatted.content;
-        durationMs = formatted.durationMs;
-      }
-
-      await db.$transaction(async (tx) => {
-        // Mark call as ended
-        await tx.call.update({
-          where: { id: call.id },
-          data: {
-            status: CallStatus.ENDED,
-            endedAt: now,
-          },
-        });
-
-        // Update all active participants to mark them as left
-        await repositories.calls.markAllParticipantsAsLeft(call.id, now, tx);
-
-        // Update system message if exists
-        if (systemMessageId && messageContent) {
-          await tx.message.update({
-            where: { messageId: systemMessageId },
-            data: {
-              content: messageContent,
-              metadata: {
-                isCallMessage: true,
-                callId: call.externalId,
-                operation: 'call_ended',
-                durationMs,
-              },
-            },
-          });
-        }
-      });
-
-      logger.info(`[CallController] Database transaction completed for ending call ${callId}`);
-
+      // Remove all participants from LiveKit room
+      // The webhook will handle marking participants as left and ending the call
       try {
         const participants = await livekitService.listParticipants(callId);
         
@@ -1262,7 +1048,7 @@ export class CallController {
         logger.warn(`[CallController] Failed to remove participants from room ${callId}:`, liveKitError);
       }
 
-      logger.info(`[CallController] Host ${userId} successfully ended call ${callId} for everyone`);
+      logger.info(`[CallController] Host ${userId} successfully removed all participants from call ${callId}`);
       res.json({ success: true });
     } catch (error) {
       logger.error('Failed to end call for all:', error);

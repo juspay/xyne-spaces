@@ -4,6 +4,7 @@ import { AuthData, ParticipantOperationType } from '@/zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { zql } from '../queries';
 import { repositories } from '@/database/repositories';
+import { Call, Prisma } from '@prisma/client';
 
 type ParticipantMetadata = {
   operationType: ParticipantOperationType;
@@ -185,24 +186,25 @@ function formatCallDuration(durationMs: number): string {
  * Examples:
  * - 1 participant: "Alice started a call • lasted 2m"
  * - 2 participants: "Alice and Bob were in the call for 9m"
- * - 3+ participants: "Alice and 2 others were in the call for 15m"
+ * - 3+ participants: "Alice and 5 others were in the call for 15m"
  */
 function formatFinalCallMessage(
   participants: Array<{ userId: string; userName: string }>,
+  totalCount: number,
   durationMs: number,
   currentUserId: string
 ): string {
   const duration = formatCallDuration(durationMs);
   
-  if (participants.length === 1) {
+  if (totalCount === 1) {
     return `${participants[0].userName} started a call • lasted ${duration}`;
-  } else if (participants.length === 2) {
+  } else if (totalCount === 2) {
     return `${participants[0].userName} and ${participants[1].userName} were in the call for ${duration}`;
   } else {
     const firstParticipant = participants.find(p => p.userId === currentUserId) 
       ? participants.find(p => p.userId !== currentUserId) || participants[0]
       : participants[0];
-    const othersCount = participants.length - 1;
+    const othersCount = totalCount - 1;
     return `${firstParticipant.userName} and ${othersCount} ${othersCount === 1 ? 'other' : 'others'} were in the call for ${duration}`;
   }
 }
@@ -278,6 +280,7 @@ export async function updateCallSystemMessageOnEnd(
   {
     messageId,
     participants,
+    totalCount,
     startedAt,
     endedAt,
     callId,
@@ -285,6 +288,7 @@ export async function updateCallSystemMessageOnEnd(
   }: {
     messageId: string;
     participants: Array<{ userId: string; userName: string }>;
+    totalCount: number;
     startedAt: number;
     endedAt: number;
     callId: string;
@@ -292,7 +296,7 @@ export async function updateCallSystemMessageOnEnd(
   }
 ): Promise<void> {
   const durationMs = endedAt - startedAt;
-  const finalContent = formatFinalCallMessage(participants, durationMs, currentUserId);
+  const finalContent = formatFinalCallMessage(participants, totalCount, durationMs, currentUserId);
 
   // Update message with final content and mark as ended
   await tx.mutate.messages.update({
@@ -301,39 +305,110 @@ export async function updateCallSystemMessageOnEnd(
     metadata: {
       isCallMessage: true,
       callId,
-      operation: 'call_ended',
       durationMs,
     },
   });
 }
 
+/**
+ * Update call system message directly in the database using a transaction.
+ * Requires a transaction client for atomic operations.
+ */
+export async function updateCallSystemMessageInDatabase(
+  {
+    messageId,
+    participants,
+    totalCount,
+    startedAt,
+    endedAt,
+    callId,
+    currentUserId,
+    tx,
+  }: {
+    messageId: string;
+    participants: Array<{ userId: string; userName: string }>;
+    totalCount: number;
+    startedAt: number;
+    endedAt: number;
+    callId: string;
+    currentUserId: string;
+    tx: Prisma.TransactionClient;
+  }
+): Promise<void> {
+  const durationMs = endedAt - startedAt;
+  const finalContent = formatFinalCallMessage(participants, totalCount, durationMs, currentUserId);
 
-// Get participants who joined a call with their user names and format the final call message
-export async function formatEndedCallMessage(
-  callId: string,
-  callStartedAt: Date,
-  userId: string
-): Promise<{ content: string; durationMs: number; participantsList: Array<{ userId: string; userName: string }> }> {
-  const participants = await repositories.calls.getJoinedParticipants(callId);
-
-  const userIds = participants.map(p => p.userId);
-  const users = await repositories.users.findMany({
-    where: {
-      id: { in: userIds },
+  // Update message directly in database using transaction
+  await tx.message.update({
+    where: { messageId },
+    data: {
+      content: finalContent,
+      metadata: {
+        isCallMessage: true,
+        callId,
+        operation: 'call_ended',
+        durationMs,
+      },
     },
   });
+}
 
-  const userMap = new Map(users.map(u => [u.id, u.name || 'Unknown']));
+/**
+ * Update call system message if not already updated.
+ * Used by webhooks to avoid duplicate updates when both participant_left and room_finished fire.
+ * Requires a transaction client for atomic operations.
+ */
+export async function updateCallSystemMessageIfNeeded(
+  {
+    call,
+    callId,
+    endedAt,
+    tx,
+  }: {
+    call: Call; // Call record with metadata, startedAt, createdByUserId
+    callId: string;
+    endedAt: Date;
+    tx: Prisma.TransactionClient;
+  }
+): Promise<boolean> {
+  const callMetadata = call.metadata as any;
+  const systemMessageId = callMetadata?.systemMessageId;
 
-  const participantsList = participants.map(p => ({
-    userId: p.userId,
-    userName: userMap.get(p.userId) || 'Unknown',
-  }));
+  if (!systemMessageId || !call.startedAt) {
+    return false;
+  }
 
-  const durationMs = Date.now() - new Date(callStartedAt).getTime();
-  
-  // Format the final message content
-  const content = formatFinalCallMessage(participantsList, durationMs, userId);
+  try {
+    // Check if message is already updated (operation: 'call_ended' means it was already updated)
+    const existingMessage = await tx.message.findUnique({
+      where: { messageId: systemMessageId },
+      select: { metadata: true },
+    });
 
-  return { content, durationMs, participantsList };
+    const messageMetadata = existingMessage?.metadata as any;
+    if (messageMetadata?.operation === 'call_ended') {
+      return false; // Already updated, skip
+    }
+
+    // Get all participants who actually joined using repository method
+    const { participants, totalCount } = await repositories.calls.getJoinedParticipants(call.id, tx);
+
+    if (totalCount > 0 && participants.length > 0) {
+      // Update system message with final content
+      await updateCallSystemMessageInDatabase({
+        messageId: systemMessageId,
+        participants,
+        totalCount,
+        startedAt: call.startedAt.getTime(),
+        endedAt: endedAt.getTime(),
+        callId: callId,
+        currentUserId: call.createdByUserId,
+        tx,
+      });
+      return true;
+    }
+    return false;
+  } catch (error) {
+    throw error;
+  }
 }

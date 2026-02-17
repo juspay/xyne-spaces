@@ -21,7 +21,7 @@ export const getActiveParticipants = <
 >(
   participants: readonly T[],
 ): T[] => {
-  return participants.filter(p => p.response === InvitationResponse.ACCEPTED && p.leftAt === null);
+  return participants.filter(p => p.response === InvitationResponse.ACCEPTED);
 };
 
 /**
@@ -84,4 +84,19 @@ export const useIsOnlyParticipant = (participants: CallParticipants) => {
     const activeParticipants = getActiveParticipants(participants);
     return activeParticipants.length <= 1;
   }, [participants]);
+};
+
+/**
+ * Custom hook to check if a specific call is active
+ * @param callId - The external call ID to check
+ * @returns true if the call is active, false otherwise
+ */
+export const useIsCallActive = (callId: string | undefined): boolean => {
+  const activeCalls = useActiveCalls();
+
+  if (!callId || !activeCalls) {
+    return false;
+  }
+
+  return activeCalls.some(call => call.externalId === callId);
 };
