@@ -3,6 +3,7 @@ import { FullAgenticCheckpointConfig, WorkflowState, BaseWorkflowContext, GitInf
 import { WorkflowExecutionStatus } from '../../types/workflow-enums'
 import { WorkflowPausedException, WorkflowCancelledException } from '../../exceptions/workflow-exceptions'
 import { BitbucketManager } from '@/bitbucket/apis'
+import { TicketRepository, WorkflowRepository } from '@/database/repositories/workflows'
 import { logger } from '@/utils/logger'
 import { exec } from 'child_process'
 import { promisify } from 'util'
@@ -49,7 +50,9 @@ export class OpenCodeExecutor {
   constructor(
     private storage: WorkflowStorage,
     private bitbucketManager = new BitbucketManager(),
-    openCodeConfig: Partial<OpenCodeConfig> = {}
+    openCodeConfig: Partial<OpenCodeConfig> = {},
+    private workflowRepo = new WorkflowRepository(),
+    private ticketRepo = new TicketRepository()
   ) {
     this.baseUrl = openCodeConfig.baseUrl || 'http://localhost:4096'
   }
@@ -275,7 +278,6 @@ export class OpenCodeExecutor {
     let branchName: string | undefined
     let projectName: string | undefined
     let repoName: string | undefined
-    let baseCommitHash: string | undefined
 
     if (repoUrl) {
       await workspaceEventService.publishCloningStarted(parentExecutionId, childExecutionId)
@@ -295,7 +297,6 @@ export class OpenCodeExecutor {
       
       repoPath = cloneResult.repoPath
       branchName = cloneResult.branchName
-      baseCommitHash = cloneResult.baseCommitHash
       const extractedData = extractWorkspace(repoUrl)
       projectName = extractedData.projectName
       repoName = extractedData.repoName
@@ -363,7 +364,6 @@ export class OpenCodeExecutor {
       childExecutionId,
       parentExecutionId,
       latestCommitHash: undefined,
-      baseCommitHash,
       commitCount: 0
     }
 
@@ -664,7 +664,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
       }
     }
 
-    if (repoPath && commitTracker.baseCommitHash) {
+    if (repoPath) {
       const { hasUncommittedChanges: checkUncommitted, commitAllChanges: doCommit } = await import('@framework')
       
       const hasUncommittedWork = await checkUncommitted(repoPath)
@@ -705,12 +705,16 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
           pushResult = { pullRequestUrl: existingPrLink, repoUrl }
         }
       } else {
-        const ticketTitle: string | undefined = ('title' in parentState.context ? parentState.context.title : null) as string | undefined
+        const workflow = await this.workflowRepo.findById(parentState.workflowId)
+        const ticketId = workflow?.ticketId || ''
+        const ticket = ticketId ? await this.ticketRepo.findById(ticketId) : null
+        const xyneId = ticket?.xyneId
+        const ticketTitle: string | undefined = ticket?.title || ('title' in parentState.context ? parentState.context.title : null) as string | undefined
         const ticketDescription = await this.generatePRDescription(conversationRequest, parentState)
 
         try {
           const prTargetBranch = baseBranch || 'main'
-          await this.bitbucketManager.raisePr(repoUrl, childExecutionId, prTargetBranch, branchName, projectName, repoName, ticketTitle, ticketDescription)
+          await this.bitbucketManager.raisePr(repoUrl, childExecutionId, prTargetBranch, branchName, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId)
         } catch (error) {
           logger.error(`[OPENCODE-EXECUTOR] Failed to create PR:`, error)
         }
@@ -734,28 +738,27 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
 
     let gitDiff: GitDiffFile[] | undefined
     let diffStats: GitDiffStats | undefined
+    let baseCommitHash: string | undefined
     
-    if (repoPath && commitTracker.baseCommitHash && commitTracker.hasCommits) {
-      let diffBaseCommit = commitTracker.baseCommitHash
-      if (baseBranch) {
-        try {
-          const { stdout } = await execAsync(`git merge-base HEAD origin/${baseBranch}`, { cwd: repoPath })
-          diffBaseCommit = stdout.trim()
-        } catch {
-          // Use baseCommitHash as fallback
-        }
-      }
+    if (repoPath && baseBranch && commitTracker.hasCommits) {
+      try {
+        const { stdout } = await execAsync(`git merge-base HEAD origin/${baseBranch}`, { cwd: repoPath })
+        baseCommitHash = stdout.trim()
+        logger.info(`[OPENCODE-EXECUTOR] Using merge-base: ${baseCommitHash.substring(0, 8)} (vs ${baseBranch})`)
 
-      const diffResult = await this.computeGitDiff(repoPath, diffBaseCommit)
-      gitDiff = diffResult.gitDiff
-      diffStats = diffResult.diffStats
+        const diffResult = await this.computeGitDiff(repoPath, baseCommitHash)
+        gitDiff = diffResult.gitDiff
+        diffStats = diffResult.diffStats
+      } catch (error) {
+        logger.error(`[OPENCODE-EXECUTOR] Failed to compute git diff with merge-base:`, error)
+      }
     }
 
     const gitInfo: GitInfo = {
       branch: branchName || agentChkConfig.repoInfo?.repoBranch || 'main',
       repoUrl: commitTracker.repoUrl,
       commitHash: commitTracker.latestCommitHash,
-      baseCommitHash: commitTracker.baseCommitHash,
+      baseCommitHash,
       pullRequestUrl: pushResult?.pullRequestUrl,
       pr_link: customPrLink || pushResult?.pullRequestUrl,
       gitDiff,
@@ -833,8 +836,8 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
           await this.processToolPart(
             toolPart,
             childExecutionId,
-            parentExecutionId,
             commitTracker,
+            parentExecutionId,
             repoPath,
             agentChkConfig,
             processedToolCalls
@@ -905,8 +908,8 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
   private async processToolPart(
     toolPart: ToolPart,
     childExecutionId: string,
-    parentExecutionId: string,
     commitTracker: OpenCodeCommitTracker,
+    parentExecutionId: string,
     repoPath: string,
     agentChkConfig: FullAgenticCheckpointConfig,
     processedToolCalls: Set<string>
@@ -930,7 +933,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     })
 
     if (state.status === 'completed') {
-      const { hasUncommittedChanges, commitAllChanges, pushCommits } = await import('@framework')
+      const { hasUncommittedChanges, commitAllChanges } = await import('@framework')
       
       const hasChanges = await hasUncommittedChanges(repoPath)
 

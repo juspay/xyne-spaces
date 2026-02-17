@@ -2275,7 +2275,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
       }
 
       // Find existing SYSTEM message for this workflow in the conversation
-      const allMessages = await repositories.messages.findMany({
+      const allMessages = await prisma.message.findMany({
         where: {
           conversationId: ticket.conversationId,
           msgType: 'SYSTEM',

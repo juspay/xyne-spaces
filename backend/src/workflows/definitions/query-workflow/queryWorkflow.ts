@@ -31,7 +31,7 @@ const initializeLLMClient = (): LLMClient => {
         retries: 5
       },
     },
-    defaultModel: 'glm-latest',
+    defaultModel: config.workflow.defaultModelName,
   });
 };
 
@@ -58,7 +58,7 @@ ${description}`;
     const llmMessages: UserMessage[] = [createUserMessage(prompt)];
 
     const response = await llmClient.generate({
-      model: 'glm-latest',
+      model: config.workflow.defaultModelName,
       messages: llmMessages,
     });
 

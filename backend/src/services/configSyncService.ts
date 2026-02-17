@@ -1,6 +1,7 @@
 import { repositories } from '../database/repositories';
 import { logger } from '../utils/logger';
 import { config, ToolStatus, type WorkflowConfig, type AgentConfig } from '../workflows/config';
+import { config as appConfig } from '../config/env';
 import type { Agent } from '@prisma/client';
 
 export class ConfigSyncService {
@@ -36,7 +37,8 @@ export class ConfigSyncService {
    * Ensure the default LiteLLM model exists
    */
   private async ensureDefaultModel(): Promise<void> {
-    const defaultModelUserDefinedId = 'litellm-glm-46-fp8';
+    const defaultModelUserDefinedId = appConfig.workflow.defaultModelId;
+    const defaultModelName = appConfig.workflow.defaultModelName;
     
     // Check if model already exists
     const existingModel = await repositories.models.findByUserDefinedId(defaultModelUserDefinedId);
@@ -46,7 +48,7 @@ export class ConfigSyncService {
       
       await repositories.models.create({
         userDefinedId: defaultModelUserDefinedId,
-        name: 'glm-46-fp8',
+        name: defaultModelName,
         provider: 'litellm',
         credentials: JSON.stringify({
           apiKey: 'YOUR_LITELLM_API_KEY',

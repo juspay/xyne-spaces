@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Bot, UnifiedBaseBot } from '@/bots/unified/index.js';
 import type { BotExecutionContext, InternalBotDefinition, BotEvent } from '@/bots/unified/types/index.js';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { createFlowJson, createSingleLineText, createMultiLineText, createFlexLayout, createTag, createSplitTag, createAvatarGroup } from '@/bots/json-ui';
 import type { Component } from '@/bots/json-ui/types';
 import type { FlowJson } from '@/bots/json-ui/types';
@@ -165,7 +166,7 @@ Provide a concise but informative summary:`;
 
     try {
       const response = await this.llmClient.generate({
-        model: 'glm-latest',
+        model: config.workflow.defaultModelName,
         messages: llmMessages,
       });
 

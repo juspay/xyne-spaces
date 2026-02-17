@@ -111,6 +111,9 @@ const envSchema = Joi.object({
   OPENCODE_MODEL: Joi.string().allow('').default(''),
   // Default workflow executor when not specified
   DEFAULT_WORKFLOW_EXECUTOR: Joi.string().default(''),
+  // Default model ID for config sync service
+  DEFAULT_MODEL_ID: Joi.string().default(''),
+  DEFAULT_MODEL_NAME: Joi.string().default(''),
   // oh-my-opencode Plugin Configuration
   OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
   OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default(''),
@@ -176,6 +179,8 @@ export const config = {
   workflow: {
     lockDurationMs: envVars.WORKFLOW_LOCK_DURATION_MS,
     defaultExecutor: envVars.DEFAULT_WORKFLOW_EXECUTOR,
+    defaultModelId: envVars.DEFAULT_MODEL_ID,
+    defaultModelName: envVars.DEFAULT_MODEL_NAME,
   },
   fileStorage: {
     provider: envVars.STORAGE_PROVIDER,

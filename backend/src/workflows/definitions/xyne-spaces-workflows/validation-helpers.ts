@@ -1,4 +1,4 @@
-import { hasUncommittedChanges, commitAllChanges, CommandExecutor } from '@framework';
+import { hasUncommittedChanges, commitAllChanges, pushCommits, CommandExecutor } from '@framework';
 import { logger } from '@/utils/logger';
 import { GitInfo } from '../../workflow-types';
 
@@ -21,9 +21,19 @@ async function executeCommand(
   command: string,
   cwd: string
 ): Promise<ExecutionResult> {
-  logger.info(`[cmd] Executing: ${command}`);
+  logger.info(`[cmd] Executing: ${command}`, { cwd });
   try {
-    return await commandExecutor.executeCommand({ command }, undefined, cwd);
+    const result = await commandExecutor.executeCommand({ command }, undefined, cwd);
+    
+    if (result.stdout) {
+      logger.info(`[cmd] stdout:`, { command, stdout: result.stdout });
+    }
+    if (result.stderr) {
+      logger.info(`[cmd] stderr:`, { command, stderr: result.stderr });
+    }
+    logger.info(`[cmd] Exit code: ${result.exitCode}`, { command });
+    
+    return result;
   } catch (error) {
     logger.error(`Command failed: ${command}`, { error, cwd });
     return {
@@ -72,14 +82,14 @@ export async function runDeterministicValidation(
 
   // Step 1: Install and build shared (dashboard depends on shared being built)
   logger.info('Installing dependencies in shared...');
-  await executeCommand('npm i --force', `${repoPath}/shared`);
+  await executeCommand('NODE_ENV=development npm i', `${repoPath}/shared`);
   
   logger.info('Building shared...');
   await executeCommand('npm run build', `${repoPath}/shared`);
 
-  // Step 2: Install dependencies in dashboard (use --force for clean install, --ignore-scripts to avoid duplicate shared build)
+  // Step 2: Install dependencies in dashboard
   logger.info('Installing dependencies in dashboard...');
-  await executeCommand('npm i --force --ignore-scripts', `${repoPath}/dashboard`);
+  await executeCommand('NODE_ENV=development npm i', `${repoPath}/dashboard`);
 
   // Step 3: Format code
   logger.info('Formatting code...');
@@ -94,7 +104,7 @@ export async function runDeterministicValidation(
     logger.info('Committing formatted files...');
     const commitHash = await commitAllChanges(
       repoPath,
-      'chore: format code with prettier'
+      'fix: format code with prettier'
     );
     if (commitHash) {
       formatCommitHash = commitHash;
@@ -114,6 +124,21 @@ export async function runDeterministicValidation(
 
   // Extract only actual errors (not warnings) from the output
   const errorLines = extractErrorLines(validationOutput.stderr || validationOutput.stdout);
+
+  // Step 6: Push format commit AFTER validation (only if validation passed)
+  if (formatCommitHash && gitInfo.branch && passed) {
+    logger.info('Validation passed - pushing format commit to remote...', { 
+      branch: gitInfo.branch
+    });
+    try {
+      await pushCommits(repoPath, gitInfo.branch, gitInfo.repoUrl);
+      logger.info('Format commit pushed successfully');
+    } catch (error) {
+      logger.error('Failed to push format commit', { error });
+    }
+  } else if (formatCommitHash && !passed) {
+    logger.info('Validation failed - format commit will be pushed by agent along with fixes');
+  }
 
   return {
     passed,

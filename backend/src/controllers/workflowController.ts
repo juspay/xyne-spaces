@@ -9,6 +9,7 @@ import { DBWorkflowStorage } from '../workflows';
 import { ticketService } from '../services/ticketService';
 import { AI_STAGES } from '@/workflows/types/workflow-enums';
 import { logger } from '@/utils/logger';
+import { config as appConfig } from '@/config/env';
 import { bitbucketManager } from '../bitbucket/apis';
 import { extractWorkspace } from '../workflows/framework/agent-executor';
 import { calculateDiffStats } from '@/utils/diffUtils';
@@ -274,11 +275,11 @@ export class WorkflowController {
         title,
         description,
         imageAttachments,
-        executorType: executorType || 'xyne-code', // Default to xyne-code if not provided
+        executorType: executorType || appConfig.workflow.defaultExecutor,
       });
       const context = {
         ...mappedContext,
-        executorType: executorType || 'xyne-code',
+        executorType: executorType || appConfig.workflow.defaultExecutor,
       };
 
       if (!context || typeof context !== 'object' || !Object.keys(context).length) {

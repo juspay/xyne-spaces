@@ -4,6 +4,7 @@ import { Agent, type AgentConfig, createUserMessage, type Message, type Conversa
 import { LogLevel } from '@framework'
 import type { GitInfo, GitDiffFile } from '../workflow-types'
 import {logger} from '@/utils/logger';
+import { config } from '@/config/env';
 
 // Learning types for categorizing captured knowledge
 export type LearningType = 'file_purpose' | 'implementation_pattern' | 'gotcha' | 'debugging_tip'
@@ -99,7 +100,7 @@ export async function generateKnowledgeLearnings(
             retries: 3
           }
         },
-        defaultModel: 'glm-latest'
+        defaultModel: config.workflow.defaultModelName
       },
       tools: {
         enabled: [], // No tools needed for knowledge extraction
@@ -316,7 +317,7 @@ export async function generateConsolidatedKnowledgeLearnings(
             retries: 3
           }
         },
-        defaultModel: 'glm-latest'
+        defaultModel: config.workflow.defaultModelName
       },
       tools: {
         enabled: [], // No tools needed for knowledge extraction

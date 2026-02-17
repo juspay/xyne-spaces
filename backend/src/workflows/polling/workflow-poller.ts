@@ -2,7 +2,7 @@
 
 import os from 'os'
 import { repositories, WorkflowExecutionWithState } from '@/database/repositories'
-import { workflowRegistry } from '../registry/workflowRegistry'
+import { workflowRegistry } from '@/workflows/registry/workflowRegistry'
 import { createWorkflowEngineWithDB } from '../factory'
 import { WorkflowExecutionStatus, WorkflowType } from '../types/workflow-enums'
 import { PollingConfig, WORKFLOW_POLLER_CONFIG } from './config'
@@ -24,6 +24,7 @@ import type { WorkflowStorage } from '../workflow-storage'
 interface PollingLoop {
   index: number
   timer?: NodeJS.Timeout
+  currentExecutionId?: string
 }
 
 export class WorkflowPoller {
@@ -58,10 +59,36 @@ export class WorkflowPoller {
   }
 
   async stop(): Promise<void> {
+    logger.info('Workflow poller stop() called - initiating graceful shutdown')
+    
+    const activeExecutions = this.loops
+      .filter(loop => loop.currentExecutionId)
+      .map(loop => loop.currentExecutionId!)
+    
+    logger.info(`Active executions being processed: ${activeExecutions.length}`)
+    
     this.isRunning = false
     this.loops.forEach((loop) => {
       if (loop.timer) clearTimeout(loop.timer)
     })
+    
+    if (activeExecutions.length > 0) {
+      logger.info(`Marking ${activeExecutions.length} active workflow executions as PENDING for recovery`)
+      const resetPromises = activeExecutions.map(async (executionId) => {
+        try {
+          await workflowStatusSyncService.updateWorkflowExecution(executionId, {
+            status: WorkflowExecutionStatus.PENDING
+          })
+          
+          await this.lockService.releaseLock(executionId, this.workerId)
+          logger.info(`Reset workflow execution ${executionId} to PENDING`)
+        } catch (error) {
+          logger.error(`Failed to reset workflow execution ${executionId} to PENDING:`, error)
+        }
+      })
+      await Promise.all(resetPromises)
+    }
+    
     this.loops = []
     logger.info('⏹️ Workflow poller stopped')
   }
@@ -71,7 +98,7 @@ export class WorkflowPoller {
 
     loop.timer = setTimeout(async () => {
       try {
-        const processed = await this.pollAndExecute()
+        const processed = await this.pollAndExecute(loop)
         this.scheduleNextPoll(loop, processed ? 0 : this.currentInterval)
       } catch (error) {
         logger.error(`Polling error in lane ${loop.index}:`, error)
@@ -80,7 +107,9 @@ export class WorkflowPoller {
     }, delay)
   }
 
-  private async pollAndExecute(): Promise<boolean> {
+  private async pollAndExecute(loop: PollingLoop): Promise<boolean> {
+    if (!this.isRunning) return false
+    
     const allowedWorkflowType = process.env.WORKFLOW_TYPE
     const pendingExecutions: WorkflowExecutionWithState[] = await repositories.workflowExecutions.findByStatus('PENDING', allowedWorkflowType, 1)
 
@@ -92,23 +121,25 @@ export class WorkflowPoller {
     this.currentInterval = this.config.minInterval
 
     // Execute the single workflow
-    await this.tryProcessExecution(pendingExecutions[0])
+    await this.tryProcessExecution(loop, pendingExecutions[0])
     return true
   }
 
-  private async tryProcessExecution(execution: WorkflowExecutionWithState): Promise<void> {
+  private async tryProcessExecution(loop: PollingLoop, execution: WorkflowExecutionWithState): Promise<void> {
     // Try to acquire lock
     const lockAcquired = await this.lockService.tryAcquireLock(execution.id, this.workerId)
 
     if (!lockAcquired) {
       return
     }
+    loop.currentExecutionId = execution.id
 
     try {
       await this.executeWorkflow(execution)
     } catch (error) {
       await this.handleWorkflowError(execution, error as Error)
     } finally {
+      loop.currentExecutionId = undefined
       await this.lockService.releaseLock(execution.id, this.workerId)
     }
   }

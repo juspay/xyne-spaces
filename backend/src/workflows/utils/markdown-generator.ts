@@ -3,6 +3,7 @@
 import { Agent, type AgentConfig, createUserMessage, type Message } from '@framework'
 import { LogLevel } from '@framework'
 import {logger} from '@/utils/logger';
+import { config } from '@/config/env';
 
 type CheckpointData = Record<string, unknown>
 
@@ -31,7 +32,7 @@ export async function generateMarkdownSummary(
             retries: 5
           }
         },
-        defaultModel: 'glm-latest'
+        defaultModel: config.workflow.defaultModelName
       },
       tools: {
         enabled: [], // No tools needed for markdown generation

@@ -96,7 +96,7 @@ export async function cloneRepository(
   repoBranch?: string,
   commitHash?: string,
   checkoutCommit?: string
-): Promise<{ repoPath: string; branchName: string; baseCommitHash: string }> {
+): Promise<{ repoPath: string; branchName: string }> {
   // Create a temp directory for cloning the repo
   const tempDir = `/tmp/${executionId}`;
 
@@ -210,20 +210,16 @@ export async function cloneRepository(
     }
   }
 
-  // Capture the base commit hash (current HEAD) before any changes are made
-  const baseCommitHash = await git.revparse(['HEAD']);
-
   logger.info(workspaceExists ? 'Workspace reused successfully' : 'Repository cloned successfully', {
     repoUrl,
     repoPath: tempDir,
     branchName,
     executionId,
-    baseCommitHash,
     commitHash: commitHash || 'branch head',
     workspaceReused: workspaceExists
   });
 
-  return { repoPath: tempDir, branchName, baseCommitHash };
+  return { repoPath: tempDir, branchName };
 }
 
 /**
