@@ -34,6 +34,12 @@ const AnalyticsScreen = (): ReactElement => {
     return createTimeRangeParams(dateRange);
   }, [dateRange]);
 
+  // Create time range parameters for Messages Today with hourly grouping always
+  const messagesTodayParams = useMemo(() => {
+    const params = createTimeRangeParams(dateRange);
+    return { ...params, groupBy: 'hour' as const };
+  }, [dateRange]);
+
   // Query configuration using utility function (refetchInterval handles live updates)
   const queryConfig = createQueryConfig(user);
 
@@ -123,8 +129,8 @@ const AnalyticsScreen = (): ReactElement => {
     data: messagesTodayData,
     error: messagesTodayError,
   } = useQuery({
-    queryKey: ['analytics', 'messagesToday', timeRangeParams],
-    queryFn: () => analyticsService.getMessagesToday(timeRangeParams),
+    queryKey: ['analytics', 'messagesToday', messagesTodayParams],
+    queryFn: () => analyticsService.getMessagesToday(messagesTodayParams),
     ...queryConfig,
   });
 
@@ -170,12 +176,12 @@ const AnalyticsScreen = (): ReactElement => {
 
   const subtitle = useMemo(() => formatDateRangeForDisplay(dateRange), [dateRange]);
 
-  // Process data using helper functions - always use day grouping
+  // Process data using helper functions - use dynamic groupBy based on time range
   const processedMessages = processMessagesExchangedData(
     messagesData?.data,
     messagesLoading,
     messagesError,
-    'day',
+    timeRangeParams.groupBy,
   );
 
   // Calculate Messages Per User from existing data (Active Messages / Active Users)
@@ -187,6 +193,7 @@ const AnalyticsScreen = (): ReactElement => {
     messagesLoading,
     usersError,
     messagesError,
+    timeRangeParams.groupBy,
   );
 
   const pieChartResult = processCurrentActiveUsersData(
@@ -353,7 +360,7 @@ const AnalyticsScreen = (): ReactElement => {
                 variant={StatCardVariant.LINE}
                 {...(Array.isArray(channelsData?.data)
                   ? {
-                      chartData: processTimeSeriesData(channelsData.data, 'day'),
+                      chartData: processTimeSeriesData(channelsData.data, timeRangeParams.groupBy),
                     }
                   : {})}
               />
@@ -368,7 +375,7 @@ const AnalyticsScreen = (): ReactElement => {
                 {...((): { chartData?: Array<{ value: number; name: string }> } => {
                   // Extract chart data from structured ActiveUsersResponse
                   const chartData = usersData?.data?.timeSeries
-                    ? processTimeSeriesData(usersData.data.timeSeries, 'day')
+                    ? processTimeSeriesData(usersData.data.timeSeries, timeRangeParams.groupBy)
                     : [];
                   return chartData.length > 0 ? { chartData } : {};
                 })()}
@@ -405,11 +412,14 @@ const AnalyticsScreen = (): ReactElement => {
                   messagesTodayLoading,
                   messagesTodayError,
                 )}
-                subtitle={subtitle}
+                subtitle='Today'
                 variant={StatCardVariant.LINE}
                 {...(Array.isArray(messagesTodayData?.data)
                   ? {
-                      chartData: processTimeSeriesData(messagesTodayData.data, 'day'),
+                      chartData: processTimeSeriesData(
+                        messagesTodayData.data,
+                        messagesTodayParams.groupBy,
+                      ),
                     }
                   : {})}
               />
@@ -439,6 +449,7 @@ const AnalyticsScreen = (): ReactElement => {
                   totalCallsDurationData?.data,
                   totalCallsDurationLoading,
                   totalCallsDurationError,
+                  timeRangeParams.groupBy,
                 );
                 return (
                   <StatCard
@@ -462,7 +473,7 @@ const AnalyticsScreen = (): ReactElement => {
                 variant={StatCardVariant.LINE}
                 {...(Array.isArray(callsData?.data)
                   ? {
-                      chartData: processTimeSeriesData(callsData.data, 'day'),
+                      chartData: processTimeSeriesData(callsData.data, timeRangeParams.groupBy),
                     }
                   : {})}
               />
@@ -481,7 +492,7 @@ const AnalyticsScreen = (): ReactElement => {
                 variant={StatCardVariant.LINE}
                 {...(Array.isArray(ticketsData?.data)
                   ? {
-                      chartData: processTimeSeriesData(ticketsData.data, 'day'),
+                      chartData: processTimeSeriesData(ticketsData.data, timeRangeParams.groupBy),
                     }
                   : {})}
               />
@@ -495,7 +506,7 @@ const AnalyticsScreen = (): ReactElement => {
                 variant={StatCardVariant.LINE}
                 {...(Array.isArray(canvasesData?.data)
                   ? {
-                      chartData: processTimeSeriesData(canvasesData.data, 'day'),
+                      chartData: processTimeSeriesData(canvasesData.data, timeRangeParams.groupBy),
                     }
                   : {})}
               />
@@ -509,7 +520,7 @@ const AnalyticsScreen = (): ReactElement => {
                 variant={StatCardVariant.LINE}
                 {...(Array.isArray(filesData?.data)
                   ? {
-                      chartData: processTimeSeriesData(filesData.data, 'day'),
+                      chartData: processTimeSeriesData(filesData.data, timeRangeParams.groupBy),
                     }
                   : {})}
               />

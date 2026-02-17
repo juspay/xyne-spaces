@@ -50,7 +50,7 @@ router.get('/active-channels', aclMiddleware.checkAccess, analyticsAuth, analyti
 router.get('/files-shared', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getFilesShared);
 
 // Messages today endpoint
-router.get('/messages-today', authMiddleware.authenticate, analyticsController.getMessagesToday);
+router.get('/messages-today', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getMessagesToday);
 
 // Metrics bar consolidated endpoint (Redis cached)
 router.get('/metrics-bar', authMiddleware.authenticate, analyticsController.getMetricsBar);

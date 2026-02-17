@@ -4,7 +4,7 @@ export interface TimeRangeParams {
   timeRange: string;
   startDate?: string;
   endDate?: string;
-  groupBy?: 'day' | 'week' | 'month';
+  groupBy: 'hour' | 'day' | 'week' | 'month';
 }
 
 export interface AnalyticsResponse<T> {

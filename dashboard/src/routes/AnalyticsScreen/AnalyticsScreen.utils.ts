@@ -228,6 +228,7 @@ export const calculateMessagesPerUser = (
   messagesLoading: boolean,
   usersError: unknown,
   messagesError: unknown,
+  groupBy: GroupByOption,
 ): {
   value: number;
   chartData: Array<{ value: number; name: string }>;
@@ -263,7 +264,7 @@ export const calculateMessagesPerUser = (
 
     if (timeSeriesUsers.length > 0) {
       // Create a Map for O(1) lookups to optimize performance from O(n*m) to O(n+m)
-      const userMap = new Map(timeSeriesUsers.map(u => [formatChartDate(u.date, 'day'), u]));
+      const userMap = new Map(timeSeriesUsers.map(u => [formatChartDate(u.date, groupBy), u]));
 
       // Match up daily messages with daily users using the optimized Map lookup
       processedMessages.totalChartData.forEach(messagePoint => {
@@ -295,9 +296,12 @@ export const calculateMessagesPerUser = (
 
 // Create time range parameters for analytics queries
 export const createTimeRangeParams = (dateRange: DateRange): TimeRangeParams => {
+  const rangeDuration = dateRange.endDate.getTime() - dateRange.startDate.getTime();
+  const hours = rangeDuration / (1000 * 60 * 60);
+
   const params: TimeRangeParams = {
     timeRange: 'custom',
-    groupBy: 'day', // Always use day grouping for consistent time-series data
+    groupBy: hours < 48 ? 'hour' : 'day',
   };
 
   if (dateRange.startDate) {
@@ -360,6 +364,7 @@ export const processDurationMetric = (
   data: number | TimeSeriesDataPoint[] | undefined,
   isLoading: boolean,
   error: unknown,
+  groupBy: GroupByOption,
 ): { value: string; unit: 'hrs' | 'mins'; chartData: Array<{ value: number; name: string }> } => {
   if (isLoading) {
     return { value: 'Loading...', unit: 'mins', chartData: [] };
@@ -384,7 +389,7 @@ export const processDurationMetric = (
     // Process chart data - keep in original units (minutes) for chart
     chartData = data.map(item => ({
       value: item.value || 0,
-      name: formatChartDate(item.date, 'day'),
+      name: formatChartDate(item.date, groupBy),
     }));
   } else if (typeof data === 'number') {
     totalMinutes = data;

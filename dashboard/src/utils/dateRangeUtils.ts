@@ -11,7 +11,7 @@ export type DateRangeOption =
   | 'last_month'
   | 'custom';
 
-export type GroupByOption = 'none' | 'day' | 'week' | 'month';
+export type GroupByOption = 'none' | 'hour' | 'day' | 'week' | 'month';
 
 export interface DateRange {
   startDate: Date;
@@ -259,31 +259,18 @@ export function shouldEnableGroupBy(dateRange: DateRange, groupBy: GroupByOption
 }
 
 /**
- * Get the appropriate groupBy option based on date range
- */
-export function getRecommendedGroupBy(dateRange: DateRange): GroupByOption {
-  const rangeDuration = dateRange.endDate.getTime() - dateRange.startDate.getTime();
-  const days = rangeDuration / (1000 * 60 * 60 * 24);
-
-  if (days <= 1) {
-    return 'none'; // For very short ranges, don't group
-  }
-
-  if (days <= 7) {
-    return 'day';
-  }
-
-  if (days <= 90) {
-    return 'week';
-  }
-
-  return 'month';
-}
-
-/**
  * Format chart dates consistently across all analytics components
  */
 export function formatChartDate(dateString: string, groupByType: GroupByOption): string {
+  if (groupByType === 'hour') {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      hour12: true,
+    });
+  }
   if (dateString.includes('_')) {
     // Handle date ranges for week/month groupBy
     const dateParts = dateString.split('_');
