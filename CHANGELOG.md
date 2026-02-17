@@ -1,3 +1,10 @@
+## [1.47.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.47.0...v1.47.1) (2026-02-17)
+
+
+### Bug Fixes
+
+* Log detailed JAF error in agent stream ([75d1a40](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75d1a409fd8ec731724ac592f063e4f293a46932)), closes [#3283](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3283)
+
 ## [1.47.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.46.0...v1.47.0) (2026-02-17)
 
 
