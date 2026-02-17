@@ -2368,7 +2368,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
   // Agent creation methods
 
-  async getAgentConfigFromDb(name: string, agentConfigVersions?: AgentConfigVersions, maxTurns?: number): Promise<Agent> {
+  async getAgentConfigFromDb(name: string, agentConfigVersions?: AgentConfigVersions, maxTurns?: number, modelName?: string): Promise<Agent> {
     let preferredVersion: number | undefined;
     if (agentConfigVersions && agentConfigVersions[name]) {
       preferredVersion = agentConfigVersions[name];
@@ -2401,7 +2401,22 @@ export class DBWorkflowStorage implements WorkflowStorage {
       throw new Error(`Agent with name '${name}' not found`);
     }
 
-    const agentConfig = this.convertDbToAgentConfig(fullAgent, maxTurns);
+    let agentConfig = this.convertDbToAgentConfig(fullAgent, maxTurns);
+
+    // If modelName is provided, override the defaultModel
+    if (modelName) {
+      const model = await repositories.models.findByName(modelName);
+      if (model && model.length > 0) {
+        agentConfig = {
+          ...agentConfig,
+          model: {
+            ...agentConfig.model,
+            defaultModel: modelName
+          }
+        };
+      }
+    }
+
     return Agent.create(agentConfig);
   }
 

@@ -2,9 +2,11 @@
 import type { AgentConfig, Message, ConversationResult } from '@framework'
 import type { WorkflowDefinition } from './registry/workflowRegistry'
 import type { WorkflowType } from './types/workflow-enums'
+import type { BaseWorkflowContextSchema } from './schemas/workflow-schema'
+import type { z } from 'zod'
 
 // Base context type - all workflow contexts should extend this
-export type BaseWorkflowContext = Record<string, unknown>
+export type BaseWorkflowContext = z.infer<typeof BaseWorkflowContextSchema>
 
 // Type constraint for TypeScript enums (string or number enums)
 // This ensures only actual TypeScript enums can be used, not plain objects

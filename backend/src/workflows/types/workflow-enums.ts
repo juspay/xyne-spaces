@@ -65,6 +65,7 @@ export interface BaseWorkflowContext {
   ticketId: string
   userId?: string
   metadata?: Record<string, any>
+  modelName?: string
 }
 
 export interface ImageAttachment {

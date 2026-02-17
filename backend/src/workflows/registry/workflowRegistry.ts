@@ -6,6 +6,7 @@ import { ZodSchema } from 'zod';
 import { createWorkflowEngine } from '../workflow-engine';
 import zodToJsonSchema from 'zod-to-json-schema';
 import {logger} from '@/utils/logger';
+import { repositories } from '../../database/repositories';
 
 
 // Note: We use BaseWorkflowContext for workflow definitions but the engine parameter
@@ -138,6 +139,9 @@ function convertJsonSchemaToFields(jsonSchema: any): WorkflowFieldSchema[] {
   
   for (const [fieldName, fieldDef] of Object.entries(root.properties)) {  
     const def = fieldDef as any;  
+    if (def.description && def.description.startsWith('_HIDDEN_')) {
+      continue;
+    }
   
     let type = "string";  
     let enumValues: string[] | undefined;  
@@ -316,7 +320,7 @@ export class WorkflowRegistry {
     return this.definitions.delete(workflowType);
   }
 
-  getWorkflowTypesForAPI(): WorkflowTypesAPIResponse {
+  async getWorkflowTypesForAPI(): Promise<WorkflowTypesAPIResponse> {
     const workflowTypes = [];
 
     for (const def of this.definitions.values()) {
@@ -329,6 +333,16 @@ export class WorkflowRegistry {
         : null;
       // Convert JSON Schema to frontend-friendly field array
       const schemaFields = convertJsonSchemaToFields(jsonSchema);
+      const modelField = schemaFields.find(f => f.name === 'modelName');
+      if (modelField) {
+        const allModels = await repositories.models.findMany();
+        const modelNames = allModels.map((model: { name: string }) => model.name);
+        
+        if (modelNames.length > 0) {
+          modelField.type = 'enum';
+          modelField.enumValues = modelNames;
+        }
+      }
 
       workflowTypes.push({
         id: def.type,
