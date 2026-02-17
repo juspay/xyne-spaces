@@ -6,25 +6,81 @@ import {
   createCompositeTraceCollector,
   type TraceCollector,
   type TraceEvent,
+  type Message,
 } from '@xynehq/jaf';
 import { logger } from '../../../utils/logger.js';
 import { getLangfuseConfig } from './config.js';
 
 // ============================================================================
-// TRACING TOGGLE - Set to false to disable tracing
+// TRACING TOGGLE - Set to true to enable tracing with content masking
 // ============================================================================
-const TRACING_ENABLED = false;
+const TRACING_ENABLED = true;
+
+// ============================================================================
+// CONTENT MASKING CONFIGURATION
+// ============================================================================
+const MASKING_ENABLED = true;
+const MASKED_OUTPUT_PLACEHOLDER = '[MASKED - Agent Output]';
+const MASKED_TOOL_OUTPUT_PLACEHOLDER = '[MASKED - Tool Output]';
 
 let traceCollector: TraceCollector | null = null;
 let isInitialized = false;
 
 function getTraceCollector(): TraceCollector {
   if (!traceCollector) {
-
     traceCollector = createCompositeTraceCollector();
   }
   
   return traceCollector;
+}
+
+function maskMessage(message: Message): { role: 'user' | 'assistant' | 'tool'; content: string } {
+  const role = message.role || 'assistant';
+  const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+  
+  if (!MASKING_ENABLED) {
+    return { role, content };
+  }
+  
+  if (role === 'user') {
+    return { role, content };
+  }
+  
+  return {
+    role,
+    content: role === 'tool' ? MASKED_TOOL_OUTPUT_PLACEHOLDER : MASKED_OUTPUT_PLACEHOLDER,
+  };
+}
+
+/**
+ * Mask an array of messages - just calls maskMessage for each
+ */
+function maskMessages(messages: readonly Message[]): readonly { role: 'user' | 'assistant' | 'tool'; content: string }[] {
+  return messages.map(maskMessage);
+}
+
+function maskToolOutput(result: unknown): string {
+  if (!MASKING_ENABLED) {
+    return typeof result === 'string' ? result : JSON.stringify(result);
+  }
+  return MASKED_TOOL_OUTPUT_PLACEHOLDER;
+}
+
+function maskOutcomeOutput(outcome: unknown): unknown {
+  if (!MASKING_ENABLED) {
+    return outcome;
+  }
+  
+  const outcomeObj = outcome as { status?: string; output?: unknown; error?: unknown };
+  
+  if (outcomeObj.status === 'completed' && outcomeObj.output !== undefined) {
+    return {
+      ...outcomeObj,
+      output: MASKED_OUTPUT_PLACEHOLDER,
+    };
+  }
+  
+  return outcomeObj;
 }
 
 // ============================================================================
@@ -89,7 +145,7 @@ const SKIP_EVENTS = new Set([
 ]);
 
 /**
- * Handle event with session/user enrichment
+ * Handle event with session/user enrichment and content masking
  */
 function handleEventWithEnrichment(event: TraceEvent, collector: TraceCollector): void {
   if (SKIP_EVENTS.has(event.type)) {
@@ -98,7 +154,7 @@ function handleEventWithEnrichment(event: TraceEvent, collector: TraceCollector)
 
   switch (event.type) {
     case 'run_start': {
-      const { runId, traceId, context } = event.data;
+      const { runId, traceId, context, messages } = event.data;
       
       // Extract session and user info from context
       const sessionId = context?.sessionId || context?.session_id;
@@ -107,6 +163,22 @@ function handleEventWithEnrichment(event: TraceEvent, collector: TraceCollector)
       const userEmail = userInfo?.userEmail;
       const userName = userInfo?.userName;
       
+      const maskedContext = {
+        ...context,
+        agentName: 'ask-ai-agent',
+        sessionId,
+        userId: userEmail || userId,
+        userInfo: {
+          userId: userId,
+          userName: userName,
+          userEmail: userEmail,
+        },
+      };
+      
+      // Mask the input messages
+      const maskedMessages = messages ? maskMessages(messages) : undefined;
+      const eventDataAny = event.data as Record<string, unknown>;
+      
       const enrichedEvent = {
         type: 'run_start' as const,
         data: {
@@ -114,17 +186,9 @@ function handleEventWithEnrichment(event: TraceEvent, collector: TraceCollector)
           sessionId: sessionId,
           userId: userEmail || userId,
           agentName: 'ask-ai-agent',
-          context: {
-            ...context,
-            agentName: 'ask-ai-agent',
-            sessionId,
-            userId: userEmail || userId,
-            userInfo: {
-              userId: userId,
-              userName: userName,
-              userEmail: userEmail,
-            },
-          },
+          messages: maskedMessages,
+          ...(eventDataAny.user_query ? { user_query: eventDataAny.user_query } : {}),
+          context: maskedContext,
         },
       };
       
@@ -134,12 +198,76 @@ function handleEventWithEnrichment(event: TraceEvent, collector: TraceCollector)
       break;
     }
     
+    case 'llm_call_start': {
+      const maskedEvent = {
+        type: 'llm_call_start' as const,
+        data: {
+          ...event.data,
+          messages: event.data.messages ? maskMessages(event.data.messages) : undefined,
+          model: event.data.model,
+        },
+      };
+      
+      collector.collect(maskedEvent);
+      break;
+    }
+    
+    case 'llm_call_end': {
+      const choice = event.data.choice;
+      const maskedChoice = choice ? {
+        ...choice,
+        message: choice.message ? maskMessage(choice.message) : undefined,
+      } : undefined;
+      
+      const maskedEvent = {
+        type: 'llm_call_end' as const,
+        data: {
+          ...event.data,
+          choice: maskedChoice,
+          usage: event.data.usage,
+          model: event.data.model,
+        },
+      };
+      
+      collector.collect(maskedEvent);
+      break;
+    }
+    
+    case 'tool_call_start': {
+      collector.collect(event);
+      break;
+    }
+    
+    case 'tool_call_end': {
+      const maskedEvent = {
+        type: 'tool_call_end' as const,
+        data: {
+          ...event.data,
+          toolName: event.data.toolName,
+          result: maskToolOutput(event.data.result),
+          executionTime: event.data.executionTime,
+        },
+      };
+      
+      collector.collect(maskedEvent);
+      break;
+    }
+    
     case 'run_end': {
       const { runId } = event.data;
-      
-      collector.collect(event);
-      
       const outcome = event.data.outcome;
+      const maskedOutcome = maskOutcomeOutput(outcome) as typeof outcome;
+      
+      const maskedEvent = {
+        type: 'run_end' as const,
+        data: {
+          ...event.data,
+          outcome: maskedOutcome,
+        },
+      };
+      
+      collector.collect(maskedEvent);
+      
       logger.info(`[Langfuse] Ended trace. runId: ${runId}, status: ${outcome.status}`);
       break;
     }
