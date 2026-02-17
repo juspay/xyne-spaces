@@ -46,6 +46,16 @@ export const OTEL_EXPORT_INTERVAL_MS: number = parseInt(
 
 export const SEARCH_VERSION = import.meta.env['VITE_SEARCH_VERSION'] as string;
 
+// Working hours configuration (in IST) - should match backend defaults
+export const WORKING_HOUR_START: number = parseInt(
+  (import.meta.env['VITE_WORKING_HOUR_START'] as string) || '11',
+  10,
+);
+export const WORKING_HOUR_END: number = parseInt(
+  (import.meta.env['VITE_WORKING_HOUR_END'] as string) || '19',
+  10,
+);
+
 export const FLUSH_INTERVAL_IN_MS = 60000;
 export const MAX_BATCH_SIZE = 10;
 export const LOGGER_BASE_URL = isElectronBundled
