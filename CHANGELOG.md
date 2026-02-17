@@ -1,3 +1,18 @@
+## [1.47.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.46.0...v1.47.0) (2026-02-17)
+
+
+### Features
+
+* added mark as unread for my msgs, attachments, stopped scroll ([d784fbe](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d784fbec518688bab6a6adc3b965f48daeeca4e9)), closes [#3300](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3300)
+* paused eta projection ([1dcca2d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1dcca2d7a3d41c4e4f7c6fec7b37cadefb36b891)), closes [#2826](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2826)
+
+
+### Bug Fixes
+
+* Added  masking in langfuse tracing ([80d2e34](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/80d2e34976457e21e27bee1c48a5f73987fa2e8b)), closes [#3245](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3245)
+* fixed admin resource acess in automation ([f7adb21](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f7adb21f0cfba35558e8814df0151b31253bd0b3))
+* ip box new line fix and redirect on @ mention ([38a7181](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/38a7181a46de19b23eb83e226b9f6fd34428952d))
+
 ## [1.46.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.45.2...v1.46.0) (2026-02-17)
 
 
