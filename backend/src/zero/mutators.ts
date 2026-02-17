@@ -158,6 +158,7 @@ async function syncUserWorkloadMapping(
 async function createNonParticipantSystemMessages(
   tx: Transaction<Schema>,
   mentionedUserIds: string[],
+  mentionedGroupIds: string[],
   channelId: string,
   conversationId: string,
   senderId: string,
@@ -165,7 +166,7 @@ async function createNonParticipantSystemMessages(
   scopeType: string,
 ): Promise<void> {
   try {
-    if (mentionedUserIds.length === 0) {
+    if (mentionedUserIds.length === 0 && mentionedGroupIds.length === 0) {
       return;
     }
 
@@ -173,7 +174,7 @@ async function createNonParticipantSystemMessages(
       return
     }
 
-    logger.info(`🔍 [NON-PARTICIPANT] Checking ${mentionedUserIds.length} mentioned users in channel ${channelId}`);
+    logger.info(`🔍 [NON-PARTICIPANT] Checking ${mentionedUserIds.length} users and ${mentionedGroupIds.length} groups in channel ${channelId}`);
 
     // Get channel and sender participation for role-based messaging
     const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -182,10 +183,22 @@ async function createNonParticipantSystemMessages(
       .where('userId', senderId)
       .one());
 
+    // Fetch group members for all mentioned groups
+    const groupMemberIds: string[] = [];
+    for (const groupId of mentionedGroupIds) {
+      const mappings = await tx.run(zql.user_group_mappings.where('userGroupId', groupId));
+      const memberIds = mappings.map(m => m.userId);
+      groupMemberIds.push(...memberIds);
+      logger.info(`👥 [NON-PARTICIPANT] Group ${groupId} has ${memberIds.length} members`);
+    }
+
+    // Combine individual user IDs with group member user IDs and deduplicate
+    const allMentionedUserIds = [...new Set([...mentionedUserIds, ...groupMemberIds])];
+
     // Check which mentioned users are NOT channel participants
     const nonParticipants: Array<{ userId: string; userName: string }> = [];
 
-    for (const userId of mentionedUserIds) {
+    for (const userId of allMentionedUserIds) {
       const participant = await tx.run(zql.channel_participants
         .where('channelId', channelId)
         .where('userId', userId)
@@ -1229,6 +1242,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await createNonParticipantSystemMessages(
             tx,
             mentions.userIds,
+            mentions.groupIds,
             channelId,
             conversationId,
             authData.sub,
@@ -1755,6 +1769,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await createNonParticipantSystemMessages(
             tx,
             mentions.userIds,
+            mentions.groupIds,
             channel.id,
             conversationId,
             authData.sub,
