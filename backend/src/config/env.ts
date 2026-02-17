@@ -73,7 +73,7 @@ const envSchema = Joi.object({
   WORKING_HOUR_START: Joi.number().default(11),
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
-  ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(true),
+  ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
