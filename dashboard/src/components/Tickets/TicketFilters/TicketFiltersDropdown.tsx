@@ -103,31 +103,18 @@ export const TicketFiltersDropdown = ({
     },
     [filters],
   );
-  // Remove all 'more filters' (dynamicFields and others except boards) when 'All Boards' is selected
-  const selectedBoards = useMemo(() => {
-    if (!filters.boards || filters.boards.length === 0) {
-      // Only call onFiltersChange if any non-board filter is present
-      const hasOtherFilters = !!(
-        filters.priority?.length ||
-        filters.assignee?.length ||
-        filters.userGroups?.length ||
-        filters.createdBy?.length ||
-        filters.prReviewers?.length ||
-        filters.qaAssigned?.length ||
-        filters.dueDateStart !== undefined ||
-        filters.dueDateEnd !== undefined ||
-        filters.createdDateStart !== undefined ||
-        filters.createdDateEnd !== undefined ||
-        filters.tags?.length ||
-        (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0)
-      );
-      if (hasOtherFilters) {
-        onFiltersChange({ boards: [] });
-      }
-      return [];
+  const selectedBoards = useMemo(() => filters.boards || [], [filters.boards]);
+
+  // When "All Boards" is selected, clear only dynamic field filters,
+  // but keep common filters intact.
+  useEffect(() => {
+    if (selectedBoards.length > 0) return;
+
+    if (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) {
+      const { dynamicFields: _dynamicFields, ...remainingFilters } = filters;
+      onFiltersChange(remainingFilters);
     }
-    return filters.boards;
-  }, [filters]);
+  }, [selectedBoards, filters, onFiltersChange]);
 
   // Close submenu when main popover closes
   useEffect(() => {
