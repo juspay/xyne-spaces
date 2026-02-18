@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, AccessType } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -74,11 +74,46 @@ async function assignUserToGroup() {
     } else {
       console.log(`✅ User ${user.email} already in ADMIN group`);
     }
-    console.log('📋 ADMIN group permissions:');
-    console.log('  - Full system access');
-    console.log('  - Can manage all resources');
-    console.log('  - ADMIN access to all modules');
-    
+
+    // Grant direct ADMIN access to ALL resources for this user (required for User Management admin checks)
+    console.log('\n🔐 Granting direct ADMIN access to all resources...');
+    const allResources = await prisma.resource.findMany();
+    let grantedCount = 0;
+
+    for (const resource of allResources) {
+      // Check if direct permission already exists
+      const existingDirectPermission = await prisma.resourceAccess.findFirst({
+        where: {
+          userId: user.id,
+          resourceId: resource.id,
+          accessType: AccessType.ADMIN,
+        },
+      });
+
+      if (!existingDirectPermission) {
+        await prisma.resourceAccess.create({
+          data: {
+            userId: user.id,
+            resourceId: resource.id,
+            accessType: AccessType.ADMIN,
+          },
+        });
+        grantedCount++;
+        console.log(`  ✅ Granted ADMIN access: ${resource.name}`);
+      }
+    }
+
+    if (grantedCount === 0) {
+      console.log('  ✅ Direct ADMIN access already exists for all resources');
+    } else {
+      console.log(`  ✅ Granted direct ADMIN access to ${grantedCount} resources`);
+    }
+
+    console.log('\n📋 Admin user permissions:');
+    console.log('  - Full system access via ADMIN group');
+    console.log('  - Direct ADMIN access to all resources (for ACL checks)');
+    console.log('  - Can grant/modify/revoke resource access for other users');
+
   } catch (error) {
     console.error('❌ Error assigning user to group:', error);
   } finally {

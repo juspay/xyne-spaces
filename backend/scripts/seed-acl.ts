@@ -27,6 +27,13 @@ const ESSENTIAL_RESOURCES = [
   { name: 'HEALTH', description: 'Health check endpoints (/api/health/*)' },
   { name: 'AUTH', description: 'Authentication endpoints (/api/auth/*)' },
   { name: 'EXTERNAL-STEP-RESPONSE', description: 'External step response endpoints (/api/external-step-response/*)' },
+  { name: 'FORMS', description: 'Form management and submission access' },
+  { name: 'SUPPORT', description: 'Support ticket and help desk access' },
+  { name: 'PROJECTS', description: 'Project management access' },
+  { name: 'PRODUCT-INSIGHTS', description: 'Product insights and analytics access' },
+  { name: 'LISTPROJECTS', description: 'Project listing and management access' },
+  { name: 'CHANNELS', description: 'Read only will not allow to create channel' },
+  { name: 'CANVASES', description: 'Canvases creation access' },
 ];
 
 // Default user groups with their permissions
@@ -52,6 +59,13 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'HEALTH', accessType: AccessType.READ },
       { resourceName: 'AUTH', accessType: AccessType.READ },
       { resourceName: 'EXTERNAL-STEP-RESPONSE', accessType: AccessType.WRITE },
+      { resourceName: 'FORMS', accessType: AccessType.WRITE },
+      { resourceName: 'SUPPORT', accessType: AccessType.WRITE },
+      { resourceName: 'PROJECTS', accessType: AccessType.WRITE },
+      { resourceName: 'PRODUCT-INSIGHTS', accessType: AccessType.READ },
+      { resourceName: 'LISTPROJECTS', accessType: AccessType.READ },
+      { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
+      { resourceName: 'CANVASES', accessType: AccessType.WRITE },
     ]
   },
   {
@@ -65,6 +79,13 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'MODELS', accessType: AccessType.READ },
       { resourceName: 'ANALYTICS', accessType: AccessType.READ },
       { resourceName: 'HEALTH', accessType: AccessType.READ },
+      { resourceName: 'FORMS', accessType: AccessType.READ },
+      { resourceName: 'SUPPORT', accessType: AccessType.READ },
+      { resourceName: 'PROJECTS', accessType: AccessType.READ },
+      { resourceName: 'PRODUCT-INSIGHTS', accessType: AccessType.READ },
+      { resourceName: 'LISTPROJECTS', accessType: AccessType.READ },
+      { resourceName: 'CHANNELS', accessType: AccessType.READ },
+      { resourceName: 'CANVASES', accessType: AccessType.READ },
     ]
   }
 ];
