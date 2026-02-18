@@ -5,12 +5,15 @@ import {
   RemoteParticipant,
   RemoteTrack,
   RemoteTrackPublication,
+  LocalTrackPublication,
   VideoPresets,
   ConnectionState,
   RoomConnectOptions,
   Participant,
+  TrackPublication,
   setLogLevel,
   DisconnectReason,
+  SubscriptionError,
 } from 'livekit-client';
 import type { Zero } from '@rocicorp/zero';
 import type { Call } from '@xyne/shared';
@@ -309,9 +312,18 @@ export const roomMachine = setup({
           LiveKitRoomEvent.TrackSubscribed,
           (
             track: RemoteTrack,
-            _publication: RemoteTrackPublication,
+            publication: RemoteTrackPublication,
             participant: RemoteParticipant,
           ) => {
+            logger.info(Event.LIVEKIT_TRACK_SUBSCRIBED, {
+              callId,
+              participantIdentity: participant.identity,
+              trackSource: publication.source?.toString() ?? 'unknown',
+              trackKind: track.kind,
+              trackSid: publication.trackSid,
+              isMuted: publication.isMuted,
+              isSubscribed: publication.isSubscribed,
+            });
             updateParticipants();
             sendBack({ type: 'TRACK_SUBSCRIBED', participant, track });
           },
@@ -321,27 +333,103 @@ export const roomMachine = setup({
           LiveKitRoomEvent.TrackUnsubscribed,
           (
             track: RemoteTrack,
-            _publication: RemoteTrackPublication,
+            publication: RemoteTrackPublication,
             participant: RemoteParticipant,
           ) => {
+            logger.info(Event.LIVEKIT_TRACK_UNSUBSCRIBED, {
+              callId,
+              participantIdentity: participant.identity,
+              trackSource: publication.source?.toString() ?? 'unknown',
+              trackKind: track.kind,
+              trackSid: publication.trackSid,
+            });
             updateParticipants();
             sendBack({ type: 'TRACK_UNSUBSCRIBED', participant, track });
           },
         );
 
-        room.on(LiveKitRoomEvent.LocalTrackPublished, () => {
+        // Remote track published (before subscription)
+        room.on(
+          LiveKitRoomEvent.TrackPublished,
+          (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+            logger.info(Event.LIVEKIT_TRACK_PUBLISHED, {
+              callId,
+              participantIdentity: participant.identity,
+              trackSource: publication.source?.toString() ?? 'unknown',
+              trackKind: publication.kind,
+              trackSid: publication.trackSid,
+              isSubscribed: publication.isSubscribed,
+              isMuted: publication.isMuted,
+            });
+          },
+        );
+
+        // Track subscription failed
+        room.on(
+          LiveKitRoomEvent.TrackSubscriptionFailed,
+          (trackSid: string, participant: RemoteParticipant, reason?: SubscriptionError) => {
+            logger.error(Event.LIVEKIT_TRACK_SUBSCRIPTION_FAILED, {
+              callId,
+              participantIdentity: participant.identity,
+              trackSid,
+              reason: reason?.toString() ?? 'unknown',
+            });
+          },
+        );
+
+        room.on(LiveKitRoomEvent.LocalTrackPublished, (publication: LocalTrackPublication) => {
+          logger.info(Event.LIVEKIT_TRACK_PUBLISHED, {
+            callId,
+            participantIdentity: room.localParticipant.identity,
+            trackSource: publication.source?.toString() ?? 'unknown',
+            trackKind: publication.kind,
+            trackSid: publication.trackSid,
+            isLocal: true,
+          });
           updateParticipants();
           sendBack({ type: 'LOCAL_TRACK_PUBLISHED' });
         });
 
-        room.on(LiveKitRoomEvent.LocalTrackUnpublished, () => {
+        room.on(LiveKitRoomEvent.LocalTrackUnpublished, (publication: LocalTrackPublication) => {
+          logger.info(Event.LIVEKIT_TRACK_UNSUBSCRIBED, {
+            callId,
+            participantIdentity: room.localParticipant.identity,
+            trackSource: publication.source?.toString() ?? 'unknown',
+            trackKind: publication.kind,
+            trackSid: publication.trackSid,
+            isLocal: true,
+          });
           updateParticipants();
           sendBack({ type: 'LOCAL_TRACK_UNPUBLISHED' });
         });
 
         // Track muted/unmuted events
-        room.on(LiveKitRoomEvent.TrackMuted, updateParticipants);
-        room.on(LiveKitRoomEvent.TrackUnmuted, updateParticipants);
+        room.on(
+          LiveKitRoomEvent.TrackMuted,
+          (publication: TrackPublication, participant: Participant) => {
+            logger.info(Event.LIVEKIT_TRACK_MUTE_CHANGED, {
+              callId,
+              participantIdentity: participant.identity,
+              trackSource: publication.source?.toString() ?? 'unknown',
+              trackSid: publication.trackSid,
+              isMuted: true,
+            });
+            updateParticipants();
+          },
+        );
+        room.on(
+          LiveKitRoomEvent.TrackUnmuted,
+          (publication: TrackPublication, participant: Participant) => {
+            logger.info(Event.LIVEKIT_TRACK_MUTE_CHANGED, {
+              callId,
+              participantIdentity: participant.identity,
+              trackSource: publication.source?.toString() ?? 'unknown',
+              trackSid: publication.trackSid,
+              isMuted: false,
+            });
+            updateParticipants();
+          },
+        );
 
         // Participant connected
         room.on(LiveKitRoomEvent.ParticipantConnected, (_participant: RemoteParticipant) => {
@@ -419,6 +507,48 @@ export const roomMachine = setup({
             }
           },
         );
+
+        // Debug: Log ALL LiveKit events
+        // This ensures we catch any unhandled events for debugging purposes
+        Object.values(LiveKitRoomEvent).forEach(eventName => {
+          room.on(eventName, (...args: unknown[]) => {
+            // Filter out DataReceived as it can be very noisy and we have specific handling
+            if (eventName === LiveKitRoomEvent.DataReceived) return;
+
+            // Filter out ActiveSpeakersChanged as it is very frequent
+            if (eventName === LiveKitRoomEvent.ActiveSpeakersChanged) return;
+
+            // Simplify arguments for logging (avoid circular references in Room/Participant objects if possible)
+            // We just log the event name and validity of args for now, or simple primitives
+            // Safe logging of args
+            const safeArgs = args.map(arg => {
+              if (typeof arg === 'object' && arg !== null && !Array.isArray(arg)) {
+                // Return generic type/id if available, otherwise just "object"
+                const record = arg as Record<string, unknown>;
+                const constructor = record['constructor'] as { name?: string } | undefined;
+                const constructorName = constructor?.name ?? 'Object';
+
+                if ('sid' in record && typeof record['sid'] === 'string') {
+                  return { sid: record['sid'], type: constructorName };
+                }
+                if ('identity' in record && typeof record['identity'] === 'string') {
+                  return { identity: record['identity'], type: constructorName };
+                }
+                if ('id' in record && typeof record['id'] === 'string') {
+                  return { id: record['id'], type: constructorName };
+                }
+                return { type: constructorName };
+              }
+              return arg;
+            });
+
+            logger.info(Event.LIVEKIT_ROOM_EVENT, {
+              callId,
+              eventName,
+              args: safeArgs,
+            });
+          });
+        });
 
         // Cleanup
         return (): void => {

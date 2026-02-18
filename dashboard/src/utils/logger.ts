@@ -117,6 +117,13 @@ export const Event = {
   LIVEKIT_RTC_CONNECTING: 'livekit_rtc_connecting',
   LIVEKIT_RTC_CONNECTED: 'livekit_rtc_connected',
   LIVEKIT_RTC_DISCONNECTED: 'livekit_rtc_disconnected',
+  LIVEKIT_TRACK_PUBLISHED: 'livekit_track_published',
+  LIVEKIT_TRACK_SUBSCRIBED: 'livekit_track_subscribed',
+  LIVEKIT_TRACK_UNSUBSCRIBED: 'livekit_track_unsubscribed',
+  LIVEKIT_TRACK_MUTE_CHANGED: 'livekit_track_mute_changed',
+  LIVEKIT_TRACK_SUBSCRIPTION_FAILED: 'livekit_track_subscription_failed',
+  LIVEKIT_SCREEN_SHARE_RENDERED: 'livekit_screen_share_rendered',
+  LIVEKIT_ROOM_EVENT: 'livekit_room_event',
   CANVAS_MENTION_DEBUG: 'canvas_mention_debug',
 } as const;
 
