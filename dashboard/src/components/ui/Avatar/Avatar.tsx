@@ -4,6 +4,7 @@ import { ReactElement } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
 import { cn } from '../../../utils/classNames';
 import { useUser } from '../../../hooks/useUsers';
+import { useUserPresence } from '../../../hooks/usePresence';
 import { User } from '../../../machines/stateMachine';
 
 export type AvatarSize = 'sm' | 'rg' | 'md' | 'lg' | 'xl' | 'big';
@@ -15,13 +16,34 @@ interface AvatarProps {
   className?: string;
 }
 
+// Only dimension classes
 const sizeClasses: Record<AvatarSize, string> = {
-  sm: 'size-5 text-xs',
-  rg: 'w-[30px] h-[30px] text-xs',
-  md: 'size-8 text-sm',
-  lg: 'size-12 text-base',
-  xl: 'size-16 text-lg',
-  big: 'w-[216px] h-[216px] text-6xl',
+  sm: 'size-5',
+  rg: 'w-[30px] h-[30px]',
+  md: 'size-8',
+  lg: 'size-12',
+  xl: 'size-16',
+  big: 'w-[216px] h-[216px]',
+};
+
+// Text size classes
+const textSizeClasses: Record<AvatarSize, string> = {
+  sm: 'text-[10px]',
+  rg: 'text-xs',
+  md: 'text-sm',
+  lg: 'text-base',
+  xl: 'text-lg',
+  big: 'text-6xl',
+};
+
+// Indicator config: radius of the colored circle, stroke width for white border
+const indicatorConfig: Record<AvatarSize, { radius: number; stroke: number }> = {
+  sm: { radius: 3, stroke: 1.5 },
+  rg: { radius: 4, stroke: 2 },
+  md: { radius: 4, stroke: 2 },
+  lg: { radius: 5, stroke: 2 },
+  xl: { radius: 6, stroke: 3 },
+  big: { radius: 8, stroke: 4 },
 };
 
 function AvatarRoot({
@@ -68,45 +90,43 @@ const generateAvatarColor = (userId: string): { bg: string; text: string } => {
   if (!userId) return { bg: 'bg-muted', text: 'text-muted-foreground' };
 
   const colorPalette = [
-    { bg: 'bg-red-400', text: 'text-white' }, // #FF6B6B - Red
-    { bg: 'bg-teal-400', text: 'text-white' }, // #4ECDC4 - Teal
-    { bg: 'bg-sky-400', text: 'text-white' }, // #45B7D1 - Sky Blue
-    { bg: 'bg-orange-300', text: 'text-white' }, // #FFA07A - Light Salmon
-    { bg: 'bg-green-300', text: 'text-white' }, // #98D8C8 - Mint
-    { bg: 'bg-yellow-300', text: 'text-white' }, // #F7DC6F - Yellow
-    { bg: 'bg-purple-300', text: 'text-white' }, // #BB8FCE - Purple
-    { bg: 'bg-blue-300', text: 'text-white' }, // #85C1E2 - Light Blue
-    { bg: 'bg-amber-400', text: 'text-white' }, // #F8B739 - Orange
-    { bg: 'bg-green-500', text: 'text-white' }, // #52B788 - Green
-    { bg: 'bg-pink-400', text: 'text-white' }, // #E85D75 - Pink
-    { bg: 'bg-indigo-400', text: 'text-white' }, // #6C5CE7 - Indigo
-    { bg: 'bg-emerald-500', text: 'text-white' }, // #00B894 - Emerald
-    { bg: 'bg-yellow-500', text: 'text-white' }, // #FDCB6E - Amber
-    { bg: 'bg-orange-600', text: 'text-white' }, // #E17055 - Terra Cotta
-    { bg: 'bg-blue-400', text: 'text-white' }, // #74B9FF - Blue
-    { bg: 'bg-purple-400', text: 'text-white' }, // #A29BFE - Lavender
-    { bg: 'bg-rose-400', text: 'text-white' }, // #FD79A8 - Rose
-    { bg: 'bg-cyan-500', text: 'text-white' }, // #00CEC9 - Cyan
-    { bg: 'bg-red-400', text: 'text-white' }, // #FF7675 - Coral
-    { bg: 'bg-teal-300', text: 'text-white' }, // #55EFC4 - Aqua
-    { bg: 'bg-pink-300', text: 'text-white' }, // #FDA7DF - Light Pink
-    { bg: 'bg-gray-600', text: 'text-white' }, // #6C5B7B - Plum
-    { bg: 'bg-green-400', text: 'text-white' }, // #81C784 - Soft Green
-    { bg: 'bg-orange-400', text: 'text-white' }, // #FFB74D - Peach
-    { bg: 'bg-violet-400', text: 'text-white' }, // #9575CD - Violet
-    { bg: 'bg-red-600', text: 'text-white' }, // #E74C3C - Crimson
-    { bg: 'bg-blue-600', text: 'text-white' }, // #3498DB - Ocean Blue
-    { bg: 'bg-emerald-600', text: 'text-white' }, // #2ECC71 - Emerald Green
-    { bg: 'bg-orange-500', text: 'text-white' }, // #F39C12 - Carrot Orange
+    { bg: 'bg-red-400', text: 'text-white' },
+    { bg: 'bg-teal-400', text: 'text-white' },
+    { bg: 'bg-sky-400', text: 'text-white' },
+    { bg: 'bg-orange-300', text: 'text-white' },
+    { bg: 'bg-green-300', text: 'text-white' },
+    { bg: 'bg-yellow-300', text: 'text-white' },
+    { bg: 'bg-purple-300', text: 'text-white' },
+    { bg: 'bg-blue-300', text: 'text-white' },
+    { bg: 'bg-amber-400', text: 'text-white' },
+    { bg: 'bg-green-500', text: 'text-white' },
+    { bg: 'bg-pink-400', text: 'text-white' },
+    { bg: 'bg-indigo-400', text: 'text-white' },
+    { bg: 'bg-emerald-500', text: 'text-white' },
+    { bg: 'bg-yellow-500', text: 'text-white' },
+    { bg: 'bg-orange-600', text: 'text-white' },
+    { bg: 'bg-blue-400', text: 'text-white' },
+    { bg: 'bg-purple-400', text: 'text-white' },
+    { bg: 'bg-rose-400', text: 'text-white' },
+    { bg: 'bg-cyan-500', text: 'text-white' },
+    { bg: 'bg-red-400', text: 'text-white' },
+    { bg: 'bg-teal-300', text: 'text-white' },
+    { bg: 'bg-pink-300', text: 'text-white' },
+    { bg: 'bg-gray-600', text: 'text-white' },
+    { bg: 'bg-green-400', text: 'text-white' },
+    { bg: 'bg-orange-400', text: 'text-white' },
+    { bg: 'bg-violet-400', text: 'text-white' },
+    { bg: 'bg-red-600', text: 'text-white' },
+    { bg: 'bg-blue-600', text: 'text-white' },
+    { bg: 'bg-emerald-600', text: 'text-white' },
+    { bg: 'bg-orange-500', text: 'text-white' },
   ];
 
-  // Create hash from userId to select color
   let hash = 0;
   for (let i = 0; i < userId.length; i++) {
     hash = userId.charCodeAt(i) + ((hash << 5) - hash);
   }
 
-  // Select color from palette based on hash
   const colorIndex = Math.abs(hash) % colorPalette.length;
   return colorPalette[colorIndex] || { bg: 'bg-muted', text: 'text-muted-foreground' };
 };
@@ -114,12 +134,14 @@ const generateAvatarColor = (userId: string): { bg: string; text: string } => {
 const Avatar = ({
   userId,
   size = 'md',
-  // showActiveStatus = true,
+  showActiveStatus = true,
   className,
 }: AvatarProps): ReactElement => {
   const { user: currentUser } = useAuth();
   const targetUserId = userId || currentUser?.id || '';
   const user: User | undefined = useUser(targetUserId);
+
+  const { status: presenceStatus } = useUserPresence(targetUserId);
 
   const initials =
     user?.name
@@ -130,61 +152,60 @@ const Avatar = ({
       .slice(0, 1) || '';
 
   const sizeClass = sizeClasses[size];
+  const textSizeClass = textSizeClasses[size];
 
-  // Generate color if no profile picture
   const colorClass = !user?.picture
     ? generateAvatarColor(targetUserId)
     : { bg: 'bg-muted', text: 'text-muted-foreground' };
 
+  // Render online indicator as SVG circle (guaranteed perfect circle)
+  const renderOnlineIndicator = (): ReactElement | null => {
+    if (!showActiveStatus) return null;
+
+    const isOnline = presenceStatus === 'ONLINE';
+    const isOfflineOrAway = presenceStatus === 'OFFLINE' || presenceStatus === 'AWAY';
+
+    if (!isOnline && !isOfflineOrAway) return null;
+
+    const { radius, stroke } = indicatorConfig[size];
+    const svgSize = (radius + stroke) * 2;
+    const center = svgSize / 2;
+    // Position so the circle sits on the corner (slightly inward)
+    const offset = -(svgSize / 2) + 2;
+
+    return (
+      <svg
+        width={svgSize}
+        height={svgSize}
+        className='absolute'
+        style={{ bottom: offset, right: offset, pointerEvents: 'none' }}
+      >
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill={isOnline ? '#22c55e' : '#9ca3af'}
+          stroke='white'
+          strokeWidth={stroke}
+        />
+      </svg>
+    );
+  };
+
   return (
-    <AvatarRoot className={cn(sizeClass, className, 'visual-regression-hide')}>
-      {user?.picture && <AvatarImage src={user.picture} alt={user?.name || 'User avatar'} />}
+    <div
+      className={cn('relative inline-flex shrink-0 visual-regression-hide', sizeClass, className)}
+    >
+      <AvatarRoot className={cn(colorClass.bg, colorClass.text, 'size-full', textSizeClass)}>
+        {user?.picture && <AvatarImage src={user.picture} alt={user?.name || 'User avatar'} />}
 
-      <AvatarFallback className={cn(colorClass.bg, colorClass.text, sizeClass)}>
-        {initials}
-      </AvatarFallback>
+        <AvatarFallback className={cn(colorClass.bg, colorClass.text, 'size-full', textSizeClass)}>
+          {initials}
+        </AvatarFallback>
+      </AvatarRoot>
 
-      {/* {showActiveStatus && (
-        <>
-          {(() => {
-            const status = user?.presenceStatus?.status;
-            const isOnline = status === UserPresenceStatus.ONLINE;
-            const isOfflineOrAway =
-              status === UserPresenceStatus.OFFLINE || status === UserPresenceStatus.AWAY;
-
-            if (isOnline) {
-              return (
-                <span
-                  className={cn(
-                    'absolute bottom-[1px] right-[1px] block rounded-full ring-1 ring-background',
-                    'bg-green-500',
-                    size === 'sm' ? 'size-1.5 ring-1' : 'size-2.5',
-                    size === 'lg' || size === 'xl' ? 'size-3.5' : '',
-                    size === 'big' ? 'size-6 ring-4' : '',
-                  )}
-                />
-              );
-            }
-
-            if (isOfflineOrAway) {
-              return (
-                <span
-                  className={cn(
-                    'absolute bottom-[1px] right-[1px] block rounded-full ring-1 ring-background',
-                    'bg-gray-300', // Solid grey
-                    size === 'sm' ? 'size-1.5 ring-1' : 'size-2.5',
-                    size === 'lg' || size === 'xl' ? 'size-3.5' : '',
-                    size === 'big' ? 'size-6 ring-4' : '',
-                  )}
-                />
-              );
-            }
-
-            return null;
-          })()}
-        </>
-      )} */}
-    </AvatarRoot>
+      {renderOnlineIndicator()}
+    </div>
   );
 };
 

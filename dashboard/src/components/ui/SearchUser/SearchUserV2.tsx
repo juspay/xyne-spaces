@@ -1,8 +1,9 @@
 import { Combobox as BaseCombobox } from '@base-ui/react/combobox';
-import { User, UserStatus } from '@xyne/shared';
+import { User } from '@xyne/shared';
 import { Search, X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
+import { useUsersPresence } from '../../../hooks/usePresence';
 import Avatar from '../Avatar/Avatar';
 import Button from '../Button';
 
@@ -36,6 +37,10 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
   const lastPillRef = useRef<HTMLDivElement>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Get real-time online users for presence indicators
+  const onlineUserIds = useUsersPresence('ONLINE');
+  const onlineUserIdsSet = useMemo(() => new Set(onlineUserIds), [onlineUserIds]);
 
   const updateDimensions = useCallback(() => {
     const pillsEl = pillsContainerRef.current;
@@ -250,7 +255,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                         />
                         <div className='flex-1 w-full flex items-center gap-2'>
                           <span className='text-sm'>{user.name.split(' ')[0]}</span>
-                          {user.status === UserStatus.ACTIVE ? (
+                          {onlineUserIdsSet.has(user.id) ? (
                             <span className='w-1.5 h-1.5 bg-green-600 rounded-full'></span>
                           ) : (
                             <span className='w-1.5 h-1.5 border border-gray-500 rounded-full'></span>

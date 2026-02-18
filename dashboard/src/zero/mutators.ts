@@ -3797,7 +3797,7 @@ export const mutators = defineMutators({
         const presenceData = {
           id: presenceId,
           userId: ctx.userID,
-          status: UserPresenceStatus.ONLINE, // Default status
+          status: existingPresence?.status || UserPresenceStatus.OFFLINE,
           lastActiveAt: now,
           lastSeenAt: now,
           isManual: false,

@@ -32,7 +32,6 @@ import channelRoutes from '@/routes/channels';
 import conversationRoutes from '@/routes/conversations';
 import organizationRoutes from '@/routes/organizations';
 import reactionRoutes from '@/routes/reactionRoutes';
-import userStatusRoutes from '@/routes/userStatus';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
@@ -41,7 +40,6 @@ import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
 import { superpositionClient } from '@/services/superpositionClient';
-import { trackActivity } from '@/middleware/activityTracker';
 import { metricsMiddleware } from '@/middleware/metricsMiddleware';
 import { externalSourceSyncRoutes } from '@/integrations';
 import migrationRoutes from '@/migration';
@@ -92,6 +90,7 @@ import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
 import { modelSyncQueue } from '@/queues/modelSyncQueue';
+import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
@@ -162,9 +161,6 @@ export class App {
       this.app.use(morgan('combined', { stream }));
     }
     this.app.use(requestLogger);
-
-    // Activity tracking middleware (after auth middleware in routes)
-    this.app.use(trackActivity);
   }
 
   private initializeRoutes(): void {
@@ -288,7 +284,6 @@ export class App {
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes
     this.app.use('/api/zero', zeroRoutes); // Zero sync routes (uses authenticateZero middleware in route file)
-    this.app.use('/api/user-status', userStatusRoutes); // User status routes (auth handled in route file)
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
@@ -352,7 +347,6 @@ export class App {
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
-    this.app.use('/api/user-status', userStatusRoutes); // User status routes (auth handled in route file)
     this.app.use('/api/user-assignment-state', userAssignmentStateRoutes); // User assignment state routes (auth handled in route file)
     // this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes); // Reactions routes
     this.app.use('/api/notifications', notificationRoutes); // Notification routes
@@ -439,8 +433,8 @@ export class App {
     await modelSyncQueue.runInitialSync();
 
     // Initialize presence cleanup queue (Bull-based scheduling)
-    // logger.info('Initializing presence cleanup queue...');
-    // await presenceCleanupQueue.initialize();
+    logger.info('Initializing presence cleanup queue...');
+    await presenceCleanupQueue.initialize();
 
     logger.info('Initializing ETA deadline queue...');
     await etaDeadlineQueue.initialize();
@@ -526,7 +520,7 @@ export class App {
       await metricsSyncQueue.close();
 
       // Close presence cleanup queue
-      // await presenceCleanupQueue.close();
+      await presenceCleanupQueue.close();
 
       // Close ETA deadline queue
       await etaDeadlineQueue.close();

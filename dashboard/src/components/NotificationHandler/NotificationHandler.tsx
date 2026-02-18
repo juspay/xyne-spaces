@@ -8,6 +8,7 @@ import { useZero } from '../../hooks/useZero';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
 import { CallType } from '@xyne/shared';
+import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 
 // Function to play notification sound
 const playNotificationSound = (): void => {
@@ -377,25 +378,23 @@ export const NotificationHandler: React.FC = () => {
           );
           websocketService.on('notification_updated', () => handleNotificationUpdateRef.current());
 
-          // Notify backend that user is online to deliver pending notifications
+          // Setup presence listeners after socket is connected
+          setupPresenceListeners(user.id, websocketService);
+
+          // Request current presence state since we may have missed the initial broadcast
           const socket = websocketService.getSocket();
           if (socket) {
-            socket.emit('user_online', { userId: user.id });
+            socket.emit('request_presence_state');
           }
-
-          // Start heartbeat using Web Worker-based service
-          // This is immune to browser background tab throttling
-          // heartbeatService.start(30000); // 30 seconds
         })
         .catch(() => {
           // WebSocket connection failed - will retry on next user state change
           isConnectedRef.current = false;
         });
     }
-
     return (): void => {
-      // Stop heartbeat service on cleanup
-      // heartbeatService.stop();
+      // Cleanup presence listeners
+      cleanupPresenceListeners(websocketService);
 
       if (isConnectedRef.current) {
         websocketService.removeListener('notification_received', handleNotificationRef.current);

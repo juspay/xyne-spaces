@@ -1,8 +1,9 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
 
-import { redisService, ChatMessage, WorkflowEvent } from './redisService';
+import { redisService, ChatMessage, WorkflowEvent, PresenceEvent } from './redisService';
 import { typingService, TypingUser } from './typingService';
+import { userStatusService } from './userStatusService';
 import { workspaceEventService, WorkspaceEvent } from './workspaceEventService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -14,6 +15,7 @@ import { userCountService, UserCountData, AllTimeUserCountData } from './userCou
 import { callCountService, CallCountData, AllTimeCallCountData, CallDurationData, AllTimeCallDurationData } from './callCountService';
 import { type NotificationData } from './notificationService';
 import { NotificationDeliveryMethod, NotificationType } from '@prisma/client';
+import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -177,6 +179,9 @@ class WebSocketService {
 
     this.setupZeroFallbackConfigSubscription();
 
+    // Setup global presence subscription (for multi-server support)
+    this.setupPresenceSubscription();
+
     logger.info('WebSocket server initialized');
   }
 
@@ -207,9 +212,15 @@ class WebSocketService {
   }
 
   private async handleConnection(socket: AuthenticatedSocket): Promise<void> {
-    const { userId, userEmail } = socket;
+    const { userId, userEmail, userName } = socket;
 
     logger.info(`🔌 [CONNECT] User ${userEmail} connected via WebSocket (Socket ID: ${socket.id})`);
+
+    // Cancel any pending offline job (user reconnected within grace period)
+    const wasPendingOffline = await presenceCleanupQueue.cancelOfflineJob(userId);
+    if (wasPendingOffline) {
+      logger.info(`🔌 [CONNECT] User ${userEmail} reconnected within grace period`);
+    }
 
     // Detect platform
     const platform = this.getPlatformFromSocket(socket);
@@ -224,34 +235,38 @@ class WebSocketService {
     // Subscribe to user-specific events (only once per user across all their connections)
     await this.setupUserEventSubscription(userId);
 
-    // // Set user status to ONLINE automatically on connect (unless status is AWAY)
-    // try {
-    //   // Check current status in database
-    //   const prisma = DatabaseClient.getInstance();
-    //   const currentPresence = await prisma.userPresence.findUnique({
-    //     where: { userId }
-    //   });
-      
-    //   // Only auto-set ONLINE if user is not AWAY
-    //   if (!currentPresence || currentPresence.status !== 'AWAY') {
-    //     const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
-    //     await userStatusService.setUserStatus(
-    //       userId,
-    //       'ONLINE',
-    //       currentPresence?.status || null,
-    //       {
-    //         userName: userName || userEmail.split('@')[0],
-    //         userEmail,
-    //         deviceInfo
-    //       }
-    //     );
+      // Set user status to ONLINE automatically on connect (unless status is AWAY)
+      try {
+        // Check current status in Redis (source of truth for online/away/offline)
+        const currentStatus = await userStatusService.getUserStatus(userId);
+        
+        // Only auto-set ONLINE if user is not AWAY
+        if (!currentStatus || currentStatus.status !== 'AWAY') {
+          const onlineUsers = await userStatusService.setUserStatus(
+            userId,
+            'ONLINE'
+          );
+          // Send initial state directly to connecting socket (broadcast may race with socket setup)
+          socket.emit('user_status_updated', {
+            userId,
+            status: 'ONLINE',
+            onlineUsers,
+          });
 
-    //   } else {
-    //     logger.info(`👤 [USER-STATUS] User ${userName || userEmail} remains AWAY on connect`);
-    //   }
-    // } catch (error) {
-    //   logger.error('❌ [USER-STATUS] Error setting user online status:', error);
-    // }
+          logger.info(`👤 [USER-STATUS] User ${userName || userEmail} is now ONLINE`);
+        } else {
+          // User is AWAY - don't change status, but still send them the current state
+          const onlineUsers = await userStatusService.getOnlineUsers();
+          socket.emit('user_status_updated', {
+            userId,
+            status: currentStatus.status,
+            onlineUsers,
+          });
+          logger.info(`👤 [USER-STATUS] User ${userName || userEmail} remains AWAY on connect, sent current state`);
+        }
+      } catch (error) {
+        logger.error('❌ [USER-STATUS] Error setting user online status:', error);
+      }
 
     // Handle joining sessions
     socket.on('join_session', async (data: JoinSessionData) => {
@@ -279,22 +294,6 @@ class WebSocketService {
     socket.on('typing_stop', async (data: { sessionId: string }) => {
       await this.handleTypingStop(socket, data.sessionId);
     });
-
-    // Handle user status updates
-    socket.on('update_status', async (data: { status: 'ONLINE' | 'AWAY' | 'OFFLINE' }) => {
-      await this.handleStatusUpdate(socket, data.status);
-    });
-
-    // Handle user activity (extends online time)
-    // Supports acknowledgment callback for reliable delivery detection
-    // socket.on('user_activity', async (_data: unknown, callback?: (ack: { success: boolean }) => void) => {
-    //   await this.handleUserActivity(socket);
-      
-    //   // Send acknowledgment if callback provided (for heartbeat reliability)
-    //   if (typeof callback === 'function') {
-    //     callback({ success: true });
-    //   }
-    // });
 
     // Handle bulk channel subscriptions (new user-driven model)
     socket.on('subscribe_to_channels', async (data: SubscribeToChannelsData) => {
@@ -324,6 +323,25 @@ class WebSocketService {
     // Handle workflow unsubscription
     socket.on('unsubscribe_from_workflow', (data: { executionId: string }) => {
       this.handleWorkflowUnsubscription(socket, data.executionId);
+    });
+
+    // Handle user status update (ONLINE/AWAY/OFFLINE)
+    socket.on('update_status', async (data: { status: 'ONLINE' | 'AWAY' | 'OFFLINE' }) => {
+      await this.handleUpdateStatus(socket, data.status);
+    });
+
+    // Handle request for current presence state (client may have missed initial broadcast)
+    socket.on('request_presence_state', async () => {
+      try {
+        const onlineUsers = await userStatusService.getOnlineUsers();
+        socket.emit('user_status_updated', {
+          userId: socket.userId,
+          status: 'ONLINE',
+          onlineUsers,
+        });
+      } catch (error) {
+        logger.error('❌ [PRESENCE] Error handling request_presence_state:', error);
+      }
     });
 
     // Handle disconnection
@@ -546,6 +564,33 @@ class WebSocketService {
   }
 
   /**
+   * Handle user status update (ONLINE/AWAY/OFFLINE)
+   * Called when user manually changes their status via the UI
+   */
+  private async handleUpdateStatus(socket: AuthenticatedSocket, status: 'ONLINE' | 'AWAY' | 'OFFLINE'): Promise<void> {
+    try {
+      const { userId, userName, userEmail } = socket;
+      
+      logger.info(`[UPDATE-STATUS] User ${userName || userEmail} requested status change to ${status}`);
+      
+      // Update status in Redis and broadcast to all clients
+      const onlineUsers = await userStatusService.setUserStatus(userId, status);
+      
+      // Send confirmation directly to the user who changed their status
+      socket.emit('user_status_updated', {
+        userId,
+        status,
+        onlineUsers,
+      });
+      
+      logger.info(`[UPDATE-STATUS] User ${userName || userEmail} status updated to ${status}`);
+    } catch (error) {
+      logger.error('UPDATE-STATUS] Error updating user status:', error);
+      socket.emit('error', { message: 'Failed to update status' });
+    }
+  }
+
+  /**
    * Helper method to determine if a session ID belongs to a channel or conversation
    */
   private async isChannelSession(sessionId: string): Promise<boolean> {
@@ -574,6 +619,31 @@ class WebSocketService {
       // Remove user connection from Redis
       await redisService.removeUserConnection(userId, socket.id);
 
+      // Clean up stale connections (socket IDs that are no longer actually connected)
+      const allStoredConnections = await redisService.getUserConnections(userId);
+      const actuallyConnectedSockets = this.io?.sockets.sockets || new Map();
+
+      for (const storedSocketId of allStoredConnections) {
+        // If the stored socket ID doesn't exist in the actual connected sockets, remove it
+        if (!actuallyConnectedSockets.has(storedSocketId)) {
+          logger.debug(`[DISCONNECT] Cleaning up stale socket ID: ${storedSocketId}`);
+          await redisService.removeUserConnection(userId, storedSocketId);
+        }
+      }
+
+      // Check if user has other active connections
+      const remainingConnections = await redisService.getUserConnections(userId);
+      
+      if (remainingConnections.length > 0) {
+        // User has other tabs/devices open - do nothing, they're still connected
+        logger.info(`👤 [USER-STATUS] User ${userName || userEmail} still has ${remainingConnections.length} other connection(s), staying ONLINE`);
+      } else {
+        // No remaining connections - schedule offline with grace period
+        // This allows the user to reconnect (e.g., page refresh) without flickering offline
+        logger.info(`👤 [DISCONNECT-DEBUG] Scheduling offline job for user ${userName || userEmail} (${userId}) with grace period`);
+        await presenceCleanupQueue.scheduleOfflineJob(userId);
+      }
+
       // Clean up typing indicators for this user
       await typingService.cleanupUserTyping(userId);
 
@@ -583,13 +653,6 @@ class WebSocketService {
         if (room.startsWith('session:')) {
           const sessionId = room.replace('session:', '');
           await redisService.unsubscribeFromSession(sessionId, socket.id);
-
-          // Always notify offline when user disconnects (immediate offline)
-          socket.to(room).emit('user_offline', {
-            sessionId,
-            userId,
-            timestamp: new Date()
-          });
 
           // Broadcast updated typing state (user is no longer typing)
           const isChannel = await this.isChannelSession(sessionId);
@@ -611,53 +674,6 @@ class WebSocketService {
       logger.error('Error handling disconnection:', error);
     }
   }
-
-  private async handleStatusUpdate(socket: AuthenticatedSocket, status: 'ONLINE' | 'AWAY' | 'OFFLINE'): Promise<void> {
-    try {
-      const { userId, userName, userEmail } = socket;
-
-      logger.info(`👤 [USER-STATUS] User ${userName || userEmail} manually updating status to ${status}`);
-
-      // const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
-      // await userStatusService.setUserStatus(
-      //   userId,
-      //   status,
-      //   null,
-      //   {
-      //     userName: userName || userEmail.split('@')[0],
-      //     userEmail,
-      //     deviceInfo
-      //   }
-      // );
-
-      // Confirm status update to user
-      socket.emit('status_updated', {
-        userId,
-        status,
-        timestamp: new Date()
-      });
-
-      logger.info(`👤 [USER-STATUS] User ${userName || userEmail} status manually updated to ${status}`);
-    } catch (error) {
-      logger.error('❌ [USER-STATUS] Error handling status update:', error);
-      socket.emit('status_update_error', { message: 'Failed to update status' });
-    }
-  }
-
-  // private async handleUserActivity(socket: AuthenticatedSocket): Promise<void> {
-  //   try {
-  //     const { userId, userName, userEmail } = socket;
-  //     // const deviceInfo = `${socket.handshake.headers['user-agent']?.substring(0, 100) || 'Unknown'} - ${socket.handshake.address}`;
-
-  //     // Log at info level so we can see heartbeats in production logs
-  //     // logger.info(`💓 [HEARTBEAT] Received from ${userName || userEmail} (${userId}) via socket ${socket.id}`);
-
-  //     // Update user activity (extends online time)
-  //     // await userStatusService.updateUserActivity(userId, deviceInfo);
-  //   } catch (error) {
-  //     logger.error('❌ [USER-STATUS] Error handling user activity:', error);
-  //   }
-  // }
 
   private async handleNotificationAcknowledgment(socket: AuthenticatedSocket, data: { notificationId: string }): Promise<void> {
     try {
@@ -749,7 +765,62 @@ class WebSocketService {
     }
   }
 
+  /**
+   * Setup global presence subscription
+   * Subscribes to Redis Pub/Sub for presence events and broadcasts to all connected clients
+   * This enables multi-server support - status changes on one server are broadcast to all servers
+   */
+  private async setupPresenceSubscription(): Promise<void> {
+    try {
+      logger.info('👤 [PRESENCE] Setting up global presence subscription...');
+      
+      await redisService.subscribeToPresenceEvents(async (event: PresenceEvent) => {
+        await this.handlePresenceEvent(event);
+      });
+      
+      logger.info('[PRESENCE] Global presence subscription active');
+    } catch (error) {
+      logger.error('[PRESENCE] Error setting up presence subscription:', error);
+    }
+  }
 
+  /**
+   * Handle presence events from Redis Pub/Sub
+   * Broadcasts status updates to all connected clients on this server
+   */
+  private async handlePresenceEvent(event: PresenceEvent): Promise<void> {
+    try {
+      if (!this.io) {
+        logger.info(`[PRESENCE-DEBUG] No io instance, skipping presence event`);
+        return;
+      }
+
+      const { userId, status } = event;
+
+      logger.info(`[PRESENCE] Received presence event: user=${userId}, status=${status}`);
+      logger.info(`[PRESENCE-DEBUG] Full event: ${JSON.stringify(event)}`);
+
+      // Get current list of online users for broadcast
+      const onlineUsers = await userStatusService.getOnlineUsers();
+      logger.info(`[PRESENCE-DEBUG] Current online users count: ${onlineUsers.length}`);
+
+      // Broadcast to all connected clients on this server
+      const connectedSocketsCount = this.io.sockets.sockets.size;
+      logger.debug(`[PRESENCE] Broadcasting user_status_updated to ${connectedSocketsCount} connected sockets`);
+
+      const broadcastPayload = {
+        userId,
+        status,
+        onlineUsers,
+      };
+
+      this.io.emit('user_status_updated', broadcastPayload);
+
+      logger.debug(`[PRESENCE] Broadcast complete for user_status_updated`);
+    } catch (error) {
+      logger.error('[PRESENCE] Error handling presence event:', error);
+    }
+  }
 
   // Setup user event subscription (once per user)
   private async setupUserEventSubscription(userId: string): Promise<void> {

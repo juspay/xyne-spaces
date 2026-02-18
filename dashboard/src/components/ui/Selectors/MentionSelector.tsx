@@ -6,7 +6,6 @@ import type { MentionSelectorProps, MentionResult } from './Selectors.types';
 import { detectMentionTrigger, detectChannelTrigger, createVirtualAnchor } from './Selectors.utils';
 import { mentionPluginKey, channelMentionPluginKey } from '../TipTapExtensions';
 import { BasePopoverSelector, type BaseSelectorPluginState } from './BasePopoverSelector';
-import { UserPresenceStatus } from '@xyne/shared';
 
 export const MentionSelector: React.FC<MentionSelectorProps> = ({
   editor,
@@ -170,18 +169,13 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
           </>
         ) : (
           <>
-            <div className='relative'>
-              <Avatar
-                {...(item.picture !== undefined && { src: item.picture })}
-                alt={item.name}
-                fallback={item.avatar || item.name.charAt(0).toUpperCase()}
-                size={AvatarSize.SM}
-                shape={AvatarShape.CIRCULAR}
-              />
-              {item.presenceStatus === UserPresenceStatus.ONLINE && (
-                <div className='absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full' />
-              )}
-            </div>
+            <Avatar
+              {...(item.picture !== undefined && { src: item.picture })}
+              alt={item.name}
+              fallback={item.avatar || item.name.charAt(0).toUpperCase()}
+              size={AvatarSize.SM}
+              shape={AvatarShape.CIRCULAR}
+            />
             <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
               <div className='flex items-center gap-2'>
                 <span className='text-sm font-medium text-gray-800 whitespace-nowrap overflow-hidden text-ellipsis'>

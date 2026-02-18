@@ -56,6 +56,30 @@ export interface UnreadCounts {
   [channelId: string]: number;
 }
 
+/**
+ * Presence status from Socket.IO (online/away/offline)
+ * This is managed via Redis + Socket.IO, NOT Zero/DB
+ */
+export type PresenceStatus = 'ONLINE' | 'AWAY' | 'OFFLINE';
+
+/**
+ * Online user info received from backend
+ */
+export interface OnlineUser {
+  userId: string;
+  status: PresenceStatus;
+}
+
+/**
+ * Socket.IO event payload for user_status_updated
+ * Sent on connect (for connecting user) and on any status change (for all users)
+ */
+export interface UserStatusUpdatedEvent {
+  userId: string;
+  status: PresenceStatus;
+  onlineUsers: OnlineUser[];
+}
+
 // Keeping same type for browsable channels and user channels
 interface StateMachineContext {
   users: User[];
@@ -71,6 +95,8 @@ interface StateMachineContext {
   metrics: MetricsState;
   filteredTicketIds: string[];
   zeroRefreshCounter?: number;
+  /** List of all currently online users from Redis */
+  onlineUsers: OnlineUser[];
 }
 
 type StateMachineEvent =
@@ -95,7 +121,8 @@ type StateMachineEvent =
       metric: keyof PeriodMetrics;
       value: number;
     }
-  | { type: 'SET_FILTERED_TICKET_IDS'; ids: string[] };
+  | { type: 'SET_FILTERED_TICKET_IDS'; ids: string[] }
+  | { type: 'SET_ONLINE_USERS'; onlineUsers: OnlineUser[] };
 
 export const stateMachine = setup({
   types: {
@@ -264,6 +291,14 @@ export const stateMachine = setup({
         return context.filteredTicketIds;
       },
     }),
+    setOnlineUsers: assign({
+      onlineUsers: ({ event }) => {
+        if (event.type === 'SET_ONLINE_USERS') {
+          return event.onlineUsers;
+        }
+        return [];
+      },
+    }),
   },
 }).createMachine({
   id: 'stateMachine',
@@ -280,6 +315,7 @@ export const stateMachine = setup({
     allUserGroups: [],
     metrics: initialMetricsState,
     filteredTicketIds: [],
+    onlineUsers: [],
   },
   initial: 'idle',
   states: {
@@ -336,9 +372,73 @@ export const stateMachine = setup({
         REFRESH_ZERO: {
           actions: 'refreshZero',
         },
+        SET_ONLINE_USERS: {
+          actions: 'setOnlineUsers',
+        },
       },
     },
   },
 });
 
 export const stateMachineActor = createActor(stateMachine).start();
+
+// Flag to track if presence listeners are already set up
+let presenceListenersSetup = false;
+let currentPresenceUserId: string | null = null;
+
+/**
+ * Setup Socket.IO listeners for presence events
+ * Called once when the app initializes and socket is connected
+ */
+export function setupPresenceListeners(
+  userId: string,
+  websocketService: {
+    on: <T>(event: string, callback: (data: T) => void) => void;
+    removeListener: (event: string) => void;
+  },
+): void {
+  if (presenceListenersSetup && currentPresenceUserId === userId) {
+    return;
+  }
+
+  // If user ID changed, clean up previous listeners
+  if (presenceListenersSetup && currentPresenceUserId !== userId) {
+    cleanupPresenceListeners(websocketService);
+  }
+
+  currentPresenceUserId = userId;
+
+  // Listen for status updates - backend sends fresh onlineUsers list
+  // This is sent on connect (for connecting user) and on any status change
+  websocketService.on<UserStatusUpdatedEvent>('user_status_updated', data => {
+    stateMachineActor.send({ type: 'SET_ONLINE_USERS', onlineUsers: data.onlineUsers });
+  });
+
+  presenceListenersSetup = true;
+}
+
+/**
+ * Cleanup presence listeners (on logout/disconnect)
+ */
+export function cleanupPresenceListeners(websocketService: {
+  removeListener: (event: string) => void;
+}): void {
+  if (!presenceListenersSetup) return;
+
+  websocketService.removeListener('user_status_updated');
+
+  stateMachineActor.send({ type: 'SET_ONLINE_USERS', onlineUsers: [] });
+  presenceListenersSetup = false;
+  currentPresenceUserId = null;
+}
+
+/**
+ * Request a status update from the server
+ * @param status - The desired status (ONLINE, AWAY, OFFLINE)
+ */
+export function updateMyStatus(
+  status: PresenceStatus,
+  websocketService: { emit: (event: string, data: unknown) => void },
+): void {
+  websocketService.emit('update_status', { status });
+}

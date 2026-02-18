@@ -13,8 +13,7 @@ const shallowEqualUsers = (a: User[], b: User[]): boolean => {
       user.id === otherUser.id &&
       user.name === otherUser.name &&
       user.email === otherUser.email &&
-      user.status === otherUser.status &&
-      user.presenceStatus?.status === otherUser.presenceStatus?.status
+      user.status === otherUser.status
     );
   });
 };

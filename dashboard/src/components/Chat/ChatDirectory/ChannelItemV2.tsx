@@ -124,7 +124,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
           )}
           style={shouldShowBold ? { fontWeight: '700' } : undefined}
         >
-          <span className=''>{getIcon()}</span>
+          <span className='flex items-center'>{getIcon()}</span>
           <span ref={nameRef} className=' text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
             <span className='visual-regression-hide'>{displayName}</span>
             {isDM && (

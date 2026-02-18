@@ -16,7 +16,6 @@ import Avatar from '../Avatar/Avatar';
 import { StatusIndicator } from '../StatusIndicator';
 import { Button } from '../Button/Button';
 import { UpdateStatusModal } from '../../AppSidebar/UpdateStatusModal';
-import { UserPresenceStatus } from '@xyne/shared';
 import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
 import { cn } from '../../../utils/classNames';
 import { queries } from '../../../zero/queries';
@@ -33,6 +32,7 @@ import { useZero } from '../../../hooks/useZero';
 import SearchUser from '../SearchUser/SearchUser';
 import type { User } from '@xyne/shared';
 import { CommonChannelsSection } from '../../UserProfile/CommonChannelsSection';
+import { useUserPresence } from '../../../hooks/usePresence';
 
 interface UserProfileProps {
   userId: string;
@@ -47,7 +47,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
 
   const [userProfile] = useCachedQuery(queries.getUserProfile({ userId }));
   const user = useUser(userId);
-  const userPresence = user?.presenceStatus;
+  // Get live presence status from Socket.IO (not stale Zero data)
+  const { status: livePresenceStatus } = useUserPresence(userId);
   const users = useUsers();
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [dmChannelId, setDmChannelId] = useState<string | null>(null);
@@ -314,18 +315,16 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
             </button>
           ) : null}
 
-          {/* Online/Away Status */}
-          {userPresence?.status && (
+          {/* Online/Away Status - Use live Socket.IO presence status */}
+          {livePresenceStatus && (
             <div className='flex items-center gap-2 mt-2 text-sm text-gray-600'>
-              {userPresence.status === UserPresenceStatus.ONLINE ? (
+              {livePresenceStatus === 'ONLINE' ? (
                 <div className='w-2 h-2 rounded-full bg-green-500' />
               ) : (
                 <div className='w-2 h-2 rounded-full border border-gray-400' />
               )}
               <span className='capitalize'>
-                {userPresence.status === UserPresenceStatus.ONLINE
-                  ? 'Active'
-                  : userPresence.status.toLowerCase()}
+                {livePresenceStatus === 'ONLINE' ? 'Active' : livePresenceStatus.toLowerCase()}
               </span>
             </div>
           )}

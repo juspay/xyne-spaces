@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { X, SmilePlus, Copy, PauseCircle, Mail, Clock } from 'lucide-react';
+import { X, SmilePlus, Copy, PauseCircle, Mail, Clock, ChevronDown, Check } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { useAuth } from '../../../hooks/useAuth';
 import { Link } from 'react-router-dom';
@@ -21,6 +21,7 @@ import { logger } from '../../../utils/logger';
 import { toast } from 'sonner';
 import { SelectedStatusData } from './SetStatusView';
 import { formatDistanceToNow, format } from 'date-fns';
+import { useUserPresence } from '../../../hooks/usePresence';
 
 type ViewType = 'default' | 'status-suggestions' | 'status-edit';
 
@@ -34,11 +35,16 @@ const ProfileView = ({
   const { theme, changeTheme } = useTheme();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
+  const [isPresenceDropdownOpen, setIsPresenceDropdownOpen] = useState(false);
   const zero = useZero();
 
   // Get assignment availability for current user
   const { isCurrentlyUnavailable, unavailableUntil, isActiveInAtLeastOneGroup } =
     useCurrentUserAssignmentState();
+  // Get live presence status from Socket.IO
+  const { status: livePresenceStatus, setStatus: setLivePresenceStatus } = useUserPresence(
+    user?.id ?? '',
+  );
   const handleLogout = (): void => {
     logout();
   };
@@ -116,9 +122,63 @@ const ProfileView = ({
         </div>
         <div className='flex-1 min-w-0 space-y-1'>
           <p className='text-sm font-medium text-gray-900 truncate'>{user?.name || 'User'}</p>
-          <div className='flex items-center gap-1.5'>
-            <div className='w-2 h-2 rounded-full bg-green-500' />
-            <p className='text-xs text-gray-600'>Active</p>
+
+          {/* Presence Status Dropdown - inline for mobile compatibility */}
+          <div className='relative'>
+            <button
+              onClick={() => setIsPresenceDropdownOpen(!isPresenceDropdownOpen)}
+              className='flex items-center gap-1.5 hover:bg-gray-100 px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
+            >
+              {livePresenceStatus === 'ONLINE' ? (
+                <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-white' />
+              ) : (
+                <div className='w-2 h-2 rounded-full bg-gray-300 ring-2 ring-white'>
+                  <div className='w-full h-full rounded-full bg-white/50' />
+                </div>
+              )}
+              <p className='text-xs text-gray-600'>
+                {livePresenceStatus !== 'AWAY' ? 'Active' : 'Away'}
+              </p>
+              <ChevronDown
+                className={cn(
+                  'size-3 text-gray-400 transition-transform',
+                  isPresenceDropdownOpen && 'rotate-180',
+                )}
+              />
+            </button>
+
+            {isPresenceDropdownOpen && (
+              <div className='absolute left-0 top-full mt-1 w-40 p-1 bg-white rounded-md border shadow-md z-10'>
+                <div className='space-y-0.5'>
+                  <button
+                    onClick={() => {
+                      setLivePresenceStatus('ONLINE');
+                      setIsPresenceDropdownOpen(false);
+                    }}
+                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                  >
+                    <div className='w-2 h-2 rounded-full bg-green-500' />
+                    <span>Active</span>
+                    {livePresenceStatus !== 'AWAY' && (
+                      <Check className='size-3 ml-auto text-gray-500' />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setLivePresenceStatus('AWAY');
+                      setIsPresenceDropdownOpen(false);
+                    }}
+                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                  >
+                    <div className='w-2 h-2 rounded-full border border-gray-400' />
+                    <span>Away</span>
+                    {livePresenceStatus === 'AWAY' && (
+                      <Check className='size-3 ml-auto text-gray-500' />
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

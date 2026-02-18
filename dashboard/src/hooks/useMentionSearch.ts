@@ -102,7 +102,6 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
       email: user.email,
       picture: getUserPicture(user.name, user.picture),
       avatar: user.name.charAt(0).toUpperCase(),
-      presenceStatus: user.presenceStatus?.status || undefined,
     }),
     [],
   );
