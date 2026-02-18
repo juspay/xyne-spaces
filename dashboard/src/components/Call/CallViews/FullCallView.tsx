@@ -147,7 +147,7 @@ export function FullCallView({
         {focusedScreenShare ? (
           // Screen share layout with sidebar
           <div
-            className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300'
+            className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
             style={{ paddingRight: isSidebarOpen ? 'min(500px, 100vw)' : '0' }}
           >
             <ScreenShareView
@@ -164,7 +164,7 @@ export function FullCallView({
         ) : (
           // Normal grid layout when no screen share
           <div
-            className='flex-1 w-full p-2 sm:p-4 pb-32 sm:pb-36 transition-all duration-300'
+            className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
             style={{ paddingRight: isSidebarOpen ? 'min(500px, 100vw)' : '0' }}
           >
             <ParticipantGrid

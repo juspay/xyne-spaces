@@ -29,10 +29,14 @@ export function ParticipantGrid({
   return (
     <div
       ref={containerRef}
-      className={cn('h-full w-full relative', compact ? 'p-1' : 'p-2 sm:p-4', className)}
+      className={cn(
+        'h-full w-full relative overflow-hidden flex flex-col',
+        compact ? 'p-1' : 'p-2 sm:p-4',
+        className,
+      )}
     >
       <div
-        className={cn('grid h-full w-full', compact ? 'gap-1.5' : 'gap-2 sm:gap-4')}
+        className={cn('grid flex-1 w-full min-h-0', compact ? 'gap-1.5' : 'gap-2 sm:gap-4')}
         style={{
           gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
           gridAutoRows: 'minmax(0, 1fr)',
