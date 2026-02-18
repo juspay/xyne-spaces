@@ -1,9 +1,12 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Track } from 'livekit-client';
+import { useSelector } from '@xstate/react';
+import { roomActor } from '../../../machines/roomMachine';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
 import { ParticipantTile } from '../ParticipantTile/ParticipantTile';
 import { VideoTrack } from '@livekit/components-react';
+import { logger, Event } from '../../../utils/logger';
 
 interface ScreenShareViewProps {
   focusedScreenShare: ParticipantInfo;
@@ -28,6 +31,8 @@ export function ScreenShareView({
   aiController,
   requestedAiController,
 }: ScreenShareViewProps): React.ReactElement {
+  const callId = useSelector(roomActor, state => state.context.callId);
+
   // Create track reference for the focused screen share
   const screenSharePublication = focusedScreenShare.participant?.getTrackPublication(
     Track.Source.ScreenShare,
@@ -41,6 +46,37 @@ export function ScreenShareView({
           publication: screenSharePublication,
         }
       : undefined;
+
+  // Log screen share rendering diagnostics for debugging invisible screen shares
+  useEffect(() => {
+    const publication = screenSharePublication;
+    const track = publication?.track;
+
+    logger.info(Event.LIVEKIT_SCREEN_SHARE_RENDERED, {
+      callId,
+      participantIdentity: focusedScreenShare.identity,
+      hasPublication: !!publication,
+      hasTrack: !!track,
+      isSubscribed: publication?.isSubscribed ?? false,
+      isMuted: publication?.isMuted ?? false,
+      trackSid: publication?.trackSid ?? null,
+      hasTrackRef: !!screenShareTrackRef,
+      trackDimensions: track?.mediaStreamTrack
+        ? {
+            width: track.mediaStreamTrack.getSettings().width,
+            height: track.mediaStreamTrack.getSettings().height,
+          }
+        : null,
+      mediaStreamTrackState: track?.mediaStreamTrack?.readyState ?? null,
+    });
+  }, [
+    focusedScreenShare.identity,
+    screenSharePublication,
+    screenSharePublication?.track,
+    screenSharePublication?.isSubscribed,
+    screenSharePublication?.isMuted,
+    screenShareTrackRef,
+  ]);
 
   // Sort participants: active speaker first, screen sharers next, then others
   const sortedParticipants = useMemo(() => {
