@@ -38,6 +38,11 @@ export interface WorkflowEvent {
   timestamp: Date;
 }
 
+export interface PresenceEvent {
+  userId: string;
+  status: 'ONLINE' | 'AWAY' | 'OFFLINE';
+}
+
 class RedisService {
   private redis: Redis | null = null;
   private publisher: Redis | null = null;
@@ -494,6 +499,87 @@ class RedisService {
       await this.subscriber.subscribe(channel);
       this.activeSubscriptions.add(channel);
       logger.info('✅ [REDIS-ZERO-FALLBACK] Successfully subscribed to fallback config updates');
+    }
+  }
+
+  // ============== PRESENCE PUB/SUB ==============
+  
+  // Global presence channel - all connected clients subscribe to this
+  private readonly PRESENCE_CHANNEL = 'global:presence';
+
+  /**
+   * Broadcast a presence event to all subscribers
+   * Used when a user's status changes (online/away/offline) or status text/emoji updates
+   */
+  async broadcastPresenceEvent(event: PresenceEvent): Promise<void> {
+    if (!this.publisher) {
+      logger.warn('[REDIS-PRESENCE] Redis publisher not initialized for presence event');
+      return;
+    }
+
+    try {
+      const subscriberCount = await this.publisher.publish(this.PRESENCE_CHANNEL, JSON.stringify(event));
+      logger.debug(`[REDIS-PRESENCE] Published ${event.status} event for user ${event.userId} (received by ${subscriberCount} subscribers)`);
+    } catch (error) {
+      logger.error('[REDIS-PRESENCE] Failed to publish presence event:', error);
+    }
+  }
+
+  /**
+   * Subscribe to presence events
+   * Each API server subscribes once and broadcasts to all its connected clients
+   */
+  async subscribeToPresenceEvents(
+    callback: (event: PresenceEvent) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = this.PRESENCE_CHANNEL;
+
+    // Add callback to the list for this channel
+    if (!this.subscriptionCallbacks.has(channel)) {
+      this.subscriptionCallbacks.set(channel, []);
+    }
+    this.subscriptionCallbacks.get(channel)!.push(callback);
+
+    // Ensure global message handler is set up
+    this.setupGlobalMessageHandler();
+
+    // Only subscribe to Redis if we haven't already
+    if (!this.activeSubscriptions.has(channel)) {
+      logger.info(`[REDIS-PRESENCE] Subscribing to global presence events channel: ${channel}`);
+      await this.subscriber.subscribe(channel);
+      this.activeSubscriptions.add(channel);
+    }
+  }
+
+  /**
+   * Unsubscribe from presence events
+   */
+  async unsubscribeFromPresenceEvents(
+    callback?: (event: PresenceEvent) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = this.PRESENCE_CHANNEL;
+
+    if (callback) {
+      // Remove specific callback
+      const callbacks = this.subscriptionCallbacks.get(channel) || [];
+      const index = callbacks.indexOf(callback);
+      if (index > -1) {
+        callbacks.splice(index, 1);
+        logger.debug(`[REDIS-PRESENCE] Removed callback from presence events channel: ${channel}`);
+      }
+
+      // If no more callbacks, unsubscribe from Redis
+      if (callbacks.length === 0) {
+        await this.unsubscribeFromChannel(channel);
+      }
+    } else {
+      // Remove all callbacks and unsubscribe
+      await this.unsubscribeFromChannel(channel);
+      logger.debug(`[REDIS-PRESENCE] Unsubscribed from presence events channel: ${channel}`);
     }
   }
 

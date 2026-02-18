@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { X, User, SmilePlus, Copy, PauseCircle } from 'lucide-react';
+import { X, User, SmilePlus, Copy, PauseCircle, ChevronDown, Check } from 'lucide-react';
 import { useZero } from '../../hooks/useZero';
 import { useAuth } from '../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -21,6 +21,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { apiInstance } from '../../services/clients/apiClient';
 import { logger } from '../../utils/logger';
 import { toast } from 'sonner';
+import { Popover } from '../ui/Popover/Popover';
+import { useUserPresence } from '../../hooks/usePresence';
 
 const Settings = (): ReactElement => {
   const { logout } = useAuth();
@@ -37,8 +39,10 @@ const Settings = (): ReactElement => {
   const generalChannel = useChannelByName('general');
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId?: string }>();
-  // const userData = useUser(user?.id || '');
-  // const userPresence = userData?.presenceStatus;
+  // Get live presence status from Socket.IO
+  const { status: livePresenceStatus, setStatus: setLivePresenceStatus } = useUserPresence(
+    user?.id ?? '',
+  );
   const handleLogout = (): void => {
     logout();
   };
@@ -131,10 +135,53 @@ const Settings = (): ReactElement => {
         </div>
         <div className='flex-1 min-w-0 space-y-1'>
           <p className='text-sm font-medium text-gray-900 truncate'>{user?.name || 'User'}</p>
-          <div className='flex items-center gap-1.5'>
-            <div className='w-2 h-2 rounded-full bg-green-500' />
-            <p className='text-xs text-gray-600'>Active</p>
-          </div>
+
+          <Popover
+            trigger={
+              <button className='flex items-center gap-1.5 hover:bg-gray-100 px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'>
+                {livePresenceStatus === 'ONLINE' ? (
+                  <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-white' />
+                ) : (
+                  <div className='w-2 h-2 rounded-full bg-gray-300 ring-2 ring-white'>
+                    <div className='w-full h-full rounded-full bg-white/50' />
+                  </div>
+                )}
+                <p className='text-xs text-gray-600'>
+                  {livePresenceStatus !== 'AWAY' ? 'Active' : 'Away'}
+                </p>
+                <ChevronDown className='size-3 text-gray-400' />
+              </button>
+            }
+            align='start'
+            className='w-40 p-1'
+          >
+            <div className='space-y-0.5'>
+              <button
+                onClick={() => {
+                  setLivePresenceStatus('ONLINE');
+                }}
+                className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+              >
+                <div className='w-2 h-2 rounded-full bg-green-500' />
+                <span>Active</span>
+                {livePresenceStatus !== 'AWAY' && (
+                  <Check className='size-3 ml-auto text-gray-500' />
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setLivePresenceStatus('AWAY');
+                }}
+                className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+              >
+                <div className='w-2 h-2 rounded-full border border-gray-400' />
+                <span>Away</span>
+                {livePresenceStatus === 'AWAY' && (
+                  <Check className='size-3 ml-auto text-gray-500' />
+                )}
+              </button>
+            </div>
+          </Popover>
         </div>
       </div>
 

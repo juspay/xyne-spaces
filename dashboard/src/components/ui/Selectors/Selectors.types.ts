@@ -1,5 +1,4 @@
 import type { Editor } from '@tiptap/react';
-import { UserPresenceStatus } from '@xyne/shared';
 
 export interface MentionResult {
   id: string;
@@ -15,7 +14,6 @@ export interface MentionResult {
   isSpecial?: boolean; // Flag for @channel and @here
   isPrivate?: boolean; // Flag for private channels (when type is 'channel')
   isChannelMember?: boolean; // Flag indicating if the user is a member of the channel
-  presenceStatus?: UserPresenceStatus | undefined;
 }
 
 export interface MentionSelectorProps {

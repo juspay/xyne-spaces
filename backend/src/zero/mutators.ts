@@ -5431,7 +5431,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const presenceData = {
             id: actualPresenceId,
             userId: authData.sub,
-            status: UserPresenceStatus.ONLINE, // Default status
+            status: existingPresence?.status || UserPresenceStatus.OFFLINE,
             lastActiveAt: now,
             lastSeenAt: now,
             isManual: false,

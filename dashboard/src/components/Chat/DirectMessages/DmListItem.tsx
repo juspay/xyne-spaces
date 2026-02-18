@@ -151,7 +151,7 @@ export const DmListItem = ({
         aria-label={`Open conversation with ${displayName}`}
       >
         {/* Avatar */}
-        <div className='relative shrink-0 size-[48px] rounded-[8px]'>
+        <div className='relative shrink-0 size-[48px] rounded-[8px] overflow-visible'>
           <Avatar
             userId={avatarUserId}
             size='lg'
@@ -200,7 +200,7 @@ export const DmListItem = ({
 
 const DMItemAvatar = ({ userId }: { userId: string | null }): ReactElement => {
   return (
-    <div className='size-[44px] rounded-md shrink-0 flex items-center justify-center overflow-clip mt-[3px]'>
+    <div className='size-[44px] rounded-md shrink-0 flex items-center justify-center overflow-visible mt-[3px]'>
       <Avatar userId={userId} size='lg' />
     </div>
   );

@@ -132,6 +132,9 @@ const envSchema = Joi.object({
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
+  //Presence Queue Configuration
+  PRESENCE_CLEANUP_INTERVAL_MS: Joi.number().default(600000),
+  PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
