@@ -118,6 +118,7 @@ const TABS: TabConfig[] = [
     filter: activity =>
       activity.actorAction === 'eta_warning' ||
       activity.actorAction === 'eta_breach' ||
+      activity.actorAction === 'stage_eta_breach' ||
       activity.ticketId !== null,
   },
   {
@@ -262,6 +263,7 @@ const ActivityListView = (): ReactElement => {
         return [
           'eta_warning',
           'eta_breach',
+          'stage_eta_breach',
           'ticket_assigned',
           'ticket_status',
           'ticket_eta',

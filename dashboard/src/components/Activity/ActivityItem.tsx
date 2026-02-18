@@ -40,6 +40,7 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
 
     case 'eta_warning':
     case 'eta_breach':
+    case 'stage_eta_breach':
       return <EtaActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'paused_from_assignment':

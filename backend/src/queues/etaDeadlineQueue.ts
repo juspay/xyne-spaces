@@ -1,10 +1,15 @@
 import Bull from 'bull';
-import { ActivityClassification, Prisma, TicketStatusV2 } from '@prisma/client';
-import { MessageType } from '@xyne/shared';
-import { randomUUID } from 'crypto';
-import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
+import { redisService } from '@/services/redisService';
+import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
+import {
+  getUsersToNotifyForTicket,
+  getTicketBotActorId,
+  calculateDaysOverdueMidnight,
+  createEtaSystemMessage,
+  OPEN_STATUSES
+} from '@/utils/etaNotificationUtils';
+import { db } from '@/database/client';
 
 // Job Types
 export type EtaDeadlineJobType = 'check-eta-deadlines';
@@ -29,20 +34,8 @@ class EtaDeadlineQueue {
     this.isInitializing = true;
 
     try {
-      const redisConfig = {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-        maxRetriesPerRequest: 3,
-        ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-        ...(process.env.REDIS_TLS === 'true' && {
-          tls: {
-            rejectUnauthorized: false
-          }
-        })
-      };
-
       this.queue = new Bull<EtaDeadlineJobData>('eta-deadline-check', {
-        redis: redisConfig,
+        redis: redisService.getRedisConfig(),
         defaultJobOptions: {
           attempts: 3,
           backoff: {
@@ -123,101 +116,46 @@ class EtaDeadlineQueue {
     const BREACH_REMIND_DAYS = [1, 3, 7, 15, 31, 63, 127, 255];
 
     try {
-      // Get all non-terminal tickets with eta using statusV2
-      const openStatuses = [
-        TicketStatusV2.TODO,
-        TicketStatusV2.STARTED,
-        TicketStatusV2.PAUSED,
-      ];
-      const tickets = await db.ticket.findMany({
-        where: {
-          eta: { not: null },
-          statusV2: { in: openStatuses },
-        },
-        select: {
-          id: true,
-          xyneId: true,
-          eta: true,
-          assignedTo: true,
-          createdBy: true,
-          channelId: true,
-          conversationId: true,
-        },
-      });
+      // Get all non-terminal tickets with eta
+      const tickets = await this.getOpenTickets();
 
       logger.info(`[ETA-DEADLINE] Found ${tickets.length} open tickets with ETA`);
 
-      const xyneTicketBot = await unifiedBotUserService.getBotByEmail('ticket-bot@bot.xyne.ai');
-      const actorId = xyneTicketBot?.id || 'cmjkaarlm0001jq9oftpebya1';
-
-      const activitiesToCreate: Prisma.ActivityCreateManyInput[] = [];
+      const actorId = await getTicketBotActorId();
 
       for (const ticket of tickets) {
         if (!ticket.eta) continue;
 
-        const etaDate = new Date(ticket.eta);
-        const etaMidnight = new Date(etaDate);
-        etaMidnight.setHours(0, 0, 0, 0);
-
-
-        const daysOverdue = Math.floor(
-          (today.getTime() - etaMidnight.getTime()) / (1000 * 60 * 60 * 24)
-        );
-
-        // Check if ETA is today (warning)
-        if (daysOverdue === 0) {
-          // Create activities for both assignedTo and createdBy
-          const usersToNotify = [...new Set([
-            ticket.assignedTo,
-            ticket.createdBy,
-          ].filter((userId): userId is string => typeof userId === 'string' && userId.length > 0))];
-
-          for (const userId of usersToNotify) {
-            activitiesToCreate.push({
-              userId,
-              actorId,
-              actorAction: 'eta_warning',
-              actionSource: 'ticket',
-              actionSourceId: ticket.id,
-              channelId: ticket.channelId,
-              classification: ActivityClassification.ACTIONABLE,
-              isRead: false,
-              createdAt: now,
-            });
-          }
-
-          if (ticket.conversationId) {
-            await this.createEtaMessage(ticket.conversationId, `Ticket ${ticket.xyneId} is due today`, now);
-          }
-
-          logger.info(`[ETA-DEADLINE] Sending warning for ticket ${ticket.xyneId} (ETA: ${ticket.eta})`);
-        }
-
+        const daysOverdue = calculateDaysOverdueMidnight(new Date(ticket.eta), today);
 
         if (daysOverdue > 0) {
           // Check if today is a reminder day in the exponential sequence
           if (BREACH_REMIND_DAYS.includes(daysOverdue)) {
-            const usersToNotify = [...new Set([
+            // Get users to notify (including form field users)
+            const usersToNotify = await getUsersToNotifyForTicket(
+              ticket.id,
               ticket.assignedTo,
-              ticket.createdBy,
-            ].filter((userId): userId is string => typeof userId === 'string' && userId.length > 0))];
+              ticket.createdBy
+            );
 
-            for (const userId of usersToNotify) {
-              activitiesToCreate.push({
-                userId,
-                actorId,
-                actorAction: 'eta_breach',
-                actionSource: 'ticket',
-                actionSourceId: ticket.id,
-                channelId: ticket.channelId,
-                classification: ActivityClassification.ACTIONABLE,
-                isRead: false,
-                createdAt: now,
-              });
-            }
+            // Use helper to create activities
+            await TicketsSideEffectHandler.createEtaBreachActivities({
+              ticketId: ticket.id,
+              xyneId: ticket.xyneId,
+              channelId: ticket.channelId,
+              userIds: usersToNotify,
+              actorAction: 'eta_breach',
+              actorId,
+              daysOverdue,
+            });
 
             if (ticket.conversationId) {
-              await this.createEtaMessage(ticket.conversationId, `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`, now);
+              await createEtaSystemMessage({
+                conversationId: ticket.conversationId,
+                content: `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`,
+                createdAt: now,
+                activityType: 'ETA',
+              });
             }
 
             logger.info(
@@ -227,39 +165,38 @@ class EtaDeadlineQueue {
         }
       }
 
-      // Batch create activities
-      if (activitiesToCreate.length > 0) {
-        await db.activity.createMany({
-          data: activitiesToCreate,
-        });
-        logger.info(`[ETA-DEADLINE] Created ${activitiesToCreate.length} activities`);
-      } else {
-        logger.info('[ETA-DEADLINE] No ETA notifications to send');
-      }
+      logger.info('[ETA-DEADLINE] ETA deadline check completed');
     } catch (error) {
       logger.error('[ETA-DEADLINE] Error checking ETA deadlines:', error);
       throw error;
     }
   }
 
-  private async createEtaMessage(conversationId: string, content: string, createdAt: Date): Promise<void> {
-    await db.message.create({
-      data: {
-        messageId: randomUUID(),
-        conversationId,
-        senderId: 'system',
-        content,
-        msgType: MessageType.SYSTEM,
-        hasAttachment: false,
-        edited: false,
-        isDeleted: false,
-        isSent: true,
-        showInChannel: false,
-        createdAt,
-        metadata: {
-          activityType: 'ETA',
-          isTicketActivity: true,
-        },
+  /**
+   * Get open tickets with ETA set for overall ETA deadline checking
+   */
+  private async getOpenTickets(): Promise<Array<{
+    id: string;
+    xyneId: string;
+    eta: Date | null;
+    assignedTo: string | null;
+    createdBy: string | null;
+    channelId: string;
+    conversationId: string | null;
+  }>> {
+    return await db.ticket.findMany({
+      where: {
+        eta: { not: null },
+        statusV2: { in: OPEN_STATUSES },
+      },
+      select: {
+        id: true,
+        xyneId: true,
+        eta: true,
+        assignedTo: true,
+        createdBy: true,
+        channelId: true,
+        conversationId: true,
       },
     });
   }

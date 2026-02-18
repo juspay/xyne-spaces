@@ -93,6 +93,7 @@ import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
 import { modelSyncQueue } from '@/queues/modelSyncQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
+import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
 import { bitbucketWebhookMiddleware } from './middleware/bitbucketWebhookValidator';
@@ -444,6 +445,9 @@ export class App {
     logger.info('Initializing ETA deadline queue...');
     await etaDeadlineQueue.initialize();
 
+    logger.info('Initializing stage ETA deadline queue...');
+    await stageEtaDeadlineQueue.initialize();
+
     // Initialize assignment reactivation queue (Bull-based scheduling)
     logger.info('Initializing assignment reactivation queue...');
     await assignmentReactivationQueue.initialize();
@@ -526,6 +530,9 @@ export class App {
 
       // Close ETA deadline queue
       await etaDeadlineQueue.close();
+
+      // Close stage ETA deadline queue
+      await stageEtaDeadlineQueue.close();
 
       // Close assignment reactivation queue
       await assignmentReactivationQueue.close();

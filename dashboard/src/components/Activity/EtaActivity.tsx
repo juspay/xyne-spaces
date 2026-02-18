@@ -19,21 +19,25 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
 
   const isWarning = activity.actorAction === 'eta_warning';
   const isBreach = activity.actorAction === 'eta_breach';
+  const isStageBreach = activity.actorAction === 'stage_eta_breach';
 
-  if (!isWarning && !isBreach) {
+  if (!isWarning && !isBreach && !isStageBreach) {
     return null;
   }
 
   // On mobile: will navigate to minimized view with details tab
   // On desktop: will navigate to tab-based route in ConversationPannel
   const targetPath = `/chat/activity/${activity.channelId || ticket?.conversation?.channelId}/${ticket?.conversationId}/${activity.actionSourceId}?selectedTab=details`;
+  const stageName = ticket?.stageName || '';
 
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
       <div className='text-sm text-[#181B1D] font-medium'>
         {isWarning
           ? `Ticket ${ticketXyneId} is due today. Please ensure it's completed or updated.`
-          : `Ticket ${ticketXyneId} is overdue. Please update the ticket's status or ETA.`}
+          : isStageBreach
+            ? `Ticket ${ticketXyneId} stage "${stageName}" is overdue. Please update the Status or Status Deadline.`
+            : `Ticket ${ticketXyneId} is overdue. Please update the ticket's status or ETA.`}
       </div>
       {isBreach && (
         <div className='text-xs text-[#505B62]'>
@@ -49,8 +53,12 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
       actorId='system'
       actorName='Xyne'
       channelId={ticket?.conversation?.channelId}
-      badgeIcon={<Ticket className={`w-4 h-4 ${isWarning ? 'text-orange-600' : 'text-red-600'}`} />}
-      badgeColorClass={isWarning ? 'bg-orange-100' : 'bg-red-100'}
+      badgeIcon={
+        <Ticket
+          className={`w-4 h-4 ${isWarning ? 'text-yellow-600' : isStageBreach ? 'text-orange-600' : 'text-red-600'}`}
+        />
+      }
+      badgeColorClass={isWarning ? 'bg-yellow-100' : isStageBreach ? 'bg-orange-100' : 'bg-red-100'}
       description={<span className='text-[#505B62] text-sm'>ticket in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
@@ -61,7 +69,11 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
         <span className='text-sm text-[#181B1D]'>
           <span className='font-semibold'>{ticketXyneId}</span>
           <span className='text-[#505B62]'>
-            {isWarning ? ' is due today.' : ' deadline has passed'}
+            {isWarning
+              ? ' is due today'
+              : isStageBreach
+                ? ' stage deadline has passed'
+                : ' deadline has passed'}
           </span>
         </span>
       )}
