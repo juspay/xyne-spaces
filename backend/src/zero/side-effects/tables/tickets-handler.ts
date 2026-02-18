@@ -126,4 +126,53 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
       logger.error(`[TicketsSideEffectHandler] Failed to create activities:`, error);
     }
   }
+
+  /**
+   * Helper function to create ETA breach activities (overall ETA or stage ETA).
+   * Can be called from outside (e.g., etaDeadlineQueue, stageEtaDeadlineQueue) to create activities.
+   * This is a static method - does not use side effect context.
+   */
+  static async createEtaBreachActivities(params: {
+    ticketId: string;
+    xyneId: string;
+    channelId: string;
+    userIds: string[];
+    actorAction: 'eta_breach' | 'stage_eta_breach';
+    actorId?: string;
+    stageName?: string;
+    daysOverdue?: number;
+  }): Promise<void> {
+    const { ticketId, xyneId, channelId, userIds, actorAction, actorId = 'system', stageName, daysOverdue } = params;
+
+    if (userIds.length === 0) {
+      return;
+    }
+
+    try {
+      // Create activities for each user
+      const activityPromises = userIds.map(userId =>
+        activityService.createActivity({
+          userId,
+          actorAction,
+          actionSource: 'ticket',
+          actionSourceId: ticketId,
+          ticketId: ticketId,
+          channelId: channelId || undefined,
+          actorId,
+          classification: ActivityClassification.ACTIONABLE,
+        })
+      );
+
+      await Promise.all(activityPromises);
+
+      logger.info(
+        `[TicketsSideEffectHandler] Created ${userIds.length} ${actorAction} activities for ticket ${xyneId}` +
+        `${stageName ? ` (stage: ${stageName})` : ''}` +
+        `${daysOverdue !== undefined ? ` (${daysOverdue} days overdue)` : ''}`
+      );
+    } catch (error) {
+      logger.error(`[TicketsSideEffectHandler] Failed to create ${actorAction} activities:`, error);
+      throw error;
+    }
+  }
 }
