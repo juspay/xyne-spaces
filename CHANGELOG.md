@@ -1,3 +1,22 @@
+## [1.49.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.48.0...v1.49.0) (2026-02-18)
+
+
+### Features
+
+* added logs for unhandled events in roomMachine.ts ([f1ff572](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f1ff57247a21ce954a412533c716856c8ca292df)), closes [#3327](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3327)
+* admin can add, remove or modify user groups ([27dc4f8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/27dc4f8d5e19c6a005b2e1b12609d517728e7274)), closes [#3353](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3353)
+* Draft attachments and synchronization ([53c39c7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/53c39c7d0c67565bb622ee8904a6e97318745225)), closes [#3117](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3117)
+* Grant developer admin access to all local resources ([c0f1976](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c0f197676f0c68097ffbae30389236cb24b633a5)), closes [#3296](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3296)
+* stage eta reminders ([7250d86](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7250d8625f191f46dce0d21f722010cf41c536b7)), closes [#3208](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3208)
+* user Online offline Away ([2e33293](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2e33293a907f20d80300d544fae0a0209a19e104)), closes [#3115](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3115)
+
+
+### Bug Fixes
+
+* All Boards filter not working ([a861837](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a86183745653882a85c8bb31b4a8bac3e3e64d44)), closes [#3308](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3308)
+* Disable lazy connectors in Redis configuration ([5d930f0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5d930f0911a912923db262238a9529360df24c78)), closes [#3338](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3338)
+* screen share scale issue fix ([0ed57b9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0ed57b95a93cc9c87d935154915a08109cd85b96)), closes [#3367](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3367)
+
 ## [1.48.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.47.1...v1.48.0) (2026-02-17)
 
 
