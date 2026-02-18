@@ -106,12 +106,12 @@ export function ScreenShareView({
   }, [participants]);
 
   return (
-    <div className={cn('h-full w-full flex', className)}>
+    <div className={cn('h-full w-full flex overflow-hidden', className)}>
       {/* Main Screen Share Area */}
-      <div className={cn('flex-1 p-2 sm:p-4', compact && 'p-0')}>
+      <div className={cn('flex-1 p-2 sm:p-4 overflow-hidden flex flex-col', compact && 'p-0')}>
         <div
           className={cn(
-            'bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center relative h-full',
+            'bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center relative flex-1 min-h-0',
           )}
         >
           {/* Screen share video using LiveKit's VideoTrack component */}
