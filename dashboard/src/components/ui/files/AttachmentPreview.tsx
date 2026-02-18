@@ -15,6 +15,7 @@ import {
 import type { AttachmentPreviewProps, UploadedFile } from './Files.types';
 import { generateWebThumbnail, isVideoFile } from '../../../services/thumbnailService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 // Type guard to check if file is a browser File object
 const isBrowserFile = (file: File | UploadedFile): file is File => {
@@ -41,6 +42,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
   isUploading = false,
   variant = 'compact',
 }) => {
+  const { isMobile } = usePlatform();
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [videoThumbnailUrl, setVideoThumbnailUrl] = useState<string | null>(null);
   const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
@@ -375,7 +377,9 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
             e.stopPropagation();
             onRemove();
           }}
-          className='absolute -top-2 -right-2 p-1 bg-white hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100 shadow-md border border-gray-200 z-10'
+          className={`absolute -top-2 -right-2 p-1 bg-white hover:bg-red-50 rounded-full transition-colors shadow-md border border-gray-200 z-10 ${
+            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
           title='Remove attachment'
         >
           <X className='h-3.5 w-3.5 text-red-600' />

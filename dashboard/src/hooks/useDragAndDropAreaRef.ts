@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
+import { usePlatform } from './usePlatform';
 
 // Interface for the InputBox imperative API
 export interface InputBoxHandle {
@@ -29,6 +30,7 @@ export const useDragAndDropAreaRef = (resetKey?: string): UseDragAndDropAreaRefR
   const inputRef = useRef<InputBoxHandle>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
+  const { isMobile } = usePlatform();
 
   /**
    * Check if the drag event contains files
@@ -137,6 +139,11 @@ export const useDragAndDropAreaRef = (resetKey?: string): UseDragAndDropAreaRefR
     const element = dragAndDropAreaRef.current;
     if (!element) return;
 
+    // Disable drag and drop on mobile devices
+    if (isMobile) {
+      return;
+    }
+
     // Reset state when resetKey changes (channel switch)
     dragCounter.current = 0;
     setIsDragging(false);
@@ -158,7 +165,7 @@ export const useDragAndDropAreaRef = (resetKey?: string): UseDragAndDropAreaRefR
       element.removeEventListener('dragleave', handleDragLeave);
       element.removeEventListener('drop', handleDrop);
     };
-  }, [resetKey, handleDragEnter, handleDragOver, handleDragLeave, handleDrop]);
+  }, [resetKey, handleDragEnter, handleDragOver, handleDragLeave, handleDrop, isMobile]);
 
   return {
     dragAndDropAreaRef,
