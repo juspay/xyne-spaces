@@ -4139,19 +4139,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Update user responsibilities if provided
           if (userResponsibilityUpdates) {
-            // Check if current user has permission to update responsibilities
-            const currentUserMapping = await tx.run(
-              zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', authData.sub).one(),
-            );
-
-            if (!currentUserMapping) {
-              throw new Error('You must be a member of this group to update responsibilities');
-            }
-
-            if (currentUserMapping.responsibility !== 'MANAGER' && currentUserMapping.responsibility !== 'TEAM_LEAD') {
-              throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can update user responsibilities');
-            }
-
             for (const [userId, responsibility] of Object.entries(userResponsibilityUpdates)) {
               const mapping = await tx.run(
                 zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', userId).one(),
