@@ -19,10 +19,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
-import { conversationService } from '../../../services/Chat/conversationService';
 import { websocketService } from '../../../services/clients/socketClient';
 import { processMessageForSending } from './ChatInput.utils';
-import { useDraft, saveDraft, removeDraft } from '../../../hooks/useDraft';
+import { useDraft, saveDraft, removeDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -254,7 +253,8 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
 
     // Subscribe to draft from state machine
     const lookupId = conversationId ?? channelId;
-    const draft = useDraft(lookupId);
+    const draftFromLocal = useDraft(conversationId ?? channelId);
+    const draftFromDB = useDraftFromDB(channelId, conversationId ?? null);
 
     // Load draft for current channel on mount (only if not editing a message)
     const editorValue = React.useMemo(() => {
@@ -265,10 +265,12 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       }
       // Load draft for this channel if not editing
       if (!messageId && !initialContent) {
-        return draft?.html;
+        return draftFromLocal && draftFromDB && draftFromLocal?.updatedAt > draftFromDB?.updatedAt
+          ? draftFromLocal?.html
+          : draftFromDB?.content;
       }
       return undefined;
-    }, [initialContent, messageId, messagesData, draft]);
+    }, [initialContent, messageId, messagesData, draftFromLocal]);
 
     const { displayName: channelName } = useChannelDisplayName(channel, context.userID);
     const placeholderText =
@@ -313,11 +315,12 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const handleContentChange = useCallback(
       (html: string, text: string): void => {
         try {
+          const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
           // Do not save drafts while editing a message
           if (messageId) return;
           // Save or remove draft
           if (text.trim()) {
-            saveDraft(lookupId, html, text);
+            saveDraft(lookupId, processedHtml, text);
           } else {
             removeDraft(lookupId);
           }
@@ -329,12 +332,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     );
 
     const handleSendMessage = useCallback(
-      async (
-        _plainText: string,
-        html: string,
-        files: File[],
-        videoThumbnails?: Map<File, Blob>,
-      ): Promise<void> => {
+      (_plainText: string, html: string, files: File[]): void => {
         const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
         const hasFiles = files && files.length > 0;
         const scopeType =
@@ -344,7 +342,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
 
         if (messageId) {
           // When editing a message, ignore alsoSendToChannel state to prevent metadata corruption
-          void zero.mutate(
+          zero.mutate(
             mutators.messages.update({
               messageId,
               content: processedHtml,
@@ -360,55 +358,25 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
           });
         } else if (conversationId) {
           try {
-            if (hasFiles) {
-              try {
-                await conversationService.replyToConversation(conversationId, {
-                  content: processedHtml,
-                  msgType: 'USER',
-                  files,
-                  showInChannel: alsoSendToChannel,
-                  ...(videoThumbnails && { videoThumbnails }),
-                });
+            const messageCreatedAt = Date.now();
+            const newMessageId = uuidv4();
+            zero.mutate(
+              mutators.messages.send({
+                conversationId,
+                content: processedHtml,
+                type: MessageType.USER,
+                showInChannel: alsoSendToChannel,
+                timestamp: messageCreatedAt,
+                messageId: newMessageId,
+                ...(alsoSendToChannel && { childConversationId: uuidv4() }),
+              }),
+            );
 
-                mixpanelService.track(EVENTS.INITIATE_ACTION, {
-                  type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_REPLY,
-                  scopeType,
-                  hasAttachments: true,
-                });
-              } catch (uploadError) {
-                const errorMessage =
-                  uploadError instanceof Error ? uploadError.message : 'File upload failed';
-
-                // Track file upload failure
-                mixpanelService.track(EVENTS.MESSAGE_SEND_FAILED, {
-                  errorCode: 'FILE_UPLOAD_ERROR',
-                  errorReason: errorMessage,
-                  scopeType,
-                  hasAttachments: true,
-                });
-                return;
-              }
-            } else {
-              const messageCreatedAt = Date.now();
-              const newMessageId = uuidv4();
-              void zero.mutate(
-                mutators.messages.send({
-                  conversationId,
-                  content: processedHtml,
-                  type: MessageType.USER,
-                  showInChannel: alsoSendToChannel,
-                  timestamp: messageCreatedAt,
-                  messageId: newMessageId,
-                  ...(alsoSendToChannel && { childConversationId: uuidv4() }),
-                }),
-              );
-
-              mixpanelService.track(EVENTS.INITIATE_ACTION, {
-                type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_REPLY,
-                scopeType,
-                hasAttachments: false,
-              });
-            }
+            mixpanelService.track(EVENTS.INITIATE_ACTION, {
+              type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_REPLY,
+              scopeType,
+              hasAttachments: hasFiles,
+            });
             setAlsoSendToChannel(false);
             // Invalidate summary cache when reply is sent
             onMessageChange(conversationId, channelId);
@@ -429,52 +397,25 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
           removeDraft(lookupId);
         } else {
           try {
-            if (hasFiles) {
-              try {
-                await conversationService.createConversation(channelId, {
-                  content: processedHtml,
-                  msgType: 'USER',
-                  files,
-                  ...(videoThumbnails && { videoThumbnails }),
-                });
+            const messageCreatedAt = Date.now();
+            const newConversationId = uuidv4();
+            const newMessageId = uuidv4();
+            zero.mutate(
+              mutators.conversations.send({
+                channelId,
+                content: processedHtml,
+                type: MessageType.USER,
+                conversationId: newConversationId,
+                messageId: newMessageId,
+                timestamp: messageCreatedAt,
+              }),
+            );
 
-                mixpanelService.track(EVENTS.INITIATE_ACTION, {
-                  type: EVENT_PROPERTIES.ACTION_TYPES.DIRECT_MESSAGE,
-                  scopeType,
-                  hasAttachments: true,
-                });
-              } catch (uploadError) {
-                const errorMessage =
-                  uploadError instanceof Error ? uploadError.message : 'File upload failed';
-                toast.error('Failed to send message with attachments', {
-                  description: errorMessage,
-                });
-                mixpanelService.track(EVENTS.MESSAGE_SEND_FAILED, {
-                  errorCode: 'FILE_UPLOAD_ERROR',
-                  errorReason: errorMessage,
-                  scopeType,
-                  hasAttachments: true,
-                });
-                return;
-              }
-            } else {
-              void zero.mutate(
-                mutators.conversations.send({
-                  channelId,
-                  content: processedHtml,
-                  type: MessageType.USER,
-                  conversationId: uuidv4(),
-                  messageId: uuidv4(),
-                  timestamp: Date.now(),
-                }),
-              );
-
-              mixpanelService.track(EVENTS.INITIATE_ACTION, {
-                type: EVENT_PROPERTIES.ACTION_TYPES.DIRECT_MESSAGE,
-                scopeType,
-                hasAttachments: false,
-              });
-            }
+            mixpanelService.track(EVENTS.INITIATE_ACTION, {
+              type: EVENT_PROPERTIES.ACTION_TYPES.DIRECT_MESSAGE,
+              scopeType,
+              hasAttachments: hasFiles,
+            });
             // Invalidate channel summary cache when new conversation is created
             // Note: We only invalidate channel summaries, not thread (no conversationId yet)
             onMessageChange('', channelId);
@@ -518,6 +459,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       <>
         <InputBox
           id={currentSessionId}
+          channelId={channelId}
           autoFocus={isMobile ? false : autoFocus} // eslint-disable-line jsx-a11y/no-autofocus
           ref={inputBoxRef}
           key={`inputBox-${channelId}-${conversationId}`}
@@ -533,6 +475,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
           showTypingIndicator={showTypingIndicator}
           {...(editorValue !== undefined && { value: editorValue })}
           {...(messageId && onCancel && { onCancel: handleCancelEdit })}
+          {...(conversationId && { conversationId })}
           className={className}
           features={{
             richText: true,

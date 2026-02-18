@@ -91,6 +91,7 @@ export enum AttachmentEntityType {
   TICKET = 'TICKET',
   CHAT = 'CHAT',
   CANVAS = 'CANVAS',
+  DRAFT = 'DRAFT',
 }
 
 // @ts-ignore TS1294
@@ -1002,8 +1003,22 @@ export const messageAttachmentTable = table('message_attachments')
     url: string(),
     createdBy: string(),
     metadata: json().optional(),
-    conversationId: string(),
+    conversationId: string().optional(),
     thumbnailUrl: string().optional(),
+  })
+  .primaryKey('id');
+
+export const draftMessageTable = table('draft_messages')
+  .columns({
+    id: string(),
+    channelId: string(),
+    conversationId: string().optional(),
+    messageId: string().optional(),
+    userId: string(),
+    content: string(),
+    hasAttachment: boolean(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -2013,6 +2028,11 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ['senderId'],
     destSchema: messageTable,
   }),
+  draftMessages: many({
+    sourceField: ['id'],
+    destField: ['userId'],
+    destSchema: draftMessageTable,
+  }),
   createdConversations: many({
     sourceField: ['id'],
     destField: ['createdBy'],
@@ -2208,6 +2228,14 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     destField: ['messageId'],
     destSchema: reactionCountTable,
   }),
+}));
+
+export const draftMessageTableRelationships = relationships(draftMessageTable, ({ many }) => ({
+  attachments: many({
+    sourceField: ['id'],
+    destField: ['entityId'],
+    destSchema: messageAttachmentTable,
+  })
 }));
 
 export const customEmojiTableRelationships = relationships(customEmojiTable, ({ one }) => ({
@@ -2634,6 +2662,7 @@ export const schema = createSchema({
     conversationParticipantTable,
     messageTable,
     messageAttachmentTable,
+    draftMessageTable,
     reactionTable,
     reactionCountTable,
     customEmojiTable,
@@ -2700,6 +2729,7 @@ export const schema = createSchema({
     conversationParticipantTableRelationships,
     channelTableRelationships,
     messageTableRelationships,
+    draftMessageTableRelationships,
     channelParticipantTableRelationships,
     channelUserStatusTableRelationships,
     reactionTableRelationships,
@@ -2774,6 +2804,7 @@ export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
 export type Conversation = Row<typeof schema.tables.conversations>;
 export type Message = Row<typeof schema.tables.messages>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
+export type DraftMessage = Row<typeof schema.tables.draft_messages>;
 export type Reaction = Row<typeof schema.tables.reactions>;
 export type ReactionCount = Row<typeof schema.tables.reaction_counts>;
 export type CustomEmoji = Row<typeof schema.tables.custom_emojis>;

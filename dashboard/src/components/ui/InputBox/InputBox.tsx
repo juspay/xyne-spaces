@@ -31,6 +31,8 @@ import { EmojiPickerButton } from '../EditorToolbar';
 import { MentionSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
 import { AttachmentPreview } from '../files';
+import type { UploadedFile } from '../files/Files.types';
+import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import type { MentionResult } from '../Selectors/Selectors.types';
 import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
@@ -41,7 +43,7 @@ import { formatTypingMessage } from './InputBox.utils';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
-import { useDragDropFiles } from '../../../contexts/DragDropFileContext';
+import { useDraftAttachments } from '../../../hooks/useDraft';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { MobileEditor } from './MobileEditor';
@@ -61,6 +63,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     {
       autoFocus = null,
       id,
+      channelId,
+      conversationId,
       onSendMessage,
       onContentChange,
       onCancel,
@@ -101,27 +105,45 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     ref,
   ) => {
     const {
-      droppedFiles,
-      addDroppedFile: addContextAttachment,
-      removeDroppedFile: removeContextAttachment,
-      // clearDroppedFiles: clearContextAttachments,
-      clearDroppedFiles,
-    } = useDragDropFiles();
-    const [localAttachments, setLocalAttachments] = useState<File[]>([]);
-    const [videoThumbnails, setVideoThumbnails] = useState<Map<File, Blob>>(new Map());
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+      addDroppedFiles: providerAddDroppedFiles,
+      removeDroppedFile: providerRemoveDroppedFile,
+      clearDroppedFiles: providerClearDroppedFiles,
+      getDroppedFilesForEntity,
+    } = useDraftAttachments();
+    const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
 
-    const contextAttachments = React.useMemo(() => {
-      if (Array.isArray(droppedFiles)) {
-        console.error('Context Error: droppedFiles is an array, expected an object.');
-        return [];
-      }
-      return (id ? droppedFiles[id] : []) || [];
-    }, [droppedFiles, id]);
+    // State for attachments map (async loaded) - supports both File and UploadedFile
+    const [attachmentsMap, setAttachmentsMap] = useState<Map<string, File | UploadedFile>>(
+      new Map(),
+    );
 
-    // Combine attachments from both sources
-    const allAttachments = [...contextAttachments, ...localAttachments];
+    // Load attachments from provider when channelId or conversationId changes
+    React.useEffect(() => {
+      const loadAttachments = () => {
+        if (!channelId) {
+          setAttachmentsMap(new Map());
+          return;
+        }
+
+        try {
+          const map = getDroppedFilesForEntity(channelId, conversationId ?? null);
+          setAttachmentsMap(map);
+        } catch (error) {
+          console.error('Failed to load attachments:', error);
+        }
+      };
+
+      void loadAttachments();
+    }, [channelId, conversationId, getDroppedFilesForEntity]);
+
+    // Convert Map to array for rendering (keep attachmentId for removal)
+    const allAttachments = React.useMemo(() => {
+      return Array.from(attachmentsMap.entries()).map(([attachmentId, file]) => ({
+        attachmentId,
+        file,
+      }));
+    }, [attachmentsMap]);
     const [isFocused, setIsFocused] = useState(false);
     const [content, setContent] = useState('');
     const [isSending, setIsSending] = useState(false);
@@ -153,9 +175,29 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     const handleTyping = onTyping;
 
+    // Helper function to upload a single file as draft attachment
+    const addDraftAttachments = useCallback(
+      async (files: File[]) => {
+        if (!channelId) {
+          toast.error('Channel ID is required for file attachments');
+          return;
+        }
+
+        try {
+          await providerAddDroppedFiles(files, channelId, conversationId);
+        } catch (error) {
+          console.error('Failed to upload file:', error);
+          toast.error('Failed to upload file', {
+            description: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      },
+      [providerAddDroppedFiles, channelId, conversationId],
+    );
+
     // Helper function to add files with limit and validation
     const addFilesWithLimit = useCallback(
-      (files: File[] | FileList) => {
+      async (files: File[] | FileList) => {
         const filesArray = Array.from(files);
         const availableSlots = maxFiles - allAttachments.length;
 
@@ -192,8 +234,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           }
         });
 
-        // Add valid files
-        validFiles.forEach(file => addContextAttachment(id, file));
+        // Add valid files with upload logic
+        await addDraftAttachments(validFiles);
 
         // Show error for rejected files
         if (rejectedFiles.length > 0) {
@@ -210,7 +252,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           }
         }
       },
-      [maxFiles, allAttachments.length, addContextAttachment, id, allowedFileTypes],
+      [maxFiles, allAttachments.length, addDraftAttachments, allowedFileTypes],
     );
 
     const updateEmojiSizeClass = useCallback((editor: ReturnType<typeof useEditor>): void => {
@@ -425,7 +467,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
           if (files.length > 0) {
-            addFilesWithLimit(files);
+            void addFilesWithLimit(files);
           }
 
           const pastedText = clipboard?.getData('text');
@@ -457,7 +499,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
 
             const file = new File([blobContent], fileName, { type: fileType });
-            addContextAttachment(id, file);
+            void addDraftAttachments([file]);
             editor?.commands.setContent('');
             setContent('');
             return true;
@@ -473,7 +515,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       () => ({
         addFiles: (files: File[]): void => {
           if (files.length > 0) {
-            addFilesWithLimit(files);
+            void addFilesWithLimit(files);
           }
           // Focus the editor after adding files via drag and drop
           editor?.commands.focus();
@@ -481,16 +523,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         clearContent: (): void => {
           editor?.commands.setContent('');
           setContent('');
-          clearDroppedFiles(id);
-          setLocalAttachments([]);
-          setVideoThumbnails(new Map());
+          if (channelId) {
+            void providerClearDroppedFiles(channelId, conversationId ?? null);
+          }
         },
         insertContent: (content: string): void => {
           editor?.commands.insertContent(content);
           editor?.commands.focus();
         },
       }),
-      [editor, addFilesWithLimit, clearDroppedFiles],
+      [editor, addFilesWithLimit, providerClearDroppedFiles, channelId, conversationId],
     );
 
     const handleSend = useCallback(async () => {
@@ -503,23 +545,25 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
       setIsSending(true);
       try {
-        await onSendMessage(plainText, htmlContent, allAttachments, videoThumbnails);
+        // Filter to only send actual File objects
+        // UploadedFile metadata-only attachments are already stored and referenced by ID
+        const filesToSend = allAttachments
+          .map(a => a.file)
+          .filter((f): f is File => f instanceof File);
+        await onSendMessage(plainText, htmlContent, filesToSend);
         editor.commands.setContent('');
         setContent('');
-        clearDroppedFiles(id);
-        setLocalAttachments([]);
-        setVideoThumbnails(new Map()); // Clear thumbnails after sending
         editor.commands.focus();
       } finally {
         setIsSending(false);
       }
-    }, [editor, allAttachments, videoThumbnails, onSendMessage, isSending]);
+    }, [editor, allAttachments, onSendMessage, isSending]);
 
     const handleFileSelect = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFiles = Array.from(e.target.files || []);
         if (selectedFiles.length > 0) {
-          addFilesWithLimit(selectedFiles);
+          void addFilesWithLimit(selectedFiles);
         }
         e.target.value = '';
         // Focus the editor after file selection (but not on mobile to prevent keyboard popup)
@@ -527,7 +571,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           editor?.commands.focus();
         }
       },
-      [addFilesWithLimit, editor, isMobile],
+      [addFilesWithLimit, editor, isMobile, channelId, conversationId, getDroppedFilesForEntity],
     );
 
     const handleAttachClick = useCallback(() => {
@@ -544,34 +588,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     }, [hasTicket, id]);
 
     const handleRemoveAttachment = useCallback(
-      (file: File) => {
-        // Check if file is from context or local state
-        const isFromContext = contextAttachments.includes(file);
-
-        if (isFromContext) {
-          // Remove from context using the context's remove function
-          removeContextAttachment?.(id, file);
-        } else {
-          // Remove from local state
-          setLocalAttachments(prev => prev.filter(f => f !== file));
-        }
-
-        // Remove from video thumbnails if present
-        setVideoThumbnails(prev => {
-          if (!prev.has(file)) {
-            return prev;
-          }
+      async ({ attachmentId }: { attachmentId: string; file: File | UploadedFile }) => {
+        await providerRemoveDroppedFile(attachmentId);
+        // Update local state immediately for responsiveness
+        setAttachmentsMap(prev => {
           const newMap = new Map(prev);
-          newMap.delete(file);
+          newMap.delete(attachmentId);
           return newMap;
         });
       },
-      [contextAttachments, removeContextAttachment],
+      [providerRemoveDroppedFile],
     );
-    const handlePreview = (file: File): void => {
+
+    const handlePreview = (file: File | UploadedFile): void => {
       setSelectedFile(file);
       setIsViewerOpen(true);
-      // onPreview?.(file);
     };
 
     const handleCloseViewer = (): void => {
@@ -678,7 +709,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             <MobileEditor
               editor={editor}
               content={content}
-              allAttachments={allAttachments}
+              allAttachments={allAttachments
+                .map(a => a.file)
+                .filter((f): f is File => f instanceof File)}
               isSending={isSending}
               disabled={disabled}
               emojiSizeClass={emojiSizeClass}
@@ -697,28 +730,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               onCloseFormattingToolbar={() => setShowMobileFormattingToolbar(false)}
               showEmojiPicker={features.emojiPicker}
               onEmojiSelect={handleEmojiSelect}
-              attachmentPreviewComponent={
-                features.fileAttachments && allAttachments.length > 0 ? (
-                  <div className='px-3 pb-2 flex flex-wrap gap-3'>
-                    {allAttachments.map((file, index) => (
-                      <AttachmentPreview
-                        key={`${file.name}-${index}`}
-                        file={file}
-                        onRemove={() => handleRemoveAttachment(file)}
-                        onPreview={() => handlePreview(file)}
-                        isUploading={false}
-                        onThumbnailGenerated={(file, thumbnailBlob) => {
-                          setVideoThumbnails(prev => {
-                            const newMap = new Map(prev);
-                            newMap.set(file, thumbnailBlob);
-                            return newMap;
-                          });
-                        }}
-                      />
-                    ))}
-                  </div>
-                ) : undefined
-              }
               hideSendButton={hideSendButton}
               showAttachButton={!!features.fileAttachments}
             />
@@ -744,33 +755,39 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           {/* Desktop: Render attachments after editor content */}
           {!isMobile && features.fileAttachments && allAttachments.length > 0 && (
             <div className='px-3 pb-2 flex flex-wrap gap-3'>
-              {allAttachments.map((file, index) => (
+              {allAttachments.map(({ attachmentId, file }) => (
                 <AttachmentPreview
-                  key={`${file.name}-${index}`}
+                  key={attachmentId}
                   file={file}
-                  onRemove={() => handleRemoveAttachment(file)}
+                  onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
                   onPreview={() => handlePreview(file)}
                   isUploading={false}
-                  onThumbnailGenerated={(file, thumbnailBlob) => {
-                    setVideoThumbnails(prev => {
-                      const newMap = new Map(prev);
-                      newMap.set(file, thumbnailBlob);
-                      return newMap;
-                    });
-                  }}
                 />
               ))}
             </div>
           )}
 
-          {/* Full-screen Media Viewer */}
+          {/* Full-screen Viewer - Use MediaViewer for File objects, FilePreviewModal for UploadedFile */}
           {selectedFile && (
-            <MediaViewer
-              file={selectedFile}
-              isOpen={isViewerOpen}
-              onClose={handleCloseViewer}
-              // showDownload={showDownload}
-            />
+            <>
+              {selectedFile instanceof File ? (
+                <MediaViewer
+                  file={selectedFile}
+                  isOpen={isViewerOpen}
+                  onClose={handleCloseViewer}
+                />
+              ) : (
+                <FilePreviewModal
+                  isOpen={isViewerOpen}
+                  onClose={handleCloseViewer}
+                  fileName={selectedFile.originalName}
+                  fileUrl={`/attachments/${selectedFile.id}/download`}
+                  mimeType={selectedFile.mimeType}
+                  fileSize={selectedFile.fileSize}
+                  attachmentId={selectedFile.id}
+                />
+              )}
+            </>
           )}
 
           {/* Show checkbox for "also send to channel" functionality */}
@@ -868,7 +885,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       setIsTranscriptSelectorOpen(false);
                     }}
                     onAttach={file => {
-                      addContextAttachment(id, file);
+                      void addDraftAttachments([file]);
                       setIsTranscriptSelectorOpen(false);
                       editor?.commands.focus();
                     }}

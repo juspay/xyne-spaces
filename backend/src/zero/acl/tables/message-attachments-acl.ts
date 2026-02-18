@@ -16,4 +16,8 @@ export class MessageAttachmentsACL extends BaseACL<'message_attachments'> {
   async canDelete(_args: DeleteID<TableSchema<'message_attachments'>>, _tx: Transaction<Schema>): Promise<void> {
     // Anyone can delete it for now
   }
+
+  async canUpsert(_args: DeleteID<TableSchema<'message_attachments'>>, _tx: Transaction<Schema>): Promise<void> {
+    // Anyone can upsert it for now
+  }
 }

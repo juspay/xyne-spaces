@@ -6,6 +6,7 @@ import { QueryResultType } from '@rocicorp/zero';
 export interface DraftMessage {
   html: string;
   text: string;
+  updatedAt: number;
 }
 
 export interface DraftMessages {
@@ -25,6 +26,8 @@ export type UserPermission = {
 export type UserChannelStatus = QueryResultType<typeof queries.getAllChannelsUserStatus>[number];
 
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginated>[number];
+
+export type DraftMessageDB = QueryResultType<typeof queries.userDrafts>[number];
 
 // Metrics data for a single period
 export interface PeriodMetrics {
@@ -63,6 +66,7 @@ interface StateMachineContext {
   userChannelStatuses: UserChannelStatus[];
   lastVisitedChannelId: string | null;
   drafts: DraftMessages; // Draft messages per channel/conversation
+  draftMessages: DraftMessageDB[];
   allUserGroups: UserGroup[];
   metrics: MetricsState;
   filteredTicketIds: string[];
@@ -80,6 +84,7 @@ type StateMachineEvent =
   | { type: 'SAVE_DRAFT'; lookupId: string; html: string; text: string }
   | { type: 'REMOVE_DRAFT'; lookupId: string }
   | { type: 'ADD_ALL_USER_GROUPS'; userGroups: UserGroup[] }
+  | { type: 'ADD_USER_DRAFTS'; draftMessages: DraftMessageDB[] }
   | { type: 'SET_METRICS'; metrics: Omit<MetricsState, 'loading' | 'error'> }
   | { type: 'SET_METRICS_LOADING'; loading: boolean }
   | { type: 'SET_METRICS_ERROR'; error: string | null }
@@ -166,7 +171,7 @@ export const stateMachine = setup({
         if (event.type === 'SAVE_DRAFT') {
           const updatedDrafts = {
             ...context.drafts,
-            [event.lookupId]: { html: event.html, text: event.text },
+            [event.lookupId]: { html: event.html, text: event.text, updatedAt: Date.now() },
           };
           try {
             localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(updatedDrafts));
@@ -198,6 +203,14 @@ export const stateMachine = setup({
           return event.userGroups;
         }
         return context.allUserGroups;
+      },
+    }),
+    addUserDrafts: assign({
+      draftMessages: ({ context, event }) => {
+        if (event.type === 'ADD_USER_DRAFTS') {
+          return event.draftMessages;
+        }
+        return context.draftMessages;
       },
     }),
     setMetrics: assign({
@@ -263,6 +276,7 @@ export const stateMachine = setup({
     userChannelStatuses: [],
     lastVisitedChannelId: localStorage.getItem('lastVisitedChannelId'),
     drafts: JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
+    draftMessages: [],
     allUserGroups: [],
     metrics: initialMetricsState,
     filteredTicketIds: [],
@@ -300,6 +314,9 @@ export const stateMachine = setup({
         },
         ADD_ALL_USER_GROUPS: {
           actions: 'addAllUserGroups',
+        },
+        ADD_USER_DRAFTS: {
+          actions: 'addUserDrafts',
         },
         SET_METRICS: {
           actions: 'setMetrics',

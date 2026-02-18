@@ -27,6 +27,7 @@ export interface CreateTicketRequest {
   closedBy?: string;
   sourceConversationId?: string;
   excludedChatAttachmentIds?: string[]; // IDs of chat attachments to exclude when creating from conversation
+  draftAttachmentIds?: string[]; // IDs of draft attachments to transfer to ticket when creating from conversation
   dynamicFields?: Record<string, string>; // Dynamic form field values for the ticket
   workflowType?: string; // Optional workflow type for automation
   stageName?: string; // Optional stage name for the ticket

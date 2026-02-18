@@ -123,6 +123,7 @@ enum AttachmentEntityType {
   CHAT
   CANVAS
   EMAIL
+  DRAFT
   @@schema("public")
 }
 
@@ -1295,7 +1296,7 @@ model MessageSearch {
 // File Attachment Models
 model MessageAttachment {
   id                 String                @id @default(cuid())
-  entityType         AttachmentEntityType  // TICKET or CHAT
+  entityType         AttachmentEntityType  // TICKET or CHAT or DRAFT
   entityId           String                // Ticket id or message id (mandatory)
   storageProvider    String                // Storage provider where file is stored
   originalFilename   String                // Original filename uploaded by user
@@ -1308,7 +1309,7 @@ model MessageAttachment {
   url                String                // URL for fetching the attachment (mandatory)
   createdBy          String                // User who uploaded the attachment (no FK constraint)
   metadata           Json?                 // Width/height for images, duration for videos, etc.
-  conversationId     String                // Every message belongs to a conversation (no FK constraint)
+  conversationId     String?                // Every message belongs to a conversation (no FK constraint)
   thumbnailUrl       String?               // For images/videos
 
   @@index([entityType])
@@ -1976,6 +1977,23 @@ model Merchant {
   mid       String   @unique // Merchant identifier (matches TicketEntityMapping.entityName)
 
   @@map("merchants")
+  @@schema("public")
+}
+
+model DraftMessage {
+  id              String      @id @default(cuid())
+  channelId       String      // Channel this draft belongs to (no FK constraint)
+  conversationId  String?     // Conversation this draft belongs to (no FK constraint)
+  messageId       String?     // If this draft is for an existing message (editing), link to that message ID
+  userId          String      // User who is drafting (no FK constraint)
+  content         String      // Draft content
+  hasAttachment   Boolean     @default(false) // Whether the draft has attachments
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([channelId, conversationId, messageId, userId]) // Fast lookup of user's draft for a conversation
+  @@unique([channelId, conversationId, messageId, userId])
+  @@map("draft_messages")
   @@schema("public")
 }
 

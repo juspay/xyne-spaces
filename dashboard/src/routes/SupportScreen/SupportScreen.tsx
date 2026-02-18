@@ -62,6 +62,8 @@ import type { Ticket } from '@xyne/shared';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
 import { Hash } from 'lucide-react';
+import { useDraft } from '../../hooks/useDraft';
+import { v4 as uuidv4 } from 'uuid';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFiltered>[number];
@@ -508,6 +510,8 @@ const SupportTicketDetail = (): ReactElement => {
   // Subscribe to channel for real-time updates
   useChannelSubscription(channelId, conversationId ? [conversationId] : []);
 
+  const draft = useDraft(conversationId || '');
+
   // Drag and drop functionality
   const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(conversationId || '');
 
@@ -519,6 +523,9 @@ const SupportTicketDetail = (): ReactElement => {
         void zero.mutate(
           mutators.activities.markThreadActivitiesAsRead({
             conversationId,
+            timestamp: Date.now(),
+            draftMessage: draft?.html || '',
+            draftMessageId: uuidv4(),
           }),
         );
       }

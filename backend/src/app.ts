@@ -49,12 +49,14 @@ import { registerAllExternalSources } from '@/integrations/core/externalSourceRe
 import publicUserRoutes from '@/routes/publicUserRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
+import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
 import userGroupRoutes from '@/routes/userGroups';
 import attachmentRoutes from '@/routes/attachments';
+import draftAttachmentRoutes from '@/routes/draftAttachments';
 import { notificationService } from '@/notification-service';
 import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
@@ -291,6 +293,7 @@ export class App {
 
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
+    this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
     this.app.use('/api/search', authMiddleware.authenticate, searchRoutes); // Global search routes
 
@@ -352,6 +355,9 @@ export class App {
     this.app.use('/api/user-assignment-state', userAssignmentStateRoutes); // User assignment state routes (auth handled in route file)
     // this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes); // Reactions routes
     this.app.use('/api/notifications', notificationRoutes); // Notification routes
+
+    //Draft routes
+    this.app.use('/api/drafts', authMiddleware.authenticate, draftRoutes);
 
     // Vespa search routes (auth required)
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);

@@ -513,7 +513,7 @@ async function fetchChannelMessagesMultiChannelImpl(
     });
 
     const attachmentEntities: ToolEntity[] = allAttachments.map((att, idx) => {
-      const attChannelId = conversationToChannelMap.get(att.conversationId) || '';
+      const attChannelId = att?.conversationId && conversationToChannelMap.get(att.conversationId) || '';
       return transformAttachmentToEntity(
         att,
         idx,

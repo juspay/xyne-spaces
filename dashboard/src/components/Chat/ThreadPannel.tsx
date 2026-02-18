@@ -51,6 +51,8 @@ import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
+import { useDraft } from '../../hooks/useDraft';
+import { v4 as uuidv4 } from 'uuid';
 
 type TabType = 'thread' | 'details' | 'files' | 'workflows';
 type UnderTicketTabType = 'replies' | 'workflows';
@@ -267,6 +269,7 @@ export const ThreadMessages = ({
   const isUserMember = !!channelParticipation;
 
   const zero = useZero();
+  const draft = useDraft(derivedConversationId);
 
   useEffect(() => {
     return () => {
@@ -274,11 +277,14 @@ export const ThreadMessages = ({
         void zero.mutate(
           mutators.activities.markThreadActivitiesAsRead({
             conversationId: derivedConversationId,
+            draftMessage: draft?.html || '',
+            draftMessageId: uuidv4(),
+            timestamp: Date.now(),
           }),
         );
       }
     };
-  }, [derivedConversationId, zero]);
+  }, [derivedConversationId, zero, draft]);
 
   // Check if this is a ticket thread
   const isTicketThread = useMemo(() => {

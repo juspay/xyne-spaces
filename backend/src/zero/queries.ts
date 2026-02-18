@@ -519,6 +519,10 @@ export const queries = defineQueries({
     return zql.activities.where('isRead', false).orderBy('createdAt', 'desc').related('channel');
   }),
 
+  userDrafts: defineQuery(({ ctx }) => {
+    return zql.draft_messages.where('userId', ctx.userID).related('attachments');
+  }),
+
   userActivitiesPaginated: defineQuery(
     z.object({
       limit: z.number(),
