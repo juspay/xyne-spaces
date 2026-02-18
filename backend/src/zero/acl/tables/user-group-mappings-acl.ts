@@ -3,6 +3,7 @@ import { Schema, UserResponsibility } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasUserGroupsAdminAccess } from '../core/admin-access';
 
 export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
 
@@ -32,11 +33,18 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
         .where('id', args.userGroupId)
         .one()
     );
-      
+
     if (!userGroup) {
       throw new MutationACLError('User group mapping insert failed: the specified group does not exist', 'user_group_mappings');
     }
-    
+
+    // Allow if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (hasAdminAccess) {
+      return;
+    }
+
+    // Otherwise, verify user is MANAGER or TEAM_LEAD
     await this.verifyManagerOrTeamLead(args.userGroupId, tx);
   }
 
@@ -47,11 +55,18 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
         .where('id', args.id)
         .one()
     );
-      
+
     if (!userGroupMapping) {
       throw new MutationACLError('User group mapping update failed: the mapping does not exist', 'user_group_mappings');
     }
 
+    // Allow if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (hasAdminAccess) {
+      return;
+    }
+
+    // Otherwise, verify user is MANAGER or TEAM_LEAD
     await this.verifyManagerOrTeamLead(userGroupMapping.userGroupId, tx);
   }
 
@@ -62,11 +77,18 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
         .where('id', args.id)
         .one()
     );
-      
+
     if (!userGroupMapping) {
       throw new MutationACLError('User group mapping delete failed: the mapping does not exist', 'user_group_mappings');
     }
 
+    // Allow if user has ADMIN access to USER-GROUPS resource
+    const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
+    if (hasAdminAccess) {
+      return;
+    }
+
+    // Otherwise, verify user is MANAGER or TEAM_LEAD
     await this.verifyManagerOrTeamLead(userGroupMapping.userGroupId, tx);
   }
 }
