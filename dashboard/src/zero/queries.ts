@@ -501,6 +501,9 @@ export const queries = defineQueries({
   userUnreadActivities: defineQuery(() => {
     return zql.activities.where('isRead', false).orderBy('createdAt', 'desc').related('channel');
   }),
+  userDrafts: defineQuery(({ ctx }) => {
+    return zql.draft_messages.where('userId', ctx.userID).related('attachments');
+  }),
   // Query for message with sender and channel info for activity display
   getMessageForActivity: defineQuery(
     z.object({ messageId: z.string() }),

@@ -481,7 +481,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             ref={inputBoxRef}
             id='forward-message-optional'
             placeholder='Add a note to the forwarded message...'
-            onSendMessage={async () => {
+            onSendMessage={() => {
               // Handled by the wrapper div's onKeyDown
             }}
             onContentChange={(html: string, text: string) => {

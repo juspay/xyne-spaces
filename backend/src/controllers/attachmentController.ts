@@ -4,6 +4,7 @@ import { ConversationRepository } from '../database/repositories/conversationRep
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { gcsService, GCSService } from '../services/gcsService';
 import { logger } from '../utils/logger';
+import { AttachmentEntityType } from '@prisma/client';
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -208,31 +209,41 @@ export class AttachmentController {
         res.status(404).json({ error: 'Attachment not found' });
         return;
       }
-
-      // CHECK: Verify user has access to this attachment
-      // Attachments belong to conversations, conversations belong to channels
-      // User must be a participant of the channel to access the attachment
-      const conversation = await this.conversationRepository.findById(attachment.conversationId);
       
-      if (!conversation) {
-        logger.error(`Conversation not found for attachment ${attachmentId}`);
-        res.status(404).json({ error: 'Conversation not found' });
-        return;
-      }
+      if (attachment.entityType !== AttachmentEntityType.DRAFT) {
+        // CHECK: Verify user has access to this attachment
+        // Attachments belong to conversations, conversations belong to channels
+        // User must be a participant of the channel to access the attachment
+        const conversation = attachment.conversationId ? await this.conversationRepository.findById(attachment.conversationId) : null;
+          if (!conversation) {
+          logger.error(`Conversation not found for attachment ${attachmentId}`);
+          res.status(404).json({ error: 'Conversation not found' });
+          return;
+        }
 
-      // Check if user is a participant of the channel
-      const isParticipant = await this.channelParticipantRepository.isParticipant(
-        conversation.channelId,
-        userId
-      );
+        // Check if user is a participant of the channel
+        const isParticipant = conversation ? await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId
+        ) : attachment.createdBy === userId;
 
-      if (!isParticipant) {
-        logger.warn(`Unauthorized access attempt: User ${userId} tried to stream attachment ${attachmentId} from channel ${conversation.channelId}`);
-        res.status(403).json({ 
-          error: 'Forbidden',
-          message: 'You do not have permission to access this attachment'
-        });
-        return;
+        if (!isParticipant) {
+          logger.warn(`Unauthorized access attempt: User ${userId} tried to stream attachment ${attachmentId} from channel ${conversation.channelId}`);
+          res.status(403).json({ 
+            error: 'Forbidden',
+            message: 'You do not have permission to access this attachment'
+          });
+          return;
+        }
+      } else {
+        if (attachment.createdBy !== userId) {
+          logger.warn(`Unauthorized access attempt: User ${userId} tried to stream draft attachment ${attachmentId} created by ${attachment.createdBy}`);
+          res.status(403).json({ 
+            error: 'Forbidden',
+            message: 'You do not have permission to access this attachment'
+          });
+          return;
+        }
       }
 
       const gcsPath = attachment.url;

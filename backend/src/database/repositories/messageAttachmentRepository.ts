@@ -56,6 +56,19 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findByIds(ids: string[]): Promise<MessageAttachment[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    return await this.db.messageAttachment.findMany({
+      where: {
+        id: {
+          in: ids
+        }
+      }
+    });
+  }
+
   async findByMessageId(messageId: string): Promise<MessageAttachment[]> {
     return await this.db.messageAttachment.findMany({
       where: {

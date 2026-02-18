@@ -12,6 +12,10 @@ import {
   getExtensionColor,
   truncateFileName,
 } from '../utils/files';
+import type { AttachmentPreviewProps, UploadedFile } from './Files.types';
+import { generateWebThumbnail, isVideoFile } from '../../../services/thumbnailService';
+import { createPreviewUrl } from '../../../services/clients/fileFetchService';
+
 // Type guard to check if file is a browser File object
 const isBrowserFile = (file: File | UploadedFile): file is File => {
   return 'slice' in file && 'type' in file && 'name' in file;
@@ -26,45 +30,76 @@ const getMimeType = (file: File | UploadedFile): string => {
   return isBrowserFile(file) ? file.type : file.mimeType;
 };
 
-const getThumbnailUrl = (file: File | UploadedFile): string | undefined => {
-  return isBrowserFile(file) ? undefined : file.thumbnailUrl;
+const getFileId = (file: File | UploadedFile): string | null => {
+  return isBrowserFile(file) ? null : file.id;
 };
-import type { AttachmentPreviewProps, UploadedFile } from './Files.types';
-import { generateWebThumbnail, isVideoFile } from '../../../services/thumbnailService';
 
 export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
   file,
   onRemove,
   onPreview,
   isUploading = false,
-  onThumbnailGenerated,
   variant = 'compact',
 }) => {
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [videoThumbnailUrl, setVideoThumbnailUrl] = useState<string | null>(null);
   const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
   const [textPreview, setTextPreview] = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+
+  // Cache fetched blob URLs to avoid redundant fetches
+  const previewCacheRef = useRef<Map<string, string>>(new Map());
+
   const category = getFileCategory({
     type: getMimeType(file),
     name: getFileName(file),
   });
   const isTextFile = getMimeType(file) === 'text/plain' || getFileName(file).endsWith('.txt');
-
-  // Use ref to avoid dependency issues
-  const onThumbnailGeneratedRef = useRef(onThumbnailGenerated);
-  useEffect(() => {
-    onThumbnailGeneratedRef.current = onThumbnailGenerated;
-  }, [onThumbnailGenerated]);
+  const fileId = getFileId(file);
 
   useEffect((): (() => void) | void => {
+    setPreviewError(false);
+
     // Create object URL for images to show actual preview (only for browser File objects)
     if (category === 'image' && isBrowserFile(file)) {
       const url = URL.createObjectURL(file);
       setImagePreviewUrl(url);
       return (): void => URL.revokeObjectURL(url);
-    } else if (category === 'image' && !isBrowserFile(file)) {
-      // For uploaded files, use the thumbnail URL if available
-      setImagePreviewUrl(getThumbnailUrl(file) || null);
+    }
+
+    // Lazy fetch image for UploadedFile objects (like MessageAttachment.Preview)
+    else if (category === 'image' && !isBrowserFile(file) && fileId) {
+      setIsLoadingPreview(true);
+
+      // Check cache first
+      const cached = previewCacheRef.current.get(fileId);
+      if (cached) {
+        setImagePreviewUrl(cached);
+        setIsLoadingPreview(false);
+        return;
+      }
+
+      // Fetch image blob from server
+      const fetchImage = async (): Promise<void> => {
+        try {
+          const blob = await createPreviewUrl(fileId);
+          const url = URL.createObjectURL(blob);
+          previewCacheRef.current.set(fileId, url);
+          setImagePreviewUrl(url);
+        } catch (error) {
+          console.error('Failed to fetch image preview:', fileId, error);
+          setPreviewError(true);
+        } finally {
+          setIsLoadingPreview(false);
+        }
+      };
+
+      void fetchImage();
+
+      return (): void => {
+        // Cleanup is handled by cache management
+      };
     }
 
     // Generate thumbnail for videos (only for browser File objects)
@@ -76,8 +111,6 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
         .then(result => {
           if (!cancelled) {
             setVideoThumbnailUrl(result.dataUrl);
-            // Notify parent component that thumbnail was generated
-            onThumbnailGeneratedRef.current?.(file, result.blob);
           }
         })
         .catch(() => {
@@ -93,6 +126,40 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
 
       return () => {
         cancelled = true;
+      };
+    }
+
+    // Lazy fetch video thumbnail for UploadedFile objects (like MessageAttachment.Preview)
+    else if (category === 'video' && !isBrowserFile(file) && fileId) {
+      setIsLoadingPreview(true);
+
+      // Check cache first
+      const cached = previewCacheRef.current.get(`${fileId}-thumb`);
+      if (cached) {
+        setVideoThumbnailUrl(cached);
+        setIsLoadingPreview(false);
+        return;
+      }
+
+      // Fetch video thumbnail from server
+      const fetchThumbnail = async (): Promise<void> => {
+        try {
+          const blob = await createPreviewUrl(`/attachments/${fileId}/thumbnail`);
+          const url = URL.createObjectURL(blob);
+          previewCacheRef.current.set(`${fileId}-thumb`, url);
+          setVideoThumbnailUrl(url);
+        } catch (error) {
+          console.error('Failed to fetch video thumbnail:', fileId, error);
+          setPreviewError(true);
+        } finally {
+          setIsLoadingPreview(false);
+        }
+      };
+
+      void fetchThumbnail();
+
+      return (): void => {
+        // Cleanup is handled by cache management
       };
     }
 
@@ -116,8 +183,20 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
   }, [file, category, isTextFile]);
 
   const renderPreview = (): React.ReactElement => {
+    // Show loading state
+    if (isLoadingPreview && (category === 'image' || category === 'video')) {
+      return (
+        <div className='w-full h-full bg-gray-100 flex items-center justify-center'>
+          <Loader2 className='h-8 w-8 text-gray-400 animate-spin' />
+        </div>
+      );
+    }
+
     switch (category) {
       case 'image':
+        if (previewError) {
+          return <ImageIcon className='h-8 w-8 text-blue-600' />;
+        }
         return imagePreviewUrl ? (
           <img
             src={imagePreviewUrl}
@@ -129,8 +208,8 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
         );
 
       case 'video':
-        // Show loading spinner while generating thumbnail
-        if (isGeneratingThumbnail) {
+        // Show loading spinner while generating/fetching thumbnail
+        if (isGeneratingThumbnail || isLoadingPreview) {
           return (
             <div className='w-full h-full bg-purple-50 flex items-center justify-center'>
               <Loader2 className='h-8 w-8 text-purple-600 animate-spin' />
@@ -138,7 +217,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
           );
         }
 
-        // Show thumbnail with video icon overlay if thumbnail was generated
+        // Show thumbnail with video icon overlay if thumbnail was generated/fetched
         if (videoThumbnailUrl) {
           return (
             <div className='relative w-full h-full'>
@@ -154,7 +233,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
           );
         }
 
-        // Fallback to video icon if thumbnail generation failed
+        // Fallback to video icon if thumbnail generation/fetch failed
         return (
           <div className='w-full h-full bg-purple-50 flex items-center justify-center'>
             <Video className='h-8 w-8 text-purple-600' />

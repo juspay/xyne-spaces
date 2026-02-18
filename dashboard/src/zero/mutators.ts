@@ -13,6 +13,7 @@ import {
   CanvasVisibility,
   CanvasRole,
   BookmarkEntityType,
+  AttachmentEntityType,
   UserPresenceStatus,
   FormFieldType,
   FormContextType,
@@ -317,8 +318,14 @@ export const mutators = defineMutators({
         channelId: z.string(),
         conversationId: z.string().optional(),
         timestamp: z.number(),
+        draftMessageId: z.string(),
+        draftMessage: z.string(),
       }),
-      async ({ tx, ctx, args: { channelId, conversationId, timestamp } }) => {
+      async ({
+        tx,
+        ctx,
+        args: { channelId, conversationId, timestamp, draftMessageId, draftMessage },
+      }) => {
         const participant = await tx.run(
           zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
         );
@@ -344,6 +351,29 @@ export const mutators = defineMutators({
           id: participant.id,
           ...updateData,
         });
+
+        // Query for drafts in this channel for this user (follows backend logic)
+        const channelDrafts = await tx.run(
+          zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
+        );
+
+        // Find the channel-level draft (conversationId === null)
+        const draft = channelDrafts.find(d => d.conversationId === null);
+
+        if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+          await tx.mutate.draft_messages.delete({ id: draft.id });
+        } else {
+          await tx.mutate.draft_messages.upsert({
+            id: draft?.id || draftMessageId,
+            conversationId: null,
+            channelId,
+            userId: ctx.userID,
+            content: draftMessage,
+            hasAttachment: draft?.hasAttachment || false,
+            updatedAt: timestamp,
+            createdAt: draft?.createdAt || timestamp,
+          });
+        }
 
         const unreadActivities = await tx.run(
           zql.activities
@@ -871,13 +901,49 @@ export const mutators = defineMutators({
           createdAt: now,
         });
 
+        // Query for drafts in this channel for this user (follows backend logic)
+        const channelDrafts = await tx.run(
+          zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
+        );
+
+        // Find the channel-level draft (conversationId === null)
+        const draft = channelDrafts.find(d => d.conversationId === null);
+
+        // Transfer attachments from draft to message if found
+        let hasAttachments = false;
+        if (draft) {
+          const draftAttachments = await tx.run(
+            zql.message_attachments
+              .where('entityId', draft.id)
+              .where('entityType', AttachmentEntityType.DRAFT),
+          );
+
+          if (draftAttachments.length > 0) {
+            hasAttachments = true;
+            // Transfer attachments from draft to message
+            for (const attachment of draftAttachments) {
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
+            }
+          }
+
+          // Delete the draft message after transferring
+          await tx.mutate.draft_messages.delete({
+            id: draft.id,
+          });
+        }
+
         await tx.mutate.messages.insert({
           messageId,
           conversationId,
           senderId: ctx.userID,
           content: content.trim(),
           msgType: type,
-          hasAttachment: false,
+          hasAttachment: hasAttachments,
           edited: false,
           isDeleted: false,
           isSent: false,
@@ -1139,13 +1205,49 @@ export const mutators = defineMutators({
           throw new Error("Channel doesn't exists");
         }
 
+        // Query for drafts in this channel for this user (follows backend logic)
+        const channelDrafts = await tx.run(
+          zql.draft_messages.where('channelId', conversation.channelId).where('userId', ctx.userID),
+        );
+
+        // Find the draft for this specific conversation
+        const draft = channelDrafts.find(d => d.conversationId === conversationId);
+
+        // Transfer attachments from draft to message if found
+        let hasAttachments = false;
+        if (draft) {
+          const draftAttachments = await tx.run(
+            zql.message_attachments
+              .where('entityId', draft.id)
+              .where('entityType', AttachmentEntityType.DRAFT),
+          );
+
+          if (draftAttachments.length > 0) {
+            hasAttachments = true;
+            // Transfer attachments from draft to message
+            for (const attachment of draftAttachments) {
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
+            }
+          }
+
+          // Delete the draft message after transferring
+          await tx.mutate.draft_messages.delete({
+            id: draft.id,
+          });
+        }
+
         const message = {
           messageId,
           conversationId,
           senderId: ctx.userID,
           content: content.trim(),
           msgType: type,
-          hasAttachment: false,
+          hasAttachment: hasAttachments,
           edited: false,
           isSent: false,
           isDeleted: false,
@@ -1632,30 +1734,156 @@ export const mutators = defineMutators({
           throw new Error('Attachment not found');
         }
 
-        await tx.mutate.message_attachments.delete({ id: attachment.id });
+        if (attachment.entityType !== AttachmentEntityType.DRAFT) {
+          await tx.mutate.message_attachments.delete({ id: attachment.id });
 
-        const remainingAttachments = await tx.run(
-          zql.message_attachments.where('entityId', attachment.entityId),
-        );
+          const remainingAttachments = await tx.run(
+            zql.message_attachments.where('entityId', attachment.entityId),
+          );
 
-        if (remainingAttachments.length === 0) {
-          const message = await tx.run(zql.messages.where('messageId', attachment.entityId).one());
-          if (!message) {
-            throw new Error('Message not found for the attachment');
+          if (remainingAttachments.length === 0) {
+            const message = await tx.run(
+              zql.messages.where('messageId', attachment.entityId).one(),
+            );
+            if (!message) {
+              throw new Error('Message not found for the attachment');
+            }
+
+            // Check if the message content is empty (including HTML-only content like <p><br></p>)
+            const doc = new DOMParser().parseFromString(message.content, 'text/html');
+            const plainText = doc.body.textContent?.trim();
+
+            if (plainText === '') {
+              await tx.mutate.messages.delete({
+                messageId: message.messageId,
+              });
+            } else {
+              await tx.mutate.messages.update({
+                messageId: attachment.entityId,
+                hasAttachment: false,
+              });
+            }
           }
+        } else {
+          await tx.mutate.message_attachments.delete({ id: attachment.id });
 
-          // Check if the message content is empty (including HTML-only content like <p><br></p>)
-          const doc = new DOMParser().parseFromString(message.content, 'text/html');
-          const plainText = doc.body.textContent?.trim();
+          const remainingAttachments = await tx.run(
+            zql.message_attachments.where('entityId', attachment.entityId),
+          );
 
-          if (plainText === '') {
-            await tx.mutate.messages.delete({
-              messageId: message.messageId,
+          if (remainingAttachments.length === 0) {
+            await tx.mutate.draft_messages.update({
+              id: attachment.entityId,
+              hasAttachment: false,
+            });
+          }
+        }
+      },
+    ),
+  },
+  draft: {
+    createAttachments: defineMutator(
+      z.object({
+        draftMessageId: z.string(),
+        attachments: z.array(
+          z.object({
+            attachmentId: z.string(),
+            originalFilename: z.string(),
+            mimetype: z.string(),
+            size: z.number(),
+            width: z.number().optional(),
+            height: z.number().optional(),
+          }),
+        ),
+        channelId: z.string(),
+        conversationId: z.string().optional(),
+        content: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { draftMessageId, attachments, channelId, conversationId, content, timestamp },
+      }) => {
+        // 1. Check if draft exists for this channel/conversation/user
+        let existingDraft = null;
+        if (conversationId) {
+          existingDraft = await tx.run(
+            zql.draft_messages
+              .where('channelId', channelId)
+              .where('userId', ctx.userID)
+              .where('conversationId', conversationId)
+              .one(),
+          );
+        } else {
+          const channelDrafts = await tx.run(
+            zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
+          );
+          existingDraft = channelDrafts.find(d => d.conversationId === null);
+        }
+
+        const finalDraftMessageId = existingDraft?.id || draftMessageId;
+
+        // 2. If no draft exists, create one with the provided ID
+        if (!existingDraft) {
+          await tx.mutate.draft_messages.insert({
+            id: draftMessageId,
+            channelId,
+            conversationId: conversationId || null,
+            userId: ctx.userID,
+            content: content || '',
+            hasAttachment: true,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        } else {
+          // Update draft's hasAttachment flag
+          if (!existingDraft.hasAttachment) {
+            await tx.mutate.draft_messages.update({
+              id: finalDraftMessageId,
+              content: content || existingDraft.content,
+              hasAttachment: true,
+            });
+          }
+        }
+
+        // 3. Create or update all attachments
+        for (const attachment of attachments) {
+          const { attachmentId, originalFilename, mimetype, size, width, height } = attachment;
+
+          const existingAttachment = await tx.run(
+            zql.message_attachments.where('id', attachmentId).one(),
+          );
+
+          if (existingAttachment) {
+            await tx.mutate.message_attachments.update({
+              id: attachmentId,
+              entityId: finalDraftMessageId,
+              entityType: AttachmentEntityType.DRAFT,
+              conversationId: conversationId || null,
+              originalFilename,
+              mimetype,
+              size,
+              width,
+              height,
             });
           } else {
-            await tx.mutate.messages.update({
-              messageId: attachment.entityId,
-              hasAttachment: false,
+            await tx.mutate.message_attachments.insert({
+              id: attachmentId,
+              entityType: AttachmentEntityType.DRAFT,
+              entityId: finalDraftMessageId,
+              storageProvider: '',
+              originalFilename,
+              mimetype,
+              size,
+              width,
+              height,
+              uploadedByUserId: ctx.userID,
+              createdAt: existingDraft?.createdAt || timestamp,
+              createdBy: ctx.userID,
+              url: '', // Will be populated after upload completes
+              metadata: null,
+              conversationId: conversationId || null,
             });
           }
         }
@@ -1865,8 +2093,13 @@ export const mutators = defineMutators({
       },
     ),
     markThreadActivitiesAsRead: defineMutator(
-      z.object({ conversationId: z.string() }),
-      async ({ tx, ctx, args: { conversationId } }) => {
+      z.object({
+        conversationId: z.string(),
+        draftMessageId: z.string(),
+        draftMessage: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { conversationId, draftMessageId, draftMessage, timestamp } }) => {
         const conversation = await tx.run(
           zql.conversations.where('conversationId', conversationId).one(),
         );
@@ -1876,6 +2109,30 @@ export const mutators = defineMutators({
         }
 
         const channelId = conversation.channelId;
+
+        // Query for drafts in this channel for this user (follows backend logic)
+        const draft = await tx.run(
+          zql.draft_messages
+            .where('channelId', channelId)
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+
+        if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+          await tx.mutate.draft_messages.delete({ id: draft.id });
+        } else {
+          await tx.mutate.draft_messages.upsert({
+            id: draft?.id || draftMessageId,
+            conversationId,
+            channelId,
+            userId: ctx.userID,
+            content: draftMessage,
+            hasAttachment: draft?.hasAttachment || false,
+            updatedAt: timestamp,
+            createdAt: draft?.createdAt || timestamp,
+          });
+        }
 
         const unreadActivities = await tx.run(
           zql.activities

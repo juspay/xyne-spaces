@@ -18,7 +18,7 @@ export interface ApiMessageAttachment {
   thumbnailUrl?: string | null;
   uploadedBy: string;
   messageId: string;
-  conversationId: string;
+  conversationId: string | null;
   createdAt: Date;
   metadata: any;
 }

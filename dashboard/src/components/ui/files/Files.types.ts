@@ -1,12 +1,3 @@
-export interface AttachmentsProps {
-  files: File[];
-  onRemove: (index: number) => void;
-  onPreview: (file: File) => void;
-  isUploading?: boolean;
-  showDownload?: boolean;
-  onThumbnailGenerated?: (file: File, thumbnailBlob: Blob) => void;
-}
-
 export interface UploadedFile {
   id: string;
   originalName: string;
@@ -23,7 +14,6 @@ export interface AttachmentPreviewProps {
   onRemove: () => void;
   onPreview?: () => void;
   isUploading?: boolean;
-  onThumbnailGenerated?: (file: File, thumbnailBlob: Blob) => void;
   variant?: 'compact' | 'detailed';
 }
 

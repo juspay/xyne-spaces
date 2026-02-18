@@ -18,12 +18,14 @@ export interface InputBoxFeatures {
 export interface InputBoxProps {
   autoFocus?: FocusPosition;
   id: string;
+  channelId?: string;
+  conversationId?: string;
   onSendMessage: (
     content: string,
     html: string,
     files: File[],
     videoThumbnails?: Map<File, Blob>,
-  ) => Promise<void>;
+  ) => void | Promise<void>;
   onContentChange?: (html: string, text: string) => void;
   onCancel?: () => void;
   mentionItems?: import('../Selectors/Selectors.types').MentionResult[];

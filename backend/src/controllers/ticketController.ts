@@ -192,6 +192,7 @@ export class TicketController {
         sourceConversationId,
         channelId,
         excludedChatAttachmentIds,
+        draftAttachmentIds,
         tags,
         merchantId,
         parentTicketId,
@@ -200,6 +201,12 @@ export class TicketController {
       // Validate excludedChatAttachmentIds if provided
       if (excludedChatAttachmentIds && !Array.isArray(excludedChatAttachmentIds)) {
         res.status(400).json({ error: 'Invalid format for excludedChatAttachmentIds. Must be an array of strings.' });
+        return;
+      }
+
+      // Validate draftAttachmentIds if provided
+      if (draftAttachmentIds && !Array.isArray(draftAttachmentIds)) {
+        res.status(400).json({ error: 'Invalid format for draftAttachmentIds. Must be an array of strings.' });
         return;
       }
 
@@ -264,7 +271,7 @@ export class TicketController {
 
       // Process file uploads BEFORE transaction (external I/O operation)
       let uploadedFiles: UploadedFileResult[] = [];
-      if (files.length > 0) {
+      if (files.length > 0 && (!draftAttachmentIds || draftAttachmentIds.length === 0)) {
         // Fail entire ticket creation if file upload fails
         // Pass fileMetadata to include dimensions for images/videos
         uploadedFiles = await uploadFiles(files, undefined, fileMetadata);
@@ -466,6 +473,59 @@ export class TicketController {
           }));
 
           await this.messageAttachmentRepository.createMany(attachmentData);
+        }
+
+        // Transfer draft attachments to ticket (if provided)
+        if (draftAttachmentIds && draftAttachmentIds.length > 0) {
+          // Validate draft attachments exist and belong to the user
+          const draftAttachments = await this.messageAttachmentRepository.findByIds(draftAttachmentIds);
+          
+          if (draftAttachments.length !== draftAttachmentIds.length) {
+            logger.warn(`[Ticket Creation] Some draft attachments not found: requested ${draftAttachmentIds.length}, found ${draftAttachments.length}`);
+          }
+
+          // Validate all are DRAFT attachments owned by the user
+          const validDraftAttachmentIds: string[] = draftAttachments
+            .filter((attachment: MessageAttachment) => 
+              attachment.entityType === AttachmentEntityType.DRAFT &&
+              attachment.uploadedByUserId === userId
+            )
+            .map((attachment: MessageAttachment) => attachment.id);
+
+          // Update draft attachments to ticket attachments
+          if (validDraftAttachmentIds.length > 0) {
+            await this.messageAttachmentRepository.updateManyEntityTypeAndId(
+              validDraftAttachmentIds,
+              AttachmentEntityType.TICKET,
+              ticket.id
+            );
+            
+            // Also update conversationId to associate with the new conversation
+            await tx.messageAttachment.updateMany({
+              where: {
+                id: { in: validDraftAttachmentIds },
+              },
+              data: {
+                conversationId: conversationId,
+              },
+            });
+
+            const draftMessage = await db.draftMessage.findUnique({
+              where: {
+                id: draftAttachments[0].entityId, // All attachments belong to the same draft message
+              },
+            });
+
+            if (draftMessage) {
+              await db.draftMessage.delete({
+                where: {
+                  id: draftMessage.id,
+                },
+              });
+            }
+            
+            logger.info(`[Ticket Creation] Transferred ${validDraftAttachmentIds.length} draft attachments to ticket ${ticket.id}`);
+          }
         }
 
         return { ticket, conversationId };

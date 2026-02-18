@@ -36,7 +36,7 @@ export interface Base64AttachmentResult {
     /** Entity ID the attachment belongs to */
     entityId: string;
     /** Conversation ID */
-    conversationId: string;
+    conversationId: string | null;
     /** Base64 encoded content (null if file too large) */
     base64Content: string | null;
     /** Data URI format: data:{mimetype};base64,{content} (null if file too large) */

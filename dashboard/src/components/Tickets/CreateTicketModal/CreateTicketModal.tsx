@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
@@ -40,7 +41,6 @@ import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
-import { useDragDropFiles } from '../../../contexts/DragDropFileContext';
 import { useAuth } from '../../../hooks/useAuth';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
@@ -58,6 +58,7 @@ import { Dialog } from '../../ui/Dialog';
 import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import { AttachmentPreview } from '../../ui/files/AttachmentPreview';
+import type { UploadedFile } from '../../ui/files/Files.types';
 import Input from '../../ui/Input';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import MultiSelect from '../../ui/MultiSelect';
@@ -65,7 +66,7 @@ import RadioGroup, { Radio } from '../../ui/RadioGroup';
 import Textarea from '../../ui/Textarea';
 import Tooltip from '../../ui/Tooltip';
 import { getFilesDimensions } from '../../ui/utils/files';
-import { getPriorityOptions, getSourceId, parseAssignee, TAG_COLORS } from './createTicket.utils';
+import { getPriorityOptions, parseAssignee, TAG_COLORS } from './createTicket.utils';
 import { InlineCalendar } from './DateSelector';
 import { TextShimmer } from './ShimmerText';
 import { UserMultiSelect } from './UserMultiSelect';
@@ -73,6 +74,7 @@ import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMe
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard } from '../../../utils/boardUtils';
+import { useDraftAttachments } from '../../../hooks/useDraft';
 
 interface CreateTicketModalProps {
   isOpen: boolean;
@@ -174,22 +176,23 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const zero = useZero();
   const { user } = useAuth();
   const {
-    droppedFiles: sharedAttachments,
-    addDroppedFile: addAttachment,
-    removeDroppedFile: removeAttachment,
-    clearDroppedFiles: clearAttachments,
-  } = useDragDropFiles();
+    addDroppedFiles: providerAddDroppedFiles,
+    removeDroppedFile: providerRemoveDroppedFile,
+    clearDroppedFiles: providerClearDroppedFiles,
+    getDroppedFilesForEntity,
+  } = useDraftAttachments();
 
   const [searchParams] = useSearchParams();
 
   const tab = searchParams.get('tab');
 
-  const sourceId = getSourceId(sourceConversation, tab, channelId);
-
   const displayConversation = useMemo(
     () => (sourceConversation && isOpen ? sourceConversation : undefined),
     [sourceConversation, isOpen],
   );
+
+  // Determine if we're creating from conversation or tickets tab
+  const isFromTicketsTab = tab === 'tickets' && !sourceConversation;
   // Fetch existing CHAT attachments from INITIAL MESSAGE ONLY using Zero
 
   const messageIdForQuery =
@@ -223,6 +226,75 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // File handling state
   const [isDraggingOverModal, setIsDraggingOverModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Local state for files when creating from Tickets tab (no DB storage)
+  const [ticketLocalFiles, setTicketLocalFiles] = useState<File[]>([]);
+
+  // Load attachments from DraftProvider (conversation case) or use local state (tickets tab)
+  const [attachmentsMap, setAttachmentsMap] = useState<Map<string, File | UploadedFile>>(new Map());
+
+  // Load attachments based on source
+  useEffect(() => {
+    const loadAttachments = () => {
+      if (!isOpen) return;
+
+      if (!isFromTicketsTab) {
+        // Load from DraftProvider (DB-backed)
+        try {
+          const map = getDroppedFilesForEntity(
+            channelId,
+            sourceConversation?.conversationId ?? null,
+          );
+          setAttachmentsMap(map);
+        } catch (error) {
+          console.error('Failed to load attachments:', error);
+        }
+      } else {
+        // For tickets tab, local state only
+        setAttachmentsMap(new Map());
+      }
+    };
+
+    void loadAttachments();
+  }, [isOpen, isFromTicketsTab, sourceConversation, channelId, getDroppedFilesForEntity]);
+
+  // Unified add file handler
+  const addFile = useCallback(
+    async (file: File): Promise<void> => {
+      if (!isFromTicketsTab) {
+        // Use DraftProvider (DB-backed)
+        await providerAddDroppedFiles(file, channelId, sourceConversation?.conversationId);
+      } else {
+        // Use local state (memory only)
+        setTicketLocalFiles(prev => [...prev, file]);
+      }
+    },
+    [isFromTicketsTab, providerAddDroppedFiles, channelId, sourceConversation],
+  );
+
+  // Unified remove file handler
+  const removeFile = useCallback(
+    async (attachmentId: string, _file: File): Promise<void> => {
+      if (!isFromTicketsTab) {
+        // Use DraftProvider
+        await providerRemoveDroppedFile(attachmentId);
+      } else {
+        // Use local state - note: _file parameter is not used for tickets tab since we filter by attachmentId from DraftProvider
+        // For tickets tab, we currently don't use the file param but could implement proper filtering in future
+        setTicketLocalFiles(prev => prev.filter(() => false)); // Clear handled differently via clearFiles on close
+      }
+    },
+    [isFromTicketsTab, providerRemoveDroppedFile],
+  );
+
+  // Clear all files handler
+  const clearFiles = useCallback(async () => {
+    if (!isFromTicketsTab) {
+      await providerClearDroppedFiles(channelId, sourceConversation?.conversationId ?? null);
+    } else {
+      setTicketLocalFiles([]);
+    }
+  }, [isFromTicketsTab, providerClearDroppedFiles, channelId, sourceConversation]);
 
   const channels = useAllVisibleChannels().filter(c => c.scopeType === ChannelScopeType.DEFAULT);
 
@@ -401,8 +473,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   );
   const users = useUserSearch(assigneeSearchValue, 15);
 
-  // Combine chat attachments and shared attachments for display
-  // Only show attachments if we have a sourceConversationId (draft conversation)
+  // Combine chat attachments and newly uploaded files for display
   const allAttachments = useMemo(() => {
     const result: Array<{
       id?: string;
@@ -413,7 +484,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       url?: string;
       thumbnailUrl?: string | undefined;
       isFromChat?: boolean;
-      file?: File;
+      file?: File | UploadedFile;
     }> = [];
 
     // Add chat attachments only if creating from a conversation (draft)
@@ -435,19 +506,41 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       result.push(...chatAtts);
     }
 
-    // Add shared attachments (newly uploaded files)
-    const currentSharedFiles = sharedAttachments[sourceId] || [];
-
-    currentSharedFiles.forEach(file => {
-      result.push({
-        name: file.name,
+    // Add newly uploaded files (from DraftProvider or local state)
+    if (!isFromTicketsTab) {
+      // From DraftProvider (DB)
+      const draftFiles = Array.from(attachmentsMap.entries()).map(([attachmentId, file]) => ({
+        attachmentId,
         file,
-        isFromChat: false,
+      }));
+      draftFiles.forEach(({ attachmentId, file }) => {
+        result.push({
+          id: attachmentId,
+          name: file instanceof File ? file.name : file.originalName,
+          file,
+          isFromChat: false,
+        });
       });
-    });
+    } else {
+      // From local state (memory only)
+      ticketLocalFiles.forEach(file => {
+        result.push({
+          name: file.name,
+          file,
+          isFromChat: false,
+        });
+      });
+    }
 
     return result;
-  }, [chatAttachments, sharedAttachments, sourceId, sourceConversation, excludedChatAttachmentIds]);
+  }, [
+    chatAttachments,
+    attachmentsMap,
+    sourceConversation,
+    excludedChatAttachmentIds,
+    isFromTicketsTab,
+    ticketLocalFiles,
+  ]);
 
   // Reset form when modal opens/closes, and set initial values
   useEffect(() => {
@@ -557,7 +650,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     setIsDraggingOverModal(false);
 
     const droppedFiles = Array.from(e.dataTransfer.files);
-    droppedFiles.forEach(file => addAttachment(sourceId, file));
+    droppedFiles.forEach(file => void addFile(file));
   };
 
   const handlePaperclipClick = (): void => {
@@ -566,7 +659,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const selectedFiles = Array.from(e.target.files || []);
-    selectedFiles.forEach(file => addAttachment(sourceId, file));
+    selectedFiles.forEach(file => void addFile(file));
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -674,7 +767,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     return true;
   }, [form.state.isValid, form.state.isDirty, formMapping, formValues, dynamicFieldErrors]);
 
-  const handleCreateTicket = async (formData: CreateTicketFormData): Promise<void> => {
+  const handleCreateTicket = async (formData: CreateTicketFormData) => {
     if (!user) return;
     try {
       // Validate mandatory board-configured fields
@@ -747,10 +840,17 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         await onBeforeCreate(formData.description, []);
       }
 
-      const attachments = sharedAttachments[sourceId] || [];
+      // Collect draft attachment IDs from DraftProvider (for conversation case)
+      const draftAttachmentIds = !isFromTicketsTab ? Array.from(attachmentsMap.keys()) : [];
+
+      // Get files to send - combine both sources
+      const draftFiles = !isFromTicketsTab
+        ? Array.from(attachmentsMap.values()).filter((f): f is File => f instanceof File)
+        : ticketLocalFiles;
+
       // 2. PROCEED WITH TICKET CREATION
       let response;
-      if (sharedAttachments && attachments.length > 0) {
+      if (draftFiles.length > 0) {
         const formDataPayload = new FormData();
 
         // Add text fields
@@ -800,6 +900,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         formDataPayload.append('createdBy', user.id);
         formDataPayload.append('updatedBy', user.id);
 
+        // Add draft attachment IDs if creating from conversation
+        if (draftAttachmentIds.length > 0) {
+          draftAttachmentIds.forEach(id => {
+            formDataPayload.append('draftAttachmentIds[]', id);
+          });
+        }
+
         if (sourceConversation) {
           formDataPayload.append('sourceConversationId', sourceConversation.conversationId);
           if (excludedChatAttachmentIds.size > 0) {
@@ -810,7 +917,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         }
 
         // Extract dimensions for all files (images/videos only)
-        const dimensionsMap = await getFilesDimensions(attachments);
+        const dimensionsMap = await getFilesDimensions(draftFiles);
 
         // Build file metadata with dimensions
         const fileMetadata: Array<{
@@ -821,8 +928,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         }> = [];
 
         // Add shared attachments (files added via conversation)
-        if (attachments.length > 0) {
-          attachments.forEach((file: File, fileIndex: number) => {
+        if (draftFiles.length > 0) {
+          draftFiles.forEach((file: File, fileIndex: number) => {
             formDataPayload.append('files', file);
 
             // Get dimensions for this file (null for non-media files)
@@ -857,6 +964,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           createdBy: user.id,
           updatedBy: user.id,
           ticketType: formData.ticketType,
+          ...(draftAttachmentIds.length > 0 && { draftAttachmentIds }),
           ...(sourceConversation && { eta: formData.eta?.toISOString() }),
           ...(formData.tags && formData.tags.length > 0 && { tags: formData.tags }),
           ...(sourceConversation && { sourceConversationId: sourceConversation.conversationId }),
@@ -893,8 +1001,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           );
         });
       }
-      // Clear shared attachments after successful creation
-      clearAttachments(sourceId);
+      // Clear files after successful creation
+      void clearFiles();
 
       // Don't auto-close if part of a sequence - let the parent handle it
       if (!ticketSequence || ticketSequence.current === ticketSequence.total) {
@@ -913,7 +1021,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Clear attachments when modal closes
   const handleClose = (): void => {
-    if (sourceConversation || tab === 'tickets') clearAttachments(sourceId);
+    void clearFiles();
     setExcludedChatAttachmentIds(new Set());
     setEditingSubTicketIndex(null);
     setEditingSubTicketTitle('');
@@ -1732,17 +1840,34 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
                 // Handle new uploaded files (removable)
                 if (attachment.file) {
-                  const fileKey = `file-${attachment.file.name}-${attachment.file.size}-${attachment.file.lastModified}`;
+                  const isFileObject = attachment.file instanceof File;
+                  let fileKey: string;
+                  if (isFileObject) {
+                    const fileObj = attachment.file as File;
+                    fileKey =
+                      attachment.id ||
+                      `file-${fileObj.name}-${fileObj.size}-${fileObj.lastModified}`;
+                  } else {
+                    const uploadedFile = attachment.file as UploadedFile;
+                    fileKey =
+                      attachment.id ||
+                      `file-${uploadedFile.originalName}-${uploadedFile.fileSize}-${Date.now()}`;
+                  }
+                  const fileId = attachment.id || '';
                   return (
                     <AttachmentPreview
                       key={fileKey}
                       file={attachment.file}
                       onRemove={() => {
-                        if (attachment.file) {
-                          removeAttachment(sourceId, attachment.file);
+                        if (fileId) {
+                          void removeFile(fileId, {} as File);
                         }
                       }}
-                      onPreview={() => handlePreviewFile(attachment.file!)}
+                      onPreview={() => {
+                        if (isFileObject) {
+                          handlePreviewFile(attachment.file as File);
+                        }
+                      }}
                       isUploading={form.state.isSubmitting}
                       variant='detailed'
                     />

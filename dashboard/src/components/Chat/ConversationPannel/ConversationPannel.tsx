@@ -35,6 +35,8 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../../../machines/stateMachine';
+import { useDraft } from '../../../hooks/useDraft';
+import { v4 as uuidv4 } from 'uuid';
 
 interface NavigationState {
   fromMyTickets?: boolean;
@@ -188,6 +190,13 @@ const ConversationPannel = ({
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
+  const draft = useDraft(channelId);
+  const draftRef = useRef(draft);
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
   // Get dynamic tabs based on permissions and channel scope type
   const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(channel?.scopeType);
 
@@ -238,6 +247,8 @@ const ConversationPannel = ({
           conversationId: latestMessageRef.current.conversationId,
         }),
         timestamp: Date.now(),
+        draftMessageId: uuidv4(),
+        draftMessage: draftRef.current?.html || '',
       };
 
       void zero.mutate(mutators.channel.markChannelAsViewed(payload));
