@@ -12,6 +12,7 @@ import {
   ConversationParticipation,
   DocType,
   schema,
+  LinkVisibility,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -558,6 +559,30 @@ export const queries = defineQueries({
       .orderBy('updatedAt', 'desc')
       .related('participants')
       .related('channel');
+  }),
+
+  // Query for links in a channel (shared + personal + shared with user)
+  channelLinks: defineQuery(z.object({ channelId: z.string() }), ({ ctx, args: { channelId } }) => {
+    return zql.links
+      .where('channelId', channelId)
+      .where(helpers => {
+        return helpers.or(
+          // All DEFAULT visibility links
+          helpers.cmp('visibility', LinkVisibility.DEFAULT),
+          // PERSONAL links created by current user
+          helpers.and(
+            helpers.cmp('visibility', LinkVisibility.PERSONAL),
+            helpers.cmp('createdBy', ctx.userID),
+          ),
+          // PERSONAL links shared with current user
+          helpers.and(
+            helpers.cmp('visibility', LinkVisibility.PERSONAL),
+            helpers.exists('sharedWith', sw => sw.where('userId', ctx.userID)),
+          ),
+        );
+      })
+      .related('sharedWith')
+      .orderBy('createdAt', 'desc');
   }),
   canvasParticipants: defineQuery(z.object({ canvasId: z.string() }), ({ args: { canvasId } }) => {
     return zql.canvas_participants.where('canvasId', canvasId).related('canvas');

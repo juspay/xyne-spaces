@@ -18,6 +18,7 @@ import {
   FormFieldType,
   FormContextType,
   FormEntityType,
+  LinkVisibility,
   UserResponsibility,
   DocType,
   PRStatusEvent,
@@ -3600,6 +3601,174 @@ export const mutators = defineMutators({
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           metadata,
         });
+      },
+    ),
+  },
+  links: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        url: z.string(),
+        title: z.string(),
+        description: z.string().optional(),
+        favicon: z.string().optional(),
+        channelId: z.string(),
+        visibility: z.enum(['DEFAULT', 'PERSONAL']),
+        createdAt: z.number(),
+        updatedAt: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { id, url, title, description, favicon, channelId, visibility, createdAt, updatedAt },
+      }) => {
+        // Check if link already exists for this user in this channel
+        const existing = await tx.run(
+          zql.links
+            .where('createdBy', ctx.userID)
+            .where('url', url)
+            .where('channelId', channelId)
+            .one(),
+        );
+
+        if (existing) {
+          throw new Error('Link already exists');
+        }
+
+        await tx.mutate.links.insert({
+          id,
+          url,
+          title,
+          description: description ?? null,
+          favicon: favicon ?? null,
+          channelId,
+          createdBy: ctx.userID,
+          visibility: visibility === 'DEFAULT' ? LinkVisibility.DEFAULT : LinkVisibility.PERSONAL,
+          createdAt,
+          updatedAt,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        favicon: z.string().optional(),
+        visibility: z.enum(['DEFAULT', 'PERSONAL']).optional(),
+        updatedAt: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, title, description, favicon, visibility, updatedAt } }) => {
+        const link = await tx.run(zql.links.where('id', id).one());
+
+        if (!link) {
+          throw new Error('Link not found');
+        }
+
+        if (link.createdBy !== ctx.userID) {
+          throw new Error('Only link creator can update it');
+        }
+
+        await tx.mutate.links.update({
+          id,
+          ...(title !== undefined && { title }),
+          ...(description !== undefined && { description }),
+          ...(favicon !== undefined && { favicon }),
+          ...(visibility !== undefined && {
+            visibility: visibility === 'DEFAULT' ? LinkVisibility.DEFAULT : LinkVisibility.PERSONAL,
+          }),
+          updatedAt,
+        });
+      },
+    ),
+    delete: defineMutator(z.object({ id: z.string() }), async ({ tx, ctx, args: { id } }) => {
+      const link = await tx.run(zql.links.where('id', id).one());
+
+      if (!link) {
+        throw new Error('Link not found');
+      }
+
+      if (link.createdBy !== ctx.userID) {
+        throw new Error('Only link creator can delete it');
+      }
+
+      // Delete link (cascade will handle link_access)
+      await tx.mutate.links.delete({ id });
+    }),
+    shareWith: defineMutator(
+      z.object({
+        linkId: z.string(),
+        userIds: z.array(z.string()),
+        accessIds: z.array(z.string()),
+        createdAt: z.number(),
+      }),
+      async ({ tx, ctx, args: { linkId, userIds, accessIds, createdAt } }) => {
+        const link = await tx.run(zql.links.where('id', linkId).one());
+
+        if (!link) {
+          throw new Error('Link not found');
+        }
+
+        if (link.createdBy !== ctx.userID) {
+          throw new Error('Only link creator can share it');
+        }
+
+        // Add each user to link_access
+        for (let i = 0; i < userIds.length; i++) {
+          const userId = userIds[i];
+          const accessId = accessIds[i];
+
+          if (!userId || !accessId) {
+            continue;
+          }
+
+          // Check if user exists
+          const user = await tx.run(zql.users.where('id', userId).one());
+          if (!user) {
+            continue;
+          }
+
+          // Check if already has access
+          const existingAccess = await tx.run(
+            zql.link_access.where('linkId', linkId).where('userId', userId).one(),
+          );
+
+          if (existingAccess) {
+            continue;
+          }
+
+          await tx.mutate.link_access.insert({
+            id: accessId,
+            linkId,
+            userId,
+            createdAt,
+          });
+        }
+      },
+    ),
+    unshare: defineMutator(
+      z.object({
+        linkId: z.string(),
+        userId: z.string(),
+      }),
+      async ({ tx, ctx, args: { linkId, userId } }) => {
+        const link = await tx.run(zql.links.where('id', linkId).one());
+
+        if (!link) {
+          throw new Error('Link not found');
+        }
+
+        if (link.createdBy !== ctx.userID) {
+          throw new Error('Only link creator can unshare it');
+        }
+
+        const access = await tx.run(
+          zql.link_access.where('linkId', linkId).where('userId', userId).one(),
+        );
+
+        if (access) {
+          await tx.mutate.link_access.delete({ id: access.id });
+        }
       },
     ),
   },

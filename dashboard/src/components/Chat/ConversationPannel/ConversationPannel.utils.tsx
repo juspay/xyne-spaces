@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 
 import MessagesIcon from '../../icons/MessagesIcon';
-import { PinIcon, NotebookText, FolderOpen, SquareKanban } from 'lucide-react';
+import { PinIcon, NotebookText, FolderOpen, SquareKanban, Link } from 'lucide-react';
 import { useCanReadTicket } from '../../../hooks/usePermissions';
 import { ChannelScopeType } from '@xyne/shared';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
@@ -33,6 +33,11 @@ const STATIC_TABS: ConversationTabListType[] = [
     label: 'Canvas',
     value: 'canvas',
     icon: <NotebookText size={14} />,
+  },
+  {
+    label: 'Links',
+    value: 'links',
+    icon: <Link size={14} />,
   },
 ];
 

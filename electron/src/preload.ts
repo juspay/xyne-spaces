@@ -55,6 +55,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('navigate-to-ticket-thread', listener);
   },
 
+  onOpenInBrowserPanel: (callback: (url: string) => void) => {
+    const listener = (_event: unknown, url: string) => callback(url);
+    ipcRenderer.on('open-in-browser-panel', listener);
+    return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
+  },
+
   onAuthSuccess: (callback: () => void) => {
     ipcRenderer.on('auth:success', callback);
   },
@@ -163,6 +169,57 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docs-publish:clear-output-dir'),
     getOutputDir: () =>
       ipcRenderer.invoke('docs-publish:get-output-dir'),
+  },
+
+  // Browser Tabs APIs
+  browserTabs: {
+    create: (url: string) => ipcRenderer.invoke('browser-tabs:create', url),
+    close: (tabId: string) => ipcRenderer.invoke('browser-tabs:close', tabId),
+    switch: (tabId: string) => ipcRenderer.invoke('browser-tabs:switch', tabId),
+    getAll: () => ipcRenderer.invoke('browser-tabs:get-all'),
+    setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
+      ipcRenderer.send('browser-tabs:set-bounds', bounds),
+    show: () => ipcRenderer.send('browser-tabs:show'),
+    hide: () => ipcRenderer.send('browser-tabs:hide'),
+    goBack: (tabId: string) => ipcRenderer.invoke('browser-tabs:go-back', tabId),
+    goForward: (tabId: string) => ipcRenderer.invoke('browser-tabs:go-forward', tabId),
+    reload: (tabId: string) => ipcRenderer.invoke('browser-tabs:reload', tabId),
+    navigate: (tabId: string, url: string) => ipcRenderer.invoke('browser-tabs:navigate', tabId, url),
+    isVisible: () => ipcRenderer.invoke('browser-tabs:is-visible'),
+    // Event listeners
+    onTitleUpdated: (callback: (data: { tabId: string; title: string }) => void) => {
+      const listener = (_event: unknown, data: { tabId: string; title: string }) => callback(data);
+      ipcRenderer.on('browser-tabs:title-updated', listener);
+      return () => ipcRenderer.removeListener('browser-tabs:title-updated', listener);
+    },
+    onFaviconUpdated: (callback: (data: { tabId: string; favicon: string }) => void) => {
+      const listener = (_event: unknown, data: { tabId: string; favicon: string }) => callback(data);
+      ipcRenderer.on('browser-tabs:favicon-updated', listener);
+      return () => ipcRenderer.removeListener('browser-tabs:favicon-updated', listener);
+    },
+    onUrlUpdated: (callback: (data: { tabId: string; url: string; canGoBack: boolean; canGoForward: boolean }) => void) => {
+      const listener = (_event: unknown, data: { tabId: string; url: string; canGoBack: boolean; canGoForward: boolean }) => callback(data);
+      ipcRenderer.on('browser-tabs:url-updated', listener);
+      return () => ipcRenderer.removeListener('browser-tabs:url-updated', listener);
+    },
+    onLoadingChanged: (callback: (data: { tabId: string; isLoading: boolean }) => void) => {
+      const listener = (_event: unknown, data: { tabId: string; isLoading: boolean }) => callback(data);
+      ipcRenderer.on('browser-tabs:loading-changed', listener);
+      return () => ipcRenderer.removeListener('browser-tabs:loading-changed', listener);
+    },
+    onTabSwitched: (callback: (data: { tabId: string }) => void) => {
+      const listener = (_event: unknown, data: { tabId: string }) => callback(data);
+      ipcRenderer.on('browser-tabs:tab-switched', listener);
+      return () => ipcRenderer.removeListener('browser-tabs:tab-switched', listener);
+    },
+    onTabClosed: (callback: (data: { tabId: string }) => void) => {
+      const listener = (_event: unknown, data: { tabId: string }) => callback(data);
+      ipcRenderer.on('browser-tabs:tab-closed', listener);
+      return () => ipcRenderer.removeListener('browser-tabs:tab-closed', listener);
+    },
+    captureTab: (tabId: string) => ipcRenderer.invoke('browser-tabs:capture-tab', tabId),
+    setTabVisible: (tabId: string, visible: boolean) => ipcRenderer.send('browser-tabs:set-tab-visible', tabId, visible),
+    cleanupBeforeReload: () => ipcRenderer.send('browser-tabs:cleanup-before-reload'),
   },
 
   // Log listener

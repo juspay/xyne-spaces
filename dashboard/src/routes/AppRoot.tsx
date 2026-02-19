@@ -12,6 +12,7 @@ import TicketView from '../components/Tickets/TicketView/TicketView';
 import WorkflowScreen from './WorkflowScreen/WorkflowScreen';
 import TicketIDEScreen from './TicketIDEScreen/TicketIDEScreen';
 import VSCodeWorkspaceScreen from './VSCodeWorkspaceScreen/VSCodeWorkspaceScreen';
+import { BrowserTabsScreen } from './BrowserTabsScreen';
 import AgentsScreen from './AgentsScreen/AgentScreen';
 import KnowledgeBaseScreen from './KnowledgeBaseScreen/KnowledgeBase';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
@@ -47,6 +48,7 @@ import WebView from '../components/WebView/WebView';
 import { useSelector } from '@xstate/react';
 import { webviewActor, setPanelRefs } from '../machines/webviewMachine';
 import { xyneAIActor, setXyneAIPanelRefs } from '../machines/xyneAIMachine';
+import { browserPanelActor, setBrowserPanelRefs } from '../machines/browserPanelMachine';
 import ActivityListView from '../components/Activity/ActivityListView/ActivityListView';
 import Search from '../components/Chat/Search/Search';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
@@ -72,6 +74,7 @@ import { useShortcutById } from '../shortcuts';
 import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts';
 import DocsScreen from './DocsScreen/DocsScreen';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
+import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
@@ -88,6 +91,9 @@ const AppRoot = (): ReactElement => {
   // Create panel refs for XyneAI
   const xyneAILeftPanelRef = useRef<ImperativePanelHandle>(null);
   const xyneAIRightPanelRef = useRef<ImperativePanelHandle>(null);
+
+  const browserPanelLeftRef = useRef<ImperativePanelHandle>(null);
+  const browserPanelRightRef = useRef<ImperativePanelHandle>(null);
 
   const navigate = useNavigate();
 
@@ -109,6 +115,18 @@ const AppRoot = (): ReactElement => {
       left: xyneAILeftPanelRef,
       right: xyneAIRightPanelRef,
     });
+    setBrowserPanelRefs({
+      left: browserPanelLeftRef,
+      right: browserPanelRightRef,
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      void void window.electronAPI?.browserTabs?.cleanupBeforeReload();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
   // Register global keyboard shortcuts
@@ -117,6 +135,10 @@ const AppRoot = (): ReactElement => {
   const webviewState = useSelector(webviewActor, state => state.context.webviewState);
   const xyneAIState = useSelector(xyneAIActor, state => state);
   const xyneAIChannelId = useSelector(xyneAIActor, state => state.context.channelId);
+  const browserPanelState = useSelector(
+    browserPanelActor,
+    state => state.context.browserPanelState,
+  );
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const { isMobile } = usePlatform();
 
@@ -161,6 +183,20 @@ const AppRoot = (): ReactElement => {
 
   // Enable swipe back gesture on mobile
   useSwipeBack();
+
+  const prevPathnameRef = useRef(location.pathname);
+  useEffect(() => {
+    const prev = prevPathnameRef.current;
+    prevPathnameRef.current = location.pathname;
+
+    if (
+      browserPanelState === 'open' &&
+      prev.startsWith('/chat') &&
+      !location.pathname.startsWith('/chat')
+    ) {
+      browserPanelActor.send({ type: 'CLOSE' });
+    }
+  }, [location.pathname, browserPanelState]);
 
   // Monitor for pathname changes to update XyneAI context when navigating
   useEffect(() => {
@@ -291,6 +327,43 @@ const AppRoot = (): ReactElement => {
                   </Panel>
                 </PanelGroup>
               </div>
+            ) : browserPanelState === 'open' ? (
+              // Browser Panel is open - show panel layout with Browser
+              <div className='flex flex-col h-screen'>
+                {!isMobile && <GlobalTopBar />}
+                <PanelGroup
+                  direction='horizontal'
+                  className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
+                  autoSaveId='app-root-browser'
+                >
+                  <Panel ref={browserPanelLeftRef} defaultSize={65}>
+                    <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
+                      <AppSidebar />
+                      {/* VSCode panel - always mounted, visibility controlled by route */}
+                      <div
+                        className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
+                      >
+                        <VSCodeWorkspaceScreen />
+                      </div>
+                      {/* Regular content - hidden when on VSCode route */}
+                      <main
+                        className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
+                      >
+                        <EditWarningModal />
+                        <Outlet />
+                      </main>
+                    </div>
+                  </Panel>
+                  <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                  </PanelResizeHandle>
+                  <Panel ref={browserPanelRightRef} defaultSize={35} maxSize={50}>
+                    <div className='h-full'>
+                      <BrowserPanel />
+                    </div>
+                  </Panel>
+                </PanelGroup>
+              </div>
             ) : webviewState === 'closed' || webviewState === 'idle' ? (
               // When both closed or idle, only show the left panel without resize handle or right panel
               <div className='flex flex-col h-screen'>
@@ -353,6 +426,7 @@ const AppRoot = (): ReactElement => {
             <IncomingCallModal />
             <GlobalCallOverlay />
             <NotificationHandler />
+            <BrowserPanelHandler />
             <GlobalCommandMenu />
             <ShortcutsHelpModal
               isOpen={isShortcutsModalOpen}
@@ -657,6 +731,10 @@ export const router = createBrowserRouter([
               {
                 path: '/vscode',
                 element: <VSCodeWorkspaceScreen />,
+              },
+              {
+                path: '/browser',
+                element: <BrowserTabsScreen />,
               },
               {
                 path: '/forms',

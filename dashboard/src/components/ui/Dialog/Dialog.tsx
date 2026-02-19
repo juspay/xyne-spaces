@@ -2,6 +2,7 @@ import React, { ReactNode, useState, useEffect } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import Drawer from '../Drawer';
 import { cn } from '../../../utils/classNames';
+import { useOverlayEffect } from '../../../machines/stateMachine';
 
 export interface DialogProps {
   trigger?: ReactNode;
@@ -40,6 +41,7 @@ export const Dialog = ({
   className,
 }: DialogProps): React.ReactElement => {
   const [isMobile, setIsMobile] = useState(false);
+  useOverlayEffect(open ?? false);
 
   // Detect screen size changes
   useEffect(() => {

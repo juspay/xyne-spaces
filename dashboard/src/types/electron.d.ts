@@ -17,6 +17,7 @@ export interface ElectronAPI {
   ) => () => void;
   onNavigateTo: (callback: (url: string) => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
+  onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
   onAuthSuccess: (callback: () => void) => void;
   onTokenExpired: (callback: () => void) => void;
   openPreviewWindow: (url: string, userAgent?: string) => void;
@@ -110,6 +111,47 @@ export interface ElectronAPI {
     hasActiveSessions: () => Promise<boolean>;
     getActiveSessionCount: () => Promise<number>;
   };
+  browserTabs: {
+    create: (url: string) => Promise<{
+      success: boolean;
+      tab?: BrowserTab;
+      error?: string;
+    }>;
+    close: (tabId: string) => Promise<{ success: boolean; error?: string }>;
+    switch: (tabId: string) => Promise<{ success: boolean; error?: string }>;
+    getAll: () => Promise<{
+      success: boolean;
+      tabs: BrowserTab[];
+      activeTabId: string | null;
+      error?: string;
+    }>;
+    setBounds: (bounds: { x: number; y: number; width: number; height: number }) => void;
+    show: () => void;
+    hide: () => void;
+    goBack: (tabId: string) => Promise<{ success: boolean; error?: string }>;
+    goForward: (tabId: string) => Promise<{ success: boolean; error?: string }>;
+    reload: (tabId: string) => Promise<{ success: boolean; error?: string }>;
+    navigate: (tabId: string, url: string) => Promise<{ success: boolean; error?: string }>;
+    isVisible: () => Promise<{ isVisible: boolean }>;
+    onTitleUpdated: (callback: (data: { tabId: string; title: string }) => void) => () => void;
+    onFaviconUpdated: (callback: (data: { tabId: string; favicon: string }) => void) => () => void;
+    onUrlUpdated: (
+      callback: (data: {
+        tabId: string;
+        url: string;
+        canGoBack: boolean;
+        canGoForward: boolean;
+      }) => void,
+    ) => () => void;
+    onLoadingChanged: (
+      callback: (data: { tabId: string; isLoading: boolean }) => void,
+    ) => () => void;
+    onTabSwitched: (callback: (data: { tabId: string }) => void) => () => void;
+    onTabClosed: (callback: (data: { tabId: string }) => void) => () => void;
+    captureTab: (tabId: string) => Promise<{ success: boolean; dataUrl?: string; error?: string }>;
+    setTabVisible: (tabId: string, visible: boolean) => void;
+    cleanupBeforeReload: () => Promise<{ success: boolean; error?: string }>;
+  };
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
   getBundleVersion: () => Promise<string | null>;
   onAppUpdateAvailable: (
@@ -120,6 +162,16 @@ export interface ElectronAPI {
     }) => void,
   ) => () => void;
   applyAppUpdate: () => void;
+}
+
+interface BrowserTab {
+  id: string;
+  url: string;
+  title: string;
+  favicon?: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  isLoading: boolean;
 }
 
 declare global {

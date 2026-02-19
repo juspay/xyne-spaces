@@ -15,6 +15,7 @@ import ConversationHeader from '../ConversationHeader/ConversationHeader';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import DragAndDropOverlay from '../DragAndDropOverlay';
 import CanvasTab from '../../Canvas/CanvasTab';
+import LinksTab from '../LinksTab/LinksTab';
 import { useConversationTabs } from './ConversationPannel.utils';
 import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -415,6 +416,7 @@ const ConversationPannel = ({
               <KanbanBoardScreen channelId={channelId} />
             ))}
           {tab === 'canvas' && <CanvasTab channelId={channelId} />}
+          {tab === 'links' && <LinksTab channelId={channelId} />}
         </div>
       </div>
     </ConversationTabContext.Provider>

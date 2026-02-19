@@ -118,9 +118,9 @@ export async function createMainWindow(): Promise<BrowserWindow> {
         return { action: 'deny' };
       }
       
-      // External URLs - open in system browser
+      // External URLs - open in browser panel instead of system browser
       if (!isInternalUrl) {
-        void shell.openExternal(url);
+        mainWindow?.webContents.send('open-in-browser-panel', url);
         return { action: 'deny' };
       }
       

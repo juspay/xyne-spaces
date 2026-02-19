@@ -3,7 +3,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import useMeasure from '../../../hooks/useMeasure';
-import { Star, Users2 } from 'lucide-react';
+import { Star, Users2, ExternalLink } from 'lucide-react';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Dialog from '../../ui/Dialog';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -21,6 +21,9 @@ import { useUser } from '../../../hooks/useUsers';
 import { isDMChannel, isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { useNavigate } from 'react-router-dom';
+import { useRouteContext } from '../../../hooks/useRouteContext';
+import { standaloneNavigate } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
@@ -47,6 +50,8 @@ const ConversationHeader = ({
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
+  const navigate = useNavigate();
+  const { baseRoute } = useRouteContext();
 
   // Get user status for DMs
   const isDM = channel && isDMChannel(channel.scopeType);
@@ -60,6 +65,12 @@ const ConversationHeader = ({
 
   const handleStarToggle = (): void => {
     void zero.mutate(mutators.channel.toggleStarred({ channelId }));
+  };
+
+  const handleOpenAllLinks = (e: React.MouseEvent): void => {
+    standaloneNavigate(navigate, `${baseRoute}/${channelId}?tab=links&openAllLinks=true`, {
+      event: e,
+    });
   };
 
   if (!channel) return null;
@@ -156,6 +167,17 @@ const ConversationHeader = ({
               <XyneAIStar />
             </Button>
           </Tooltip>
+          {
+            <Tooltip content={`Open all Links`}>
+              <Button
+                variant='outline'
+                onClick={handleOpenAllLinks}
+                className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
+              >
+                <ExternalLink className='w-4 h-4' />
+              </Button>
+            </Tooltip>
+          }
           <CallTrigger
             channelId={channelId}
             targetUserIds={targetUserId ? [targetUserId] : []}

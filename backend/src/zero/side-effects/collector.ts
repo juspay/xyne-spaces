@@ -149,7 +149,9 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'dashboards':
     case 'queries':
     case 'dashboard_queries_mapping':
-    case 'stage_pr_status_mappings': {
+    case 'stage_pr_status_mappings':
+    case 'links':
+    case 'link_access': {
       const typedArgs = args as { id: string };
       return typedArgs.id;
     }

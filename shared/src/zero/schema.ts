@@ -353,6 +353,12 @@ export enum BookmarkEntityType {
 }
 
 // @ts-ignore TS1294
+export enum LinkVisibility {
+  DEFAULT = 'DEFAULT',
+  PERSONAL = 'PERSONAL',
+}
+
+// @ts-ignore TS1294
 export enum EmailType {
   DEFAULT = 'DEFAULT',
   REPLY = 'REPLY',
@@ -1218,6 +1224,30 @@ export const bookmarkTable = table('bookmarks')
     entityType: enumeration<BookmarkEntityType>(),
     createdAt: number(),
     metadata: json().optional(),
+  })
+  .primaryKey('id');
+
+export const linkTable = table('links')
+  .columns({
+    id: string(),
+    url: string(),
+    title: string(),
+    description: string().optional(),
+    favicon: string().optional(),
+    channelId: string(),
+    createdBy: string(),
+    visibility: enumeration<LinkVisibility>(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const linkAccessTable = table('link_access')
+  .columns({
+    id: string(),
+    linkId: string(),
+    userId: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -2460,6 +2490,37 @@ export const bookmarkTableRelationships = relationships(bookmarkTable, ({ one })
   }),
 }));
 
+export const linkTableRelationships = relationships(linkTable, ({ one, many }) => ({
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+  creator: one({
+    sourceField: ['createdBy'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+  sharedWith: many({
+    sourceField: ['id'],
+    destField: ['linkId'],
+    destSchema: linkAccessTable,
+  }),
+}));
+
+export const linkAccessTableRelationships = relationships(linkAccessTable, ({ one }) => ({
+  link: one({
+    sourceField: ['linkId'],
+    destField: ['id'],
+    destSchema: linkTable,
+  }),
+  user: one({
+    sourceField: ['userId'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+}));
+
 export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
   conversation: one({
     sourceField: ['conversationId'],
@@ -2676,6 +2737,8 @@ export const schema = createSchema({
     canvasTable,
     canvasParticipantTable,
     bookmarkTable,
+    linkTable,
+    linkAccessTable,
     repoTable,
     emailTable,
     emailDraftTable,
@@ -2746,6 +2809,8 @@ export const schema = createSchema({
     reactionCountTableRelationships,
     customEmojiTableRelationships,
     bookmarkTableRelationships,
+    linkTableRelationships,
+    linkAccessTableRelationships,
     emailTableRelationships,
     emailDraftTableRelationships,
     formTableRelationships,
@@ -2819,6 +2884,8 @@ export type ConversationParticipant = Row<typeof schema.tables.conversation_part
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasParticipant = Row<typeof schema.tables.canvas_participants>;
 export type Bookmark = Row<typeof schema.tables.bookmarks>;
+export type Link = Row<typeof schema.tables.links>;
+export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
