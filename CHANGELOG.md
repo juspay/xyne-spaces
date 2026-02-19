@@ -1,3 +1,11 @@
+## [1.52.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.51.0...v1.52.0) (2026-02-19)
+
+
+### Features
+
+* local automation test runner ([1ea3224](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1ea322413a9eaa6525f4954e76458075787e95b7)), closes [#3329](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3329)
+* workflow questioning ([473215c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/473215c08fb4ce7e19809b652ae1ec4660e5d015)), closes [#3275](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3275)
+
 ## [1.51.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.50.0...v1.51.0) (2026-02-19)
 
 
