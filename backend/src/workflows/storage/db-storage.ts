@@ -1923,7 +1923,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
               repoUrl: gitInfo.repoUrl,
               commitHash: gitInfo.commitHash,
               baseCommitHash: gitInfo.baseCommitHash,
-              pr_link: gitInfo.pr_link,
+              pr_link: gitInfo.pr_link || gitInfo.pullRequestUrl,
               gitDiff: gitInfo.gitDiff,
               diffStats: gitInfo.diffStats
             }
@@ -1960,7 +1960,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
                 repoUrl: gitInfo.repoUrl,
                 commitHash: gitInfo.commitHash,
                 baseCommitHash: gitInfo.baseCommitHash,
-                pr_link: gitInfo.pr_link,
+                pr_link: gitInfo.pr_link || gitInfo.pullRequestUrl,
                 gitDiff: gitInfo.gitDiff,
                 diffStats: gitInfo.diffStats
               }
@@ -2000,7 +2000,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
                 repoUrl: childGitInfo.repoUrl,
                 commitHash: childGitInfo.commitHash,
                 baseCommitHash: childGitInfo.baseCommitHash,
-                pr_link: childGitInfo.pr_link,
+                pr_link: childGitInfo.pr_link || childGitInfo.pullRequestUrl,
                 gitDiff: childGitInfo.gitDiff,
                 diffStats: childGitInfo.diffStats
               }
@@ -2031,7 +2031,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
                   repoUrl: childGitInfo.repoUrl,
                   commitHash: childGitInfo.commitHash,
                   baseCommitHash: childGitInfo.baseCommitHash,
-                  pr_link: childGitInfo.pr_link,
+                  pr_link: childGitInfo.pr_link || childGitInfo.pullRequestUrl,
                   gitDiff: childGitInfo.gitDiff,
                   diffStats: childGitInfo.diffStats
                 }

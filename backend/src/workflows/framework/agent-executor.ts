@@ -491,7 +491,16 @@ export class AgentExecutor {
         );
 
         try {
-          await this.bitbucketManager.raisePr(repoUrl, childExecutionId, baseBranch, repoBranch, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId);
+          const prUrl = await this.bitbucketManager.raisePr(repoUrl, childExecutionId, baseBranch, repoBranch, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId);
+          
+          if (prUrl) {
+            logger.info(`[AGENT-EXECUTOR] PR created: ${prUrl}`);
+            if (pushResult) {
+              pushResult.pullRequestUrl = prUrl;
+            } else {
+              pushResult = { pullRequestUrl: prUrl, repoUrl };
+            }
+          }
         } catch (error) {
           logger.error(`Failed to create PR:`, error);
         }
