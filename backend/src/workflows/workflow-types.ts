@@ -159,6 +159,10 @@ export type AgenticCheckpointConfig = {
     existingPrLink?: string          // Existing PR to update (not create new)
     /** Optional hook called after repo is cloned, before agent execution. Use for project-specific setup like npm install */
     postCloneSetup?: (repoPath: string, repoName: string) => Promise<void>
+    coAuthor?: {
+      name: string
+      email: string
+    }
   }
   agentConfigVersions?: AgentConfigVersions
   /** When true, captures learnings from the checkpoint for the knowledge base */

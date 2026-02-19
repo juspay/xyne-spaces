@@ -764,6 +764,7 @@ export const workflowExecutionTable = table('workflow_executions')
     createdAt: number(),
     updatedAt: number(),
     ignoreDuration: number(),
+    createdBy: string().optional(),
   })
   .primaryKey('id');
 

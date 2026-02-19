@@ -297,6 +297,7 @@ export class WorkflowController {
         ticketId,
         workflowType: workflowTypeValue,
         context,
+        createdBy: req.user?.id,
         metadata: {
           createdFrom: 'form',
           originalRequest: req.body,

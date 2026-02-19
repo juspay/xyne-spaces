@@ -407,7 +407,13 @@ async function handleSDKToolPart(
           ? context.agentChkConfig.repoInfo.getCommitMessage(commitMessage)
           : commitMessage
 
-        const commitHash = await commitAllChanges(context.repoPath, updatedCommitMessage)
+        const coAuthor = context.agentChkConfig.repoInfo?.coAuthor
+        const commitHash = await commitAllChanges(
+          context.repoPath,
+          updatedCommitMessage,
+          coAuthor?.name,
+          coAuthor?.email
+        )
 
         if (commitHash) {
           updateAgentData = { ...updateAgentData, commitHash: commitHash }
@@ -945,7 +951,13 @@ async function handleToolResult(
       ? context.agentChkConfig.repoInfo.getCommitMessage(commitMessage)
       : commitMessage
 
-    const commitHash = await commitAllChanges(context.repoPath, updatedCommitMessage)
+    const coAuthor = context.agentChkConfig.repoInfo?.coAuthor
+    const commitHash = await commitAllChanges(
+      context.repoPath,
+      updatedCommitMessage,
+      coAuthor?.name,
+      coAuthor?.email
+    )
 
     if (commitHash) {
       updateAgentData = { ...updateAgentData, commitHash: commitHash }
@@ -1147,7 +1159,13 @@ async function handleFileEdited(
       ? context.agentChkConfig.repoInfo.getCommitMessage(commitMessage)
       : commitMessage
 
-    const commitHash = await commitAllChanges(context.repoPath, updatedCommitMessage)
+    const coAuthor = context.agentChkConfig.repoInfo?.coAuthor
+    const commitHash = await commitAllChanges(
+      context.repoPath,
+      updatedCommitMessage,
+      coAuthor?.name,
+      coAuthor?.email
+    )
     
     if (commitHash) {
       context.commitTracker.hasCommits = true

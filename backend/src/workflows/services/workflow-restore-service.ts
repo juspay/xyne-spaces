@@ -143,7 +143,8 @@ export class WorkflowRestoreService {
       tag: 'rerun',
       parentWorkflowExecution: { connect: { id: sourceExecution.id } },
       sourceStepsId: actualRestoreStepId, // Store the INPUT step's DB ID
-      stepInputOverrideData: modifiedInput ? JSON.stringify(modifiedInput) : null
+      stepInputOverrideData: modifiedInput ? JSON.stringify(modifiedInput) : null,
+      createdBy: sourceExecution.createdBy,
     })
 
     if (modifiedInput !== undefined) {

@@ -68,7 +68,8 @@ function extractErrorLines(output: string): string[] {
 
 export async function runDeterministicValidation(
   repoPath: string,
-  gitInfo: GitInfo
+  gitInfo: GitInfo,
+  coAuthor?: { name: string; email: string }
 ): Promise<DeterministicValidationResult> {
   if (!repoPath || typeof repoPath !== 'string') {
     throw new Error('Invalid repoPath: must be a non-empty string');
@@ -104,7 +105,9 @@ export async function runDeterministicValidation(
     logger.info('Committing formatted files...');
     const commitHash = await commitAllChanges(
       repoPath,
-      'fix: format code with prettier'
+      'chore: format code with prettier',
+      coAuthor?.name,
+      coAuthor?.email
     );
     if (commitHash) {
       formatCommitHash = commitHash;

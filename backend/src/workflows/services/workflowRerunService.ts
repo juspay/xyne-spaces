@@ -74,7 +74,8 @@ export class WorkflowRerunService {
         status: WorkflowExecutionStatus.PENDING,
         tag: 'rerun',
         parentWorkflowExecution: { connect: { id: rootExecution.id } },
-        sourceStepsId: null // NULL = rerun from start
+        sourceStepsId: null,
+        createdBy: rootExecution.createdBy,
       }
     });
 
@@ -133,7 +134,8 @@ export class WorkflowRerunService {
         status: WorkflowExecutionStatus.PENDING,
         tag: 'rerun',
         parentWorkflowExecution: { connect: { id: executionToUse.id } },
-        sourceStepsId: null // NULL indicates rerun from start (no specific restore point)
+        sourceStepsId: null,
+        createdBy: executionToUse.createdBy,
       }
     });
 

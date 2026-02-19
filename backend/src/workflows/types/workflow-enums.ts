@@ -514,6 +514,7 @@ export interface WorkflowTriggerRequest {
   priority?: WorkflowPriority
   scheduledAt?: Date
   metadata?: Record<string, any>
+  createdBy?: string
 }
 
 // Type guards for workflow contexts

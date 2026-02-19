@@ -481,6 +481,7 @@ model WorkflowExecution {
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
   ignoreDuration            Int      @default(0) // ~22 days max (PAUSED or Waiting for external input)
+  createdBy                 String?  // User ID of who created/triggered this execution
 
   // Relations
   workflow                Workflow               @relation(fields: [workflowId], references: [id], onDelete: Cascade)
