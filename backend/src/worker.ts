@@ -18,6 +18,7 @@ import { workerScheduler } from './workers';
 import { initializeOpenCode, shutdownOpenCode } from '@/workflows/framework/opencode';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
+import { callValidationWorker } from '@/workers/callValidationWorker';
 
 config()
 
@@ -52,6 +53,7 @@ class WorkerService {
       const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
+      const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
 
       if (vespaEnabled) {
         await vespaWorker.start()
@@ -99,6 +101,11 @@ class WorkerService {
         await proactiveNudgeWorker.start()
       }
 
+      if (callValidationEnabled) {
+        logger.info('Starting call validation worker service...');
+        await callValidationWorker.start();
+      }
+
       process.on('SIGINT', () => this.shutdown())
       process.on('SIGTERM', () => this.shutdown())
 
@@ -126,6 +133,7 @@ class WorkerService {
       const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
+      const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
 
       if (vespaEnabled) {
         await vespaWorker.shutdown()
@@ -156,6 +164,10 @@ class WorkerService {
 
       if (proactiveNudgeWorkerEnabled) {
         await proactiveNudgeWorker.shutdown()
+      }
+
+      if (callValidationEnabled) {
+        await callValidationWorker.stop();
       }
 
       await DatabaseClient.disconnect()

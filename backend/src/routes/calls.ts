@@ -6,7 +6,6 @@ const router = Router();
 // Call management endpoints
 router.post('/initiate', callController.initiateCall);
 router.post('/join', callController.joinCall);
-router.post('/validate-rooms', callController.validateRooms);
 
 // Recordings endpoints (HEADLESS calls)
 router.get('/recordings', callController.getRecordings);

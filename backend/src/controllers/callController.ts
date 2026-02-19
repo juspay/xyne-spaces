@@ -5,7 +5,6 @@ import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { transcriptService } from '@/services/transcriptService';
-import { websocketService } from '@/services/websocketService';
 import { CallStatus, CallType, InvitationResponse } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
@@ -230,113 +229,6 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to join call:', error);
       res.status(500).json({ success: false, error: 'Failed to join call' });
-    }
-  };
-
-  // POST /api/calls/validate-rooms - Validate active calls against LiveKit room state
-  validateRooms = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { callIds } = req.body;
-      const userId = req.user?.id;
-
-      if (!userId) {
-        res.status(401).json({ success: false, error: 'Unauthorized' });
-        return;
-      }
-
-      if (!Array.isArray(callIds) || callIds.length === 0) {
-        res.status(400).json({ success: false, error: 'callIds array is required' });
-        return;
-      }
-
-      logger.info(`[validateRooms] Validating ${callIds.length} calls for user ${userId}`);
-
-      // Validate each call against LiveKit room state
-      const validationPromises = callIds.map(async (callId: string) => {
-        try {
-          // Get call from database
-          const call = await repositories.calls.findByExternalId(callId);
-          if (!call || call.status !== CallStatus.ACTIVE) {
-            return; // Skip if call doesn't exist or is already ended
-          }
-
-          // Check LiveKit room state
-          const roomInfo = await livekitService.getRoomInfo(callId);
-
-          let shouldEndCall = false;
-          let reason = '';
-
-          // Check if room doesn't exist
-          if (!roomInfo) {
-            shouldEndCall = true;
-            reason = 'room not found';
-          } else {
-            // Get actual participant list (more reliable than numParticipants)
-            const participants = await livekitService.listParticipants(callId);
-            logger.info(`[validateRooms] Room ${callId} - numParticipants: ${roomInfo.numParticipants}, actual participants: ${participants.length}`);
-
-            // Check if room has no active participants
-            if (participants.length === 0) {
-              shouldEndCall = true;
-              reason = 'no active participants';
-            }
-          }
-
-          // Mark call as ended if either condition is true
-          if (shouldEndCall) {
-            const endedAt = new Date();
-            await repositories.calls.update(call.id, {
-              status: 'ENDED',
-              endedAt,
-            });
-            logger.info(`[validateRooms] [${callId}] call_status_updated | from=${call.status}, to=ENDED, reason=${reason}`);
-            logger.info(`[validateRooms] Transcript will be processed when user views the ended call message`);
-
-            // Increment call count and add duration only for calls lasting > 60 seconds
-            const callDurationSeconds = (endedAt.getTime() - call.startedAt.getTime()) / 1000;
-            if (callDurationSeconds > 60) {
-              // Convert duration to minutes (rounded to 1 decimal place)
-              const callDurationMinutes = Math.round((callDurationSeconds / 60) * 10) / 10;
-
-              try {
-                await Promise.all([
-                  websocketService.incrementTodayCallCount(),
-                  websocketService.addCallDuration(callDurationMinutes)
-                ]);
-                logger.info(`[validateRooms] Successfully updated metrics for call ${callId} (duration: ${callDurationSeconds}s / ${callDurationMinutes}m)`);
-              } catch (err) {
-                logger.error('[validateRooms] Failed to update call metrics for auto-ended call:', err);
-              }
-            }
-
-            // Update the call system message metadata to mark as ended
-            const metadata = call.metadata as { systemMessageId?: string } | null;
-            const systemMessageId = metadata?.systemMessageId;
-            if (systemMessageId) {
-              await repositories.messages.update(systemMessageId, {
-                metadata: {
-                  isCallMessage: true,
-                  callId: call.externalId,
-                  operation: 'call_ended',
-                },
-              });
-              logger.info(`[validateRooms] Updated message ${systemMessageId} to call_ended for call ${callId}`);
-            }
-          }
-        } catch (error) {
-          logger.error(`[validateRooms] Failed to validate call ${callId}:`, error);
-          // Continue with other calls even if one fails
-        }
-      });
-
-      // Execute all validations in parallel
-      await Promise.all(validationPromises);
-
-      // No response body needed - just acknowledge
-      res.status(204).send();
-    } catch (error) {
-      logger.error('[validateRooms] Failed to validate rooms:', error);
-      res.status(500).json({ success: false, error: 'Failed to validate rooms' });
     }
   };
 

@@ -78,6 +78,15 @@ export class CallRepository {
     return result;
   }
 
+  async findAllActiveCalls(): Promise<Call[]> {
+    const result = await DatabaseClient.getInstance().call.findMany({
+      where: {
+        status: CallStatus.ACTIVE,
+      },
+    });
+    return result;
+  }
+
   async update(id: string, data: UpdateCallInput): Promise<Call> {
     const result = await DatabaseClient.getInstance().call.update({
       where: { id },
