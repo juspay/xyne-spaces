@@ -1,0 +1,2 @@
+# This folder contains Playwright spec files recorded via Playwright Codegen
+# These files are converted to Cucumber BDD format using the test-and-run script
