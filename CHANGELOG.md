@@ -1,3 +1,22 @@
+## [1.51.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.50.0...v1.51.0) (2026-02-19)
+
+
+### Features
+
+* call validation cron job ([b88f91b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b88f91b386ffa4253544de60c88243e7c0c81ff9)), closes [#3396](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3396)
+* One click setup script+dummy seed ([442faf6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/442faf65bba91329a0823d84dddf7c5bdc4be1e2)), closes [#3287](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3287)
+* stage level eta overdue filter ([1e5be1e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1e5be1ee691471b8d8b8513ae80e72ac1dcae3f4)), closes [#3282](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3282)
+* test automation ([e450140](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e450140f82bd23c46722b77d95dea678a3573984)), closes [#2954](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2954)
+
+
+### Bug Fixes
+
+* Cancel option to DMs Header search input ([4af7177](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4af7177258de09b64e8440814d9193f3fcd61b52)), closes [#3269](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3269)
+* channel call notification fixes ([874f928](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/874f928887cd3228407fbc6b36cf0c89f3b824c4)), closes [#3383](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3383)
+* Display participant count in sidebar DM header ([dcb1bd8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dcb1bd87f1991fa3c8dcc6db7a64b8f382f545b4)), closes [#3265](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3265)
+* making board name unique per project and making all proj visible to all ([17411c8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/17411c8b432803a4744dbb3bac270e304eebd73b)), closes [#3368](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3368)
+* pdf resizing and text attachment bg fixed ([a9ff797](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a9ff797d47a9fec2438d2bafe6d06986019f45a2)), closes [#3319](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3319)
+
 ## [1.50.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.49.0...v1.50.0) (2026-02-19)
 
 
