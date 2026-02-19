@@ -71,7 +71,10 @@ import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Tooltip from '../../components/ui/Tooltip';
 import Avatar from '../../components/ui/Avatar/Avatar';
-import { getPriorityIcon } from '../../components/Tickets/TicketCard/TicketCard.utils';
+import {
+  getPriorityIcon,
+  isStageEtaOverdue,
+} from '../../components/Tickets/TicketCard/TicketCard.utils';
 import { TicketPriority } from '@xyne/shared';
 import AcOnSlow from '../../assets/icons/AcOnSlowIcon';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -131,6 +134,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
   const [isComfortView, setIsComfortView] = useState(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [showOverdueOnly, setShowOverdueOnly] = useState(false);
 
   // Stage form modal state
   const [stageFormModal, setStageFormModal] = useState<{
@@ -829,6 +833,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       });
     }
 
+    // Filter for stage overdue tickets
+    if (showOverdueOnly) {
+      tickets = tickets.filter(ticket => isStageEtaOverdue(ticket));
+    }
+
     // Hide Rejected tickets when viewing stage view across all contexts
     const isStageView =
       // Channel stage view
@@ -856,6 +865,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     formValuesByTicketId,
     formFieldsById,
     searchTerm,
+    showOverdueOnly,
   ]);
 
   useEffect(() => {
@@ -1229,6 +1239,35 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 </Tooltip>
               )}
             </div>
+
+            {/* Stage Overdue Filter Toggle */}
+            <Tooltip content={showOverdueOnly ? 'Show All Tickets' : 'Show Only Overdue Tickets'}>
+              <button
+                onClick={() => setShowOverdueOnly(prev => !prev)}
+                className={`px-3 py-2 transition-colors ${
+                  showOverdueOnly
+                    ? 'bg-red-100 text-red-700 border border-red-300'
+                    : 'bg-white text-gray-500 hover:text-gray-700 border border-gray-300'
+                } rounded-lg flex items-center gap-2`}
+                title='Filter Overdue Tickets'
+              >
+                <svg
+                  width='14'
+                  height='14'
+                  viewBox='0 0 12 12'
+                  fill='none'
+                  className={showOverdueOnly ? 'text-red-600' : 'text-gray-500'}
+                >
+                  <circle cx='6' cy='6' r='5' stroke='currentColor' strokeWidth='1.5' />
+                  <path
+                    d='M6 3v3.5M6 8.5h.01'
+                    stroke='currentColor'
+                    strokeWidth='1.5'
+                    strokeLinecap='round'
+                  />
+                </svg>
+              </button>
+            </Tooltip>
 
             <DropdownMenu.Root open={isCustomizeOpen} onOpenChange={setIsCustomizeOpen}>
               <DropdownMenu.Trigger>
