@@ -6,6 +6,7 @@ import { AgentStep } from '@prisma/client'
 import { WorkflowStepStatus } from './types/workflow-enums'
 import { Agent } from 'agentic-framework'
 import type { KnowledgeLearning } from './utils/knowledge-generator'
+import { GitInfo } from './workflow-types'
 
 // Framework types for storage operations
 export interface FrameworkExecutionResult {
@@ -14,6 +15,7 @@ export interface FrameworkExecutionResult {
   metrics: any
   status: 'completed' | 'max_turns' | 'interrupted' | 'error'
   error?: string
+  gitInfo?: GitInfo
 }
 
 export interface WorkflowStepData {

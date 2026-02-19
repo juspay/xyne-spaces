@@ -1121,58 +1121,77 @@ export class WorkflowController {
       }
 
       const parsed = extractWorkspace(gitInfo.repoUrl);
-      if (parsed) {
-        const latest = await bitbucketManager.getLatestCommit(parsed.projectName, parsed.repoName, gitInfo.branch);
-
-        const shouldRefresh = latest && (
-          latest.id !== gitInfo.commitHash ||
-          (!gitInfo.gitDiff?.length && gitInfo.baseCommitHash !== latest.id)
-        );
-
-        if (shouldRefresh) {
-          logger.info(`[getWorkflowGitDiff] Auto-refreshing via Bitbucket API: ${gitInfo.commitHash} -> ${latest.id}`);
-          const gitDiff = await bitbucketManager.getDiff(parsed.projectName, parsed.repoName, gitInfo.baseCommitHash || latest.id, latest.id);
-          const diffStats = calculateDiffStats(gitDiff);
-
-          const fullOutput = await storage.loadWorkflowOutput<any>(executionId);
-          if (fullOutput?.gitInfo) {
-            fullOutput.gitInfo.gitDiff = gitDiff;
-            fullOutput.gitInfo.diffStats = diffStats;
-            fullOutput.gitInfo.commitHash = latest.id;
-            await storage.saveWorkflowOutput(executionId, fullOutput);
-            logger.info(`[getWorkflowGitDiff] Persisted diff to storage for ${executionId}`);
-          }
-
-          res.status(200).json({
-            executionId,
-            branch: gitInfo.branch,
-            baseCommitHash: gitInfo.baseCommitHash,
-            commitHash: latest.id,
-            gitDiff: gitDiff,
-            stats: diffStats,
-            isRefreshed: true
-          });
-          return;
-        }
-      }
-
-      if (!gitInfo.gitDiff || !gitInfo.diffStats) {
+      if (!parsed) {
         res.status(404).json({
           error: 'Git diff not available',
-          message:
-            'Git diff not available',
+          message: 'Could not parse repository information',
         });
         return;
       }
 
-      res.status(200).json({
-        executionId,
-        branch: gitInfo.branch,
-        baseCommitHash: gitInfo.baseCommitHash,
-        commitHash: gitInfo.commitHash,
-        gitDiff: gitInfo.gitDiff,
-        stats: gitInfo.diffStats,
-        isRefreshed: false
+      let gitDiff: any[];
+      let diffStats: any;
+      let commitHash = gitInfo.commitHash;
+      
+      // Try PR diff first if PR link exists
+      if (gitInfo.pr_link) {
+        const prUrl = gitInfo.pr_link;
+        const prId = bitbucketManager.extractPRIdFromUrl(prUrl);
+        
+        if (prId) {
+          logger.info(`[getWorkflowGitDiff] Fetching PR diff for PR #${prId}`);
+          
+          gitDiff = await bitbucketManager.getPRDiff(parsed.projectName, parsed.repoName, prId);
+          
+          if (gitDiff.length > 0) {
+            diffStats = calculateDiffStats(gitDiff);
+            logger.info(`[getWorkflowGitDiff] Successfully fetched PR diff: ${diffStats.files} files changed`);
+
+            res.status(200).json({
+              executionId,
+              branch: gitInfo.branch,
+              baseCommitHash: gitInfo.baseCommitHash,
+              commitHash: gitInfo.commitHash,
+              gitDiff: gitDiff,
+              stats: diffStats,
+            });
+            return;
+          } else {
+            logger.warn(`[getWorkflowGitDiff] PR diff empty for PR #${prId}, falling back to branch diff`);
+          }
+        } else {
+          logger.warn(`[getWorkflowGitDiff] Could not extract PR ID from ${prUrl}, falling back to branch diff`);
+        }
+      }
+      
+      // Fallback to branch diff - get latest commit
+      const latest = await bitbucketManager.getLatestCommit(parsed.projectName, parsed.repoName, gitInfo.branch);
+      if (latest) {
+        commitHash = latest.id;
+        logger.info(`[getWorkflowGitDiff] Fetching branch diff for latest commit: ${commitHash}`);
+        gitDiff = await bitbucketManager.getDiff(
+          parsed.projectName, 
+          parsed.repoName, 
+          gitInfo.baseCommitHash || commitHash, 
+          commitHash
+        );
+        diffStats = calculateDiffStats(gitDiff);
+
+        res.status(200).json({
+          executionId,
+          branch: gitInfo.branch,
+          baseCommitHash: gitInfo.baseCommitHash,
+          commitHash: commitHash,
+          gitDiff: gitDiff,
+          stats: diffStats,
+        });
+        return;
+      }
+
+      // If we reach here, we couldn't get the diff
+      res.status(404).json({
+        error: 'Git diff not available',
+        message: 'Could not fetch git diff from repository',
       });
     } catch (error) {
       logger.error('Error getting git diff:', error);

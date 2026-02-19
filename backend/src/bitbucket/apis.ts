@@ -88,6 +88,33 @@ export class BitbucketManager {
         }
     }
 
+    async getPRDiff(projectKey: string, repoSlug: string, prId: number): Promise<any[]> {
+      try {
+        const url = `${BASE_URL}/projects/${projectKey}/repos/${repoSlug}/pull-requests/${prId}/diff?contextLines=3`;
+        const response = await this.makeRequest<{ diffs: any[] }>(url, 'GET');
+
+        if (!response.data.diffs) return [];
+
+        return response.data.diffs.map((diff: any) => transformBitbucketDiff(diff));
+      } catch (error) {
+        logger.error(`[Bitbucket API] Error getting PR diff for ${projectKey}/${repoSlug} PR #${prId}:`, { error: error instanceof Error ? error.message : error });
+        return [];
+      }
+    }
+
+    extractPRIdFromUrl(prUrl: string): number | null {
+      try {
+        const prMatch = prUrl.match(/\/pull-requests\/(\d+)/);
+        if (prMatch && prMatch[1]) {
+            return parseInt(prMatch[1], 10);
+        }
+        return null;
+      } catch (error) {
+        logger.warn(`[Bitbucket API] Failed to extract PR ID from URL: ${prUrl}`);
+        return null;
+      }
+    }
+
   async raisePr(
     repoUrl: string,
     childExecutionId: string,
@@ -99,9 +126,9 @@ export class BitbucketManager {
     ticketDescription?: string,
     xyneId?: string,
     ticketId?: string
-  ) {
+  ): Promise<string | undefined> {
     if (!sourceBranchName || !destinationBranchName || !projectName || !repoName) {
-      return;
+      return undefined;
     }
 
     try {
@@ -187,9 +214,13 @@ export class BitbucketManager {
         ticketId: ticketId
       });
 
+      logger.info(`[Bitbucket-API] PR created/updated: ${prUrl}`);
       logger.debug(`[Bitbucket-API] PR ${prId} inserted with ticketId: ${ticketId || 'fetched from workflow execution'}`);
+      
+      return prUrl;
     } catch (error) {
       logger.error('[Bitbucket-API] Error raising PR:', error);
+      return undefined;
     }
   }
 
