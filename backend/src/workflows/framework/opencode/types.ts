@@ -1,5 +1,5 @@
 import { config } from '@/config/env'
-import type { AssistantMessage, Part, Project } from '@opencode-ai/sdk'
+import type { AssistantMessage, Part, Project } from '@opencode-ai/sdk/v2'
 
 export interface PermissionRuleset {
   read?: boolean
@@ -164,6 +164,25 @@ export interface PermissionAskedEvent extends OpenCodeEventBase {
   }
 }
 
+export interface QuestionAskedEvent extends OpenCodeEventBase {
+  type: 'question.asked'
+  properties: {
+    id: string
+    sessionID: string
+    questions: Array<{
+      question: string
+      header: string
+      options: Array<{ label: string; description?: string }>
+      multiple?: boolean
+      custom?: boolean
+    }>
+    tool?: {
+      messageID: string
+      callID: string
+    }
+  }
+}
+
 export interface PermissionUpdatedEvent extends OpenCodeEventBase {
   type: 'permission.updated'
   properties: {
@@ -253,6 +272,7 @@ export type OpenCodeEvent =
   | DoomLoopEvent
   | PermissionAskedEvent
   | PermissionUpdatedEvent
+  | QuestionAskedEvent
   | ErrorEvent
   | { type: string; properties: Record<string, unknown>; timestamp?: string }
 

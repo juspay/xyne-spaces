@@ -3,6 +3,7 @@ import {
   CheckpointHandler,
   WorkflowEngine,
   AgenticCheckpointConfig,
+  FullAgenticCheckpointConfig,
   AgenticCheckpointResult,
   AgenticContinuationOverride,
   ConditionalHandler,
@@ -162,10 +163,10 @@ export class WorkflowEngineImpl<
     const agentConfig = agent.getConfig()
 
     // Create the full config with agentConfig for AgentExecutor
-    const fullConfig = {
+    // Spread all fields from config (useQuestioningMode, executorType, captureKnowledge, etc.)
+    const fullConfig: FullAgenticCheckpointConfig = {
+      ...config,
       agentConfig,
-      conversationContext: config.conversationContext,
-      repoInfo: config.repoInfo
     }
 
     // All workflows manage locks (child workflows now run on separate workers)
@@ -265,7 +266,7 @@ export class WorkflowEngineImpl<
     let result, updatedState, gitInfo
     
     if (useOpenCode) {
-      logger.info(`[WORKFLOW-ENGINE] Using OpenCode executor for checkpoint ${String(id)}`)
+      logger.info(`[WORKFLOW-ENGINE] Using OpenCode executor for checkpoint ${String(id)}, useQuestioningMode=${fullConfig.useQuestioningMode}`)
       const openCodeExecutor = new OpenCodeExecutor(this.storage, undefined, {
         baseUrl: appConfig.openCode.baseUrl,
         timeout: appConfig.openCode.timeoutMs,

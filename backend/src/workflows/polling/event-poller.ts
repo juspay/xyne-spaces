@@ -4,6 +4,8 @@ import { WorkflowExecutionStatus } from '../types/workflow-enums'
 import { PollingConfig, EVENT_POLLER_CONFIG } from './config'
 import { LockService } from '@/services/lockService'
 import { logger } from '@/utils/logger'
+import { config as appConfig } from '@/config/env'
+import { cleanupRepository } from '@framework'
 
 /**
  * EventPoller - Monitors WAIT_FOR_EVENT executions and promotes them to PENDING
@@ -81,19 +83,60 @@ export class EventPoller {
     try {
       const externalResponses = await repositories.externalStepResponses.findByWorkflowExecutionId(execution.id)
       
-      if (externalResponses.length === 0) {
-        logger.debug(`⏳ Execution ${execution.id} still waiting for external response, skipping promotion`)
+      if (externalResponses.length > 0) {
+        await repositories.workflowExecutions.update(execution.id, {
+          status: WorkflowExecutionStatus.PENDING
+        })
+        logger.info(`✅ Promoted execution ${execution.id} from WAIT_FOR_EVENT to PENDING`)
+
+        if (execution.parentWorkflowExecutionId) {
+          await repositories.workflowExecutions.update(execution.parentWorkflowExecutionId, {
+            status: WorkflowExecutionStatus.PENDING
+          })
+          logger.info(`✅ Promoted parent execution ${execution.parentWorkflowExecutionId} to PENDING`)
+        }
         return
       }
 
-      await repositories.workflowExecutions.update(execution.id, {
-        status: WorkflowExecutionStatus.PENDING
-      })
-      logger.info(`✅ Promoted execution ${execution.id} from WAIT_FOR_EVENT to PENDING (response received)`)
+      await this.checkExecutionTimeout(execution)
+
     } catch (error) {
       logger.error(`Failed to promote execution ${execution.id}:`, error)
     } finally {
       await this.lockService.releaseLock(execution.id, this.workerId)
+    }
+  }
+
+  private async checkExecutionTimeout(execution: any): Promise<void> {
+    try {
+      try {
+        const outputData = execution.output ? JSON.parse(execution.output) : {}
+        if (outputData?.timedOut) return
+      } catch { /* parse failed, continue checking */ }
+
+      const timeoutMs = appConfig.questionTimeoutMinutes * 60 * 1000
+      const elapsed = Date.now() - new Date(execution.updatedAt).getTime()
+
+      if (elapsed <= timeoutMs) return
+
+      logger.warn(`[EventPoller] Execution ${execution.id} timed out after ${Math.round(elapsed / 60000)}min in WAIT_FOR_EVENT — cleaning up`)
+
+      const workspacePath = `/tmp/${execution.id}`
+      await cleanupRepository(workspacePath).catch((err: Error) => {
+        logger.warn(`[EventPoller] Failed to cleanup workspace ${workspacePath}:`, err)
+      })
+
+      try {
+        const existingOutput = execution.output ? JSON.parse(execution.output) : {}
+        await repositories.workflowExecutions.update(execution.id, {
+          output: JSON.stringify({ ...existingOutput, timedOut: true })
+        })
+        logger.info(`[EventPoller] Marked execution ${execution.id} as timed out`)
+      } catch (markErr) {
+        logger.warn(`[EventPoller] Failed to mark execution as timed out:`, markErr)
+      }
+    } catch (error) {
+      logger.error(`[EventPoller] Error checking timeout for execution ${execution.id}:`, error)
     }
   }
 }

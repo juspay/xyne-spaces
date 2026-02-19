@@ -7,6 +7,7 @@ import { createWorkflowEngine } from '../workflow-engine';
 import zodToJsonSchema from 'zod-to-json-schema';
 import {logger} from '@/utils/logger';
 import { repositories } from '../../database/repositories';
+import { WorkflowExternalWaitException } from '../exceptions/workflow-exceptions';
 
 
 // Note: We use BaseWorkflowContext for workflow definitions but the engine parameter
@@ -287,7 +288,11 @@ export class WorkflowRegistry {
       logger.info(`Completed workflow: ${definition.name}`);
       return output;
     } catch (error) {
-      logger.error(`Workflow execution failed: ${definition.name}`, error);
+      if (error instanceof WorkflowExternalWaitException) {
+        logger.info(`Workflow paused for external input: ${definition.name} — ${(error as Error).message}`);
+      } else {
+        logger.error(`Workflow execution failed: ${definition.name}`, error);
+      }
       throw error;
     }
   }

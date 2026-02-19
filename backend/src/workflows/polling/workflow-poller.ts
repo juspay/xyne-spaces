@@ -111,7 +111,7 @@ export class WorkflowPoller {
     if (!this.isRunning) return false
     
     const allowedWorkflowType = process.env.WORKFLOW_TYPE
-    const pendingExecutions: WorkflowExecutionWithState[] = await repositories.workflowExecutions.findByStatus('PENDING', allowedWorkflowType, 1)
+    const pendingExecutions: WorkflowExecutionWithState[] = await repositories.workflowExecutions.findByStatus('PENDING', allowedWorkflowType, 1, ['root', 'rerun'])
 
     if (pendingExecutions.length === 0) {
       this.currentInterval = this.config.maxInterval

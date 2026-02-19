@@ -140,6 +140,7 @@ export type ExecutorType = 'xyne-code' | 'opencode'
 
 export type AgenticCheckpointConfig = {
   executorType?: ExecutorType
+  useQuestioningMode?: boolean
   conversationContext?: {
     messages?: readonly Message[]  // Framework Message type
     initialUserMessage?: string

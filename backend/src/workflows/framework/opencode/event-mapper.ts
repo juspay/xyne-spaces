@@ -20,6 +20,7 @@ import {
   SessionStatusEvent,
   SessionDiffEvent,
   PermissionAskedEvent,
+  QuestionAskedEvent,
   EventWorktreeReady,
   EventWorktreeFailed,
 } from './types'
@@ -27,7 +28,7 @@ import type {
   EventFileEdited,
   EventCommandExecuted,
   EventTodoUpdated,
-} from '@opencode-ai/sdk'
+} from '@opencode-ai/sdk/v2'
 import { WorkflowStorage } from '../../workflow-storage'
 import { FullAgenticCheckpointConfig } from '../../workflow-types'
 import { hasUncommittedChanges, commitAllChanges } from '@framework'
@@ -66,6 +67,7 @@ export interface OpenCodeEventHandlerContext {
   processedToolResults: Set<string>
   checkPauseOrCancel: () => Promise<void>
   grantPermission?: (sessionId: string, permissionId: string) => Promise<void>
+  handleQuestion?: (requestId: string, sessionId: string, questions: QuestionAskedEvent['properties']['questions']) => Promise<void>
 }
 
 export interface EventProcessingStats {
@@ -178,6 +180,14 @@ export function createOpenCodeEventHandler(
         stats.permissionsHandled++
         break
 
+      case 'question.asked':
+        await handleQuestionAsked(event as QuestionAskedEvent, context)
+        break
+
+      case 'question.replied':
+      case 'question.rejected':
+        break
+
       case 'file.edited':
         await handleFileEdited(event as EventFileEdited, context, stats)
         break
@@ -238,6 +248,9 @@ export function createOpenCodeEventHandler(
         break
 
       case 'installation.update-available':
+        break
+
+      case 'message.part.delta':
         break
 
       case 'doom_loop':
@@ -1139,6 +1152,26 @@ async function handlePermissionAsked(
     }
   } else {
     logger.warn('Cannot auto-grant permission - no callback or missing IDs')
+  }
+}
+
+async function handleQuestionAsked(
+  event: QuestionAskedEvent,
+  context: OpenCodeEventHandlerContext,
+): Promise<void> {
+  const { id: requestId, sessionID, questions } = event.properties
+
+  const questionTexts = questions?.map(q => q.header || q.question).join(', ') || 'unknown'
+  logger.info(`❓ [OpenCode] Question asked: ${questionTexts}, requestId=${requestId}`)
+
+  if (context.handleQuestion && requestId) {
+    try {
+      await context.handleQuestion(requestId, sessionID, questions)
+    } catch (error) {
+      logger.error(`[OpenCode] Failed to handle question ${requestId}:`, error)
+    }
+  } else {
+    logger.warn('[OpenCode] Cannot handle question - no callback or missing requestId')
   }
 }
 

@@ -16,6 +16,7 @@ import { ToolErrorRenderer } from './ToolErrorRenderer';
 import { formatStepData } from '../utils/utils';
 import { FinalResultRenderer } from './FinalResultRenderer';
 import { ToolBackgroundTaskRenderer } from './ToolBackgroundTaskRenderer';
+import { ExternalStepApprovalRenderer, ExternalStepOutputRenderer } from './ExternalStepRenderer';
 
 interface AgentStepRendererProps {
   step: WorkflowStep;
@@ -59,6 +60,8 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
     assistant_message: () => <LLMCallRenderer data={step.data} />,
     // eslint-disable-next-line @typescript-eslint/naming-convention
     final_result: () => <FinalResultRenderer data={step.data?.['gitInfo']} />,
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_task: () => <ToolBackgroundTaskRenderer data={step.data} toolName='task' />,
     // eslint-disable-next-line @typescript-eslint/naming-convention
     tool_background_task: () => (
       <ToolBackgroundTaskRenderer data={step.data} toolName='background_task' />
@@ -106,6 +109,8 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
     final_result: 'final_result',
     // eslint-disable-next-line @typescript-eslint/naming-convention
     tool_delegate_task: 'tool_delegate_task',
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    tool_task: 'tool_task',
     // eslint-disable-next-line @typescript-eslint/naming-convention
     tool_background_task: 'tool_background_task',
     // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -156,6 +161,14 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
   if (step.stepName === 'user_message') return <UserMessageRenderer data={step.data} />;
   if (step.stepName === 'assistant_message') return <LLMCallRenderer data={step.data} />;
   if (step.stepName === 'framework_error') return <ToolErrorRenderer data={step.data} />;
+  // External steps (user_approval) — render using the existing ApprovalDialog
+  if (step.stepExecutorType === 'external' && step.type === 'input') {
+    return <ExternalStepApprovalRenderer step={step} />;
+  }
+  // External output steps — render the submitted answers
+  if (step.stepExecutorType === 'external' && step.type === 'output') {
+    return <ExternalStepOutputRenderer step={step} />;
+  }
   // tool_edit, tool_write, tool_multiedit go through Accordion wrapper below
 
   return (

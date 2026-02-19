@@ -13,8 +13,8 @@ export const WORKFLOW_POLLER_CONFIG: PollingConfig = {
 }
 
 export const EVENT_POLLER_CONFIG: PollingConfig = {
-  minInterval: 300000,  // 5 minutes when events are found
-  maxInterval: 300000,  // 5 minutes when idle
+  minInterval: 60000,  // 1 minute when events are found
+  maxInterval: 60000,  // 1 minute when idle
   batchSize: 5
 }
 

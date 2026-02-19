@@ -109,6 +109,7 @@ const envSchema = Joi.object({
   OPENCODE_TIMEOUT_MS: Joi.number().default(600000),
   OPENCODE_AUTO_COMPACT: Joi.boolean().default(false),
   OPENCODE_MODEL: Joi.string().allow('').default(''),
+  QUESTION_TIMEOUT_MINUTES: Joi.number().default(2),
   // Default workflow executor when not specified
   DEFAULT_WORKFLOW_EXECUTOR: Joi.string().default(''),
   // Default model ID for config sync service
@@ -117,6 +118,7 @@ const envSchema = Joi.object({
   // oh-my-opencode Plugin Configuration
   OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
   OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default(''),
+  ENABLE_IMMEDIATE_OUTPUT_STEP: Joi.boolean().default(false),
   // Web Search Configuration
   WEB_SEARCH_URL: Joi.string().uri().allow('').default(''),
   WEB_SEARCH_API_KEY: Joi.string().allow('').default(''),
@@ -309,6 +311,7 @@ export const config = {
     model: envVars.TICKET_DESC_CLEAN_MODEL,
     maxRetries: envVars.TICKET_DESC_CLEAN_MAX_RETRIES,
   },
+  questionTimeoutMinutes: envVars.QUESTION_TIMEOUT_MINUTES,
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
@@ -324,4 +327,5 @@ export const config = {
   jwt: {
     expirationSeconds: envVars.JWT_EXPIRATION_SECONDS,
   },
+  enableImmediateOutputStep: envVars.ENABLE_IMMEDIATE_OUTPUT_STEP,
 };

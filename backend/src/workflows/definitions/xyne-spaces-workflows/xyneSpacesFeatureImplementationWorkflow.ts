@@ -66,6 +66,7 @@ export interface XyneSpacesFeatureContext extends BaseWorkflowContext {
   checkoutCommit?: string;
   imageAttachments?: ImageAttachment[];
   executorType?: ExecutorType;
+  useQuestioningMode?: boolean;
 }
 
 export interface XyneSpacesFeatureOutput {
@@ -93,6 +94,14 @@ const XyneSpacesFeatureInputSchema = BaseWorkflowContextSchema.extend({
   repoBranch: z.string().optional(),
   checkoutCommit: z.string().optional(),
   executorType: z.enum(['xyne-code', 'opencode']).optional().describe('Select the executor to use for this workflow'),
+  useQuestioningMode: z.preprocess(
+    (val) => {
+      if (typeof val === 'boolean') return val ? 'true' : 'false';
+      if (typeof val === 'string') return val;
+      return 'false';
+    },
+    z.enum(['true', 'false']).default('false')
+  ).describe('Enable question mode to ask clarifying questions before implementation'),
   imageAttachments: z.array(z.object({
     id: z.string(),
     type: z.literal('image'),
@@ -113,6 +122,7 @@ const xyneSpacesFeatureContextMapper = (
   checkoutCommit: payload.checkoutCommit,
   imageAttachments: payload.imageAttachments,
   executorType: payload.executorType,
+  useQuestioningMode: payload.useQuestioningMode === 'true',
 });
 
 export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
@@ -173,7 +183,8 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
     // PHASE 1: PLANNING WITH GUIDELINES
     // =========================================================================
 
-    logger.info('Starting planning phase with guidelines context...');
+    const questioningMode = context.useQuestioningMode ?? false;
+    logger.info(`Starting planning phase with guidelines context... useQuestioningMode=${questioningMode}, executorType=${context.executorType}`);
     const planningResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(
       XyneSpacesWorkflowSteps.PLANNING,
       'xyne-cli-planner',
@@ -187,6 +198,7 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         context.checkoutCommit,
         projectGuidelines,
         context.executorType,
+        questioningMode,
         coAuthor
       )
     );
@@ -223,6 +235,7 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         context.checkoutCommit,
         projectGuidelines,
         context.executorType,
+        false,
         coAuthor
       )
     );
@@ -261,6 +274,7 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         context.checkoutCommit,
         projectGuidelines,
         context.executorType,
+        false,
         coAuthor
       );
 
