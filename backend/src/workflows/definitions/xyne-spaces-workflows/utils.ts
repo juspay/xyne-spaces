@@ -137,7 +137,8 @@ export const createXyneSpacesAgentConfig = (
   baseBranch?: string,
   checkoutCommit?: string,
   maxTurns?: number,
-  executorType?: ExecutorType
+  executorType?: ExecutorType,
+  coAuthor?: { name: string; email: string }
 ): AgenticCheckpointConfig => {
 
   const repoInfo: { 
@@ -146,6 +147,7 @@ export const createXyneSpacesAgentConfig = (
     baseBranch?: string
     checkoutCommit?: string
     postCloneSetup?: (repoPath: string, repoName: string) => Promise<void>
+    coAuthor?: { name: string; email: string }
   } = { 
     repoUrl, 
     baseBranch,
@@ -157,7 +159,11 @@ export const createXyneSpacesAgentConfig = (
   
   if (checkoutCommit) {
     repoInfo.checkoutCommit = checkoutCommit
-  }  
+  }
+
+  if (coAuthor) {
+    repoInfo.coAuthor = coAuthor
+  }
 
   return {
     executorType,
@@ -168,7 +174,7 @@ export const createXyneSpacesAgentConfig = (
       ]
     },
     repoInfo,
-    captureKnowledge: true,  // Enable knowledge capture by default for all Xyne Spaces workflows
+    captureKnowledge: true,
     ...(maxTurns !== undefined && { maxTurns })
   };
 }
@@ -463,7 +469,8 @@ export const getPlanningConfig = (
   baseBranch?: string,
   checkoutCommit?: string,
   guidelines?: string,
-  executorType?: ExecutorType
+  executorType?: ExecutorType,
+  coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-planner',
   SYSTEM_PROMPTS.PLANNER,
@@ -530,13 +537,14 @@ Your final response should follow this exact format:
 Remember: Output the COMPLETE plan as your final response. Do NOT use plan_mode_response tool.`,
   repoUrl,
   imageAttachments,
-  ['read', 'grep', 'ls'], // Read-only tools for planning
-  0.2, // Lower temperature for structured planning
+  ['read', 'grep', 'ls'],
+  0.2,
   repoBranch,
   baseBranch,
   checkoutCommit,
-  undefined, // maxTurns
-  executorType
+  undefined,
+  executorType,
+  coAuthor
 )
 
 /**
@@ -549,7 +557,8 @@ export const getImplementationConfig = (
   baseBranch?: string,
   checkoutCommit?: string,
   guidelines?: string,
-  executorType?: ExecutorType
+  executorType?: ExecutorType,
+  coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-implementer',
   SYSTEM_PROMPTS.IMPLEMENTER,
@@ -592,14 +601,15 @@ Implement the feature according to the plan:
 
 Remember: Quality over speed. Follow the guidelines strictly. NO \`any\` TYPES.`,
   repoUrl,
-  undefined, // No new image attachments needed for implementation phase
-  ['read', 'grep', 'bash', 'write', 'ls', 'edit'], // Full tool access
-  0.1, // Low temperature for precise implementation
+  undefined,
+  ['read', 'grep', 'bash', 'write', 'ls', 'edit'],
+  0.1,
   repoBranch,
   baseBranch,
   checkoutCommit,
-  undefined, // maxTurns
-  executorType
+  undefined,
+  executorType,
+  coAuthor
 )
 
 /**
@@ -614,7 +624,8 @@ export const getValidationConfig = (
   baseBranch?: string,
   checkoutCommit?: string,
   guidelines?: string,
-  executorType?: ExecutorType
+  executorType?: ExecutorType,
+  coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-validator',
   SYSTEM_PROMPTS.VALIDATOR,
@@ -657,6 +668,7 @@ Your response must end with:
   repoBranch,
   baseBranch,
   checkoutCommit,
-  25, // maxTurns
-  executorType
+  25,
+  executorType,
+  coAuthor
 )

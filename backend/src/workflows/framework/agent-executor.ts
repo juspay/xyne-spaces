@@ -611,7 +611,13 @@ export class AgentExecutor {
             ? agentChkConfig.repoInfo.getCommitMessage(commitMessage)
             : commitMessage;
 
-          const commitHash = await commitAllChanges(repoPath, updatedCommitMessage);
+          const coAuthor = agentChkConfig.repoInfo?.coAuthor;
+          const commitHash = await commitAllChanges(
+            repoPath,
+            updatedCommitMessage,
+            coAuthor?.name,
+            coAuthor?.email
+          );
 
           if (commitHash) {
             updateAgentData = { ...updateAgentData, commitHash: commitHash };

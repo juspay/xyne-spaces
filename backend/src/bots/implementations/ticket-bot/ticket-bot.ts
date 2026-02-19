@@ -597,6 +597,7 @@ Provide a concise but informative summary:`;
               context: workflowContext,
               xyneId: ticket.xyneId, 
               conversationId: context.conversationId,
+              createdBy: ticket.createdBy,
             };
 
             logger.info(`[TicketBot] Triggering workflow with context:`, workflowRequest);

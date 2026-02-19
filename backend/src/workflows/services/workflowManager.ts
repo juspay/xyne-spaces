@@ -50,7 +50,8 @@ export class WorkflowManager {
         workflow: { connect: { id: workflow.id } },
         context: request.context ? JSON.stringify(request.context) : null,
         workflowType: request.workflowType,
-        status: WorkflowExecutionStatus.PENDING
+        status: WorkflowExecutionStatus.PENDING,
+        createdBy: request.createdBy,
       })
 
       await repositories.workflows.update(workflow.id, {

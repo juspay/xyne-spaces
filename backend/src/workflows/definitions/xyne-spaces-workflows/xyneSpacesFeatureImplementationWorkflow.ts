@@ -52,6 +52,7 @@ import {
 } from './utils';
 import { runDeterministicValidation } from './validation-helpers';
 import {logger} from '@/utils/logger';
+import { repositories } from '@/database/repositories';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -143,6 +144,24 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
     };
 
     // =========================================================================
+    // LOAD USER INFO FOR CO-AUTHOR
+    // =========================================================================
+    
+    let coAuthor: { name: string; email: string } | undefined;
+    const executionId = workflow.getWorkflowExecutionId();
+    const execution = await repositories.workflowExecutions.findById(executionId);
+    const createdBy = execution?.createdBy;
+    if (createdBy) {
+      const user = await repositories.users.findById(createdBy);
+      if (user) {
+        coAuthor = { name: user.name, email: user.email };
+        logger.info(`Found co-author info for user ${createdBy}`);
+      } else {
+        logger.warn(`User ${createdBy} not found, commits will not have co-author`);
+      }
+    }
+
+    // =========================================================================
     // LOAD GUIDELINES
     // =========================================================================
 
@@ -167,7 +186,8 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         context.baseBranch || 'main',     // baseBranch
         context.checkoutCommit,
         projectGuidelines,
-        context.executorType
+        context.executorType,
+        coAuthor
       )
     );
 
@@ -202,7 +222,8 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         context.baseBranch || 'main', // baseBranch
         context.checkoutCommit,
         projectGuidelines,
-        context.executorType
+        context.executorType,
+        coAuthor
       )
     );
 
@@ -216,7 +237,7 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
 
     const workspaceName = workflow.getWorkflowExecutionId();
     const repoPath = `/tmp/${workspaceName}`;
-    const deterministicResult = await runDeterministicValidation(repoPath, gitInfo);
+    const deterministicResult = await runDeterministicValidation(repoPath, gitInfo, coAuthor);
     
     if (deterministicResult.formatCommitHash) {
       gitInfo = { ...gitInfo, commitHash: deterministicResult.formatCommitHash };
@@ -239,7 +260,8 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         context.baseBranch || 'main',
         context.checkoutCommit,
         projectGuidelines,
-        context.executorType
+        context.executorType,
+        coAuthor
       );
 
       const validationResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(

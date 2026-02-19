@@ -32,13 +32,17 @@ async function directoryExists(dirPath: string): Promise<boolean> {
  * @param filePath Path to the file that was modified (relative to the repository root)
  * @param message Commit message
  * @param executionId Execution ID for logging
+ * @param coAuthorName Co-author name
+ * @param coAuthorEmail Co-author email
  * @returns Commit hash if successful, undefined otherwise
  */
 export async function commitChanges(
   repoPath: string, 
   filePath: string, 
   message: string,
-  executionId: string
+  executionId: string,
+  coAuthorName?: string,
+  coAuthorEmail?: string
 ): Promise<string | undefined> {
   try {
     // Initialize git with the repository path
@@ -50,8 +54,12 @@ export async function commitChanges(
     // Add the file
     await git.add(relativeFilePath);
     
+    const commitMessage = coAuthorName && coAuthorEmail
+      ? `${message}\n\nCo-authored-by: ${coAuthorName} <${coAuthorEmail}>`
+      : message;
+    
     const commitOptions = { '--no-verify': null };
-    const commitResult = await git.commit(message, undefined, commitOptions);
+    const commitResult = await git.commit(commitMessage, undefined, commitOptions);
     
     // Get the commit hash
     const commitHash = commitResult.commit || '';
@@ -291,24 +299,33 @@ export async function hasUncommittedChanges(repoPath: string): Promise<boolean> 
  * Commit all changes in the repository (staged and unstaged)
  * @param repoPath - Path to the git repository
  * @param commitMessage - Commit message
+ * @param coAuthorName - Co-author name
+ * @param coAuthorEmail - Co-author email
  * @returns commit hash if successful, undefined if failed
  */
-export async function commitAllChanges(repoPath: string, commitMessage: string): Promise<string | undefined> {
+export async function commitAllChanges(
+  repoPath: string, 
+  commitMessage: string,
+  coAuthorName?: string,
+  coAuthorEmail?: string
+): Promise<string | undefined> {
   try {
     const git: SimpleGit = simpleGit(repoPath);
     
-    // Add all files (including untracked)
     await git.add('.');
     
-    // Check if there are any changes to commit after adding
     const status = await git.status();
     if (status.files.length === 0) {
       logger.info('No changes to commit', { repoPath });
       return undefined;
     }
     
+    const finalMessage = coAuthorName && coAuthorEmail
+      ? `${commitMessage}\n\nCo-authored-by: ${coAuthorName} <${coAuthorEmail}>`
+      : commitMessage;
+    
     const commitOptions = { '--no-verify': null };
-    const commitResult = await git.commit(commitMessage, undefined, commitOptions);
+    const commitResult = await git.commit(finalMessage, undefined, commitOptions);
     const commitHash = commitResult.commit || '';
     
     if (commitHash) {

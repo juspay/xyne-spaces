@@ -674,7 +674,8 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
           ? agentChkConfig.repoInfo.getCommitMessage('Final auto-commit of remaining changes')
           : 'Final auto-commit of remaining changes'
         
-        const finalCommitHash = await doCommit(repoPath, finalCommitMessage)
+        const coAuthor = agentChkConfig.repoInfo?.coAuthor
+        const finalCommitHash = await doCommit(repoPath, finalCommitMessage, coAuthor?.name, coAuthor?.email)
         if (finalCommitHash) {
           commitTracker.hasCommits = true
           commitTracker.latestCommitHash = finalCommitHash
@@ -948,7 +949,13 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
           ? agentChkConfig.repoInfo.getCommitMessage(commitMessage)
           : commitMessage
 
-        const commitHash = await commitAllChanges(repoPath, updatedCommitMessage)
+        const coAuthor = agentChkConfig.repoInfo?.coAuthor
+        const commitHash = await commitAllChanges(
+          repoPath,
+          updatedCommitMessage,
+          coAuthor?.name,
+          coAuthor?.email
+        )
 
         if (commitHash) {
           updateAgentData = { ...updateAgentData, commitHash }
