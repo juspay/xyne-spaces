@@ -8,7 +8,9 @@
     "services": "chmod +x scripts/start-services.sh && ./scripts/start-services.sh",
     "services:stop": "command -v podman-compose > /dev/null && podman-compose -f docker-compose.dev.yml down || docker-compose -f docker-compose.dev.yml down",
     "cleanup": "chmod +x scripts/cleanup-storage.sh && ./scripts/cleanup-storage.sh",
-    "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js"
+    "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js",
+    "test": "./xyne-automation/scripts/run-test.sh",
+    "test:integrity": "npm run test:integrity --prefix xyne-automation"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.1.0",

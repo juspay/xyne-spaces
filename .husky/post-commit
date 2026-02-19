@@ -1,0 +1,71 @@
+#!/usr/bin/env sh
+
+# Check if tests were run in the pre-commit phase
+if [ -f .git/XYNE_TEST_RAN ]; then
+  rm .git/XYNE_TEST_RAN
+
+  exec < /dev/tty
+
+  # Extract ticket ID from the last commit message
+  # Use grep to find pattern like XYNE-123. If multiple, take the first one.
+  LAST_COMMIT_MSG=$(git log -1 --format=%s)
+  TICKET_ID=$(echo "$LAST_COMMIT_MSG" | grep -oE '[A-Z]+-[0-9]+' | head -n 1)
+
+  if [ -z "$TICKET_ID" ]; then
+    echo "⚠️  No ticket ID found in commit message. Using 'NO-TICKET'."
+    TICKET_ID="NO-TICKET"
+  fi
+
+  echo ""
+  echo "🤖 Detected test run. Creating automated report commit for ticket: $TICKET_ID..."
+  echo ""
+
+  # Add the report directory (force add since it's ignored)
+  git add -f xyne-automation/report
+
+  # Create the commit without triggering hooks (--no-verify)
+  # Check if there are changes to commit first
+  if ! git diff --cached --quiet; then
+    git commit --no-verify -m "chore: $TICKET_ID added automation test reports"
+    echo ""
+    echo "✅ Created report commit."
+    echo ""
+    echo "ℹ️  NOTE: This automation report commit is temporary."
+    echo "    - Jenkins will archive the reports and automatically remove this commit from remote"
+    echo ""
+    echo "📤 Push Options:"
+    echo "    [YES] - Push now, then auto-reset HEAD to sync with remote (default)"
+    echo "    [NO]  - You push manually later. Remember to reset HEAD after push"
+    echo "            (If you don't reset, your local will be out of sync with remote)"
+    echo ""
+    printf "Do you want to push to remote now? [Y/n] "
+    read -r PUSH_NOW
+
+    PUSH_NOW=${PUSH_NOW:-y}
+
+    if [ "$PUSH_NOW" = "y" ] || [ "$PUSH_NOW" = "Y" ]; then
+      CURRENT_BRANCH=$(git branch --show-current)
+
+      echo "🚀 Pushing to remote..."
+      git push --no-verify origin "$CURRENT_BRANCH"
+
+      if [ $? -eq 0 ]; then
+        echo "✅ Push successful."
+        echo "🔄 Resetting HEAD to remove local report commit..."
+        git reset --hard HEAD~1
+        echo "✅ Local HEAD reset complete. Your branch is now synced with remote."
+        echo "    Jenkins will handle the report commit cleanup on remote."
+      else
+        echo "❌ Push failed. Please resolve the issue and push manually."
+        echo "⚠️  Remember to reset HEAD after successful push: git reset --hard HEAD~1"
+      fi
+    else
+      echo ""
+      echo "⚠️  IMPORTANT: After you push manually, make sure to reset HEAD to sync with remote:"
+      echo "    $ git reset --hard HEAD~1"
+      echo ""
+      echo "    Jenkins will automatically remove the temp commit from remote after archiving."
+      echo ""
+    fi
+  fi
+fi

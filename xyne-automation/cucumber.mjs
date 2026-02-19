@@ -10,7 +10,11 @@ const common = {
   requireModule: ['ts-node/register', 'tsconfig-paths/register'],
   require: ['tests/**/*.steps.ts', 'fixtures/cucumber.*.ts'],
   format: [
-    process.env.TEST_ENV != 'local' ? 'progress' : 'summary',
+    process.env.TEST_ENV === 'local-test'
+      ? 'summary'
+      : process.env.TEST_ENV !== 'local'
+        ? 'progress-bar'
+        : 'summary',
     `summary:report/${timestamp}/cucumber-summary.log`,
     `json:report/${timestamp}/cucumber-report.json`,
     `html:report/${timestamp}/cucumber-report.html`,

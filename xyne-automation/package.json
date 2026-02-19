@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "npx cucumber-js",
+    "test:integrity": "./scripts/verify-test-code-integrity.sh",
+    "test:runner": "./scripts/run-test.sh",
     "test:api": "npx cucumber-js --profile api",
     "test:ui": "npx cucumber-js --profile ui",
     "test:e2e": "npx cucumber-js --profile e2e",
@@ -32,6 +34,7 @@
     "@typescript-eslint/eslint-plugin": "^8.52.0",
     "@typescript-eslint/parser": "^8.52.0",
     "chai": "^6.2.2",
+    "chalk": "^4.1.2",
     "dotenv": "^17.2.3",
     "eslint": "^9.39.2",
     "eslint-plugin-simple-import-sort": "^12.1.1",
@@ -46,6 +49,7 @@
     "@types/pixelmatch": "^5.2.6",
     "@types/pngjs": "^6.0.5",
     "axios": "^1.13.2",
+    "ora": "^9.3.0",
     "pixelmatch": "^7.1.0",
     "pngjs": "^7.0.0"
   }
