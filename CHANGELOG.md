@@ -1,3 +1,15 @@
+## [1.50.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.49.0...v1.50.0) (2026-02-19)
+
+
+### Features
+
+* add co-author in workflow commits ([3e36555](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3e3655501997200dd507cf10e5f3ecf778b88c27)), closes [#3298](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3298)
+
+
+### Bug Fixes
+
+* only-on-empty-input-enabling-keyboard-shortcut ([076e2c1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/076e2c120dbf8552492c07620ac4bca88ca8f71b)), closes [#3373](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3373)
+
 ## [1.49.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.48.0...v1.49.0) (2026-02-18)
 
 
