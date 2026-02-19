@@ -13,7 +13,7 @@ import {
   List,
   Store,
 } from 'lucide-react';
-import { ReactElement, useMemo, useState, useEffect, useCallback } from 'react';
+import React, { ReactElement, useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '../../utils/classNames';
@@ -64,6 +64,8 @@ import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySe
 import { Hash } from 'lucide-react';
 import { useDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
+import { useUsers } from '../../hooks/useUsers';
+import { EmailTagWithAvatar } from '../../components/xyne-desk/EmailTagWithAvatar/EmailTagWithAvatar';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFiltered>[number];
@@ -1182,11 +1184,15 @@ const EmailComposer = ({
 }: {
   conversationId?: string | null | undefined;
 }): ReactElement => {
+  const [emails] = useCachedQuery(
+    queries.getEmailsForTicket({ conversationId: conversationId || '' }),
+  );
   const [drafts] = useCachedQuery(
     queries.getDraftForConversation({ conversationId: conversationId || '' }),
   );
   const [emailContent, setEmailContent] = useState<string>('');
   const [isSending, setIsSending] = useState<boolean>(false);
+  const users = useUsers();
 
   const stripHtml = (html: string): string => {
     if (!html) return '';
@@ -1206,9 +1212,60 @@ const EmailComposer = ({
       setEmailContent('');
     }
   }, [drafts, conversationId]);
+  const toInputRef = React.useRef<HTMLInputElement>(null);
+  const [toInputValue, setToInputValue] = useState<string>('');
+
+  // Recipient state
+  const [toEmails, setToEmails] = useState<string[]>([]);
+  const [ccEmails, setCcEmails] = useState<string[]>([]);
+  const [bccEmails, setBccEmails] = useState<string[]>([]);
+  const [showCc, setShowCc] = useState<boolean>(false);
+  const [showBcc, setShowBcc] = useState<boolean>(false);
+
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+
+  // Initialize recipients from latest email
+  useEffect(() => {
+    if (emails && emails.length > 0) {
+      const sortedEmailsAsc = [...emails].sort((a, b) => {
+        const aTime = a.createdAt || 0;
+        const bTime = b.createdAt || 0;
+        return aTime - bTime;
+      });
+      const initialEmail = sortedEmailsAsc[0];
+
+      const sortedEmailsDesc = [...emails].sort((a, b) => {
+        const aTime = a.createdAt || 0;
+        const bTime = b.createdAt || 0;
+        return bTime - aTime;
+      });
+      const latestEmail = sortedEmailsDesc[0];
+
+      if (latestEmail && initialEmail) {
+        // Backend sends FROM this address, so we should not include it in TO recipients
+        const fromEmailAddress = (initialEmail.to && initialEmail.to[0])?.toLowerCase() || '';
+
+        const allRecipients = new Set<string>();
+        if (latestEmail.from) allRecipients.add(latestEmail.from);
+        if (latestEmail.to) latestEmail.to.forEach(email => allRecipients.add(email));
+
+        const filteredRecipients = Array.from(allRecipients).filter(
+          email => email.toLowerCase() !== fromEmailAddress,
+        );
+
+        setToEmails(filteredRecipients);
+        setCcEmails(latestEmail.cc || []);
+        setBccEmails(latestEmail.bcc || []);
+
+        setIsExpanded(false);
+        setShowCc(false);
+        setShowBcc(false);
+      }
+    }
+  }, [emails, conversationId]);
 
   const handleSendEmail = async (): Promise<void> => {
-    if (!emailContent.trim() || !conversationId || isSending) {
+    if (!emailContent.trim() || !conversationId || isSending || toEmails.length === 0) {
       return;
     }
     setIsSending(true);
@@ -1216,6 +1273,9 @@ const EmailComposer = ({
       await apiInstance.post(`/email/${conversationId}/reply`, {
         body: emailContent,
         type: 'REPLY_ALL',
+        to: toEmails,
+        cc: ccEmails,
+        bcc: bccEmails,
       });
       setEmailContent('');
     } catch (error) {
@@ -1225,41 +1285,283 @@ const EmailComposer = ({
     }
   };
 
+  const handleToKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') {
+      e.preventDefault();
+      const email = toInputValue.trim().replace(',', '');
+      if (email && email.includes('@') && !toEmails.includes(email)) {
+        setToEmails([...toEmails, email]);
+        setToInputValue('');
+      }
+    } else if (e.key === 'Backspace' && !toInputValue && toEmails.length > 0) {
+      setToEmails(toEmails.slice(0, -1));
+    }
+  };
+
+  const handleToBlur = (): void => {
+    const email = toInputValue.trim().replace(',', '');
+    if (email && email.includes('@') && !toEmails.includes(email)) {
+      setToEmails([...toEmails, email]);
+      setToInputValue('');
+    }
+  };
+
+  const collapsedDisplay = useMemo(() => {
+    const MAX_VISIBLE = 2;
+    const allUniqueEmails = Array.from(new Set([...toEmails, ...ccEmails, ...bccEmails]));
+    const visibleEmails = allUniqueEmails.slice(0, MAX_VISIBLE);
+    const remainingCount = allUniqueEmails.length - MAX_VISIBLE;
+    return { visibleEmails, remainingCount: remainingCount > 0 ? remainingCount : 0 };
+  }, [toEmails, ccEmails, bccEmails]);
+
+  // Input refs for Cc and Bcc
+  const ccInputRef = React.useRef<HTMLInputElement>(null);
+  const bccInputRef = React.useRef<HTMLInputElement>(null);
+  const [ccInputValue, setCcInputValue] = useState<string>('');
+  const [bccInputValue, setBccInputValue] = useState<string>('');
+
+  const handleCcKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') {
+      e.preventDefault();
+      const email = ccInputValue.trim().replace(',', '');
+      if (email && email.includes('@') && !ccEmails.includes(email)) {
+        setCcEmails([...ccEmails, email]);
+        setCcInputValue('');
+      }
+    } else if (e.key === 'Backspace' && !ccInputValue && ccEmails.length > 0) {
+      setCcEmails(ccEmails.slice(0, -1));
+    }
+  };
+
+  const handleBccKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') {
+      e.preventDefault();
+      const email = bccInputValue.trim().replace(',', '');
+      if (email && email.includes('@') && !bccEmails.includes(email)) {
+        setBccEmails([...bccEmails, email]);
+        setBccInputValue('');
+      }
+    } else if (e.key === 'Backspace' && !bccInputValue && bccEmails.length > 0) {
+      setBccEmails(bccEmails.slice(0, -1));
+    }
+  };
+
+  // Handle expand - auto-show Cc/Bcc if they have emails
+  const handleExpand = (): void => {
+    setIsExpanded(true);
+    if (ccEmails.length > 0) {
+      setShowCc(true);
+    }
+    if (bccEmails.length > 0) {
+      setShowBcc(true);
+    }
+  };
+
   return (
     <div className='w-full p-4'>
       <div
-        className={`border border-border rounded-xl relative ${isSending ? 'opacity-60 pointer-events-none' : ''}`}
+        className={`border border-gray-200 rounded-xl relative ${isSending ? 'opacity-60 pointer-events-none' : ''}`}
       >
-        <div className='px-4 h-8 flex items-center justify-start gap-2 pt-2'>
-          <ReplyAll size={16} className={`${isSending ? 'text-gray-400' : 'text-gray-900'}`} />
-          <span
-            className={`text-sm tracking-tight font-medium ${isSending ? 'text-gray-400' : 'text-gray-900'}`}
-          >
-            {isSending ? 'Sending...' : 'Reply to all'}
-          </span>
+        <div className='px-4 pt-3'>
+          {!isExpanded ? (
+            <button
+              type='button'
+              className='w-full flex items-center gap-2 cursor-pointer text-left py-1'
+              onClick={handleExpand}
+            >
+              <ReplyAll size={16} className='text-gray-800 flex-shrink-0' />
+              <span className='text-sm text-gray-800 font-medium'>Reply to</span>
+              <div className='flex items-center gap-1.5 flex-wrap flex-1'>
+                {collapsedDisplay.visibleEmails.map(email => (
+                  <span key={email} className='text-sm text-gray-700'>
+                    &lt;{email}&gt;
+                  </span>
+                ))}
+                {collapsedDisplay.remainingCount > 0 && (
+                  <span className='text-sm text-gray-600 bg-gray-100 px-2 py-0.5 rounded hover:bg-gray-200'>
+                    {collapsedDisplay.remainingCount} more
+                  </span>
+                )}
+              </div>
+            </button>
+          ) : (
+            <>
+              <div className='flex items-start gap-2'>
+                <button
+                  type='button'
+                  onClick={() => setIsExpanded(false)}
+                  className='flex-shrink-0 p-0.5 hover:bg-gray-100 rounded transition-colors mt-0.5'
+                  title='Collapse'
+                >
+                  <ReplyAll size={16} className='text-gray-500' />
+                </button>
+                <span className='text-sm text-gray-800 font-medium flex-shrink-0 mt-1'>To</span>
+
+                <div
+                  className='flex-1 flex flex-wrap items-center gap-1.5 cursor-text min-h-[28px]'
+                  onClick={() => toInputRef.current?.focus()}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toInputRef.current?.focus();
+                    }
+                  }}
+                  role='button'
+                  tabIndex={0}
+                >
+                  {toEmails.map(email => (
+                    <EmailTagWithAvatar
+                      key={email}
+                      email={email}
+                      onRemove={() => setToEmails(toEmails.filter(e => e !== email))}
+                      disabled={isSending}
+                      users={users}
+                    />
+                  ))}
+                  <input
+                    ref={toInputRef}
+                    type='text'
+                    value={toInputValue}
+                    onChange={e => setToInputValue(e.target.value)}
+                    onKeyDown={handleToKeyDown}
+                    onBlur={handleToBlur}
+                    placeholder={toEmails.length === 0 ? 'Add recipients...' : ''}
+                    className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
+                    disabled={isSending}
+                  />
+                </div>
+
+                {/* Cc/Bcc buttons on the right - Gmail style */}
+                <div className='flex items-center gap-1 flex-shrink-0 mt-0.5'>
+                  {!showCc && (
+                    <button
+                      onClick={() => setShowCc(true)}
+                      className='text-sm text-gray-500 hover:text-gray-700 px-1 transition-colors'
+                    >
+                      Cc
+                    </button>
+                  )}
+                  {!showBcc && (
+                    <button
+                      onClick={() => setShowBcc(true)}
+                      className='text-sm text-gray-500 hover:text-gray-700 px-1 transition-colors'
+                    >
+                      Bcc
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {showCc && (
+                <div className='flex items-start gap-2 mt-1'>
+                  <div className='w-[20px] flex-shrink-0' />
+                  <span className='text-sm text-gray-800 font-medium flex-shrink-0 mt-1'>Cc</span>
+                  <div
+                    className='flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text'
+                    onClick={() => ccInputRef.current?.focus()}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        ccInputRef.current?.focus();
+                      }
+                    }}
+                    role='button'
+                    tabIndex={0}
+                  >
+                    {ccEmails.map(email => (
+                      <EmailTagWithAvatar
+                        key={email}
+                        email={email}
+                        onRemove={() => setCcEmails(ccEmails.filter(e => e !== email))}
+                        disabled={isSending}
+                        users={users}
+                      />
+                    ))}
+                    <input
+                      ref={ccInputRef}
+                      type='text'
+                      value={ccInputValue}
+                      onChange={e => setCcInputValue(e.target.value)}
+                      onKeyDown={handleCcKeyDown}
+                      onBlur={() => {
+                        const email = ccInputValue.trim().replace(',', '');
+                        if (email && email.includes('@') && !ccEmails.includes(email)) {
+                          setCcEmails([...ccEmails, email]);
+                          setCcInputValue('');
+                        }
+                      }}
+                      placeholder={ccEmails.length === 0 ? 'Add recipients...' : ''}
+                      className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
+                      disabled={isSending}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {showBcc && (
+                <div className='flex items-start gap-2 mt-1'>
+                  <div className='w-[20px] flex-shrink-0' />
+                  <span className='text-sm text-gray-800 font-medium flex-shrink-0 mt-1'>Bcc</span>
+                  <div
+                    className='flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text'
+                    onClick={() => bccInputRef.current?.focus()}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        bccInputRef.current?.focus();
+                      }
+                    }}
+                    role='button'
+                    tabIndex={0}
+                  >
+                    {bccEmails.map(email => (
+                      <EmailTagWithAvatar
+                        key={email}
+                        email={email}
+                        onRemove={() => setBccEmails(bccEmails.filter(e => e !== email))}
+                        disabled={isSending}
+                        users={users}
+                      />
+                    ))}
+                    <input
+                      ref={bccInputRef}
+                      type='text'
+                      value={bccInputValue}
+                      onChange={e => setBccInputValue(e.target.value)}
+                      onKeyDown={handleBccKeyDown}
+                      onBlur={() => {
+                        const email = bccInputValue.trim().replace(',', '');
+                        if (email && email.includes('@') && !bccEmails.includes(email)) {
+                          setBccEmails([...bccEmails, email]);
+                          setBccInputValue('');
+                        }
+                      }}
+                      placeholder={bccEmails.length === 0 ? 'Add recipients...' : ''}
+                      className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
+                      disabled={isSending}
+                    />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
+
         <TextareaAutosize
           minRows={3}
           maxRows={4}
           placeholder='Compose email...'
           value={emailContent}
           onChange={e => setEmailContent(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-              e.preventDefault();
-              if (emailContent.trim() && conversationId && !isSending) {
-                void handleSendEmail();
-              }
-            }
-          }}
-          className='w-full px-4 py-2 rounded-lg focus:outline-none focus:border-transparent text-sm'
+          className='w-full px-4 py-3 focus:outline-none text-sm resize-none'
           disabled={isSending}
         />
-        <div className='px-4 flex items-center justify-end gap-2 pb-2 pt-1'>
+
+        <div className='px-4 py-3 flex items-center justify-end'>
           <button
-            className='size-7 flex items-center justify-center rounded-full bg-[#788187] text-white hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed'
+            className='size-8 flex items-center justify-center rounded-full bg-gray-400 text-white hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
             onClick={() => void handleSendEmail()}
-            disabled={!emailContent.trim() || !conversationId || isSending}
+            disabled={!emailContent.trim() || !conversationId || isSending || toEmails.length === 0}
             aria-label='Send email'
           >
             {isSending ? (
