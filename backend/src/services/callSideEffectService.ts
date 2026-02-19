@@ -38,6 +38,16 @@ class CallSideEffectService {
 
         if (!call) return;
 
+        const channel = await db.channel.findUnique({
+            where: { id: call.channelId },
+            select: { scopeType: true }
+        });
+
+        if (channel?.scopeType === ChannelScopeType.DEFAULT) {
+            this.logger.info(`Skipping missed call notifications for DEFAULT scope channel: ${call.channelId}`);
+            return;
+        }
+
         const now = new Date();
 
         // 1. Update status to MISSED
@@ -124,6 +134,23 @@ class CallSideEffectService {
             if (!callId || !recipientId || !invitedBy) return;
             if (recipientId === invitedBy) return;
 
+            const call = await db.call.findUnique({
+                where: { id: callId },
+                select: { externalId: true, callType: true, roomLink: true, channelId: true }
+            });
+
+            if (!call) return;
+
+            const channel = await db.channel.findUnique({
+                where: { id: call.channelId },
+                select: { scopeType: true }
+            });
+
+            if (channel?.scopeType === ChannelScopeType.DEFAULT) {
+                this.logger.info(`Skipping side effects for DEFAULT scope channel: ${call.channelId}`);
+                return;
+            }
+
             // Schedule Timeout Job
             const inviteTime = participant.invitedAt ? new Date(participant.invitedAt).getTime() : Date.now();
             await callTimeoutWorker.addJob(participantId, {
@@ -138,23 +165,6 @@ class CallSideEffectService {
                 where: { id: invitedBy },
                 select: { name: true, picture: true }
             });
-
-            const call = await db.call.findUnique({
-                where: { id: callId },
-                select: { externalId: true, callType: true, roomLink: true, channelId: true }
-            });
-
-            if (!call) return;
-
-            const channel = await db.channel.findUnique({
-                where: { id: call.channelId },
-                select: { scopeType: true }
-            });
-
-            if (channel?.scopeType === ChannelScopeType.DEFAULT) {
-                this.logger.info(`Skipping notification for DEFAULT scope channel: ${call.channelId}`);
-                return;
-            }
 
             const callerName = caller?.name || 'Someone';
             const recipient = await db.user.findUnique({
