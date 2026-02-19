@@ -35,6 +35,7 @@ import {
   Mic,
   MoreHorizontal,
   Bookmark,
+  Globe,
   ShieldUser,
 } from 'lucide-react';
 
@@ -111,6 +112,11 @@ const navigationItems = [
     path: '/vscode',
     label: 'VS Code',
     icon: <Code2 size={16} color='var(--app-sidebar-active-foreground)' />,
+  },
+  {
+    path: '/browser',
+    label: 'Browser',
+    icon: <Globe size={16} color='var(--app-sidebar-active-foreground)' />,
   },
   {
     path: '/forms',
@@ -225,6 +231,7 @@ const AppSidebar = (): ReactElement => {
         : true;
 
       if (item.path === '/vscode' && !isElectronApp()) return false;
+      if (item.path === '/browser' && !isElectronApp()) return false;
       return hasAccess;
     });
   }, [permissions]);

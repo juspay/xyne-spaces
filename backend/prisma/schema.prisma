@@ -1764,6 +1764,45 @@ model Bookmark {
   @@schema("public")
 }
 
+// Link Sharing Feature Models
+enum LinkVisibility {
+  DEFAULT  // Visible to all channel members
+  PERSONAL // Only visible to creator + explicitly shared participants
+  @@schema("public")
+}
+
+model Link {
+  id          String         @id @default(cuid())
+  url         String
+  title       String
+  description String?
+  favicon     String?
+  channelId   String
+  createdBy   String         // User ID (no FK constraint)
+  visibility  LinkVisibility @default(DEFAULT)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([createdBy, url, channelId]) // No duplicate URLs per user per channel
+  @@index([channelId, visibility]) // Fast lookup of channel links by visibility
+  @@index([channelId, createdBy]) // Fast lookup of user's links in channel
+  @@map("links")
+  @@schema("public")
+}
+
+model LinkAccess {
+  id        String   @id @default(cuid())
+  linkId    String   // Link ID (no FK constraint)
+  userId    String   // User ID (no FK constraint)
+  createdAt DateTime @default(now())
+
+  @@unique([linkId, userId]) // User can only have one access record per link
+  @@index([userId]) // Fast lookup of links shared with user
+  @@index([linkId]) // Fast lookup of users with access to link
+  @@map("link_access")
+  @@schema("public")
+}
+
 // Vespa Insertion Logs
 enum VespaInsertionStatus {
   PENDING

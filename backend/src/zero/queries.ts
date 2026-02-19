@@ -17,7 +17,7 @@ import {
   ChannelRole,
   AttachmentEntityType,
   ChannelType,
-  ActivityClassification,
+  ActivityClassification, LinkVisibility,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -1187,6 +1187,33 @@ export const queries = defineQueries({
     ({ args: { type } }) => {
       return zql.lookup_values.where('type', type).orderBy('createdAt', 'asc');
     },
+  ),
+
+  // Links queries
+  channelLinks: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.links
+        .where('channelId', channelId)
+        .where(({ or, cmp, and, exists }) =>
+          or(
+            // DEFAULT visibility - visible to everyone
+            cmp('visibility', '=', LinkVisibility.DEFAULT),
+            // PERSONAL visibility - only visible to creator
+            and(
+              cmp('visibility', '=', LinkVisibility.PERSONAL),
+              cmp('createdBy', '=', ctx.userID)
+            ),
+            // PERSONAL visibility - shared with current user
+            and(
+              cmp('visibility', '=', LinkVisibility.PERSONAL),
+              exists('sharedWith', sw => sw.where('userId', '=', ctx.userID))
+            )
+          )
+        )
+        .related('sharedWith')
+        .orderBy('createdAt', 'desc');
+    }
   ),
 });
  

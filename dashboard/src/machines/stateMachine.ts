@@ -1,4 +1,6 @@
 import { setup, assign, createActor } from 'xstate';
+import { useSelector } from '@xstate/react';
+import { useEffect } from 'react';
 import { queries } from '../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
 
@@ -97,6 +99,8 @@ interface StateMachineContext {
   zeroRefreshCounter?: number;
   /** List of all currently online users from Redis */
   onlineUsers: OnlineUser[];
+  /** Overlay depth for tracking open dialogs/modals */
+  overlayDepth: number;
 }
 
 type StateMachineEvent =
@@ -122,7 +126,9 @@ type StateMachineEvent =
       value: number;
     }
   | { type: 'SET_FILTERED_TICKET_IDS'; ids: string[] }
-  | { type: 'SET_ONLINE_USERS'; onlineUsers: OnlineUser[] };
+  | { type: 'SET_ONLINE_USERS'; onlineUsers: OnlineUser[] }
+  | { type: 'PUSH_OVERLAY' }
+  | { type: 'POP_OVERLAY' };
 
 export const stateMachine = setup({
   types: {
@@ -299,6 +305,12 @@ export const stateMachine = setup({
         return [];
       },
     }),
+    pushOverlay: assign({
+      overlayDepth: ({ context }) => context.overlayDepth + 1,
+    }),
+    popOverlay: assign({
+      overlayDepth: ({ context }) => Math.max(0, context.overlayDepth - 1),
+    }),
   },
 }).createMachine({
   id: 'stateMachine',
@@ -316,6 +328,7 @@ export const stateMachine = setup({
     metrics: initialMetricsState,
     filteredTicketIds: [],
     onlineUsers: [],
+    overlayDepth: 0,
   },
   initial: 'idle',
   states: {
@@ -374,6 +387,12 @@ export const stateMachine = setup({
         },
         SET_ONLINE_USERS: {
           actions: 'setOnlineUsers',
+        },
+        PUSH_OVERLAY: {
+          actions: 'pushOverlay',
+        },
+        POP_OVERLAY: {
+          actions: 'popOverlay',
         },
       },
     },
@@ -441,4 +460,34 @@ export function updateMyStatus(
   websocketService: { emit: (event: string, data: unknown) => void },
 ): void {
   websocketService.emit('update_status', { status });
+}
+
+/**
+ * Get current overlay state
+ */
+export function getHasOverlay(): boolean {
+  return stateMachineActor.getSnapshot().context.overlayDepth > 0;
+}
+
+/**
+ * Hook to check if any overlay (dialog/modal) is currently open
+ */
+export function useHasOverlay(): boolean {
+  return useSelector(stateMachineActor, state => state.context.overlayDepth > 0);
+}
+
+/**
+ * Hook to automatically manage overlay depth when a dialog/modal opens/closes
+ * @param isOpen - Whether the overlay is currently open
+ */
+export function useOverlayEffect(isOpen: boolean): void {
+  useEffect(() => {
+    if (isOpen) {
+      stateMachineActor.send({ type: 'PUSH_OVERLAY' });
+      return () => {
+        stateMachineActor.send({ type: 'POP_OVERLAY' });
+      };
+    }
+    return undefined;
+  }, [isOpen]);
 }

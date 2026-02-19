@@ -126,15 +126,6 @@ export const xyneAIMachine = setup({
       }
       return {};
     }),
-    // Panel resizing actions
-    resizeToDefault: () => {
-      globalXyneAIPanelRefs.left.current?.resize(65);
-      globalXyneAIPanelRefs.right.current?.resize(35);
-    },
-    resizeToClosed: () => {
-      globalXyneAIPanelRefs.left.current?.resize(100);
-      globalXyneAIPanelRefs.right.current?.resize(0);
-    },
   },
 }).createMachine({
   context: () => ({
@@ -151,7 +142,7 @@ export const xyneAIMachine = setup({
       on: {
         OPEN: {
           target: 'open',
-          actions: ['setOpen', 'resizeToDefault'],
+          actions: 'setOpen',
         },
       },
     },
@@ -162,7 +153,7 @@ export const xyneAIMachine = setup({
         },
         CLOSE: {
           target: 'closed',
-          actions: ['setClosed', 'resizeToClosed'],
+          actions: 'setClosed',
         },
         SET_CONTEXT: {
           actions: 'setContext',

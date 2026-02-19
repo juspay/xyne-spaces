@@ -26,6 +26,7 @@ import {
   BoardType,
   TicketStageRequestStatus,
   AttachmentEntityType,
+  LinkVisibility,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationController } from "@/controllers/conversationController";
@@ -6483,5 +6484,181 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }
       },
     ),
-  });
-}
+    links: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          url: z.string().url(),
+          title: z.string().min(1),
+          description: z.string().optional(),
+          favicon: z.string().optional(),
+          channelId: z.string(),
+          visibility: z.enum(['DEFAULT', 'PERSONAL']).default('DEFAULT'),
+          createdAt: z.number(),
+          updatedAt: z.number(),
+        }),
+        async ({ tx, ctx, args }) => {
+          const { id, url, title, description, favicon, channelId, visibility, createdAt, updatedAt } = args;
+          const userId = ctx.userID;
+
+          // Check if link already exists for this user in this channel
+          const existing = await tx.run(
+            zql.links
+              .where('createdBy', userId)
+              .where('url', url)
+              .where('channelId', channelId)
+              .one()
+          );
+
+          if (existing) {
+            throw new Error('Link already exists');
+          }
+
+          await tx.mutate.links.insert({
+            id,
+            url,
+            title,
+            description: description || null,
+            favicon: favicon || null,
+            channelId,
+            createdBy: userId,
+            visibility: visibility === 'DEFAULT' ? LinkVisibility.DEFAULT : LinkVisibility.PERSONAL,
+            createdAt,
+            updatedAt,
+          });
+        }
+      ),
+
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          title: z.string().min(1).optional(),
+          description: z.string().optional(),
+          favicon: z.string().optional(),
+          visibility: z.enum(['DEFAULT', 'PERSONAL']).optional(),
+          updatedAt: z.number(),
+        }),
+        async ({ tx, ctx, args }) => {
+          const { id, title, description, favicon, visibility, updatedAt } = args;
+          const userId = ctx.userID;
+
+          // Verify ownership
+          const link = await tx.run(zql.links.where('id', id).one());
+          if (!link) {
+            throw new Error('Link not found');
+          }
+          if (link.createdBy !== userId) {
+            throw new Error('Not authorized to update this link');
+          }
+
+          const updates: Record<string, ReadonlyJSONValue> = {
+            updatedAt,
+          };
+
+          if (title !== undefined) updates.title = title;
+          if (description !== undefined) updates.description = description || null;
+          if (favicon !== undefined) updates.favicon = favicon || null;
+          if (visibility !== undefined) {
+            updates.visibility = visibility === 'DEFAULT' ? LinkVisibility.DEFAULT : LinkVisibility.PERSONAL;
+          }
+
+          await tx.mutate.links.update({ id, ...updates });
+        }
+      ),
+
+      delete: defineMutator(
+        z.object({ id: z.string() }),
+        async ({ tx, ctx, args: { id } }) => {
+          const userId = ctx.userID;
+
+          // Verify ownership
+          const link = await tx.run(zql.links.where('id', id).one());
+          if (!link) {
+            throw new Error('Link not found');
+          }
+          if (link.createdBy !== userId) {
+            throw new Error('Not authorized to delete this link');
+          }
+
+          // Delete link (cascade will handle link_access)
+          await tx.mutate.links.delete({ id });
+        }
+      ),
+
+      shareWith: defineMutator(
+        z.object({
+          linkId: z.string(),
+          userIds: z.array(z.string()),
+          accessIds: z.array(z.string()),
+          createdAt: z.number(),
+        }),
+        async ({ tx, ctx, args: { linkId, userIds, accessIds, createdAt } }) => {
+          const userId = ctx.userID;
+
+          // Verify ownership
+          const link = await tx.run(zql.links.where('id', linkId).one());
+          if (!link) {
+            throw new Error('Link not found');
+          }
+          if (link.createdBy !== userId) {
+            throw new Error('Not authorized to share this link');
+          }
+
+          // Add access for each user
+          for (let i = 0; i < userIds.length; i++) {
+            const targetUserId = userIds[i];
+            const accessId = accessIds[i];
+            
+            // Check if already shared
+            const existing = await tx.run(
+              zql.link_access
+                .where('linkId', linkId)
+                .where('userId', targetUserId)
+                .one()
+            );
+
+            if (!existing) {
+              await tx.mutate.link_access.insert({
+                id: accessId,
+                linkId,
+                userId: targetUserId,
+                createdAt,
+              });
+            }
+          }
+        }
+      ),
+
+      unshare: defineMutator(
+        z.object({
+          linkId: z.string(),
+          userId: z.string(),
+        }),
+        async ({ tx, ctx, args: { linkId, userId: targetUserId } }) => {
+          const userId = ctx.userID;
+
+          // Verify ownership
+          const link = await tx.run(zql.links.where('id', linkId).one());
+          if (!link) {
+            throw new Error('Link not found');
+          }
+          if (link.createdBy !== userId) {
+            throw new Error('Not authorized to unshare this link');
+          }
+
+          // Find and delete the access record
+          const access = await tx.run(
+            zql.link_access
+              .where('linkId', linkId)
+              .where('userId', targetUserId)
+              .one()
+          );
+
+          if (access) {
+            await tx.mutate.link_access.delete({ id: access.id });
+          }
+        }
+      ),
+    },
+  })
+};
