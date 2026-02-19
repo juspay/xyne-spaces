@@ -67,3 +67,6 @@ update:
 # Show flake outputs
 show:
     nix flake show --allow-import-from-derivation
+#one-click-setup
+setup:
+    chmod +x setup.sh && ./setup.sh
