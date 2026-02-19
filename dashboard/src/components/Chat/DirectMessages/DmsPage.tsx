@@ -1,5 +1,5 @@
 import { ReactElement, useMemo, useState, useRef } from 'react';
-import { Search, PenBox, ArrowLeft } from 'lucide-react';
+import { Search, PenBox, ArrowLeft, X } from 'lucide-react';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
@@ -22,6 +22,7 @@ import {
 } from 'react-resizable-panels';
 import { useUsers } from '../../../hooks/useUsers';
 import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
+import Button from '../../ui/Button';
 
 const DmsPage = (): ReactElement => {
   const navigate = useNavigate();
@@ -136,11 +137,22 @@ const DmsPage = (): ReactElement => {
             </div>
             <input
               type='text'
-              className='w-full h-11 pl-12 pr-4 py-3 bg-white bg-opacity-70 rounded-full border border-[#181B1D] border-opacity-[0.06] text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-0'
+              className='w-full h-11 pl-12 pr-10 py-3 bg-white bg-opacity-70 rounded-full border border-[#181B1D] border-opacity-[0.06] text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-0'
               placeholder='Search'
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
             />
+            {searchQuery && (
+              <Button
+                className='absolute inset-y-1 right-1 pr-3 flex items-center'
+                onClick={() => setSearchQuery('')}
+                aria-label='Clear search'
+                variant='link'
+                size='icon'
+              >
+                <X className='size-4 text-gray-400 hover:text-gray-600' />
+              </Button>
+            )}
           </div>
         </div>
 
