@@ -16,14 +16,15 @@ import { MessageItem } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
 import type { ResearchContext } from '../../../hooks/useResearchAgent';
 
 interface XyneAISidebarProps {
   channelId: string | null;
+  threadInfo?: ThreadInfo | null;
 }
 
-const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
+const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElement => {
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [visibleCharsMap, setVisibleCharsMap] = useState<Record<string, number>>({});
@@ -40,10 +41,16 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
   const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
     null,
   );
+  const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
+
+  // Update activeThreadInfo when threadInfo prop changes
+  useEffect(() => {
+    setActiveThreadInfo(threadInfo ?? null);
+  }, [threadInfo]);
 
   const channel = useChannel(channelId || '');
 
@@ -71,10 +78,11 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
     ? ['Summarize this channel', 'Notes shared last week', 'SR trend today']
     : ['How can I help you?', 'Ask me anything', 'General assistance'];
 
-  // Use the streaming hook with selected channel IDs and research context
+  // Use the streaming hook with selected channel IDs, research context, and active thread info
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: selectedChannelIds,
     conversationId,
+    threadConversationId: activeThreadInfo?.conversationId,
     setMessages,
     setConversationId,
     setCurrentTraceId,
@@ -596,11 +604,13 @@ const XyneAISidebar = ({ channelId }: XyneAISidebarProps): ReactElement => {
             channelDescription={channelDescription}
             scopeType={scopeType}
             showChannelTag={true}
+            threadInfo={activeThreadInfo}
             inputValue={inputValue}
             onInputChange={setInputValue}
             onSubmit={() => void handleSubmit()}
             onSelectedChannelsChange={setSelectedChannelIds}
             onResearchContextChange={setSelectedResearchContext}
+            onThreadInfoChange={setActiveThreadInfo}
             onAttachmentsChange={setAttachments}
             isStreaming={messages.some(m => m.isStreaming)}
             onAbort={abortCurrentRequest}

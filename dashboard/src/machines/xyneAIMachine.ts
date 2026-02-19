@@ -7,6 +7,13 @@ export type XyneAIState = 'closed' | 'open';
 // XyneAI context types - what section is XyneAI being used in
 export type XyneAIContextType = 'chat' | 'ticket' | 'call' | 'general';
 
+// Thread info interface
+export interface ThreadInfo {
+  conversationId: string;
+  senderName: string;
+  previewText: string;
+}
+
 // Context interface for the XyneAI machine
 export interface XyneAIContext {
   xyneAIState: XyneAIState;
@@ -14,11 +21,19 @@ export interface XyneAIContext {
   contextId: string | null; // channelId, ticketId, callId, or null for general
   // Legacy support
   channelId: string | null;
+  // Thread context
+  threadInfo: ThreadInfo | null;
 }
 
 // Event types for XyneAI machine
 export type XyneAIEvent =
-  | { type: 'OPEN'; contextType?: XyneAIContextType; contextId?: string; channelId?: string }
+  | {
+      type: 'OPEN';
+      contextType?: XyneAIContextType;
+      contextId?: string;
+      channelId?: string;
+      threadInfo?: ThreadInfo | null;
+    }
   | { type: 'CLOSE' }
   | { type: 'SET_CONTEXT'; contextType: XyneAIContextType; contextId: string }
   | { type: 'SET_CHANNEL'; channelId: string };
@@ -63,15 +78,33 @@ export const xyneAIMachine = setup({
           contextType,
           contextId,
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
+          threadInfo: event.threadInfo ?? null,
         };
       }
       return { xyneAIState: 'open' as XyneAIState };
+    }),
+    // Update context when already open
+    updateOpen: assign(({ event }) => {
+      if (event.type === 'OPEN') {
+        // Support both new contextType/contextId and legacy channelId
+        const contextType = event.contextType ?? (event.channelId ? 'chat' : 'general');
+        const contextId = event.contextId ?? event.channelId ?? null;
+
+        return {
+          contextType,
+          contextId,
+          channelId: contextType === 'chat' ? contextId : null, // Legacy support
+          threadInfo: event.threadInfo ?? null,
+        };
+      }
+      return {};
     }),
     setClosed: assign({
       xyneAIState: 'closed' as XyneAIState,
       contextType: 'general' as XyneAIContextType,
       contextId: null,
       channelId: null,
+      threadInfo: null,
     }),
     setContext: assign(({ event }) => {
       if (event.type === 'SET_CONTEXT') {
@@ -109,6 +142,7 @@ export const xyneAIMachine = setup({
     contextType: 'general' as XyneAIContextType,
     contextId: null,
     channelId: null,
+    threadInfo: null,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',
@@ -123,6 +157,9 @@ export const xyneAIMachine = setup({
     },
     open: {
       on: {
+        OPEN: {
+          actions: 'updateOpen',
+        },
         CLOSE: {
           target: 'closed',
           actions: ['setClosed', 'resizeToClosed'],

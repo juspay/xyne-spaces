@@ -117,6 +117,7 @@ const AppRoot = (): ReactElement => {
   const webviewState = useSelector(webviewActor, state => state.context.webviewState);
   const xyneAIState = useSelector(xyneAIActor, state => state);
   const xyneAIChannelId = useSelector(xyneAIActor, state => state.context.channelId);
+  const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const { isMobile } = usePlatform();
 
   // Get current location to check if we're on onboarding or vscode
@@ -285,7 +286,7 @@ const AppRoot = (): ReactElement => {
                   </PanelResizeHandle>
                   <Panel ref={xyneAIRightPanelRef} defaultSize={35} maxSize={50}>
                     <div className='max-w-[830px] h-full'>
-                      <XyneAISidebar channelId={xyneAIChannelId} />
+                      <XyneAISidebar channelId={xyneAIChannelId} threadInfo={xyneAIThreadInfo} />
                     </div>
                   </Panel>
                 </PanelGroup>
@@ -365,7 +366,7 @@ const AppRoot = (): ReactElement => {
                 title='Xyne AI'
                 description='Ask questions about your channel'
               >
-                <XyneAISidebar channelId={xyneAIChannelId} />
+                <XyneAISidebar channelId={xyneAIChannelId} threadInfo={xyneAIThreadInfo} />
               </Drawer>
             )}
           </EditProvider>

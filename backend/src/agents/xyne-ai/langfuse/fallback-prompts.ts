@@ -24,6 +24,7 @@ You are **Xyne AI**, the intelligent assistant for the Xyne Spaces collaboration
 CURRENT TIMESTAMP - {{current_timestamp}}
 CHANNEL CONTEXT - {{channel_context}}
 RESEARCH CONTEXT - {{research_context}}
+THREAD CONTEXT - {{thread_context}}
 </context>
 
 <tools_definition>
@@ -115,6 +116,8 @@ RESEARCH CONTEXT - {{research_context}}
     - 1 channel: 30 days | 2: 20 days | 3: 15 days | 4: 10 days | 5: 5 days.
     - If you must cap the user's requested range, you **MUST** include a note in the 'summary' explaining the limitation.
 - **Style:** Start with "This channel..." (or "These channels..."). Be terse. Attribute all actions to specific users.
+
+{{fetch_thread_messages_instructions}}
 </behavior_guidelines>
 
 <analytics_module>
@@ -189,6 +192,8 @@ You must respond with valid JSON containing these keys:
   "keypoints": [],
   "citations": {}
 }
+
+{{fetch_thread_messages_few_shot_example}}
 </few_shot_examples>
 
 <strict_compliance>
@@ -206,8 +211,13 @@ You must respond with valid JSON containing these keys:
  * Fallback description for fetch_channel_messages tool
  */
 const FETCH_CHANNEL_MESSAGES_FALLBACK = `Use this tool ONLY for SUMMARIZATION queries when source is "channel".
-Fetches all messages from the specified channels within a time interval.
-Returns messages with content, author, timestamp, and messageId for citations.
+Fetches all content from the specified channels within a time interval including:
+- Messages (with content, author, timestamp)
+- Attachments (metadata only - filename, mimetype, size, dimensions)
+- Calls (with transcripts and AI summaries)
+- Canvas (with content)
+- Tickets (with status, priority, description)
+
 DO NOT use for normal questions - use search_relevant_messages instead.
 
 **Parameters:**
@@ -242,10 +252,24 @@ Call fetch_channel_messages() without channels parameter`;
 /**
  * Fallback description for fetch_thread_messages tool
  */
-const FETCH_THREAD_MESSAGES_FALLBACK = `Use this tool ONLY for SUMMARIZATION queries when source is "thread".
-Fetches all messages from the current thread/conversation.
-Returns the complete thread history with content, author, timestamp, and messageId for citations.
-DO NOT use for normal questions - use search_relevant_messages instead.`;
+const FETCH_THREAD_MESSAGES_FALLBACK = `Use this tool ONLY for SUMMARIZATION queries in thread context.
+Fetches all content from the current thread/conversation including:
+- Messages (with content, author, timestamp)
+- Attachments (metadata only - filename, mimetype, size, dimensions)
+- Tickets (with status, priority, description)
+
+NOTE: This tool does NOT fetch calls or canvases (those are channel-level, not thread-level).
+
+**Parameters:** None - automatically uses the current thread context.
+
+**Example triggers:**
+- "summarize this thread"
+- "what was discussed here?"
+- "catch me up on this conversation"
+- "tldr of this thread"
+
+DO NOT use for normal questions - use search_relevant_messages instead.
+DO NOT use for channel summarization - use fetch_channel_messages instead.`;
 
 /**
  * Fallback description for search_relevant_messages tool

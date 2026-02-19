@@ -59,6 +59,7 @@ import { SHAREABLE_ORIGIN } from '../../../config';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { SubTicketModal } from '../../Tickets/SubTicketModal/SubTicketModal';
 import { ForwardMessageForm } from '../ForwardMessageModal/ForwardMessageModal';
+import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
 import DOMPurify from 'dompurify';
 
 export interface ThreadData {
@@ -212,6 +213,27 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleCreateSubTicket = (): void => {
     setIsSubTicketModalOpen(true);
+  };
+
+  const handleAskAI = (): void => {
+    // Get conversation ID from message context
+    const conversationId = conversation?.conversationId || message.conversationId;
+    if (!conversationId) return;
+
+    // Create thread info
+    const previewText = typeof message.content === 'string' ? message.content.slice(0, 100) : '';
+    const threadInfo: ThreadInfo = {
+      conversationId,
+      senderName: sender?.name || 'Unknown',
+      previewText,
+    };
+
+    // Open XyneAI with thread context
+    xyneAIActor.send({
+      type: 'OPEN',
+      channelId,
+      threadInfo,
+    });
   };
 
   const handleEditInCanvas = (): void => {
@@ -708,6 +730,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
+              {...(conversation &&
+                context === 'channel' &&
+                !isSystemMessage &&
+                !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
             />
           )}
@@ -758,6 +784,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
+              {...(conversation &&
+                context === 'channel' &&
+                !isSystemMessage &&
+                !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
             />
           )}

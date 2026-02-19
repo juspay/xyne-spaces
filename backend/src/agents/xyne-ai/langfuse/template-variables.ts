@@ -82,6 +82,64 @@ function formatFullResearchContext(
   return parts.join('\n');
 }
 
+/**
+ * Format thread context indicator when conversationId is present
+ * Kept concise - just indicates thread mode is active
+ */
+function formatThreadContext(hasThreadContext: boolean): string {
+  if (!hasThreadContext) {
+    return 'NO THREAD CONTEXT PROVIDED - If the user asks about a thread, please politely ask the user to add the thread to Ask AI context';
+  }
+  
+  return `**THREAD MODE ACTIVE** - Use <tool>fetch_thread_messages</tool> for "summarize this thread" or other thread-related queries.`;
+}
+
+/**
+ * Format fetch_thread_messages handling instructions
+ */
+function formatFetchThreadMessagesInstructions(hasThreadContext: boolean): string {
+  if (!hasThreadContext) {
+    return '';
+  }
+  
+  return `
+## 4. THREAD SUMMARIZATION RULES (When in Thread Context)
+- **Trigger Keywords:** summarize this thread, catch up on this conversation, what was discussed here, tldr of this thread.
+- **Tool:** Use <tool>fetch_thread_messages</tool>.
+- **No Parameters Needed:** The tool automatically uses the current thread context.
+- **Scope:** Summarizes all content in the current thread including messages, attachments, calls, and tickets.
+- **Style:** Start with "This thread..." or "In this conversation...". Be terse. Attribute actions to specific users.
+- **Citations:** Use the citation references returned by the tool (e.g., [A1], [A2]) to cite specific messages.`;
+}
+
+/**
+ * Format few-shot example for thread summarization
+ */
+function formatFetchThreadMessagesFewShotExample(hasThreadContext: boolean): string {
+  if (!hasThreadContext) {
+    return '';
+  }
+  
+  return `
+### Case G: Thread Summarization
+**User:** "Summarize this thread" (when in thread context)
+**Step 1:** Call <tool>fetch_thread_messages</tool>() - no parameters needed
+**Response:**
+{
+  "summary": "This thread discusses the API v2 migration plan. The team agreed on a phased rollout starting with auth endpoints.",
+  "keypoints": [
+    "**Migration Timeline** - Team decided on 3-month gradual migration with v1 deprecation after 6 months",
+    "**Auth Endpoints First** - Alice proposed starting with authentication endpoints due to lower complexity",
+    "**Documentation** - Bob volunteered to update API docs before the migration begins"
+  ],
+  "citations": {
+    "1": "A3",
+    "2": "A7",
+    "3": "A12"
+  }
+}`;
+}
+
 export function buildAgentTemplateVariables(
   _source: SourceType,
   currentTimestamp?: string,
@@ -89,12 +147,16 @@ export function buildAgentTemplateVariables(
   channelNames?: string[],
   webSearchEnabled?: boolean,
   researchContext?: ResearchContext,
-  researchOptions?: AvailableResearchOptions
+  researchOptions?: AvailableResearchOptions,
+  hasThreadContext?: boolean
 ): Record<string, string> {
   const variables = {
     current_timestamp: currentTimestamp || getCurrentTimestamp(),
     user_info: formatUserInfo(userInfo),
     channel_context: formatChannelContext(channelNames),
+    thread_context: formatThreadContext(hasThreadContext || false),
+    fetch_thread_messages_instructions: formatFetchThreadMessagesInstructions(hasThreadContext || false),
+    fetch_thread_messages_few_shot_example: formatFetchThreadMessagesFewShotExample(hasThreadContext || false),
     web_search_tool_definition: webSearchEnabled
       ? `6. <tool>web_search</tool>
 **Usage:** For external facts, recent news, documentation, or real-time data not present in Xyne Spaces.

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
+import { XyneAIStar } from '../../icons/xyne-ai';
 import { useReactions } from '../../../hooks/useReaction';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
@@ -46,6 +47,7 @@ export interface MessageActionsDrawerProps {
   onForwardMessage?: () => void;
   onEditInCanvas?: () => void;
   onBookmark?: () => void;
+  onAskAI?: () => void;
   isBookmarked?: boolean;
   isPinned?: boolean;
   onMarkAsUnread?: () => void;
@@ -68,6 +70,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   onForwardMessage,
   onEditInCanvas,
   onBookmark,
+  onAskAI,
   isBookmarked = false,
   isPinned = false,
   onMarkAsUnread,
@@ -230,6 +233,15 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
             icon={isPinned ? <UnpinIcon className='w-5 h-5' /> : <Pin className='w-5 h-5' />}
             label={isPinned ? 'Unpin Message' : 'Pin Message'}
             onClick={() => handleActionClick(onPinMessage)}
+          />
+        )}
+
+        {/* Ask AI */}
+        {onAskAI && (
+          <ActionButton
+            icon={<XyneAIStar size={20} />}
+            label='Ask AI'
+            onClick={() => handleActionClick(onAskAI)}
           />
         )}
 

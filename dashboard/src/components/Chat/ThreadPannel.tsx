@@ -50,9 +50,10 @@ import { useZero } from '../../hooks/useZero';
 import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
-import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
+import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
+import { useUser } from '../../hooks/useUsers';
 
 type TabType = 'thread' | 'details' | 'files' | 'workflows';
 type UnderTicketTabType = 'replies' | 'workflows';
@@ -292,6 +293,24 @@ export const ThreadMessages = ({
     const metadata = conversation.metadata as { ticketId?: string };
     return metadata.ticketId !== undefined;
   }, [conversation]);
+
+  // Create thread info for XyneAI context
+  const initialMessage = conversation?.initialMessage;
+  const initialMessageSender = useUser(initialMessage?.senderId || '');
+  const threadInfo: ThreadInfo | null = useMemo(() => {
+    if (!derivedConversationId || !initialMessage) return null;
+
+    const senderName: string = String(initialMessageSender?.name || 'Unknown');
+    const contentStr: string =
+      typeof initialMessage.content === 'string' ? initialMessage.content : '';
+    const previewText: string = contentStr.slice(0, 100);
+
+    return {
+      conversationId: derivedConversationId,
+      senderName,
+      previewText,
+    };
+  }, [derivedConversationId, initialMessage, initialMessageSender]);
 
   // Check if any message has a ticketId in metadata
   const hasTicketInMessages = useMemo(() => {
@@ -674,11 +693,15 @@ export const ThreadMessages = ({
               </Tooltip>
             )}
             {!isStandaloneWindow() && (
-              <Tooltip content='Ask AI'>
+              <Tooltip content='Ask AI Conversation'>
                 <Button
                   variant='outline'
                   onClick={() => {
-                    xyneAIActor.send({ type: 'OPEN', channelId: derivedChannelId });
+                    xyneAIActor.send({
+                      type: 'OPEN',
+                      channelId: derivedChannelId,
+                      threadInfo,
+                    });
                   }}
                   className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
                 >
@@ -951,11 +974,15 @@ export const ThreadMessages = ({
                   <div className='flex items-center gap-2'>
                     {/* Ask AI Button */}
                     {!isStandaloneWindow() && (
-                      <Tooltip content='Ask AI'>
+                      <Tooltip content='Ask AI Conversation'>
                         <Button
                           variant='outline'
                           onClick={() => {
-                            xyneAIActor.send({ type: 'OPEN', channelId: derivedChannelId });
+                            xyneAIActor.send({
+                              type: 'OPEN',
+                              channelId: derivedChannelId,
+                              threadInfo,
+                            });
                           }}
                           className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
                         >
@@ -1002,11 +1029,15 @@ export const ThreadMessages = ({
                     <div className='flex items-center gap-2'>
                       {/* Ask AI Button */}
                       {!isStandaloneWindow() && (
-                        <Tooltip content='Ask AI'>
+                        <Tooltip content='Ask AI Conversation'>
                           <Button
                             variant='outline'
                             onClick={(): void => {
-                              xyneAIActor.send({ type: 'OPEN', channelId: derivedChannelId });
+                              xyneAIActor.send({
+                                type: 'OPEN',
+                                channelId: derivedChannelId,
+                                threadInfo,
+                              });
                             }}
                             className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
                           >
