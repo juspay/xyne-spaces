@@ -9,14 +9,18 @@ import { ConversationRepository } from '@/database/repositories/conversationRepo
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailDraftRepository } from '@/database/repositories/emailDraftRepository';
+import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 // import { ZohoService } from '@/services/zohoService';
 import { logger } from '@/utils/logger';
-import { EmailType } from '@prisma/client';
+import { EmailType, MessageDirection, ExternalEntityType } from '@prisma/client';
 import { ZohoService } from '@/services/zohoService';
 
 interface ReplyEmailRequest {
   body: string;
   type: 'REPLY' | 'REPLY_ALL';
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
 }
 
 export class EmailController {
@@ -25,6 +29,7 @@ export class EmailController {
   private externalSourceRepo = new ExternalSourceRepository();
   private channelRepo = new ChannelRepository();
   private emailDraftRepo = new EmailDraftRepository();
+  private externalMessageRepo = new ExternalMessageRepository();
 
   /**
    * POST /api/email/:conversationId/reply
@@ -33,7 +38,7 @@ export class EmailController {
   replyToEmail = async (req: Request, res: Response) => {
     try {
       const { conversationId } = req.params;
-      const { body, type } = req.body as ReplyEmailRequest;
+      const { body, type, to: customTo, cc: customCc, bcc: customBcc } = req.body as ReplyEmailRequest;
 
       // Validate input
       if (!body || typeof body !== 'string') {
@@ -59,11 +64,16 @@ export class EmailController {
       // Get initial email (last in array since findByConversationId orders by createdAt DESC)
       const initialEmail = emails[emails.length - 1];
 
-      // 3. Compose recipients based on reply type
+      // 3. Compose recipients based on reply type or use custom recipients if provided
       let toRecipients: string[];
       let ccRecipients: string[] = [];
+      let bccRecipients: string[] = [];
 
-      if (type === 'REPLY') {
+      if (customTo && customTo.length > 0) {
+        toRecipients = customTo;
+        ccRecipients = customCc || [];
+        bccRecipients = customBcc || [];
+      } else if (type === 'REPLY') {
         toRecipients = [initialEmail.from];
       } else {
         const allRecipients = [initialEmail.from, ...initialEmail.to];
@@ -101,6 +111,7 @@ export class EmailController {
         content: body,
         to: toRecipients,
         cc: ccRecipients,
+        bcc: bccRecipients,
         fromEmailAddress,
       });
 
@@ -115,13 +126,28 @@ export class EmailController {
         to: toRecipients,
         from: fromEmailAddress,
         cc: ccRecipients,
-        bcc: [],
+        bcc: bccRecipients,
         conversationId,
         externalThreadId: result.threadId,
         externalMessageId: result.threadId,
       });
 
-      // 7. Delete draft for this conversation since email has been sent
+      // 7. Create ExternalMessage tracking record for deduplication
+      // This prevents Zoho sync from creating a duplicate email when it syncs back the sent reply
+      try {
+        await this.externalMessageRepo.create({
+          externalSourceId: externalSource.id,
+          externalId: result.threadId,
+          externalThreadId: initialEmail.externalThreadId,
+          entityId: newEmail.id,
+          direction: MessageDirection.OUTGOING,
+          entityType: ExternalEntityType.EMAIL,
+        });
+        logger.info(`[EmailController] ExternalMessage tracking record created for email: ${newEmail.id}`);
+      } catch (error) {
+        logger.warn(`[EmailController] Failed to create ExternalMessage tracking record:`, error);
+      }
+
       try {
         await this.emailDraftRepo.deleteByConversationId(conversationId);
         logger.info(`[EmailController] Draft deleted for conversation: ${conversationId}`);
