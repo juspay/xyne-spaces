@@ -197,6 +197,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   };
 
   const isImage = fileType?.displayName === 'Image';
+  const isPdf = fileType?.displayName === 'PDF Document';
 
   const showThreadPanel = replyCount && replyCount > 0 && conversationId && channelId && !isMobile;
 
@@ -287,10 +288,20 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             {showThreadPanel ? (
               <div className='flex flex-row h-full w-full'>
                 {/* File preview with shadow */}
-                <div className='flex-[7] h-full overflow-hidden relative before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'>
+                <div
+                  className={`flex-[7] h-full relative ${
+                    isImage
+                      ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
+                      : isPdf
+                        ? 'bg-white'
+                        : 'overflow-auto bg-white'
+                  }`}
+                >
                   {/* Floating top bar - no close button when thread panel is visible */}
                   {renderFloatingTopBar(false)}
-                  <div className='relative z-10 h-full w-full flex items-center justify-center'>
+                  <div
+                    className={`relative z-10 h-full w-full flex ${isPdf ? '' : 'items-center justify-center'}`}
+                  >
                     {renderContent()}
                   </div>
                 </div>
@@ -320,10 +331,20 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
               </div>
             ) : (
               // Full content with shadow
-              <div className='relative w-full h-full before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'>
+              <div
+                className={`relative w-full h-full ${
+                  isImage
+                    ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
+                    : isPdf
+                      ? 'bg-white'
+                      : 'overflow-auto bg-white'
+                }`}
+              >
                 {/* Floating top bar - with close button when no thread panel */}
                 {renderFloatingTopBar(true)}
-                <div className='relative z-10 h-full w-full flex items-center justify-center'>
+                <div
+                  className={`relative z-10 h-full w-full flex ${isPdf ? '' : 'items-center justify-center'}`}
+                >
                   {renderContent()}
                 </div>
               </div>
