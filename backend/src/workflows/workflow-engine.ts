@@ -221,12 +221,14 @@ export class WorkflowEngineImpl<
       }
     }
 
-    // Check if we have a continuation override to pass to AgentExecutor
+    // Check if we have a continuation override to pass to AgentExecutor and matches targetStepId
     let continuationOverride: AgenticContinuationOverride | undefined
     if (this.reachedRestorePoint && this.stepInputOverrideData) {
       const override = this.stepInputOverrideData as AgenticContinuationOverride | AgenticCheckpointConfig
       if ('continuationUserMessage' in override && 'sourceChildExecutionId' in override) {
-        continuationOverride = override
+        if (!override.targetStepId || override.targetStepId === String(id)) {
+          continuationOverride = override
+        }
       }
     }
 

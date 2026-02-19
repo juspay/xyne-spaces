@@ -10,6 +10,7 @@ import { BitbucketWebhookEnvelope, BitbucketPullRequest } from '@/routes/webhook
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { PRStatusEvent } from '@prisma/client';
+import { xyneCommentService } from '@/services/xyneCommentService';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -19,6 +20,7 @@ export enum BitbucketPREventType {
   PR_MODIFIED = 'pr:modified',
   PR_MERGED = 'pr:merged',
   PR_DECLINED = 'pr:declined',
+  PR_COMMENT_ADDED = 'pr:comment:added',
 }
 
 interface PREventContext {
@@ -58,6 +60,11 @@ export class BitbucketWebhookService {
       if (!this.isPullRequestEvent(eventKey)) {
         logger.info(`[Bitbucket-Webhook] Non-PR event received: ${eventKey}, skipping`);
         return { success: true, message: `Event ${eventKey} acknowledged but not processed` };
+      }
+
+      // Handle comment events separately
+      if (this.isCommentEvent(eventKey)) {
+        return await this.handleCommentEvent(eventKey as BitbucketPREventType, payload);
       }
 
       // Validate PR data exists (Bitbucket Server uses 'pullRequest' with capital R)
@@ -143,6 +150,82 @@ export class BitbucketWebhookService {
    */
   private isPullRequestEvent(eventKey: string): boolean {
     return eventKey.startsWith('pr:');
+  }
+
+  /**
+   * Check if event is a comment event
+   */
+  private isCommentEvent(eventKey: string): boolean {
+    return eventKey.startsWith('pr:comment:');
+  }
+
+  /**
+   * Handle PR comment events
+   */
+  private async handleCommentEvent(
+    eventKey: BitbucketPREventType,
+    payload: BitbucketWebhookEnvelope
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      if (!payload.comment || !payload.pullRequest) {
+        logger.warn(`[Bitbucket-Webhook] Comment event ${eventKey} missing comment or PR data`);
+        return { success: true, message: 'Missing comment or PR data' };
+      }
+
+      const comment = payload.comment;
+      const pr = payload.pullRequest;
+      const commentText = comment.text || '';
+
+      logger.info(`[Bitbucket-Webhook] Processing comment event ${eventKey} on PR #${pr.id}`);
+      logger.debug(`[Bitbucket-Webhook] Comment text: ${commentText.substring(0, 100)}...`);
+
+      const mentions = this.extractMentions(commentText);
+      
+      if (mentions.some(m => m.toLowerCase() === 'john.doe@gmail.com')) {
+        logger.info(`[Bitbucket-Webhook] Detected @john.doe@gmail.com mention in PR #${pr.id} comment #${comment.id}`);
+        
+        const context = this.extractPRContext(payload);
+        
+        await xyneCommentService.handleXyneMention({
+          prId: context.prId,
+          prUrl: context.prUrl,
+          projectName: context.projectName,
+          repoName: context.repoName,
+        });
+      }
+
+      return { 
+        success: true, 
+        message: `Comment event ${eventKey} processed successfully` 
+      };
+    } catch (error) {
+      logger.error(`[Bitbucket-Webhook] Error handling comment event:`, error);
+      return { success: true, message: 'Comment event error acknowledged' };
+    }
+  }
+
+  /**
+   * Extract mentions from comment text (e.g., @john.doe@gmail.com or @"john.doe@gmail.com")
+   */
+  private extractMentions(text: string): string[] {
+    const emailMentionRegex = /@"?([\w.-]+@[\w.-]+)"?/g;
+    const simpleMentionRegex = /@"?([\w.-]+)"?/g;
+    
+    const mentions: string[] = [];
+    let match: RegExpExecArray | null;
+    
+    while ((match = emailMentionRegex.exec(text)) !== null) {
+      mentions.push(match[1]);
+    }
+    
+    while ((match = simpleMentionRegex.exec(text)) !== null) {
+      const mentionText = match[1];
+      if (!mentions.some(m => m.includes(mentionText))) {
+        mentions.push(mentionText);
+      }
+    }
+    
+    return mentions;
   }
 
   /**

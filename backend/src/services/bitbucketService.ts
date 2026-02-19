@@ -1,6 +1,7 @@
 import {
   BitbucketPullRequestsResponse,
   BitbucketCommentsResponse,
+  BitbucketActivitiesResponse,
   BitbucketConfig,
   PullRequestData,
 } from '../types/bitbucket.js';
@@ -111,6 +112,18 @@ export class BitbucketService {
     }
 
     return this.makeRequest<BitbucketPullRequestsResponse>(endpoint);
+  }
+
+  /**
+   * Get activities for a specific pull request
+   */
+  async getPullRequestActivities(
+    pullRequestId: number,
+    limit: number = 100,
+    start: number = 0
+  ): Promise<BitbucketActivitiesResponse> {
+    const endpoint = `/projects/${this.config.projectKey}/repos/${this.config.repositorySlug}/pull-requests/${pullRequestId}/activities?limit=${limit}&start=${start}`;
+    return this.makeRequest<BitbucketActivitiesResponse>(endpoint);
   }
 
   /**
