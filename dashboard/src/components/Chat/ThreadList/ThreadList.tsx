@@ -12,7 +12,7 @@ import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { useEditContext } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
-import { findLastEditableMessage, isEventFromInput } from '../../../utils/chatUtils';
+import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { ChevronRight, ChevronUp } from 'lucide-react';
 
 type ThreadListProps = {
@@ -46,7 +46,7 @@ const ThreadList = ({
   const [hasNavigatedToMessage, setHasNavigatedToMessage] = useState(false);
 
   const isEventFromThreadInput = useCallback(
-    (event: KeyboardEvent): boolean => isEventFromInput(event, conversationId),
+    (event: KeyboardEvent): boolean => isEventFromEmptyInput(event, conversationId),
     [conversationId],
   );
 

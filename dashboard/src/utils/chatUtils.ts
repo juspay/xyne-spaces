@@ -169,6 +169,23 @@ export const isEventFromInput = (event: KeyboardEvent, inputId: string): boolean
 };
 
 /**
+ * Check if a keyboard event originated from a specific input element
+ * and that input is currently empty.
+ */
+export const isEventFromEmptyInput = (event: KeyboardEvent, inputId: string): boolean => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return false;
+
+  const inputWrapper = target.closest(`[data-input-id="${inputId}"]`);
+  if (!(inputWrapper instanceof HTMLElement)) return false;
+
+  const editorElement = inputWrapper.querySelector('.ProseMirror');
+  if (!(editorElement instanceof HTMLElement)) return false;
+
+  return (editorElement.textContent || '').trim().length === 0;
+};
+
+/**
  * Check if a message has meaningful text content
  * Returns false for empty strings, whitespace-only strings, or strings with only empty HTML tags
  */

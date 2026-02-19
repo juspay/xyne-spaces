@@ -17,7 +17,7 @@ import { ArrowDown } from 'lucide-react';
 import { useGetChannelConversations } from '../../../hooks/useChannels';
 import { useEditContext } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
-import { findLastEditableMessage, isEventFromInput } from '../../../utils/chatUtils';
+import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { queryCacheActor } from '../../../machines/queryCacheMachine';
 
@@ -103,7 +103,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
   const conversations: Conversation[] = useGetChannelConversations(channelId);
 
   const isEventFromChannelInput = useCallback(
-    (event: KeyboardEvent): boolean => isEventFromInput(event, channelId),
+    (event: KeyboardEvent): boolean => isEventFromEmptyInput(event, channelId),
     [channelId],
   );
 
