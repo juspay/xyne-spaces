@@ -252,7 +252,7 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
     return stitchExecutionState(execution);
   }
 
-  async findByStatus(status: string, workflowType?: string, limit?: number): Promise<WorkflowExecutionWithState[]> {
+  async findByStatus(status: string, workflowType?: string, limit?: number, tags?: string[]): Promise<WorkflowExecutionWithState[]> {
     const whereClause: any = { status }
     
     if (workflowType) {
@@ -263,6 +263,10 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
           workflow: { workflowType: workflowType }
         }
       ]
+    }
+
+    if (tags && tags.length > 0) {
+      whereClause.tag = { in: tags }
     }
     
     const executions = await this.db.workflowExecution.findMany({

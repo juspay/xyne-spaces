@@ -1,5 +1,5 @@
-import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk'
-import type { Session, Event, AssistantMessage, Part } from '@opencode-ai/sdk'
+import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2'
+import type { Session, Event, AssistantMessage, Part } from '@opencode-ai/sdk/v2'
 import { logger } from '@/utils/logger'
 import {
   OpenCodeConfig,
@@ -65,12 +65,8 @@ export class OpenCodeClient {
 
   async createSession(options: CreateSessionOptions): Promise<SessionInfo> {
     const result = await this.client.session.create({
-      body: {
-        title: options.title
-      },
-      query: {
-        directory: options.directory
-      }
+      title: options.title,
+      directory: options.directory
     })
 
     if (result.error) {
@@ -88,7 +84,7 @@ export class OpenCodeClient {
 
   async getSession(sessionId: string): Promise<Session> {
     const result = await this.client.session.get({
-      path: { id: sessionId }
+      sessionID: sessionId
     })
 
     if (result.error) {
@@ -104,7 +100,7 @@ export class OpenCodeClient {
 
   async deleteSession(sessionId: string): Promise<void> {
     const result = await this.client.session.delete({
-      path: { id: sessionId }
+      sessionID: sessionId
     })
 
     if (result.error) {
@@ -119,12 +115,10 @@ export class OpenCodeClient {
     modelOverride?: { providerID: string; modelID: string }
   ): Promise<SDKPromptResponse> {
     const result = await this.client.session.prompt({
-      path: { id: sessionId },
-      body: {
-        parts: [{ type: 'text', text: message }],
-        system: systemPrompt,
-        ...(modelOverride && { model: modelOverride })
-      }
+      sessionID: sessionId,
+      parts: [{ type: 'text', text: message }],
+      system: systemPrompt,
+      ...(modelOverride && { model: modelOverride })
     })
 
     if (result.error) {
@@ -141,7 +135,8 @@ export class OpenCodeClient {
     systemPrompt?: string,
     modelOverride?: { providerID: string; modelID: string },
     timeoutMs: number = 600000,
-    onEvent?: (event: OpenCodeEvent) => void
+    onEvent?: (event: OpenCodeEvent) => void,
+    forceResolveRef?: { resolve?: () => void }
   ): Promise<SDKPromptResponse> {
     return new Promise<SDKPromptResponse>((resolve, reject) => {
       let unsubscribe: (() => void) | undefined
@@ -205,6 +200,12 @@ export class OpenCodeClient {
         }
       }
 
+      if (forceResolveRef) {
+        forceResolveRef.resolve = () => {
+          void completeWithSuccess()
+        }
+      }
+
       timeoutId = setTimeout(() => {
         completeWithError(new Error(`Streaming prompt timed out after ${timeoutMs}ms`))
       }, timeoutMs)
@@ -234,12 +235,10 @@ export class OpenCodeClient {
 
       // Send the prompt
       this.client.session.prompt({
-        path: { id: sessionId },
-        body: {
-          parts: [{ type: 'text', text: message }],
-          system: systemPrompt,
-          ...(modelOverride && { model: modelOverride })
-        }
+        sessionID: sessionId,
+        parts: [{ type: 'text', text: message }],
+        system: systemPrompt,
+        ...(modelOverride && { model: modelOverride })
       }).then(result => {
         if (result.error) {
           completeWithError(new OpenCodeAPIError(`Failed to send prompt: ${JSON.stringify(result.error)}`, 400))
@@ -270,7 +269,7 @@ export class OpenCodeClient {
 
   async getTodos(sessionId: string): Promise<TodoItem[]> {
     const result = await this.client.session.todo({
-      path: { id: sessionId }
+      sessionID: sessionId
     })
 
     if (result.error) {
@@ -290,10 +289,54 @@ export class OpenCodeClient {
     }
   }
 
-  async grantPermission(sessionId: string, permissionId: string): Promise<void> {
-    const result = await this.client.postSessionIdPermissionsPermissionId({
-      path: { id: sessionId, permissionID: permissionId },
-      body: { response: 'always' }
+  async rejectQuestion(requestId: string): Promise<void> {
+    const result = await this.client.question.reject({
+      requestID: requestId,
+      directory: this.directory
+    })
+
+    if (result.error) {
+      throw new OpenCodeAPIError(`Failed to reject question: ${JSON.stringify(result.error)}`, 400)
+    }
+  }
+
+  async answerQuestion(requestId: string, answers: string[][]): Promise<void> {
+    const result = await this.client.question.reply({
+      requestID: requestId,
+      answers,
+      directory: this.directory
+    })
+
+    if (result.error) {
+      throw new OpenCodeAPIError(`Failed to answer question: ${JSON.stringify(result.error)}`, 400)
+    }
+  }
+
+  async injectContextMessage(
+    sessionId: string,
+    text: string,
+    systemPrompt?: string,
+    modelOverride?: { providerID: string; modelID: string }
+  ): Promise<void> {
+    const result = await this.client.session.prompt({
+      sessionID: sessionId,
+      parts: [{ type: 'text', text }],
+      noReply: true,
+      system: systemPrompt,
+      ...(modelOverride && { model: modelOverride })
+    })
+
+    if (result.error) {
+      logger.warn(`[OpenCodeClient] injectContextMessage error: ${JSON.stringify(result.error)}`)
+      throw new OpenCodeAPIError(`Failed to inject context message: ${JSON.stringify(result.error)}`, 400)
+    }
+  }
+
+  async grantPermission(_sessionId: string, permissionId: string): Promise<void> {
+    const result = await this.client.permission.reply({
+      requestID: permissionId,
+      reply: 'always',
+      directory: this.directory
     })
 
     if (result.error) {

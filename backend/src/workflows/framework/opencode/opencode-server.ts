@@ -1,4 +1,4 @@
-import { createOpencode, createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk'
+import { createOpencode, createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2'
 import { config as appConfig } from '../../../config/env'
 import * as fs from 'fs'
 import * as path from 'path'

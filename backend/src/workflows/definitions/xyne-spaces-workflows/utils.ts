@@ -138,6 +138,7 @@ export const createXyneSpacesAgentConfig = (
   checkoutCommit?: string,
   maxTurns?: number,
   executorType?: ExecutorType,
+  useQuestioningMode?: boolean,
   coAuthor?: { name: string; email: string }
 ): AgenticCheckpointConfig => {
 
@@ -167,6 +168,7 @@ export const createXyneSpacesAgentConfig = (
 
   return {
     executorType,
+    useQuestioningMode,
     conversationContext: {
       systemPrompt: instructions,
       messages: [
@@ -470,6 +472,7 @@ export const getPlanningConfig = (
   checkoutCommit?: string,
   guidelines?: string,
   executorType?: ExecutorType,
+  useQuestioningMode?: boolean,
   coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-planner',
@@ -544,6 +547,7 @@ Remember: Output the COMPLETE plan as your final response. Do NOT use plan_mode_
   checkoutCommit,
   undefined,
   executorType,
+  useQuestioningMode,
   coAuthor
 )
 
@@ -558,6 +562,7 @@ export const getImplementationConfig = (
   checkoutCommit?: string,
   guidelines?: string,
   executorType?: ExecutorType,
+  useQuestioningMode?: boolean,
   coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-implementer',
@@ -609,6 +614,7 @@ Remember: Quality over speed. Follow the guidelines strictly. NO \`any\` TYPES.`
   checkoutCommit,
   undefined,
   executorType,
+  useQuestioningMode,
   coAuthor
 )
 
@@ -625,6 +631,7 @@ export const getValidationConfig = (
   checkoutCommit?: string,
   guidelines?: string,
   executorType?: ExecutorType,
+  useQuestioningMode?: boolean,
   coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-validator',
@@ -670,5 +677,6 @@ Your response must end with:
   checkoutCommit,
   25,
   executorType,
+  useQuestioningMode,
   coAuthor
 )

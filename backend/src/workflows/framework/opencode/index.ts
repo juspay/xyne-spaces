@@ -33,6 +33,7 @@ export type {
   MessagePartUpdatedEvent,
   DoomLoopEvent,
   PermissionAskedEvent,
+  QuestionAskedEvent,
   ErrorEvent,
   OpenCodeEvent,
   OpenCodeConfig,

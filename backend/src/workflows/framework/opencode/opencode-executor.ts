@@ -1,9 +1,10 @@
 import { WorkflowStorage, FrameworkExecutionResult } from '../../workflow-storage'
 import { FullAgenticCheckpointConfig, WorkflowState, BaseWorkflowContext, GitInfo, GitDiffFile, GitDiffStats, AgenticContinuationOverride } from '../../workflow-types'
 import { WorkflowExecutionStatus } from '../../types/workflow-enums'
-import { WorkflowPausedException, WorkflowCancelledException } from '../../exceptions/workflow-exceptions'
+import { WorkflowPausedException, WorkflowCancelledException, WorkflowExternalWaitException } from '../../exceptions/workflow-exceptions'
 import { BitbucketManager } from '@/bitbucket/apis'
-import { TicketRepository, WorkflowRepository } from '@/database/repositories/workflows'
+import { repositories } from '@/database/repositories'
+import { WorkflowRepository, TicketRepository } from '@/database/repositories/workflows'
 import { logger } from '@/utils/logger'
 import { exec } from 'child_process'
 import { promisify } from 'util'
@@ -12,7 +13,6 @@ import { resolve as pathResolve, normalize as pathNormalize } from 'path'
 const execAsync = promisify(exec)
 
 import { cloneRepository, pushCommits } from '@framework'
-import { createUserMessage, createToolResultMessage, createAssistantMessage } from '@framework'
 import { workspaceEventService } from '@/services/workspaceEventService'
 
 import { OpenCodeClient } from './opencode-client'
@@ -20,12 +20,14 @@ import {
   OpenCodeConfig,
   OpenCodeCommitTracker, 
   SessionInfo, 
-  SDKPromptResponse
+  SDKPromptResponse,
+  QuestionAskedEvent
 } from './types'
-import type { ToolPart, TextPart, ReasoningPart, StepFinishPart } from '@opencode-ai/sdk'
+import type { ToolPart, TextPart, ReasoningPart, StepFinishPart } from '@opencode-ai/sdk/v2'
 import { createOpenCodeEventHandler, EventProcessingStats } from './event-mapper'
+import { getStoredQuestionAnswer, handleOpenCodeQuestion } from '../../utils/external-step-utils'
 
-import type { ConversationRequest, ConversationResult, Message } from '../types.js'
+import type { ConversationRequest, ConversationResult } from '../types.js'
 
 function extractWorkspace(url: string): { projectName: string; repoName: string } {
   const parts = url.split('/');
@@ -126,20 +128,16 @@ export class OpenCodeExecutor {
   ): Promise<{ result: ConversationResult; updatedState: WorkflowState<T>; gitInfo: GitInfo }> {
 
     const existingSteps = await this.storage.getChildWorkflowSteps(childExecutionId)
-    const conversationHistory = this.reconstructConversationFromSteps(existingSteps)
-
-    const resumeRequest: ConversationRequest = {
-      ...conversationRequest,
-      messages: conversationHistory
-    }
 
     try {
       const { result, gitInfo } = await this.executeOpenCodeWithPauseCheck(
         parentExecutionId,
         childExecutionId,
         agentChkConfig,
-        resumeRequest,
-        parentState
+        conversationRequest,
+        parentState,
+        false,
+        existingSteps
       )
 
       const resultWithGitInfo = { ...result, gitInfo } as FrameworkExecutionResult
@@ -221,14 +219,6 @@ export class OpenCodeExecutor {
     }
 
     const sourceSteps = await this.storage.getChildWorkflowSteps(continuationOverride.sourceChildExecutionId)
-    const reconstructedHistory = this.reconstructConversationFromSteps(sourceSteps)
-
-    const continuationMessage = createUserMessage(continuationOverride.continuationUserMessage)
-
-    const continuationRequest: ConversationRequest = {
-      ...originalConversationRequest,
-      messages: [...reconstructedHistory, continuationMessage]
-    }
 
     const childExecutionId = await this.storage.createChildWorkflowExecution(
       parentExecutionId,
@@ -243,9 +233,11 @@ export class OpenCodeExecutor {
         parentExecutionId,
         childExecutionId,
         agentChkConfig,
-        continuationRequest,
+        originalConversationRequest,
         parentState,
-        true
+        true,
+        sourceSteps,
+        continuationOverride.continuationUserMessage
       )
 
       const resultWithGitInfo = { ...result, gitInfo } as FrameworkExecutionResult
@@ -266,7 +258,9 @@ export class OpenCodeExecutor {
     agentChkConfig: FullAgenticCheckpointConfig,
     conversationRequest: ConversationRequest,
     parentState: WorkflowState<T>,
-    isContinuation: boolean = false
+    isContinuation: boolean = false,
+    stepsToReplay?: any[],
+    promptOverride?: string
   ): Promise<{ result: ConversationResult; gitInfo: GitInfo }> {
     const repoUrl = agentChkConfig.repoInfo?.repoUrl
     const baseBranch = agentChkConfig.repoInfo?.baseBranch
@@ -368,6 +362,7 @@ export class OpenCodeExecutor {
     }
 
     const abortController = new AbortController()
+    let savedExternalWaitException: WorkflowExternalWaitException | undefined
 
     const lspInstructions = `
 ## � CODE QUALITY INSTRUCTIONS - READ CAREFULLY 🔧
@@ -410,9 +405,43 @@ You are ONLY done when:
 **REMEMBER: Complete the implementation first. Many LSP errors resolve themselves as you add more code.**
 `
 
+    // Questioning mode determines whether the agent can ask clarifying questions
+    const useQuestioningMode = agentChkConfig.useQuestioningMode ?? false
+    const isPlanningEnabled = useQuestioningMode
+    logger.info(`[OPENCODE-EXECUTOR] 🔍 useQuestioningMode=${useQuestioningMode}, isPlanningEnabled=${isPlanningEnabled}, raw agentChkConfig.useQuestioningMode=${agentChkConfig.useQuestioningMode}`)
+
+    const questionRule = isPlanningEnabled
+      ? `
+### RULE 6: CLARIFYING QUESTIONS (MANDATORY)
+You have access to a \`question\` tool that lets you ask the user clarifying questions.
+
+**YOU MUST USE THE \`question\` TOOL** before finalizing your plan. After exploring the codebase and understanding the requirements, ask the user about:
+- Ambiguous requirements, design choices, or implementation preferences
+- Scope clarifications — what to include vs exclude
+- Edge cases or trade-offs that affect the plan
+- UI/UX preferences, component layout, or interaction details
+- Any assumptions you are making that could be wrong
+
+Workflow:
+1. First explore the codebase to understand context
+2. Then call the \`question\` tool with your questions (batch them into a single call)
+3. Wait for answers before producing your final plan
+4. Use the built-in \`question\` tool ONLY — do NOT ask questions in plain text or markdown
+5. After receiving answers, incorporate them and finalize your plan
+`
+      : `
+### RULE 6: NO QUESTIONS
+Do NOT ask the user any questions. Proceed directly with the task.
+- Do NOT use the \`question\` tool.
+- Do NOT ask questions in plain text or markdown.
+- Make your best judgment call for any ambiguity and proceed.
+`
+
+    const lspInstructionsWithQuestionRule = lspInstructions + questionRule
+
     const systemPrompt = conversationRequest.systemPrompt
-      ? conversationRequest.systemPrompt + `\n\nIMPORTANT: You MUST work in the following directory. All file operations should be relative to or within this path:\n${workingDir}\n${lspInstructions}`
-      : `IMPORTANT: You MUST work in the following directory. All file operations should be relative to or within this path:\n${workingDir}\n${lspInstructions}`
+      ? conversationRequest.systemPrompt + `\n\nIMPORTANT: You MUST work in the following directory. All file operations should be relative to or within this path:\n${workingDir}\n${lspInstructionsWithQuestionRule}`
+      : `IMPORTANT: You MUST work in the following directory. All file operations should be relative to or within this path:\n${workingDir}\n${lspInstructionsWithQuestionRule}`
 
     const dbModel = agentChkConfig.agentConfig?.model?.defaultModel
     const dbProviderType = agentChkConfig.agentConfig?.model?.provider?.type
@@ -438,6 +467,49 @@ You are ONLY done when:
       logger.error(`[DIRECTORY-MISMATCH] Session directory ${session.directory} != expected ${workingDir}`)
     }
 
+    // Replay prior conversation history into the new session using noReply
+    if (stepsToReplay && stepsToReplay.length > 0) {
+      await this.replayStepsIntoSession(client, session.id, stepsToReplay)
+    }
+
+    let postQuestionNudgeTimer: ReturnType<typeof setTimeout> | undefined
+    // Tracks the last question/answer so we can build a context-aware prompt if we need to create a new session
+    let lastQuestionContext: { questionTexts: string[]; userAnswers: string[][] | null } | undefined
+    // Set by the handleQuestion callback when a question is asked — signals the main loop to throw
+    let pendingExternalWait: { stepName: string } | undefined
+    // Allows the handleQuestion callback to force-resolve the current promptWithStreaming call
+    const forceResolveRef: { resolve?: () => void } = {}
+
+    // Check if there's already a stored answer from a prior question round (after WAIT_FOR_EVENT promotion)
+    const storedQuestionAnswer = await getStoredQuestionAnswer(childExecutionId)
+    let resumeAfterQuestionInit = false
+    if (storedQuestionAnswer) {
+      lastQuestionContext = {
+        questionTexts: storedQuestionAnswer.questionTexts,
+        userAnswers: storedQuestionAnswer.answers
+      }
+      resumeAfterQuestionInit = true
+      logger.info(`[OPENCODE-EXECUTOR] Found stored question answer from prior round — will include Q&A context in first message`)
+
+      const existingOutputSteps = await repositories.workflowSteps.findMany({
+        where: { workflowExecutionId: childExecutionId, stepName: storedQuestionAnswer.stepName, type: 'output' }
+      })
+      if (existingOutputSteps.length === 0) {
+        try {
+          await this.storage.saveExternalStepData(
+            childExecutionId,
+            storedQuestionAnswer.stepName,
+            { answers: storedQuestionAnswer.answers, questionTexts: storedQuestionAnswer.questionTexts }
+          )
+          logger.info(`[OPENCODE-EXECUTOR] Created output step for external step ${storedQuestionAnswer.stepName} — now marked completed`)
+        } catch (err) {
+          logger.warn(`[OPENCODE-EXECUTOR] Failed to create output step for external step:`, err)
+        }
+      } else {
+        logger.info(`[OPENCODE-EXECUTOR] Output step already exists for ${storedQuestionAnswer.stepName} — skipping duplicate creation`)
+      }
+    }
+
     const { handleEvent, getStats } = createOpenCodeEventHandler({
       childExecutionId,
       parentExecutionId,
@@ -451,27 +523,134 @@ You are ONLY done when:
       checkPauseOrCancel: () => this.checkWorkflowPauseOrCancelStatusAndThrow(childExecutionId, abortController),
       grantPermission: async (sessionId: string, permissionId: string) => {
         await client.grantPermission(sessionId, permissionId)
+      },
+      handleQuestion: async (requestId: string, sessionId: string, questions: QuestionAskedEvent['properties']['questions']) => {
+        // Only allow questions when useQuestioningMode is enabled
+        if (!isPlanningEnabled) {
+          logger.warn(`[OPENCODE-EXECUTOR] Rejecting question ${requestId} — useQuestioningMode is off, questions are disabled`)
+          try {
+            await client.rejectQuestion(requestId)
+          } catch (rejectErr) {
+            logger.error(`[OPENCODE-EXECUTOR] Failed to reject question (planning disabled):`, rejectErr)
+          }
+          return
+        }
+
+        // Check for stored answer (resume after WAIT_FOR_EVENT — replay the user's answer)
+        const stored = await getStoredQuestionAnswer(childExecutionId)
+        if (stored) {
+          logger.info(`[OPENCODE-EXECUTOR] Replaying stored answer for question ${requestId}`)
+          try {
+            await client.answerQuestion(requestId, stored.answers ?? [['Proceed with your best judgment']])
+            const existingOutputSteps = await repositories.workflowSteps.findMany({
+              where: { workflowExecutionId: childExecutionId, stepName: stored.stepName, type: 'output' }
+            })
+            if (existingOutputSteps.length === 0) {
+              await this.storage.saveExternalStepData(
+                childExecutionId,
+                stored.stepName,
+                { answers: stored.answers, questionTexts: stored.questionTexts }
+              )
+              logger.info(`[OPENCODE-EXECUTOR] Created output step for external step ${stored.stepName} — now marked completed`)
+            } else {
+              logger.info(`[OPENCODE-EXECUTOR] Output step already exists for ${stored.stepName} — skipping duplicate creation`)
+            }
+          } catch (answerErr) {
+            logger.error(`[OPENCODE-EXECUTOR] Failed to replay stored answer:`, answerErr)
+            try { await client.rejectQuestion(requestId) } catch { /* ignore */ }
+          }
+          return
+        }
+
+        // New question — create external step, mark child WAIT_FOR_EVENT
+        const stepName = await handleOpenCodeQuestion(this.storage, childExecutionId, parentExecutionId, requestId, sessionId, questions)
+
+        pendingExternalWait = { stepName }
+        logger.info(`[OPENCODE-EXECUTOR] pendingExternalWait set: ${stepName}, force-resolving prompt`)
+
+        if (forceResolveRef.resolve) {
+          forceResolveRef.resolve()
+        }
+
+        // Reject the question on OpenCode so the session goes idle naturally
+        try {
+          await client.rejectQuestion(requestId)
+        } catch (rejectErr) {
+          logger.error(`[OPENCODE-EXECUTOR] Failed to reject question after creating external step:`, rejectErr)
+        }
       }
     })
 
-    const unsubscribe = client.subscribeToSessionEvents(session.id, handleEvent)
+    let unsubscribe = client.subscribeToSessionEvents(session.id, handleEvent)
 
-    let result: ConversationResult
+    let result!: ConversationResult
     let promptResponse: SDKPromptResponse | undefined
     
     try {
-      const userMessage = this.extractUserMessage(conversationRequest)
-      const MAX_CONTINUATION_ATTEMPTS = 5
+      const userMessage = promptOverride || this.extractUserMessage(conversationRequest)
+      const MAX_CONTINUATION_ATTEMPTS = isPlanningEnabled ? 8 : 5
       let continuationAttempt = 0
       let isComplete = false
+      let resumeAfterQuestion = resumeAfterQuestionInit
       
       while (!isComplete && continuationAttempt < MAX_CONTINUATION_ATTEMPTS) {
         const isFirstAttempt = continuationAttempt === 0
-        const messageToSend = isFirstAttempt 
-          ? userMessage 
-          : await this.buildContinuationPrompt(getStats(), client, session.id)
+        const isResumingAfterQuestion = resumeAfterQuestion
+        let messageToSend: string
+        if (resumeAfterQuestion) {
+          // Build a context-aware continuation message with the Q&A context
+          const qaParts: string[] = []
+          qaParts.push(`ORIGINAL TASK:`)
+          qaParts.push(userMessage)
+          qaParts.push('')
+          if (lastQuestionContext) {
+            qaParts.push(`QUESTIONS PREVIOUSLY ASKED:`)
+            lastQuestionContext.questionTexts.forEach((q, i) => qaParts.push(`  ${i + 1}. ${q}`))
+            qaParts.push('')
+            qaParts.push(`USER'S ANSWERS:`)
+            if (lastQuestionContext.userAnswers) {
+              lastQuestionContext.userAnswers.forEach(a => qaParts.push(`  - ${a.join(', ')}`))
+            } else {
+              qaParts.push(`  (No answer was provided)`)
+            }
+            qaParts.push('')
+          }
+          qaParts.push(`Continue the task based on the user's answers. Do NOT ask any more questions — proceed with implementation.`)
+          messageToSend = qaParts.join('\n')
+          resumeAfterQuestion = false
+          lastQuestionContext = undefined
+        } else if (isFirstAttempt) {
+          if (isPlanningEnabled && !resumeAfterQuestionInit) {
+            messageToSend = [
+              `--- TASK ---`,
+              userMessage,
+              `--- END TASK ---`,
+              ``,
+              `⚠️ IMPORTANT: You have a \`question\` tool available. You MUST use it whenever you encounter ambiguity during your analysis — unclear requirements, multiple valid implementation approaches, scope questions, design trade-offs, or edge cases.`,
+              ``,
+              `You can ask questions at ANY point during your work — not just at the beginning. Whenever you realize something is unclear or could go multiple ways, stop and use the \`question\` tool before proceeding further.`,
+              ``,
+              `Batch related questions into a single \`question\` tool call. Use the built-in \`question\` tool ONLY — do NOT ask questions in plain text or markdown.`,
+            ].join('\n')
+          } else {
+            messageToSend = userMessage
+          }
+        } else {
+          messageToSend = await this.buildContinuationPrompt(getStats(), client, session.id)
+        }
         
-        const systemPromptToUse = isFirstAttempt ? systemPrompt : undefined
+        // Send system prompt on first attempt OR when resuming after Q&A
+        const systemPromptToUse = (isFirstAttempt || isResumingAfterQuestion) ? systemPrompt : undefined
+        
+        // Debug logging to verify prompt contents
+        logger.info(`[OPENCODE-EXECUTOR] 📤 Sending prompt (attempt=${continuationAttempt}, isFirst=${isFirstAttempt}, isResume=${isResumingAfterQuestion}):`)
+        logger.info(`[OPENCODE-EXECUTOR] 📤 System prompt present: ${!!systemPromptToUse}, length: ${systemPromptToUse?.length ?? 0}`)
+        if (systemPromptToUse) {
+          logger.info(`[OPENCODE-EXECUTOR] 📤 System prompt (first 800 chars): ${systemPromptToUse.substring(0, 800)}`)
+          logger.info(`[OPENCODE-EXECUTOR] 📤 System prompt (last 800 chars): ${systemPromptToUse.substring(Math.max(0, systemPromptToUse.length - 800))}`)
+        }
+        logger.info(`[OPENCODE-EXECUTOR] 📤 User message (first 500 chars): ${messageToSend.substring(0, 500)}`)
+        
         const MAX_PROMPT_RETRIES = 5
         let promptRetry = 0
         let lastError: unknown
@@ -484,22 +663,22 @@ You are ONLY done when:
               messageToSend, 
               systemPromptToUse, 
               modelOverride,
-              600000 // 10 minute timeout
+              600000, // 10 minute timeout
+              undefined, // onEvent
+              forceResolveRef // allows handleQuestion to force-resolve this prompt
             )
+            if (postQuestionNudgeTimer) {
+              clearTimeout(postQuestionNudgeTimer)
+              postQuestionNudgeTimer = undefined
+            }
             break
           } catch (err) {
             lastError = err
-            const errorWithCause = err as Error & { cause?: Error }
-            const isTimeoutError = err instanceof Error && 
-              (err.message.includes('fetch failed') || 
-               err.message.includes('HeadersTimeoutError') ||
-               err.message.includes('timed out') ||
-               errorWithCause.cause?.message?.includes('Headers Timeout'));
             
-            if (isTimeoutError && promptRetry < MAX_PROMPT_RETRIES - 1) {
+            if (promptRetry < MAX_PROMPT_RETRIES - 1) {
               promptRetry++
               const backoffMs = Math.min(5000 * Math.pow(2, promptRetry - 1), 30000)
-              logger.warn(`[OPENCODE-EXECUTOR] Prompt timeout (attempt ${promptRetry}/${MAX_PROMPT_RETRIES}), retrying in ${backoffMs}ms...`)
+              logger.warn(`[OPENCODE-EXECUTOR] Prompt failed (attempt ${promptRetry}/${MAX_PROMPT_RETRIES}), retrying in ${backoffMs}ms: ${err instanceof Error ? err.message : String(err)}`)
               await new Promise(resolve => setTimeout(resolve, backoffMs))
               try {
                 const sessionStatus = await client.getSession(session.id)
@@ -513,6 +692,7 @@ You are ONLY done when:
                 throw new Error(`Session validation failed after ${promptRetry} retries: ${sessionErr instanceof Error ? sessionErr.message : String(sessionErr)}`)
               }
             } else {
+              logger.error(`[OPENCODE-EXECUTOR] Prompt failed after ${MAX_PROMPT_RETRIES} attempts: ${err instanceof Error ? err.message : String(err)}`)
               throw err
             }
           }
@@ -520,6 +700,13 @@ You are ONLY done when:
         
         if (!promptResponse) {
           throw lastError || new Error('No response received after retries')
+        }
+
+        // Check if a question was asked during the prompt — if so, halt execution
+        // The handleQuestion callback sets pendingExternalWait and force-resolves the prompt
+        if (pendingExternalWait) {
+          logger.info(`[OPENCODE-EXECUTOR] ❓ Question asked during prompt — halting for external input: ${pendingExternalWait.stepName}`)
+          throw new WorkflowExternalWaitException(parentExecutionId, pendingExternalWait.stepName)
         }
 
         await this.processPromptResponse(
@@ -538,6 +725,7 @@ You are ONLY done when:
         const todoCheck = await client.hasIncompleteTodos(session.id)
         const hasIncompleteTodos = todoCheck.hasIncomplete
 
+        // Detect completion or need for continuation
         if (finishReason === 'stop' && !hasUnfixedLspErrors && !hasIncompleteTodos) {
           logger.info(`✅ [OPENCODE-EXECUTOR] LLM finished with stop, no LSP errors, no incomplete todos - task complete`)
           isComplete = true
@@ -564,6 +752,15 @@ You are ONLY done when:
       result = this.buildConversationResultFromResponse(promptResponse, session, getStats())
 
     } catch (openCodeError) {
+      // WorkflowExternalWaitException (e.g., question asked) must NOT be swallowed.
+      // We skip push/PR/workspace-close — the workflow is just pausing, not completing.
+      // Only session cleanup runs (in finally), then we re-throw immediately.
+      if (openCodeError instanceof WorkflowExternalWaitException) {
+        logger.info(`[OPENCODE-EXECUTOR] WorkflowExternalWaitException detected — pausing workflow for external input (no push/PR)`)
+        savedExternalWaitException = openCodeError
+        // Fall through to finally (session cleanup) → then re-throw before push/PR
+      } else {
+
       logger.error(`[OPENCODE-EXECUTOR] OpenCode execution failed:`, openCodeError)
 
       const errorWithCause = openCodeError as Error & { cause?: Error }
@@ -653,7 +850,15 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
         await this.handleExecutionError(childExecutionId, openCodeError)
         throw openCodeError
       }
+
+      } // end of non-WorkflowExternalWaitException else block
     } finally {
+      // Cancel any pending post-question nudge timer
+      if (postQuestionNudgeTimer) {
+        clearTimeout(postQuestionNudgeTimer)
+        postQuestionNudgeTimer = undefined
+      }
+
       unsubscribe()
 
       try {
@@ -662,6 +867,13 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
       } catch (cleanupError) {
         logger.warn(`[OPENCODE-EXECUTOR] Failed to cleanup session:`, cleanupError)
       }
+    }
+
+    // If we're pausing for a question, re-throw BEFORE any push/PR/workspace-close logic.
+    // The workflow is just halting temporarily — no commits, PRs, or workspace close needed.
+    if (savedExternalWaitException) {
+      logger.info(`[OPENCODE-EXECUTOR] Re-throwing WorkflowExternalWaitException after session cleanup (skipped push/PR): ${savedExternalWaitException.message}`)
+      throw savedExternalWaitException
     }
 
     if (repoPath) {
@@ -805,9 +1017,9 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     repoPath: string,
     agentChkConfig: FullAgenticCheckpointConfig,
     abortController: AbortController
-  ): Promise<void> {
+  ): Promise<{ textContent: string }> {
     if (!response?.parts || !Array.isArray(response.parts)) {
-      return
+      return { textContent: '' }
     }
 
     const partTypeCounts: Record<string, number> = {}
@@ -904,6 +1116,8 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
       )
       logger.error(`[OPENCODE-EXECUTOR] Error in response: ${errorMessage}`)
     }
+
+    return { textContent }
   }
 
   private async processToolPart(
@@ -1357,6 +1571,10 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
       throw error
     }
 
+    if (error instanceof WorkflowExternalWaitException) {
+      throw error
+    }
+
     await this.storage.markChildExecutionFailed(childExecutionId, this.serializeError(error as Error))
   }
 
@@ -1381,12 +1599,16 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     }
   }
 
-  private reconstructConversationFromSteps(steps: any[]): Message[] {
-    const conversationHistory: Message[] = []
-
-    const sortedSteps = steps.sort((a: any, b: any) => 
+  private async replayStepsIntoSession(
+    client: OpenCodeClient,
+    sessionId: string,
+    steps: any[]
+  ): Promise<void> {
+    const sortedSteps = [...steps].sort((a: any, b: any) =>
       new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     )
+
+    let replayedCount = 0
 
     for (const step of sortedSteps) {
       if (!step.data) continue
@@ -1395,43 +1617,35 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
         const stepData = typeof step.data === 'string' ? JSON.parse(step.data) : step.data
         const stepName = step.stepName || ''
 
+        let textToInject: string | undefined
+
         if (stepName === 'user_message') {
-          conversationHistory.push({
-            role: 'user',
-            content: stepData.content || ''
-          } as unknown as Message)
+          textToInject = stepData.content || ''
 
         } else if (stepName.startsWith('tool_')) {
-          if (stepData.output !== null && stepData.output !== undefined) {
-            const toolResultMessage = createToolResultMessage(
-              JSON.stringify(stepData.output),
-              stepData.id || `tool_${Date.now()}`,
-              stepData.success !== false,
-              {
-                error: stepData.error,
-                executionTime: stepData.duration
-              }
-            )
-            conversationHistory.push(toolResultMessage)
-          }
+          // Summarize tool execution as context
+          const toolName = stepName.replace('tool_', '')
+          const inputSummary = stepData.input ? JSON.stringify(stepData.input).substring(0, 500) : ''
+          const outputSummary = stepData.output != null ? JSON.stringify(stepData.output).substring(0, 1000) : 'null'
+          const success = stepData.success !== false ? 'succeeded' : 'failed'
+          textToInject = `[Prior tool execution] Tool: ${toolName}, Status: ${success}\nInput: ${inputSummary}\nOutput: ${outputSummary}`
 
         } else if (stepName.startsWith('llm_call_') || stepName === 'assistant_message') {
           const content = stepData.response || stepData.content || stepData.turn?.result?.content
           if (content) {
-            const assistantMessage = createAssistantMessage(content, {
-              thinking: stepData.thinking,
-              toolCalls: stepData.toolCalls
-            })
-            conversationHistory.push(assistantMessage)
+            textToInject = `[Prior assistant response]\n${content}`
           }
         }
+        if (textToInject) {
+          await client.injectContextMessage(sessionId, textToInject)
+          replayedCount++
+        }
       } catch (error) {
-        logger.error(`Error parsing step data for ${step.stepName}:`, error)
-        continue
+        logger.warn(`[OPENCODE-EXECUTOR] Failed to replay step ${step.stepName} into session:`, error)
       }
     }
 
-    return conversationHistory
+    logger.info(`[OPENCODE-EXECUTOR] Replayed ${replayedCount}/${sortedSteps.length} steps into session ${sessionId}`)
   }
 
   private async computeGitDiff(

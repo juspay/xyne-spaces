@@ -1076,7 +1076,8 @@ export class DBWorkflowStorage implements WorkflowStorage {
         workflow: { connect: { id: workflowId } },
         parentWorkflowExecution: { connect: { id: parentExecutionId } },
         sourceStepsId: checkpointId,
-        status: WorkflowExecutionStatus.RUNNING
+        status: WorkflowExecutionStatus.RUNNING,
+        tag: 'child'
       })
 
       return childExecution.id
