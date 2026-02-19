@@ -1,3 +1,17 @@
+## [1.53.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.52.0...v1.53.0) (2026-02-19)
+
+
+### Features
+
+* enhance Bitbucket integration with PR diff retrieval and workflow message updates ([950e58b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/950e58b232fcc37b1d9065d3839cd8eb4b6b0a8f)), closes [#3255](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3255)
+* moving to native call and metric ([00fe264](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/00fe2642367f6afc155999d7be21889f2a6ad96c)), closes [#3333](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3333)
+* trigger worklfow with pr comments on bitbucket ([8ec4110](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8ec4110423962015809a5fc70f85bf28eed90ed1)), closes [#3421](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3421)
+
+
+### Bug Fixes
+
+* Fix empty user tagging list in DM Panel ([9ef4ae4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9ef4ae4c026cefa75da3da986acc06789cee5087))
+
 ## [1.52.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.51.0...v1.52.0) (2026-02-19)
 
 
