@@ -79,9 +79,8 @@ export class GcsPollingService {
     let project, board, userGroup, systemUser;
 
     try {
-      [project, board, userGroup, systemUser] = await Promise.all([
+      [project, userGroup, systemUser] = await Promise.all([
         db.project.findUnique({ where: { name: projectName } }),
-        db.board.findUnique({ where: { name: boardName } }),
         db.userGroup.findUnique({ where: { name: userGroupName } }),
         db.user.findUnique({ where: { email: systemUserEmail } }),
       ]);
@@ -91,6 +90,15 @@ export class GcsPollingService {
 
     if (!project) {
       throw new Error(`Project not found: ${projectName}`);
+    }
+
+    // Fetch board with both name and projectId (now required due to unique constraint)
+    try {
+      board = await db.board.findFirst({
+        where: { name: boardName, projectId: project.id }
+      });
+    } catch (error) {
+      throw new Error(`Database query failed: ${error}`);
     }
 
     let channel;

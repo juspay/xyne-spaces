@@ -58,7 +58,7 @@ export class BoardRepository {
     await this.validateString(data.projectId, 'projectId');
     await this.validateString(data.createdBy, 'createdBy');
 
-    await this.validateNameUnique(data.name);
+    await this.validateNameUnique(data.name, data.projectId);
 
     // Validate PR status uniqueness across stages
     if (data.stages && data.stages.length > 0) {
@@ -197,19 +197,25 @@ export class BoardRepository {
     }
   }
 
-  async validateNameUnique(name: string, excludeId?: string): Promise<void> {
-    const existing = await this.db.board.findUnique({
-      where: { name },
+  async validateNameUnique(name: string, projectId: string, excludeId?: string): Promise<void> {
+    const existing = await this.db.board.findFirst({
+      where: {
+        name,
+        projectId,
+      },
     });
 
     if (existing && existing.id !== excludeId) {
-      throw new Error(`Board with name '${name}' already exists`);
+      throw new Error(`Board with name '${name}' already exists in this project`);
     }
   }
 
-  async checkDuplicateName(name: string, excludeId?: string): Promise<boolean> {
-    const existing = await this.db.board.findUnique({
-      where: { name },
+  async checkDuplicateName(name: string, projectId: string, excludeId?: string): Promise<boolean> {
+    const existing = await this.db.board.findFirst({
+      where: {
+        name,
+        projectId,
+      },
     });
     return !!(existing && existing.id !== excludeId);
   }
