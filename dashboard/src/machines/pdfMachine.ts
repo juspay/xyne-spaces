@@ -265,7 +265,17 @@ export const pdfMachine = createMachine(
         const page = await input.doc.getPage(1);
         const vp = page.getViewport({ scale: 1 });
 
-        const containerWidth = Math.max(document.documentElement.clientWidth - 32, 320);
+        // Try to find the actual PDF container element for accurate width measurement
+        const pdfContainer = document.querySelector('[data-pdf-container]');
+        let containerWidth: number;
+
+        if (pdfContainer) {
+          // Use the actual container width if available
+          containerWidth = Math.max(pdfContainer.clientWidth - 32, 320);
+        } else {
+          // Fallback to viewport width
+          containerWidth = Math.max(document.documentElement.clientWidth - 32, 320);
+        }
 
         const scale = Math.min(Math.max(containerWidth / vp.width, 0.5), 2.0);
 
