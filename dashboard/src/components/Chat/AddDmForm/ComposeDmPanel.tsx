@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/react-form';
 import { useMutation } from '@tanstack/react-query';
 import { User } from '@xyne/shared';
 import { CircleAlert } from 'lucide-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -23,6 +23,7 @@ import { InputBox } from '../../ui/InputBox';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import ChatListV2 from '../ChatList/ChatListV2';
 import { useExistingDmChannel } from './useExistingDmChannel';
+import { useMentionSearch } from '../../../hooks/useMentionSearch';
 
 export interface CreateDmFormData {
   participants: User[];
@@ -94,6 +95,16 @@ export const ComposeDmPanel: React.FC = () => {
   const handleUsersChange = (users: User[]): void => {
     setSelectedUsers(users);
   };
+
+  // Mention search within the compose panel input box
+  const { results: mentionResults, searchMentions } = useMentionSearch('');
+
+  const handleMentionSearch = useCallback(
+    (query: string) => {
+      searchMentions(query);
+    },
+    [searchMentions],
+  );
 
   const existingDmChannel = useExistingDmChannel(selectedUsers);
 
@@ -257,6 +268,8 @@ export const ComposeDmPanel: React.FC = () => {
                     placeholder='Say something to start the conversation...'
                     showTypingIndicator={false}
                     disabled={selectedUsers.length === 0 || selectedUsers.length > 9}
+                    mentionItems={mentionResults}
+                    onMentionSearch={handleMentionSearch}
                     onContentChange={(html: string) => {
                       field.handleChange(html);
                     }}
