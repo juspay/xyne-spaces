@@ -58,10 +58,10 @@ export class BoardController {
         }
       }
 
-      // Check for duplicate name
-      const isDuplicate = await this.boardRepository.checkDuplicateName(name.trim());
+      // Check for duplicate name within the project
+      const isDuplicate = await this.boardRepository.checkDuplicateName(name.trim(), projectId.trim());
       if (isDuplicate) {
-        res.status(409).json({ error: `Board with name '${name.trim()}' already exists` });
+        res.status(409).json({ error: `Board with name '${name.trim()}' already exists in this project` });
         return;
       }
 
