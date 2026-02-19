@@ -20,6 +20,12 @@
     },
     "types": ["node", "@playwright/test"]
   },
-  "include": ["config/**/*.ts", "lib/**/*.ts", "tests/**/*.ts", "fixtures/**/*.ts"],
+  "include": [
+    "config/**/*.ts",
+    "lib/**/*.ts",
+    "tests/**/*.ts",
+    "fixtures/**/*.ts",
+    "scripts/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

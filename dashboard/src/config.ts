@@ -2,7 +2,7 @@ const isElectronBundled = window.location.protocol === 'xyne-spaces:';
 
 const hostname = window.location.hostname;
 const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-export const isTestEnv = hostname === 'dashboard';
+export const isTestEnv = import.meta.env.MODE === 'test' || hostname === 'dashboard';
 
 export const isSandBox = hostname.includes('sandbox');
 export const isProd = !isLocalhost && !isSandBox;

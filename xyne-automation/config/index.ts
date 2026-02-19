@@ -3,7 +3,7 @@ import * as dotenv from 'dotenv';
 // Load environment variables from .env file
 dotenv.config({ quiet: true });
 
-export type Environment = 'local' | 'test' | 'sbx' | 'prod';
+export type Environment = 'local' | 'local-test' | 'test' | 'sbx' | 'prod';
 export type BrowserType = 'chromium' | 'firefox' | 'webkit';
 
 export interface ServiceConfig {
@@ -22,7 +22,7 @@ export interface Config {
 // Get current environment from TEST_ENV env variable, default to 'local'
 export function getEnvironment(): Environment {
   const env = process.env.TEST_ENV as Environment;
-  const validEnvs: Environment[] = ['local', 'test', 'sbx', 'prod'];
+  const validEnvs: Environment[] = ['local', 'local-test', 'test', 'sbx', 'prod'];
   return validEnvs.includes(env) ? env : 'local';
 }
 
@@ -35,6 +35,7 @@ function getBackendUrl(env: Environment): string {
 
   switch (env) {
     case 'local':
+    case 'local-test':
     case 'test':
       return 'http://localhost:3001';
     case 'sbx':
@@ -53,6 +54,7 @@ function getDashboardUrl(env: Environment): string {
 
   switch (env) {
     case 'local':
+    case 'local-test':
     case 'test':
       return 'http://localhost:5173';
     case 'sbx':
@@ -72,6 +74,7 @@ function getHeadless(env: Environment): boolean {
   switch (env) {
     case 'local':
       return false; // local runs with browser visible
+    case 'local-test':
     case 'test':
     case 'sbx':
     case 'prod':
@@ -101,7 +104,7 @@ function getEnableBrowserConsoleLogs(env: Environment): boolean {
     return process.env.ENABLE_BROWSER_CONSOLE_LOGS === 'true';
   }
 
-  return env === 'test';
+  return env === 'test' || env === 'local-test';
 }
 
 // Build config for environment

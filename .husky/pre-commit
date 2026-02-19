@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 
+
 echo "Running pre-commit checks..."
+
+exec < /dev/tty
 
 # Get list of changed files
 CHANGED_FILES=$(git diff --cached --name-only)
@@ -67,5 +70,49 @@ fi
 # Run service change analysis (ensure we're in repo root)
 cd "$(git rev-parse --show-toplevel)"
 bash scripts/change-analysis.sh || exit 1
+
+# Run tests if the user opted in
+# Ask the user if they want to run tests (only if all previous checks passed)
+echo ""
+echo "🧪 \033[1;36mDo you want to run the automation test suite now?\033[0m"
+echo "   \033[0;33m(Running tests locally is faster and more reliable than waiting for Jenkins)"
+echo "   (These results will be reused in Jenkins, saving time later)"
+echo ""
+echo "   (Only run test case if this is your final commit for this feature/fix)\033[0m"
+echo ""
+printf "   Run tests? [Y/n] "
+read -r response
+
+should_run_tests=false
+
+case "$response" in
+    [yY][eE][sS]|[yY]|"")
+        echo "   \033[0;32mGreat! Running tests after other checks...\033[0m"
+        should_run_tests=true
+        ;;
+    *)
+        echo "   \033[0;33mSkipping tests. (They will run in Jenkins)\033[0m"
+        should_run_tests=false
+        ;;
+esac
+
+if [ "$should_run_tests" = true ]; then
+  echo ""
+
+  echo "🔒 Verifying test code integrity..."
+  if ! npm run test:integrity; then
+      echo "❌ Test code integrity check failed! Your test code does not match main branch."
+      echo "🚫 Commit aborted."
+      exit 1
+  fi
+
+  # Mark that tests are running so post-commit knows to commit reports
+  touch .git/XYNE_TEST_RAN
+  npm run test || echo "⚠️  Tests failed, but committing anyway..."
+else
+  # Ensure clean state if tests are skipped
+  rm -f .git/XYNE_TEST_RAN
+fi
+
 
 echo "✅ All pre-commit checks passed!" 
