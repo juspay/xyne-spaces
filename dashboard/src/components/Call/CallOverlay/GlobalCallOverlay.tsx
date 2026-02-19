@@ -6,7 +6,6 @@ import { CustomLiveKitRoom } from '../CallViews/CustomLiveKitRoom';
 import { useZero } from '../../../hooks/useZero';
 import { useEffect } from 'react';
 import { queries } from '../../../zero/queries';
-import { callService } from '../../../services/Call/callService';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 export function GlobalCallOverlay(): React.ReactElement | null {
@@ -20,15 +19,6 @@ export function GlobalCallOverlay(): React.ReactElement | null {
     if (calls) {
       roomActor.send({ type: 'UPDATE_ACTIVE_CALLS', calls });
     }
-  }, [calls]);
-
-  // Validate new calls against LiveKit room state
-  useEffect(() => {
-    if (!calls || calls.length === 0) return;
-
-    // Extract call IDs for validation
-    const newCallIds = calls.map(call => call.externalId);
-    void callService.validateRooms({ callIds: newCallIds });
   }, [calls]);
 
   const isCallActive = useSelector(
