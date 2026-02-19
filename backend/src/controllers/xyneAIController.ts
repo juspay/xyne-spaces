@@ -108,17 +108,6 @@ export class XyneAIController {
         }
       }
 
-      // Verify conversation_id if provided (only if channel_ids is not empty)
-      if (conversation_id && channel_ids.length > 0) {
-        const conversation = await db.conversation.findUnique({
-          where: { conversationId: conversation_id },
-        });
-        if (!conversation || !channel_ids.includes(conversation.channelId)) {
-          res.status(400).json({ error: 'Invalid conversation_id: does not belong to any of the specified channels' });
-          return;
-        }
-      }
-
       // Fetch user information for agent context
       const user = await db.user.findUnique({
         where: { id: userId },

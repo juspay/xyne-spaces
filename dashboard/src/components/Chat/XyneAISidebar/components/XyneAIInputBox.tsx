@@ -14,6 +14,9 @@ import { MentionSelector } from '../../../ui/Selectors';
 import type { MentionResult } from '../../../ui/Selectors/Selectors.types';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { useResearchOptions, type ResearchContext } from '../../../../hooks/useResearchAgent';
+import type { ThreadInfo } from '../../../../machines/xyneAIMachine';
+import { useNavigate } from 'react-router-dom';
+import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 
 // Hash icon component
 const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
@@ -26,11 +29,13 @@ interface XyneAIInputBoxProps {
   channelDescription?: string;
   scopeType?: string;
   showChannelTag?: boolean;
+  threadInfo?: ThreadInfo | null | undefined;
   inputValue: string;
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onSelectedChannelsChange?: (channelIds: string[]) => void;
   onResearchContextChange?: (context: ResearchContext | null) => void;
+  onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onAttachmentsChange?: (attachments: Attachment[]) => void;
   isStreaming?: boolean;
   onAbort?: () => void;
@@ -60,11 +65,13 @@ export const XyneAIInputBox = ({
   channelId,
   channelName,
   scopeType,
+  threadInfo,
   inputValue,
   onInputChange,
   onSubmit,
   onSelectedChannelsChange,
   onResearchContextChange,
+  onThreadInfoChange,
   onAttachmentsChange,
   isStreaming = false,
   onAbort,
@@ -79,6 +86,7 @@ export const XyneAIInputBox = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasInitializedDefaultChannel = useRef(false);
   const { isMobile } = usePlatform();
+  const navigate = useNavigate();
 
   // Get all visible channels and filter out DMs
   const allChannels = useAllVisibleChannels();
@@ -130,6 +138,34 @@ export const XyneAIInputBox = ({
   const [researchSearchQuery, setResearchSearchQuery] = useState('');
   const [researchHighlightedIndex, setResearchHighlightedIndex] = useState(0);
   const [researchTab, setResearchTab] = useState<'products' | 'repositories'>('products');
+
+  // Thread info state - track if user has removed it
+  const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
+
+  // Update activeThreadInfo when threadInfo prop changes
+  useEffect(() => {
+    setActiveThreadInfo(threadInfo ?? null);
+  }, [threadInfo]);
+
+  // Handle removing thread info
+  const handleRemoveThreadInfo = (e: React.MouseEvent): void => {
+    e.stopPropagation(); // Prevent triggering the pill click
+    setActiveThreadInfo(null);
+    onThreadInfoChange?.(null);
+  };
+
+  // Handle clicking thread pill to navigate
+  const handleThreadPillClick = (): void => {
+    if (!activeThreadInfo || !channelId) return;
+
+    // Navigate to the thread
+    void navigate(`/chat/dir/${channelId}/${activeThreadInfo.conversationId}`);
+
+    // Close XyneAI modal on mobile after navigation
+    if (isMobile) {
+      xyneAIActor.send({ type: 'CLOSE' });
+    }
+  };
 
   // Filter channels based on search query (exclude DMs)
   const filteredChannels = useMemo(() => {
@@ -676,7 +712,13 @@ export const XyneAIInputBox = ({
         className={`bg-card border border-input focus-within:border-ring ${isMobile ? 'rounded-[26px]' : 'rounded-2xl'} py-2 px-2 flex flex-col gap-3 transition-colors relative`}
       >
         {/* Selector Buttons and Pills Row */}
-        <div className='flex items-center gap-2 overflow-x-auto scrollbar-hide flex-nowrap'>
+        <div
+          className='flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 pb-2'
+          style={{
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#D1D5DB transparent',
+          }}
+        >
           {/* "/" Button to open channel selector */}
           <button
             type='button'
@@ -700,6 +742,32 @@ export const XyneAIInputBox = ({
             >
               <Search className='w-4 h-4 text-gray-600' />
             </button>
+          )}
+
+          {/* Thread Context Pill */}
+          {activeThreadInfo && (
+            <div
+              className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+            >
+              <button
+                type='button'
+                onClick={handleThreadPillClick}
+                className='flex items-center gap-1 cursor-pointer hover:bg-gray-50 transition-colors bg-transparent border-0 p-0'
+                aria-label={`Navigate to thread from ${activeThreadInfo.senderName}`}
+              >
+                <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
+                  {activeThreadInfo.senderName} • {activeThreadInfo.previewText}
+                </span>
+              </button>
+              <button
+                type='button'
+                onClick={handleRemoveThreadInfo}
+                className='hover:bg-gray-200 rounded p-0.5 transition-colors flex-shrink-0'
+                aria-label='Remove thread context'
+              >
+                <X className='w-3 h-3' />
+              </button>
+            </div>
           )}
 
           {/* Channel Pills */}

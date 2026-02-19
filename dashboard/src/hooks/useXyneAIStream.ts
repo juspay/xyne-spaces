@@ -16,6 +16,7 @@ import type { ResearchContext } from '@xyne/shared';
 interface UseXyneAIStreamParams {
   channelIds: string[];
   conversationId: string;
+  threadConversationId?: string | undefined;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
@@ -35,6 +36,7 @@ const clearStatusMessage = <T extends { statusMessage?: string }>(
 export const useXyneAIStream = ({
   channelIds,
   conversationId,
+  threadConversationId,
   setMessages,
   setConversationId,
   setCurrentTraceId,
@@ -115,7 +117,7 @@ export const useXyneAIStream = ({
             // eslint-disable-next-line @typescript-eslint/naming-convention
             channel_ids: channelIds,
             // eslint-disable-next-line @typescript-eslint/naming-convention
-            conversation_id: '',
+            conversation_id: threadConversationId || '',
             // eslint-disable-next-line @typescript-eslint/naming-convention
             session_id: conversationId,
             // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -201,7 +203,16 @@ export const useXyneAIStream = ({
         );
       }
     },
-    [channelIds, conversationId, researchContext, setMessages, setConversationId, webSearchEnabled],
+    [
+      channelIds,
+      conversationId,
+      threadConversationId,
+      researchContext,
+      setMessages,
+      setConversationId,
+      setCurrentTraceId,
+      webSearchEnabled,
+    ],
   );
 
   const abortCurrentRequest = useCallback(() => {

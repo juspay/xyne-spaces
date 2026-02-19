@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
+import { XyneAIStar } from '../../icons/xyne-ai';
 import { useReactions } from '../../../hooks/useReaction';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
@@ -47,6 +48,7 @@ interface HoverActionsToolbarProps {
   onForwardMessage?: () => void;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   onBookmark?: () => void;
+  onAskAI?: () => void;
   isBookmarked?: boolean;
   isPinned?: boolean;
   onMarkAsUnread?: () => void;
@@ -69,6 +71,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onForwardMessage,
   onEmojiPickerOpenChange,
   onBookmark,
+  onAskAI,
   isBookmarked = false,
   isPinned = false,
   onMarkAsUnread,
@@ -247,6 +250,21 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             onClick={onPinMessage}
           >
             {isPinned ? <UnpinIcon className='w-4 h-4' /> : <Pin className='w-4 h-4' />}
+          </Button>
+        </Tooltip>
+      )}
+
+      {/* Ask AI */}
+      {onAskAI && (
+        <Tooltip content='Ask AI' side='top'>
+          <Button
+            variant='ghost'
+            className='size-7 text-[rgba(120,129,135,1)]'
+            onClick={onAskAI}
+            title='Ask AI'
+            data-testid='hover-action-ask-ai'
+          >
+            <XyneAIStar size={16} />
           </Button>
         </Tooltip>
       )}

@@ -6,6 +6,7 @@ import { logger } from '../../../utils/logger.js';
 import { redisService } from '../../../services/redisService.js';
 import { getPromptFromLangfuse, PROMPT_NAMES } from '../langfuse/index.js';
 import { getFallbackPrompt } from '../langfuse/fallback-prompts.js';
+import type { EnrichedCall } from '../../../services/aiContextService.js';
 import type {
   ToolMessage,
   ToolResult,
@@ -14,6 +15,7 @@ import type {
   EntityType,
   EnhancedToolResult,
   EnhancedCitationMappings,
+  ToolEntity,
 } from './types.js';
 import {
   REDIS_CITATION_PREFIX,
@@ -32,8 +34,9 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, searchMessages, searchTickets, geniusQuery, fieldValueDiscovery, webSearch, researchAgent] = await Promise.all([
+  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, fieldValueDiscovery, webSearch, researchAgent] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
+    getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_TICKETS),
     getPromptFromLangfuse(PROMPT_NAMES.GENIUS),
@@ -44,7 +47,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
   
   const descriptions = {
     fetch_channel_messages: fetchChannel || 'Fetch messages from the current channel.',
-    fetch_thread_messages: '',
+    fetch_thread_messages: fetchThread || 'Fetch all content from the current thread including messages, attachments, and tickets.',
     search_relevant_messages: searchMessages || 'Search for relevant messages in the channel.',
     search_relevant_tickets: searchTickets || 'Search for relevant support tickets using semantic search.',
     genius: geniusQuery || 'Query Genius for analytics and data insights.',
@@ -659,4 +662,220 @@ export function formatEnhancedToolResultForContext(
   }
 
   return output.trim();
+}
+
+// ============================================================================
+// Entity Transform Functions
+// ============================================================================
+
+/**
+ * Transform Message to ToolEntity format
+ */
+export function transformMessageToEntity(
+  message: any,
+  index: number,
+  channelId: string,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>
+): ToolEntity {
+  const user = userMap.get(message.senderId);
+  return {
+    entityType: 'message',
+    entityId: message.messageId,
+    entityIndex: index,
+    content: stripHtml(message.content),
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: message.senderId,
+    timestamp: toIST(message.createdAt),
+    channelId,
+    channelName,
+    conversationId: message.conversationId,
+    messageId: message.messageId,
+    hasAttachment: message.hasAttachment,
+  };
+}
+
+/**
+ * Transform MessageAttachment to ToolEntity format
+ */
+export function transformAttachmentToEntity(
+  attachment: any,
+  index: number,
+  channelId: string,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>
+): ToolEntity {
+  const user = userMap.get(attachment.uploadedByUserId || attachment.createdBy);
+
+  // Build content: metadata only
+  let content = `Attachment: ${attachment.originalFilename} (${attachment.mimetype})`;
+
+  // Add file size
+  if (attachment.size) {
+    const sizeMB = (attachment.size / 1024 / 1024).toFixed(2);
+    content += `\nSize: ${sizeMB}MB`;
+  }
+
+  // Add dimensions for images/videos if available
+  if (attachment.width && attachment.height) {
+    content += `\nDimensions: ${attachment.width}x${attachment.height}`;
+  }
+
+  return {
+    entityType: 'attachment',
+    entityId: attachment.id,
+    entityIndex: index,
+    content,
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: attachment.uploadedByUserId || attachment.createdBy,
+    timestamp: toIST(attachment.createdAt),
+    channelId,
+    channelName,
+    conversationId: attachment.conversationId,
+    messageId: attachment.entityType === 'CHAT' ? attachment.entityId : undefined,
+    attachmentMimetype: attachment.mimetype,
+    base64Data: undefined,
+  };
+}
+
+/**
+ * Transform Call to ToolEntity format
+ */
+export function transformCallToEntity(
+  call: EnrichedCall,
+  index: number,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>
+): ToolEntity {
+  const user = userMap.get(call.createdByUserId);
+
+  // Build content with transcript if available
+  let content = `Call: ${call.title || 'Untitled'}\nStatus: ${call.status}`;
+
+  if (call.description) {
+    content += `\nDescription: ${call.description}`;
+  }
+
+  if (call.transcript) {
+    content += `\n\nTranscript:\n${call.transcript}`;
+  } else {
+    content += `\n\n[No transcript available]`;
+  }
+
+  if (call.aiSummary) {
+    content += `\n\nAI Summary:\n${call.aiSummary}`;
+  }
+
+  return {
+    entityType: 'call',
+    entityId: call.id,
+    entityIndex: index,
+    content,
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: call.createdByUserId,
+    timestamp: toIST(call.startedAt),
+    channelId: call.channelId,
+    channelName,
+    conversationId: call.conversationId || undefined,
+    callId: call.id,
+    callStatus: call.status,
+    hasTranscript: !!call.transcript,
+  };
+}
+
+/**
+ * Transform Canvas to ToolEntity format
+ */
+export function transformCanvasToEntity(
+  canvas: any,
+  index: number,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>
+): ToolEntity {
+  const user = userMap.get(canvas.createdBy);
+
+  // Build content with full canvas data
+  let content = `Canvas: ${canvas.title}\n`;
+
+  // Include full BlockNote JSON content
+  if (canvas.content) {
+    content += `\nContent (BlockNote JSON):\n${JSON.stringify(canvas.content, null, 2)}`;
+  }
+
+  // Add metadata if available
+  if (canvas.metadata) {
+    content += `\n\nMetadata:\n${JSON.stringify(canvas.metadata, null, 2)}`;
+  }
+
+  // Add document type info for Quarto docs
+  if (canvas.docType === 'Quarto' && canvas.quartoDocumentType) {
+    content += `\n\nQuarto Document Type: ${canvas.quartoDocumentType}`;
+    if (canvas.entryFile) {
+      content += `\nEntry File: ${canvas.entryFile}`;
+    }
+  }
+
+  return {
+    entityType: 'canvas',
+    entityId: canvas.id,
+    entityIndex: index,
+    content,
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: canvas.createdBy,
+    timestamp: toIST(canvas.updatedAt),
+    channelId: canvas.channelId || '',
+    channelName,
+    canvasId: canvas.id,
+  };
+}
+
+/**
+ * Transform Ticket to ToolEntity format
+ */
+export function transformTicketToEntity(
+  ticket: any,
+  index: number,
+  channelName: string,
+  userMap: Map<string, { name: string | null; email: string | null }>
+): ToolEntity {
+  const user = userMap.get(ticket.createdBy);
+  const assignee = ticket.assignedTo ? userMap.get(ticket.assignedTo) : null;
+
+  // Build comprehensive ticket content
+  let content = `Ticket [${ticket.xyneId}]: ${ticket.title}\n`;
+  content += `Status: ${ticket.statusV2}\n`;
+  content += `Priority: ${ticket.priority}\n`;
+
+  if (assignee) {
+    content += `Assigned To: ${assignee.name || assignee.email || 'Unknown'}\n`;
+  }
+
+  if (ticket.eta) {
+    content += `ETA: ${toIST(ticket.eta)}\n`;
+  }
+
+  // Include full description
+  if (ticket.description) {
+    content += `\nDescription:\n${ticket.description}`;
+  }
+
+  // Add metadata if available
+  if (ticket.metadata) {
+    content += `\n\nMetadata:\n${JSON.stringify(ticket.metadata, null, 2)}`;
+  }
+
+  return {
+    entityType: 'ticket',
+    entityId: ticket.id,
+    entityIndex: index,
+    content,
+    authorName: user?.name || user?.email || 'Unknown User',
+    authorId: ticket.createdBy,
+    timestamp: toIST(ticket.createdAt),
+    channelId: ticket.channelId,
+    channelName,
+    conversationId: ticket.conversationId,
+    ticketId: ticket.id,
+    ticketStatus: ticket.statusV2,
+  };
 }

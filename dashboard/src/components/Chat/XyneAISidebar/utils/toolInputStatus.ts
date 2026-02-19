@@ -245,6 +245,9 @@ export const generateToolInputStatus = (toolName: string, toolInput: unknown): s
       case 'fetch_channel_messages':
         return 'Fetching channel messages';
 
+      case 'fetch_thread_messages':
+        return 'Fetching thread messages';
+
       case 'web_search': {
         const query = extractSafeString(input['query']);
         if (query) {

@@ -46,11 +46,11 @@ function createModelProvider(apiKey: string) {
 // Agent Definition
 // ============================================================================
 
-function createXyneAIAgent(systemPrompt: string, webSearchEnabled?: boolean): Agent<XyneAIAgentContext, string> {
+function createXyneAIAgent(systemPrompt: string, webSearchEnabled?: boolean, hasThreadContext?: boolean): Agent<XyneAIAgentContext, string> {
   return {
     name: 'XyneAI',
     instructions: () => systemPrompt,
-    tools: getXyneAITools(webSearchEnabled),
+    tools: getXyneAITools({ webSearchEnabled, hasThreadContext }),
     modelConfig: {
       temperature: 0.3,
     },
@@ -64,9 +64,10 @@ async function buildAgentPrompt(
   channelNames?: string[],
   webSearchEnabled?: boolean,
   researchContext?: ResearchContext,
-  researchOptions?: AvailableResearchOptions
+  researchOptions?: AvailableResearchOptions,
+  hasThreadContext?: boolean
 ): Promise<string> {
-  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions);
+  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions, hasThreadContext);
   
   const prompt = await getPromptFromLangfuse(PROMPT_NAMES.XYNE_AI_SYSTEM, {
     templateVariables,
@@ -209,16 +210,21 @@ export async function createAgentRunner(
     productNameToId,
     repositoryNameToId,
   };
-
+  
+  // Determine if we have thread context (conversationId is present)
+  const hasThreadContext = !!context.conversationId;
+  
   const systemPrompt = await buildAgentPrompt(
     source, 
     context.timestamp, 
     context.userInfo, 
-    channelNames, context.webSearchEnabled,
+    channelNames, 
+    context.webSearchEnabled,
     context.researchContext,
-    researchOptions
+    researchOptions,
+    hasThreadContext
   );
-  const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled);
+  const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, hasThreadContext);
   const agentRegistry = createAgentRegistry(agent);
   const runConfig = createRunConfig(agentRegistry, modelName, apiKey, onEvent);
   const initialState = createInitialState(enrichedContext, messages);

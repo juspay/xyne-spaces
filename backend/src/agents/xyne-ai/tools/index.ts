@@ -103,13 +103,26 @@ export { createResearchAgentTool, getResearchAgentTool };
 // ============================================================================
 
 /**
+ * Options for configuring which tools to include
+ */
+export interface GetXyneAIToolsOptions {
+  webSearchEnabled?: boolean;
+  hasThreadContext?: boolean;
+}
+
+/**
  * Get all Xyne AI tools (with descriptions from Langfuse)
  * MUST call initializeTools() before using this function
+ * 
+ * @param options Configuration options
+ * @param options.webSearchEnabled Whether to include the web_search tool
+ * @param options.hasThreadContext Whether to include the fetch_thread_messages tool (when conversationId is present)
  */
-export function getXyneAITools(webSearchEnabled?: boolean): Tool<any, XyneAIAgentContext>[] {
-  const tools = [
+export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneAIAgentContext>[] {
+  const { webSearchEnabled = false, hasThreadContext = false } = options || {};
+  
+  const tools: Tool<any, XyneAIAgentContext>[] = [
     createFetchChannelMessagesTool(),
-    // createFetchThreadMessagesTool(), // Commented out in original
     createSearchRelevantMessagesTool(),
     createSearchRelevantTicketsTool(),
     createFieldValueDiscoveryTool(),
@@ -120,6 +133,11 @@ export function getXyneAITools(webSearchEnabled?: boolean): Tool<any, XyneAIAgen
   // Add web search tool if runtime flag is true
   if (webSearchEnabled) {
     tools.push(createWebSearchTool());
+  }
+
+  // Add fetch_thread_messages tool if in thread context (conversationId is present)
+  if (hasThreadContext) {
+    tools.push(createFetchThreadMessagesTool());
   }
 
   return tools;
