@@ -177,6 +177,7 @@ export type AgenticCheckpointConfig = {
 export type AgenticContinuationOverride = {
   continuationUserMessage: string      // User's message to append to conversation
   sourceChildExecutionId: string       // Original child execution to get history from
+  targetStepId?: string                // Optional: specific step ID to apply this override to
 }
 
 // Full config with agentConfig for internal use

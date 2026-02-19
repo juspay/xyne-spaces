@@ -17,6 +17,37 @@ export interface BitbucketCommentsResponse {
   nextPageStart: number | null;
 }
 
+export interface BitbucketActivitiesResponse {
+  values: ActivityData[];
+  size: number;
+  limit: number;
+  start: number;
+  isLastPage: boolean;
+  nextPageStart: number | null;
+}
+
+export interface ActivityData {
+  action: 'COMMENTED' | 'APPROVED' | 'DECLINED' | 'OPENED' | 'MERGED' | 'UPDATED' | 'RESCOPED' | string;
+  comment?: CommentData;
+  commentAnchor?: {
+    path: string;
+    line: number;
+    lineType: string;
+    fileType: string;
+    orphaned: boolean;
+  };
+  user?: {
+    name: string;
+    emailAddress: string;
+    id: number;
+    displayName: string;
+    active: boolean;
+    slug: string;
+    type: string;
+  };
+  createdDate?: number;
+}
+
 /**
  * Bitbucket Server (self-hosted) API pull request format
  * Used for API responses from Bitbucket Server installations
@@ -179,6 +210,13 @@ export interface CommentData {
     role: string;
     approved: boolean;
     status: string;
+    name?: string;
+    emailAddress?: string;
+    id?: number;
+    displayName?: string;
+    active?: boolean;
+    slug?: string;
+    type?: string;
   };
   createdDate: number;
   updatedDate: number;
@@ -187,6 +225,13 @@ export interface CommentData {
   severity: string;
   state: string;
   fixed: boolean;
+  anchor?: {
+    path: string;
+    line: number;
+    lineType: string;
+    fileType: string;
+    orphaned: boolean;
+  };
   properties: {
     repositoryId: number;
   };

@@ -30,6 +30,22 @@ export interface ContinueAgenticStepOptions {
   continuationMessage: string    // User's message to append to conversation
 }
 
+// Webhook to workflow-step mapping
+const webhookWorkflowMapper = {
+  bitbucket: {
+    workflows: [
+      {
+        workflow: 'XYNE_SPACES_FEATURE_IMPLEMENTATION',
+        step: 'implementation',
+      },
+      {
+        workflow: 'FIDO_SERVER_WORKFLOW',
+        step: 'code_implementation',
+      },
+    ],
+  },
+} as const;
+
 export class WorkflowRestoreService {
   /**
    * Creates a new rerun execution from a restore point.
@@ -262,6 +278,30 @@ export class WorkflowRestoreService {
   }
 
   /**
+   * Get the step name for a webhook source and workflow type from the mapper.
+   * Falls back to the first INPUT step if no mapping found.
+   * 
+   * @param webhookSource - The webhook source (e.g., 'bitbucket', 'github')
+   * @param workflowType - The workflow type
+   * @returns The step name to use for the rerun
+   */
+  async getStepNameForWebhook(
+    webhookSource: string,
+    workflowType: string
+  ): Promise<string> {
+    const sourceConfig = webhookWorkflowMapper[webhookSource as keyof typeof webhookWorkflowMapper];
+    if (sourceConfig) {
+      const workflowConfig = sourceConfig.workflows.find(w => w.workflow === workflowType);
+      if (workflowConfig) {
+        return workflowConfig.step;
+      }
+    }
+
+    logger.warn(`⚠️  No step mapping found for workflow type ${workflowType} and source ${webhookSource}`);
+    throw new Error(`No step mapping found for workflow type ${workflowType} and webhook source ${webhookSource}`);
+  }
+
+  /**
    * Creates a continuation rerun for an agentic step.
    * This allows continuing an agentic step with additional user input while preserving
    * the conversation history from the original execution.
@@ -315,10 +355,11 @@ export class WorkflowRestoreService {
     logger.info(`   Agentic step: ${agenticStepId} (${agenticStep.stepName})`)
     logger.info(`   Source child execution: ${sourceChildExecution.id}`)
 
-    // 3. Create the continuation override
+    // 3. Create the continuation override with targetStepId to ensure it only applies to this step
     const continuationOverride = {
       continuationUserMessage: continuationMessage,
-      sourceChildExecutionId: sourceChildExecution.id
+      sourceChildExecutionId: sourceChildExecution.id,
+      targetStepId: agenticStep.stepName
     }
 
     // 4. Use createRerunExecution with the continuation override as modifiedInput
