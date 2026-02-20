@@ -131,17 +131,35 @@ review:
     - If a file matches any exclude pattern, immediately skip to the next file
 
     Follow this autonomous review workflow:
+    
+    📚 STEP 0 - MANDATORY PRE-REVIEW READING:
+    Before starting any code review, you MUST read the project guidelines:
+    a. Read `xyne.md` in the repository root - this is the main entry point for understanding the project structure
+    b. After getting the list of changed files, determine which areas are affected:
+       - If changes are in `backend/` → Read `backend/docs/guidelines/xyne.md` and relevant sub-docs
+       - If changes are in `dashboard/` → Read `dashboard/docs/guidelines/xyne.md` and relevant sub-docs
+       - If changes span both → Read BOTH guideline files
+    c. Based on the specific files changed, read the relevant documentation:
+       - Zero changes → Read `backend/docs/guidelines/zero/` and `dashboard/docs/guidelines/zero/`
+       - Auth changes → Read `backend/docs/guidelines/auth.md`
+       - Job/queue changes → Read `backend/docs/guidelines/jobs.md`
+       - Integration changes → Read `backend/docs/guidelines/integrations.md`
+       - State machine changes → Read `dashboard/docs/guidelines/machines.md`
+       - Hook changes → Read `dashboard/docs/guidelines/hooks.md`
+    d. This context gathering ensures you understand the project patterns and can provide accurate, relevant review comments
+    
     1. Use get_branch() with branch name to get PR details and list of changed files
     2. VALIDATE: Check if PR exists and (target branch is "main" OR branch name starts with "feature/release-") - if not, skip to description enhancement only
     3. Filter out any files matching excludePatterns from the file list
-    4. For EACH remaining file individually:
+    4. EXECUTE STEP 0: Read xyne.md and relevant guideline files based on the changed file paths
+    5. For EACH remaining file individually:
        a. Call get_pull_request_diff() with include_pattern set to the specific file path
        b. Read and analyze ONLY that file's diff
        c. Use search_code() and get_file_content() tools to gather context when needed
        d. Comment on issues immediately as you find them (real-time feedback)
        e. Complete review of this file before moving to next
-    5. Read project standards from memory-bank (if available)
-    6. Read docs/ directory files for additional context and reference documentation
+    6. Read project standards from memory-bank (if available)
+    7. Read docs/ directory files for additional context and reference documentation
 
     🔒 SECURITY FIRST: Prioritize security vulnerabilities and data protection
     ⚡ PERFORMANCE AWARE: Identify performance bottlenecks and optimization opportunities
@@ -611,11 +629,10 @@ descriptionEnhancement:
 # ============================================================================
 memoryBank:
   enabled: true
-  path: "memory-bank"
+  path: "xyne.md"
   fallbackPaths:
-    - "docs/memory-bank"
-    - "docs"
-    - ".memory-bank"
+    - "backend/docs/guidelines"
+    - "dashboard/docs/guidelines"
 
   # Standard files AI will read for project context
   standardFiles:
