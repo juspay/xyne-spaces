@@ -596,8 +596,18 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       data-show-avatar={showAvatar}
       className='no-select-mobile relative transition-all duration-200 ease-in-out'
       style={{ touchAction: 'pan-y' }}
-      onTouchStart={() => {
+      onTouchStart={e => {
         if (isMobile) {
+          // Skip long-press when touch is inside a modal/preview overlay
+          const target = e.target;
+          if (
+            target instanceof HTMLElement &&
+            (target.closest('[data-prevent-drawer="true"]') ||
+              !containerRef.current?.contains(target))
+          ) {
+            return;
+          }
+
           isScrollingRef.current = false;
 
           pressTimerRef.current = setTimeout(() => {

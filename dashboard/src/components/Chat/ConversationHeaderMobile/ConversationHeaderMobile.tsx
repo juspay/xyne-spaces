@@ -19,7 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
-import Drawer, { cn } from '../../ui/Drawer';
+import Drawer from '../../ui/Drawer';
 import AddPeopleForm from '../AddPeopleForm/AddPeopleForm';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { getTargetUserIdForCall } from '../ConversationHeader/ConversationHeader.utils';
@@ -28,6 +28,7 @@ import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { cn } from '../../../utils/classNames';
 
 interface ConversationHeaderMobileProps {
   channelId: string;

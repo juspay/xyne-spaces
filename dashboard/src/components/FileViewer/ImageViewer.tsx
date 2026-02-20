@@ -188,6 +188,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName }) => {
           limitToBounds={true}
           centerOnInit={true}
           centerZoomedOut={true}
+          panning={{ disabled: true }}
           wheel={{
             step: 0.5,
             smoothStep: 0.01,

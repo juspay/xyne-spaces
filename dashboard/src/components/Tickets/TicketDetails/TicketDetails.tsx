@@ -70,7 +70,7 @@ import { TicketStatusIcon as TicketStageIcon } from '../TicketStatus/TicketStatu
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { calculateETADeadline, calculateWorkingDurationMs } from '../../../utils/etaCalculation';
 import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
-import { cn } from '../../ui/Drawer';
+import { cn } from '../../../utils/classNames';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
