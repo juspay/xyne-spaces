@@ -1,4 +1,5 @@
 #!/usr/bin/env npx tsx
+/// <reference types="node" />
 
 /**
  * Dummy Data Seeding Script
@@ -70,6 +71,15 @@ async function main() {
     // Use a transaction to ensure atomicity
     await prisma.$transaction(async (tx) => {
       
+      // ============================================
+      // PRELIMINARY: Create Sequences
+      // ============================================
+      console.log('  Creating sequences...');
+      await tx.$executeRaw`
+        CREATE SEQUENCE IF NOT EXISTS ticket_xyne_id_seq START 1
+      `;
+      console.log('    ✅ Sequence ticket_xyne_id_seq created');
+
       // ============================================
       // PHASE 1: Foundation Data
       // ============================================
@@ -1108,158 +1118,6 @@ async function main() {
       console.log(`    ✅ Created 2 workflow knowledge records`);
 
       // ============================================
-      // PHASE 4: Agents & Tools
-      // ============================================
-      console.log('\n📦 Phase 4: Agents & Tools...');
-
-      // Create Models
-      console.log('  Creating Models...');
-      const model1 = await tx.model.create({
-        data: {
-          userDefinedId: 'gpt-4-turbo',
-          name: 'GPT-4 Turbo',
-          provider: 'OpenAI',
-          credentials: JSON.stringify({ apiKey: 'sk-****' })
-        }
-      });
-
-      const model2 = await tx.model.create({
-        data: {
-          userDefinedId: 'claude-3-opus',
-          name: 'Claude 3 Opus',
-          provider: 'Anthropic',
-          credentials: JSON.stringify({ apiKey: 'sk-ant-****' })
-        }
-      });
-      console.log(`    ✅ Created 2 models`);
-
-      // Create Tools
-      console.log('  Creating Tools...');
-      const tool1 = await tx.tool.create({
-        data: {
-          name: 'code-explorer',
-          description: 'Explore and analyze code repositories',
-          status: 'Enabled'
-        }
-      });
-
-      const tool2 = await tx.tool.create({
-        data: {
-          name: 'file-reader',
-          description: 'Read and parse files from filesystem',
-          status: 'Enabled'
-        }
-      });
-
-      const tool3 = await tx.tool.create({
-        data: {
-          name: 'web-searcher',
-          description: 'Search the web for information',
-          status: 'Enabled'
-        }
-      });
-      console.log(`    ✅ Created 3 tools`);
-
-      // Create Agents
-      console.log('  Creating Agents...');
-      const agent1 = await tx.agent.create({
-        data: {
-          userDefinedId: 'code-assistant-v1',
-          modelId: model1.id,
-          systemPrompt: 'You are a helpful code assistant. Help developers write better code.',
-          description: 'AI-powered code assistant for development tasks',
-          name: 'Code Assistant',
-          version: 1,
-          temp: 0.7,
-          scope: 'project',
-          scopeURI: project1.id
-        }
-      });
-
-      const agent2 = await tx.agent.create({
-        data: {
-          userDefinedId: 'qa-bot-v1',
-          modelId: model2.id,
-          systemPrompt: 'You are a QA specialist. Help identify and document bugs.',
-          description: 'AI-powered QA bot for testing and bug detection',
-          name: 'QA Bot',
-          version: 1,
-          temp: 0.5,
-          scope: 'project',
-          scopeURI: project1.id
-        }
-      });
-      console.log(`    ✅ Created 2 agents`);
-
-      // Create Agent Tools Mappings
-      console.log('  Creating Agent Tools Mappings...');
-      await tx.agentToolsMapping.createMany({
-        data: [
-          {
-            agentId: agent1.id,
-            toolId: tool1.id,
-            specialDescription: 'Explore repository structure',
-            status: 'Enabled'
-          },
-          {
-            agentId: agent1.id,
-            toolId: tool2.id,
-            specialDescription: 'Read code files',
-            status: 'Enabled'
-          },
-          {
-            agentId: agent1.id,
-            toolId: tool3.id,
-            specialDescription: 'Search for solutions online',
-            status: 'Enabled'
-          },
-          {
-            agentId: agent2.id,
-            toolId: tool1.id,
-            specialDescription: 'Analyze test cases',
-            status: 'Enabled'
-          },
-          {
-            agentId: agent2.id,
-            toolId: tool2.id,
-            specialDescription: 'Read test files',
-            status: 'Enabled'
-          }
-        ]
-      });
-      console.log(`    ✅ Created 5 agent tools mappings`);
-
-      // Create Agent Steps
-      console.log('  Creating Agent Steps...');
-      await tx.agentStep.createMany({
-        data: [
-          {
-            stepsId: generateId(),
-            stepType: 'tool',
-            agentId: agent1.id,
-            toolName: 'code-explorer',
-            repositoryURL: 'https://github.com/xyne/xyne-spaces',
-            branch: 'develop'
-          },
-          {
-            stepsId: generateId(),
-            stepType: 'llm-call',
-            agentId: agent1.id,
-            commitHash: 'abc123def456'
-          },
-          {
-            stepsId: generateId(),
-            stepType: 'tool',
-            agentId: agent2.id,
-            toolName: 'file-reader',
-            repositoryURL: 'https://github.com/xyne/xyne-spaces',
-            branch: 'develop'
-          }
-        ]
-      });
-      console.log(`    ✅ Created 3 agent steps`);
-
-      // ============================================
       // PHASE 5: Forms & Other Entities
       // ============================================
       console.log('\n📦 Phase 5: Forms & Other Entities...');
@@ -1301,7 +1159,7 @@ async function main() {
             formId: form1.id,
             fieldName: 'complexity',
             fieldType: FormFieldType.SINGLE_SELECT,
-            fieldEnum: JSON.stringify(['Low', 'Medium', 'High']),
+            fieldEnum: ['Low', 'Medium', 'High'],
             isOptional: false
           },
           {
@@ -1691,7 +1549,7 @@ async function main() {
             repositoryUrl: 'https://github.com/xyne/xyne-spaces',
             prUrl: 'https://github.com/xyne/xyne-spaces/pull/1235',
             status: PRStatus.MERGED,
-            updatedAt: daysAgo(1)
+            updatedAt: hoursAgo(1)
           }
         ]
       });
@@ -1818,13 +1676,10 @@ async function main() {
       console.log('  Workflows: 3');
       console.log('  Workflow Executions: 3');
       console.log('  Workflow Steps: 6');
-      console.log('  Agents: 2');
-      console.log('  Tools: 3');
       console.log('  Forms: 2');
       console.log('  Notifications: 5');
       console.log('  Calls: 1');
       console.log('  Canvases: 2');
-      console.log('  Pull Requests: 2');
       console.log('  Knowledge Documents: 2');
       console.log('\n🎉 All relationships maintained correctly!');
     });
