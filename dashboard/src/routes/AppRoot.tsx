@@ -691,6 +691,14 @@ export const router = createBrowserRouter([
                 element: <CallHistoryScreen />,
               },
               {
+                path: '/call/:callId',
+                element: <CallPage />,
+              },
+              {
+                path: '/calls/:callId/:callType',
+                element: <CallPage />,
+              },
+              {
                 path: '/user-groups/:userGroupId/assignment-config',
                 element: (
                   <ResourceProtectedRoute resourceName='USER-GROUPS'>
@@ -774,6 +782,14 @@ export const router = createBrowserRouter([
         element: (
           <ZeroProvider>
             <CanvasRedirectPage />
+          </ZeroProvider>
+        ),
+      },
+      {
+        path: '/calls/:callId/:callType',
+        element: (
+          <ZeroProvider>
+            <CallPage />
           </ZeroProvider>
         ),
       },

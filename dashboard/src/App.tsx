@@ -17,6 +17,7 @@ import { CodeServerProvider } from './contexts/CodeServerContext';
 import { VSCodeProvider } from './contexts/VSCodeContext';
 import { WorkflowVSCodeOverlay } from './components/Workflows/VSCodePanel/WorkflowVSCodeOverlay';
 import { initializeTelemetry } from './services/otel/init';
+import { TRUSTED_ORIGINS } from './config';
 
 const App = (): ReactElement => {
   // Initialize theme on app load
@@ -51,15 +52,16 @@ const App = (): ReactElement => {
 
       if (!anchor || !anchor.href) return;
 
-      const url = new URL(anchor.href);
-      const currentOrigin = window.location.origin;
+      if (anchor.protocol === 'blob:') return;
 
-      if (url.protocol === 'blob:') return;
-
-      if (url.origin === currentOrigin) {
+      // Check origin directly from anchor element
+      if (anchor.origin === window.location.origin || TRUSTED_ORIGINS.includes(anchor.origin)) {
         event.preventDefault();
-        const path = url.pathname + url.search + url.hash;
-        void router.navigate(path);
+        void router.navigate({
+          pathname: anchor.pathname,
+          search: anchor.search,
+          hash: anchor.hash,
+        });
       }
     };
 

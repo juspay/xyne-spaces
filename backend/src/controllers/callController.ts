@@ -34,9 +34,9 @@ export class CallController {
   initiateCall = async (req: Request, res: Response): Promise<void> => {
     const correlationId = uuidv4();
     let callExternalId: string | undefined;
-     
+
     try {
-        const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel } = req.body;
+      const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.name;
       const userEmail = req.user?.email;
@@ -133,7 +133,6 @@ export class CallController {
         res.status(404).json({ success: false, error: 'Channel not found' });
         return;
       }
-
       // Generate room link
       const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
 
@@ -840,7 +839,7 @@ export class CallController {
 
       // Find participant record
       const participant = await repositories.calls.findParticipant(call.id, userId);
-      
+
       if (!participant) {
         logger.warn(`[CallController] Participant not found for decline: callId=${callId}, userId=${userId}`);
         res.status(404).json({ success: false, error: 'Participant not found' });
@@ -921,21 +920,21 @@ export class CallController {
       // The webhook will handle marking participants as left and ending the call
       try {
         const participants = await livekitService.listParticipants(callId);
-        
+
         // Filter out LiveKit agents (default pattern: agent-<id>)
-        const participantsToRemove = participants.filter(participant => 
+        const participantsToRemove = participants.filter(participant =>
           !participant.identity.startsWith('agent-')
         );
-        
-        const removalPromises = participantsToRemove.map(participant => 
+
+        const removalPromises = participantsToRemove.map(participant =>
           livekitService.removeParticipant(callId, participant.identity)
             .catch(error => {
               logger.warn(`[CallController] Failed to remove participant ${participant.identity}:`, error);
             })
         );
-        
+
         await Promise.all(removalPromises);
-        
+
       } catch (liveKitError) {
         logger.warn(`[CallController] Failed to remove participants from room ${callId}:`, liveKitError);
       }

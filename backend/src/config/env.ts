@@ -66,7 +66,7 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
-    ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
+  ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
   PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default(''),
   PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
   // Working Hours Configuration (in IST)
