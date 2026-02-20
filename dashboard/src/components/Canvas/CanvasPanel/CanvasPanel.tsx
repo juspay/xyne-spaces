@@ -75,6 +75,12 @@ const CanvasPanel = (): ReactElement => {
 
   const handleSelectCanvas = useCallback(
     (canvas: Canvas) => {
+      if (!navigator.onLine) {
+        toast.info('Canvas Unavailable', {
+          description: 'Canvases are available online only. Please check your connection.',
+        });
+        return;
+      }
       // If it's a Quarto doc, navigate to docs
       if (canvas.docType === DocType.Quarto && canvas.userRepo) {
         void navigate(`/docs/${canvas.userRepo}`);

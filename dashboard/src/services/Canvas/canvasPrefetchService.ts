@@ -83,7 +83,7 @@ class CanvasPrefetchService {
       };
 
       const provider = createYjsProvider(doc, actualDocId, getAuthToken, {
-        offlineSupport: false,
+        offlineSupport: true,
         warnOnClose: false,
         showDebuggerLink: false,
         connect: true,
