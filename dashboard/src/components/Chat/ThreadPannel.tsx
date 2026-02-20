@@ -66,7 +66,6 @@ interface ThreadMessagesProps {
   showHeader?: boolean;
   underTicketView?: boolean;
   simpleView?: boolean;
-  hideHeader?: boolean;
   onSummaryClick?: () => void;
 }
 
@@ -78,7 +77,6 @@ export const ThreadMessages = ({
   showHeader = false,
   underTicketView = false,
   simpleView = false,
-  hideHeader = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -941,7 +939,7 @@ export const ThreadMessages = ({
         /* Regular Thread or Simple View */
         <>
           {/* Header with tabs for simpleView, or simple header for regular view */}
-          {!hideHeader && !isThreadsRoute && (
+          {!isThreadsRoute && (
             <div
               className={cn(
                 'p-4 flex items-center gap-2 self-stretch bg-white border-b border-gray-200 h-14',

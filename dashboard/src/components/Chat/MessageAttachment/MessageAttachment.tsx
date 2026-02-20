@@ -40,9 +40,6 @@ interface MessageAttachmentProps {
   attachment: QueryResultType<typeof queries.conversationMessages>[number]['attachments'][number];
   compact?: boolean;
   isLoading?: boolean;
-  conversationId?: string;
-  channelId?: string;
-  replyCount?: number;
 }
 
 //to check the who can delete and delete the attachment
@@ -248,10 +245,7 @@ const InlineTextFile: React.FC<{
   attachmentId: string;
   fileName: string;
   metadata?: Record<string, unknown>;
-  conversationId?: string;
-  channelId?: string;
-  replyCount?: number;
-}> = ({ attachmentId, fileName, metadata, conversationId, channelId, replyCount }) => {
+}> = ({ attachmentId, fileName, metadata }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -360,9 +354,6 @@ const InlineTextFile: React.FC<{
             mimeType='text/plain'
             fileSize={fileData.size}
             attachmentId={attachmentId}
-            {...(conversationId && { conversationId })}
-            {...(channelId && { channelId })}
-            {...(typeof replyCount === 'number' && { replyCount })}
           />
         </div>
       </>
@@ -419,22 +410,7 @@ const InlineVideoPlayer: React.FC<{
   fileSize: number;
   height?: number | undefined;
   width?: number | undefined;
-  conversationId?: string;
-  channelId?: string;
-  replyCount?: number;
-}> = ({
-  attachmentId,
-  fileName,
-  mimeType,
-  uploadedBy,
-  width,
-  height,
-  thumbnailUrl,
-  fileSize,
-  conversationId,
-  channelId,
-  replyCount,
-}) => {
+}> = ({ attachmentId, fileName, mimeType, uploadedBy, width, height, thumbnailUrl, fileSize }) => {
   const [hasClickedPlay, setHasClickedPlay] = useState(false);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailError, setThumbnailError] = useState(false);
@@ -646,9 +622,6 @@ const InlineVideoPlayer: React.FC<{
           fileSize={fileSize}
           attachmentId={attachmentId}
           initialTime={currentTime}
-          {...(conversationId && { conversationId })}
-          {...(channelId && { channelId })}
-          {...(typeof replyCount === 'number' && { replyCount })}
         />
       </div>
     </>
@@ -658,13 +631,7 @@ const InlineVideoPlayer: React.FC<{
 /**
  * Main MessageAttachment component
  */
-export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
-  attachment,
-  compact,
-  conversationId,
-  channelId,
-  replyCount,
-}) => {
+export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment, compact }) => {
   const { isMobile } = usePlatform();
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
 
@@ -697,9 +664,6 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         attachmentId={attachment.id}
         fileName={attachment.originalFilename}
         {...(metadata && { metadata })}
-        {...(conversationId && { conversationId })}
-        {...(channelId && { channelId })}
-        {...(typeof replyCount === 'number' && { replyCount })}
       />
     );
   }
@@ -716,9 +680,6 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         fileSize={attachment.size}
         height={attachment.height ?? undefined}
         width={attachment.width ?? undefined}
-        {...(conversationId && { conversationId })}
-        {...(channelId && { channelId })}
-        {...(typeof replyCount === 'number' && { replyCount })}
       />
     );
   }
@@ -780,9 +741,6 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
           mimeType={attachment.mimetype}
           fileSize={attachment.size}
           attachmentId={attachment.id}
-          {...(conversationId && { conversationId })}
-          {...(channelId && { channelId })}
-          {...(typeof replyCount === 'number' && { replyCount })}
         />
       </div>
     </>
