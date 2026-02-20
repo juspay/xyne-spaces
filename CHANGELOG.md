@@ -1,3 +1,11 @@
+## [1.53.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.53.0...v1.53.1) (2026-02-20)
+
+
+### Bug Fixes
+
+* added pr title validation moved release steps ([4a3f9c8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4a3f9c8237873dc9b9b74d1598b69eeb58d2162c)), closes [#3442](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3442)
+* call notification  mobile ([2ee7f6f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2ee7f6f678f949fa23b328e5960162ff6d5e4669)), closes [#3448](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3448)
+
 ## [1.53.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.52.0...v1.53.0) (2026-02-19)
 
 
