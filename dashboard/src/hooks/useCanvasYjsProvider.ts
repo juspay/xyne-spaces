@@ -98,6 +98,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   const localChangesTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasLocalChangesRef = useRef(false);
   const errorCountRef = useRef(0);
+  const permissionReadOnlyRef = useRef(false);
 
   const [collaborators, setCollaborators] = useState<CollaboratorInfo[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<
@@ -191,6 +192,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   useEffect(() => {
     if (authTokenData) {
       const readOnly = authTokenData.authorization === 'read-only';
+      permissionReadOnlyRef.current = readOnly;
       setIsReadOnly(readOnly);
     }
   }, [authTokenData]);
@@ -224,6 +226,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
 
         if (status === 'connected') {
           errorCountRef.current = 0;
+          setIsReadOnly(permissionReadOnlyRef.current);
           if (!hasConnectedOnceRef.current) {
             hasConnectedOnceRef.current = true;
             lastNotificationStatusRef.current = status;
@@ -231,6 +234,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
           }
         } else if (status === 'error') {
           errorCountRef.current += 1;
+          setIsReadOnly(true);
           logger.error(Event.CANVAS_CONNECTION_ERROR, {
             canvasId,
             errorCount: errorCountRef.current,
@@ -244,13 +248,14 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
           if (lastNotificationStatusRef.current !== 'error') {
             lastNotificationStatusRef.current = 'error';
             toast.warning('Connection Issue', {
-              description: 'Your changes are saved locally and will sync automatically.',
+              description: 'Try refreshing the page.',
             });
           }
         } else if (status === 'offline' && lastNotificationStatusRef.current === 'connected') {
+          setIsReadOnly(true);
           lastNotificationStatusRef.current = 'offline';
           toast.info('Working Offline', {
-            description: 'Changes will sync when connection is restored',
+            description: 'Try refreshing the page.',
           });
         }
       };
@@ -299,7 +304,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     const actualDocId = authTokenData.docId || canvasId;
 
     const provider = createYjsProvider(doc, actualDocId, getAuthToken, {
-      offlineSupport: false,
+      offlineSupport: true,
       warnOnClose: true,
       showDebuggerLink: false,
       connect: true,
@@ -315,6 +320,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
 
       if (status === 'connected') {
         errorCountRef.current = 0;
+        setIsReadOnly(permissionReadOnlyRef.current);
         if (!hasConnectedOnceRef.current) {
           hasConnectedOnceRef.current = true;
           lastNotificationStatusRef.current = status;
@@ -322,6 +328,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
         }
       } else if (status === 'error') {
         errorCountRef.current += 1;
+        setIsReadOnly(true);
         logger.error(Event.CANVAS_CONNECTION_ERROR, {
           canvasId,
           errorCount: errorCountRef.current,
@@ -335,13 +342,14 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
         if (lastNotificationStatusRef.current !== 'error') {
           lastNotificationStatusRef.current = 'error';
           toast.warning('Connection Issue', {
-            description: 'Your changes are saved locally and will sync automatically.',
+            description: 'Try refreshing the page.',
           });
         }
       } else if (status === 'offline' && lastNotificationStatusRef.current === 'connected') {
+        setIsReadOnly(true);
         lastNotificationStatusRef.current = 'offline';
         toast.info('Working Offline', {
-          description: 'Changes will sync when connection is restored',
+          description: 'Try refreshing the page.',
         });
       }
     };
