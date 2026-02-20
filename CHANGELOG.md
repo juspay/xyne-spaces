@@ -1,3 +1,18 @@
+## [1.54.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.53.1...v1.54.0) (2026-02-20)
+
+
+### Features
+
+* youtube videos inline play and getting decription title for links in chat ([8c00575](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8c00575a38b873d2600bd37dc2927bb2376b01fc)), closes [#3301](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3301)
+
+
+### Bug Fixes
+
+* : revert "Pull request [#3018](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3018): Add interactive thread panel to web image modal" ([cdc91b6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cdc91b63d407fe856812602f7eb4a9e1efbd977c)), closes [#3446](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3446) [#3319](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3319)
+* canvas fix where network issue where causing content to disappear ([cd2c8eb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cd2c8eb1e7f8b3c52fbf8e0ac565637d00129284))
+* dummy script fix ([24765c7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/24765c7190abd351634c092c4e56f8d3b0f8aab3)), closes [#3449](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3449)
+* KanbanBoard stage maker checker fix ([1b1629b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1b1629b3184e437c4a8ec73a2173013374bf9d06)), closes [#3154](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3154)
+
 ## [1.53.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.53.0...v1.53.1) (2026-02-20)
 
 
