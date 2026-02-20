@@ -408,7 +408,7 @@ const SupportScreen = (): ReactElement => {
                     sensors={sensors}
                     collisionDetection={closestCenter}
                     onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
+                    onDragEnd={event => void handleDragEnd(event)}
                   >
                     <KanbanColumns
                       stages={stageColumns}

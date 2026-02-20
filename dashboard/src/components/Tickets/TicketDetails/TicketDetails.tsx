@@ -217,6 +217,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     formId: string;
     isReviewer?: boolean;
     hasApprovers: boolean;
+    existingRequest?: TicketStageRequest | null;
   } | null>(null);
 
   const [editingStageETA, setEditingStageETA] = useState(false);
@@ -444,17 +445,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     });
   }, [formMapping, formEntityValues, ticketId]);
 
+  type FormsToShowItem = {
+    type: 'request' | 'form';
+    id: string;
+    stageId: string;
+    formId: string;
+    status?: TicketStageRequestStatus;
+    createdAt: number;
+    updatedAt: number;
+    form?: { formName: string };
+    request?: TicketStageRequest;
+  };
+
   const formsToShow = useMemo(() => {
-    const result: Array<{
-      type: 'request' | 'form';
-      id: string;
-      stageId: string;
-      formId: string;
-      status?: TicketStageRequestStatus;
-      createdAt: number;
-      updatedAt: number;
-      form?: { formName: string };
-    }> = [];
+    const result: FormsToShowItem[] = [];
 
     // Get current ticket stage sequence number to limit formEntityValues (not requests)
     const currentTicketStage = stagesWithFormInfo?.find(s => s.name === ticket?.stageName);
@@ -479,6 +483,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             status: req.status,
             createdAt: req.createdAt,
             updatedAt: req.updatedAt,
+            request: req,
             ...(form && { form }),
           });
           stagesWithForm.add(req.stageId);
@@ -834,6 +839,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       // Open form modal for everyone (approvers and non-approvers)
+      const existingRequest = ticket.ticketStageRequests?.find(r => r.stageId === targetStage.id);
       setStageFormModal({
         ticket,
         targetStage,
@@ -841,6 +847,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         formId: targetStageFormId,
         isReviewer: false,
         hasApprovers: hasApprovers ?? false,
+        existingRequest: existingRequest || null,
       });
       return;
     }
@@ -2021,6 +2028,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     formId: item.formId,
                                     isReviewer: false,
                                     hasApprovers: true,
+                                    existingRequest: item.request!,
                                   })
                                 }
                                 className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
@@ -2089,6 +2097,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                         formId: item.formId,
                                         isReviewer: true,
                                         hasApprovers: true,
+                                        existingRequest: item.request!,
                                       })
                                     }
                                     className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg flex items-center gap-2 bg-blue-500 text-white hover:bg-blue-600'
@@ -2113,6 +2122,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     formId: item.formId,
                                     isReviewer: false,
                                     hasApprovers: true,
+                                    existingRequest: item.request!,
                                   })
                                 }
                                 className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
@@ -2176,6 +2186,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     formId: item.formId,
                                     isReviewer: isApprover,
                                     hasApprovers: true,
+                                    existingRequest: item.request!,
                                   })
                                 }
                                 className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
@@ -2221,6 +2232,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 formId: item.formId,
                                 isReviewer: false,
                                 hasApprovers: false,
+                                existingRequest: item.request!,
                               })
                             }
                             className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
@@ -2558,6 +2570,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           formId={stageFormModal.formId}
           isReviewer={stageFormModal.isReviewer ?? false}
           hasApprovers={stageFormModal.hasApprovers ?? false}
+          existingRequest={stageFormModal.existingRequest ?? null}
           onSuccess={() => setStageFormModal(null)}
         />
       )}

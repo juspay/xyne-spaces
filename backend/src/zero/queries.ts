@@ -1215,5 +1215,11 @@ export const queries = defineQueries({
         .orderBy('createdAt', 'desc');
     }
   ),
+  getTicketStageRequests: defineQuery(
+    z.object({ ticketId: z.string() }),
+    ({ args: { ticketId } }) => {
+      return zql.ticket_stage_requests.where('ticketId', ticketId).orderBy('createdAt', 'desc');
+    },
+  ),
 });
  

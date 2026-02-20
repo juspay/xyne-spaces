@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
 import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket } from '../../hooks/usePermissions';
@@ -48,13 +47,7 @@ import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import type { Ticket, FormEntityValues, TicketStageRequest } from '@xyne/shared';
-import {
-  TicketStatusV2,
-  FormContextType,
-  FormEntityType,
-  FormFieldType,
-  TicketStageRequestStatus,
-} from '@xyne/shared';
+import { TicketStatusV2, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
   getStageColor,
@@ -83,6 +76,8 @@ import { useUserGroups } from '../../hooks/useUserGroup';
 import { stateMachineActor } from '../../machines/stateMachine';
 import { Dialog } from '../../components/ui/Dialog';
 import Button from '../../components/ui/Button';
+/* eslint-disable local-rules/no-rocicorp-use-zero */
+import { useZero } from '@rocicorp/zero/react';
 
 interface BoardKanbanScreenProps {
   viewMode?: 'my-tickets' | `user-tickets` | 'group-tickets';
@@ -143,6 +138,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     sourceStageName: string;
     formId: string;
     hasApprovers: boolean;
+    existingRequest?: TicketStageRequest | null;
   } | null>(null);
 
   // Backward movement confirmation dialog state
@@ -748,33 +744,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return map;
   }, [stages]);
 
-  // Extract stage form submissions from tickets (now included via .related('ticketStageApprovals'))
-  const stageFormSubmissions = useMemo(() => {
-    const submissions: Array<{
-      id: string;
-      stageId: string;
-      status: TicketStageRequestStatus;
-      formId?: string | null;
-    }> = [];
-
-    for (const ticket of localTickets) {
-      const requests = (ticket as Ticket & { ticketStageRequests?: TicketStageRequest[] })
-        ?.ticketStageRequests;
-      if (!Array.isArray(requests) || requests.length === 0) continue;
-
-      submissions.push(
-        ...requests.map((request: TicketStageRequest) => ({
-          id: request.id,
-          stageId: request.stageId,
-          status: request.status,
-          formId: request.formId,
-        })),
-      );
-    }
-
-    return submissions;
-  }, [localTickets]);
-
   const tagsByTicketId = useMemo(() => {
     return createTagsByTicketIdMap(allTags);
   }, [allTags]);
@@ -911,15 +880,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Handler for when stage form is required
   const handleStageFormRequired = useCallback(
-    (data: { ticket: Ticket; targetStage: Stage; formId: string; hasApprovers: boolean }) => {
+    async (data: { ticket: Ticket; targetStage: Stage; formId: string; hasApprovers: boolean }) => {
       // Find the source stage (current stage of the ticket)
       const sourceStage = stages.find(s => s.name === data.ticket.stageName);
+
+      // Fetch requests for this ticket on-demand
+      const ticketRequests = await zero.run(
+        queries.getTicketStageRequests({ ticketId: data.ticket.id }),
+        { type: 'complete' },
+      );
+      const existingRequest = ticketRequests?.find(r => r.stageId === data.targetStage.id);
+
       setStageFormModal({
         ...data,
         sourceStageName: sourceStage?.name || data.ticket.stageName,
+        existingRequest: existingRequest || null,
       });
     },
-    [stages],
+    [stages, zero],
   );
 
   // Handler for backward stage change confirmation
@@ -951,7 +929,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return viewMode === 'board' || filteredSingleBoardId ? 'stage' : 'status';
   }, [channelId, viewMode, channelViewType, filteredSingleBoardId]);
 
-  const { activeTicket, handleDragStart, handleDragEnd } = useDragAndDrop({
+  const {
+    activeTicket,
+    handleDragStart,
+    handleDragEnd,
+    rejectedApprovalConfirm,
+    confirmRejectedApproval,
+    cancelRejectedApproval,
+  } = useDragAndDrop({
     localTickets,
     setLocalTickets,
     zero,
@@ -960,7 +945,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     onStageFormRequired: handleStageFormRequired,
     onBackwardStageChange: handleBackwardStageChange,
     stageFormMap,
-    stageFormSubmissions,
   });
 
   useEffect(() => {
@@ -1514,7 +1498,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           <DndContext
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
+            onDragEnd={event => void handleDragEnd(event)}
             sensors={sensors}
           >
             <div className='h-full flex flex-col space-y-5 mb-12'>
@@ -1617,6 +1601,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           ticket={stageFormModal.ticket}
           targetStage={stageFormModal.targetStage}
           sourceStageName={stageFormModal.sourceStageName}
+          existingRequest={stageFormModal.existingRequest ?? null}
           formId={stageFormModal.formId}
           hasApprovers={stageFormModal.hasApprovers ?? false}
           onSuccess={() => {
@@ -1671,6 +1656,35 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
               >
                 Confirm
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Rejected approval confirmation dialog */}
+      {rejectedApprovalConfirm && (
+        <Dialog
+          open={!!rejectedApprovalConfirm}
+          onOpenChange={() => cancelRejectedApproval()}
+          title='Approve Rejected Request'
+        >
+          <div className='p-6'>
+            <p className='text-sm text-gray-600 mb-6'>
+              This request was previously rejected. Approving now will mark the request as Approved
+              and update the ticket stage to {rejectedApprovalConfirm.targetStage.name}. Do you want
+              to continue?
+            </p>
+
+            <div className='flex justify-end gap-3'>
+              <Button variant='secondary' onClick={cancelRejectedApproval}>
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmRejectedApproval}
+                className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
+              >
+                Approve
               </Button>
             </div>
           </div>

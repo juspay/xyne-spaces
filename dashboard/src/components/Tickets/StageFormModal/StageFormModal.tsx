@@ -23,6 +23,7 @@ interface StageFormModalProps {
   onSuccess?: () => void;
   isReviewer?: boolean;
   hasApprovers?: boolean; // true if stage has approvers (requires approval workflow)
+  existingRequest?: TicketStageRequest | null; // Pre-fetched request for this stage
 }
 
 export const StageFormModal: React.FC<StageFormModalProps> = ({
@@ -35,6 +36,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
   onSuccess,
   isReviewer = false,
   hasApprovers = false,
+  existingRequest = null,
 }) => {
   const zero = useZero();
   const { user } = useAuth();
@@ -48,22 +50,13 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
     queries.getFormEntityValuesByEntityId({ entityId: ticket.id }),
   );
 
-  const ticketStageRequests = (ticket as Ticket & { ticketStageRequests?: TicketStageRequest[] })
-    ?.ticketStageRequests;
-
   useEffect(() => {
-    // Find existing ticket stage request for this stage by ticketId and stageId
-    const requests = Array.isArray(ticketStageRequests) ? ticketStageRequests : [];
-    const request = requests.find(
-      (a: TicketStageRequest) => a.ticketId === ticket.id && a.stageId === targetStage.id,
-    );
-
-    setExistingApproval(request ?? null);
+    setExistingApproval(existingRequest ?? null);
 
     const values = Array.isArray(formEntityValues) ? formEntityValues : [];
     const fields = Array.isArray(formFields) ? formFields : [];
 
-    if ((request || !hasApprovers) && values.length > 0 && fields.length > 0) {
+    if (values.length > 0 && fields.length > 0) {
       const preFilled: Record<string, string[]> = {};
 
       const fieldIds = fields.map(f => f.id);
@@ -95,7 +88,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
   }, [
     formEntityValues,
     formFields,
-    ticketStageRequests,
+    existingRequest,
     targetStage.id,
     ticket.id,
     hasApprovers,
