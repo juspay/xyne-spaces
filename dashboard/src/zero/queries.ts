@@ -1147,4 +1147,11 @@ export const queries = defineQueries({
       return zql.lookup_values.where('type', type).orderBy('createdAt', 'asc');
     },
   ),
+
+  getTicketStageRequests: defineQuery(
+    z.object({ ticketId: z.string() }),
+    ({ args: { ticketId } }) => {
+      return zql.ticket_stage_requests.where('ticketId', ticketId).orderBy('createdAt', 'desc');
+    },
+  ),
 });

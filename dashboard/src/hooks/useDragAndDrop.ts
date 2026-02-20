@@ -3,11 +3,13 @@ import { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
 import { toast } from 'sonner';
 import type { Ticket, TicketStatusV2 } from '@xyne/shared';
-import { TicketStageRequestStatus } from '@xyne/shared';
+import { TicketStageRequestStatus, type TicketStageRequest } from '@xyne/shared';
 import type { Zero } from '@rocicorp/zero';
 import { mutators } from '../zero/mutators';
+import { queries } from '../zero/queries';
 import type { Stage } from '../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import { useAuth } from './useAuth';
+import { v4 as uuidv4 } from 'uuid';
 
 interface UseDragAndDropProps {
   localTickets: Ticket[];
@@ -20,7 +22,7 @@ interface UseDragAndDropProps {
     targetStage: Stage;
     formId: string;
     hasApprovers: boolean;
-  }) => void;
+  }) => Promise<void>;
   onBackwardStageChange?: (data: {
     ticket: Ticket;
     stageName: string;
@@ -28,12 +30,6 @@ interface UseDragAndDropProps {
     newStatus?: TicketStatusV2;
   }) => void;
   stageFormMap?: Map<string, string>; // Map of stageId -> formId
-  stageFormSubmissions?: Array<{
-    id: string;
-    stageId: string;
-    status: TicketStageRequestStatus;
-    formId?: string | null;
-  }>;
 }
 
 export const useDragAndDrop = ({
@@ -45,13 +41,24 @@ export const useDragAndDrop = ({
   onStageFormRequired,
   onBackwardStageChange,
   stageFormMap = new Map(),
-  stageFormSubmissions = [],
 }: UseDragAndDropProps): {
   activeTicket: Ticket | null;
   handleDragStart: (event: DragStartEvent) => void;
-  handleDragEnd: (event: DragEndEvent) => void;
+  handleDragEnd: (event: DragEndEvent) => Promise<void>;
+  rejectedApprovalConfirm: {
+    ticket: Ticket;
+    targetStage: Stage;
+    requestId: string;
+  } | null;
+  confirmRejectedApproval: () => void;
+  cancelRejectedApproval: () => void;
 } => {
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+  const [rejectedApprovalConfirm, setRejectedApprovalConfirm] = useState<{
+    ticket: Ticket;
+    targetStage: Stage;
+    requestId: string;
+  } | null>(null);
   const { user: currentUser } = useAuth();
 
   const handleDragStart = useCallback(
@@ -65,7 +72,7 @@ export const useDragAndDrop = ({
   );
 
   const handleDragEnd = useCallback(
-    (event: DragEndEvent): void => {
+    async (event: DragEndEvent): Promise<void> => {
       const { active, over } = event;
       setActiveTicket(null);
 
@@ -127,81 +134,83 @@ export const useDragAndDrop = ({
                 return;
               }
 
-              // Check if target stage requires approval (has approvers)
+              // Check target stage properties
               const targetStageApprovers = targetStage.approvers;
               const targetStageFormId = stageFormMap.get(targetStage.id);
               const hasApprovers = targetStageApprovers && targetStageApprovers.length > 0;
+              const isApprover = hasApprovers
+                ? (targetStageApprovers.some(a => a.userId === currentUser?.id) ?? false)
+                : false;
 
-              // CASE 1: Stage has approvers → requires approval (with or without form)
+              const ticketRequests = await zero.run(
+                queries.getTicketStageRequests({ ticketId: activeTicket.id }),
+                { type: 'complete' },
+              );
+              const existingRequest = ticketRequests?.find(
+                (r: TicketStageRequest) => r.stageId === targetStage.id,
+              );
+              const isRejectedRequest =
+                existingRequest?.status === TicketStageRequestStatus.REJECTED;
+
+              // If stage has a form, open modal for everyone
+              if (targetStageFormId) {
+                void onStageFormRequired?.({
+                  ticket: activeTicket,
+                  targetStage,
+                  formId: targetStageFormId,
+                  hasApprovers: hasApprovers ?? false,
+                });
+                return;
+              }
+
+              // No form - handle approval workflow
               if (hasApprovers) {
-                const isApprover =
-                  targetStageApprovers.some(a => a.userId === currentUser?.id) ?? false;
-
-                if (!isApprover) {
-                  // If form exists, open modal for form submission + approval
-                  if (targetStageFormId) {
-                    onStageFormRequired?.({
+                // Stage has approvers - handle approval
+                if (isApprover) {
+                  // Approver: approve the request
+                  if (isRejectedRequest && existingRequest) {
+                    // Show confirmation dialog for rejected request
+                    setRejectedApprovalConfirm({
                       ticket: activeTicket,
                       targetStage,
-                      formId: targetStageFormId,
-                      hasApprovers: true,
+                      requestId: existingRequest.id,
                     });
                     return;
+                  } else if (!existingRequest) {
+                    void zero.mutate(
+                      mutators.ticketStageRequest.upsert({
+                        id: uuidv4(),
+                        ticketId: activeTicket.id,
+                        stageId: targetStage.id,
+                        status: TicketStageRequestStatus.APPROVED,
+                        updatedBy: currentUser?.id || '',
+                        reviewedBy: currentUser?.id || '',
+                        updatedAt: Date.now(),
+                        approvedActivityId: uuidv4(),
+                      }),
+                    );
+                    toast.success('Request approved');
                   }
-
-                  // No form, create approval request (to be approved from TicketDetails)
-                  const rejectedApproval = stageFormSubmissions?.find(
-                    s =>
-                      s.stageId === targetStage.id &&
-                      s.status === TicketStageRequestStatus.REJECTED &&
-                      !s.formId,
+                } else {
+                  // Non-approver: submit for approval
+                  void zero.mutate(
+                    mutators.ticketStageRequest.upsert({
+                      id: existingRequest ? existingRequest.id : uuidv4(),
+                      ticketId: activeTicket.id,
+                      stageId: targetStage.id,
+                      status: TicketStageRequestStatus.SUBMITTED,
+                      updatedBy: currentUser?.id || '',
+                      updatedAt: Date.now(),
+                      requestActivityId: uuidv4(),
+                    }),
                   );
-
-                  if (rejectedApproval) {
-                    // Update the rejected request to submitted
-                    void zero.mutate(
-                      mutators.ticketStageRequest.upsert({
-                        id: rejectedApproval.id,
-                        ticketId: activeTicket.id,
-                        stageId: targetStage.id,
-                        status: TicketStageRequestStatus.SUBMITTED,
-                        updatedBy: currentUser?.id || '',
-                        updatedAt: Date.now(),
-                        requestActivityId: crypto.randomUUID(),
-                      }),
-                    );
-                    toast.success('Stage change request resubmitted for approval');
-                  } else {
-                    // Create a new approval request
-                    void zero.mutate(
-                      mutators.ticketStageRequest.upsert({
-                        id: crypto.randomUUID(),
-                        ticketId: activeTicket.id,
-                        stageId: targetStage.id,
-                        status: TicketStageRequestStatus.SUBMITTED,
-                        updatedBy: currentUser?.id || '',
-                        updatedAt: Date.now(),
-                        requestActivityId: crypto.randomUUID(),
-                      }),
-                    );
-                    toast.success('Stage change request submitted for approval');
-                  }
-                  return;
+                  toast.success(
+                    existingRequest
+                      ? 'Stage change request resubmitted for approval'
+                      : 'Stage change request submitted for approval',
+                  );
                 }
-              }
-              // CASE 2: Stage has NO approvers → no approval needed
-              else {
-                // If form exists, open modal for form submission only (no approval)
-                if (targetStageFormId) {
-                  onStageFormRequired?.({
-                    ticket: activeTicket,
-                    targetStage,
-                    formId: targetStageFormId,
-                    hasApprovers: false,
-                  });
-                  return;
-                }
-                // No form, directly update stage (no approval needed)
+                return;
               }
             }
           }
@@ -283,14 +292,55 @@ export const useDragAndDrop = ({
       onStageFormRequired,
       onBackwardStageChange,
       stageFormMap,
-      stageFormSubmissions,
       currentUser,
     ],
   );
+
+  // Handler to confirm and approve a rejected request
+  const confirmRejectedApproval = useCallback(() => {
+    if (!rejectedApprovalConfirm) return;
+
+    const { ticket, targetStage, requestId } = rejectedApprovalConfirm;
+    const timestamp = Date.now();
+
+    void zero.mutate(
+      mutators.ticketStageRequest.upsert({
+        id: requestId,
+        ticketId: ticket.id,
+        stageId: targetStage.id,
+        status: TicketStageRequestStatus.APPROVED,
+        updatedBy: currentUser?.id || '',
+        reviewedBy: currentUser?.id || '',
+        updatedAt: timestamp,
+        approvedActivityId: uuidv4(),
+      }),
+    );
+
+    // Also update ticket stage
+    void zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        stageName: targetStage.name,
+        ...(targetStage.defaultTicketStatusV2 && { statusV2: targetStage.defaultTicketStatusV2 }),
+        updatedAt: timestamp,
+      }),
+    );
+
+    toast.success('Request approved');
+    setRejectedApprovalConfirm(null);
+  }, [rejectedApprovalConfirm, zero, currentUser]);
+
+  // Cancel rejected approval confirmation
+  const cancelRejectedApproval = useCallback(() => {
+    setRejectedApprovalConfirm(null);
+  }, []);
 
   return {
     activeTicket,
     handleDragStart,
     handleDragEnd,
+    rejectedApprovalConfirm,
+    confirmRejectedApproval,
+    cancelRejectedApproval,
   };
 };
