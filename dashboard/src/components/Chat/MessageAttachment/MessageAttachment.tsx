@@ -9,7 +9,7 @@
  * - Integration with FilePreviewModal
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FileText, Maximize2, MoreVertical, Play, Video } from 'lucide-react';
 import { Menu } from '@base-ui/react/menu';
 import {
@@ -35,11 +35,16 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
+import { cn } from '../../../utils/classNames';
 
 interface MessageAttachmentProps {
   attachment: QueryResultType<typeof queries.conversationMessages>[number]['attachments'][number];
   compact?: boolean;
   isLoading?: boolean;
+  allAttachments?: QueryResultType<typeof queries.conversationMessages>[number]['attachments'];
+  currentAttachmentIndex?: number;
+  isInGrid?: boolean | undefined;
+  fullSize?: boolean;
 }
 
 //to check the who can delete and delete the attachment
@@ -79,18 +84,31 @@ const Preview: React.FC<{
   compact?: boolean;
   width?: number | null;
   height?: number | null;
+  isInGrid?: boolean | undefined;
+  fullSize?: boolean | undefined;
   onLoadingChange?: (isLoading: boolean) => void;
-}> = ({ attachmentId, mimeType, fileName, fileSize, thumbnailUrl, compact, width, height }) => {
+}> = ({
+  attachmentId,
+  mimeType,
+  fileName,
+  fileSize,
+  thumbnailUrl,
+  compact,
+  width,
+  height,
+  isInGrid,
+  fullSize,
+}) => {
   const isImage = isImageFile(mimeType);
   const isVideo = isVideoFile(mimeType);
 
-  const [imageBlobUrl, setImageBlobUrl] = React.useState<string | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [error, setError] = React.useState<boolean>(false);
+  const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<boolean>(false);
 
   // Calculate dimensions from stored width/height or fallback to calculated
-  const fixedHeight = compact ? 64 : 256;
-  const calculatedWidth = React.useMemo(() => {
+  const fixedHeight = isInGrid ? 350 : compact ? 64 : 256;
+  const calculatedWidth = useMemo(() => {
     if (width && height) {
       const aspectRatio = width / height;
       return Math.min(300, Math.round(aspectRatio * fixedHeight));
@@ -142,6 +160,8 @@ const Preview: React.FC<{
     };
   }, [attachmentId, isImage, isVideo, thumbnailUrl, compact, calculatedWidth]);
 
+  const { isMobile } = usePlatform();
+
   if (isLoading) {
     return (
       <div
@@ -159,7 +179,12 @@ const Preview: React.FC<{
   if (isImage || (isVideo && thumbnailUrl)) {
     if (error || !imageBlobUrl) {
       return (
-        <div className='h-full w-full min-w-64 bg-gray-100 flex flex-col items-center justify-center gap-2 p-4'>
+        <div
+          className={cn(
+            'h-full w-full bg-gray-100 flex flex-col items-center justify-center gap-2 p-4',
+            !isMobile && 'min-w-64',
+          )}
+        >
           {isVideo && (
             <>
               <Video size={32} className='text-gray-400' />
@@ -174,9 +199,13 @@ const Preview: React.FC<{
       <img
         src={imageBlobUrl}
         alt={fileName}
-        className='w-auto'
+        className={fullSize ? 'w-full h-auto' : 'w-auto'}
         loading='lazy'
-        style={{ objectFit: 'contain', height: fixedHeight, width: `${imageWidth}px` || '300px' }}
+        style={
+          fullSize
+            ? undefined
+            : { objectFit: 'cover', height: fixedHeight, width: `${imageWidth}px` || '300px' }
+        }
         onError={() => setError(true)}
       />
     ) : (
@@ -206,8 +235,13 @@ const Preview: React.FC<{
   }
 
   return (
-    <div className='w-[256px] h-[256px] bg-gray-100 flex flex-col items-center justify-center gap-2'>
-      <div className='bg-white  rounded-lg p-3 shadow-sm border border-gray-200'>{icon}</div>
+    <div
+      className={cn(
+        'bg-gray-100 flex flex-col items-center justify-center gap-2',
+        isInGrid ? 'w-full h-full' : 'w-[256px] h-[256px]',
+      )}
+    >
+      <div className='bg-white rounded-lg p-3 shadow-sm border border-gray-200'>{icon}</div>
       <div className='text-center'>
         <div className='text-sm font-semibold text-gray-700'>{extension}</div>
         <div className='text-xs text-gray-500'>{formattedSize}</div>
@@ -226,12 +260,15 @@ const ActionTray: React.FC<{
   canDelete: boolean;
   onDelete: () => void | Promise<void>;
 }> = ({ attachmentId, fileName, canDelete, onDelete }) => {
+  const { isMobile } = usePlatform();
   return (
     <div className='absolute top-2 right-2 z-10 opacity-0 group-hover/attachment:opacity-100 transition-opacity duration-200'>
-      <div className='flex items-center justify-between bg-gray-900/80 backdrop-blur-sm rounded-lg p-1 shadow-lg'>
-        <DownloadButton attachmentId={attachmentId} fileName={fileName} variant='overlay' />
-        {canDelete && <DeleteButton fileName={fileName} variant='overlay' onDelete={onDelete} />}
-      </div>
+      {!isMobile && (
+        <div className='flex items-center justify-between bg-gray-900/80 backdrop-blur-sm rounded-lg p-1 shadow-lg'>
+          <DownloadButton attachmentId={attachmentId} fileName={fileName} variant='overlay' />
+          {canDelete && <DeleteButton fileName={fileName} variant='overlay' onDelete={onDelete} />}
+        </div>
+      )}
     </div>
   );
 };
@@ -410,7 +447,18 @@ const InlineVideoPlayer: React.FC<{
   fileSize: number;
   height?: number | undefined;
   width?: number | undefined;
-}> = ({ attachmentId, fileName, mimeType, uploadedBy, width, height, thumbnailUrl, fileSize }) => {
+  isInGrid?: boolean | undefined;
+}> = ({
+  attachmentId,
+  fileName,
+  mimeType,
+  uploadedBy,
+  width,
+  height,
+  thumbnailUrl,
+  fileSize,
+  isInGrid,
+}) => {
   const [hasClickedPlay, setHasClickedPlay] = useState(false);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailError, setThumbnailError] = useState(false);
@@ -436,7 +484,7 @@ const InlineVideoPlayer: React.FC<{
     setIsModalOpen(prev => !prev);
   };
 
-  const dimensions = React.useMemo(() => {
+  const dimensions = useMemo(() => {
     const maxWidth = isMobile ? 320 : 500;
     const maxHeight = isMobile ? 260 : 400;
     const minWidth = 200;
@@ -456,7 +504,7 @@ const InlineVideoPlayer: React.FC<{
     }
 
     return { width: finalWidth, height: finalHeight };
-  }, [width, height, isMobile]);
+  }, [width, height, isMobile, isInGrid]);
 
   // Create inline menu content (3-dot menu for thumbnail state)
   const inlineMenuContent = (
@@ -533,15 +581,8 @@ const InlineVideoPlayer: React.FC<{
 
   return (
     <>
-      <div style={{ contain: 'layout' }}>
-        <div
-          className='relative bg-black rounded-lg overflow-hidden border border-gray-200 shadow-sm'
-          style={{
-            height: dimensions.height,
-            width: `${dimensions.width}px`,
-            minWidth: `${dimensions.width}px`,
-          }}
-        >
+      <div className='h-full' style={{ contain: 'layout' }}>
+        <div className='relative bg-black rounded-lg overflow-hidden border border-gray-200 shadow-sm h-full w-full'>
           {/* Show thumbnail on mobile or until user clicks to play on desktop */}
           {loading ? (
             <div className='bg-gray-200 animate-pulse flex items-center justify-center h-full' />
@@ -558,12 +599,23 @@ const InlineVideoPlayer: React.FC<{
                 />
               ) : (
                 // Show video icon if no thumbnail
-                <div className='h-full flex items-center justify-center bg-gray-900'>
-                  <Video size={64} className='text-gray-600' />
+                <div
+                  className={cn(
+                    'flex items-center justify-center bg-gray-900 h-64',
+                    !isMobile && 'min-w-64',
+                  )}
+                >
+                  {!isMobile && <Video size={64} className='text-gray-600' />}
                 </div>
               )}
               <div className='absolute top-4 right-3'>{inlineMenuContent}</div>
-              <div className='absolute bottom-4 left-3 transition-opacity'>
+              <div
+                className={cn(
+                  'absolute',
+                  isInGrid ? 'inset-0 flex items-center justify-center' : 'bottom-4 left-3',
+                )}
+                onTouchStart={e => e.stopPropagation()}
+              >
                 <button
                   onClick={() => {
                     if (isMobile) {
@@ -572,7 +624,8 @@ const InlineVideoPlayer: React.FC<{
                       setHasClickedPlay(true);
                     }
                   }}
-                  className='p-1 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
+                  onTouchStart={e => e.stopPropagation()}
+                  className='p-1 flex items-center justify-center rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
                   title='Play video'
                   aria-label='Play video'
                 >
@@ -631,9 +684,17 @@ const InlineVideoPlayer: React.FC<{
 /**
  * Main MessageAttachment component
  */
-export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment, compact }) => {
+export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
+  attachment,
+  compact,
+  allAttachments,
+  currentAttachmentIndex,
+  isInGrid,
+  fullSize,
+}) => {
   const { isMobile } = usePlatform();
-  const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(currentAttachmentIndex ?? 0);
 
   const { canDelete, handleDelete } = useAttachmentDelete(
     attachment.id,
@@ -646,7 +707,26 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment
   const isVideo = isVideoFile(attachment.mimetype);
 
   const handleCardClick = (): void => {
+    setCurrentIndex(currentAttachmentIndex ?? 0);
     setIsPreviewOpen(true);
+  };
+
+  // Build files array for stack navigation if multiple attachments exist
+  const filesForNavigation = useMemo(() => {
+    if (!allAttachments || allAttachments.length <= 1) return undefined;
+
+    return allAttachments.map(att => ({
+      fileName: att.originalFilename,
+      fileUrl: `/attachments/${att.id}/download`,
+      mimeType: att.mimetype,
+      fileSize: att.size,
+      attachmentId: att.id,
+      thumbnailUrl: att.thumbnailUrl,
+    }));
+  }, [allAttachments]);
+
+  const handleNavigate = (newIndex: number): void => {
+    setCurrentIndex(newIndex);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
@@ -680,6 +760,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment
         fileSize={attachment.size}
         height={attachment.height ?? undefined}
         width={attachment.width ?? undefined}
+        isInGrid={isInGrid}
       />
     );
   }
@@ -688,7 +769,10 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment
   return (
     <>
       <div
-        className={`message-attachment group/attachment relative flex flex-col bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${compact ? 'w-16 h-16' : isMobile ? 'w-full h-56' : 'w-full h-64'}`}
+        className={cn(
+          'message-attachment group/attachment relative flex flex-col bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
+          compact ? 'w-16 h-16 ' : isMobile ? 'h-full ' : 'w-full h-64',
+        )}
         onClick={handleCardClick}
         onKeyDown={handleKeyDown}
         tabIndex={0}
@@ -697,13 +781,12 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment
       >
         {/* Preview Section with Action Tray */}
         <div
-          className={
-            compact
-              ? 'relative h-16 w-16 bg-gray-100 overflow-hidden rounded-md'
-              : isMobile
-                ? 'relative bg-gray-50 overflow-hidden'
-                : 'relative bg-gray-100 overflow-hidden'
-          }
+          className={cn(
+            'relative overflow-hidden',
+            compact && 'h-16 w-16 bg-gray-100 rounded-md',
+            !compact &&
+              (isInGrid ? 'w-full h-full bg-gray-50' : isMobile ? 'bg-gray-50' : 'bg-gray-100'),
+          )}
         >
           <Preview
             attachmentId={attachment.id}
@@ -714,6 +797,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment
             width={(attachment as { width?: number | null }).width ?? null}
             height={(attachment as { height?: number | null }).height ?? null}
             {...(compact && { compact: true })}
+            isInGrid={isInGrid}
+            fullSize={fullSize}
           />
 
           {/* Slack-style hover action tray */}
@@ -732,7 +817,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment
       </div>
 
       {/* File Preview Modal */}
-      <div data-prevent-drawer='true' onTouchStart={e => e.stopPropagation()}>
+      <div data-prevent-drawer='true'>
         <FilePreviewModal
           isOpen={isPreviewOpen}
           onClose={() => setIsPreviewOpen(false)}
@@ -741,6 +826,11 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({ attachment
           mimeType={attachment.mimetype}
           fileSize={attachment.size}
           attachmentId={attachment.id}
+          {...(filesForNavigation && {
+            files: filesForNavigation,
+            currentIndex: currentIndex,
+            onNavigate: handleNavigate,
+          })}
         />
       </div>
     </>

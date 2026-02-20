@@ -53,6 +53,7 @@ import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { hasMessageContent } from '../../../utils/chatUtils';
 import { ProactiveNudgeList } from '../../Chat/Nudges/ProactiveNudgeList';
 import MobileReactionDrawer from './MobileReactionDrawer';
+import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -125,9 +126,13 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
           {/* Videos first - each in separate row */}
           {attachments
             .filter(attachment => attachment.mimetype.startsWith('video/'))
-            .map(attachment => (
+            .map((attachment, index) => (
               <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
-                <MessageAttachment attachment={attachment} />
+                <MessageAttachment
+                  attachment={attachment}
+                  allAttachments={attachments}
+                  currentAttachmentIndex={index}
+                />
               </div>
             ))}
 
@@ -139,17 +144,26 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             >
               {attachments
                 .filter(attachment => !attachment.mimetype.startsWith('video/'))
-                .map(attachment => {
+                .map((attachment, index) => {
                   const isImageOrText =
                     attachment.mimetype.startsWith('image/') ||
                     attachment.mimetype === 'text/plain';
+                  // Calculate the actual index in the full attachments array
+                  const videoCount = attachments.filter(att =>
+                    att.mimetype.startsWith('video/'),
+                  ).length;
+                  const actualIndex = videoCount + index;
 
                   return (
                     <div
                       key={attachment.id}
                       className={`flex items-center gap-2 py-2 text-sm ${!isImageOrText ? 'w-[256px] aspect-square' : ''} ${isMobile ? 'flex-shrink-0' : ''}`}
                     >
-                      <MessageAttachment attachment={attachment} />
+                      <MessageAttachment
+                        attachment={attachment}
+                        allAttachments={attachments}
+                        currentAttachmentIndex={actualIndex}
+                      />
                     </div>
                   );
                 })}
@@ -797,7 +811,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               )}
 
               {!isForwardedMessage && (
-                <AttachmentsBlock attachments={attachments} isMobile={isMobile} />
+                <>
+                  {isMobile ? (
+                    <MobileAttachmentsGrid attachments={attachments} />
+                  ) : (
+                    <AttachmentsBlock attachments={attachments} isMobile={isMobile} />
+                  )}
+                </>
               )}
               {!contentOnly && (
                 <ProactiveNudgeList

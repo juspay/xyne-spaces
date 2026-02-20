@@ -11,7 +11,7 @@ import { Button } from '../ui/Button/Button';
 import { useCurrentUserAssignmentState } from '../../hooks/useAssignmentState';
 import { useTheme } from '../../hooks/useTheme';
 import { useDebugSettings } from '../../hooks/useDebugSettings';
-import { cn } from '../ui/Drawer';
+import { cn } from '../../utils/classNames';
 import { isStatusExpired, formatExpiryTime } from '../../utils/statusUtils';
 import { Switch } from '../ui/Switch';
 import { useChannelByName } from '../../hooks/useChannels';

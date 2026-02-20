@@ -3,7 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 import { usePendingHumanIntervention } from '../../../services/Workflow/usePendingApproval';
 import { useApprovalSubmit } from '../../../services/Workflow/useApprovalSubmit';
 import ApprovalDialog from './ApprovalDialog';
-import { cn } from '../../ui/Drawer';
+import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
 
 interface ApprovalNudgeBannerProps {

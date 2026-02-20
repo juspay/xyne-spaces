@@ -1,14 +1,9 @@
 import React, { useMemo } from 'react';
-import { AvatarSize, Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import { AvatarSize } from '@juspay/blend-design-system';
 import { MessageType, parseForwardedMessageXml, isForwardedMessageXml } from '@xyne/shared';
-import {
-  formatFullTimestamp,
-  formatTimeAmPm,
-  formatRelativeTimestamp,
-} from '../../../utils/dateUtils';
+import { formatTimeAmPm, formatRelativeTimestamp } from '../../../utils/dateUtils';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
-import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { useReactions } from '../../../hooks/useReaction';
 import { Bookmark } from 'lucide-react';
 import { BotBubble } from '../../Chat/BotBubble';
@@ -27,6 +22,9 @@ import UserAvatar from '../../UserAvatar/UserAvatar';
 import { PostedInLink } from './PostedInLink';
 import { hasMessageContent } from '../../../utils/chatUtils';
 import { ProactiveNudgeList } from '../../Chat/Nudges/ProactiveNudgeList';
+import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
+import { usePlatform } from '../../../hooks/usePlatform';
+import { cn } from '../../../utils/classNames';
 
 type MessageWithRelations = QueryResultType<typeof queries.conversationMessages>[number];
 
@@ -84,6 +82,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
     (isSystemMessage && metadata?.workflowId && metadata?.ticketId) ||
     (isBotMessage && metadata?.xyneId && metadata?.ticketId);
   const isActiveCall = useIsCallActive(metadata?.callId);
+  const { isMobile } = usePlatform();
 
   // Parse forwarded message XML content
   const forwardedMessageData = useMemo(() => {
@@ -144,24 +143,26 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
 
       <div
         data-component='MobileMessageMyBubble'
-        className={`
-          group flex gap-2 relative px-3 py-0.5 justify-end items-end mb-3
-          ${isHighlighted ? 'bg-blue-50/30' : ''}
-        `}
+        className={cn(
+          'group flex gap-2 relative px-3 py-0.5 justify-end items-end',
+          isHighlighted && 'bg-blue-50/30',
+        )}
       >
         {/* ================== CONTENT ================== */}
         <div className='flex flex-col min-w-0 max-w-[85%] items-end'>
-          {/* Timestamp - Above bubble */}
-          <Tooltip content={formatFullTimestamp(message.createdAt)} side={TooltipSide.TOP}>
-            <div className='flex items-center justify-end mb-1 w-full'>
-              <span className='text-[12px] text-muted-foreground leading-[1.2]'>
+          {/* Bubble / Message Content */}
+          <div
+            className={cn(
+              'relative p-2 mobile-my-bubble rounded-tl-2xl rounded-bl-2xl rounded-br-2xl rounded-tr-[4px] text-foreground flex',
+              isMobile ? 'flex-col-reverse gap-1' : 'flex-col',
+            )}
+          >
+            {/* Timestamp - Above bubble */}
+            <div className='flex items-center justify-end w-full'>
+              <span className='text-[10px] pr-1 pt-1 text-muted-foreground leading-[1.2]'>
                 {formatTimeAmPm(message.createdAt)}
               </span>
             </div>
-          </Tooltip>
-
-          {/* Bubble / Message Content */}
-          <div className='relative p-3 mobile-my-bubble rounded-tl-2xl rounded-bl-2xl rounded-br-2xl rounded-tr-[4px] text-foreground'>
             {isActiveCall && channelId && metadata?.callId ? (
               <CallMessageOverlay callId={metadata.callId} channelId={channelId} />
             ) : isForwardedMessage && forwardedMessageData ? (
@@ -170,7 +171,10 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                 {/* Optional message from forwarder */}
                 {forwardedMessageData.optionalText && (
                   <div
-                    className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-[16px] leading-[1.5] ${getEmojiFontSizeClass(forwardedMessageData.optionalText)}`}
+                    className={cn(
+                      'jp-message-html whitespace-pre-wrap break-all-words inline-block text-[16px] leading-[1.5]',
+                      getEmojiFontSizeClass(forwardedMessageData.optionalText),
+                    )}
                   >
                     <ExpandableMessage
                       message={forwardedMessageData.optionalText}
@@ -199,7 +203,10 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                     )}
                   </div>
                   <div
-                    className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-gray-600 ${getEmojiFontSizeClass(forwardedMessageData.content)}`}
+                    className={cn(
+                      'jp-message-html whitespace-pre-wrap break-all-words inline-block text-gray-600',
+                      getEmojiFontSizeClass(forwardedMessageData.content),
+                    )}
                   >
                     <ExpandableMessage
                       message={forwardedMessageData.content}
@@ -210,21 +217,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                   {/* Attachments inside the forwarded message border - vertical layout same as normal messages */}
                   {attachments.length > 0 && (
                     <div className='mt-2'>
-                      {attachments.map(attachment => {
-                        const isImageVideoOrText =
-                          attachment.mimetype.startsWith('image/') ||
-                          attachment.mimetype.startsWith('video/') ||
-                          attachment.mimetype === 'text/plain';
-
-                        return (
-                          <div
-                            key={attachment.id}
-                            className={`flex items-center gap-2 py-1 text-sm ${!isImageVideoOrText ? 'w-[256px] aspect-square' : ''}`}
-                          >
-                            <MessageAttachment attachment={attachment} />
-                          </div>
-                        );
-                      })}
+                      <MobileAttachmentsGrid attachments={attachments} />
                     </div>
                   )}
                   {/* Posted in link for forwarded messages */}
@@ -241,7 +234,11 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
             ) : (
               hasMessageContent(message.content) && (
                 <div
-                  className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-[16px] leading-[1.5] text-foreground ${getEmojiFontSizeClass(message.content)} ${isSystemMessage ? 'text-muted-foreground italic' : ''}`}
+                  className={cn(
+                    'jp-message-html whitespace-pre-wrap break-all-words inline-block text-[16px] leading-[1.5] text-foreground',
+                    getEmojiFontSizeClass(message.content),
+                    isSystemMessage ? 'text-muted-foreground italic' : '',
+                  )}
                   style={isSystemMessage ? systemMessageStyles : undefined}
                 >
                   <ExpandableMessage
@@ -275,22 +272,8 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
 
             {/* Attachments (only for non-forwarded messages) */}
             {!isForwardedMessage && attachments.length > 0 && (
-              <div className='mt-2 pt-2 border-t border-border/50'>
-                {attachments.map(attachment => {
-                  const isImageVideoOrText =
-                    attachment.mimetype.startsWith('image/') ||
-                    attachment.mimetype.startsWith('video/') ||
-                    attachment.mimetype === 'text/plain';
-
-                  return (
-                    <div
-                      key={attachment.id}
-                      className={`flex items-center gap-2 py-1 text-sm ${!isImageVideoOrText ? 'w-[256px] aspect-square' : ''}`}
-                    >
-                      <MessageAttachment attachment={attachment} />
-                    </div>
-                  );
-                })}
+              <div className='border-t border-border/50'>
+                <MobileAttachmentsGrid attachments={attachments} />
               </div>
             )}
           </div>

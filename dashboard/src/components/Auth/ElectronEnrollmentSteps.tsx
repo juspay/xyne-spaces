@@ -1,6 +1,6 @@
 import { Check } from 'lucide-react';
 import { ReactElement } from 'react';
-import { cn } from '../ui/Drawer';
+import { cn } from '../../utils/classNames';
 
 interface ElectronEnrollmentStepsProps {
   onLogin?: () => void;

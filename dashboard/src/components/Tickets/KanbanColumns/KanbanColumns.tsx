@@ -15,7 +15,7 @@ import { TicketCard } from '../TicketCard/TicketCard';
 import Button from '../../ui/Button';
 import { CollapseIcon } from '../../../assets/icons/CollapseIcon';
 import { ExpandIcon } from '../../../assets/icons/ExpandIcon';
-import { cn } from '../../ui/Drawer';
+import { cn } from '../../../utils/classNames';
 import { StatusOptions } from '../TicketTable/TicketTableHelper';
 import { StageCircleIcon } from '../../../assets/icons/StageIcon';
 import InProgressIcon from '../../../assets/icons/InProgressIcon';

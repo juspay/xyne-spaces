@@ -1,10 +1,21 @@
-import React, { JSX, useState, useEffect } from 'react';
-import { Download, X } from 'lucide-react';
+import React, { JSX, useState, useEffect, useCallback, useRef } from 'react';
+import { Download, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { detectFileType, formatFileSize } from './utils';
-import { fetchFile, downloadFile } from '../../services/clients/fileFetchService';
+import { fetchFile, downloadFile, createPreviewUrl } from '../../services/clients/fileFetchService';
 import { downloadAttachment } from '../Chat/MessageAttachment/utils';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useShortcut, useScope } from '../../shortcuts';
+import { cn } from '../../utils/classNames';
+
+export interface FileItem {
+  fileName: string;
+  fileUrl: string;
+  mimeType: string;
+  fileSize: number;
+  attachmentId?: string;
+  thumbnailUrl?: string | null;
+}
 
 interface FilePreviewModalProps {
   isOpen: boolean;
@@ -13,8 +24,11 @@ interface FilePreviewModalProps {
   fileUrl: string;
   mimeType: string;
   fileSize: number;
-  attachmentId?: string; // Optional: if provided, use downloadAttachment instead of downloadFile
+  attachmentId?: string;
   initialTime?: number;
+  files?: FileItem[];
+  currentIndex?: number;
+  onNavigate?: (index: number) => void;
 }
 
 // Inline Loading Component
@@ -26,6 +40,110 @@ const LoadingState: React.FC<{ message?: string }> = ({ message = 'Loading previ
     </div>
   </div>
 );
+
+// Placeholder for non-mounted carousel slides
+const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const urlRef = useRef<string | null>(null);
+
+  const isImage = file.mimeType.startsWith('image/');
+  const isVideo = file.mimeType.startsWith('video/');
+
+  useEffect(() => {
+    // For images, fetch the preview thumbnail so user sees the image during swipe
+    if (!isImage && !(isVideo && file.thumbnailUrl)) return;
+
+    const source =
+      isVideo && file.thumbnailUrl && file.attachmentId
+        ? `/attachments/${file.attachmentId}/thumbnail`
+        : file.attachmentId || file.fileUrl;
+
+    createPreviewUrl(source)
+      .then(blob => {
+        const url = URL.createObjectURL(blob);
+        urlRef.current = url;
+        setBlobUrl(url);
+      })
+      .catch(() => {});
+
+    return () => {
+      if (urlRef.current) {
+        URL.revokeObjectURL(urlRef.current);
+        urlRef.current = null;
+      }
+    };
+  }, [file.attachmentId, file.fileUrl, file.thumbnailUrl, isImage, isVideo]);
+
+  if (blobUrl) {
+    return (
+      <div className='w-full h-full flex items-center justify-center'>
+        <img src={blobUrl} alt={file.fileName} className='max-w-full max-h-full object-contain' />
+      </div>
+    );
+  }
+
+  return <LoadingState />;
+};
+
+// Individual slide component - fetches its own file
+const SlideContent: React.FC<{
+  file: FileItem;
+}> = ({ file }) => {
+  const [fileData, setFileData] = useState<File | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fileType = detectFileType(file.mimeType, file.fileName);
+  const isVideo = fileType?.displayName === 'Video';
+
+  useEffect(() => {
+    if (isVideo) {
+      setIsLoading(false);
+      return;
+    }
+
+    fetchFile(file.fileUrl, file.fileName, file.mimeType)
+      .then(setFileData)
+      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'))
+      .finally(() => setIsLoading(false));
+  }, [file.fileUrl, file.fileName, file.mimeType, isVideo]);
+
+  if (isLoading) return <LoadingState />;
+
+  if (error) {
+    return (
+      <div className='flex flex-col items-center gap-3'>
+        <p className='text-red-400 text-sm'>{error}</p>
+      </div>
+    );
+  }
+
+  if (!fileType) {
+    return (
+      <div className='text-gray-300 text-center'>
+        <p>Preview not available</p>
+      </div>
+    );
+  }
+
+  if (isVideo && file.attachmentId) {
+    const ViewerComponent = fileType.component;
+    return (
+      <div className={fileType.wrapperClass}>
+        <ViewerComponent source={null} fileName={file.fileName} attachmentId={file.attachmentId} />
+      </div>
+    );
+  }
+
+  if (!fileData) return <LoadingState />;
+
+  const ViewerComponent = fileType.component;
+  return (
+    <div className={`${fileType.wrapperClass} max-w-full max-h-full`}>
+      <ViewerComponent source={fileData} fileName={file.fileName} />
+    </div>
+  );
+};
 
 // Inline Error Component
 const ErrorState: React.FC<{
@@ -85,6 +203,9 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   fileSize,
   attachmentId,
   initialTime,
+  files,
+  currentIndex = 0,
+  onNavigate,
 }) => {
   // Simple state - service handles all caching and complexity
   const [fileData, setFileData] = useState<File | null>(null);
@@ -93,15 +214,123 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   const [isHovered, setIsHovered] = useState(false);
   const { isMobile } = usePlatform();
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const constraintsRef = useRef(null);
+
+  // Track which slides have been mounted so they stay alive once loaded
+  const [mountedSlides, setMountedSlides] = useState<Set<number>>(() => new Set());
+
+  const hasStackNavigation = files && files.length > 1;
+  const totalFiles = hasStackNavigation ? files.length : 1;
+  const currentFileIndex = hasStackNavigation
+    ? Math.max(0, Math.min(currentIndex, files.length - 1))
+    : 0;
+
+  // Get current file info from stack or props
+  const currentFile = hasStackNavigation ? files[currentFileIndex] : null;
+  const currentFileName = currentFile?.fileName ?? fileName;
+  const currentFileUrl = currentFile?.fileUrl ?? fileUrl;
+  const currentMimeType = currentFile?.mimeType ?? mimeType;
+  const currentFileSize = currentFile?.fileSize ?? fileSize;
+  const currentAttachmentId = currentFile?.attachmentId ?? attachmentId;
+
   // Detect file type using utility function
-  const fileType = detectFileType(mimeType, fileName);
+  const fileType = detectFileType(currentMimeType, currentFileName);
 
   // For videos, skip the download and use streaming directly
   const isVideo = fileType?.displayName === 'Video';
 
-  // Simple fetch - service handles everything (but skip for videos)
+  // Expand mounted slides as user navigates (current ±1), reset on close
   useEffect(() => {
-    if (!isOpen || !fileUrl || isVideo) {
+    if (!isOpen || !hasStackNavigation) {
+      setMountedSlides(new Set());
+      return;
+    }
+    setMountedSlides(prev => {
+      const next = new Set(prev);
+      for (
+        let i = Math.max(0, currentFileIndex - 1);
+        i <= Math.min(totalFiles - 1, currentFileIndex + 1);
+        i++
+      ) {
+        next.add(i);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [isOpen, hasStackNavigation, currentFileIndex, totalFiles]);
+
+  // Push viewer scope for keyboard shortcuts
+  useScope('viewer', isOpen);
+
+  // Navigation handlers - scroll is handled by useEffect when currentFileIndex changes
+  const handlePrevious = useCallback(() => {
+    if (!hasStackNavigation || currentFileIndex <= 0) return;
+    onNavigate?.(currentFileIndex - 1);
+  }, [hasStackNavigation, currentFileIndex, onNavigate]);
+
+  const handleNext = useCallback(() => {
+    if (!hasStackNavigation || currentFileIndex >= totalFiles - 1) return;
+    onNavigate?.(currentFileIndex + 1);
+  }, [hasStackNavigation, currentFileIndex, totalFiles, onNavigate]);
+
+  // Register keyboard shortcuts for navigation
+  useShortcut(
+    'left',
+    e => {
+      e.preventDefault();
+      handlePrevious();
+    },
+    {
+      scope: 'viewer',
+      enabled: Boolean(isOpen && hasStackNavigation && currentFileIndex > 0),
+      preventDefault: true,
+      priority: 200,
+    },
+  );
+
+  useShortcut(
+    'right',
+    e => {
+      e.preventDefault();
+      handleNext();
+    },
+    {
+      scope: 'viewer',
+      enabled: Boolean(isOpen && hasStackNavigation && currentFileIndex < totalFiles - 1),
+      preventDefault: true,
+      priority: 200,
+    },
+  );
+
+  // Scroll to current index when modal opens (for carousel navigation)
+  const scrollContainerCallbackRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      scrollContainerRef.current = node;
+      if (node && hasStackNavigation) {
+        requestAnimationFrame(() => {
+          node.scrollTo({
+            left: currentFileIndex * node.clientWidth,
+            behavior: 'auto',
+          });
+        });
+      }
+    },
+    [hasStackNavigation, currentFileIndex],
+  );
+
+  // Also scroll when currentFileIndex changes via navigation
+  useEffect(() => {
+    if (scrollContainerRef.current && hasStackNavigation) {
+      scrollContainerRef.current.scrollTo({
+        left: currentFileIndex * scrollContainerRef.current.clientWidth,
+        behavior: 'smooth',
+      });
+    }
+  }, [currentFileIndex, hasStackNavigation]);
+
+  // Fetch current file - simple fetch like old code
+  useEffect(() => {
+    if (!isOpen || !currentFileUrl || isVideo || hasStackNavigation) {
       setFileData(null);
       setError(null);
       return;
@@ -110,20 +339,20 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
     setIsLoading(true);
     setError(null);
 
-    fetchFile(fileUrl, fileName, mimeType)
+    fetchFile(currentFileUrl, currentFileName, currentMimeType)
       .then(setFileData)
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'))
       .finally(() => setIsLoading(false));
-  }, [isOpen, fileUrl, fileName, mimeType, isVideo]);
+  }, [isOpen, currentFileUrl, currentFileName, currentMimeType, isVideo, hasStackNavigation]);
 
   // Handle download with utility function
   const handleDownload = async (): Promise<void> => {
-    if (attachmentId) {
+    if (currentAttachmentId) {
       // Use shared downloadAttachment function for attachment downloads
-      await downloadAttachment(attachmentId, fileName);
+      await downloadAttachment(currentAttachmentId, currentFileName);
     } else {
       // Fall back to downloadFile for generic file URLs
-      await downloadFile(fileUrl, fileName);
+      await downloadFile(currentFileUrl, currentFileName);
     }
   };
 
@@ -146,14 +375,14 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
 
     // For videos, we need an attachmentId to stream
     if (isVideo) {
-      if (attachmentId) {
+      if (currentAttachmentId) {
         const ViewerComponent = fileType.component;
         return (
           <div className={fileType.wrapperClass}>
             <ViewerComponent
               source={null}
-              fileName={fileName}
-              attachmentId={attachmentId}
+              fileName={currentFileName}
+              attachmentId={currentAttachmentId}
               onExpand={onClose}
               {...(initialTime !== undefined && { initialTime })}
             />
@@ -163,7 +392,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
       // Handle the case where it's a video but there's no attachmentId
       return (
         <div className='flex flex-col items-center justify-center h-full gap-3'>
-          <p className='text-gray-600'>Video cannot be streamed</p>
+          <p className='text-gray-400'>Video cannot be streamed</p>
           <button
             onClick={() => void handleDownload()}
             className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
@@ -184,7 +413,50 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
     const ViewerComponent = fileType.component;
     return (
       <div className={`${fileType.wrapperClass} max-w-full max-h-full`}>
-        <ViewerComponent source={fileData} fileName={fileName} />
+        <ViewerComponent source={fileData} fileName={currentFileName} />
+      </div>
+    );
+  };
+
+  // Detect current slide from scroll position for swipe gestures
+  const handleScroll = useCallback(() => {
+    if (!scrollContainerRef.current || !hasStackNavigation) return;
+
+    const container = scrollContainerRef.current;
+    const slideWidth = container.clientWidth;
+    const newIndex = Math.round(container.scrollLeft / slideWidth);
+
+    if (newIndex !== currentFileIndex && newIndex >= 0 && newIndex < totalFiles) {
+      onNavigate?.(newIndex);
+    }
+  }, [hasStackNavigation, currentFileIndex, totalFiles, onNavigate]);
+
+  // Scroll-snap carousel — lazy mount ±1 slides, show thumbnail placeholder for others
+  const renderCarousel = () => {
+    return (
+      <div
+        ref={scrollContainerCallbackRef}
+        onScroll={handleScroll}
+        className='flex w-full h-full overflow-x-auto overflow-y-hidden'
+        style={{
+          scrollSnapType: 'x mandatory',
+          scrollbarWidth: 'none',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
+        {files!.map((file, index) => (
+          <div
+            key={file.attachmentId || file.fileUrl}
+            className='flex-shrink-0 w-full h-full flex items-center justify-center'
+            style={{ scrollSnapAlign: 'center' }}
+          >
+            {mountedSlides.has(index) ? (
+              <SlideContent file={file} />
+            ) : (
+              <SlidePlaceholder file={file} />
+            )}
+          </div>
+        ))}
       </div>
     );
   };
@@ -207,6 +479,95 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [isImage, fileData]);
+
+  // Helper function to render floating top bar with optional close button
+  const renderFloatingTopBar = (includeCloseButton: boolean): JSX.Element => (
+    <div
+      className={`absolute gap-6 p-5 top-0 left-0 z-20 flex transition-opacity duration-300 ${
+        isHovered ? 'opacity-100' : 'opacity-0'
+      } w-full`}
+    >
+      {/* Gradient overlay - always full width */}
+      <div className='absolute inset-0 bg-gradient-to-b from-black/60 to-transparent w-full' />
+      {/* Content */}
+      <div className='relative flex items-center justify-between w-full'>
+        <div className='flex-1 min-w-0'>
+          <Dialog.Title className='text-base font-medium text-white truncate drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]'>
+            {currentFileName}
+          </Dialog.Title>
+          <Dialog.Description className='text-xs text-white/90 mt-0.5 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]'>
+            {hasStackNavigation
+              ? `${currentFileIndex + 1} of ${totalFiles} • ${formatFileSize(currentFileSize)}${fileType ? ` • ${fileType.displayName}` : ''}`
+              : `${formatFileSize(currentFileSize)}${fileType ? ` • ${fileType.displayName}` : ''}`}
+          </Dialog.Description>
+        </div>
+        <div className='flex items-center gap-3'>
+          <button
+            onClick={() => void handleDownload()}
+            className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+          >
+            <Download className='h-4 w-4' />
+          </button>
+          {includeCloseButton && (
+            <Dialog.Close asChild>
+              <button
+                className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+                aria-label='Close'
+              >
+                <X className='h-5 w-5' />
+              </button>
+            </Dialog.Close>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  // Navigation arrow buttons
+  const renderNavigationArrows = (): JSX.Element | null => {
+    if (!hasStackNavigation) return null;
+
+    const canGoPrevious = currentFileIndex > 0;
+    const canGoNext = currentFileIndex < totalFiles - 1;
+
+    return (
+      <>
+        {/* Previous Button */}
+        {canGoPrevious && (
+          <button
+            onClick={handlePrevious}
+            className={cn(
+              'absolute left-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',
+              isMobile ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0',
+            )}
+            aria-label='Previous file'
+            title='Previous (←)'
+            type='button'
+          >
+            <ChevronLeft className='h-6 w-6' />
+          </button>
+        )}
+
+        {/* Next Button */}
+        {canGoNext && (
+          <button
+            onClick={handleNext}
+            className={cn(
+              'absolute right-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',
+              isMobile ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0',
+            )}
+            aria-label='Next file'
+            title='Next (→)'
+            type='button'
+          >
+            <ChevronRight className='h-6 w-6' />
+          </button>
+        )}
+      </>
+    );
+  };
+
+  const renderMainContent = () => (hasStackNavigation ? renderCarousel() : renderContent());
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={onClose}>
@@ -233,39 +594,24 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
           onMouseLeave={() => setIsHovered(false)}
         >
           {/* Content - Full surface with padding for floating controls */}
-          <div className='absolute inset-0 flex items-center justify-center bg-white'>
-            <div className='w-full h-full'>{renderContent()}</div>
-          </div>
+          <div className='absolute inset-0 bg-white'>
+            <div
+              ref={constraintsRef}
+              className={cn(
+                'relative w-full h-full',
+                isImage
+                  ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
+                  : 'overflow-auto bg-white',
+              )}
+            >
+              {/* Floating top bar */}
+              {renderFloatingTopBar(true)}
+              <div className='relative z-10 h-full w-full flex items-center justify-center'>
+                {renderMainContent()}
+              </div>
 
-          {/* Floating Top Bar */}
-          <div
-            className={`absolute bg-gradient-to-b from-black/60 to-transparent gap-6 p-5 w-full top-0 left-0 z-20 flex transition-opacity duration-300 ${
-              isHovered ? 'opacity-100' : 'opacity-0'
-            }`}
-          >
-            <div className='flex-1 min-w-0'>
-              <Dialog.Title className='text-base font-medium text-white truncate drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]'>
-                {fileName}
-              </Dialog.Title>
-              <Dialog.Description className='text-xs text-white/90 mt-0.5 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]'>
-                {`${formatFileSize(fileSize)}${fileType ? ` • ${fileType.displayName}` : ''}`}
-              </Dialog.Description>
-            </div>
-            <div className='flex items-center gap-3'>
-              <button
-                onClick={() => void handleDownload()}
-                className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-              >
-                <Download className='h-4 w-4' />
-              </button>
-              <Dialog.Close asChild>
-                <button
-                  className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-                  aria-label='Close'
-                >
-                  <X className='h-5 w-5' />
-                </button>
-              </Dialog.Close>
+              {/* Navigation arrow*/}
+              {renderNavigationArrows()}
             </div>
           </div>
         </Dialog.Content>
