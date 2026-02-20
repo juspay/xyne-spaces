@@ -417,6 +417,7 @@ export class CallRepository {
   /**
    * Create initial call with all participants, conversation, and system message atomically
    * This is used when the first participant joins a room
+   * Returns the call and list of invited participant IDs (excluding the joining user)
    */
   async createCallWithParticipantsAndMessage(
     params: {
@@ -432,7 +433,7 @@ export class CallRepository {
       messageId: string;
       now: Date;
     }
-  ): Promise<Call> {
+  ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
       callId,
       roomName,
@@ -473,12 +474,15 @@ export class CallRepository {
       });
 
       // Create call_participants: joining user as ACCEPTED, others as INVITED
+      const invitedParticipantIds: string[] = [];
+      
       for (const channelParticipant of channelParticipants) {
         const isJoiningUser = channelParticipant.userId === joiningUserId;
+        const participantId = uuidv4();
         
         await tx.callParticipant.create({
           data: {
-            id: uuidv4(),
+            id: participantId,
             callId: call.id,
             userId: channelParticipant.userId,
             invitedBy: createdBy,
@@ -487,6 +491,11 @@ export class CallRepository {
             joinedAt: isJoiningUser ? now : null,
           },
         });
+        
+        // Track invited participants for notification
+        if (!isJoiningUser) {
+          invitedParticipantIds.push(participantId);
+        }
       }
 
       // Get user info for message
@@ -536,7 +545,7 @@ export class CallRepository {
         },
       });
 
-      return call;
+      return { call, invitedParticipantIds };
     });
   }
 

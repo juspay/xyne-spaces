@@ -6,6 +6,8 @@ import { InvitationResponse } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
+import { callSideEffectService } from '@/services/callSideEffectService';
+import { livekitWebhookACL } from './livekitWebhookACL';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -177,6 +179,20 @@ class LiveKitWebhookController {
           return;
         }
 
+        // ACL Validation: Verify permissions for call creation
+        const aclCheck = await livekitWebhookACL.canCreateCall({
+          channelId,
+          createdBy,
+          joiningUserId: participant.identity,
+        });
+
+        if (!aclCheck.valid) {
+          logger.error(`[LiveKit Webhook] ACL validation failed: ${aclCheck.reason}`);
+          return;
+        }
+
+        logger.info(`[LiveKit Webhook] ACL validation passed for call creation: channel=${channelId}, creator=${createdBy}, joiner=${participant.identity}`);
+
         // Get channel participants for creating participant records
         const channelParticipants = await repositories.channelParticipants.getChannelParticipants(channelId);
         const now = new Date();
@@ -190,7 +206,7 @@ class LiveKitWebhookController {
         const roomLink = `${config.livekit.clientUrl}/call/${roomName}?type=${callType}`;
 
         // Use repository method to create call with all related records atomically
-        call = await repositories.calls.createCallWithParticipantsAndMessage({
+        const result = await repositories.calls.createCallWithParticipantsAndMessage({
           callId,
           roomName,
           channelId,
@@ -204,9 +220,26 @@ class LiveKitWebhookController {
           now,
         });
 
+        call = result.call;
+
         logger.info(`[LiveKit Webhook] Successfully created all records for first participant in call ${roomName}`);
+
+        // Trigger notifications for invited participants
+        if (result.invitedParticipantIds.length > 0) {
+          logger.info(`[LiveKit Webhook] Triggering notifications for ${result.invitedParticipantIds.length} invited participants`);
+          await Promise.allSettled(
+            result.invitedParticipantIds.map(async (participantId) => {
+              try {
+                await callSideEffectService.handleParticipantInvited(participantId);
+              } catch (error) {
+                logger.error(`[LiveKit Webhook] Failed to trigger notification for participant ${participantId}:`, error);
+              }
+            })
+          );
+        }
       } else if (call) {
         // Call exists, handle subsequent participant join
+
         const existingParticipant = await repositories.calls.findParticipant(call.id, participant.identity);
 
         if (!existingParticipant) {
@@ -233,6 +266,17 @@ class LiveKitWebhookController {
             );
           });
           logger.info(`[LiveKit Webhook] Updated participant ${participant.identity} to ACCEPTED for call ${roomName}`);
+          
+          // Trigger side effects for participant response (dismiss notification, cleanup timeout)
+          try {
+            await callSideEffectService.handleParticipantResponse(
+              existingParticipant.id,
+              InvitationResponse.ACCEPTED
+            );
+            logger.info(`[LiveKit Webhook] Triggered participant response side effects for ${participant.identity}`);
+          } catch (sideEffectError) {
+            logger.error(`[LiveKit Webhook] Failed to trigger participant response side effects:`, sideEffectError);
+          }
         }
       }
     } catch (error) {
@@ -263,6 +307,19 @@ class LiveKitWebhookController {
     try {
       const now = new Date();
       
+      // ACL Validation: Verify participant can update call status
+      const aclCheck = await livekitWebhookACL.canUpdateCallStatus({
+        callExternalId: callId,
+        userId: participant.identity,
+      });
+
+      if (!aclCheck.valid) {
+        logger.error(`[LiveKit Webhook] ACL validation failed: ${aclCheck.reason}`);
+        return;
+      }
+
+      logger.info(`[LiveKit Webhook] ACL validation passed for participant leave: call=${callId}, user=${participant.identity}`);
+      
       // Use repository method to handle participant leave atomically (includes system message update)
       const result = await repositories.calls.handleParticipantLeave({
         callExternalId: callId,
@@ -279,6 +336,14 @@ class LiveKitWebhookController {
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);
+        
+        // Trigger side effects for call end (missed call notifications, cleanup timeouts, activities)
+        try {
+          await callSideEffectService.handleCallEnded(result.call.id);
+          logger.info(`[LiveKit Webhook] Triggered call ended side effects for ${callId}`);
+        } catch (sideEffectError) {
+          logger.error(`[LiveKit Webhook] Failed to trigger call ended side effects:`, sideEffectError);
+        }
       }
 
       if (result.messageUpdated) {
