@@ -297,4 +297,25 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     });
   }
 
+  async upsertGroupsWithMetadata(
+    data: CreateUserGroupInput,
+    actorUserId?: string
+  ): Promise<UserGroup> {
+    // Check if a group with the same alias already exists
+    if (data.alias) {
+      const existingGroup = await this.findByAlias(data.alias);
+      if (existingGroup) {
+        // Merge new metadata into existing metadata
+        return await this.db.userGroup.update({
+          where: { id: existingGroup.id },
+          data: { metadata: data.metadata },
+        });
+      }
+    }
+
+    // No existing group found, create a new one 
+    return await this.create(data, actorUserId);
+  }
+
 }
+
