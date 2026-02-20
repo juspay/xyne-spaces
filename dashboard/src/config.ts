@@ -65,3 +65,11 @@ export const LOGGER_BASE_URL = isElectronBundled
 export const MAX_RETRIES = 3;
 
 export const SHAREABLE_ORIGIN = window.location.origin;
+
+export const TRUSTED_ORIGINS = [
+  'https://spaces.xyne.juspay.net',
+  'https://app.spaces.xyne.juspay.net',
+  'https://app.spaces.sandbox.xyne.juspay.net',
+  'https://xyne-spaces.web.app',
+  'https://xyne-spaces.web',
+];
