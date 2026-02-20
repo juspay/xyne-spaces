@@ -8,6 +8,7 @@ declare global {
   interface Window {
     pdfjsWasmDir?: string;
     __APP_VERSION__?: string;
+    __builder?: unknown;
   }
 }
 

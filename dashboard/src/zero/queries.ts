@@ -17,6 +17,8 @@ import {
 
 export const zql = createBuilder(schema);
 
+window.__builder = zql;
+
 export const queries = defineQueries({
   channelConversations: defineQuery(
     z.object({ channelId: z.string() }),
