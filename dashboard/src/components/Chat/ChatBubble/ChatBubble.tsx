@@ -797,8 +797,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       {variant !== 'pinned' && showLinkPreview && linkPreviewMetadata && !canvasId && (
         <div
           className={cn(
-            'mt-2 ml-12 pr-3 max-w-full',
+            'pr-3 max-w-full border-l-4 border-l-gray-300 dark:border-l-gray-600 pl-4 ml-14 transition-colors rounded-r',
             message.senderId === user?.id && 'max-[500px]:mb-5',
+            showHoverActions && 'bg-gray-100/50 dark:bg-gray-800/50',
           )}
         >
           <LinkPreview metadata={linkPreviewMetadata} onClose={() => setShowLinkPreview(false)} />

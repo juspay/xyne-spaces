@@ -1,0 +1,125 @@
+import React, { useState } from 'react';
+import { ExternalLink, Play, X } from 'lucide-react';
+import { SiYoutube } from 'react-icons/si';
+
+const YOUTUBE_HOME = 'https://www.youtube.com';
+
+export interface YouTubeThumbnailProps {
+  thumbnailUrl: string;
+  embedUrl: string;
+  watchUrl: string;
+  title?: string;
+  onClose?: () => void;
+  isMobile?: boolean;
+}
+
+/** YouTube: clickable title + thumbnail with play / external */
+export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
+  thumbnailUrl,
+  embedUrl,
+  watchUrl,
+  title,
+  onClose,
+  isMobile,
+}) => {
+  const [showPlayer, setShowPlayer] = useState(false);
+  const displayTitle =
+    title && title.length > 70 ? title.slice(0, 70) + '...' : title || 'YouTube video';
+
+  return (
+    <div
+      className='relative w-full max-w-[360px] md:max-w-[420px] lg:max-w-[480px] flex flex-col gap-1.5'
+      role='article'
+      aria-label='YouTube video'
+    >
+      {onClose && (
+        <button
+          type='button'
+          className='absolute top-0 right-0 z-10 p-1 text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100 focus:outline-none focus:ring-0'
+          onClick={e => {
+            e.stopPropagation();
+            onClose();
+          }}
+          aria-label='Close link preview'
+        >
+          <X size={14} className='text-current' />
+        </button>
+      )}
+      <a
+        href={YOUTUBE_HOME}
+        target='_blank'
+        rel='noopener noreferrer'
+        className='flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:underline w-fit'
+      >
+        <SiYoutube size={18} className='flex-shrink-0 text-[#FF0000]' aria-hidden />
+        <span>YouTube</span>
+      </a>
+
+      <a
+        href={watchUrl}
+        target='_blank'
+        rel='noopener noreferrer'
+        className='text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline truncate block'
+        title={title}
+      >
+        {displayTitle}
+      </a>
+
+      {/* Thumbnail + play / external */}
+      <div className='relative w-full aspect-video rounded-2xl border border-[#D3DAE0A8] dark:border-gray-700 overflow-hidden bg-black max-h-[202px] md:max-h-[236px] lg:max-h-[270px]'>
+        {isMobile ? (
+          // Mobile: no inline play, no overlay controls. Tap thumbnail -> open YouTube.
+          <a
+            href={watchUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='absolute inset-0'
+            aria-label='Open on YouTube'
+          >
+            <img src={thumbnailUrl} alt='' className='w-full h-full object-cover' />
+          </a>
+        ) : !showPlayer ? (
+          <>
+            <img
+              src={thumbnailUrl}
+              alt=''
+              className='absolute inset-0 w-full h-full object-cover'
+            />
+
+            <div className='absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[1]'>
+              <div className='flex items-center gap-1 md:gap-1.5 lg:gap-2 rounded-xl md:rounded-2xl lg:rounded-3xl bg-black/40 shadow-lg p-1.5 md:p-2 lg:py-3 lg:px-6'>
+                <button
+                  type='button'
+                  onClick={() => setShowPlayer(true)}
+                  aria-label='Play video'
+                  className='group flex items-center justify-center h-12 w-12 md:h-14 md:w-14 lg:h-20 lg:w-20 rounded-lg md:rounded-xl lg:rounded-2xl text-gray-300 hover:text-white focus:outline-none focus:ring-0 transition-colors'
+                >
+                  <Play className='text-current w-6 h-6 md:w-7 md:h-7 lg:w-10 lg:h-10' />
+                </button>
+                <a
+                  href={watchUrl}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                  aria-label='Open on YouTube'
+                  title='Open on YouTube'
+                  className='group flex items-center justify-center h-12 w-12 md:h-14 md:w-14 lg:h-20 lg:w-20 rounded-lg md:rounded-xl lg:rounded-2xl text-gray-300 hover:text-white focus:outline-none focus:ring-0 transition-colors'
+                >
+                  <ExternalLink className='text-current w-6 h-6 md:w-7 md:h-7 lg:w-10 lg:h-10' />
+                </a>
+              </div>
+            </div>
+          </>
+        ) : (
+          <iframe
+            src={`${embedUrl}${embedUrl.includes('?') ? '&' : '?'}autoplay=1`}
+            title='YouTube video'
+            className='absolute inset-0 w-full h-full'
+            allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share'
+            allowFullScreen
+          />
+        )}
+      </div>
+    </div>
+  );
+};

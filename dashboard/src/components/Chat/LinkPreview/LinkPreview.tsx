@@ -1,5 +1,8 @@
 import React from 'react';
 import { ExternalLink, X } from 'lucide-react';
+import { getYoutubeEmbedUrl, getYoutubeVideoId, isYoutubeUrl } from './youtubeUtils';
+import { usePlatform } from '../../../hooks/usePlatform';
+import { YouTubeThumbnail } from './YouTubeThumbnail';
 
 export interface LinkMetadata {
   url: string;
@@ -51,14 +54,34 @@ const getHostnameSafely = (url: string): string | null => {
  *
  * Compatible with Zero sync - displays metadata from message.metadata field
  */
-const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClick, onClose }) => {
-  const { url, title, siteName, favicon } = metadata;
+const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose }) => {
+  const { url, title, description, favicon } = metadata;
+  const { isMobile } = usePlatform();
 
   // Safe hostname extraction
   const hostname = getHostnameSafely(url);
 
   if (!hostname) {
     return null;
+  }
+
+  // YouTube: Slack-style – plain image thumbnail only, no YouTube UI. Our play + external icon only.
+  if (isYoutubeUrl(url)) {
+    const videoId = getYoutubeVideoId(url);
+    if (!videoId) return null;
+    const embedUrl = getYoutubeEmbedUrl(videoId);
+    // Plain thumbnail image (no YouTube play button, 3-dot, or title overlay)
+    const thumbnailUrl = metadata.image ?? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+    return (
+      <YouTubeThumbnail
+        thumbnailUrl={thumbnailUrl}
+        embedUrl={embedUrl}
+        watchUrl={url}
+        isMobile={isMobile}
+        {...(onClose && { onClose })}
+        {...(metadata.title !== null && { title: metadata.title })}
+      />
+    );
   }
 
   // Default favicon if none provided - only use Google service for proper domains
@@ -68,135 +91,80 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClick, o
       ? `https://www.google.com/s2/favicons?domain=${hostname}&sz=128`
       : undefined);
 
-  // Truncate title to ensure it fits nicely
-  const truncatedTitle = title
-    ? title.length > 50
-      ? title.substring(0, 50) + '...'
+  const displayTitle = title
+    ? title.length > 80
+      ? title.substring(0, 80) + '...'
       : title
-    : null;
-
-  const handleClick = (event: React.MouseEvent): void => {
-    // Prevent bubbling if clicking on close button area
-    if ((event.target as HTMLElement).closest('.link-preview__close-button')) {
-      return;
-    }
-
-    if (onClick) {
-      onClick();
-    } else {
-      // Default behavior: open link in new tab with safe URL
-      const parsedUrl = parseUrlSafely(url);
-      if (parsedUrl) {
-        window.open(url, '_blank', 'noopener,noreferrer');
-      }
-    }
-  };
+    : hostname;
 
   const handleClose = (event: React.MouseEvent): void => {
     event.stopPropagation();
-    if (onClose) {
-      onClose();
-    }
-  };
-
-  const handleKeyPress = (event: React.KeyboardEvent): void => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      // For keyboard events, we don't need the mouse event target checks
-      if (onClick) {
-        onClick();
-      } else {
-        // Default behavior: open link in new tab with safe URL
-        const parsedUrl = parseUrlSafely(url);
-        if (parsedUrl) {
-          window.open(url, '_blank', 'noopener,noreferrer');
-        }
-      }
-    } else if (event.key === 'Escape' && onClose) {
-      event.preventDefault();
-      onClose();
-    }
+    onClose?.();
   };
 
   return (
     <div
-      className='link-preview relative flex flex-col rounded-2xl border border-[#D3DAE0A8] dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800 cursor-pointer transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 max-w-3/4 w-full'
-      onClick={handleClick}
-      role='button'
-      tabIndex={0}
-      onKeyDown={handleKeyPress}
-      aria-label={`Link preview: ${title || hostname}`}
+      className='link-preview relative flex flex-col gap-1 max-w-3/4 w-full rounded-2xl border border-[#D3DAE0A8] dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800 py-2 pr-8 pl-3'
+      aria-label={`Link preview: ${displayTitle}`}
     >
-      {/* Close Button */}
       {onClose && (
         <button
           type='button'
-          className='link-preview__close-button absolute top-2 right-2 z-10 p-1 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500'
+          className='link-preview__close-button absolute top-2 right-2 z-10 p-1 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400'
           onClick={handleClose}
           aria-label='Close link preview'
         >
           <X size={14} className='text-gray-600 dark:text-gray-300' />
         </button>
       )}
-      {/* Preview Image Section */}
-      {/* {image && (
-        <div className='link-preview__image-section p-2 sm:p-3 bg-gray-50 dark:bg-gray-900'>
-          <img
-            src={image}
-            alt={title || 'Link preview image'}
-            className='link-preview__image w-full h-auto max-h-[150px] sm:max-h-[200px] object-cover rounded-lg'
-            loading='lazy'
-            onError={e => {
-              // Gracefully hide image section to prevent layout jumps
-              const imageSection = e.currentTarget.parentElement;
-              if (imageSection) {
-                imageSection.classList.add('hidden');
-              }
-            }}
-          />
-        </div>
-      )} */}
 
-      {/* Metadata Section */}
-      <div className='link-preview__metadata flex gap-3 p-3 max-w-[90%]'>
-        {/* Favicon */}
-        <div className='flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center'>
+      {/* Line 1: Icon + domain (Slack-style, clickable) */}
+      <a
+        href={url}
+        target='_blank'
+        rel='noopener noreferrer'
+        className='flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:underline min-w-0 w-fit'
+      >
+        <span className='flex-shrink-0 w-5 h-5 rounded overflow-hidden flex items-center justify-center'>
           {faviconUrl ? (
             <img
               src={faviconUrl}
-              alt={siteName || 'Site icon'}
+              alt=''
               className='w-full h-full object-contain'
               loading='lazy'
               onError={e => {
-                // Hide image and show fallback icon
                 e.currentTarget.style.display = 'none';
-                const fallbackIcon = e.currentTarget.nextElementSibling as HTMLElement;
-                if (fallbackIcon) {
-                  fallbackIcon.style.display = 'block';
-                }
+                const next = e.currentTarget.nextElementSibling as HTMLElement;
+                if (next) next.style.display = 'block';
               }}
             />
           ) : null}
           <ExternalLink
-            size={16}
+            size={14}
             className='text-gray-500 dark:text-gray-400'
             style={{ display: faviconUrl ? 'none' : 'block' }}
           />
-        </div>
+        </span>
+        <span className='truncate'>{hostname}</span>
+      </a>
 
-        {/* Text Content */}
-        <div className='link-preview__content flex-1 min-w-0 flex flex-col justify-center gap-1'>
-          {/* Title */}
-          <div className='link-preview__title text-sm font-medium leading-tight text-gray-900 dark:text-gray-50 truncate'>
-            {truncatedTitle || title || hostname}
-          </div>
+      {/* Line 2: Title (blue, clickable) */}
+      <a
+        href={url}
+        target='_blank'
+        rel='noopener noreferrer'
+        className='text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline truncate block'
+        title={title}
+      >
+        {displayTitle}
+      </a>
 
-          {/* Site Name */}
-          <div className='link-preview__site-name text-xs leading-tight text-gray-500 dark:text-gray-400 truncate'>
-            {siteName || hostname}
-          </div>
-        </div>
-      </div>
+      {/* Line 3: Description if present */}
+      {description && (
+        <p className='text-xs text-gray-500 dark:text-gray-400 line-clamp-3' title={description}>
+          {description.length > 200 ? description.slice(0, 200) + '...' : description}
+        </p>
+      )}
     </div>
   );
 };
