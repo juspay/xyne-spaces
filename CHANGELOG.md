@@ -1,3 +1,18 @@
+## [1.55.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.54.0...v1.55.0) (2026-02-20)
+
+
+### Features
+
+* adding keyboard navigation in the bulk images and files ([c7f1cc7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c7f1cc7ffd71e2d06b61fa097363ffab259cb0b5)), closes [#3270](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3270)
+
+
+### Bug Fixes
+
+* Add alias check in slack migration ([5de2d03](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5de2d034c4745f3c7ec12aefc704e3f87439461a)), closes [#3472](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3472)
+* adding builder for analyzing and optimizing zero queries ([b4b1f44](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b4b1f44d061ec1c594a5e8451209420ea8118117)), closes [#3461](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3461)
+* adding guidelines ([e1084d7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e1084d7d27358c815d971d4202bb8cfdcb6e8b2d)), closes [#3212](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3212)
+* internal reroute for calls to prevent external routing ([7f70944](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7f709440dfcd9a050b053af4a53e55a413433ec2)), closes [#3326](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3326)
+
 ## [1.54.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.53.1...v1.54.0) (2026-02-20)
 
 
