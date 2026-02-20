@@ -134,7 +134,7 @@ async function resolveApiGroup(slackGroupId: string, botOauthToken: string): Pro
   if (!slackGroup) {
     return undefined;
   }
-  const group = await groupRepo.create({
+  const group = await groupRepo.upsertGroupsWithMetadata({
     name: slackGroup.name,
     description: slackGroup.description,
     alias: slackGroup.handle,
