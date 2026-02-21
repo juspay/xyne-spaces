@@ -2,7 +2,7 @@ module.exports = {
   extends: ['@commitlint/config-conventional'],
   parserPreset: {
     parserOpts: {
-      headerPattern: /^(\w+):\s+(XYNE-\d+)\s+(.+)$/i,
+      headerPattern: /^(\w+):\s+(XYNE-\d+):?\s+(.+)$/i,
       headerCorrespondence: ['type', 'ticket', 'subject']
     }
   },
@@ -26,19 +26,19 @@ module.exports = {
           
           // Check for missing ticket
           if (!raw || !raw.includes('XYNE-')) {
-            return [false, 'Missing ticket number. Format: type: XYNE-1234 subject'];
+            return [false, 'Missing ticket number. Format: type: XYNE-1234 subject OR type: XYNE-1234: subject'];
           }
           
           // Check if ticket exists but no subject
-          if (/^(feat|feature|fix|docs|style|refactor|perf|test|chore|build|ci|revert):\s+XYNE-\d+\s*$/i.test(raw)) {
-            return [false, 'Missing subject. Format: type: XYNE-1234 subject (e.g., "fix: XYNE-1234 Fix Jenkins issue")'];
+          if (/^(feat|feature|fix|docs|style|refactor|perf|test|chore|build|ci|revert):\s+XYNE-\d+:?\s*$/i.test(raw)) {
+            return [false, 'Missing subject. Format: type: XYNE-1234 subject OR type: XYNE-1234: subject (e.g., "fix: XYNE-1234 Fix Jenkins issue")'];
           }
           
-          if (!/^(feat|feature|fix|docs|style|refactor|perf|test|chore|build|ci|revert):\s+XYNE-\d+\s+/i.test(raw)) {
-            return [false, 'Incorrect format. Use: type: XYNE-1234 subject (with spaces after colon and after ticket)'];
+          if (!/^(feat|feature|fix|docs|style|refactor|perf|test|chore|build|ci|revert):\s+XYNE-\d+:?\s+/i.test(raw)) {
+            return [false, 'Incorrect format. Use: type: XYNE-1234 subject OR type: XYNE-1234: subject'];
           }
           
-          return [false, 'Invalid format. Use: type: XYNE-1234 subject'];
+          return [false, 'Invalid format. Use: type: XYNE-1234 subject OR type: XYNE-1234: subject'];
         }
       }
     }
