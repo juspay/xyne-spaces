@@ -1,3 +1,10 @@
+## [1.55.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.55.0...v1.55.1) (2026-02-21)
+
+
+### Bug Fixes
+
+* Commitlint to work with both space and colon after ticket ([cb9d5a7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cb9d5a7d340f8500a70f7c0eac09d0c3e315a4ab)), closes [#3483](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3483)
+
 ## [1.55.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.54.0...v1.55.0) (2026-02-20)
 
 
