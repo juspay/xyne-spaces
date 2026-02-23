@@ -519,13 +519,15 @@ const ActivityListView = (): ReactElement => {
     >
       <div className='px-4 py-4 flex items-center justify-between gap-2'>
         <div className='flex items-center gap-2'>
-          <Link
-            to='/chat/dir'
-            className='p-1 rounded-md text-gray-900 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
-            aria-label='Go back'
-          >
-            <ArrowLeft size={20} />
-          </Link>
+          {!isMobile && (
+            <Link
+              to='/chat/dir'
+              className='p-1 rounded-md text-gray-900 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
+              aria-label='Go back'
+            >
+              <ArrowLeft size={20} />
+            </Link>
+          )}
           <h2 className='text-xl font-semibold text-gray-900 truncate'>Activity</h2>
         </div>
         <div className='flex items-center gap-4'>

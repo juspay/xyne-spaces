@@ -14,6 +14,9 @@ import useMeasure from '../../../hooks/useMeasure';
 import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useUser } from '../../../hooks/useUsers';
+import { StatusIndicator } from '../../ui/StatusIndicator';
+import { ChannelScopeType } from '@xyne/shared';
 
 interface MobileChannelItemProps {
   channel: Channel;
@@ -42,6 +45,10 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
   const hasActiveCall = activeCalls?.some(call => call.channelId === channel.id);
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, currentUserID);
+
+  // Get user status for 1-on-1 DMs only (not group DMs)
+  const is1on1DM = channel.scopeType === ChannelScopeType.DM;
+  const dmUser = useUser(is1on1DM && avatarUserId ? avatarUserId : '');
 
   const status = useGetChannelUserStatus(channel.id);
   const hasUnreadCount = unreadCount > 0;
@@ -103,11 +110,20 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
           <span
             ref={nameRef}
             className={cn(
-              'flex-1 truncate min-w-0 text-[16px] leading-[1.2] tracking-[-0.32px]',
+              'flex-1 truncate min-w-0 text-[16px] leading-[1.2] tracking-[-0.32px] flex items-center gap-1.5',
               shouldShowBold ? 'font-semibold text-[#181B1D]' : 'font-medium text-[#788187]',
             )}
           >
-            {displayName}
+            <span className='truncate'>{displayName}</span>
+            {is1on1DM && (
+              <StatusIndicator
+                statusEmoji={dmUser?.presenceStatus?.statusEmoji}
+                statusContent={dmUser?.presenceStatus?.statusContent}
+                statusExpiryAt={dmUser?.presenceStatus?.statusExpiryAt}
+                size='sm'
+                showOnHover={true}
+              />
+            )}
           </span>
           {hasActiveCall && <Headphones size={14} className='shrink-0' />}
           {draftMessage && !isActive && (

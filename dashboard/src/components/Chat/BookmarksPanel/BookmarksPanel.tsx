@@ -32,13 +32,15 @@ const BookmarksPanel = (): ReactElement => {
       <div className='relative p-4 bg-white'>
         <div className='flex items-center gap-2'>
           {/* Back Button */}
-          <Link
-            to='/chat/dir'
-            className='p-1 rounded-md text-gray-900 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
-            aria-label='Go back'
-          >
-            <ArrowLeft size={20} />
-          </Link>
+          {!isMobile && (
+            <Link
+              to='/chat/dir'
+              className='p-1 rounded-md text-gray-900 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
+              aria-label='Go back'
+            >
+              <ArrowLeft size={20} />
+            </Link>
+          )}
 
           <h3 className='font-semibold text-gray-900'>Bookmarks</h3>
         </div>

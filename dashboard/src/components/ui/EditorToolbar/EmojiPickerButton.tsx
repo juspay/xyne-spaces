@@ -173,7 +173,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
       }`}
       aria-label='Insert emoji'
     >
-      <Smile className='w-4 h-4 text-gray-600' />
+      <Smile className='w-5 h-5 text-gray-600' />
     </button>
   );
 
