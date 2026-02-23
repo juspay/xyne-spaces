@@ -5,11 +5,12 @@ import {
   AvatarShape,
   AvatarSize,
 } from '@juspay/blend-design-system';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, User } from '@xyne/shared';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { useUsers } from '../../../hooks/useUsers';
 import { MultiSelect } from '../../ui/MultiSelect';
+import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 
 interface EditableFormFieldProps {
   fieldName: string;
@@ -60,6 +61,8 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       ? jsonToArray(fieldValue).join(', ')
       : jsonToString(fieldValue),
   );
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   // Reset edit value when field value changes externally
   useEffect(() => {
@@ -129,25 +132,17 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   // Fetch user search results for edit mode
   const usersSearchResults = useUsers();
 
-  const selectedUsers = useMemo(() => {
-    if (!usersSearchResults) return [];
-    return usersSearchResults
-      .filter(user => selectedUserIds.includes(user.id))
-      .map(user => ({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-      }));
-  }, [selectedUserIds, usersSearchResults]);
-
-  const userOptions = useMemo(() => {
-    if (!usersSearchResults) return [];
-    return usersSearchResults.map(user => ({
-      label: user.name ?? 'Unnamed User',
-      value: user.id,
-      icon: <UserAvatar userId={user.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
-    }));
+  // Create a map for O(1) user lookups by ID
+  const userMap = useMemo<Map<string, User>>(() => {
+    if (!usersSearchResults) return new Map();
+    return new Map(usersSearchResults.map(user => [user.id, user]));
   }, [usersSearchResults]);
+
+  const selectedUsers = useMemo(() => {
+    return selectedUserIds
+      .map(userId => userMap.get(userId))
+      .filter((user): user is User => user !== undefined);
+  }, [selectedUserIds, userMap]);
 
   if (isEditing) {
     if (fieldType === FormFieldType.BOOLEAN) {
@@ -266,29 +261,27 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       );
     }
 
-    // USER field - MultiSelect with user options
+    // USER field - SearchUserV2 with user options
     if (fieldType === FormFieldType.USER) {
-      const currentValues = jsonToArray(fieldValue);
-
       return (
-        <div className='flex items-center gap-2 w-full'>
+        <div className='flex items-start gap-2 w-full'>
           <span
             className='text-sm text-gray-500 w-[120px] flex-shrink-0 truncate overflow-hidden'
             title={fieldName}
           >
             {fieldName}
           </span>
-          <div className='flex-1'>
-            <MultiSelect
-              placeholder={`Select ${fieldName.toLowerCase()}`}
-              options={userOptions.map(opt => ({
-                label: opt.label,
-                value: opt.value,
-              }))}
-              selectedValues={currentValues}
-              onChange={newValues => {
-                onSave(newValues);
+          <div className='flex-1 border border-gray-300 rounded outline-none focus:border-blue-500 focus-within:border-blue-500'>
+            <SearchUserV2
+              options={usersSearchResults || []}
+              selectedUsers={selectedUsers}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onSelect={selected => {
+                onSave(selected.map(u => u.id));
               }}
+              isOpen={isSearchOpen}
+              setIsOpen={setIsSearchOpen}
             />
           </div>
         </div>

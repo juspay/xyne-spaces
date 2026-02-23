@@ -14,6 +14,7 @@ import {
   TicketPriority,
   TicketStatusV2,
   TicketTag,
+  type User as UserType,
 } from '@xyne/shared';
 import {
   CircleCheck,
@@ -45,7 +46,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
-import { useUserSearch } from '../../../hooks/useUsers';
+import { useUserSearch, useUsers } from '../../../hooks/useUsers';
 import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
@@ -69,7 +70,7 @@ import { getFilesDimensions } from '../../ui/utils/files';
 import { getPriorityOptions, parseAssignee, TAG_COLORS } from './createTicket.utils';
 import { InlineCalendar } from './DateSelector';
 import { TextShimmer } from './ShimmerText';
-import { UserMultiSelect } from './UserMultiSelect';
+import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
@@ -226,6 +227,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // File handling state
   const [isDraggingOverModal, setIsDraggingOverModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Dynamic field USER search state
+  const [dynamicFieldSearchQueries, setDynamicFieldSearchQueries] = useState<
+    Record<string, string>
+  >({});
+  const [dynamicFieldOpenStates, setDynamicFieldOpenStates] = useState<Record<string, boolean>>({});
 
   // Local state for files when creating from Tickets tab (no DB storage)
   const [ticketLocalFiles, setTicketLocalFiles] = useState<File[]>([]);
@@ -472,6 +479,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
   );
   const users = useUserSearch(assigneeSearchValue, 15);
+
+  // Fetch all users for dynamic USER fields
+  const allUsers = useUsers();
+
+  // Create a map for O(1) user lookups by ID
+  const userMap = useMemo<Map<string, UserType>>(() => {
+    if (!allUsers) return new Map();
+    return new Map(allUsers.map(user => [user.id, user]));
+  }, [allUsers]);
 
   // Combine chat attachments and newly uploaded files for display
   const allAttachments = useMemo(() => {
@@ -1680,34 +1696,54 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         />
                       )}
                       {fieldType === FormFieldType.USER && (
-                        <UserMultiSelect
-                          label={`${fieldName}${!isOptional ? ' *' : ''}`}
-                          placeholder={`Select ${fieldName.toLowerCase()}`}
-                          selectedValues={arrayValue}
-                          onChange={newValues => {
-                            const cleanedValues = (newValues ?? []).filter(
-                              v => !!v && v.trim().length > 0,
-                            );
+                        <>
+                          <label className='text-sm font-medium text-gray-700'>{`${fieldName}${!isOptional ? ' *' : ''}`}</label>
+                          <div className='border border-gray-300 rounded'>
+                            <SearchUserV2
+                              options={allUsers || []}
+                              selectedUsers={arrayValue
+                                .map(userId => userMap.get(userId))
+                                .filter((user): user is UserType => user !== undefined)}
+                              searchQuery={dynamicFieldSearchQueries[fieldName] || ''}
+                              onSearchChange={query => {
+                                setDynamicFieldSearchQueries(prev => ({
+                                  ...prev,
+                                  [fieldName]: query,
+                                }));
+                              }}
+                              onSelect={selectedUsers => {
+                                const cleanedValues = selectedUsers
+                                  .map(u => u.id)
+                                  .filter(v => !!v && v.trim().length > 0);
 
-                            form.setFieldValue('dynamicFields', {
-                              ...formValues?.dynamicFields,
-                              [fieldName]: cleanedValues,
-                            });
-                            if (!isOptional && cleanedValues.length === 0) {
-                              setDynamicFieldErrors(prev => ({
-                                ...prev,
-                                [fieldName]: `${fieldName} is required`,
-                              }));
-                            } else {
-                              setDynamicFieldErrors(prev => {
-                                const next = { ...prev };
-                                delete next[fieldName];
-                                return next;
-                              });
-                            }
-                          }}
-                          error={error || ''}
-                        />
+                                form.setFieldValue('dynamicFields', {
+                                  ...formValues?.dynamicFields,
+                                  [fieldName]: cleanedValues,
+                                });
+                                if (!isOptional && cleanedValues.length === 0) {
+                                  setDynamicFieldErrors(prev => ({
+                                    ...prev,
+                                    [fieldName]: `${fieldName} is required`,
+                                  }));
+                                } else {
+                                  setDynamicFieldErrors(prev => {
+                                    const next = { ...prev };
+                                    delete next[fieldName];
+                                    return next;
+                                  });
+                                }
+                              }}
+                              isOpen={dynamicFieldOpenStates[fieldName] || false}
+                              setIsOpen={isOpen => {
+                                setDynamicFieldOpenStates(prev => ({
+                                  ...prev,
+                                  [fieldName]: isOpen,
+                                }));
+                              }}
+                            />
+                          </div>
+                          {error && <p className='text-xs text-red-600 mt-1'>{error}</p>}
+                        </>
                       )}
                     </div>
                   );
