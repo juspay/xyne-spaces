@@ -352,6 +352,17 @@ export function BrowserTabsScreen({
     );
   }
 
+  if (!window.electronAPI?.browserTabs) {
+    return (
+      <div className='flex items-center justify-center h-full bg-gray-50'>
+        <div className='text-center text-gray-500'>
+          <Globe size={48} className='mx-auto mb-4 opacity-50' />
+          <p>Please update to the latest desktop app version to use Xyne Browser.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`flex flex-col h-full bg-white overflow-hidden ${
