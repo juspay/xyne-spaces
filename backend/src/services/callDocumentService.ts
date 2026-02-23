@@ -13,6 +13,15 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { CanvasRole } from '@prisma/client';
+import { ServerBlockNoteEditor } from '@blocknote/server-util';
+import { getCanvasUrl } from '@/services/canvasService';
+import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
+import type {
+  BlockNoteBlock,
+  BlockNoteTableBlock,
+  BlockNoteInlineContent,
+} from '@/types/blockNoteTypes';
 
 // PRD Document structure
 interface PRDDocument {
@@ -27,43 +36,13 @@ interface PRDDocument {
   participants: string[];
 }
 
-// BlockNote block types
-interface BlockNoteTextBlock {
-  id: string;
-  type: 'paragraph' | 'heading';
-  props?: {
-    level?: 1 | 2 | 3;
-    textColor?: string;
-    backgroundColor?: string;
-  };
-  content: Array<{
-    type: 'text';
-    text: string;
-    styles?: {
-      bold?: boolean;
-      italic?: boolean;
-      code?: boolean;
-    };
-  }>;
-  children?: BlockNoteBlock[];
+// Participant information for mentions
+interface ParticipantInfo {
+  userId: string;
+  username: string;
+  userEmail: string;
+  userPicture?: string;
 }
-
-interface BlockNoteBulletListBlock {
-  id: string;
-  type: 'bulletListItem' | 'numberedListItem';
-  content: Array<{
-    type: 'text';
-    text: string;
-    styles?: {
-      bold?: boolean;
-      italic?: boolean;
-      code?: boolean;
-    };
-  }>;
-  children?: BlockNoteBlock[];
-}
-
-type BlockNoteBlock = BlockNoteTextBlock | BlockNoteBulletListBlock;
 
 /**
  * Sanitize input strings to prevent injection attacks
@@ -78,6 +57,107 @@ function sanitizeInput(input: string | null): string {
   // Limit length to prevent excessive token usage (adjust as needed)
   const maxLength = 100000; // ~100K chars
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
+}
+
+/**
+ * Parse text content to extract @mentions and convert to BlockNote inline content.
+ * Example: "Task for @Mayank Bansal" -> [text, mention, text]
+ *
+ * Builds a dynamic regex from participant names so the entire text is tokenised
+ * in a single `split` pass — no manual index arithmetic needed.
+ * Matched user IDs are collected into `mentionedIds` for the caller.
+ */
+function parseTextWithMentions(
+  text: string,
+  participantMap: Map<string, ParticipantInfo>,
+  applyBold = false,
+  mentionedIds?: Set<string>,
+): BlockNoteInlineContent[] {
+  if (!text) return [];
+
+  const textStyles = applyBold ? { bold: true } : {};
+
+  // Fast path: no participants to match against
+  if (participantMap.size === 0) {
+    return [{ type: 'text', text, styles: textStyles }];
+  }
+
+  // Escape special regex chars in each name; sort longest-first for greedy match
+  const regexReadyNames = Array.from(participantMap.keys())
+    .sort((a, b) => b.length - a.length)
+    .map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
+  // Capturing group keeps the matched delimiter in the split result array
+  const mentionPattern = new RegExp(`(@(?:${regexReadyNames.join('|')}))`, 'i');
+
+  const result: BlockNoteInlineContent[] = [];
+
+  for (const segment of text.split(mentionPattern)) {
+    if (!segment) continue;
+
+    if (segment.startsWith('@')) {
+      const key = segment.slice(1).toLowerCase();
+      const info = participantMap.get(key);
+
+      if (info) {
+        logger.info(`[CallDocumentService] ✅ Matched ${segment} to ${info.username}`);
+        mentionedIds?.add(info.userId);
+        result.push({
+          type: 'mention',
+          props: {
+            userId: info.userId,
+            username: info.username,
+            userEmail: info.userEmail,
+            userPicture: info.userPicture ?? '',
+          },
+        });
+        continue;
+      }
+    }
+
+    // Plain text segment (or unmatched @ — keep as-is)
+    result.push({ type: 'text', text: segment, styles: textStyles });
+  }
+
+  return result;
+}
+
+
+/**
+ * Build participant map from call ID
+ * Maps lowercase participant name -> participant info
+ */
+async function buildParticipantMap(callId: string): Promise<Map<string, ParticipantInfo>> {
+  const participantMap = new Map<string, ParticipantInfo>();
+
+  try {
+    // Get participants with user details from repository
+    const participants = await repositories.calls.getCallParticipantsWithUserDetails(callId);
+
+    if (participants.length === 0) {
+      logger.warn(`[CallDocumentService] No participants found for call ${callId}`);
+      return participantMap;
+    }
+
+    // Build participant map
+    for (const participant of participants) {
+      const lowerName = participant.userName.toLowerCase();
+      participantMap.set(lowerName, {
+        userId: participant.userId,
+        username: participant.userName,
+        userEmail: participant.userEmail,
+        userPicture: participant.userPicture || undefined,
+      });
+      logger.info(`[CallDocumentService] Added participant to map: "${participant.userName}" (lowercase: "${lowerName}") -> ${participant.userId}`);
+    }
+
+    logger.info(`[CallDocumentService] Built participant map with ${participantMap.size} participants for call ${callId}`);
+    logger.info(`[CallDocumentService] Participant names in map: ${Array.from(participantMap.keys()).join(', ')}`);
+  } catch (error) {
+    logger.error('[CallDocumentService] Error building participant map:', error);
+  }
+
+  return participantMap;
 }
 
 // PRD Generation prompt
@@ -197,6 +277,14 @@ MARKDOWN TEMPLATE:
 2. [Second most important]
 3. [Third if applicable]
 
+**CALL PARTICIPANTS (Correct Names):**
+{participants}
+
+**IMPORTANT - NAME ACCURACY:**
+- The transcript may contain misspelled or incorrectly transcribed participant names
+- If a name in the transcript seems close to a participant name, use the correct version from the list
+- For @mentions in Action Items, use the full correct name (e.g., @Mayank Bansal)
+
 **INSTRUCTIONS:**
 - Determine call length from transcript and use appropriate number of phases (1-7)
 - Short/quick calls should have FEWER phases - don't force many phases on a brief discussion
@@ -206,6 +294,8 @@ MARKDOWN TEMPLATE:
 - Preserve chronological order of discussion
 - Skip sections that have no relevant content
 - For very short calls, the "Consolidated Outcomes" section may be the most valuable part
+- In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
+- In Action Items: For people NOT in the participant list, write their name plainly with "(not in channel)" notation
 
 Only output valid Markdown.
 No extra text.
@@ -315,107 +405,101 @@ function formatPRDToBlockNote(prd: PRDDocument, callId: string): BlockNoteBlock[
 }
 
 /**
- * Convert markdown to BlockNote JSON format
+ * Convert markdown to BlockNote JSON format with mention support.
+ * Returns both the blocks and the set of user IDs that were actually mentioned,
+ * collected in a single pass — no second scan needed.
  */
-function convertMarkdownToBlockNote(markdown: string): BlockNoteBlock[] {
-  const blocks: BlockNoteBlock[] = [];
-  const lines = markdown.split('\n');
+async function convertMarkdownToBlockNote(
+  markdown: string,
+  participantMap: Map<string, ParticipantInfo> = new Map()
+): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
+  try {
+    const editor = ServerBlockNoteEditor.create();
+    const parsed = await editor.tryParseMarkdownToBlocks(markdown);
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    // Collect mentioned IDs during the mention-processing pass
+    const mentionedIds = new Set<string>();
+    const blocks = processBlocksForMentions(parsed as BlockNoteBlock[], participantMap, mentionedIds);
 
-    // Skip empty lines at the beginning
-    if (!line.trim() && blocks.length === 0) continue;
-
-    // Heading (## or ### or ####)
-    if (line.startsWith('####')) {
-      blocks.push({
-        id: uuidv4(),
-        type: 'heading',
-        props: { level: 3 },
-        content: [{ type: 'text', text: line.replace(/^####\s*/, ''), styles: {} }],
-        children: [],
-      });
-    } else if (line.startsWith('###')) {
-      blocks.push({
-        id: uuidv4(),
-        type: 'heading',
-        props: { level: 2 },
-        content: [{ type: 'text', text: line.replace(/^###\s*/, ''), styles: {} }],
-        children: [],
-      });
-    } else if (line.startsWith('##')) {
-      blocks.push({
-        id: uuidv4(),
-        type: 'heading',
-        props: { level: 1 },
-        content: [{ type: 'text', text: line.replace(/^##\s*/, ''), styles: {} }],
-        children: [],
-      });
-    }
-    // Bullet list item
-    else if (line.match(/^[-*]\s/)) {
-      blocks.push({
-        id: uuidv4(),
-        type: 'bulletListItem',
-        content: [{ type: 'text', text: line.replace(/^[-*]\s*/, ''), styles: {} }],
-        children: [],
-      });
-    }
-    // Numbered list item
-    else if (line.match(/^\d+\.\s/)) {
-      blocks.push({
-        id: uuidv4(),
-        type: 'numberedListItem',
-        content: [{ type: 'text', text: line.replace(/^\d+\.\s*/, ''), styles: {} }],
-        children: [],
-      });
-    }
-    // Regular paragraph
-    else if (line.trim()) {
-      // Handle bold text **text**
-      const parts = line.split(/\*\*(.*?)\*\*/);
-      const content: any[] = [];
-
-      parts.forEach((part, idx) => {
-        if (part) {
-          if (idx % 2 === 1) {
-            // Odd indices are bold text
-            content.push({ type: 'text', text: part, styles: { bold: true } });
-          } else {
-            content.push({ type: 'text', text: part, styles: {} });
-          }
-        }
-      });
-
-      blocks.push({
-        id: uuidv4(),
-        type: 'paragraph',
-        content: content.length > 0 ? content : [],
-        children: [],
-      });
-    }
-    // Empty line
-    else {
-      blocks.push({
-        id: uuidv4(),
-        type: 'paragraph',
-        content: [],
-        children: [],
-      });
-    }
+    logger.info(`[CallDocumentService] Total unique mentioned user IDs found: ${mentionedIds.size}`);
+    return { blocks, mentionedUserIds: Array.from(mentionedIds) };
+  } catch (error) {
+    logger.error('[CallDocumentService] Error converting markdown to BlockNote:', error);
+    return { blocks: [], mentionedUserIds: [] };
   }
-
-  return blocks;
 }
 
 /**
- * Get shareable canvas URL from viewAccessId
+ * Process BlockNote blocks to convert @mentions in text content.
+ * Handles tables (cells), regular inline blocks, and children — all in one place.
  */
-function getCanvasUrl(viewAccessId: string): string {
-  const frontendUrl = 'https://spaces.xyne.juspay.net';
-  return `${frontendUrl}/chat/canvas/${viewAccessId}`;
+function processBlocksForMentions(
+  blocks: BlockNoteBlock[],
+  participantMap: Map<string, ParticipantInfo>,
+  mentionedIds: Set<string>,
+): BlockNoteBlock[] {
+  // Processes an array of inline items: text nodes are split on @mentions,
+  // everything else (existing mentions, links, etc.) passes through untouched.
+  const processInline = (content: BlockNoteInlineContent[]): BlockNoteInlineContent[] =>
+    content.flatMap(item =>
+      item.type === 'text' && item.text
+        ? parseTextWithMentions(item.text, participantMap, item.styles?.bold ?? false, mentionedIds)
+        : [item]
+    );
+
+  return blocks.map(block => {
+    if (block.type === 'table') {
+      const t = block as BlockNoteTableBlock;
+      return {
+        ...t,
+        content: {
+          ...t.content,
+          rows: t.content.rows.map(row => ({
+            ...row,
+            cells: row.cells.map(cell => ({ ...cell, content: processInline(cell.content) })),
+          })),
+        },
+      } as BlockNoteTableBlock;
+    }
+
+    return {
+      ...block,
+      ...('content' in block && Array.isArray(block.content)
+        ? { content: processInline(block.content as BlockNoteInlineContent[]) }
+        : {}),
+      ...('children' in block && Array.isArray(block.children)
+        ? { children: processBlocksForMentions(block.children, participantMap, mentionedIds) }
+        : {}),
+    } as BlockNoteBlock;
+  });
 }
+
+/**
+ * Remove undefined values from BlockNote content for Prisma JSON compatibility
+ * Prisma's JSON field doesn't accept undefined values
+ */
+function sanitizeBlockNoteContent(obj: any): any {
+  if (obj === null || obj === undefined) {
+    return null;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeBlockNoteContent(item)).filter(item => item !== undefined);
+  }
+
+  if (typeof obj === 'object') {
+    const sanitized: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        sanitized[key] = sanitizeBlockNoteContent(value);
+      }
+    }
+    return sanitized;
+  }
+
+  return obj;
+}
+
 
 export class CallDocumentService {
   /**
@@ -544,7 +628,7 @@ export class CallDocumentService {
   /**
    * Generate detailed summary from transcript
    */
-  async generateDetailedSummary(transcript: string, customPrompt?: string): Promise<string | null> {
+  async generateDetailedSummary(transcript: string, callId: string, customPrompt?: string): Promise<string | null> {
     const agent = this.createAgent();
     if (!agent) {
       logger.warn('[CallDocumentService] Failed to create agent for detailed summary');
@@ -552,11 +636,19 @@ export class CallDocumentService {
     }
 
     try {
+      // Build participant map to get correct participant names
+      const participantMap = await buildParticipantMap(callId);
+      const participantList = Array.from(participantMap.values())
+        .map(p => `- ${p.username}`)
+        .join('\n');
+
       // Sanitize input to prevent injection attacks
       const sanitizedTranscript = sanitizeInput(transcript);
       const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
 
-      let prompt = DETAILED_SUMMARY_PROMPT.replace('{transcript}', sanitizedTranscript);
+      let prompt = DETAILED_SUMMARY_PROMPT
+        .replace('{participants}', participantList || '- No participants found')
+        .replace('{transcript}', sanitizedTranscript);
 
       if (sanitizedCustomPrompt) {
         prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this summary. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
@@ -660,7 +752,8 @@ export class CallDocumentService {
     createdByUserId: string,
     conversationId: string,
     channelId: string,
-    callStartedAt: Date
+    callStartedAt: Date,
+    callCreatorUserId: string
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -683,14 +776,24 @@ export class CallDocumentService {
           title = `Call Summary: ${primaryFocusMatch[1].trim()}`;
         }
       }
-      const content = convertMarkdownToBlockNote(markdownSummary);
+
+      // Build participant map for mention resolution
+      const participantMap = await buildParticipantMap(callId);
+      logger.info(`[CallDocumentService] Built participant map with ${participantMap.size} participants for mentions`);
+
+      // Convert markdown to BlockNote with mention support
+      // mentionedUserIds are collected during the same pass — no second scan needed
+      const { blocks: content, mentionedUserIds } = await convertMarkdownToBlockNote(markdownSummary, participantMap);
+
+      // Sanitize content to remove undefined values for Prisma
+      const sanitizedContent = sanitizeBlockNoteContent(content);
 
       // Create canvas
       await prisma.canvas.create({
         data: {
           id: canvasId,
           title,
-          content: content as any,
+          content: sanitizedContent as any,
           channelId,
           createdBy: createdByUserId,
           viewAccessId,
@@ -707,23 +810,46 @@ export class CallDocumentService {
             conversationId,
             isAiGenerated: true,
             generatedAt: now.toISOString(),
+            mentionedUserIds, // Store mentioned users for side effect handler
           },
         },
       });
 
-      // Add creator as OWNER
+      // Add Xyne Automatic bot as OWNER
       await prisma.canvasParticipant.create({
         data: {
           id: participantId,
           canvasId,
           userId: createdByUserId,
-          role: 'OWNER',
+          role: CanvasRole.OWNER,
           joinedAt: now,
           updatedAt: now,
         },
       });
 
-      logger.info(`[CallDocumentService] Created detailed summary canvas ${canvasId} for call ${callId}`);
+      // Add call creator as OWNER
+      await prisma.canvasParticipant.create({
+        data: {
+          id: uuidv4(),
+          canvasId,
+          userId: callCreatorUserId,
+          role: CanvasRole.OWNER,
+          joinedAt: now,
+          updatedAt: now,
+        },
+      });
+
+      logger.info(`[CallDocumentService] Created detailed summary canvas ${canvasId} for call ${callId} with Xyne Automatic and call creator as owners`);
+
+      // Manually call canvas handler for activities and notifications
+      // (Canvas is created via Prisma, not Zero mutator, so handler won't auto-trigger)
+      const canvasHandler = new CanvasSideEffectHandler({ userID: createdByUserId });
+      canvasHandler.onInsert({
+        entityId: canvasId,
+        entityType: 'canvases',
+        operation: 'insert'
+      }).catch(err => logger.error('[CallDocumentService] Canvas side-effect handler error:', err));
+
       return viewAccessId;
     } catch (error) {
       logger.error('[CallDocumentService] Failed to create detailed summary canvas:', error);
@@ -958,7 +1084,7 @@ A comprehensive detailed summary has been generated from this call.
   ): Promise<{ success: boolean; canvasUrl?: string; error?: string }> {
     try {
       // 1. Generate detailed summary markdown
-      const detailedSummaryMarkdown = await this.generateDetailedSummary(transcript, customPrompt);
+      const detailedSummaryMarkdown = await this.generateDetailedSummary(transcript, callId, customPrompt);
       if (!detailedSummaryMarkdown) {
         return { success: false, error: 'Failed to generate detailed summary' };
       }
@@ -987,7 +1113,8 @@ A comprehensive detailed summary has been generated from this call.
         xyneAutomaticBot.id,
         conversationId,
         conversation.channelId,
-        call.startedAt
+        call.startedAt,
+        call.createdByUserId
       );
       if (!viewAccessId) {
         return { success: false, error: 'Failed to create detailed summary canvas' };

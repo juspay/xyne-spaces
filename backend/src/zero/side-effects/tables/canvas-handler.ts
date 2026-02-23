@@ -1,0 +1,115 @@
+import { ActivityClassification } from '@prisma/client';
+import { db } from '@/database/client';
+import { activityService } from '@/services/activity/activityService';
+import { notificationService } from '@/services/notificationService';
+import { repositories } from '@/database/repositories/index';
+import { logger } from '@/utils/logger';
+import { BaseSideEffectHandler } from '../base-handler';
+import type { SideEffectJobConfig } from '../types';
+
+/**
+ * Handler for canvas-related side effects
+ * Handles activity and notification creation for canvas mentions
+ */
+export class CanvasSideEffectHandler extends BaseSideEffectHandler {
+  /**
+   * Handle canvas insert events to create activities and notifications for mentions
+   */
+  async onInsert(job: SideEffectJobConfig): Promise<void> {
+    const canvasId = job.entityId;
+
+    try {
+      // Get the canvas details
+      const canvas = await db.canvas.findUnique({
+        where: { id: canvasId },
+        select: {
+          id: true,
+          title: true,
+          channelId: true,
+          createdBy: true,
+          metadata: true,
+        },
+      });
+
+      if (!canvas) {
+        logger.warn(`[CanvasSideEffectHandler] Canvas ${canvasId} not found`);
+        return;
+      }
+
+      // Extract mentioned user IDs from metadata
+      const metadata = canvas.metadata as any;
+      const mentionedUserIds: string[] = metadata?.mentionedUserIds || [];
+
+      if (mentionedUserIds.length === 0) {
+        logger.info(`[CanvasSideEffectHandler] No mentions found in canvas ${canvasId}`);
+        return;
+      }
+
+      const createdByUserId = canvas.createdBy;
+
+      // Filter out the creator from recipients
+      const recipientIds = mentionedUserIds.filter((id: string) => id !== createdByUserId);
+
+      if (recipientIds.length === 0) {
+        logger.info(`[CanvasSideEffectHandler] No recipients to notify for canvas ${canvasId}`);
+        return;
+      }
+
+      logger.info(`[CanvasSideEffectHandler] Sending mention notifications to ${recipientIds.length} users for canvas ${canvasId}`);
+
+      // Get sender name (bot name)
+      const bot = await repositories.users.findById(createdByUserId);
+      const senderName = bot?.name || 'Xyne Automatic';
+
+      // Get channel name if canvas is in a channel
+      let channelName: string | undefined;
+      if (canvas.channelId) {
+        const channel = await db.channel.findUnique({
+          where: { id: canvas.channelId },
+          select: { name: true },
+        });
+        channelName = channel?.name || undefined;
+      }
+
+      // Create activity entries for activity tab
+      const activities = recipientIds.map(userId => ({
+        userId,
+        actorId: createdByUserId,
+        actorAction: 'mentioned_user', // AI mentions are always direct mentions (not group mentions)
+        actionSource: 'canvas' as const,
+        actionSourceId: canvasId,
+        channelId: canvas.channelId || undefined,
+        canvasId: canvasId,
+        blockId: undefined, // no specific blockId for AI-generated content
+        classification: ActivityClassification.PENDING,
+      }));
+
+      logger.info(`[CanvasSideEffectHandler] Creating ${activities.length} activity entries for canvas mentions`, {
+        canvasId,
+        recipientIds,
+        activities: activities.map(a => ({ userId: a.userId, actorAction: a.actorAction, canvasId: a.canvasId })),
+      });
+
+      // Create activities and send notifications (fire and forget - don't block canvas creation)
+      Promise.all([
+        activityService.createActivities(activities),
+        notificationService.createCanvasMentionNotifications(
+          recipientIds,
+          canvasId,
+          canvas.title,
+          createdByUserId,
+          senderName,
+          channelName,
+          undefined // no specific blockId for AI-generated content
+        ),
+      ]).then(() => {
+        logger.info(`[CanvasSideEffectHandler] Successfully created activities and notifications for canvas ${canvasId}`);
+      }).catch(error => {
+        logger.error('[CanvasSideEffectHandler] Failed to create activities or send mention notifications:', error);
+      });
+    } catch (error) {
+      logger.error(`[CanvasSideEffectHandler] Failed to handle canvas insert:`, error);
+      // Don't throw - we don't want to fail the main canvas creation
+    }
+  }
+}

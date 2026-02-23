@@ -139,6 +139,20 @@ export class CallRepository {
   }
 
   /**
+   * Get all participants for a call
+   */
+  async findParticipants(callId: string): Promise<Array<{ userId: string }>> {
+    return await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        callId,
+      },
+      select: {
+        userId: true,
+      },
+    });
+  }
+
+  /**
    * Get up to 3 participants who joined the call (with user names) and total count
    * Now uses the smaller utility methods with transaction support
    * Requires a transaction client for atomic operations
@@ -547,6 +561,42 @@ export class CallRepository {
 
       return { call, invitedParticipantIds };
     });
+  }
+
+  /**
+   * Get all participants for a call with their user details
+   * Used for building mention maps in documents
+   */
+  async getCallParticipantsWithUserDetails(
+    callExternalId: string
+  ): Promise<Array<{ userId: string; userName: string; userEmail: string; userPicture: string | null }>> {
+    // Get call by external ID
+    const call = await this.findByExternalId(callExternalId);
+    if (!call) {
+      return [];
+    }
+
+    // Get all call participants using repository method
+    const callParticipants = await this.findParticipants(call.id);
+
+    // Get user IDs
+    const userIds = callParticipants.map(p => p.userId);
+
+    if (userIds.length === 0) {
+      return [];
+    }
+
+    // Batch fetch all user details using repository method
+    const users = await repositories.users.findMany({
+      where: { id: { in: userIds } },
+    });
+
+    return users.map(user => ({
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      userPicture: user.picture,
+    }));
   }
 
 }
