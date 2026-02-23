@@ -191,9 +191,8 @@ const ConversationPannel = ({
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const draft = useDraft(channelId);
-  const draftRef = useRef(draft);
-
+  const draft = useDraft(channelId, null);
+  const draftRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
@@ -249,7 +248,7 @@ const ConversationPannel = ({
         }),
         timestamp: Date.now(),
         draftMessageId: uuidv4(),
-        draftMessage: draftRef.current?.html || '',
+        draftMessage: draftRef.current || '',
       };
 
       void zero.mutate(mutators.channel.markChannelAsViewed(payload));

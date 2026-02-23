@@ -732,6 +732,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               onEmojiSelect={handleEmojiSelect}
               hideSendButton={hideSendButton}
               showAttachButton={!!features.fileAttachments}
+              attachmentPreviewComponent={
+                features.fileAttachments && allAttachments.length > 0 ? (
+                  <div className='px-3 pb-2 flex flex-wrap gap-3'>
+                    {allAttachments.map(({ attachmentId, file }, index) => (
+                      <AttachmentPreview
+                        key={`file-${attachmentId}-${index}`}
+                        file={file}
+                        onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
+                        onPreview={() => handlePreview(file)}
+                        isUploading={false}
+                      />
+                    ))}
+                  </div>
+                ) : undefined
+              }
             />
           ) : (
             <div

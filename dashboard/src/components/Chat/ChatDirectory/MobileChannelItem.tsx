@@ -33,8 +33,7 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
   const currentUserID = context.userID;
 
   // Get draft from state machine (reactive updates)
-  const draft = useDraft(channel.id);
-  const draftMessage = draft?.text?.trim() || undefined;
+  const draftMessage = useDraft(channel.id, null);
 
   const isActive = activeChannelId === channel.id;
   const isPrivate = channel.visibility === ChannelVisibility.PRIVATE;

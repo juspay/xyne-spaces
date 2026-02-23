@@ -40,8 +40,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
 
   const { isMobile } = usePlatform();
 
-  const draft = useDraft(channel.id);
-  const draftMessage = draft?.text?.trim() || undefined;
+  const draftMessage = useDraft(channel.id, null);
   const isActive = activeChannelId === channel.id;
   const isPrivate = channel.visibility === ChannelVisibility.PRIVATE;
   const isDM = isDMChannel(channel.scopeType);

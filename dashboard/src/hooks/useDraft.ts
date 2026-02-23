@@ -37,7 +37,7 @@ async function getImageDimensions(file: File): Promise<{ width: number; height: 
   });
 }
 
-export function useDraft(lookupId: string) {
+export function useDraftFromLocal(lookupId: string) {
   return useSelector(stateMachineActor, state => state.context.drafts[lookupId]);
 }
 
@@ -57,6 +57,23 @@ export function useDraftFromDB(channelId: string, conversationId: string | null)
   );
 }
 
+export function useDraft(channelId: string, conversationId: string | null) {
+  const draftFromLocal = useSelector(
+    stateMachineActor,
+    state => state.context.drafts[conversationId ?? channelId],
+  );
+  const draftFromDB = useSelector(stateMachineActor, state =>
+    state.context.draftMessages.find(
+      draft => draft.channelId === channelId && draft.conversationId === conversationId,
+    ),
+  );
+
+  return useMemo(() => {
+    return draftFromDB && draftFromLocal && draftFromLocal.updatedAt > draftFromDB.updatedAt
+      ? draftFromLocal.html
+      : draftFromDB?.content;
+  }, [draftFromLocal, draftFromDB]);
+}
 export function useDraftAttachments() {
   const zero = useZero();
   const draftMessages = useSelector(stateMachineActor, state => state.context.draftMessages);
