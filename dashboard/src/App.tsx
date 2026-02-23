@@ -17,6 +17,7 @@ import { CodeServerProvider } from './contexts/CodeServerContext';
 import { VSCodeProvider } from './contexts/VSCodeContext';
 import { WorkflowVSCodeOverlay } from './components/Workflows/VSCodePanel/WorkflowVSCodeOverlay';
 import { initializeTelemetry } from './services/otel/init';
+import { KeyboardProvider } from './contexts/KeyboardContext';
 import { TRUSTED_ORIGINS } from './config';
 
 const App = (): ReactElement => {
@@ -75,55 +76,58 @@ const App = (): ReactElement => {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <AnalyticsProvider>
-            <CodeServerProvider>
-              <VSCodeProvider>
-                <ThemeProvider
-                  foundationTokens={XYNE_FOUNDATION_TOKENS}
-                  componentTokens={XYNE_THEME_COMPONENT_TOKENS}
-                >
-                  <ShortcutsProvider>
-                    <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
-                      <RouterProvider router={router}></RouterProvider>
-                    </main>
-                    <Toaster
-                      position='top-right'
-                      richColors
-                      closeButton
-                      toastOptions={{
-                        style: {
-                          alignItems: 'flex-start',
-                          background: '#000000',
-                          color: '#ffffff',
-                          border: '1px solid #27272a',
-                        },
-                        classNames: {
-                          toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',
-                          icon: 'mt-1',
-                          title: '!text-white !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
-                          description: '!text-white !opacity-80',
+        <KeyboardProvider>
+          <AuthProvider>
+            <AnalyticsProvider>
+              <CodeServerProvider>
+                <VSCodeProvider>
+                  <ThemeProvider
+                    foundationTokens={XYNE_FOUNDATION_TOKENS}
+                    componentTokens={XYNE_THEME_COMPONENT_TOKENS}
+                  >
+                    <ShortcutsProvider>
+                      <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
+                        <RouterProvider router={router}></RouterProvider>
+                      </main>
+                      <Toaster
+                        position='top-right'
+                        richColors
+                        closeButton
+                        className='visual-regression-hide'
+                        toastOptions={{
+                          style: {
+                            alignItems: 'flex-start',
+                            background: '#000000',
+                            color: '#ffffff',
+                            border: '1px solid #27272a',
+                          },
+                          classNames: {
+                            toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',
+                            icon: 'mt-1',
+                            title: '!text-white !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
+                            description: '!text-white !opacity-80',
 
-                          actionButton: '!bg-white !text-black hover:!bg-zinc-200 !mt-8',
-                          cancelButton: '!bg-zinc-800 !text-white hover:!bg-zinc-700 !mt-8',
+                            actionButton: '!bg-white !text-black hover:!bg-zinc-200 !mt-8',
+                            cancelButton: '!bg-zinc-800 !text-white hover:!bg-zinc-700 !mt-8',
 
-                          closeButton:
-                            '!absolute !right-3 !top-5 !left-auto !bg-transparent !opacity-100 !text-white hover:!opacity-50 rounded-md z-10',
+                            closeButton:
+                              '!absolute !right-3 !top-5 !left-auto !bg-transparent !opacity-100 !text-white hover:!opacity-50 rounded-md z-10',
 
-                          success: '!text-green-500 !border-green-100',
-                          error: '!text-red-500 !border-red-100',
-                          warning: '!text-yellow-500 !border-yellow-100',
-                          info: '!text-blue-500 !border-blue-100',
-                        },
-                      }}
-                    />
-                    <WorkflowVSCodeOverlay />
-                  </ShortcutsProvider>
-                </ThemeProvider>
-              </VSCodeProvider>
-            </CodeServerProvider>
-          </AnalyticsProvider>
-        </AuthProvider>
+                            success: '!text-green-500 !border-green-100',
+                            error: '!text-red-500 !border-red-100',
+                            warning: '!text-yellow-500 !border-yellow-100',
+                            info: '!text-blue-500 !border-blue-100',
+                          },
+                        }}
+                      />
+                      <WorkflowVSCodeOverlay />
+                    </ShortcutsProvider>
+                  </ThemeProvider>
+                </VSCodeProvider>
+              </CodeServerProvider>
+            </AnalyticsProvider>
+          </AuthProvider>
+        </KeyboardProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   );

@@ -90,6 +90,9 @@ const nativeInboundMessageTypeValues = {
   NATIVE_REQUEST_CALLBACK: 'NATIVE_REQUEST_CALLBACK',
   CLOSE_DRAWER: 'CLOSE_DRAWER',
   GET_CLIENT_SESSION_ID: 'GET_CLIENT_SESSION_ID',
+  // Keyboard events
+  KEYBOARD_OPEN: 'KEYBOARD_OPEN',
+  KEYBOARD_HIDDEN: 'KEYBOARD_HIDDEN',
 } as const;
 
 export type NativeInboundMessageType = keyof typeof nativeInboundMessageTypeValues;
@@ -277,6 +280,9 @@ type ReactNativeInboundPayloadMap = {
   NATIVE_REQUEST_CALLBACK: NativeRequestCallbackPayload;
   GET_CLIENT_SESSION_ID: GetClientSessionIdPayload;
   CLOSE_DRAWER: undefined;
+  // Keyboard events
+  KEYBOARD_OPEN: undefined;
+  KEYBOARD_HIDDEN: undefined;
 };
 
 type ReactNativeOutboundPayloadMap = {
