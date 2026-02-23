@@ -1,3 +1,24 @@
+## [1.56.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.55.1...v1.56.0) (2026-02-23)
+
+
+### Features
+
+* Add user active status and resolve UI issues ([3e643ae](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3e643ae094b856473ad3aa2c826683a43c7a7d47))
+* download transcripts ([8e01ea5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8e01ea5baff0b9f83ca6fc349e211afdbcd83312)), closes [#3336](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3336)
+* Implement Scroll Behavior for Mobile Search and Resolve UI Issues ([79ab836](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/79ab8365593614ed95152647a7ecf7663a531ded))
+* user mention in canvas call summary ([c9b7dbf](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c9b7dbf47b83e1f260f4e304638846910784411a)), closes [#3374](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3374)
+
+
+### Bug Fixes
+
+* : Added log if bitbucket auth missing ([964ca54](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/964ca544e83216db13681d6db72910216ab62082)), closes [#3490](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3490)
+* draft mobile attachment preview fix ([3d35ea2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3d35ea29fd150b4372d75118cc726b1e4a6c7248)), closes [#3506](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3506)
+* fetch nudge-extractor prompt from Langfuse with fallback ([457c0cc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/457c0ccb9ddf2c9c8875814d9ba2b15ccd15500a)), closes [#3452](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3452)
+* group dm count in mobile view and channel search in compose dm pannel ([c1dcc3b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c1dcc3be14b6a42a796f61d18d6082e02749a37b)), closes [#3504](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3504)
+* make-links-tab-backward-compatible ([0b6ced4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0b6ced4606521f5060a6ab9de13c4a01afa840f7)), closes [#3476](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3476)
+* making avatar stack appear without white spaces ([ebc1aac](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ebc1aac7fcd513ba87a03b9dafa5f91895bc0044)), closes [#3507](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3507)
+* search user with name and email and use a rich component ([b050fae](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b050fae017e8253c109ca56aa4d9745968dcfac5)), closes [#3460](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3460)
+
 ## [1.55.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.55.0...v1.55.1) (2026-02-21)
 
 
