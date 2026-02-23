@@ -2,7 +2,7 @@ import { ReactElement, useRef, useState, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Hash, Pencil, Headphones } from 'lucide-react';
 import { ChannelVisibility, Channel } from '@xyne/shared';
-import { isDMChannel } from './ChatDirectory.utils';
+import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
 import { useDraft } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
@@ -58,9 +58,29 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
         !!channel.lastActivityAt &&
         channel.lastActivityAt > status.lastViewedAt);
 
+  /**
+   * Returns the icon for the channel type:
+   * - Group DM: participant count badge
+   * - 1:1 DM: other user's avatar
+   * - Private channel: lock icon
+   * - Public channel: hash icon
+   */
   const getIcon = (): ReactElement => {
-    if (isDM && avatarUserId) {
-      return <Avatar userId={avatarUserId} size='sm' />;
+    if (isGroupDMChannel(channel.scopeType)) {
+      const participantCount = parseDMParticipantIds(channel).length;
+      return (
+        <span className='flex items-center justify-center size-5 rounded-md bg-sidebar-item-hover text-sidebar-secondary-foreground text-[10px] font-medium'>
+          {participantCount}
+        </span>
+      );
+    } else if (isDM && avatarUserId) {
+      return (
+        <Avatar
+          userId={avatarUserId}
+          size='sm'
+          className='rounded-md size-5 flex items-center justify-center'
+        />
+      );
     }
 
     return isPrivate ? <ChatLock color={isActive ? '#1D1E1F' : '#464C53'} /> : <Hash size={12} />;

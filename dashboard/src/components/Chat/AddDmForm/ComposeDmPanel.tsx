@@ -1,7 +1,7 @@
 import { useZero } from '../../../hooks/useZero';
 import { useForm } from '@tanstack/react-form';
 import { useMutation } from '@tanstack/react-query';
-import { User } from '@xyne/shared';
+import { User, ChannelVisibility, ChannelScopeType } from '@xyne/shared';
 import { CircleAlert } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -24,6 +24,7 @@ import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import ChatListV2 from '../ChatList/ChatListV2';
 import { useExistingDmChannel } from './useExistingDmChannel';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
+import { useChannelSearch } from '../../../hooks/useChannels';
 
 export interface CreateDmFormData {
   participants: User[];
@@ -99,12 +100,35 @@ export const ComposeDmPanel: React.FC = () => {
   // Mention search within the compose panel input box
   const { results: mentionResults, searchMentions } = useMentionSearch('');
 
+  // Channel search for # mentions
+  const [channelSearchQuery, setChannelSearchQuery] = useState('');
+  const channelResults = useChannelSearch(channelSearchQuery, 10);
+
   const handleMentionSearch = useCallback(
     (query: string) => {
       searchMentions(query);
     },
     [searchMentions],
   );
+
+  const handleChannelSearch = useCallback((query: string) => {
+    setChannelSearchQuery(query);
+  }, []);
+
+  const channelItems = useMemo(() => {
+    if (!channelResults || channelResults.length === 0) return [];
+
+    // Filter channels to only show DEFAULT scope (exclude DM, GROUP_DM, TICKET, DOCUMENT)
+    return channelResults
+      .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
+      .map(channel => ({
+        id: channel.id,
+        name: channel.name,
+        isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+        ...(channel.description && { description: channel.description }),
+        hasAccess: true,
+      }));
+  }, [channelResults]);
 
   const existingDmChannel = useExistingDmChannel(selectedUsers);
 
@@ -254,7 +278,7 @@ export const ComposeDmPanel: React.FC = () => {
               name='message'
               validators={{
                 onChange: ({ value }) => {
-                  if (value.length > 1000) return 'Message must be 1000 characters or less';
+                  if (getTextLength(value) > 1000) return 'Message must be 1000 characters or less';
                   return undefined;
                 },
               }}
@@ -267,12 +291,14 @@ export const ComposeDmPanel: React.FC = () => {
                     value={field.state.value}
                     placeholder='Say something to start the conversation...'
                     showTypingIndicator={false}
-                    disabled={selectedUsers.length === 0 || selectedUsers.length > 9}
                     mentionItems={mentionResults}
                     onMentionSearch={handleMentionSearch}
+                    channelItems={channelItems}
+                    onChannelSearch={handleChannelSearch}
                     onContentChange={(html: string) => {
                       field.handleChange(html);
                     }}
+                    disabled={selectedUsers.length === 0 || selectedUsers.length > 9}
                     onSendMessage={async () => {
                       if (form.state.isSubmitting) return;
                       await form.handleSubmit();

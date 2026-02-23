@@ -1070,7 +1070,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             disabled || isSending || (!content && allAttachments.length === 0)
                           }
                           className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
-                            content || allAttachments.length > 0
+                            (content || allAttachments.length > 0) && !disabled
                               ? 'bg-primary text-white hover:bg-primary/90'
                               : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-80'
                           }`}
