@@ -21,7 +21,7 @@ import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import { websocketService } from '../../../services/clients/socketClient';
 import { processMessageForSending } from './ChatInput.utils';
-import { useDraft, saveDraft, removeDraft, useDraftFromDB } from '../../../hooks/useDraft';
+import { saveDraft, useDraft } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -253,8 +253,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
 
     // Subscribe to draft from state machine
     const lookupId = conversationId ?? channelId;
-    const draftFromLocal = useDraft(conversationId ?? channelId);
-    const draftFromDB = useDraftFromDB(channelId, conversationId ?? null);
+    const draft = useDraft(channelId, conversationId ?? null);
 
     // Load draft for current channel on mount (only if not editing a message)
     const editorValue = React.useMemo(() => {
@@ -265,12 +264,10 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       }
       // Load draft for this channel if not editing
       if (!messageId && !initialContent) {
-        return draftFromLocal && draftFromDB && draftFromLocal?.updatedAt > draftFromDB?.updatedAt
-          ? draftFromLocal?.html
-          : draftFromDB?.content;
+        return draft;
       }
       return undefined;
-    }, [initialContent, messageId, messagesData, draftFromLocal]);
+    }, [initialContent, messageId, messagesData, draft]);
 
     const { displayName: channelName } = useChannelDisplayName(channel, context.userID);
     const placeholderText =
@@ -322,7 +319,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
           if (text.trim()) {
             saveDraft(lookupId, processedHtml, text);
           } else {
-            removeDraft(lookupId);
+            saveDraft(lookupId, '', '');
           }
         } catch {
           // Unable to save draft
@@ -394,7 +391,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             });
           }
           // Clear draft after sending
-          removeDraft(lookupId);
+          saveDraft(lookupId, '', '');
         } else {
           try {
             const messageCreatedAt = Date.now();
@@ -434,7 +431,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             });
           }
           // Clear draft after sending
-          removeDraft(lookupId);
+          saveDraft(lookupId, '', '');
         }
       },
       [

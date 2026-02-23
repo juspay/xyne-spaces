@@ -40,7 +40,7 @@ export const ChatListItem = ({
       : null;
 
   // Hooks must be called unconditionally
-  const draft = useDraft(conversation?.conversationId ?? '');
+  const draft = useDraft(channelId, conversation?.conversationId ?? '');
 
   // Render date separator
   if (item.type === 'date-separator') {
@@ -79,7 +79,7 @@ export const ChatListItem = ({
         channelScopeType={channelScopeType}
         showAvatar={showAvatar}
         conversation={conversation}
-        draft={draft}
+        {...(draft && { draft })}
         replies={{
           replyCount: conversation.replyCount,
           lastActivityAt: conversation.lastActivityAt,

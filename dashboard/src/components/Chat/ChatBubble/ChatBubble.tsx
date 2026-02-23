@@ -29,7 +29,6 @@ import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import { cn } from '../../../utils/classNames';
 import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUtils';
-import { DraftMessage } from '../ChatDirectory/ChatDirectory.types';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import ReplyLayout from '../ReplyLayout/ReplyLayout';
@@ -76,7 +75,7 @@ interface ChatBubbleProps {
   channelScopeType?: ChannelScopeType | undefined;
   replies?: ThreadData;
   showAvatar?: boolean;
-  draft?: DraftMessage | undefined;
+  draft?: string | undefined;
   conversation?: ConversationWithTicket;
   variant?: 'default' | 'pinned';
   context?: 'channel' | 'thread';
@@ -830,7 +829,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 }
               : replies
           }
-          draft={draft?.text}
+          draft={draft}
           isThreadOpen={isThreadOpen}
           isMe={message.senderId === user?.id}
           showInChannel={message.showInChannel}

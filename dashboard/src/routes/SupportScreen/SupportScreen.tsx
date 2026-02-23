@@ -13,7 +13,7 @@ import {
   List,
   Store,
 } from 'lucide-react';
-import React, { ReactElement, useMemo, useState, useEffect, useCallback } from 'react';
+import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '../../utils/classNames';
@@ -512,7 +512,11 @@ const SupportTicketDetail = (): ReactElement => {
   // Subscribe to channel for real-time updates
   useChannelSubscription(channelId, conversationId ? [conversationId] : []);
 
-  const draft = useDraft(conversationId || '');
+  const draft = useDraft(channelId, conversationId ?? null);
+  const draftRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   // Drag and drop functionality
   const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(conversationId || '');
@@ -526,13 +530,13 @@ const SupportTicketDetail = (): ReactElement => {
           mutators.activities.markThreadActivitiesAsRead({
             conversationId,
             timestamp: Date.now(),
-            draftMessage: draft?.html || '',
+            draftMessage: draftRef.current || '',
             draftMessageId: uuidv4(),
           }),
         );
       }
     };
-  }, [conversationId, zero]);
+  }, [conversationId]);
 
   // Check if any message has a ticketId in metadata
   const hasTicketInMessages = useMemo(() => {

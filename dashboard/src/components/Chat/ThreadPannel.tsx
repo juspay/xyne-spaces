@@ -268,7 +268,11 @@ export const ThreadMessages = ({
   const isUserMember = !!channelParticipation;
 
   const zero = useZero();
-  const draft = useDraft(derivedConversationId);
+  const draft = useDraft(derivedChannelId, derivedConversationId);
+  const draftRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   useEffect(() => {
     return () => {
@@ -276,14 +280,14 @@ export const ThreadMessages = ({
         void zero.mutate(
           mutators.activities.markThreadActivitiesAsRead({
             conversationId: derivedConversationId,
-            draftMessage: draft?.html || '',
+            draftMessage: draftRef.current || '',
             draftMessageId: uuidv4(),
             timestamp: Date.now(),
           }),
         );
       }
     };
-  }, [derivedConversationId, zero, draft]);
+  }, [derivedConversationId]);
 
   // Check if this is a ticket thread
   const isTicketThread = useMemo(() => {
