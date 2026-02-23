@@ -1,11 +1,12 @@
 import React from 'react';
-import { Circle, CircleDashed } from 'lucide-react';
+import { Circle } from 'lucide-react';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useSortable } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
 import { Virtuoso } from 'react-virtuoso';
 import type { Ticket, TicketTag } from '@xyne/shared';
+import { TicketStatusV2 } from '@xyne/shared';
 import type {
   Stage,
   SortableTicketCardProps,
@@ -17,8 +18,6 @@ import { CollapseIcon } from '../../../assets/icons/CollapseIcon';
 import { ExpandIcon } from '../../../assets/icons/ExpandIcon';
 import { cn } from '../../../utils/classNames';
 import { StatusOptions } from '../TicketTable/TicketTableHelper';
-import { StageCircleIcon } from '../../../assets/icons/StageIcon';
-import InProgressIcon from '../../../assets/icons/InProgressIcon';
 
 const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   ticket,
@@ -67,26 +66,15 @@ interface KanbanColumnsProps {
   visibleColumns?: Set<string> | undefined;
 }
 
-export const KanbanIcon = ({ stage }: { stage: Stage }) => {
-  const stageId = stage.id.toLowerCase();
-  const stageName = stage.name.toLowerCase();
-
-  const statusOption = StatusOptions.find(opt => opt.label.toLowerCase() === stageName);
+export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) => {
+  if (!status) {
+    return <Circle className='w-4 h-4 text-gray-400' />;
+  }
+  const statusOption = StatusOptions.find(opt => (opt.value as TicketStatusV2) === status);
   if (statusOption) {
     return <>{statusOption.icon}</>;
   }
-
-  if (['done', 'completed', 'resolved'].includes(stageId)) {
-    return <StageCircleIcon size={14} />;
-  }
-  if (stageId === 'to_do' || stageName === 'to do') {
-    return <CircleDashed className='w-4 h-4 text-orange-500' />;
-  }
-  if (stageId === 'in_progress' || stageName === 'in progress') {
-    return <InProgressIcon className='w-4 h-4 text-blue-500' />;
-  }
-
-  return <Circle className='w-4 h-4' style={{ color: stage.color }} />;
+  return <Circle className='w-4 h-4 text-gray-400' />;
 };
 
 export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
@@ -137,7 +125,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                   /* EXPANDED HEADER */
                   <>
                     <div className='flex items-center gap-2 min-w-0'>
-                      <KanbanIcon stage={stage} />
+                      <KanbanIcon status={stage.defaultTicketStatusV2} />
                       <h3 className='text-xs font-medium truncate  uppercase'>{stage.name}</h3>
                       <span className='text-xs px-2 py-0.5 rounded-full'>
                         {stageTickets.length}
@@ -169,7 +157,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     tabIndex={0}
                   >
                     <div className='flex flex-col items-center gap-2 w-full h-full'>
-                      <KanbanIcon stage={stage} />
+                      <KanbanIcon status={stage.defaultTicketStatusV2} />
                       <h3
                         className={cn(
                           'text-sm font-medium whitespace-nowrap w-fit',

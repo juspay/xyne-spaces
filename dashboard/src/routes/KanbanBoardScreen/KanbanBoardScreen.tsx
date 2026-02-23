@@ -194,7 +194,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const availableColumns = [
     { key: 'assignee', label: 'Assignee', icon: <User className='h-4 w-4' /> },
     { key: 'dueDate', label: 'Due Date', icon: <Calendar className='h-4 w-4' /> },
-    { key: 'status', label: 'Status', icon: <CircleCheckBig className='h-4 w-4' /> },
+    { key: 'status', label: 'Status Category', icon: <CircleCheckBig className='h-4 w-4' /> },
     { key: 'priority', label: 'Priority', icon: <Vote className='h-4 w-4' /> },
     { key: 'tags', label: 'Tags', icon: <Tag className='h-4 w-4' /> },
     { key: 'stage', label: 'Sub-status', icon: <CircleCheckBig className='h-4 w-4' /> },
@@ -398,7 +398,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       },
       {
         value: 'status' as const,
-        label: 'Group by: Status',
+        label: 'Group by: Status Category',
         icon: <CircleCheckBig className='h-4 w-4' />,
       },
       {
@@ -849,6 +849,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return Array.from(uniqueTags).sort();
   }, [allTags]);
 
+  const availableStages = useMemo(() => {
+    if (!stages || stages.length === 0) return undefined;
+    return stages.map(stage => ({
+      name: stage.name,
+      status: stage.defaultTicketStatusV2,
+    }));
+  }, [stages]);
+
   useEffect(() => {
     if (!isDraggingRef.current && filteredTickets) {
       const ids = filteredTickets.map(t => t.id);
@@ -1135,6 +1143,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               showBoardsFilter={!!channelId || isMyTicketsView}
               selectedBoard={selectedBoard}
               availableTags={availableTags}
+              availableStages={availableStages}
               hideAssigneeFilter={viewMode === 'my-tickets' ? true : false}
               formMappings={
                 filters.boards?.length === 1 && allBoardsProject

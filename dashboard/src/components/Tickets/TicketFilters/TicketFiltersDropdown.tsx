@@ -15,6 +15,7 @@ import {
   Hash,
   ToggleLeft,
   X,
+  Circle,
 } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import {
@@ -25,6 +26,7 @@ import {
   BoardSubmenu,
   TagsSubmenu,
   DynamicFieldSubmenu,
+  StagesSubmenu,
 } from './Submenus';
 import { TicketFiltersProps, DateRange } from './types';
 import type { TicketFilters } from './types';
@@ -54,6 +56,7 @@ const FILTER_MENU_ITEMS: FilterMenuItem[] = [
   { id: 'dueDate', label: 'Due Date', icon: Calendar, filterKey: 'dueDate' },
   { id: 'createdAt', label: 'Created At', icon: Calendar, filterKey: 'createdAt' },
   { id: 'tags', label: 'Tags', icon: Tag, filterKey: 'tags' },
+  { id: 'stages', label: 'Stages', icon: Circle, filterKey: 'stages' },
 ];
 
 export const TicketFiltersDropdown = ({
@@ -69,6 +72,7 @@ export const TicketFiltersDropdown = ({
   showBoardsFilter = false,
   selectedBoard,
   availableTags,
+  availableStages,
   hideAssigneeFilter = false,
   formMappings,
   onSearchChange,
@@ -304,6 +308,7 @@ export const TicketFiltersDropdown = ({
     if (filters.dueDateStart !== undefined || filters.dueDateEnd !== undefined) count++;
     if (filters.createdDateStart !== undefined || filters.createdDateEnd !== undefined) count++;
     if (filters.tags?.length) count++;
+    if (filters.stages?.length) count++;
     if (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) {
       count += Object.keys(filters.dynamicFields).length;
     }
@@ -428,6 +433,14 @@ export const TicketFiltersDropdown = ({
             selectedTags={filters.tags || []}
             onChange={(tags: string[]) => handleFilterChange('tags', tags)}
             availableTags={availableTags || []}
+          />
+        );
+      case 'stages':
+        return (
+          <StagesSubmenu
+            selectedStages={filters.stages || []}
+            onChange={(stages: string[]) => handleFilterChange('stages', stages)}
+            availableStages={availableStages ?? []}
           />
         );
       default:
@@ -611,7 +624,11 @@ export const TicketFiltersDropdown = ({
           >
             <div className='py-1'>
               {allFilterItems
-                .filter(item => item.id !== 'boards' || showBoardsFilter)
+                .filter(
+                  item =>
+                    (item.id !== 'boards' || showBoardsFilter) &&
+                    (item.id !== 'stages' || selectedBoards.length > 0),
+                )
                 .map(item => {
                   const Icon = item.icon;
                   const isActive = activeSubmenu === item.id;
