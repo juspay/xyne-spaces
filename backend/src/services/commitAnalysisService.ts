@@ -92,7 +92,6 @@ export class CommitAnalysisService {
       logger.info('[CommitAnalysisService] Successfully initialized all repositories');
     } catch (error) {
       logger.error('[CommitAnalysisService] Failed to initialize repositories:', error);
-      throw new Error('CommitAnalysisService initialization failed');
     }
 
   }

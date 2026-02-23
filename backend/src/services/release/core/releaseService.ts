@@ -67,7 +67,6 @@ export class ReleaseService {
 			logger.info('[ReleaseService] Successfully initialized all repositories');
 		} catch (error) {
 			logger.error('[ReleaseService] Failed to initialize repositories:', error);
-			throw new Error('ReleaseService initialization failed');
 		}
 	}
 

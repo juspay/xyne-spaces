@@ -6,7 +6,6 @@ import { ApplicationRepository } from '@/database/repositories/applicationReposi
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { AppError } from '@/middleware/errorHandler';
 import { db } from '@/database/client';
 import { conversationService } from '@/services/conversationService';
 import { formatCommitAnalysisMessage } from '@/utils/commitAnalysisMessageFormatter';
@@ -72,7 +71,6 @@ export class CommitAnalysisController {
       this.initializeServices();
     } catch (error) {
       logger.error('Failed to initialize CommitAnalysisController services:', error);
-      throw new AppError('Service initialization failed', 503);
     }
   }
 
@@ -98,10 +96,7 @@ export class CommitAnalysisController {
       Boolean(bitbucketConfig.apiUsername) && Boolean(bitbucketConfig.password);
 
     if (!hasToken && !hasBasicAuth) {
-      throw new AppError(
-        'Bitbucket integration not configured. Please provide either username/password or token.',
-        503
-      );
+      logger.info("Bitbucket integration not configured. Please provide either username/password or token.")
     }
 
     const configObj: BitbucketConfig = {

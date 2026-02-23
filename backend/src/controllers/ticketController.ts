@@ -42,7 +42,7 @@ export class TicketController {
   private channelParticipantRepository: ChannelParticipantRepository;
   private messageRepository: MessageRepository;
   private messageAttachmentRepository: MessageAttachmentRepository;
-  private commitAnalysisController: CommitAnalysisController;
+  private commitAnalysisController: CommitAnalysisController | null = null;
 
   constructor() {
     this.ticketRepository = new TicketRepository();
@@ -52,7 +52,13 @@ export class TicketController {
     this.channelParticipantRepository = new ChannelParticipantRepository();
     this.messageRepository = new MessageRepository();
     this.messageAttachmentRepository = new MessageAttachmentRepository();
-    this.commitAnalysisController = new CommitAnalysisController();
+
+    const bitbucketConfig = config.bitbucket;
+    const hasToken = Boolean(bitbucketConfig.apiToken);
+    const hasBasicAuth = Boolean(bitbucketConfig.apiUsername) && Boolean(bitbucketConfig.password);
+    if (hasToken || hasBasicAuth) {
+      this.commitAnalysisController = new CommitAnalysisController();
+    }
   }
 
   /**
@@ -479,14 +485,14 @@ export class TicketController {
         if (draftAttachmentIds && draftAttachmentIds.length > 0) {
           // Validate draft attachments exist and belong to the user
           const draftAttachments = await this.messageAttachmentRepository.findByIds(draftAttachmentIds);
-          
+
           if (draftAttachments.length !== draftAttachmentIds.length) {
             logger.warn(`[Ticket Creation] Some draft attachments not found: requested ${draftAttachmentIds.length}, found ${draftAttachments.length}`);
           }
 
           // Validate all are DRAFT attachments owned by the user
           const validDraftAttachmentIds: string[] = draftAttachments
-            .filter((attachment: MessageAttachment) => 
+            .filter((attachment: MessageAttachment) =>
               attachment.entityType === AttachmentEntityType.DRAFT &&
               attachment.uploadedByUserId === userId
             )
@@ -499,7 +505,7 @@ export class TicketController {
               AttachmentEntityType.TICKET,
               ticket.id
             );
-            
+
             // Also update conversationId to associate with the new conversation
             await tx.messageAttachment.updateMany({
               where: {
@@ -523,7 +529,7 @@ export class TicketController {
                 },
               });
             }
-            
+
             logger.info(`[Ticket Creation] Transferred ${validDraftAttachmentIds.length} draft attachments to ticket ${ticket.id}`);
           }
         }
@@ -694,7 +700,7 @@ export class TicketController {
       const newCommitId = dynamicFields?.['newCommitId'] as string;
       const branch = dynamicFields?.['branch'] as string;
 
-      if (isReleaseTicket(ticket.ticketType as BaseTicketType) && deployedCommitId && newCommitId && branch) {
+      if (this.commitAnalysisController && isReleaseTicket(ticket.ticketType as BaseTicketType) && deployedCommitId && newCommitId && branch) {
         // TODO: Replace hardcoded values with actual configuration from project/board settings
         const workspace = 'XYNE';
         const repoSlug = 'xyne-spaces';
