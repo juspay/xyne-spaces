@@ -149,17 +149,19 @@ const MobileChatDirectory = ({
           {starred.length > 0 && (
             <Accordion.Item value={ChannelCategory.STARRED}>
               <Accordion.Trigger asChild>
-                <button className='group flex items-center justify-between w-full py-[8px]'>
-                  <span className='font-medium text-[14px] text-[#a0a7ab] leading-[1.2] tracking-[-0.14px] text-left truncate block'>
-                    Starred
-                  </span>
-                  <span className='size-[20px] flex items-center justify-center shrink-0'>
-                    <ChevronRight
-                      strokeWidth={2.33}
-                      className='size-4 transition-transform duration-200 group-data-[state=open]:rotate-90'
-                    />
-                  </span>
-                </button>
+                <div className='group flex items-center justify-between w-full py-[8px]'>
+                  <button className='flex items-center'>
+                    <span className='font-medium text-[14px] text-[#a0a7ab] leading-[1.2] tracking-[-0.14px] text-left truncate block'>
+                      Starred
+                    </span>
+                    <span className='size-[20px] flex items-center justify-center shrink-0'>
+                      <ChevronRight
+                        strokeWidth={2.33}
+                        className='size-4 transition-transform duration-200 group-data-[state=open]:rotate-90'
+                      />
+                    </span>
+                  </button>
+                </div>
               </Accordion.Trigger>
               <Accordion.Content>
                 {starred.map(channel => (

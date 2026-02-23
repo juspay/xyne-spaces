@@ -226,7 +226,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                 aria-label='Text formatting'
                 onMouseDown={e => e.preventDefault()}
               >
-                <span className='text-gray-600 font-semibold text-base'>Aa</span>
+                <span className='text-gray-600 font-semibold text-xl'>Aa</span>
               </button>
 
               {/* Emoji Picker Button */}
@@ -267,7 +267,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   aria-label='Mention user'
                   onMouseDown={e => e.preventDefault()}
                 >
-                  <AtSign className='h-4 w-4 text-gray-600' />
+                  <AtSign className='h-5 w-5 text-gray-600' />
                 </button>
               )}
 
@@ -283,7 +283,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   aria-label='Mention channel'
                   onMouseDown={e => e.preventDefault()}
                 >
-                  <span className='text-gray-600 font-semibold text-base'>#</span>
+                  <span className='text-gray-600 font-semibold text-xl'>#</span>
                 </button>
               )}
 

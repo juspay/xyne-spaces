@@ -1,5 +1,3 @@
-// src/components/Chat/DirectMessages/DmListItem.tsx
-
 import { ReactElement, KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -18,6 +16,8 @@ import { queries } from '../../../zero/queries';
 import { formatElapsedTime } from '../../../utils/dateUtils';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useUser } from '../../../hooks/useUsers';
+import { StatusIndicator } from '../../ui/StatusIndicator';
 
 interface DmListItemProps {
   channel: Channel;
@@ -50,6 +50,10 @@ export const DmListItem = ({
   const lastMessage = latestConversation?.initialMessage;
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
+
+  // Get user for status (only for 1-on-1 DMs)
+  const isDM = channel.scopeType === ChannelScopeType.DM;
+  const targetUser = useUser(isDM && avatarUserId ? avatarUserId : '');
 
   // 3. Format elapsed time (now, 5m, 2h, 3d, 1 month, 2 years, etc.)
   const formatTime = (timestamp?: number): string => {
@@ -106,12 +110,23 @@ export const DmListItem = ({
         onClick={handleClick}
         aria-label={`Open conversation with ${displayName}`}
       >
-        <DMItemAvatar userId={avatarUserId || null} />
+        <DMItemAvatar userId={avatarUserId || null} scopeType={channel.scopeType} />
         <div className='w-full flex-1 min-w-0 space-y-1'>
           <div className='w-full flex items-start justify-between gap-3 min-w-0'>
-            <p className='text-[16px] tracking-[-0.32px] text-[#202020] font-medium min-w-0 line-clamp-2'>
-              {displayName}
-            </p>
+            <div className='flex items-center gap-1.5 min-w-0 flex-1'>
+              <p className='text-[16px] tracking-[-0.32px] text-[#202020] font-medium min-w-0 truncate'>
+                {displayName}
+              </p>
+              {isDM && (
+                <StatusIndicator
+                  statusEmoji={targetUser?.presenceStatus?.statusEmoji}
+                  statusContent={targetUser?.presenceStatus?.statusContent}
+                  statusExpiryAt={targetUser?.presenceStatus?.statusExpiryAt}
+                  size='sm'
+                  className='text-[14px]'
+                />
+              )}
+            </div>
             <p className='shrink-0 text-[14px] tracking-[-0.28px] text-[#BBB]'>
               {formatTime(lastMessage?.createdAt)}
             </p>
@@ -164,9 +179,20 @@ export const DmListItem = ({
         <div className='flex flex-1 flex-col justify-center min-w-0 gap-[4px]'>
           {/* Top Row: Name and Time */}
           <div className='flex items-center justify-between gap-[4px] w-full'>
-            <h4 className="font-['Inter'] font-semibold text-[16px] text-[#181b1d] tracking-[-0.32px] truncate leading-[1.2]">
-              {displayName}
-            </h4>
+            <div className='flex items-center gap-1.5 min-w-0 flex-1'>
+              <h4 className="font-['Inter'] font-semibold text-[16px] text-[#181b1d] tracking-[-0.32px] truncate leading-[1.2]">
+                {displayName}
+              </h4>
+              {isDM && (
+                <StatusIndicator
+                  statusEmoji={targetUser?.presenceStatus?.statusEmoji}
+                  statusContent={targetUser?.presenceStatus?.statusContent}
+                  statusExpiryAt={targetUser?.presenceStatus?.statusExpiryAt}
+                  size='sm'
+                  className='text-[14px]'
+                />
+              )}
+            </div>
             {lastMessage && (
               <span className="shrink-0 font-['Inter'] font-normal text-[12px] text-[#788187] tracking-[-0.24px] leading-[1.2]">
                 {formatTime(lastMessage.createdAt)}
@@ -198,10 +224,16 @@ export const DmListItem = ({
   );
 };
 
-const DMItemAvatar = ({ userId }: { userId: string | null }): ReactElement => {
+const DMItemAvatar = ({
+  userId,
+  scopeType,
+}: {
+  userId: string | null;
+  scopeType: ChannelScopeType;
+}): ReactElement => {
   return (
     <div className='size-[44px] rounded-md shrink-0 flex items-center justify-center overflow-visible mt-[3px]'>
-      <Avatar userId={userId} size='lg' />
+      <Avatar userId={userId} size='lg' showActiveStatus={scopeType === ChannelScopeType.DM} />
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import { ReactElement, useRef, useState, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Hash, Pencil, Headphones, X } from 'lucide-react';
-import { ChannelVisibility, Channel } from '@xyne/shared';
+import { ChannelVisibility, Channel, ChannelScopeType } from '@xyne/shared';
 import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
 import { useDraft } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -63,8 +63,9 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
 
   const shouldShowCloseButton = isDM && !isActive && unreadCount === 0 && !isMobile;
 
-  // Get user status for DMs
-  const dmUser = useUser(avatarUserId || '');
+  // Get user status for 1-on-1 DMs only (not group DMs)
+  const is1on1DM = channel.scopeType === ChannelScopeType.DM;
+  const dmUser = useUser(is1on1DM && avatarUserId ? avatarUserId : '');
 
   const handleCloseDm = (e: React.MouseEvent): void => {
     e.preventDefault();
@@ -147,7 +148,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
           <span className='flex items-center'>{getIcon()}</span>
           <span ref={nameRef} className=' text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
             <span className='visual-regression-hide'>{displayName}</span>
-            {isDM && (
+            {is1on1DM && (
               <StatusIndicator
                 statusEmoji={dmUser?.presenceStatus?.statusEmoji}
                 statusContent={dmUser?.presenceStatus?.statusContent}
