@@ -83,6 +83,23 @@ function formatFullResearchContext(
 }
 
 /**
+ * Format custom instructions for agent prompt
+ */
+function formatCustomInstructions(customInstruction?: string): string {
+  if (!customInstruction) {
+    return '';
+  }
+  
+  return `The following instructions OVERRIDE tone and stylistic defaults
+but MUST NOT override:
+- Tool selection logic
+- JSON schema
+- Safety policies
+
+${customInstruction}`;
+}
+
+/**
  * Format thread context indicator when conversationId is present
  * Kept concise - just indicates thread mode is active
  */
@@ -148,12 +165,14 @@ export function buildAgentTemplateVariables(
   webSearchEnabled?: boolean,
   researchContext?: ResearchContext,
   researchOptions?: AvailableResearchOptions,
+  customInstruction?: string,
   hasThreadContext?: boolean
 ): Record<string, string> {
   const variables = {
     current_timestamp: currentTimestamp || getCurrentTimestamp(),
     user_info: formatUserInfo(userInfo),
     channel_context: formatChannelContext(channelNames),
+    custom_instructions: formatCustomInstructions(customInstruction),
     thread_context: formatThreadContext(hasThreadContext || false),
     fetch_thread_messages_instructions: formatFetchThreadMessagesInstructions(hasThreadContext || false),
     fetch_thread_messages_few_shot_example: formatFetchThreadMessagesFewShotExample(hasThreadContext || false),

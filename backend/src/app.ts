@@ -81,6 +81,7 @@ import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
 import emailRoutes from '@/routes/email';
 import docsRoutes from '@/routes/docs';
 import testAuthRoutes from '@/routes/testAuth';
+import customInstructionRoutes from '@/routes/customInstruction';
 import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
 import commitAnalysisRoutes from '@/routes/commitAnalysis';
@@ -335,6 +336,9 @@ export class App {
 
     // Xyne AI routes (unified AI assistant with context awareness)
     this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
+
+    // Custom instruction routes (auth required)
+    this.app.use('/api/custom-instruction', customInstructionRoutes);
 
     // Activity logging routes (auth required)
     this.app.use('/api/activity', authMiddleware.authenticate, activityLogRoutes);

@@ -65,9 +65,10 @@ async function buildAgentPrompt(
   webSearchEnabled?: boolean,
   researchContext?: ResearchContext,
   researchOptions?: AvailableResearchOptions,
+  customInstruction?: string,
   hasThreadContext?: boolean
 ): Promise<string> {
-  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions, hasThreadContext);
+  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions, customInstruction, hasThreadContext);
   
   const prompt = await getPromptFromLangfuse(PROMPT_NAMES.XYNE_AI_SYSTEM, {
     templateVariables,
@@ -222,6 +223,7 @@ export async function createAgentRunner(
     context.webSearchEnabled,
     context.researchContext,
     researchOptions,
+    context.customInstruction,
     hasThreadContext
   );
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, hasThreadContext);

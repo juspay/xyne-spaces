@@ -233,6 +233,22 @@ export async function* xyneAIStream(
   
   const streamProvider = getStreamProvider();
 
+  // Fetch custom instruction from database
+  let customInstruction: string | undefined;
+  try {
+    const { db } = await import('../../database/client.js');
+    const userPreference = await db.userPreference.findUnique({
+      where: { userId },
+      select: { askai_custom_instruction: true },
+    });
+    
+    if (userPreference?.askai_custom_instruction) {
+      customInstruction = userPreference.askai_custom_instruction;
+    }
+  } catch (error) {
+    logger.error(`[XyneAI] [${session.sessionId}] Failed to fetch custom instruction:`, error);
+  }
+
   const agentContext = {
     channelIds,
     conversationId,
@@ -245,6 +261,7 @@ export async function* xyneAIStream(
     userInfo: request.userInfo,
     webSearchEnabled: request.webSearchEnabled,
     researchContext,
+    customInstruction,
     requestMappings: {
       channelNameToId: new Map<string, string>(),
       userNameToId: new Map<string, string>(),
