@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { PhoneIncoming, PhoneOutgoing, PhoneMissed, Captions, Hash } from 'lucide-react';
+import { PhoneIncoming, PhoneOutgoing, PhoneMissed, Captions, Hash, Download } from 'lucide-react';
 import AvatarGroup from '../../components/ui/Avatar/AvatarGroup';
 import { type User, ChannelScopeType } from '@xyne/shared';
 import { formatRelativeTimestamp } from '../../utils/dateUtils';
@@ -21,6 +21,7 @@ interface CallHistoryItemProps {
   onCallClick: () => void;
   onParticipantsClick: () => void;
   handleGotoTranscript?: (() => void) | undefined;
+  handleDownloadTranscript?: (() => void) | undefined;
 }
 
 const ICON_SIZE = 20;
@@ -32,6 +33,7 @@ export function CallHistoryItem({
   onCallClick,
   onParticipantsClick,
   handleGotoTranscript,
+  handleDownloadTranscript,
 }: CallHistoryItemProps): ReactElement {
   // Basic call info
   const isOutgoingCall = call.createdByUserId === currentUserId;
@@ -42,6 +44,9 @@ export function CallHistoryItem({
   const allChannels = useAllChannels();
   const channel = allChannels.find(c => c.id === call.channelId);
   const isChannelCall = channel?.scopeType === ChannelScopeType.DEFAULT;
+
+  // Check if current user is a member of the channel
+  const isUserChannelMember = !!channel;
 
   // Get other participants (excluding current user)
   const otherParticipants = getOtherParticipants(call.participants, currentUserId);
@@ -59,6 +64,9 @@ export function CallHistoryItem({
     anyoneJoined,
   );
 
+  // Check if transcript is available
+  const hasTranscript = Boolean(call.transcript);
+
   return renderCallItem({
     call,
     channel,
@@ -69,8 +77,11 @@ export function CallHistoryItem({
     isOutgoingCall,
     isMissedCall,
     didNotAnswer,
+    hasTranscript,
+    isUserChannelMember,
     onCallClick,
     handleGotoTranscript,
+    handleDownloadTranscript,
     onParticipantsClick,
   });
 }
@@ -85,9 +96,12 @@ interface RenderCallItemProps {
   isOutgoingCall: boolean;
   isMissedCall: boolean;
   didNotAnswer: boolean;
+  hasTranscript: boolean;
+  isUserChannelMember: boolean;
   onCallClick: () => void;
   onParticipantsClick: () => void;
   handleGotoTranscript?: (() => void) | undefined;
+  handleDownloadTranscript?: (() => void) | undefined;
 }
 
 function renderCallItem({
@@ -100,9 +114,12 @@ function renderCallItem({
   isOutgoingCall,
   isMissedCall,
   didNotAnswer,
+  hasTranscript,
+  isUserChannelMember,
   onCallClick,
   onParticipantsClick,
   handleGotoTranscript,
+  handleDownloadTranscript,
 }: RenderCallItemProps): ReactElement {
   // Get call icon
   const getCallIcon = (): ReactElement => {
@@ -218,24 +235,68 @@ function renderCallItem({
           >
             <AvatarGroup userIds={userIds} size='sm' count={MAX_AVATARS_TO_SHOW} />
           </div>
-          <Tooltip content='Go to Transcripts' delayDuration={300}>
+          <Tooltip
+            content={
+              !isUserChannelMember ? 'You are not a member of this channel' : 'Go to Call message'
+            }
+            delayDuration={300}
+          >
             <div
               role='button'
-              tabIndex={0}
+              tabIndex={isUserChannelMember ? 0 : -1}
               onClick={e => {
                 e.stopPropagation();
-                handleGotoTranscript?.();
+                if (isUserChannelMember) {
+                  handleGotoTranscript?.();
+                }
               }}
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   e.stopPropagation();
-                  handleGotoTranscript?.();
+                  if (isUserChannelMember) {
+                    handleGotoTranscript?.();
+                  }
                 }
               }}
-              className='p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+              className={`p-2 rounded-full ${
+                isUserChannelMember
+                  ? 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer'
+                  : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+              }`}
             >
               <Captions size={16} />
+            </div>
+          </Tooltip>
+          <Tooltip
+            content={hasTranscript ? 'Download Transcript' : 'Transcript not available'}
+            delayDuration={300}
+          >
+            <div
+              role='button'
+              tabIndex={hasTranscript ? 0 : -1}
+              onClick={e => {
+                e.stopPropagation();
+                if (hasTranscript) {
+                  handleDownloadTranscript?.();
+                }
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (hasTranscript) {
+                    handleDownloadTranscript?.();
+                  }
+                }
+              }}
+              className={`p-2 rounded-full ${
+                hasTranscript
+                  ? 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer'
+                  : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+              }`}
+            >
+              <Download size={16} />
             </div>
           </Tooltip>
         </div>

@@ -1,4 +1,5 @@
 import { apiInstance } from '../clients/apiClient';
+import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
 import { CallType } from '@xyne/shared';
 
@@ -186,6 +187,43 @@ export class CallService {
       // Re-throw unknown errors
       throw error;
     }
+  }
+
+  /**
+   * Download call transcript
+   * Returns the transcript content as text and content-type header
+   * Uses React Query caching (10 min staleTime) to avoid redundant downloads
+   */
+  async downloadTranscript(callId: string): Promise<{ data: string; contentType?: string }> {
+    const url = `/calls/${callId}/download-transcript`;
+    const queryKey = ['transcript', callId];
+
+    return queryClient.fetchQuery<{ data: string; contentType?: string }>({
+      queryKey,
+      queryFn: async ({ signal }) => {
+        try {
+          const response = await apiInstance.get<string>(url, { signal });
+          const contentType = response.headers?.['content-type'] as string | undefined;
+          return {
+            data: response.data,
+            ...(contentType !== undefined && { contentType }),
+          };
+        } catch (error) {
+          if (error instanceof AxiosError && error.response?.data) {
+            const errorData = error.response.data as unknown;
+            if (isApiErrorResponse(errorData)) {
+              throw new ApiError(
+                errorData.error,
+                error.response.status,
+                errorData.code ?? 'UNKNOWN_ERROR',
+              );
+            }
+          }
+          throw error;
+        }
+      },
+      staleTime: 10 * 60 * 1000,
+    });
   }
 }
 

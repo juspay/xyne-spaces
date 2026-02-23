@@ -13,6 +13,10 @@ import { getParticipantUsers } from './callHistoryItem.utils';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { callService } from '../../services/Call/callService';
+import { reactNativeBridge } from '../../utils/reactNativeBridge';
+import { blobToBase64 } from '../../services/clients/fileFetchService';
+import { logger, Event as Logger } from '../../utils/logger';
 
 type CallHistoryResult = QueryResultType<typeof queries.userCallHistory>;
 type Call = CallHistoryResult[number];
@@ -34,6 +38,7 @@ interface UseCallHistoryReturn {
   handleInitiateCall: () => void;
   closeParticipantsModal: () => void;
   handleGotoTranscript: (call: Call) => void;
+  handleDownloadTranscript: (call: Call) => void;
   showConfirmModal: boolean;
   confirmModalConfig: {
     title: string;
@@ -308,6 +313,77 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     void navigate(`/chat/dir/${call.channelId}/${conversationId}#origin=${conversationId}`);
   };
 
+  const handleDownloadTranscript = (call: Call): void => {
+    void (async () => {
+      try {
+        const response = await callService.downloadTranscript(call.externalId);
+
+        // Convert the response text to a blob for download
+        const blob = new Blob([response.data], { type: 'text/plain' });
+        const fileName = `call_transcript_${call.externalId}_${new Date().toISOString().split('T')[0]}.txt`;
+
+        if (reactNativeBridge.isAvailable()) {
+          try {
+            const base64Data = await blobToBase64(blob);
+            const mimeType = response.contentType || blob.type || 'application/octet-stream';
+            const dispatched = reactNativeBridge.saveFileToDevice({
+              fileName,
+              mimeType,
+              base64Data,
+            });
+
+            if (dispatched) {
+              return;
+            }
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : 'Failed to download transcript';
+
+            logger.error(Logger.API_OPERATIONAL_ERROR, {
+              message: 'Failed to download transcript on mobile device',
+              error: errorMessage,
+            });
+
+            toast.error(errorMessage, { id: 'download-transcript' });
+            return;
+          }
+        }
+
+        // Create a download link
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+
+        // Cleanup
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        logger.info(Logger.API_CALL_SUCCESSFUL, {
+          message: 'Transcript download completed',
+          bytes: blob.size,
+          fileName,
+        });
+        toast.success('Transcript downloaded', { id: 'download-transcript' });
+      } catch (error) {
+        logger.error(Logger.API_CALL_FAILED, {
+          message: 'Failed to download transcript',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+
+        // Axios interceptor already extracts the error message from response.data.error
+        const errorMessage =
+          error instanceof Error ? error.message : 'Failed to download transcript';
+
+        toast.error(errorMessage, {
+          id: 'download-transcript',
+        });
+      }
+    })();
+  };
+
   return {
     calls,
     queryDetails,
@@ -325,6 +401,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     handleInitiateCall,
     closeParticipantsModal,
     handleGotoTranscript,
+    handleDownloadTranscript,
     showConfirmModal,
     confirmModalConfig,
     handleConfirmCall,

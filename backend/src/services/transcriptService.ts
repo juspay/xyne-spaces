@@ -9,6 +9,7 @@ import { MessageType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
+import { GCSService } from '../services/gcsService';
 
 interface TranscriptEntry {
   user: string;
@@ -512,6 +513,7 @@ export class TranscriptService {
     try {
       // Try to fetch formatted transcript first
       const formattedPath = `attachments/${callId}_formatted.txt`;
+      
       const formattedFile = this.transcriptBucket.file(formattedPath);
       const [formattedExists] = await formattedFile.exists();
 
@@ -534,6 +536,27 @@ export class TranscriptService {
       return this.formatTranscript(entries, callId);
     } catch (error) {
       logger.error(`Failed to get transcript content for ${callId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Download formatted transcript file directly from GCS (txt file only, no fallback)
+   * Used for direct file downloads
+   * @param callId - The external call ID
+   * @param gcsPath - The GCS path to the formatted transcript
+   * @returns Buffer of the transcript file or null if not found
+   */
+  async downloadFormattedTranscript(callId: string, gcsPath: string): Promise<Buffer | null> {
+    try {
+      logger.info(`[${callId}] formatted_transcript_download_started | gcs_path=${gcsPath}, bucket=${config.gcs.transcriptionBucketName}`);
+      
+      const serviceToUse = new GCSService(config.gcs.transcriptionBucketName);
+      const buffer = await serviceToUse.getFileBuffer(gcsPath);
+      
+      return buffer;
+    } catch (error) {
+      logger.error(`[${callId}] formatted_transcript_download_failed | gcs_path=${gcsPath}, error=${error}`);
       return null;
     }
   }
