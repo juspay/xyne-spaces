@@ -12,6 +12,7 @@ import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
 import { MentionType } from './ChannelCommandMenu.types';
 import { Search } from 'lucide-react';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface LexicalSearchInputProps {
   placeholder?: string;
@@ -40,6 +41,7 @@ interface LexicalSearchInputProps {
 function PlaceholderPlugin({ placeholder }: { placeholder?: string }) {
   const [editor] = useLexicalComposerContext();
   const [showPlaceholder, setShowPlaceholder] = useState(true);
+  const { isMobile } = usePlatform();
 
   useEffect(() => {
     return editor.registerUpdateListener(() => {
@@ -54,7 +56,9 @@ function PlaceholderPlugin({ placeholder }: { placeholder?: string }) {
   if (!showPlaceholder || !placeholder) return null;
 
   return (
-    <div className='absolute left-9 top-1/2 -translate-y-1/2 text-sm text-[#C9CCCF] pointer-events-none'>
+    <div
+      className={`absolute ${isMobile ? 'left-0' : 'left-9'} top-1/2 -translate-y-1/2 text-sm text-[#C9CCCF] pointer-events-none`}
+    >
       {placeholder}
     </div>
   );
@@ -68,6 +72,21 @@ function AutoFocusPlugin({ open }: { open?: boolean }) {
       editor.focus();
     }
   }, [open, editor]);
+
+  return null;
+}
+
+function ClearEditorPlugin({ value }: { value: string | undefined }) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    if (value === '') {
+      editor.update(() => {
+        const root = $getRoot();
+        root.clear();
+      });
+    }
+  }, [value, editor]);
 
   return null;
 }
@@ -158,6 +177,8 @@ export function LexicalSearchInput({
   onPasteDetected,
   onManualKeystroke,
 }: LexicalSearchInputProps) {
+  const { isMobile } = usePlatform();
+
   const initialConfig = {
     namespace: 'SearchInput',
     theme: {
@@ -180,7 +201,7 @@ export function LexicalSearchInput({
           <RichTextPlugin
             contentEditable={
               <span className='flex items-center gap-2'>
-                <Search size={16} className='ml-3 text-[#788187]' />
+                {!isMobile && <Search size={16} className='ml-3 text-[#788187]' />}
                 <ContentEditable className='min-h-5 py-1 text-sm focus:outline-none flex-1' />
               </span>
             }
@@ -198,6 +219,7 @@ export function LexicalSearchInput({
               {...(onManualKeystroke && { onManualKeystroke })}
             />
           )}
+          <ClearEditorPlugin value={value} />
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}

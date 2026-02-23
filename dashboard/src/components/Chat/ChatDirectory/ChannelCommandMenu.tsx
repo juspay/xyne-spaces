@@ -16,6 +16,8 @@ import {
   CornerDownLeft,
   MoveUp,
   MoveDown,
+  Search,
+  X,
 } from 'lucide-react';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -51,6 +53,7 @@ import { channelService } from '../../../services/Chat/channelService';
 import { ToolOutputRenderer } from 'cosmic-ai-genius';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useScope, useShortcutById } from '../../../shortcuts';
+import { usePlatform } from '../../../hooks/usePlatform';
 import {
   summarizeSearchMessages,
   SearchMessageForSummary,
@@ -91,6 +94,7 @@ const ChannelCommandItem = ({
   getChannelIcon: (channel: Channel) => ReactElement;
 }): ReactElement | null => {
   const { displayName } = useChannelDisplayName(channel, currentUserID);
+  const { isMobile } = usePlatform();
 
   if (
     search.trim() &&
@@ -105,7 +109,8 @@ const ChannelCommandItem = ({
       key={channel.id}
       value={`channel-${channel.id}-${displayName}`}
       onSelect={onSelect}
-      className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
+      className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'hover:bg-gray-100 aria-selected:bg-gray-100'}`}
+      style={{ WebkitTapHighlightColor: 'transparent' }}
     >
       <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
         {getChannelIcon(channel)}
@@ -301,6 +306,9 @@ const ChannelCommandMenu = ({
 
   const [selectedBot, setSelectedBot] = useState<UnifiedBotInfo | null>(null);
   const [botChatState, setBotChatState] = useState<BotChatState>({ status: 'idle' });
+
+  // Platform detection - needs to be before useEffects that depend on it
+  const { isMobile } = usePlatform();
 
   const resetBotMode = useCallback((): void => {
     setSelectedBot(null);
@@ -776,14 +784,16 @@ const ChannelCommandMenu = ({
     return groups;
   }, [filteredLocalChannels]);
 
+  const iconSize = isMobile ? 14 : 12;
+
   const tabs: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
     // { id: TabType.ALL, label: 'All' },
-    { id: TabType.USERS, label: 'People', icon: <Users size={12} /> },
-    { id: TabType.MESSAGES, label: 'Messages', icon: <MessageSquare size={12} /> },
-    { id: TabType.CHANNELS, label: 'Channels', icon: <Hash size={12} /> },
-    { id: TabType.TICKETS, label: 'Tickets', icon: <SquareDashedKanban size={12} /> },
-    { id: TabType.ATTACHMENTS, label: 'Files', icon: <FolderOpen size={12} /> },
-    // { id: TabType.NOTES, label: 'Notes', icon: <Paperclip size={14} /> },
+    { id: TabType.USERS, label: 'People', icon: <Users size={iconSize} /> },
+    { id: TabType.MESSAGES, label: 'Messages', icon: <MessageSquare size={iconSize} /> },
+    { id: TabType.CHANNELS, label: 'Channels', icon: <Hash size={iconSize} /> },
+    { id: TabType.TICKETS, label: 'Tickets', icon: <SquareDashedKanban size={iconSize} /> },
+    { id: TabType.ATTACHMENTS, label: 'Files', icon: <FolderOpen size={iconSize} /> },
+    // { id: TabType.NOTES, label: 'Notes', icon: <Paperclip size={1} /> },
   ];
 
   const getCategoryLabel = (category: ChannelCategory): string => {
@@ -830,8 +840,8 @@ const ChannelCommandMenu = ({
       ref={commandRef}
       onOpenChange={onOpenChange}
       shouldFilter={false}
-      className='fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full h-screen md:w-full md:max-w-3xl md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000]
- border border-gray-200 z-50'
+      className={`fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full ${isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen'} md:w-full md:max-w-3xl md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000]
+ border border-gray-200 z-50'`}
       onKeyDownCapture={e => {
         if (e.key !== 'Enter') return;
 
@@ -921,6 +931,7 @@ const ChannelCommandMenu = ({
             />
           ) : (
             <LexicalSearchInput
+              value={searchText}
               placeholder={`Search ${activeTab === TabType.ALL ? 'everything' : activeTab}...`}
               onChange={handleEditorChange}
               onUserSearch={handleUserSearch}
@@ -936,6 +947,29 @@ const ChannelCommandMenu = ({
               onPasteDetected={onPasteDetected}
               onManualKeystroke={onManualKeystroke}
             />
+          )}
+          {/* Search/Close Icon */}
+          {isMobile && (
+            <button
+              onClick={() => {
+                if (search.trim() || searchText.trim()) {
+                  setSearch('');
+                  setSearchText('');
+                  setSelectedMentions([]);
+                  if (inputRef.current) {
+                    inputRef.current.blur();
+                  }
+                }
+              }}
+              className='p-1.5 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors flex-shrink-0 flex items-center justify-center'
+              aria-label={search.trim() || searchText.trim() ? 'Clear search' : 'Search'}
+            >
+              {search.trim() || searchText.trim() ? (
+                <X className='w-4 h-4' />
+              ) : (
+                <Search className='w-4 h-4' />
+              )}
+            </button>
           )}
           {/* Summarize Button - icon only, left of Esc */}
           {searchText.trim() &&
@@ -974,23 +1008,47 @@ const ChannelCommandMenu = ({
       </div>
 
       {/* Tabs, Results, Footer Container - modal overlays everything below search input */}
-      <div className='relative flex-1 flex flex-col min-h-0'>
+      <div
+        className='relative flex-1 flex flex-col min-h-0'
+        role='presentation'
+        onClick={() => {
+          // Blur input when clicking anywhere in this container
+          if (inputRef.current) {
+            inputRef.current.blur();
+          }
+        }}
+        onKeyDown={e => {
+          // Blur input when pressing Enter or Space in this container
+          if ((e.key === 'Enter' || e.key === ' ') && inputRef.current) {
+            inputRef.current.blur();
+          }
+        }}
+      >
         {/* Tabs - hidden when bot is selected */}
         {!selectedBot && !showBotsSuggestions && (
-          <div className='overflow-x-auto no-scrollbar p-2 ml-4'>
+          <div className={`overflow-x-auto no-scrollbar p-2 ${isMobile ? 'mx-1' : 'ml-4'}`}>
             <Tabs.Root value={activeTab}>
               <Tabs.List className='flex items-center justify-start gap-[6px]'>
                 {tabs.map(tab => (
                   <Tabs.Trigger asChild key={tab.id} value={tab.id}>
                     <button
-                      onClick={() =>
-                        activeTab === tab.id ? setActiveTab(TabType.ALL) : setActiveTab(tab.id)
-                      }
+                      onClick={() => {
+                        if (activeTab === tab.id) {
+                          setActiveTab(TabType.ALL);
+                        } else {
+                          setActiveTab(tab.id);
+                        }
+                        // Blur input when clicking tabs
+                        if (inputRef.current) {
+                          inputRef.current.blur();
+                        }
+                      }}
                       className={cn(
-                        'flex items-center gap-1.5 px-2 text-[13px] py-[2px] max-h-6  whitespace-nowrap transition-colors cursor-pointer rounded-md border-[0.5px]',
+                        'flex items-center justify-center gap-1.5 px-2 text-[13px] py-[2px] max-h-6 whitespace-nowrap transition-colors cursor-pointer rounded-[10px] border',
                         activeTab === tab.id
-                          ? 'border-gray-900 text-gray-900'
-                          : 'border-gray-300 text-gray-600 hover:text-gray-900',
+                          ? 'border-[#6276BE] text-[#FFF] bg-[#6276BE]'
+                          : 'border-[#E4E6E7] text-[#000] hover:text-gray-900',
+                        isMobile && 'text-[14px] w-fit h-[37px] px-3',
                       )}
                     >
                       {tab.icon}
@@ -1005,7 +1063,7 @@ const ChannelCommandMenu = ({
 
         {/* Results */}
         <Command.List
-          className='flex-1 md:max-h-[550px] overflow-y-auto p-2 ml-2'
+          className='flex-1 overflow-y-auto md:max-h-[550px] p-2 ml-2'
           ref={el => {
             if (el) {
               setScrollContainer(el);
@@ -1094,7 +1152,8 @@ const ChannelCommandMenu = ({
                     key={bot.id}
                     value={`@${bot.name}`}
                     onSelect={() => handleBotSelect(bot)}
-                    className='flex items-center gap-3 px-3 py-2 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100'
+                    className={`flex items-center gap-3 px-3 py-2 rounded-sm cursor-pointer ${!isMobile && 'hover:bg-gray-100 aria-selected:bg-gray-100'}`}
+                    style={{ WebkitTapHighlightColor: 'transparent' }}
                   >
                     <div className='flex items-center justify-center h-8 w-8 rounded-full bg-blue-100 flex-shrink-0'>
                       <Bot size={16} className='text-blue-600' />
@@ -1142,9 +1201,10 @@ const ChannelCommandMenu = ({
                               setSelectedMentionIndex(index);
                             }
                           }}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98] mt-1 ${
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
                             index === selectedMentionIndex ? 'bg-gray-100' : ''
-                          }`}
+                          } ${!isMobile && 'hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98]'}`}
+                          style={{ WebkitTapHighlightColor: 'transparent' }}
                         >
                           <Avatar userId={user.id} size='sm' />
                           <div className='flex-1 min-w-0'>
@@ -1180,9 +1240,10 @@ const ChannelCommandMenu = ({
                               setSelectedMentionIndex(index);
                             }
                           }}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98] mt-1 ${
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
                             index === selectedMentionIndex ? 'bg-gray-100' : ''
-                          }`}
+                          } ${!isMobile && 'hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98]'}`}
+                          style={{ WebkitTapHighlightColor: 'transparent' }}
                         >
                           <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
                             <Hash size={16} className='text-gray-600' />
@@ -1262,7 +1323,7 @@ const ChannelCommandMenu = ({
                                   {hasMore && (
                                     <button
                                       onClick={() => toggleCategoryExpansion(category)}
-                                      className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                      className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
                                     >
                                       {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                     </button>
@@ -1335,7 +1396,11 @@ const ChannelCommandMenu = ({
                                   {hasMore && (
                                     <button
                                       onClick={() => toggleCategoryExpansion('user')}
-                                      className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                      className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                      style={{
+                                        WebkitTapHighlightColor: 'transparent',
+                                        userSelect: 'none',
+                                      }}
                                     >
                                       {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                     </button>
@@ -1416,7 +1481,11 @@ const ChannelCommandMenu = ({
                                   {hasMore && (
                                     <button
                                       onClick={() => toggleCategoryExpansion(category)}
-                                      className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                      className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                      style={{
+                                        WebkitTapHighlightColor: 'transparent',
+                                        userSelect: 'none',
+                                      }}
                                     >
                                       {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                     </button>
@@ -1521,7 +1590,11 @@ const ChannelCommandMenu = ({
                                     {shouldLimit && hasMore && (
                                       <button
                                         onClick={() => toggleCategoryExpansion(category)}
-                                        className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                        style={{
+                                          WebkitTapHighlightColor: 'transparent',
+                                          userSelect: 'none',
+                                        }}
                                       >
                                         {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                       </button>
@@ -1581,7 +1654,11 @@ const ChannelCommandMenu = ({
                                     {isUserType && hasMore && (
                                       <button
                                         onClick={() => toggleCategoryExpansion(type)}
-                                        className='w-full px-2 py-1.5 mt-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-sm text-left transition-colors'
+                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                        style={{
+                                          WebkitTapHighlightColor: 'transparent',
+                                          userSelect: 'none',
+                                        }}
                                       >
                                         {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                       </button>
@@ -1613,8 +1690,9 @@ const ChannelCommandMenu = ({
         </Command.List>
 
         {/* Footer */}
-        <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-between shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
-          {/* Vespa Search toggle - commented out, using Vespa as default
+        {!isMobile && (
+          <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-between shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
+            {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
             <label htmlFor='vespa-toggle' className='text-xs text-gray-600 cursor-pointer'>
               Vespa Search
@@ -1629,27 +1707,28 @@ const ChannelCommandMenu = ({
             </Switch.Root>
           </div>
           */}
-          <div className='flex items-center gap-6'>
-            <span className='flex gap-[10px] items-center'>
-              <span>Open</span>
-              <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
-                <CornerDownLeft size={10} />
-              </span>
-            </span>
-            {/* <span className='text-gray-300'>|</span> */}
-            <span className='flex gap-[10px] items-center'>
-              <span>Navigate </span>
-              <span className='flex gap-1'>
+            <div className='flex items-center gap-6'>
+              <span className='flex gap-[10px] items-center'>
+                <span>Open</span>
                 <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
-                  <MoveUp size={12} />
-                </span>
-                <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
-                  <MoveDown size={12} />
+                  <CornerDownLeft size={10} />
                 </span>
               </span>
-            </span>
+              {/* <span className='text-gray-300'>|</span> */}
+              <span className='flex gap-[10px] items-center'>
+                <span>Navigate </span>
+                <span className='flex gap-1'>
+                  <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
+                    <MoveUp size={12} />
+                  </span>
+                  <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
+                    <MoveDown size={12} />
+                  </span>
+                </span>
+              </span>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Summary Modal Overlay - covers both results and footer */}
         <SearchSummaryModal
