@@ -16,6 +16,9 @@ router.delete('/recordings/:callId', callController.deleteRecording);
 // Manual endpoint to process transcript (triggered by user clicking "View Transcript" button)
 router.post('/:callId/process-transcript', callController.processTranscript);
 
+// Download transcript endpoint (downloads transcript file from GCS)
+router.get('/:callId/download-transcript', callController.downloadTranscript);
+
 // PRD Generation endpoint (generates PRD canvas from call transcript)
 router.post('/:callId/generate-prd', callController.generatePRD);
 

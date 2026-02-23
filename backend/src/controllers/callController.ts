@@ -543,6 +543,81 @@ export class CallController {
   };
 
   /**
+   * GET /api/calls/:callId/download-transcript
+   * Download call transcript as text file (formatted .txt only)
+   */
+  downloadTranscript = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    logger.info(`[${callId}] download_transcript_request_received | user_id=${userId}`);
+
+    if (!userId) {
+      logger.warn(`[${callId}] download_transcript_unauthorized | user_id=undefined`);
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      logger.warn(`[${callId}] download_transcript_bad_request | call_id=missing`);
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      
+      if (!call) {
+        logger.warn(`[${callId}] download_transcript_call_not_found | user_id=${userId}`);
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      
+      logger.info(`[${callId}] download_transcript_call_found | call_status=${call.status}, created_by=${call.createdByUserId}`);
+
+      let gcsPath = call.transcript;
+
+      if (!gcsPath || typeof gcsPath !== 'string') {
+        logger.warn(`[${callId}] download_transcript_invalid_gcs_path | gcsPath=${gcsPath}`);
+        res.status(404).json({ success: false, error: 'Transcript not available for this call' });
+        return;
+      }
+ 
+
+      if (gcsPath.startsWith('gs://')) {
+          const match = gcsPath.match(/^gs:\/\/([^\/]+)\/(.+)$/);
+          if (match) {
+            const [, ,filePath] = match;
+            gcsPath = filePath; 
+          }
+        }
+      const transcriptBuffer = await transcriptService.downloadFormattedTranscript(callId, gcsPath);
+      
+      if (!transcriptBuffer) {
+        logger.warn(`[${callId}] download_transcript_not_available | gcs_path=${gcsPath}`);
+        res.status(404).json({ success: false, error: 'Transcript not available for this call' });
+        return;
+      }
+      
+      logger.info(`[${callId}] download_transcript_buffer_received | buffer_size=${transcriptBuffer.length} bytes`);
+
+      const fileName = `call_transcript_${callId}_${new Date().toISOString().split('T')[0]}.txt`;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.setHeader('Content-Length', transcriptBuffer.length);
+      
+      logger.info(`[${callId}] download_transcript_headers_set | filename=${fileName}, content_length=${transcriptBuffer.length}`);
+
+      res.send(transcriptBuffer);
+
+      logger.info(`[${callId}] download_transcript_completed | user_id=${userId}, bytes_sent=${transcriptBuffer.length}`);
+    } catch (error) {
+      logger.error(`[${callId}] download_transcript_failed | user_id=${userId}, error=${error}`);
+      res.status(500).json({ success: false, error: 'Failed to download transcript' });
+    }
+  };
+
+  /**
    * POST /api/calls/:callId/generate-prd
    * Generate PRD from call transcript and post to conversation as Canvas
    */

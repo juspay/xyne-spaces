@@ -37,6 +37,7 @@ const CallHistoryScreen = (): ReactElement => {
     handleInitiateCall,
     closeParticipantsModal,
     handleGotoTranscript,
+    handleDownloadTranscript,
     showConfirmModal,
     confirmModalConfig,
     handleConfirmCall,
@@ -233,6 +234,7 @@ const CallHistoryScreen = (): ReactElement => {
                           onCallClick={() => handleCallRowClick(call)}
                           onParticipantsClick={() => handleParticipantsClick(call)}
                           handleGotoTranscript={() => handleGotoTranscript(call)}
+                          handleDownloadTranscript={() => handleDownloadTranscript(call)}
                         />
                       ))}
                     </div>
@@ -252,6 +254,7 @@ const CallHistoryScreen = (): ReactElement => {
                 onCallClick={() => handleCallRowClick(call)}
                 onParticipantsClick={() => handleParticipantsClick(call)}
                 handleGotoTranscript={() => handleGotoTranscript(call)}
+                handleDownloadTranscript={() => handleDownloadTranscript(call)}
               />
             ))}
           </div>
