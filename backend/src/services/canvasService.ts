@@ -7,59 +7,8 @@ import { DatabaseClient } from '@/database/client';
 import type { KnowledgeLearning } from '@/workflows/utils/knowledge-generator';
 import { logger } from '@/utils/logger';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
+import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 
-// BlockNote block types for canvas content
-interface BlockNoteTextBlock {
-  id: string;
-  type: 'paragraph' | 'heading';
-  props?: {
-    level?: 1 | 2 | 3;
-    textColor?: string;
-    backgroundColor?: string;
-    textAlignment?: 'left' | 'center' | 'right';
-  };
-  content: Array<{
-    type: 'text';
-    text: string;
-    styles?: {
-      bold?: boolean;
-      italic?: boolean;
-      code?: boolean;
-    };
-  }>;
-  children?: BlockNoteBlock[];
-}
-
-interface BlockNoteCodeBlock {
-  id: string;
-  type: 'codeBlock';
-  props?: {
-    language?: string;
-  };
-  content: Array<{
-    type: 'text';
-    text: string;
-    styles?: Record<string, never>;
-  }>;
-  children?: BlockNoteBlock[];
-}
-
-interface BlockNoteBulletListBlock {
-  id: string;
-  type: 'bulletListItem';
-  content: Array<{
-    type: 'text';
-    text: string;
-    styles?: {
-      bold?: boolean;
-      italic?: boolean;
-      code?: boolean;
-    };
-  }>;
-  children?: BlockNoteBlock[];
-}
-
-type BlockNoteBlock = BlockNoteTextBlock | BlockNoteCodeBlock | BlockNoteBulletListBlock;
 
 /**
  * Get human-readable label for learning type
