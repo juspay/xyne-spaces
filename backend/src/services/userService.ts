@@ -121,6 +121,9 @@ export class UserService {
       // Create user presence entry
       await this.ensureUserPresence(user.id);
 
+      // Create user preference entry
+      await this.ensureUserPreference(user.id);
+
       return user;
     } catch (error) {
       logger.error('Error creating user:', error);
@@ -188,6 +191,33 @@ export class UserService {
       }
     } catch (error) {
       logger.error(`Error ensuring user presence for user ${userId}:`, error);
+      // Don't throw - this shouldn't block authentication
+    }
+  }
+
+  /**
+   * Ensure user preference entry exists (create if not exists)
+   */
+  async ensureUserPreference(userId: string): Promise<void> {
+    try {
+      const existingPreference = await this.prisma.userPreference.findUnique({
+        where: { userId }
+      });
+
+      if (!existingPreference) {
+        logger.info(`Creating user preference entry for user ${userId}`);
+        await this.prisma.userPreference.create({
+          data: {
+            userId,
+            askai_custom_instruction: null, // Initialize with null
+          }
+        });
+        logger.info(`Successfully created user preference entry for user ${userId}`);
+      } else {
+        logger.debug(`User preference already exists for user ${userId}`);
+      }
+    } catch (error) {
+      logger.error(`Error ensuring user preference for user ${userId}:`, error);
       // Don't throw - this shouldn't block authentication
     }
   }

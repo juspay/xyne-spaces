@@ -66,7 +66,8 @@ export interface XyneAIAgentContext {
   // Research Agent context
   researchContext?: ResearchContext;  // Currently selected product/repository (for agent prompt)
   productNameToId?: Map<string, string>;  // Product name→ID mapping (for tool validation)
-  repositoryNameToId?: Map<string, string>
+  repositoryNameToId?: Map<string, string>;
+  customInstruction?: string;
 }
 
 // ============================================================================

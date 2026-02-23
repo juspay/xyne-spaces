@@ -774,6 +774,18 @@ model User {
   @@schema("public")
 }
 
+// User Preferences
+model UserPreference {
+  id                      String   @id @default(cuid())
+  userId                  String   @unique  // One preference record per user
+  askai_custom_instruction String?  // Custom instruction for Ask AI
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@map("user_preferences")
+  @@schema("public")
+}
+
 // User-Team membership (many-to-many, no FK constraints)
 model UserGroupMapping {
   id             String              @id @default(cuid())

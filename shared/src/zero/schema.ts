@@ -837,6 +837,16 @@ export const userProfileTable = table('user_profiles')
   })
   .primaryKey('id');
 
+export const userPreferenceTable = table('user_preferences')
+  .columns({
+    id: string(),
+    userId: string(),
+    askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const resourceTable = table('resources')
   .columns({
     id: string(),
