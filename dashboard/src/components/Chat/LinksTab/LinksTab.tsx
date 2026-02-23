@@ -46,7 +46,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
     if (shouldOpenAll && links && links.length > 0) {
       const urls = links.map(link => link.url);
 
-      if (isElectronApp()) {
+      if (isElectronApp() && window.electronAPI?.browserTabs) {
         xyneAIActor.send({ type: 'CLOSE' });
         browserPanelActor.send({ type: 'OPEN', urls });
       } else {
@@ -127,7 +127,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
   };
 
   const handleOpenLink = (url: string) => {
-    if (isElectronApp()) {
+    if (isElectronApp() && window.electronAPI?.browserTabs) {
       xyneAIActor.send({ type: 'CLOSE' });
 
       if (browserPanelState === 'open') {
