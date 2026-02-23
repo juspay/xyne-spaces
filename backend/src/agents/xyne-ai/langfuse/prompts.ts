@@ -159,6 +159,7 @@ export const PROMPT_NAMES = {
   TICKET_DESCRIPTION_CLEANER: 'ticket_description_cleaner',
   CLUSTER_THEME_SINGLE: 'cluster_theme_single',
   META_THEME_SINGLE: 'meta_theme_single',
+  NUDGE_EXTRACTOR: 'nudge_extractor',
 } as const;
 
 export type PromptName = typeof PROMPT_NAMES[keyof typeof PROMPT_NAMES];
