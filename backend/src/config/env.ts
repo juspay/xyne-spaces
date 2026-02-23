@@ -130,7 +130,7 @@ const envSchema = Joi.object({
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
   // Bitbucket Configuration
-  BITBUCKET_BASE_URL: Joi.string().default(''),
+  BITBUCKET_BASE_URL: Joi.string().allow('').default(''),
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
