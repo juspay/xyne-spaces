@@ -5,6 +5,7 @@ import type {
   TicketTag,
   FormEntityValues,
 } from '@xyne/shared';
+import { TicketStatusV2 } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { FormFieldType, type FormFields } from '@xyne/shared';
@@ -52,15 +53,36 @@ export const getStatusColor = (status: string): string => {
  */
 export const getStatusColumns = (): Stage[] => {
   return [
-    { id: 'TODO', name: 'Todo', color: getStatusColor('TODO') },
-    { id: 'STARTED', name: 'Started', color: getStatusColor('STARTED') },
+    {
+      id: 'TODO',
+      name: 'Todo',
+      color: getStatusColor('TODO'),
+      defaultTicketStatusV2: TicketStatusV2.TODO,
+    },
+    {
+      id: 'STARTED',
+      name: 'Started',
+      color: getStatusColor('STARTED'),
+      defaultTicketStatusV2: TicketStatusV2.STARTED,
+    },
     {
       id: 'PAUSED',
       name: 'Paused',
       color: getStatusColor('PAUSED'),
+      defaultTicketStatusV2: TicketStatusV2.PAUSED,
     },
-    { id: 'COMPLETED', name: 'Completed', color: getStatusColor('COMPLETED') },
-    { id: 'CANCELLED', name: 'Cancelled', color: getStatusColor('CANCELLED') },
+    {
+      id: 'COMPLETED',
+      name: 'Completed',
+      color: getStatusColor('COMPLETED'),
+      defaultTicketStatusV2: TicketStatusV2.COMPLETED,
+    },
+    {
+      id: 'CANCELLED',
+      name: 'Cancelled',
+      color: getStatusColor('CANCELLED'),
+      defaultTicketStatusV2: TicketStatusV2.CANCELLED,
+    },
   ];
 };
 
@@ -334,6 +356,13 @@ export const applyTicketFilters = (
       const hasMatchingTag = filters.tags.some(filterTag => ticketTagNames.has(filterTag));
 
       if (!hasMatchingTag) {
+        return false;
+      }
+    }
+
+    // Stages filter
+    if (filters.stages && filters.stages.length > 0) {
+      if (!ticket.stageName || !filters.stages.includes(ticket.stageName)) {
         return false;
       }
     }

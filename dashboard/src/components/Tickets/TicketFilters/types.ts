@@ -1,4 +1,4 @@
-import { TicketPriority, FormContextMapping } from '@xyne/shared';
+import { TicketPriority, TicketStatusV2, FormContextMapping } from '@xyne/shared';
 
 export interface TicketFilters {
   priority?: TicketPriority[];
@@ -13,6 +13,7 @@ export interface TicketFilters {
   createdDateEnd?: number;
   boards?: string[];
   tags?: string[];
+  stages?: string[];
   // Dynamic form fields: fieldId -> filter value
   // For SELECT fields: string array of selected values
   // For DATE fields: { start?: number, end?: number }
@@ -59,6 +60,7 @@ export interface TicketFiltersProps {
   showBoardsFilter?: boolean;
   selectedBoard?: { id: string; name: string } | null | undefined;
   availableTags?: string[] | undefined;
+  availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
   hideAssigneeFilter?: boolean;
   formMappings?: readonly FormContextMapping[] | undefined;
 }

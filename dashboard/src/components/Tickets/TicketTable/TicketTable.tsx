@@ -372,7 +372,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 
       {
         key: 'status',
-        headerName: 'Status',
+        headerName: 'Status Category',
         field: 'statusV2',
         editable: true,
         minWidth: 170,
