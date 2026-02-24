@@ -6,6 +6,7 @@ import {
   CallStatus,
   InvitationResponse,
   ChannelScopeType,
+  ChannelAddUserPolicy,
   ConversationParticipation,
   TicketStatusV2,
   TicketPriority,
@@ -157,13 +158,18 @@ export const mutators = defineMutators({
         const participationOfRequestingUser = await tx.run(
           zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
         );
-        if (
-          !participationOfRequestingUser ||
-          (channel.visibility === ChannelVisibility.PRIVATE &&
-            participationOfRequestingUser.role === ChannelRole.MEMBER &&
-            channel.scopeType !== ChannelScopeType.GROUP_DM)
-        ) {
+        if (!participationOfRequestingUser) {
           throw new Error('You are not allowed to add someone');
+        }
+
+        if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
+          const addUserPolicy = channel.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+          if (
+            addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY &&
+            participationOfRequestingUser.role === ChannelRole.MEMBER
+          ) {
+            throw new Error('Only admins can add users to this channel');
+          }
         }
 
         const users = await Promise.all(userIds.map(id => tx.run(zql.users.where('id', id).one())));
@@ -312,6 +318,64 @@ export const mutators = defineMutators({
             id: channelUserStatusParticipant.id,
           });
         }
+      },
+    ),
+    updateAddUserPolicy: defineMutator(
+      z.object({
+        channelId: z.string(),
+        policy: z.nativeEnum(ChannelAddUserPolicy),
+      }),
+      async ({ tx, ctx, args: { channelId, policy } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+          throw new Error('Can only update add-user policy for default channels');
+        }
+
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (!participant || participant.role !== ChannelRole.ADMIN) {
+          throw new Error('Only channel admins can update the add-user policy');
+        }
+
+        await tx.mutate.channels.update({
+          id: channelId,
+          addUserPolicy: policy,
+        });
+      },
+    ),
+    makeChannelPublic: defineMutator(
+      z.object({
+        channelId: z.string(),
+      }),
+      async ({ tx, ctx, args: { channelId } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+          throw new Error('Can only change visibility for default channels');
+        }
+        if (channel.visibility !== ChannelVisibility.PRIVATE) {
+          throw new Error('Channel is already public');
+        }
+
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (!participant || participant.role !== ChannelRole.ADMIN) {
+          throw new Error('Only channel admins can make a channel public');
+        }
+
+        await tx.mutate.channels.update({
+          id: channelId,
+          visibility: ChannelVisibility.PUBLIC,
+        });
       },
     ),
     markChannelAsViewed: defineMutator(

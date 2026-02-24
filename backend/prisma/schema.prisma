@@ -168,6 +168,12 @@ enum ChannelVisibility {
   @@schema("public")
 }
 
+enum ChannelAddUserPolicy {
+  EVERYONE
+  ADMINS_ONLY
+  @@schema("public")
+}
+
 enum MessageType {
   USER
   BOT
@@ -1138,8 +1144,9 @@ model Channel {
   createdBy       String            // User ID (no FK constraint)
   metadata        Json?             // Additional metadata for future extension
   projectId       String            // Project to which the channel is linked
-  participantCount Int              @default(0)
-  isMigrated      Boolean?          @default(false)
+  participantCount Int                    @default(0)
+  isMigrated      Boolean?                @default(false)
+  addUserPolicy   ChannelAddUserPolicy?  @default(EVERYONE)
 
   @@map("channels")
   @@schema("public")

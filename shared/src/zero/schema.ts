@@ -129,6 +129,12 @@ export enum ChannelVisibility {
 }
 
 // @ts-ignore TS1294
+export enum ChannelAddUserPolicy {
+  EVERYONE = 'EVERYONE',
+  ADMINS_ONLY = 'ADMINS_ONLY',
+}
+
+// @ts-ignore TS1294
 export enum MessageType {
   USER = 'USER',
   BOT = 'BOT',
@@ -925,6 +931,7 @@ export const channelTable = table('channels')
     projectId: string(),
     participantCount: number(),
     isMigrated: boolean().optional(),
+    addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
   })
   .primaryKey('id');
 

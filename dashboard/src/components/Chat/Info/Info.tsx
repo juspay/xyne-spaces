@@ -1,7 +1,13 @@
 import React, { ReactElement, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { queries } from '../../../zero/queries';
-import { ChannelVisibility, ChannelScopeType, ChannelRole, Channel } from '@xyne/shared';
+import {
+  ChannelVisibility,
+  ChannelScopeType,
+  ChannelRole,
+  ChannelAddUserPolicy,
+  Channel,
+} from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { useQuery } from '../../../hooks/useQuery';
 import { QueryResultType } from '@rocicorp/zero';
@@ -17,6 +23,7 @@ import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import AboutChannel from '../AboutChannel/AboutChannel';
+import ChannelSettings from '../ChannelInformation/ChannelSettings';
 import { AddChannelForm } from '../AddChannelForm/AddChannelForm';
 import { PromoteGroupDmRequest } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
@@ -51,7 +58,7 @@ import { mutators } from '../../../zero/mutators';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { v4 as uuidv4 } from 'uuid';
 
-export type ChannelTab = 'about' | 'members';
+export type ChannelTab = 'about' | 'members' | 'settings';
 interface InfoProps {
   channel: Channel;
   previousChannelId?: string | null;
@@ -84,16 +91,15 @@ const Info = ({
   );
 
   const isParticipant = participants.some(p => p.userId === context.userID);
+  const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
 
-  // Members should not see add people button in private channels (excluding GROUP_DM)
+  const addUserPolicy = channel.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const showAddPeopleButton =
     isParticipant &&
     !isDM &&
-    !(
-      channel.visibility === ChannelVisibility.PRIVATE &&
-      currentUserParticipant?.role === ChannelRole.MEMBER &&
-      channel.scopeType !== ChannelScopeType.GROUP_DM
-    );
+    (channel.scopeType === ChannelScopeType.GROUP_DM ||
+      currentUserParticipant?.role === ChannelRole.ADMIN ||
+      addUserPolicy === ChannelAddUserPolicy.EVERYONE);
 
   const zero = useZero();
   const navigate = useNavigate();
@@ -372,6 +378,19 @@ const Info = ({
               Members {channel.participantCount || 0}
             </Tabs.Trigger>
           )}
+          {isDefaultChannel && (
+            <Tabs.Trigger
+              value='settings'
+              className={cn(
+                'px-4 py-2 text-sm transition-all duration-100 border-b-2',
+                activeTab === 'settings'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Settings
+            </Tabs.Trigger>
+          )}
         </Tabs.List>
         <Tabs.Content value='about' className='outline-none h-[480px] rounded-b-lg overflow-hidden'>
           <AboutChannel
@@ -388,6 +407,14 @@ const Info = ({
               participants={participants}
               channelDisplayName={channelDisplayName}
               popoverContainer={popoverContainerRef.current}
+            />
+          </Tabs.Content>
+        )}
+        {isDefaultChannel && (
+          <Tabs.Content value='settings' className='outline-none overflow-y-auto'>
+            <ChannelSettings
+              channel={channel}
+              isAdmin={currentUserParticipant?.role === ChannelRole.ADMIN}
             />
           </Tabs.Content>
         )}
