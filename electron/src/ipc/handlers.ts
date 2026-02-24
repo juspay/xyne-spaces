@@ -3,7 +3,6 @@ import { clearAllCookies } from '../services/cookies';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
-import { setupBrowserTabsHandlers } from './browser-tabs-handlers';
 import { config } from '../app/config';
 import { codeServerService } from '../services/code-server';
 import { docsPublishService } from '../services/docs-publish';
@@ -20,8 +19,6 @@ export function setupIpcHandlers(): void {
 
   // Set up mTLS IPC handlers
   setupMTLSIpcHandlers();
-
-  setupBrowserTabsHandlers();
 
   // Code Server IPC handlers
   ipcMain.handle('code-server:start', async () => {
