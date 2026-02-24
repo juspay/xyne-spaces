@@ -14,6 +14,7 @@ import {
   setLogLevel,
   DisconnectReason,
   SubscriptionError,
+  MediaDeviceFailure,
 } from 'livekit-client';
 import type { Zero } from '@rocicorp/zero';
 import type { Call } from '@xyne/shared';
@@ -31,6 +32,7 @@ import { mixpanelService } from '../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 import { toast } from 'sonner';
+import { MACOS_PRIVACY_URLS } from '../constants/permissions';
 import {
   reactNativeBridge,
   detectReactNativeWebView,
@@ -61,6 +63,9 @@ export interface ChatMessage {
   timestamp: number;
   isLocal: boolean;
 }
+
+// Permission error type
+export type PermissionErrorType = 'microphone' | 'camera' | 'screen' | null;
 
 // Context for Room state management
 export interface RoomContext {
@@ -103,6 +108,10 @@ export interface RoomContext {
   isNativeMode: boolean;
   // Display name for CallKit (DM: participant name, Channel: channel name)
   callDisplayName: string | null;
+  permissionError: {
+    type: PermissionErrorType;
+    dismissed: boolean;
+  };
 }
 
 // Events for Room operations
@@ -175,6 +184,9 @@ export type RoomMachineEvent =
   | { type: 'APPROVE_CONTROL_REQUEST' }
   | { type: 'DENY_CONTROL_REQUEST' }
   | { type: 'SET_CONVERSATION_ID'; conversationId: string }
+  // Permission error events
+  | { type: 'PERMISSION_ERROR'; errorType: PermissionErrorType }
+  | { type: 'DISMISS_PERMISSION_ERROR' }
   // Native mode events (from React Native bridge)
   | {
       type: 'NATIVE_CONNECTION_STATE';
@@ -437,9 +449,28 @@ export const roomMachine = setup({
           playAudio(AUDIO_PATHS.PARTICIPANT_JOIN);
         });
 
-        // Error handling
-        room.on(LiveKitRoomEvent.MediaDevicesError, (error: Error) => {
-          sendBack({ type: 'ERROR', error: error.message });
+        // Error handling - use MediaDeviceFailure.getFailure() for reliable error classification
+        room.on(LiveKitRoomEvent.MediaDevicesError, (error: Error, kind?: MediaDeviceKind) => {
+          const failure = MediaDeviceFailure.getFailure(error);
+          let permissionType: PermissionErrorType = null;
+
+          // Use kind parameter (added in livekit-client v2.13.1) to determine which device failed
+          if (kind === 'audioinput') {
+            permissionType = 'microphone';
+          } else if (kind === 'videoinput') {
+            permissionType = 'camera';
+          } else if (!kind && failure === MediaDeviceFailure.PermissionDenied) {
+            // Screen share errors often have undefined kind since getDisplayMedia doesn't use MediaDeviceKind
+            permissionType = 'screen';
+          }
+
+          // Send permission error event if we detected a permission issue
+          if (permissionType) {
+            sendBack({ type: 'PERMISSION_ERROR', errorType: permissionType });
+          }
+
+          // Also send generic error for logging/debugging with failure type
+          sendBack({ type: 'ERROR', error: `[${failure ?? 'Unknown'}] ${error.message}` });
         });
 
         // Unified handler for AI data channel messages
@@ -905,6 +936,47 @@ export const roomMachine = setup({
       error: () => null,
     }),
 
+    setPermissionError: assign({
+      permissionError: ({ event }) => ({
+        type: event.type === 'PERMISSION_ERROR' ? event.errorType : null,
+        dismissed: false,
+      }),
+    }),
+
+    showPermissionErrorToast: ({ event }) => {
+      if (event.type === 'PERMISSION_ERROR' && event.errorType) {
+        const deviceName =
+          event.errorType === 'microphone'
+            ? 'Microphone'
+            : event.errorType === 'camera'
+              ? 'Camera'
+              : 'Screen recording';
+        const settingsUrl = MACOS_PRIVACY_URLS[event.errorType];
+        const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
+
+        toast.error(`${deviceName} access is blocked`, {
+          description: 'Please allow access in your system settings and reload.',
+          duration: 6000,
+          action:
+            isElectron && settingsUrl
+              ? {
+                  label: 'Open Settings',
+                  onClick: () => {
+                    void window.electronAPI?.openExternal?.(settingsUrl);
+                  },
+                }
+              : undefined,
+        });
+      }
+    },
+
+    dismissPermissionError: assign({
+      permissionError: ({ context }) => ({
+        ...context.permissionError,
+        dismissed: true,
+      }),
+    }),
+
     storeConnectionParams: assign({
       token: ({ event }) => (event.type === 'CONNECT' ? event.token : null),
       serverUrl: ({ event }) => (event.type === 'CONNECT' ? event.serverUrl : null),
@@ -952,6 +1024,7 @@ export const roomMachine = setup({
       ticketDescription: () => '',
       ticketAssignedToName: () => null,
       ticketBoardId: () => null,
+      permissionError: () => ({ type: null as PermissionErrorType, dismissed: false }),
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1022,6 +1095,11 @@ export const roomMachine = setup({
     // The native app sets window.nativeCallSupported = true to enable this
     isNativeMode: isNativeCallSupported(),
     callDisplayName: null,
+    // Permission error state
+    permissionError: {
+      type: null,
+      dismissed: false,
+    },
   },
   id: 'roomMachine',
   on: {
@@ -1618,6 +1696,12 @@ export const roomMachine = setup({
         },
         ERROR: {
           actions: 'setError',
+        },
+        PERMISSION_ERROR: {
+          actions: ['setPermissionError', 'showPermissionErrorToast'],
+        },
+        DISMISS_PERMISSION_ERROR: {
+          actions: 'dismissPermissionError',
         },
         // Native mode events
         NATIVE_CONNECTION_STATE: [

@@ -162,6 +162,7 @@ export interface ElectronAPI {
     }) => void,
   ) => () => void;
   applyAppUpdate: () => void;
+  requestAllMediaPermissions: () => Promise<{ microphone: boolean; camera: boolean }>;
 }
 
 interface BrowserTab {
