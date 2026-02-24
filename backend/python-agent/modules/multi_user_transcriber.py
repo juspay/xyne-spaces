@@ -10,11 +10,13 @@ Uses livekit-agents built-in STT with:
 - Retry logic for handling transient errors
 """
 import asyncio
+import concurrent.futures
 import json
 import logging
+import math
 import os
 import time
-from typing import Dict, Optional, Callable, Awaitable, Set, Any
+from typing import Dict, List, Optional, Callable, Awaitable, Set, Any
 
 from livekit import rtc
 from livekit.agents import (
@@ -153,6 +155,7 @@ class ParticipantTranscriber(Agent):
         on_transcription: Callable[[dict], Awaitable[None]],
         call_id: str = "unknown",
         ai_enabled: bool = False,
+        turn_detector=None,
     ):
         """
         Initialize the transcriber agent.
@@ -163,8 +166,8 @@ class ParticipantTranscriber(Agent):
             on_transcription: Async callback to emit transcription events
             call_id: Call ID for logging
             ai_enabled: Whether AI voice is enabled (affects turn detection)
+            turn_detector: Pre-loaded shared turn detector model (avoids per-participant loading)
         """
-        turn_detector = _load_turn_detector_model()
         super().__init__(
             instructions="not-needed",
             turn_detection=turn_detector,
@@ -227,7 +230,7 @@ class MultiUserTranscriber:
         azure_api_version: str,
         azure_deployment: str,
         stt_model: str = "azure",
-        google_credentials_json: Optional[str] = None,
+        google_voice_credentials_json: Optional[str] = None,
         google_stt_model: str = "chirp_3",
         google_stt_language: str = "en-US",
         # Deepgram STT Configuration
@@ -254,7 +257,7 @@ class MultiUserTranscriber:
             azure_api_version: Azure OpenAI API version
             azure_deployment: Azure OpenAI Whisper deployment name
             stt_model: STT provider to use ('google', 'azure', or 'deepgram', default: 'google')
-            google_credentials_json: Google service account credentials JSON (for validation/logging only, actual credentials loaded from GOOGLE_APPLICATION_CREDENTIALS env var)
+            google_voice_credentials_json: Google service account credentials JSON (for validation/logging only, actual credentials loaded from GOOGLE_APPLICATION_CREDENTIALS env var)
             google_stt_model: Google STT model name (e.g., long, latest_long, short)
             google_stt_language: Language code (e.g., en-US)
             deepgram_api_key: Deepgram API key
@@ -275,7 +278,7 @@ class MultiUserTranscriber:
         self._azure_deployment = azure_deployment
 
         self._stt_model = stt_model.lower()
-        self._google_credentials_json = google_credentials_json
+        self._google_voice_credentials_json = google_voice_credentials_json
         self._google_stt_model = google_stt_model
         self._google_stt_language = google_stt_language
         
@@ -295,17 +298,49 @@ class MultiUserTranscriber:
         self._ai_manager: Optional[Any] = None
         self._call_type: Optional[str] = None
         self._stt_model_override: Optional[str] = None  # User's STT model preference from UI
-        self._mute_states: Dict[str, bool] = {}  # Track mute state per participant
+        self._pending_sessions: Set[str] = set()  # Participants with session creation in progress
         
-        # Pre-load VAD model for faster session startup
-        self._vad: Optional[silero.VAD] = None
+        # === Multi-core VAD optimization ===
+        # Silero VAD hardcodes ONNX to intra_op_num_threads=1, inter_op_num_threads=1.
+        # When multiple VADStreams share the same ONNX session, inference calls
+        # serialize internally (one core busy, others idle).
+        #
+        # Fix: Create N separate VAD instances (each with its own ONNX session)
+        # so inference can run truly in parallel across CPU cores.
+        # Each speaker gets assigned a VAD instance via round-robin.
+        cpu_count = os.cpu_count() or 4
+        self._num_vad_instances = max(2, min(cpu_count, 6))  # 2-6 VAD instances
+        self._vad_instances: List[silero.VAD] = []
+        self._vad_round_robin = 0  # Counter for round-robin VAD assignment
+        
+        # Enlarge default thread pool so ONNX run_in_executor calls
+        # can actually use all cores in parallel
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self._num_vad_instances + 4,  # VAD threads + headroom
+            thread_name_prefix="vad-onnx"
+        )
+        asyncio.get_event_loop().set_default_executor(executor)
         
         # Shared resilient STT with retry logic
         self._shared_stt: Optional[ResilientSTT] = None
+        
+        # Shared turn detector (loaded once, reused across all participants)
+        self._turn_detector = None
+        self._turn_detector_loaded = False
+        
+        # Pre-warmed session pool: ready AgentSessions waiting for assignment
+        # Sessions are created with VAD+STT already initialized so there's
+        # zero delay when track_subscribed fires (no lost audio frames)
+        self._session_pool: asyncio.Queue[AgentSession] = asyncio.Queue()
+        self._pool_size = 5  # Keep 5 sessions pre-warmed at all times
+        self._pool_replenish_task: Optional[asyncio.Task] = None
+        
         logger.info(
             f"multi_user_transcriber_initialized | "
             f"vad_threshold={vad_activation_threshold}, min_speech={vad_min_speech_duration}s, "
-            f"min_silence={vad_min_silence_duration}s, prefix_padding={vad_prefix_padding_duration}s"
+            f"min_silence={vad_min_silence_duration}s, prefix_padding={vad_prefix_padding_duration}s, "
+            f"session_pool_size={self._pool_size}, "
+            f"vad_instances={self._num_vad_instances}, cpu_cores={cpu_count}"
         )
         
 
@@ -377,7 +412,7 @@ class MultiUserTranscriber:
                     self._shared_stt = resilient_stt
             else:
                 logger.info("[STT] Using Azure OpenAI Whisper")
-                stt_prompt = "The following technical discussion includes terms like Xyne Calls, Juspay Euler, Namma Cloud, Xyne Chats, Xyne Tickets, Juspay Hyperswitch, Xyne Support, Namma Yatri, Xyne Spaces, Juspay,  Xyne Code, Xyne Training, Namma Bengaluru, Xyne Automatic, Juspay Payments Operating System, Xyne AI, Xyne Assistant, Namma Shuttle, Xyne Agent, Xyne Bot, Juspay Technologies, Namma Switch, Xyne The speaker begins by saying:"
+                stt_prompt = "Technical terms: Xyne Calls, Juspay Euler, Namma Cloud, Xyne Chats, Xyne Tickets, Juspay Hyperswitch, Xyne Support, Namma Yatri, Xyne Spaces, Juspay, Xyne Code, Xyne Training, Namma Bengaluru, Xyne Automatic, Juspay Payments Operating System, Xyne AI, Xyne Assistant, Namma Shuttle, Xyne Agent, Xyne Bot, Juspay Technologies, Namma Switch."
                 inner_stt = openai.STT.with_azure(
                     azure_endpoint=self._azure_endpoint,
                     azure_deployment=self._azure_deployment,
@@ -388,42 +423,142 @@ class MultiUserTranscriber:
                 self._shared_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
         return self._shared_stt
     
-    def _create_vad(self) -> silero.VAD:
-        """Create or reuse VAD instance with stricter settings."""
-        if self._vad is None:
-            self._vad = silero.VAD.load(
+    def _init_vad_pool(self):
+        """Initialize pool of VAD instances for multi-core parallelism.
+        
+        Each VAD instance has its own ONNX InferenceSession, so when multiple
+        VADStreams call run_in_executor, they hit DIFFERENT ONNX sessions and
+        can truly run in parallel across CPU cores.
+        
+        Without this, all streams share one ONNX session (hardcoded to 1 thread),
+        causing inference to serialize on a single core.
+        """
+        if self._vad_instances:
+            return  # Already initialized
+        
+        for i in range(self._num_vad_instances):
+            vad = silero.VAD.load(
                 activation_threshold=self._vad_activation_threshold,
                 min_speech_duration=self._vad_min_speech_duration,
                 min_silence_duration=self._vad_min_silence_duration,
                 prefix_padding_duration=self._vad_prefix_padding_duration,
             )
-            logger.info(f"vad_model_loaded | activation_threshold={self._vad_activation_threshold}, min_speech={self._vad_min_speech_duration}, min_silence={self._vad_min_silence_duration}")
-        return self._vad
+            self._vad_instances.append(vad)
+        
+        logger.info(
+            f"vad_pool_initialized | instances={self._num_vad_instances}, "
+            f"activation_threshold={self._vad_activation_threshold}, "
+            f"min_speech={self._vad_min_speech_duration}, "
+            f"min_silence={self._vad_min_silence_duration}"
+        )
     
+    def _get_next_vad(self) -> silero.VAD:
+        """Get next VAD instance via round-robin for even distribution across cores."""
+        self._init_vad_pool()
+        vad = self._vad_instances[self._vad_round_robin % self._num_vad_instances]
+        self._vad_round_robin += 1
+        return vad
+    
+    def _create_turn_detector(self):
+        """Create or reuse shared turn detector singleton."""
+        if not self._turn_detector_loaded:
+            self._turn_detector = _load_turn_detector_model()
+            self._turn_detector_loaded = True
+            if self._turn_detector:
+                logger.info("turn_detector_loaded | shared_across_all_participants=True")
+            else:
+                logger.warning("turn_detector_unavailable | fallback=vad_only")
+        return self._turn_detector
+    
+    def _create_pooled_session(self) -> AgentSession:
+        """Create a pre-configured AgentSession (not yet started).
+        
+        Uses round-robin VAD assignment so sessions are distributed across
+        different ONNX sessions for multi-core parallelism.
+        """
+        return AgentSession(
+            vad=self._get_next_vad(),
+            stt=self._create_stt(call_type=self._call_type),
+        )
+    
+    async def _warm_pool(self):
+        """Pre-warm the session pool at startup. Called once from start()."""
+        # Pre-load shared models first so pool creation is fast
+        self._init_vad_pool()
+        self._create_stt(call_type=self._call_type)
+        self._create_turn_detector()
+        
+        for i in range(self._pool_size):
+            try:
+                session = self._create_pooled_session()
+                await self._session_pool.put(session)
+            except Exception as e:
+                logger.error(f"pool_warm_failed | index={i}, error={e}")
+        
+        logger.info(f"session_pool_warmed | pool_size={self._session_pool.qsize()}")
+    
+    async def _replenish_pool(self):
+        """Background task that keeps the session pool topped up."""
+        while True:
+            try:
+                current_size = self._session_pool.qsize()
+                if current_size < self._pool_size:
+                    needed = self._pool_size - current_size
+                    for _ in range(needed):
+                        session = self._create_pooled_session()
+                        await self._session_pool.put(session)
+                    logger.debug(f"pool_replenished | added={needed}, pool_size={self._session_pool.qsize()}")
+                await asyncio.sleep(1)  # Check every second
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"pool_replenish_error | error={e}")
+                await asyncio.sleep(2)
+    
+    async def _get_session_from_pool(self) -> AgentSession:
+        """Get a pre-warmed session from pool (instant, no delay)."""
+        try:
+            return self._session_pool.get_nowait()
+        except asyncio.QueueEmpty:
+            # Pool exhausted (shouldn't happen normally), create one on-demand
+            logger.warning("session_pool_exhausted | creating_on_demand")
+            return self._create_pooled_session()
+
     async def _emit_transcription(self, data: dict):
         """Emit transcription event via EventBus."""
         await self.bus.emit("TRANSCRIPTION", data)
     
     async def start(self):
-        """Start room-level monitoring with track mute/unmute event handlers."""
+        """Start room-level monitoring with track_subscribed for lazy session creation.
+        
+        Architecture:
+        - Pre-warms a pool of AgentSessions at startup (no delay when audio arrives)
+        - Uses track_subscribed instead of participant_connected to only create
+          sessions for participants that actually publish audio tracks
+        - Listeners (no mic) never get a session → no VAD inference overhead
+        - Pool auto-replenishes in background to stay ready
+        """
         try:
-            # Register participant handlers
-            self.ctx.room.on("participant_connected", self._on_participant_connected)
+            # Pre-warm session pool FIRST so sessions are ready before any track arrives
+            await self._warm_pool()
+            
+            # Start background pool replenishment
+            self._pool_replenish_task = asyncio.create_task(self._replenish_pool())
+            self._tasks.add(self._pool_replenish_task)
+            self._pool_replenish_task.add_done_callback(lambda t: self._tasks.discard(t))
+            
+            # Use track_subscribed: only fires when an actual audio track arrives
+            # This means participants without mics (listeners) never get a session
+            self.ctx.room.on("track_subscribed", self._on_track_subscribed)
+            self.ctx.room.on("track_unsubscribed", self._on_track_unsubscribed)
             self.ctx.room.on("participant_disconnected", self._on_participant_disconnected)
             
-            # Register track mute/unmute handlers
+            # Register track mute/unmute handlers for session lifecycle
+            # Sessions are created on unmute, destroyed on mute
             self.ctx.room.on("track_muted", self._on_track_muted)
             self.ctx.room.on("track_unmuted", self._on_track_unmuted)
             
-            # Initialize mute states for existing participants
-            for participant in self.ctx.room.remote_participants.values():
-                for _, publication in participant.track_publications.items():
-                    if publication.kind == rtc.TrackKind.KIND_AUDIO:
-                        self._mute_states[participant.identity] = publication.muted
-                        if publication.muted:
-                            self.set_participant_muted(participant.identity, True)
-            
-            logger.info("transcriber_started | mute_detection=enabled")
+            logger.info(f"transcriber_started | mode=mute_lifecycle, pool_size={self._session_pool.qsize()}")
         except Exception as e:
             logger.error(f"transcriber_start_failed | error={e}", exc_info=True)
     
@@ -442,11 +577,28 @@ class MultiUserTranscriber:
             return_exceptions=True
         )
         self._sessions.clear()
-        self._mute_states.clear()
+        self._pending_sessions.clear()
+        
+        # Cancel pool replenishment task
+        if self._pool_replenish_task and not self._pool_replenish_task.done():
+            self._pool_replenish_task.cancel()
+            try:
+                await self._pool_replenish_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Drain and close pooled sessions
+        while not self._session_pool.empty():
+            try:
+                session = self._session_pool.get_nowait()
+                await session.aclose()
+            except Exception:
+                pass
         
         # Unregister event handlers from ctx.room
         try:
-            self.ctx.room.off("participant_connected", self._on_participant_connected)
+            self.ctx.room.off("track_subscribed", self._on_track_subscribed)
+            self.ctx.room.off("track_unsubscribed", self._on_track_unsubscribed)
             self.ctx.room.off("participant_disconnected", self._on_participant_disconnected)
             self.ctx.room.off("track_muted", self._on_track_muted)
             self.ctx.room.off("track_unmuted", self._on_track_unmuted)
@@ -464,102 +616,136 @@ class MultiUserTranscriber:
         except asyncio.CancelledError:
             pass
     
-    def _on_participant_connected(self, participant: rtc.RemoteParticipant):
-        """Handle new participant connection."""
-        if participant.identity in self._sessions:
-            logger.debug(f"participant_session_already_exists | participant_id={participant.identity}")
+    def _on_track_subscribed(
+        self,
+        track: rtc.Track,
+        publication: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
+    ):
+        """Handle audio track subscription.
+        
+        Session lifecycle is tied to mute state:
+        - If participant joins unmuted → create session immediately
+        - If participant joins muted → skip, session will be created on unmute
+        
+        This avoids creating sessions for muted participants (no VAD overhead).
+        """
+        if track.kind != rtc.TrackKind.KIND_AUDIO:
             return
         
         participant_name = participant.name or participant.identity
-        logger.info(f"participant_session_starting | participant_id={participant.identity}, participant_name={participant_name}")
+        logger.info(
+            f"track_subscribed | participant_id={participant.identity}, "
+            f"participant_name={participant_name}, track_sid={track.sid}, "
+            f"publication_muted={publication.muted}, pool_available={self._session_pool.qsize()}"
+        )
         
-        task = asyncio.create_task(self._start_session(participant))
-        self._tasks.add(task)
+        if publication.muted:
+            logger.info(
+                f"track_subscribed_muted_no_session | participant_id={participant.identity}, "
+                f"participant_name={participant_name}"
+            )
+        else:
+            self._create_participant_session(participant)
+    
+    def _on_track_unsubscribed(
+        self,
+        track: rtc.Track,
+        publication: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
+    ):
+        """Handle audio track unsubscription - final cleanup when track goes away.
         
-        def on_task_done(t: asyncio.Task):
-            try:
-                session = t.result()
-                self._sessions[participant.identity] = session
-                logger.info(f"participant_session_started | participant_id={participant.identity}, participant_name={participant_name}")
-            except Exception as e:
-                logger.error(f"participant_session_failed | participant_id={participant.identity}, error={e}")
-            finally:
-                self._tasks.discard(t)
+        Session may already be destroyed (by mute), but this ensures cleanup
+        if participant's track is removed while unmuted.
+        """
+        if track.kind != rtc.TrackKind.KIND_AUDIO:
+            return
         
-        task.add_done_callback(on_task_done)
+        # Check if participant has any other audio tracks remaining
+        has_other_audio = any(
+            pub.kind == rtc.TrackKind.KIND_AUDIO and pub.sid != publication.sid
+            for pub in participant.track_publications.values()
+        )
+        if has_other_audio:
+            return
+        
+        participant_name = participant.name or participant.identity
+        logger.info(f"track_unsubscribed | participant_id={participant.identity}, participant_name={participant_name}")
+        self._destroy_participant_session(participant)
     
     def _on_participant_disconnected(self, participant: rtc.RemoteParticipant):
-        """Handle participant disconnection."""
-        session = self._sessions.pop(participant.identity, None)
-        if session is None:
-            return
-        
+        """Handle participant disconnection - final cleanup."""
         participant_name = participant.name or participant.identity
         logger.info(f"participant_disconnected | participant_id={participant.identity}, participant_name={participant_name}")
-        
-        task = asyncio.create_task(self._close_session(session, participant.identity))
-        self._tasks.add(task)
-        task.add_done_callback(lambda t: self._tasks.discard(t))
+        self._destroy_participant_session(participant)
     
-    def _on_track_muted(self, publication, participant):
-        """Handle track muted event - stops VAD processing for the participant."""
+    def _on_track_muted(self, participant, publication):
+        """Handle track muted - destroy the participant's session.
+        
+        Session lifecycle: unmuted = session exists, muted = no session.
+        This ensures only unmuted participants consume VAD/CPU resources.
+        NOTE: SDK emits ("track_muted", participant, publication) — participant FIRST.
+        """
         try:
+            if publication.kind != rtc.TrackKind.KIND_AUDIO or publication.source != rtc.TrackSource.SOURCE_MICROPHONE:
+                return
+            
+            participant_name = participant.name or participant.identity
             logger.info(
-                f"[MUTE-EVENT] track_muted | participant_id={participant.identity}, "
-                f"participant_name={participant.name}, publication_sid={publication.sid}, "
-                f"kind={publication.kind}, source={publication.source}, "
-                f"is_audio={publication.kind == rtc.TrackKind.KIND_AUDIO}, "
-                f"is_microphone={publication.source == rtc.TrackSource.SOURCE_MICROPHONE}"
+                f"track_muted_destroying_session | participant_id={participant.identity}, "
+                f"participant_name={participant_name}, publication_sid={publication.sid}"
             )
-            if publication.kind == rtc.TrackKind.KIND_AUDIO and publication.source == rtc.TrackSource.SOURCE_MICROPHONE:
-                logger.info(f"[MUTE-EVENT] Condition matched - calling set_participant_muted(True) | participant={participant.name}")
-                self.set_participant_muted(participant.identity, True)
-            else:
-                logger.info(f"[MUTE-EVENT] Condition NOT matched - skipping | participant={participant.name}")
+            self._destroy_participant_session(participant)
         except Exception as e:
-            logger.error(f"track_muted_error | participant_id={participant.identity}, error={e}", exc_info=True)
+            logger.error(f"track_muted_error | error={e}", exc_info=True)
     
     def _on_track_unmuted(self, participant, publication):
-        """Handle track unmuted event - resumes VAD processing for the participant."""
+        """Handle track unmuted - create a new session for the participant.
+        
+        Session lifecycle: unmuted = session exists, muted = no session.
+        Uses pre-warmed pool for instant session creation (no lost audio frames).
+        NOTE: SDK emits ("track_unmuted", participant, publication) — participant FIRST.
+        """
         try:
+            if publication.kind != rtc.TrackKind.KIND_AUDIO or publication.source != rtc.TrackSource.SOURCE_MICROPHONE:
+                return
+            
+            participant_name = participant.name or participant.identity
             logger.info(
-                f"[UNMUTE-EVENT] track_unmuted | participant_id={participant.identity}, "
-                f"participant_name={participant.name}, publication_sid={publication.sid}, "
-                f"kind={publication.kind}, source={publication.source}, "
-                f"is_audio={publication.kind == rtc.TrackKind.KIND_AUDIO}, "
-                f"is_microphone={publication.source == rtc.TrackSource.SOURCE_MICROPHONE}"
+                f"track_unmuted_creating_session | participant_id={participant.identity}, "
+                f"participant_name={participant_name}, publication_sid={publication.sid}, "
+                f"pool_available={self._session_pool.qsize()}"
             )
-            if publication.kind == rtc.TrackKind.KIND_AUDIO and publication.source == rtc.TrackSource.SOURCE_MICROPHONE:
-                logger.info(f"[UNMUTE-EVENT] Condition matched - calling set_participant_muted(False) | participant={participant.name}")
-                self.set_participant_muted(participant.identity, False)
-            else:
-                logger.info(f"[UNMUTE-EVENT] Condition NOT matched - skipping | participant={participant.name}")
+            self._create_participant_session(participant)
         except Exception as e:
-            logger.error(f"track_unmuted_error | participant_id={participant.identity}, error={e}", exc_info=True)
+            logger.error(f"track_unmuted_error | error={e}", exc_info=True)
     
     async def _start_session(self, participant: rtc.RemoteParticipant) -> AgentSession:
         """
-        Create and start an AgentSession for a participant.
+        Start an AgentSession for a participant using a pre-warmed session from the pool.
+        
+        The pool ensures zero delay — the session (with VAD+STT already configured)
+        is grabbed instantly, so no audio frames are lost.
+        
         Args:
             participant: The remote participant to transcribe
         Returns:
             The started AgentSession
         """
         participant_name = participant.name or participant.identity
-        # Create session with VAD and call-type-aware STT
-        session = AgentSession(
-            vad=self._create_vad(),
-            stt=self._create_stt(call_type=self._call_type),  # Pass call type for STT selection
-        )
         
-        # Create agent for this participant
-        # Use dynamic turn detection based on AI state
+        # Grab pre-warmed session from pool (instant, no initialization delay)
+        session = await self._get_session_from_pool()
+        
+        # Create agent for this participant with shared turn detector
         agent = ParticipantTranscriber(
             participant_identity=participant.identity,
             participant_name=participant_name,
             on_transcription=self._emit_transcription,
             call_id=self._call_id,
             ai_enabled=self._is_ai_enabled(),
+            turn_detector=self._create_turn_detector(),
         )
         
         # Start session with participant-specific options
@@ -576,20 +762,6 @@ class MultiUserTranscriber:
             ),
         )
         
-        # Initialize mute state and check if already muted
-        self._mute_states[participant.identity] = False
-        
-        for _, publication in participant.track_publications.items():
-            if publication.kind == rtc.TrackKind.KIND_AUDIO:
-                logger.info(
-                    f"[MUTE-CHECK] Initial state | participant_id={participant.identity}, "
-                    f"publication.muted={publication.muted}, publication.sid={publication.sid}, "
-                    f"publication.source={publication.source}"
-                )
-                if publication.muted:
-                    self.set_participant_muted(participant.identity, True)
-                break
-        
         return session
     
     async def _close_session(self, session: AgentSession, participant_identity: str = None):
@@ -601,10 +773,6 @@ class MultiUserTranscriber:
             participant_identity: The participant's identity (for cleanup)
         """
         try:
-            # Clean up mute state
-            if participant_identity and participant_identity in self._mute_states:
-                del self._mute_states[participant_identity]
-            
             logger.info(f"stt_drain_started")
             await session.drain()
             logger.info(f"stt_drain_completed")
@@ -615,9 +783,22 @@ class MultiUserTranscriber:
             logger.warning(f"participant_session_close_error | error={e}")
     
     def handle_existing_participants(self):
-        """Start sessions for participants already in the room."""
+        """Start sessions for participants already in the room with unmuted audio tracks.
+        
+        Delegates to _on_track_subscribed which checks mute state:
+        - Unmuted participants → session created immediately
+        - Muted participants → session created when they unmute
+        """
         for participant in self.ctx.room.remote_participants.values():
-            self._on_participant_connected(participant)
+            for _, publication in participant.track_publications.items():
+                if (
+                    publication.kind == rtc.TrackKind.KIND_AUDIO
+                    and publication.track is not None
+                ):
+                    self._on_track_subscribed(
+                        publication.track, publication, participant
+                    )
+                    break  # One audio track per participant is enough
     def set_agent_session(self, agent_session: AgentSession):
         """Set the agent session for VAD-based speech interruption."""
         self._agent_session = agent_session
@@ -641,35 +822,76 @@ class MultiUserTranscriber:
             return False
         return getattr(self._ai_manager, 'ai_voice_enabled', False)
     
-    def set_participant_muted(self, participant_identity: str, is_muted: bool):
-        """Control audio input based on mute state to optimize VAD processing."""
-        session = self._sessions.get(participant_identity)
-        participant = self.ctx.room.remote_participants.get(participant_identity)
-        participant_name = participant.name if participant else participant_identity
+    def _create_participant_session(self, participant: rtc.RemoteParticipant):
+        """Create a new AgentSession for a participant from the pre-warmed pool.
         
-        logger.info(
-            f"[SET-MUTED] Called | participant={participant_name}, "
-            f"requested_muted={is_muted}, has_session={session is not None}"
-        )
-        
-        if session is None:
-            logger.warning(f"[SET-MUTED] No session found - early return | participant={participant_name}")
+        Handles deduplication and race conditions:
+        - Skips if session already exists or creation is in progress
+        - After creation, re-checks mute state in case participant muted during async creation
+        """
+        if participant.identity in self._sessions or participant.identity in self._pending_sessions:
+            logger.debug(f"session_already_exists_or_pending | participant_id={participant.identity}")
             return
         
-        old_state = self._mute_states.get(participant_identity, False)
+        participant_name = participant.name or participant.identity
+        self._pending_sessions.add(participant.identity)
+        
         logger.info(
-            f"[SET-MUTED] State check | participant={participant_name}, "
-            f"old_state={old_state}, new_state={is_muted}, state_changed={old_state != is_muted}"
+            f"session_creating | participant_id={participant.identity}, "
+            f"participant_name={participant_name}, pool_available={self._session_pool.qsize()}"
         )
         
-        if old_state != is_muted:
-            self._mute_states[participant_identity] = is_muted
-            session.input.set_audio_enabled(not is_muted)
-            
-            logger.info(
-                f"mute_state_changed | participant={participant_name}, "
-                f"muted={is_muted}, vad_active={not is_muted}"
-            )
-        else:
-            logger.info(f"[SET-MUTED] State unchanged - skipping | participant={participant_name}, state={is_muted}")
+        task = asyncio.create_task(self._start_session(participant))
+        self._tasks.add(task)
+        
+        def on_task_done(t: asyncio.Task):
+            self._pending_sessions.discard(participant.identity)
+            try:
+                session = t.result()
+                self._sessions[participant.identity] = session
+                
+                # Re-check: participant may have muted during async session creation
+                is_still_unmuted = False
+                for _, pub in participant.track_publications.items():
+                    if pub.kind == rtc.TrackKind.KIND_AUDIO and pub.source == rtc.TrackSource.SOURCE_MICROPHONE:
+                        is_still_unmuted = not pub.muted
+                        break
+                
+                if is_still_unmuted:
+                    logger.info(
+                        f"participant_session_started | participant_id={participant.identity}, "
+                        f"participant_name={participant_name}"
+                    )
+                else:
+                    # Muted during creation — destroy immediately
+                    logger.info(
+                        f"session_created_but_now_muted | participant_id={participant.identity}, "
+                        f"participant_name={participant_name}, closing_immediately=True"
+                    )
+                    self._destroy_participant_session(participant)
+            except Exception as e:
+                logger.error(f"participant_session_failed | participant_id={participant.identity}, error={e}")
+            finally:
+                self._tasks.discard(t)
+        
+        task.add_done_callback(on_task_done)
+    
+    def _destroy_participant_session(self, participant: rtc.RemoteParticipant):
+        """Close and remove a participant's AgentSession.
+        
+        Safe to call even if no session exists (no-op).
+        Also clears pending state if session creation was in progress.
+        """
+        self._pending_sessions.discard(participant.identity)
+        
+        session = self._sessions.pop(participant.identity, None)
+        if session is None:
+            return
+        
+        participant_name = participant.name or participant.identity
+        logger.info(f"session_destroying | participant_id={participant.identity}, participant_name={participant_name}")
+        
+        task = asyncio.create_task(self._close_session(session, participant.identity))
+        self._tasks.add(task)
+        task.add_done_callback(lambda t: self._tasks.discard(t))
 

@@ -23,7 +23,7 @@ class Config:
 
     # STT Provider Configuration (google, azure, or deepgram)
     stt_model: str  # 'google', 'azure', or 'deepgram'
-    google_credentials_json: Optional[str]
+    google_voice_credentials_json: Optional[str]
     google_stt_model: str  # Model for Google STT (e.g., chirp-2)
     google_stt_language: str
     
@@ -79,7 +79,7 @@ class Config:
     # Conversation History Settings
     max_conversation_history: int = 50
     conversation_ttl: int = 86400  # 24 hours
-    restore_last_n_messages: int = 5
+    restore_last_n_messages: int = 30
     
     @classmethod
     def load(cls) -> 'Config':
@@ -110,7 +110,7 @@ class Config:
 
             # STT Provider Configuration (google, azure, or deepgram, default: azure)
             stt_model=os.getenv("STT_MODEL", "azure").lower(),
-            google_credentials_json=os.getenv("GOOGLE_CREDENTIALS_JSON"),
+            google_voice_credentials_json=os.getenv("GOOGLE_VOICE_CREDENTIALS_JSON"),
             google_stt_model=os.getenv("GOOGLE_STT_MODEL", "chirp_3"),
             google_stt_language=os.getenv("GOOGLE_STT_LANGUAGE", "en-US"),
             
