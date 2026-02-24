@@ -455,7 +455,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const {
     duplicateCheck,
     // duplicateCandidate,
-    duplicateCandidateLink,
+    candidateLinks,
     // duplicateCheckError,
     isCheckingDuplicate,
     // isDuplicateReasonExpanded,
@@ -1759,42 +1759,40 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 <span>Checking for duplicates...</span>
               </div>
             )}
-            {duplicateCheck?.analysis.isDuplicate &&
-              duplicateCheck.analysis.duplicateTicketId &&
-              duplicateCandidateLink && (
-                <div className='rounded-lg border border-gray-200 bg-gray-50 p-4 mb-2 transition-all duration-200 ease-out'>
-                  <div className='space-y-2'>
-                    <div className='flex items-center justify-between pb-0.5'>
-                      <span className='flex items-center gap-2'>
-                        <Copy className='size-3' strokeWidth={2.5} />
-                        <p className='text-sm font-medium text-gray-800 leading-5'>
-                          Duplicate ticket found
-                        </p>
-                      </span>
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        onClick={resetDuplicateState}
-                        className='size-6 '
+            {(duplicateCheck?.candidates?.length ?? 0) > 0 && (
+              <div className='rounded-lg border border-gray-200 bg-gray-50 p-4 mb-2 transition-all duration-200 ease-out'>
+                <div className='space-y-2'>
+                  <div className='flex items-center justify-between pb-0.5'>
+                    <span className='flex items-center gap-2'>
+                      <Copy className='size-3' strokeWidth={2.5} />
+                      <p className='text-sm font-medium text-gray-800 leading-5'>
+                        Similar tickets found
+                      </p>
+                    </span>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      onClick={resetDuplicateState}
+                      className='size-6 '
+                    >
+                      <X strokeWidth={2.33} className='size-3.5' />
+                    </Button>
+                  </div>
+                  {duplicateCheck?.candidates?.slice(0, 5)?.map(candidate => {
+                    const candidateLink = candidateLinks.get(candidate.id);
+
+                    return (
+                      <div
+                        key={candidate.id}
+                        className='border border-gray-100 rounded-lg p-2.5 flex items-center justify-between gap-2 group bg-white'
                       >
-                        <X strokeWidth={2.33} className='size-3.5' />
-                      </Button>
-                    </div>
-                    {duplicateCheck?.candidates
-                      .filter(
-                        candidate => candidate.id === duplicateCheck.analysis.duplicateTicketId,
-                      )
-                      .map(candidate => (
-                        <div
-                          key={candidate.id}
-                          className='border border-gray-100 rounded-lg p-2.5 flex items-center justify-between gap-2 bg-white group'
-                        >
-                          <span className='flex items-center gap-2 overflow-hidden cursor-default'>
-                            <p className='text-gray-900 text-sm font-medium truncate'>
-                              <RenderMessageWithHTML message={candidate.title} />
-                            </p>
-                          </span>
-                          <span className='opacity-0 flex items-center gap-1 group-hover:opacity-100 transition-opacity duration-300 '>
+                        <span className='flex items-center gap-2 overflow-hidden cursor-default'>
+                          <p className='text-gray-900 text-sm font-medium truncate'>
+                            <RenderMessageWithHTML message={candidate.title} />
+                          </p>
+                        </span>
+                        <span className='opacity-0 flex items-center gap-1 group-hover:opacity-100 transition-opacity duration-300 '>
+                          {candidateLink && (
                             <Tooltip
                               content='Copy Ticket'
                               side='top'
@@ -1806,18 +1804,20 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                                 size='icon'
                                 className='size-6'
                                 onClick={() => {
-                                  handleDuplicateTicketCopyLink(duplicateCandidateLink);
+                                  handleDuplicateTicketCopyLink(candidateLink);
                                 }}
                               >
                                 <LinkIcon className='size-3.5' />
                               </Button>
                             </Tooltip>
+                          )}
+                          {candidateLink && (
                             <Tooltip
                               content='Open in new page'
                               side='top'
                               className='text-[10px] font-semibold leading-3 p-1.5 '
                             >
-                              <Link to={duplicateCandidateLink}>
+                              <Link to={candidateLink}>
                                 <Button
                                   type='button'
                                   variant='ghost'
@@ -1828,12 +1828,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                                 </Button>
                               </Link>
                             </Tooltip>
-                          </span>
-                        </div>
-                      ))}
-                  </div>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
+            )}
           </div>
 
           {allAttachments.length > 0 && (

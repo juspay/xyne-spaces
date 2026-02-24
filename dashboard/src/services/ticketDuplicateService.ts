@@ -30,7 +30,7 @@ export interface TicketDuplicateCheckAnalysis {
 }
 
 export interface TicketDuplicateCheckResponse {
-  candidates: TicketDuplicateCandidate[];
+  candidates?: TicketDuplicateCandidate[];
   analysis: TicketDuplicateCheckAnalysis;
 }
 

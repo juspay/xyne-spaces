@@ -2,7 +2,6 @@ import type { Dispatch, SetStateAction } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   checkTicketDuplicates,
-  type TicketDuplicateCandidate,
   type TicketDuplicateCheckResponse,
 } from '../services/ticketDuplicateService';
 import { useDebouncedValue } from './useDebouncedValue';
@@ -22,8 +21,7 @@ export interface UseDuplicateTicketCheckOptions {
 
 interface UseDuplicateTicketCheckResult {
   duplicateCheck: TicketDuplicateCheckResponse | null;
-  duplicateCandidate: TicketDuplicateCandidate | undefined;
-  duplicateCandidateLink: string | undefined;
+  candidateLinks: Map<string, string>;
   duplicateCheckError: string | null;
   isCheckingDuplicate: boolean;
   isDuplicateReasonExpanded: boolean;
@@ -247,46 +245,46 @@ export const useDuplicateTicketCheck = (
     setIsDuplicateReasonExpanded(false);
   }, [duplicateCheck?.analysis.duplicateTicketId, duplicateCheck?.analysis.reason]);
 
-  const duplicateCandidate = useMemo(() => {
-    if (!duplicateCheck?.analysis.isDuplicate || !duplicateCheck.analysis.duplicateTicketId) {
-      return undefined;
-    }
-    return duplicateCheck.candidates.find(c => c.id === duplicateCheck.analysis.duplicateTicketId);
-  }, [duplicateCheck]);
+  // Query for ticket data for all candidates to get authoritative projectId/boardId
+  const candidateIds = duplicateCheck?.candidates?.map(c => c.id) || [];
+  const [ticketsData] = useCachedQuery(queries.ticketsByIds({ ticketIds: candidateIds }), {
+    enabled: candidateIds.length > 0,
+  });
 
-  // Query for ticket data when we have a duplicate candidate
-  const [ticketData] = useCachedQuery(
-    queries.ticketById({ ticketId: duplicateCandidate?.id ?? '' }),
-    {
-      enabled: !!duplicateCandidate?.id,
-    },
-  );
+  // Generate links for all candidates
+  const candidateLinks = useMemo(() => {
+    const links = new Map<string, string>();
 
-  const duplicateCandidateLink = useMemo(() => {
-    if (!duplicateCandidate) return undefined;
+    for (const candidate of duplicateCheck?.candidates || []) {
+      let link: string | undefined;
 
-    // Use queried ticket data for projectId and boardId
-    if (ticketData?.projectId && ticketData?.boardId) {
-      return `/projects/${ticketData.projectId}/${ticketData.boardId}/${duplicateCandidate.id}`;
+      // Priority: authoritative ticket data > candidate boardId > context boardId > channelId
+      const ticketData = ticketsData?.find(t => t.id === candidate.id);
+
+      if (ticketData?.projectId && ticketData?.boardId) {
+        link = `/projects/${ticketData.projectId}/${ticketData.boardId}/${candidate.id}`;
+      } else if (candidate.boardId && projectId) {
+        // Use candidate boardId from API response
+        link = `/projects/${projectId}/${candidate.boardId}/${candidate.id}`;
+      } else if (boardId && projectId) {
+        // Use context boardId as fallback
+        link = `/projects/${projectId}/${boardId}/${candidate.id}`;
+      } else if (candidate.channelId) {
+        // Last resort: use chat link if no board info available
+        link = `/chat/dir/${candidate.channelId}/tickets/${candidate.id}`;
+      }
+
+      if (link && candidate.id) {
+        links.set(candidate.id, link);
+      }
     }
 
-    // Fallbacks
-    if (duplicateCandidate.channelId) {
-      return `/${duplicateCandidate.channelId}/tickets/${duplicateCandidate.id}`;
-    }
-    if (duplicateCandidate.boardId) {
-      return `/projects/${projectId}/${duplicateCandidate.boardId}/${duplicateCandidate.id}`;
-    }
-    if (boardId) {
-      return `/projects/${projectId}/${boardId}/${duplicateCandidate.id}`;
-    }
-    return undefined;
-  }, [boardId, duplicateCandidate, projectId, ticketData]);
+    return links;
+  }, [duplicateCheck, projectId, boardId, ticketsData]);
 
   return {
     duplicateCheck,
-    duplicateCandidate,
-    duplicateCandidateLink,
+    candidateLinks,
     duplicateCheckError,
     isCheckingDuplicate,
     isDuplicateReasonExpanded,
