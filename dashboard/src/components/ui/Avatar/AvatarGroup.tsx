@@ -125,25 +125,18 @@ const AvatarGroup = ({
   const remainingCount =
     count !== undefined && validUserIds.length > count ? validUserIds.length - count : 0;
 
-  // Reverse array so first avatar renders last (appears on top)
-  const reversedAvatars = [...avatarsToShow].reverse();
-
   return (
-    <div
-      data-slot='avatar-group'
-      className={cn('flex items-center flex-row-reverse', className)}
-      {...props}
-    >
+    <div data-slot='avatar-group' className={cn('flex items-center', className)} {...props}>
+      {avatarsToShow.map((userId, index) => (
+        <AvatarStackItem key={`${userId}-${index}`} size={pixelSize}>
+          <Avatar userId={userId} size={size} showActiveStatus={false} />
+        </AvatarStackItem>
+      ))}
       {remainingCount > 0 && (
         <div data-slot='avatar-stack-item'>
           <AvatarCountBadge count={remainingCount} size={size} pixelSize={pixelSize} />
         </div>
       )}
-      {reversedAvatars.map((userId, index) => (
-        <AvatarStackItem key={`${userId}-${index}`} size={pixelSize}>
-          <Avatar userId={userId} size={size} showActiveStatus={false} />
-        </AvatarStackItem>
-      ))}
     </div>
   );
 };
