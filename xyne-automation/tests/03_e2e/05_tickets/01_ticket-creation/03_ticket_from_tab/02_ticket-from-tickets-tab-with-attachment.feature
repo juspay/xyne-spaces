@@ -22,6 +22,6 @@ Feature: Create Ticket from Channel Tickets Tab with Attachment
     And I click on "[data-testid='ticket-status-selector']"
     And I click on text "Todo" in the element "[data-testid='ticket-status-selector-options']"
     And I click on "[data-testid='ticket-due-date-selector']"
-    And I select a date 7 days from now in the element "[data-testid='ticket-due-date-calendar']"
+    And I select a date 0 days from now in the element "[data-testid='ticket-due-date-calendar']"
     And I click on "[data-testid='ticket-submit-button']"
     And I wait for "[data-testid='ticket-title-input']" to disappear

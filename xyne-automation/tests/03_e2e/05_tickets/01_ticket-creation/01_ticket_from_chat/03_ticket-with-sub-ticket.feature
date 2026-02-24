@@ -16,7 +16,7 @@ Feature: Ticket Edit and Sub-Ticket Creation E2E Flow from Chat
     And I click on "[data-testid='ticket-detail-status-selector']"
     And I click on "ul[role='listbox'] li button:has-text('In Progress')"
     And I click on "[data-testid='ticket-detail-stage-eta-display']"
-    And I set datetime input "[data-testid='ticket-detail-stage-eta-input'] input" to 7 days from now
+    And I set datetime input "[data-testid='ticket-detail-stage-eta-input'] input" to 0 days from now
     And I click on "[data-testid='ticket-detail-priority-selector']"
     And I click on "ul[role='listbox'] li button:has-text('Critical')"
     And I click on "[data-testid='create-sub-ticket-button']"

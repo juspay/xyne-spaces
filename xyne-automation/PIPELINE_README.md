@@ -100,6 +100,7 @@ npm run codegen-cleanup
 4. **Updates spec file** — replaces `getByRole('button', { name: '...' })` → `getByTestId('...')` in the Playwright spec
 
 #### Flow control:
+
 - **Runs automatically** for each spec file
 - **Blocks:** Step 2 does not start until this completes
 
@@ -126,17 +127,20 @@ npm run codegen-cleanup
 9. Logs start time, end time, elapsed time, and exit code to `llm_reports/llm_output_debug/`
 
 #### Key LLM prompt rules:
+
 - **ALWAYS output code blocks** (even if similar tests exist)
 - Use `I click on "[data-testid='...']"` format (NOT `I click the element with testid`)
 - Reuse shared step definitions where possible
 - Do not re-define steps that exist in `tests/shared/common.steps.ts`
 
 #### File discovery (test-and-run.sh):
+
 - After conversion, `test-and-run.sh` finds generated files by searching `tests/03_e2e/` for `*<BASE_NAME>*.feature` and `*<BASE_NAME>*.steps.ts`
 - No manifest files are used — discovery is purely by filename pattern matching
 - `BASE_NAME` is derived from the spec file (e.g., `test-1.spec.ts` → `test-1`)
 
 #### Flow control:
+
 - **Waits for:** Stage 1 to complete
 - **Blocks:** Stage 3 waits for all files to be generated
 
@@ -161,6 +165,7 @@ npm run codegen-cleanup
    - Up to **2 retries** (3 total attempts)
 
 #### Flow control:
+
 - **Waits for:** Stage 2 to produce `.feature` + `.steps.ts` files
 - **Retries:** Up to 2 times on dry run failure
 - **Blocks:** Stage 4 does not start until all files pass validation
@@ -173,11 +178,13 @@ npm run codegen-cleanup
 **Trigger:** Automatically after all validations pass
 
 #### What it does:
+
 - Runs the full Cucumber e2e test suite
 - 4-hour maximum timeout
 - Shows live spinner with elapsed time
 
 #### Flow control:
+
 - **Waits for:** All files to pass dry run validation
 - **Does NOT run if:** Any conversion or validation failed
 
@@ -231,16 +238,16 @@ xyne-automation/
 
 ## Backup Files
 
-| File | Location | Purpose |
-|------|----------|---------|
-| `test-1_original.spec.ts` | `tests/actions/` | Original Playwright spec before `getByRole` → `getByTestId` replacement. Allows reverting spec changes. |
-| `*_attempt_00.feature.txt` | `tests/03_e2e/<folder>/_previous/` | Failed feature file from retry attempt 0. Kept for debugging LLM output issues. Uses `.txt` extension to prevent cucumber from picking it up. |
-| `*_attempt_00.steps.ts.txt` | `tests/03_e2e/<folder>/steps/_previous/` | Failed steps file from retry attempt 0. Same reason as above. |
-| `*_conversion_*.log` | `llm_reports/conversion_logs/` | Full stdout/stderr from the conversion script run. Useful for debugging LLM connection issues, timeouts. |
-| `*_failed_dry_run_*.txt` | `llm_reports/dry_run/` | Dry run failure report containing: command ran, cucumber output, undefined/ambiguous step details. Sent to LLM on retry for self-correction. |
-| `test-1_*.txt` | `llm_reports/llm_output_debug/` | Raw LLM response text with start/end timestamps, elapsed time, model, and exit code. Used to debug what the LLM actually generated vs what was parsed. |
-| `*_folder_decision_*.log` | `llm_reports/folder_decisions/` | LLM folder decision debug output. Contains exit code, timestamp, and raw LLM response for the folder selection call. |
-| `*_prompt_*.txt` | `llm_reports/prompts/` | Full prompt sent to the LLM. Useful for debugging prompt construction, missing context, or rule issues. |
+| File                        | Location                                 | Purpose                                                                                                                                                |
+| --------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test-1_original.spec.ts`   | `tests/actions/`                         | Original Playwright spec before `getByRole` → `getByTestId` replacement. Allows reverting spec changes.                                                |
+| `*_attempt_00.feature.txt`  | `tests/03_e2e/<folder>/_previous/`       | Failed feature file from retry attempt 0. Kept for debugging LLM output issues. Uses `.txt` extension to prevent cucumber from picking it up.          |
+| `*_attempt_00.steps.ts.txt` | `tests/03_e2e/<folder>/steps/_previous/` | Failed steps file from retry attempt 0. Same reason as above.                                                                                          |
+| `*_conversion_*.log`        | `llm_reports/conversion_logs/`           | Full stdout/stderr from the conversion script run. Useful for debugging LLM connection issues, timeouts.                                               |
+| `*_failed_dry_run_*.txt`    | `llm_reports/dry_run/`                   | Dry run failure report containing: command ran, cucumber output, undefined/ambiguous step details. Sent to LLM on retry for self-correction.           |
+| `test-1_*.txt`              | `llm_reports/llm_output_debug/`          | Raw LLM response text with start/end timestamps, elapsed time, model, and exit code. Used to debug what the LLM actually generated vs what was parsed. |
+| `*_folder_decision_*.log`   | `llm_reports/folder_decisions/`          | LLM folder decision debug output. Contains exit code, timestamp, and raw LLM response for the folder selection call.                                   |
+| `*_prompt_*.txt`            | `llm_reports/prompts/`                   | Full prompt sent to the LLM. Useful for debugging prompt construction, missing context, or rule issues.                                                |
 
 ---
 
@@ -255,6 +262,7 @@ npm run codegen-and-test -- <spec-file.spec.ts> [<spec-file2.spec.ts> ...]
 ```
 
 **Key behaviors:**
+
 - Automatically runs testid analysis for each spec file
 - Runs conversion in background with live spinner + phase detection
 - Validates each generated file with dry run
@@ -271,6 +279,7 @@ npm run codegen -- <spec-file.spec.ts>
 ```
 
 **Key behaviors:**
+
 - LLM folder decision with fallback to name-based lookup (`*_<BASE_NAME>`)
 - Folder decision debug saved to `llm_reports/folder_decisions/`
 - Full prompt saved to `llm_reports/prompts/` for debugging
@@ -290,6 +299,7 @@ The LLM couldn't decide which folder to place generated files in. The script fal
 ### "No component files found" for a button
 
 The button text may be:
+
 - **Split across JSX elements** — e.g., `Open My Workspace` + `<span>→</span>`. The LLM handles this by analyzing the component context, but unusual splits may need manual testid addition.
 - **Dynamic/conditional** — e.g., `{isLoading ? 'Loading...' : 'Submit'}`. Add `data-testid` manually and re-run.
 - **In a different project** — text rendered by a package or micro-frontend.
@@ -317,11 +327,13 @@ The generated `.steps.ts` re-defines a step that already exists in `tests/shared
 ### Timeout during test execution
 
 Default timeouts:
+
 - **LLM conversion**: 10 minutes (`API_TIMEOUT_MS=600000`)
 - **Validation retries**: 20 minutes each
 - **Test execution**: 4 hours
 
 If any stage exceeds its timeout, the process is terminated. Check for:
+
 - Hanging browser instances
 - Network connectivity issues
 - LLM API downtime (for conversion timeout)

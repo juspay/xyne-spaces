@@ -49,6 +49,7 @@ DASHBOARD_URL=http://localhost:5173
 ## 2. Quick Start - Convert and Run Tests
 
 The **`npm run codegen-and-test`** command is the main workflow that provides a complete pipeline:
+
 1. **Converts** Playwright specs to Cucumber BDD format
 2. **Validates** generated files with dry-run checks
 3. **Runs** the Cucumber tests automatically
@@ -86,11 +87,13 @@ npm run codegen-and-test -- ../tests/test1.spec.ts
 
 **Failed Dry Run Reports:**
 If validation fails, detailed reports are saved in `xyne-automation/llm_reports/dry_run`:
+
 - Contains the dry run output showing undefined steps
 - Includes the feature file and steps file content
 - Provides suggested fixes for resolving issues
 
 View a failed report:
+
 ```bash
 cat xyne-automation/llm_reports/dry_run/<file_name>_failed_dry_run_<timestamp>.txt
 ```
@@ -98,10 +101,12 @@ cat xyne-automation/llm_reports/dry_run/<file_name>_failed_dry_run_<timestamp>.t
 ## 2.5 Alternative - Convert Only
 
 If you only want to convert Playwright specs without running tests, use `npm run codegen`. This command:
+
 - Verifies Claude Code installation (requires manual installation)
 - Uses Juspay Grid API (via Claude Code) to convert Playwright tests
 - Generates feature files and step definitions
 - Places them in the correct directory structure
+
 ### Convert a single Playwright spec file:
 
 ```bash
@@ -157,6 +162,7 @@ tests/
 - **Step Definition Files**: `01_<test-name>.steps.ts` (in `steps/` subfolder)
 
 The script automatically:
+
 - Assigns the next available number prefix to new test folders
 - Ensures feature and steps files are correctly named
 - Creates a `steps/` subfolder within each test folder
@@ -210,6 +216,7 @@ npm run test:debug
 ### Smart Conversion Features
 
 The conversion process:
+
 - **Reuses existing steps**: Checks `tests/shared/common.steps.ts` and `tests/shared/browser.steps.ts` before creating new step definitions
 - **Uses dynamic data**: Avoids hardcoding user names, test strings, and other application data
 - **Follows naming conventions**: Maintains consistency with existing test structure
@@ -262,6 +269,7 @@ If Cucumber reports undefined steps after conversion:
 ### File Not Found Errors
 
 The script tries multiple path locations for input files:
+
 - Relative path from current directory
 - Relative to `xyne-automation/tests/`
 - Relative to `xyne-automation/`
