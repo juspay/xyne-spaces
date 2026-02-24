@@ -12,6 +12,7 @@ const ReplyLayout: React.FC<{
   isThreadOpen: boolean;
   isMe?: boolean;
   showInChannel?: boolean;
+  isCallMessage?: boolean;
   showViewNewerReplies: boolean | undefined;
   parentConversationId?: string;
   messageId: string;
@@ -21,6 +22,7 @@ const ReplyLayout: React.FC<{
   isThreadOpen,
   isMe,
   showInChannel,
+  isCallMessage,
   showViewNewerReplies,
   parentConversationId,
   messageId,
@@ -42,7 +44,9 @@ const ReplyLayout: React.FC<{
     );
   }
 
-  if (showInChannel) return null;
+  // Call messages (e.g., headless recordings) use showInChannel: true for direct visibility
+  // but still need to show their thread indicator for summaries/PRDs posted as replies
+  if (showInChannel && !isCallMessage) return null;
 
   if ((!replies || replies.replyCount === 0) && (!draft || isThreadOpen)) return null;
 
