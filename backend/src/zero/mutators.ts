@@ -3490,16 +3490,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
                 if (existingEntry) {
                   // Re-entering a stage - reactivate it
+                  const newStageEtaDeadline = calculateETADeadline(
+                    new Date(existingEntry.stageEnteredAt),
+                    newStage.eta // Add stage ETA hours
+                  ).getTime();
                   await tx.mutate.ticket_stage_eta.update({
                     id: existingEntry.id,
                     stageLeftAt: null,
+                    stageEta: newStageEtaDeadline,
                     updatedAt: now,
                     updatedBy: authData.sub
                   });
                 } else {
                   // First time entering this stage - create new entry
                   const newEntryId = uuidv4();
-                  const stageEtaDeadline = now + newStage.eta * 60 * 60 * 1000;
+                  const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
                   await tx.mutate.ticket_stage_eta.insert({
                     id: newEntryId,
                     ticketId: params.id,
@@ -3556,7 +3561,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   });
                 } else {
                   // Create new entry if it didn't exist
-                  const stageEtaDeadline = now + newStage.eta * 60 * 60 * 1000;
+                  const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
                   const newEntryId = uuidv4();
                   await tx.mutate.ticket_stage_eta.insert({
                     id: newEntryId,

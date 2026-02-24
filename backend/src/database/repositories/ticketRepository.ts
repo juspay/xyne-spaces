@@ -104,9 +104,7 @@ export class TicketRepository {
     });
 
     const stageEnteredAt = new Date();
-    const stageEtaDeadline = new Date(
-      stageEnteredAt.getTime() + selectedStage.eta * 60 * 60 * 1000
-    );
+    const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta);
     await prisma.ticketStageEta.create({
       data: {
         ticketId: ticket.id,
@@ -277,9 +275,7 @@ export class TicketRepository {
       } else {
         // First time entering this stage - create new entry
 
-        const stageEtaDeadline = new Date(
-          now.getTime() + targetStage.eta * 60 * 60 * 1000
-        );
+        const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
         
         await prisma.ticketStageEta.create({
           data: {
@@ -338,9 +334,7 @@ export class TicketRepository {
       } else {
         // Entry doesn't exist (edge case - create it)
 
-        const stageEtaDeadline = new Date(
-          now.getTime() + targetStage.eta * 60 * 60 * 1000
-        );
+        const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
         await prisma.ticketStageEta.create({
           data: {
             ticketId: ticketId,

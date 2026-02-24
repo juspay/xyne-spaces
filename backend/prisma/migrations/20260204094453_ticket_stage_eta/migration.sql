@@ -24,3 +24,6 @@ CREATE INDEX "ticket_stage_eta_stageLeftAt_idx" ON "public"."ticket_stage_eta"("
 
 -- CreateIndex
 CREATE INDEX "ticket_stage_eta_stageEta_idx" ON "public"."ticket_stage_eta"("stageEta");
+
+-- AlterEnum
+ALTER TYPE "public"."ActivityType" ADD VALUE 'STAGE_ETA';
