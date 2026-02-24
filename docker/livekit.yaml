@@ -4,7 +4,9 @@ rtc:
   port_range_end: 60000
   use_external_ip: false
 
-redis: {}
+redis:
+  address: redis:6379
+
 
 keys:
   devkey: devsecret
@@ -15,8 +17,14 @@ logging:
 
 room:
   auto_create: true
-  empty_timeout: 300
+  empty_timeout: 120     
+  departure_timeout: 10     
   max_participants: 100
 
 turn:
   enabled: false
+
+webhook:
+  api_key: devkey
+  urls:
+    - http://backend:3001/api/livekit/webhook
