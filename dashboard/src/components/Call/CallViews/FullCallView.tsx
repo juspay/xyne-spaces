@@ -2,6 +2,7 @@ import type { Room } from 'livekit-client';
 import { ConnectionState, Track } from 'livekit-client';
 import { useCallback, useEffect, useState } from 'react';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
+import { roomActor } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
 import ThreadMessages from '../../Chat/ThreadPannel';
 import { CallControls } from '../CallControls/CallControls';
@@ -10,7 +11,6 @@ import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
-import { roomActor } from '../../../machines/roomMachine';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 
 interface FullCallViewProps {

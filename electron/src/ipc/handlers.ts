@@ -9,6 +9,10 @@ import { codeServerService } from '../services/code-server';
 import { docsPublishService } from '../services/docs-publish';
 import { performHardReload } from '../services/version-checker';
 import { Logger } from '../services/logger/Logger';
+import {
+  requestAllMediaPermissions,
+} from '../services/media-permission';
+
 
 let previewBrowserView: BrowserView | null = null;
 
@@ -340,4 +344,8 @@ export function setupIpcHandlers(): void {
   ipcMain.on('apply-app-update', () => {
     void performHardReload();
   });
+  ipcMain.handle('request-all-media-permissions', async () => {
+    return requestAllMediaPermissions();
+  });
 }
+

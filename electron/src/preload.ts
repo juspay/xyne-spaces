@@ -239,4 +239,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('app-update-available', listener);
   },
   applyAppUpdate: () => ipcRenderer.send('apply-app-update'),
+  requestAllMediaPermissions: () =>
+    ipcRenderer.invoke('request-all-media-permissions'),
 });
+
