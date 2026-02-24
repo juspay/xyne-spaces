@@ -48,6 +48,7 @@ import {
   WorkflowExecutionsACL,
   WorkflowsACL,
 } from './tables'
+import { UserActivityEventsAcl } from './tables/user_activity_acl'
 
 export class ACLFactory {
   static getACL(
@@ -179,6 +180,8 @@ export class ACLFactory {
 
       case 'workflowExecution':
         return new WorkflowExecutionsACL(ctx, prisma)
+      case 'userActivityEvent':
+        return new UserActivityEventsAcl(ctx, prisma)
 
       // Default: no ACL restriction (pass-through)
       default:
