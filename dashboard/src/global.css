@@ -1099,7 +1099,9 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   margin-left: -4px;
 }
 
-[data-slot="avatar-group"] [data-slot="avatar-stack-item"]:not(:first-of-type) img {
+[data-slot="avatar-group"]
+  [data-slot="avatar-stack-item"]:not(:first-of-type)
+  [data-slot="avatar"] {
   mask: radial-gradient(circle 9px at -4px 50%, transparent 99%, #fff 100%);
 }
 
