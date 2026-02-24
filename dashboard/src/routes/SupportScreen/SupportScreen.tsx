@@ -12,8 +12,11 @@ import {
   LayoutGrid,
   List,
   Store,
+  Split,
 } from 'lucide-react';
+import { EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { toast } from 'sonner';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '../../utils/classNames';
@@ -105,6 +108,16 @@ const DropdownIcon = ({
 
 // Type definition for emails from the query
 type Email = QueryResultType<typeof queries.getEmailsForTicket>[number];
+
+// API response type for email demerge endpoint
+interface DemergeEmailResponse {
+  success: boolean;
+  newTicket: {
+    ticketId: string;
+    xyneId: string;
+    conversationId: string;
+  };
+}
 // Cache interface for AI summary
 interface SummaryCache {
   summary: string;
@@ -1088,7 +1101,7 @@ const EmailThread = ({ emails }: { emails: Email[] }): ReactElement => {
     return (
       <div className='divide-y divide-gray-200'>
         {sortedEmails.map(email => (
-          <EmailThreadItem key={email.id} email={email} />
+          <EmailThreadItem key={email.id} email={email} firstEmail={sortedEmails[0]!} />
         ))}
       </div>
     );
@@ -1104,7 +1117,7 @@ const EmailThread = ({ emails }: { emails: Email[] }): ReactElement => {
     return (
       <div className='divide-y divide-gray-200'>
         {sortedEmails.map(email => (
-          <EmailThreadItem key={email.id} email={email} />
+          <EmailThreadItem key={email.id} email={email} firstEmail={sortedEmails[0]!} />
         ))}
       </div>
     );
@@ -1113,7 +1126,7 @@ const EmailThread = ({ emails }: { emails: Email[] }): ReactElement => {
   // Show first, collapsed pill, and last when collapsed
   return (
     <div className='divide-y divide-gray-200 relative'>
-      <EmailThreadItem email={firstEmail} />
+      <EmailThreadItem email={firstEmail} firstEmail={sortedEmails[0]!} />
       <div className='py-3 flex items-center justify-center'>
         <button
           onClick={() => setIsExpanded(true)}
@@ -1125,16 +1138,65 @@ const EmailThread = ({ emails }: { emails: Email[] }): ReactElement => {
           {collapsedCount} {collapsedCount === 1 ? 'more message' : 'more messages'}
         </button>
       </div>
-      <EmailThreadItem email={lastEmail} />
+      <EmailThreadItem email={lastEmail} firstEmail={sortedEmails[0]!} />
     </div>
   );
 };
 
-const EmailThreadItem = ({ email }: { email: Email }): ReactElement => {
+const EmailThreadItem = ({
+  email,
+  firstEmail,
+}: {
+  email: Email;
+  firstEmail: Email;
+}): ReactElement => {
   const fromName = email.from || 'Unknown';
   const toList = email.to || [];
   const ccList = email.cc || [];
   const avatarChar = fromName.charAt(0).toUpperCase();
+  const navigate = useNavigate();
+  const [isDemerging, setIsDemerging] = useState(false);
+
+  const handleDemerge = async (): Promise<void> => {
+    if (isDemerging) return;
+    setIsDemerging(true);
+
+    // Show loading toast
+    const toastId = toast.loading('Demerging email...', {
+      description: 'Creating new ticket from this email',
+    });
+
+    try {
+      const response = await apiInstance.post<DemergeEmailResponse>('/email/demerge', {
+        emailId: email.id,
+      });
+
+      if (response.data?.success && response.data.newTicket) {
+        // Show success toast
+        toast.success('Demerge Successful', {
+          id: toastId,
+          description: `Created new ticket ${response.data.newTicket.xyneId}`,
+        });
+
+        // Navigate to the new ticket
+        void navigate(`/support/${response.data.newTicket.xyneId}`, {
+          state: {
+            conversationId: response.data.newTicket.conversationId,
+            title: email.subject,
+            ticketId: response.data.newTicket.ticketId,
+          },
+        });
+      }
+    } catch {
+      // Error handling without console
+      toast.error('Demerge Failed', {
+        id: toastId,
+        description: 'Operation failed. Please try again.',
+      });
+    } finally {
+      setIsDemerging(false);
+    }
+  };
 
   return (
     <div className='w-full py-8 flex items-start justify-start gap-4'>
@@ -1148,6 +1210,19 @@ const EmailThreadItem = ({ email }: { email: Email }): ReactElement => {
           <div className='flex-1'>
             <div className='flex items-center gap-2 mb-1'>
               <span className='text-sm font-semibold text-gray-900'>{fromName}</span>
+              {email.type === EmailType.DEFAULT &&
+                email.externalThreadId === email.externalMessageId &&
+                email.id !== firstEmail.id && (
+                  <button
+                    onClick={() => void handleDemerge()}
+                    disabled={isDemerging}
+                    className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+                    title='Demerge this email to a new ticket'
+                  >
+                    <Split size={12} />
+                    {isDemerging ? 'Demerging...' : 'Demerge'}
+                  </button>
+                )}
             </div>
             <div className='text-xs text-gray-500 mb-2'>
               <div>To: {toList.join(', ')}</div>

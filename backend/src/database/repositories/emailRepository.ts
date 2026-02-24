@@ -48,5 +48,39 @@ export class EmailRepository {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  async findByConversationIdOrdered(conversationId: string): Promise<Email[]> {
+    return await this.db.email.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async findFirstByConversationId(conversationId: string): Promise<Email | null> {
+    return await this.db.email.findFirst({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async updateConversationId(emailId: string, conversationId: string): Promise<Email> {
+    return await this.db.email.update({
+      where: { id: emailId },
+      data: { conversationId },
+    });
+  }
+
+  async updateManyConversationIds(emailIds: string[], conversationId: string): Promise<{ count: number }> {
+    return await this.db.email.updateMany({
+      where: { id: { in: emailIds } },
+      data: { conversationId },
+    });
+  }
+
+  async delete(id: string): Promise<Email> {
+    return await this.db.email.delete({
+      where: { id },
+    });
+  }
 }
 

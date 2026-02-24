@@ -84,6 +84,23 @@ export interface AddEmailToConversationParams {
   uploadedFiles?: UploadedFileResult[];
 }
 
+export interface CreateConversationFromEmailParams {
+  channelId: string;
+  userId: string;
+  emailSubject: string;
+  emailBody: string;
+  emailTo: string[];
+  emailFrom: string;
+  emailCc?: string[];
+  emailBcc?: string[];
+  externalThreadId: string;
+  externalMessageId: string;
+  projectId: string;
+  boardId: string;
+  stageName: string;
+  userGroupId?: string;
+}
+
 export class EmailService {
   private conversationRepository: ConversationRepository;
   private messageRepository: MessageRepository;
@@ -637,6 +654,125 @@ export class EmailService {
       logger.warn('Error in addEmailToConversation:', error);
       throw error;
     }
+  }
+
+  /**
+   * Create new conversation and ticket from existing email data
+   * Used for demerge operation to create a new ticket from a demerged email
+   */
+  async createConversationFromEmail(params: CreateConversationFromEmailParams) {
+    const {
+      channelId,
+      userId,
+      emailSubject,
+      emailBody,
+      projectId,
+      boardId,
+      stageName,
+      userGroupId,
+    } = params;
+
+    // Check if channel exists
+    const channel = await this.channelRepository.findById(channelId);
+    if (!channel) {
+      throw new Error('Channel not found');
+    }
+
+    // If channel type is not EMAIL, set it to EMAIL
+    if (channel.type !== ChannelType.EMAIL) {
+      await this.channelRepository.update(channelId, {
+        type: ChannelType.EMAIL,
+      });
+    }
+
+    // Step 1: Create conversation
+    const conversationData: CreateConversationInput = {
+      channelId,
+      createdBy: userId,
+      initialMessageId: 'temp',
+    };
+
+    const conversation = await this.conversationRepository.create(conversationData);
+
+    // Step 2: Create ticket in a transaction
+    const ticket = await this.prisma.$transaction(async (tx) => {
+      // Generate xyneId using PostgreSQL sequence
+      const result = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('ticket_xyne_id_seq')`;
+      const xyneId = `XYNE-${result[0].nextval}`;
+
+      // Create ticket using transaction client
+      return await tx.ticket.create({
+        data: {
+          title: emailSubject,
+          description: emailBody,
+          createdBy: userId,
+          updatedBy: userId,
+          conversationId: conversation.conversationId,
+          channelId: channelId,
+          xyneId: xyneId,
+          projectId: projectId,
+          boardId: boardId,
+          stageName: stageName,
+          ...(userGroupId && { userGroupId }),
+        }
+      });
+    });
+
+    this.pushVespaJobForTicket(ticket.id, userId).catch(error => {
+      logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
+    });
+
+    // Auto-assign ticket if userGroupId is provided
+    if (userGroupId && boardId) {
+      try {
+        const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId);
+        if (assignmentResult.assignedUserId) {
+          await this.prisma.ticket.update({
+            where: { id: ticket.id },
+            data: { assignedTo: assignmentResult.assignedUserId }
+          });
+
+          try {
+            await syncUserWorkload(assignmentResult.assignedUserId, userGroupId, boardId, userId);
+            logger.info(`[EmailService] Synced workload for user ${assignmentResult.assignedUserId}`);
+          } catch (workloadError) {
+            logger.error('[EmailService] Error syncing workload:', workloadError);
+          }
+        }
+      } catch (error) {
+        logger.error('[EmailService] Auto-assignment failed:', error);
+      }
+    }
+
+    // Step 3: Create BOT message with ticket
+    const messageData: CreateMessageInput = {
+      conversationId: conversation.conversationId,
+      senderId: userId,
+      content: '',
+      msgType: MessageType.BOT,
+      hasAttachment: true,
+      metadata: {
+        ticketId: ticket.id,
+      },
+    };
+
+    const message = await this.messageRepository.create(messageData, true);
+
+    // Update conversation with real initial message ID
+    await this.conversationRepository.update(conversation.conversationId, {
+      initialMessageId: message.messageId,
+      ticketId: ticket.id
+    });
+
+    // Update channel last activity
+    await this.channelRepository.updateLastActivity(channelId);
+
+    return {
+      conversation,
+      message,
+      ticket,
+      channel,
+    };
   }
 }
 

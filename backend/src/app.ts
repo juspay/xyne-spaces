@@ -79,6 +79,7 @@ import pythonQueryRoutes from '@/routes/pythonQuery';
 import formsRoutes from '@/routes/forms';
 import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
 import emailRoutes from '@/routes/email';
+import emailDemergeRoutes from '@/routes/emailDemerge';
 import docsRoutes from '@/routes/docs';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
@@ -198,6 +199,7 @@ export class App {
 
     this.app.use('/api/health', healthRoutes);
     this.app.use('/api/email', emailRoutes);
+    this.app.use('/api/email', emailDemergeRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', verifySamCallback, meetCallbackRoutes);
