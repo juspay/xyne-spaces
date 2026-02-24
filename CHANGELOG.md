@@ -1,3 +1,29 @@
+## [1.57.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.56.1...v1.57.0) (2026-02-24)
+
+
+### Features
+
+* Add user activity tracking ([dd67c0e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dd67c0e803352b49702cd422a88d9053e6ed4b17)), closes [#2464](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2464)
+* auto merge and unmerge tickets from zoho ([f5d5007](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f5d5007fc9616fac81ecac1c65bc13c99ba9a011)), closes [#3534](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3534)
+* display_top_five_similar_tickets ([c3fe1fc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c3fe1fc3a14aada61ef0e49c8fe02499fd38db48)), closes [#3206](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3206)
+* expose user activity via python query ([b108e2d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b108e2dca86d7ccdb1394429c58d4852aa794242)), closes [#3529](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3529)
+* implements channel settings tab ([bfac520](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bfac520d8a35171ff500bcfd563a797b9cc67173)), closes [#3114](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3114)
+
+
+### Bug Fixes
+
+* add user activity view in xyneai ([951932a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/951932a7c71c75aa830c599f6e7c9c7ad5bc9052)), closes [#3574](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3574)
+* added a condn to handle isCallMessage sent in Xyne automatic ([9aa0ac0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9aa0ac054c64e4df15c691285d831a24bf30a01b)), closes [#3473](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3473)
+* Added auto focus for search modal in ticket details and kanban ([4922d88](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4922d88eb73ea4bd30ce93759077ca882785d49d)), closes [#2492](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2492)
+* build dashboard even when push images is true ([f0ec378](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f0ec37865b9fda1e61717cf7badb8f78837ee585)), closes [#3532](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3532)
+* changing the stt_prompt to prevent transcript hallucination, adding missing env values and code transfer to bring main and deployed branches in sync. ([cb165fe](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cb165fe806852e1cf7e963fcd2df699e9ef61752)), closes [#3511](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3511)
+* fix the attachments coming blank when unsupported format is being uploaded ([f9dcb32](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f9dcb325f498ac2912388c9ca82a13326f6f93f4))
+* fixed call automation ([09aa67c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/09aa67cadf1e6027f87882667f3a4da7f98c37cb))
+* fixing the count of selected stages on board switch ([b5552c0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b5552c004918113b0144e90b81e64eb388088349))
+* move-browser-from-native-to-webview ([9ebb7bc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9ebb7bcf2f45eba5407fe039dad8634d4f7b3dc7)), closes [#3563](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3563)
+* showing error if permission is missing ([641f5e5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/641f5e59010583358793103e05be3f6037757fa3)), closes [#3519](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3519)
+* stageEtaFix ([264ce1a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/264ce1a07d6fddfd579c1480088b830379397af3)), closes [#3242](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3242)
+
 ## [1.56.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.56.0...v1.56.1) (2026-02-24)
 
 
