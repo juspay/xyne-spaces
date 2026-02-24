@@ -37,7 +37,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
       <div className={`h-full flex items-center justify-center bg-white ${className}`}>
         <div className='text-center text-gray-500'>
           <div className='mb-4'>User not found</div>
-          <Button onClick={handleClose} variant='outline'>
+          <Button
+            onClick={handleClose}
+            variant='outline'
+            data-track-category='Profile'
+            data-track-name='CloseProfile'
+            data-track-metadata={JSON.stringify({ channelId, userId })}
+          >
             Go Back
           </Button>
         </div>
@@ -66,6 +72,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             onClick={handleClose}
             className='!p-2 border border-gray-300 rounded-md hover:bg-gray-50'
             title='Close'
+            data-track-category='Profile'
+            data-track-name='CloseProfileSidebar'
+            data-track-metadata={JSON.stringify({ channelId, userId })}
           >
             <X className='size-4' />
           </Button>

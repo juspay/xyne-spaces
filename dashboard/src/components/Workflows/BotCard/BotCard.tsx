@@ -57,6 +57,9 @@ export const BotCard: React.FC<BotCardProps> = ({
       role='button'
       tabIndex={0}
       className='bg-white border border-gray-200 rounded-xl p-4 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer group'
+      data-track-category='Workflows'
+      data-track-name='OpenWorkflow'
+      data-track-metadata={JSON.stringify({ workflowId, workflowName, status })}
     >
       {/* Header: ID and Icons */}
       <div className='flex items-start justify-between mb-2'>

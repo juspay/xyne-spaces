@@ -16,6 +16,7 @@ import { callCountService, CallCountData, AllTimeCallCountData, CallDurationData
 import { type NotificationData } from './notificationService';
 import { NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
+import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -342,6 +343,14 @@ class WebSocketService {
       } catch (error) {
         logger.error('❌ [PRESENCE] Error handling request_presence_state:', error);
       }
+    });
+
+    // Handle user activity events (for analytics tracking)
+    socket.on('user_activity_event', (event: ActivityEventPayload) => {
+      // Fire and forget - non-blocking
+      activityTrackingService.saveActivityEvent(event).catch(error => {
+        logger.error('Error saving activity event from WebSocket:', event, error);
+      });
     });
 
     // Handle disconnection

@@ -189,6 +189,8 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
     shadow-sm
     z-20
   '
+              data-track-category='Workflows'
+              data-track-name='ToggleDetailsPanel'
             >
               {showDetails ? 'Hide Details' : 'Show Details'}
             </button>
@@ -208,6 +210,9 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                   <button
                     onClick={handleOpenAssignModal}
                     className='bg-white border border-gray-300 px-3 py-2 rounded-md text-sm hover:bg-gray-50'
+                    data-track-category='Workflows'
+                    data-track-name='OpenAssignUserModal'
+                    data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                   >
                     Assign User
                   </button>
@@ -216,6 +221,9 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                     onClick={handleCancelWorkflow}
                     disabled={isCanceling || !executionId}
                     className='bg-white border border-gray-300 px-3 py-2 rounded-md text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                    data-track-category='Workflows'
+                    data-track-name='CancelWorkflow'
+                    data-track-metadata={JSON.stringify({ executionId })}
                   >
                     {isCanceling ? 'Canceling...' : 'Cancel'}
                   </button>
@@ -224,6 +232,9 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                     onClick={handlePauseWorkflow}
                     disabled={isPausing || !executionId}
                     className='bg-white border border-gray-300 px-3 py-2 rounded-md text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                    data-track-category='Workflows'
+                    data-track-name='PauseWorkflow'
+                    data-track-metadata={JSON.stringify({ executionId })}
                   >
                     {isPausing ? 'Pausing...' : 'Pause'}
                   </button>
@@ -232,6 +243,9 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                     onClick={handleResumeWorkflow}
                     disabled={isResuming || !executionId}
                     className='bg-white border border-gray-300 px-3 py-2 rounded-md text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                    data-track-category='Workflows'
+                    data-track-name='ResumeWorkflow'
+                    data-track-metadata={JSON.stringify({ executionId })}
                   >
                     {isResuming ? 'Resuming...' : 'Resume'}
                   </button>
@@ -257,6 +271,9 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                   onKeyDown={e => e.key === 'Enter' && handleDescriptionClick()}
                   role='button'
                   tabIndex={0}
+                  data-track-category='Workflows'
+                  data-track-name='OpenDescriptionModal'
+                  data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 >
                   <div className='flex items-center gap-2 mb-2'>
                     {getWorkflowIcon('description', { size: 16, className: 'text-gray-600' })}

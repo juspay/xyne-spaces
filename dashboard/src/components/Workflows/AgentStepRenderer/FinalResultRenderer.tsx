@@ -74,6 +74,8 @@ export const FinalResultRenderer: React.FC<FinalResultRendererProps> = ({
                   e.stopPropagation();
                   setShowFull(true);
                 }}
+                data-track-category='Workflows'
+                data-track-name='ShowFullResult'
               >
                 (show more)
               </button>
@@ -89,6 +91,8 @@ export const FinalResultRenderer: React.FC<FinalResultRendererProps> = ({
               e.stopPropagation();
               setShowFull(false);
             }}
+            data-track-category='Workflows'
+            data-track-name='ShowLessResult'
           >
             (show less)
           </button>
@@ -129,6 +133,8 @@ export const FinalResultRenderer: React.FC<FinalResultRendererProps> = ({
                 e.stopPropagation();
                 setShowFullFallback(true);
               }}
+              data-track-category='Workflows'
+              data-track-name='ShowMoreFallbackResult'
             >
               (show more)
             </button>
@@ -144,6 +150,8 @@ export const FinalResultRenderer: React.FC<FinalResultRendererProps> = ({
             e.stopPropagation();
             setShowFullFallback(false);
           }}
+          data-track-category='Workflows'
+          data-track-name='ShowLessFallbackResult'
         >
           (show less)
         </button>

@@ -258,12 +258,24 @@ export const QueryBuilderScreen: React.FC = () => {
       {/* Header */}
       <div className='flex items-center justify-between px-4 py-3 border-b border-gray-200'>
         <div className='flex items-center gap-3'>
-          <Button variant='ghost' size='icon' onClick={() => void navigate('/analytics-dashboard')}>
+          <Button
+            variant='ghost'
+            size='icon'
+            onClick={() => void navigate('/analytics-dashboard')}
+            data-track-category='QueryBuilder'
+            data-track-name='BackToDashboard'
+          >
             <ChevronLeft className='w-5 h-5' />
           </Button>
           <h2 className='text-lg font-semibold text-gray-900'>{currentDashboard.name}</h2>
         </div>
-        <Button variant='ghost' size='icon' onClick={() => void navigate('/analytics-dashboard')}>
+        <Button
+          variant='ghost'
+          size='icon'
+          onClick={() => void navigate('/analytics-dashboard')}
+          data-track-category='QueryBuilder'
+          data-track-name='CloseQueryBuilder'
+        >
           <X className='w-5 h-5' />
         </Button>
       </div>
@@ -298,6 +310,9 @@ export const QueryBuilderScreen: React.FC = () => {
                   setSelectedEntityType(e.target.value as FormEntityType);
                   setErrorMessage('');
                 }}
+                data-track-event='change'
+                data-track-category='QueryBuilder'
+                data-track-name='SelectEntityType'
                 className='w-40 px-3 py-2 text-sm border rounded-md'
               >
                 <option value=''>Select</option>
@@ -345,6 +360,8 @@ export const QueryBuilderScreen: React.FC = () => {
                   if (f) setOrderBy(p => [...p, { field: f.key, direction: 'ASC' }]);
                 }}
                 disabled={!fields || fields.filter(x => !x.isCustom).length === 0}
+                data-track-category='QueryBuilder'
+                data-track-name='AddOrderBy'
               >
                 <Plus className='w-3 h-3' /> Add
               </Button>
@@ -360,6 +377,10 @@ export const QueryBuilderScreen: React.FC = () => {
                       return n;
                     })
                   }
+                  data-track-event='change'
+                  data-track-category='QueryBuilder'
+                  data-track-name='SelectOrderByField'
+                  data-track-metadata={JSON.stringify({ index: i })}
                   className='flex-1 px-2 py-1 text-sm border rounded'
                 >
                   {fields
@@ -379,6 +400,10 @@ export const QueryBuilderScreen: React.FC = () => {
                       return n;
                     })
                   }
+                  data-track-event='change'
+                  data-track-category='QueryBuilder'
+                  data-track-name='SelectOrderByDirection'
+                  data-track-metadata={JSON.stringify({ index: i })}
                   className='px-2 py-1 text-sm border rounded'
                 >
                   <option value='ASC'>ASC</option>
@@ -388,6 +413,8 @@ export const QueryBuilderScreen: React.FC = () => {
                   variant='ghost'
                   size='iconSm'
                   onClick={() => setOrderBy(prev => prev.filter((_, x) => x !== i))}
+                  data-track-category='QueryBuilder'
+                  data-track-name='RemoveOrderBy'
                 >
                   <X className='w-3 h-3' />
                 </Button>
@@ -410,6 +437,8 @@ export const QueryBuilderScreen: React.FC = () => {
                   )?.[0];
                   if (f) setAggregations(p => [...p, { function: 'COUNT', field: f.name }]);
                 }}
+                data-track-category='QueryBuilder'
+                data-track-name='AddAggregation'
                 disabled={!fields || fields.length === 0}
               >
                 <Plus className='w-3 h-3' /> Add
@@ -430,6 +459,8 @@ export const QueryBuilderScreen: React.FC = () => {
                     })
                   }
                   className='px-2 py-1 text-sm border rounded'
+                  data-track-category='QueryBuilder'
+                  data-track-name='SelectAggregationFunction'
                 >
                   <option value='COUNT'>COUNT</option>
                   <option value='SUM'>SUM</option>
@@ -447,6 +478,8 @@ export const QueryBuilderScreen: React.FC = () => {
                     })
                   }
                   className='flex-1 px-2 py-1 text-sm border rounded'
+                  data-track-category='QueryBuilder'
+                  data-track-name='SelectAggregationField'
                 >
                   {fields?.map(f => (
                     <option key={f.name} value={f.name}>
@@ -513,6 +546,8 @@ export const QueryBuilderScreen: React.FC = () => {
                       })
                     }
                     className='flex-1 px-2 py-1 text-sm border rounded'
+                    data-track-category='QueryBuilder'
+                    data-track-name='SelectGroupBy'
                   >
                     {fields
                       ?.filter(f => !f.name.startsWith('custom.'))
@@ -556,6 +591,9 @@ export const QueryBuilderScreen: React.FC = () => {
                         else setSelectedFields(p => p.filter(f => f !== field.name));
                       }}
                       className='rounded border-gray-300'
+                      data-track-category='QueryBuilder'
+                      data-track-name='ToggleField'
+                      data-track-metadata={JSON.stringify({ fieldName: field.name })}
                     />
                     <span className='text-sm text-gray-700'>{field.label}</span>
                   </label>
@@ -595,6 +633,14 @@ export const QueryBuilderScreen: React.FC = () => {
                 onClick={() => void handleSaveQuery()}
                 disabled={!queryName.trim() || !selectedEntityType}
                 className='flex-1'
+                data-track-event='BUTTON_CLICK'
+                data-track-category='QUERY_BUILDER'
+                data-track-name='SAVE_QUERY'
+                data-track-metadata={JSON.stringify({
+                  entityType: selectedEntityType,
+                  isEdit: !!editingQueryId,
+                  queryName,
+                })}
               >
                 <Save className='w-4 h-4' />
                 {editingQueryId ? 'Update Query' : 'Save Query'}

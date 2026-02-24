@@ -115,6 +115,12 @@ const SimplePieChart = ({
               }`}
               style={{ transformOrigin: 'center', transformBox: 'fill-box' }}
               onClick={() => onSelect(slice.metaTheme)}
+              data-track-category='ProductInsights'
+              data-track-name='SelectPieSlice'
+              data-track-metadata={JSON.stringify({
+                themeName: slice.metaTheme.meta_theme,
+                clusterCount: slice.value,
+              })}
             >
               <title>{`${slice.label} (${slice.value} clusters)`}</title>
             </path>
@@ -201,6 +207,9 @@ const MetaThemeItem = ({
         ? 'bg-blue-50/80 dark:bg-blue-900/10 shadow-sm ring-1 ring-blue-100 dark:ring-blue-800'
         : 'hover:bg-gray-100/80 dark:hover:bg-[#2A2A2A]'
     }`}
+    data-track-category='ProductInsights'
+    data-track-name='SelectMetaTheme'
+    data-track-metadata={JSON.stringify({ themeName: theme.meta_theme, isSelected })}
   >
     <div className='flex items-start gap-3'>
       <div
@@ -250,6 +259,9 @@ const ClusterBarItem = ({
       role='button'
       tabIndex={0}
       onClick={onClick}
+      data-track-category='ProductInsights'
+      data-track-name='SelectCluster'
+      data-track-metadata={JSON.stringify({ clusterTitle: cluster.theme_title })}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -329,6 +341,12 @@ const TicketItem = ({
         }
       }}
       className='p-5 rounded-lg bg-white dark:bg-[#1E1E1E] mb-3 border border-transparent shadow-sm hover:shadow-md hover:border-blue-100 dark:hover:border-blue-900 transition-all duration-200 group cursor-pointer'
+      data-track-category='ProductInsights'
+      data-track-name='NavigateToTicket'
+      data-track-metadata={JSON.stringify({
+        ticketId: ticket.docId,
+        projectId: ticketData?.projectId,
+      })}
     >
       <div className='flex items-start gap-3 mb-2'>
         <div className='mt-0.5 p-1.5 rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity'>
@@ -601,6 +619,9 @@ const ProductInsightsScreen = (): ReactElement => {
                       color={getThemeColor(index, data.meta_themes.length)}
                       isSelected={selectedMetaTheme?.meta_theme === theme.meta_theme}
                       onClick={() => handleMetaThemeSelect(theme)}
+                      data-track-category='ProductInsights'
+                      data-track-name='SelectMetaTheme'
+                      data-track-metadata={JSON.stringify({ metaTheme: theme.meta_theme })}
                     />
                   ))}
                 </div>
@@ -646,6 +667,9 @@ const ProductInsightsScreen = (): ReactElement => {
                               onClick={() => setSelectedClusterId(clusterId)}
                               count={count}
                               maxCount={maxCount}
+                              data-track-category='ProductInsights'
+                              data-track-name='SelectCluster'
+                              data-track-metadata={JSON.stringify({ clusterId })}
                             />
                           );
                         })

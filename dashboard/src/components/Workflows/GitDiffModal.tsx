@@ -113,6 +113,9 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
               value={viewType}
               onChange={e => setViewType(e.target.value as 'split' | 'unified')}
               className='px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+              data-track-category='Workflows'
+              data-track-name='ChangeGitDiffViewType'
+              data-track-metadata={JSON.stringify({ viewType })}
             >
               <option value='split'>Split View</option>
               <option value='unified'>Unified View</option>
@@ -121,6 +124,8 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
             <button
               onClick={onClose}
               className='p-2 hover:bg-gray-100 rounded-md transition-colors'
+              data-track-category='Workflows'
+              data-track-name='CloseGitDiffModal'
             >
               <X className='w-5 h-5 text-gray-500' />
             </button>
@@ -148,6 +153,9 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
                             ? 'bg-blue-50 text-blue-700 border border-blue-200'
                             : 'hover:bg-gray-50 text-gray-700'
                         }`}
+                        data-track-category='Workflows'
+                        data-track-name='SelectDiffFile'
+                        data-track-metadata={JSON.stringify({ fileName })}
                       >
                         {getFileIcon(file.type)}
                         <span className='truncate flex-1'>{fileName}</span>

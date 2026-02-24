@@ -122,6 +122,8 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             size='sm'
             onClick={onClose}
             className='size-7 p-0 text-gray-500 hover:text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100'
+            data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
+            data-track-name='Close_Assignment_Modal'
           >
             <X className='size-4' />
           </Button>
@@ -202,7 +204,13 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
 
         {/* Action Buttons */}
         <div className='flex gap-3 pt-2'>
-          <Button variant='ghost' onClick={onClose} className='text-gray-700 hover:bg-gray-100'>
+          <Button
+            variant='ghost'
+            onClick={onClose}
+            className='text-gray-700 hover:bg-gray-100'
+            data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
+            data-track-name='Cancel_Assignment_Availability'
+          >
             Cancel
           </Button>
           <Button
@@ -210,6 +218,9 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             disabled={isLoading || !expiryOption}
             className='ml-auto px-6 text-white disabled:opacity-50 disabled:cursor-not-allowed'
             style={{ backgroundColor: '#6276BE' }}
+            data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
+            data-track-name='Save_Assignment_Availability'
+            data-track-metadata={JSON.stringify({ expiryOption })}
           >
             {isLoading ? 'Saving...' : 'Save'}
           </Button>

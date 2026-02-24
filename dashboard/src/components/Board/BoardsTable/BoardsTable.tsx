@@ -73,12 +73,33 @@ export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): Rea
                         e.preventDefault();
                       }
                     }}
+                    data-track-category='Board'
+                    data-track-name='Board_Actions_Container'
+                    data-track-metadata={JSON.stringify({ boardId: board.id })}
                   >
-                    <Button variant='secondary' onClick={() => onEdit(board)}>
+                    <Button
+                      variant='secondary'
+                      onClick={() => onEdit(board)}
+                      data-track-category='Board'
+                      data-track-name='Edit_Board_Table'
+                      data-track-metadata={JSON.stringify({
+                        boardId: board.id,
+                        boardName: board.name,
+                      })}
+                    >
                       <Edit2 size={14} />
                       Edit
                     </Button>
-                    <Button variant='destructive' onClick={() => void onDelete(board.id)}>
+                    <Button
+                      variant='destructive'
+                      onClick={() => void onDelete(board.id)}
+                      data-track-category='Board'
+                      data-track-name='Delete_Board_Table'
+                      data-track-metadata={JSON.stringify({
+                        boardId: board.id,
+                        boardName: board.name,
+                      })}
+                    >
                       <Trash2 size={14} />
                       Delete
                     </Button>

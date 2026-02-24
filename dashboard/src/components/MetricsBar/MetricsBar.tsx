@@ -106,6 +106,8 @@ const MetricsBar = (): ReactElement => {
       <button
         onClick={toggleMode}
         className='flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)]'
+        data-track-category='MetricsBar'
+        data-track-name='ToggleTimePeriod'
       >
         <span>{displayLabel}</span>
         <ChevronsUpDown className='w-4 h-4 text-[var(--metrics-bar-color)]' />
@@ -162,6 +164,12 @@ const MetricsBar = (): ReactElement => {
             <button
               onClick={handleApplyUpdate}
               className='flex items-center gap-2 transition-all duration-300 ease-out cursor-pointer hover:opacity-80 text-green-500'
+              data-track-category='MetricsBar'
+              data-track-name='ApplyUpdate'
+              data-track-metadata={JSON.stringify({
+                currentVersion: updateAvailable.currentVersion,
+                latestVersion: updateAvailable.latestVersion,
+              })}
             >
               <RefreshCw className='w-4 h-4' />
               <span className='font-sans font-semibold text-xs leading-none tracking-normal'>

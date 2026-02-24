@@ -124,6 +124,9 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
           ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10'
           : 'text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700'
       }`}
+      data-track-category='MESSAGE'
+      data-track-name='MESSAGE_ACTION'
+      data-track-metadata={JSON.stringify({ action: label })}
     >
       <span className='flex-shrink-0 w-5 h-5 flex items-center justify-center'>{icon}</span>
       <span className='text-sm font-medium'>{label}</span>

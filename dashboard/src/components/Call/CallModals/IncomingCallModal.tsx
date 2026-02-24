@@ -412,6 +412,9 @@ function CallNotificationUI({
             size={ButtonSize.LARGE}
             subType={ButtonSubType.ICON_ONLY}
             leadingIcon={<PhoneOff className='h-6 w-6' />}
+            data-track-category='CALLS_NOTIFICATIONS'
+            data-track-name='REJECT_INCOMING_CALL'
+            data-track-metadata={JSON.stringify({ isInActiveCall, callId: notification.callId })}
           />
 
           <Button
@@ -421,6 +424,9 @@ function CallNotificationUI({
             text={isInActiveCall ? 'Switch Call' : ''}
             subType={isInActiveCall ? ButtonSubType.DEFAULT : ButtonSubType.ICON_ONLY}
             leadingIcon={<Phone className='h-6 w-6' />}
+            data-track-category='CALLS_NOTIFICATIONS'
+            data-track-name='ACCEPT_INCOMING_CALL'
+            data-track-metadata={JSON.stringify({ isInActiveCall, callId: notification.callId })}
           />
         </div>
       </div>

@@ -107,6 +107,8 @@ export const SearchSummaryModal = ({
         role='button'
         tabIndex={0}
         aria-label='Close modal'
+        data-track-category='GLOBAL_SEARCH'
+        data-track-name='CLOSE_SUMMARY_MODAL'
       />
 
       {/* Modal Card */}
@@ -121,6 +123,8 @@ export const SearchSummaryModal = ({
             onClick={onClose}
             className='p-1.5 rounded-md hover:bg-gray-200 transition-colors'
             aria-label='Close summary'
+            data-track-category='GLOBAL_SEARCH'
+            data-track-name='CLOSE_SUMMARY_BUTTON'
           >
             <X className='w-5 h-5 text-gray-500' />
           </button>

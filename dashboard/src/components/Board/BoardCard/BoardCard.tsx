@@ -64,11 +64,21 @@ export const BoardCard = ({ board, onEdit, onDelete }: BoardCardProps): ReactEle
         </div>
 
         <div className='flex gap-2'>
-          <Button buttonType={ButtonType.SECONDARY} text='Edit' onClick={() => onEdit(board)} />
+          <Button
+            buttonType={ButtonType.SECONDARY}
+            text='Edit'
+            onClick={() => onEdit(board)}
+            data-track-category='Board'
+            data-track-name='Edit_Board'
+            data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
+          />
           <Button
             buttonType={ButtonType.DANGER}
             text='Delete'
             onClick={() => void onDelete(board.id)}
+            data-track-category='Board'
+            data-track-name='Delete_Board'
+            data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
           />
         </div>
       </div>

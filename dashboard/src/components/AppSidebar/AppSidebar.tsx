@@ -313,6 +313,9 @@ const AppSidebar = (): ReactElement => {
                       to={item.path}
                       onClick={() => handleNavigationClick(item.label)}
                       data-testid={testId}
+                      data-track-category='App_Sidebar'
+                      data-track-name='Sidebar_Nav_Item'
+                      data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                       className={`size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
                         isActive ? 'text-white' : 'bg-transparent text-gray-700'
                       }`}
@@ -351,6 +354,8 @@ const AppSidebar = (): ReactElement => {
                   }}
                   role='button'
                   tabIndex={0}
+                  data-track-category='App_Sidebar'
+                  data-track-name='Open_Status_Popover'
                   className='absolute top-1 left-1/2 -translate-x-1/2 cursor-pointer hover:scale-110 transition-transform'
                   aria-label='Update status'
                 >
@@ -502,6 +507,9 @@ const MobileNavbar = ({
                   to={item.path}
                   key={item.path}
                   onClick={() => onNavigationClick(item.label)}
+                  data-track-category='Mobile_Sidebar'
+                  data-track-name='Mobile_Nav_Item'
+                  data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                   className='flex flex-col gap-[3px] h-[44px] items-center justify-center p-[2px] cursor-pointer'
                 >
                   <div className='size-[24px] flex items-center justify-center relative'>
@@ -535,6 +543,9 @@ const MobileNavbar = ({
               role='button'
               tabIndex={0}
               aria-label='More options'
+              data-track-category='Mobile_Sidebar'
+              data-track-name='Toggle_Mobile_Menu'
+              data-track-metadata={JSON.stringify({ isOpen: !isMenuOpen })}
               className='flex flex-col gap-[3px] h-[44px] items-center justify-center p-[2px] cursor-pointer relative'
             >
               <div className='size-[24px] flex items-center justify-center'>
@@ -579,6 +590,12 @@ const MobileNavbar = ({
                           role='button'
                           tabIndex={0}
                           aria-label={item.label}
+                          data-track-category='Mobile_Sidebar'
+                          data-track-name='Mobile_Menu_Item'
+                          data-track-metadata={JSON.stringify({
+                            path: item.path,
+                            label: item.label,
+                          })}
                         >
                           <Icon size={20} className={isActive ? 'text-white' : 'text-[#9ca3af]'} />
                           <span
@@ -601,6 +618,9 @@ const MobileNavbar = ({
                           setIsMenuOpen(false);
                           onNavigationClick(item.label);
                         }}
+                        data-track-category='Mobile_Sidebar'
+                        data-track-name='Mobile_Menu_Link'
+                        data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                       >
                         <Icon size={20} className={isActive ? 'text-white' : 'text-[#9ca3af]'} />
                         <span

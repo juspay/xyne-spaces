@@ -81,6 +81,8 @@ const ProjectsListView = (): ReactElement => {
               buttonType={ButtonType.PRIMARY}
               text='New'
               onClick={() => setShowCreateModal(true)}
+              data-track-category='Projects'
+              data-track-name='CreateProject'
             />
           </div>
           <p className='text-xs text-gray-600'>Manage your projects</p>

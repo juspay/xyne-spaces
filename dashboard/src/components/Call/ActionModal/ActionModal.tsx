@@ -73,6 +73,9 @@ export const ActionModal: React.FC<ActionModalProps> = ({
               size='sm'
               className={button.className}
               data-testid={button.testId}
+              data-track-category='Calls'
+              data-track-name='Action_Modal_Button'
+              data-track-metadata={JSON.stringify({ buttonLabel: button.label, modalTitle: title })}
             >
               {button.label}
             </Button>

@@ -20,6 +20,9 @@ const FormCard = ({ form, onClick }: FormCardProps): ReactElement => {
       }}
       onClick={onClick}
       className='bg-white border border-gray-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer'
+      data-track-category='Forms'
+      data-track-name='OpenForm'
+      data-track-metadata={JSON.stringify({ formId: form.id, formName: form.formName })}
     >
       <div className='flex items-start gap-3'>
         <div className='flex-shrink-0 w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center'>

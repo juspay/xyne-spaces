@@ -51,6 +51,9 @@ const ThreadRow = memo(
                 void navigate(`/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`)
               }
               className='text-base font-semibold text-gray-900 hover:underline'
+              data-track-category='USER_THREADS'
+              data-track-name='OPEN_USER_THREAD'
+              data-track-metadata={JSON.stringify({ channelId, conversationId })}
             >
               {displayName}
             </button>

@@ -47,6 +47,7 @@ export { UserExpertiseMappingRepository } from './userExpertiseMappingRepository
 export { UserGroupMappingRepository } from './userGroupMappingRepository';
 export { EmailRepository } from './emailRepository';
 export { EmailDraftRepository } from './emailDraftRepository';
+export { ActivityEventRepository } from './activityEventRepository';
 
 // Import statements for the container
 import { AgentRepository } from './agents';
@@ -86,6 +87,7 @@ import { UserExpertiseMappingRepository } from './userExpertiseMappingRepository
 import { UserGroupMappingRepository } from './userGroupMappingRepository';
 import { EmailRepository } from './emailRepository';
 import { EmailDraftRepository } from './emailDraftRepository';
+import { ActivityEventRepository } from './activityEventRepository';
 
 // Repository container for dependency injection
 export class RepositoryContainer {
@@ -125,6 +127,7 @@ export class RepositoryContainer {
   public userGroupMapping: UserGroupMappingRepository;
   public emails: EmailRepository;
   public emailDrafts: EmailDraftRepository;
+  public activityEvents: ActivityEventRepository;
 
   private constructor() {
     this.agents = new AgentRepository();
@@ -161,6 +164,7 @@ export class RepositoryContainer {
     this.userGroupMapping = new UserGroupMappingRepository();
     this.emails = new EmailRepository();
     this.emailDrafts = new EmailDraftRepository();
+    this.activityEvents = new ActivityEventRepository();
   }
 
   static getInstance(): RepositoryContainer {

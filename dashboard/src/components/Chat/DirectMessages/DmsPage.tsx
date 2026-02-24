@@ -141,6 +141,9 @@ const DmsPage = (): ReactElement => {
               placeholder='Search'
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
+              data-track-event='blur'
+              data-track-category='DM'
+              data-track-name='SEARCH_DMS_INPUT'
             />
             {searchQuery && (
               <Button
@@ -189,6 +192,8 @@ const DmsPage = (): ReactElement => {
           className='fixed bottom-[85px] right-4 z-40 flex items-center justify-center size-14 rounded-full bg-[#ff4f4f] border-[0.5px] border-[#181B1D]/30 backdrop-blur-[10px] shadow-lg'
           onClick={handleAddDirectMessage}
           aria-label='Create new message'
+          data-track-category='DM'
+          data-track-name='CREATE_DM'
         >
           <PenBox className='size-5 text-white' />
         </button>
@@ -235,6 +240,8 @@ const DmsPage = (): ReactElement => {
                   className='flex items-center justify-center size-10 rounded-full bg-white border-[0.1px] backdrop-blur-[10px] shadow-md hover:bg-blue-50 hover:border-blue-200 transition-colors'
                   onClick={handleAddDirectMessage}
                   aria-label='Create new message'
+                  data-track-category='DM'
+                  data-track-name='CREATE_DM_DESKTOP'
                 >
                   <PenBox className='size-5 text-blue-600' />
                 </button>
@@ -247,6 +254,9 @@ const DmsPage = (): ReactElement => {
                   placeholder='Search messages'
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
+                  data-track-event='blur'
+                  data-track-category='DM'
+                  data-track-name='SEARCH_DMS_INPUT_DESKTOP'
                 />
               </div>
             </div>

@@ -129,6 +129,12 @@ const MonthView: React.FC<{
                 ${!isSelected && !isToday && !isDisabled ? 'hover:bg-gray-100 text-gray-900' : ''}
                 ${isDisabled ? 'text-gray-300 cursor-not-allowed' : 'cursor-pointer'}
               `}
+              data-track-category='Tickets'
+              data-track-name='SelectDate'
+              data-track-metadata={JSON.stringify({
+                date: `${year}-${month}-${day}`,
+                disabled: isDisabled,
+              })}
             >
               {day}
             </button>
@@ -300,6 +306,8 @@ export const InlineCalendar: React.FC<InlineCalendarProps> = ({
             }
           }}
           className={`relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-gray-50 w-fit max-w-full overflow-hidden cursor-pointer hover:bg-gray-100 ${inputClassName}`}
+          data-track-category='Tickets'
+          data-track-name='ToggleDatePicker'
         >
           <Calendar className='flex-shrink-0 w-3.5 h-3.5 text-gray-500' />
           <span className='text-[13px] text-gray-700 whitespace-nowrap'>
@@ -309,6 +317,8 @@ export const InlineCalendar: React.FC<InlineCalendarProps> = ({
             <button
               onClick={handleClear}
               className='ml-1 flex-shrink-0 hover:bg-gray-200 rounded p-0.5 transition-colors'
+              data-track-category='Tickets'
+              data-track-name='ClearSelectedDate'
             >
               <X className='w-3 h-3 text-gray-500' />
             </button>
@@ -366,12 +376,16 @@ export const InlineCalendar: React.FC<InlineCalendarProps> = ({
               variant='outline'
               onClick={handleCancel}
               className='h-8 px-3 text-sm text-gray-600 font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors'
+              data-track-category='Tickets'
+              data-track-name='CancelDatePicker'
             >
               Cancel
             </Button>
             <Button
               onClick={handleApply}
               className='h-8 px-3 text-sm text-white font-semibold rounded-lg transition-colors'
+              data-track-category='Tickets'
+              data-track-name='ApplyDatePicker'
             >
               Apply
             </Button>

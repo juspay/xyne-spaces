@@ -997,6 +997,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                             aria-label={sendMode === 'message' ? 'Send message' : 'Create ticket'}
                             data-testid='send-message-button'
+                            data-track-event='BUTTON_CLICK'
+                            data-track-category={sendMode === 'message' ? 'MESSAGING' : 'TICKETS'}
+                            data-track-name={
+                              sendMode === 'message' ? 'SEND_MESSAGE' : 'CREATE_TICKET_FROM_MESSAGE'
+                            }
+                            data-track-metadata={JSON.stringify({
+                              hasAttachments: allAttachments.length > 0,
+                            })}
                           >
                             {isSending ? (
                               <Loader2 className='h-4 w-4 animate-spin' />

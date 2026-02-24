@@ -907,6 +907,8 @@ const ChannelCommandMenu = ({
             onClick={() => onOpenChange(false)}
             className='p-1 rounded-md text-gray-900 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200 sm:hidden'
             aria-label='Go back'
+            data-track-category='CHANNEL_SEARCH'
+            data-track-name='CLOSE_SEARCH_MENU`'
           >
             <ArrowLeft size={20} />
           </button>
@@ -984,6 +986,9 @@ const ChannelCommandMenu = ({
                 className='p-1.5 rounded-md text-purple-600 hover:text-purple-700 hover:bg-purple-50 transition-colors flex-shrink-0 hidden sm:flex items-center justify-center'
                 aria-label='Summarize search results'
                 title='Summarize search results'
+                data-track-category='CHANNEL_SEARCH'
+                data-track-name='SUMMARIZE_SEARCH_RESULTS'
+                data-track-metadata={JSON.stringify({ searchQuery: searchText })}
               >
                 <Sparkles className='w-4 h-4' />
               </button>
@@ -997,6 +1002,12 @@ const ChannelCommandMenu = ({
             onClick={() => void handleBotQuery()}
             disabled={botChatState.status === 'loading'}
             className='px-3 py-2 mr-2 text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50'
+            data-track-category='CHANNEL_SEARCH'
+            data-track-name='SEND_BOT_QUERY'
+            data-track-metadata={JSON.stringify({
+              botId: selectedBot?.id,
+              botName: selectedBot?.name,
+            })}
           >
             {botChatState.status === 'loading' ? (
               <Loader2 size={16} className='animate-spin' />
@@ -1050,6 +1061,9 @@ const ChannelCommandMenu = ({
                           : 'border-[#E4E6E7] text-[#000] hover:text-gray-900',
                         isMobile && 'text-[14px] w-fit h-[37px] px-3',
                       )}
+                      data-track-category='CHANNEL_SEARCH'
+                      data-track-name='SELECT_SEARCH_TAB'
+                      data-track-metadata={JSON.stringify({ tab: tab.id })}
                     >
                       {tab.icon}
                       {tab.label}
@@ -1127,6 +1141,9 @@ const ChannelCommandMenu = ({
                 <button
                   onClick={() => void handleContinueInDM()}
                   className='flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline'
+                  data-track-category='CHANNEL_SEARCH'
+                  data-track-name='CONTINUE_BOT_IN_DM'
+                  data-track-metadata={JSON.stringify({ botId: selectedBot?.id })}
                 >
                   <span>Continue in DM</span>
                   <ArrowRight size={14} />
@@ -1324,6 +1341,12 @@ const ChannelCommandMenu = ({
                                     <button
                                       onClick={() => toggleCategoryExpansion(category)}
                                       className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                      data-track-category='CHANNEL_SEARCH'
+                                      data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
+                                      data-track-metadata={JSON.stringify({
+                                        category: category as string,
+                                        isExpanded,
+                                      })}
                                     >
                                       {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                     </button>
@@ -1401,6 +1424,12 @@ const ChannelCommandMenu = ({
                                         WebkitTapHighlightColor: 'transparent',
                                         userSelect: 'none',
                                       }}
+                                      data-track-category='CHANNEL_SEARCH'
+                                      data-track-name='TOGGLE_CATEGORY_EXPANSION'
+                                      data-track-metadata={JSON.stringify({
+                                        category: 'user',
+                                        isExpanded,
+                                      })}
                                     >
                                       {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                     </button>
@@ -1486,6 +1515,12 @@ const ChannelCommandMenu = ({
                                         WebkitTapHighlightColor: 'transparent',
                                         userSelect: 'none',
                                       }}
+                                      data-track-category='CHANNEL_SEARCH'
+                                      data-track-name='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                                      data-track-metadata={JSON.stringify({
+                                        category: category as string,
+                                        isExpanded,
+                                      })}
                                     >
                                       {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                     </button>
@@ -1595,6 +1630,12 @@ const ChannelCommandMenu = ({
                                           WebkitTapHighlightColor: 'transparent',
                                           userSelect: 'none',
                                         }}
+                                        data-track-category='CHANNEL_SEARCH'
+                                        data-track-name='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+                                        data-track-metadata={JSON.stringify({
+                                          category: category,
+                                          isExpanded,
+                                        })}
                                       >
                                         {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                       </button>
@@ -1659,6 +1700,9 @@ const ChannelCommandMenu = ({
                                           WebkitTapHighlightColor: 'transparent',
                                           userSelect: 'none',
                                         }}
+                                        data-track-category='CHANNEL_SEARCH'
+                                        data-track-name='TOGGLE_BACKEND_USER_EXPANSION'
+                                        data-track-metadata={JSON.stringify({ type, isExpanded })}
                                       >
                                         {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                       </button>

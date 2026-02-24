@@ -201,6 +201,9 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                   }}
                   disabled={r.isLoading}
                   title='Refresh query'
+                  data-track-category='ANALYTICS'
+                  data-track-name='Refresh_Query'
+                  data-track-metadata={JSON.stringify({ queryId: r.queryId })}
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${r.isLoading ? 'animate-spin' : ''}`} />
                 </Button>
@@ -214,6 +217,9 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                     }}
                     disabled={r.isLoading}
                     title='Edit query'
+                    data-track-category='ANALYTICS'
+                    data-track-name='Edit_Query'
+                    data-track-metadata={JSON.stringify({ queryId: r.queryId })}
                   >
                     <Edit className='h-3.5 w-3.5' />
                   </Button>
@@ -223,6 +229,9 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                   size='iconSm'
                   onClick={() => void handleDelete(r.queryId)}
                   title='Delete query'
+                  data-track-category='ANALYTICS'
+                  data-track-name='Delete_Query'
+                  data-track-metadata={JSON.stringify({ queryId: r.queryId })}
                 >
                   <Trash2 className='h-3.5 w-3.5' />
                 </Button>

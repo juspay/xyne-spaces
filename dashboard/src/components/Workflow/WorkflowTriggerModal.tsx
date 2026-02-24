@@ -279,6 +279,12 @@ export default function WorkflowTriggerModal({
                   <input
                     type={field.type === 'number' ? 'number' : 'text'}
                     className='w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+                    data-track-category='Workflows'
+                    data-track-name='WorkflowParameterInput'
+                    data-track-metadata={JSON.stringify({
+                      fieldName: field.name,
+                      fieldType: field.type,
+                    })}
                     value={
                       field.type === 'number'
                         ? typeof controllerField.value === 'number'
@@ -409,6 +415,8 @@ export default function WorkflowTriggerModal({
               <button
                 onClick={handleClose}
                 className='px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors'
+                data-track-category='Workflows'
+                data-track-name='CloseErrorModal'
               >
                 Close
               </button>
@@ -430,6 +438,8 @@ export default function WorkflowTriggerModal({
           <button
             onClick={handleClose}
             className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors'
+            data-track-category='Workflows'
+            data-track-name='CloseWorkflowTriggerModal'
           >
             <X size={20} />
           </button>
@@ -517,6 +527,8 @@ export default function WorkflowTriggerModal({
               variant='secondary'
               onClick={handleClose}
               disabled={createWorkflowMutation.isPending}
+              data-track-category='Workflows'
+              data-track-name='CloseWorkflowTriggerModalForm'
             >
               {createWorkflowMutation.isPending ? 'Please wait...' : 'Close'}
             </Button>

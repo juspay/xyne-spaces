@@ -232,6 +232,9 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
               isPublic ? 'bg-green-500' : 'bg-gray-300'
             } ${!isOwner ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             data-testid='canvas-visibility-toggle'
+            data-track-category='CANVAS'
+            data-track-name='TOGGLE_CANVAS_VISIBILITY'
+            data-track-metadata={JSON.stringify({ isPublic: !isPublic, canvasId: canvas.id })}
           >
             <span
               aria-hidden='true'
@@ -265,6 +268,12 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
               onClick={handleCopyLink}
               className='px-3 py-2 text-sm text-gray-500 hover:text-gray-700 font-medium border border-gray-300 rounded-md bg-white hover:bg-gray-50'
               data-testid='canvas-copy-link-button'
+              data-track-category='CANVAS'
+              data-track-name='COPY_CANVAS_LINK'
+              data-track-metadata={JSON.stringify({
+                canvasId: canvas.id,
+                visibility: localVisibility,
+              })}
             >
               Copy
             </button>
@@ -298,6 +307,13 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                   disabled={isAddingUser}
                   size='sm'
                   variant='secondary'
+                  data-track-category='CANVAS'
+                  data-track-name='ADD_PARTICIPANT_VIEWER'
+                  data-track-metadata={JSON.stringify({
+                    canvasId: canvas.id,
+                    userCount: selectedUsers.length,
+                    role: CanvasRole.VIEWER,
+                  })}
                 >
                   <Eye className='w-3 h-3' />
                   Viewer
@@ -307,6 +323,13 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                   disabled={isAddingUser}
                   size='sm'
                   variant='secondary'
+                  data-track-category='CANVAS'
+                  data-track-name='ADD_PARTICIPANT_EDITOR'
+                  data-track-metadata={JSON.stringify({
+                    canvasId: canvas.id,
+                    userCount: selectedUsers.length,
+                    role: CanvasRole.EDITOR,
+                  })}
                 >
                   <Shield className='w-3 h-3' />
                   Editor
@@ -317,6 +340,13 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                     disabled={isAddingUser}
                     size='sm'
                     variant='secondary'
+                    data-track-category='CANVAS'
+                    data-track-name='ADD_PARTICIPANT_OWNER'
+                    data-track-metadata={JSON.stringify({
+                      canvasId: canvas.id,
+                      userCount: selectedUsers.length,
+                      role: CanvasRole.OWNER,
+                    })}
                   >
                     <Crown className='w-3 h-3' />
                     Owner
@@ -411,6 +441,13 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                       onClick={() => void handleRemoveParticipant(participant.userId)}
                       className='p-1 hover:bg-red-100 rounded text-red-600'
                       title='Remove participant'
+                      data-track-category='CANVAS'
+                      data-track-name='REMOVE_PARTICIPANT'
+                      data-track-metadata={JSON.stringify({
+                        canvasId: canvas.id,
+                        userId: participant.userId,
+                        role: participant.role,
+                      })}
                     >
                       <X className='w-4 h-4' />
                     </button>
@@ -436,10 +473,22 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
               <Button
                 variant='secondary'
                 onClick={() => setConfirmationModal({ isOpen: false, userId: null })}
+                data-track-category='CANVAS'
+                data-track-name='Cancel_Remove_Participant'
+                data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
               >
                 Cancel
               </Button>
-              <Button variant='default' onClick={() => void confirmRemoveParticipant()}>
+              <Button
+                variant='default'
+                onClick={() => void confirmRemoveParticipant()}
+                data-track-category='CANVAS'
+                data-track-name='Confirm_Remove_Participant'
+                data-track-metadata={JSON.stringify({
+                  canvasId: canvas.id,
+                  userId: confirmationModal.userId,
+                })}
+              >
                 Remove
               </Button>
             </div>

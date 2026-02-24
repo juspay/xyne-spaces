@@ -139,6 +139,9 @@ export const DateRangeFilter = ({
       {/* Trigger Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
+        data-track-category='TicketFilters'
+        data-track-name='ToggleDateRangeDropdown'
+        data-track-metadata={JSON.stringify({ filterType: 'dateRange', isOpen })}
         className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors min-w-0 ${
           hasSelection
             ? 'border-blue-200 bg-blue-50 text-blue-700'
@@ -161,6 +164,9 @@ export const DateRangeFilter = ({
       {hasSelection && !isOpen && (
         <button
           onClick={handleClear}
+          data-track-category='TicketFilters'
+          data-track-name='ClearDateRangeFilter'
+          data-track-metadata={JSON.stringify({ filterType: 'dateRange', startDate, endDate })}
           className='absolute -top-1 -right-1 bg-gray-100 hover:bg-gray-200 rounded-full p-1 transition-colors'
           title={`Clear ${label.toLowerCase()} filter`}
         >
@@ -178,6 +184,9 @@ export const DateRangeFilter = ({
               <div className='flex gap-2'>
                 <Button
                   onClick={() => handlePresetClick('today')}
+                  data-track-category='TicketFilters'
+                  data-track-name='PresetDateRangeToday'
+                  data-track-metadata={JSON.stringify({ filterType: 'dateRange', preset: 'today' })}
                   variant='ghost'
                   size='sm'
                   className='border text-xs py-1 h-6'
@@ -186,6 +195,9 @@ export const DateRangeFilter = ({
                 </Button>
                 <Button
                   onClick={() => handlePresetClick('week')}
+                  data-track-category='TicketFilters'
+                  data-track-name='PresetDateRangeWeek'
+                  data-track-metadata={JSON.stringify({ filterType: 'dateRange', preset: 'week' })}
                   variant='ghost'
                   size='sm'
                   className='border text-xs py-1 h-6'
@@ -194,6 +206,9 @@ export const DateRangeFilter = ({
                 </Button>
                 <Button
                   onClick={() => handlePresetClick('month')}
+                  data-track-category='TicketFilters'
+                  data-track-name='PresetDateRangeMonth'
+                  data-track-metadata={JSON.stringify({ filterType: 'dateRange', preset: 'month' })}
                   variant='ghost'
                   size='sm'
                   className='border text-xs py-1 h-6'
@@ -222,6 +237,8 @@ export const DateRangeFilter = ({
                     onChange={handleStartDateChange}
                     max={endDate || new Date().toISOString().split('T')[0]}
                     className='w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                    data-track-category='Tickets'
+                    data-track-name='FilterStartDate'
                   />
                 </div>
 
@@ -240,6 +257,8 @@ export const DateRangeFilter = ({
                     min={startDate || ''}
                     max={new Date().toISOString().split('T')[0]}
                     className='w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                    data-track-category='Tickets'
+                    data-track-name='FilterEndDate'
                   />
                 </div>
               </div>
@@ -250,6 +269,13 @@ export const DateRangeFilter = ({
               <div className='border-t border-gray-100 pt-3 mt-4'>
                 <button
                   onClick={handleClear}
+                  data-track-category='TicketFilters'
+                  data-track-name='ClearDateRangeFilterDropdown'
+                  data-track-metadata={JSON.stringify({
+                    filterType: 'dateRange',
+                    startDate,
+                    endDate,
+                  })}
                   className='w-full text-xs text-gray-500 hover:text-gray-700 transition-colors py-2'
                 >
                   Clear date range

@@ -172,6 +172,8 @@ const OnboardingScreen: React.FC = () => {
               <button
                 className='mt-8 md:mt-12 bg-slate-500 hover:bg-slate-600 active:scale-95 text-white font-medium py-3 px-8 rounded-xl inline-flex justify-center items-center gap-2 transition-all duration-300 transform hover:shadow-lg hover:-translate-y-1 focus:outline-none'
                 onClick={nextStep}
+                data-track-category='Onboarding'
+                data-track-name='GetStarted'
               >
                 <div className='text-sm md:text-base font-sans leading-4'>Get Started -&gt;</div>
               </button>
@@ -224,6 +226,8 @@ const OnboardingScreen: React.FC = () => {
             transition hover:bg-neutral-900/10 active:scale-90
             focus:outline-none
           '
+                data-track-category='Onboarding'
+                data-track-name='ContinueStep'
               >
                 -&gt;
               </button>
@@ -263,6 +267,8 @@ const OnboardingScreen: React.FC = () => {
                   onClick={handleCompleteOnboarding}
                   disabled={isCompleting}
                   className='h-10 px-6 rounded-xl bg-slate-500 text-white text-sm font-medium transition hover:bg-slate-600 disabled:opacity-60 inline-flex items-center gap-2 focus:outline-none'
+                  data-track-category='Onboarding'
+                  data-track-name='OpenWorkspace'
                 >
                   {isCompleting ? 'Completing...' : 'Open My Workspace'}
                   <span
@@ -359,6 +365,8 @@ const OnboardingScreen: React.FC = () => {
             transition hover:bg-neutral-900/10 active:scale-90
             focus:outline-none
           '
+                data-track-category='Onboarding'
+                data-track-name='ContinueDefaultStep'
               >
                 -&gt;
               </button>

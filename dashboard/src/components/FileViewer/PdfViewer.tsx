@@ -142,6 +142,8 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
         <button
           onClick={(): void => send({ type: 'RETRY' })}
           className='mt-4 px-4 py-2 bg-red-600 text-white rounded'
+          data-track-category='FileViewer'
+          data-track-name='RETRY_LOAD_PDF'
         >
           Retry
         </button>
@@ -166,6 +168,8 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
                 disabled={currentVisiblePage <= 1}
                 className='flex items-center gap-1 px-3 py-1 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white disabled:text-gray-400 dark:disabled:text-gray-600 disabled:cursor-not-allowed transition-colors'
                 title='Previous page'
+                data-track-category='FileViewer'
+                data-track-name='PREVIOUS_PDF_PAGE'
               >
                 <span className='text-lg'>‹</span>
                 {!isMobile && <span>Previous</span>}
@@ -196,6 +200,8 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
                   }}
                   onClick={e => e.currentTarget.select()}
                   onBlur={commitPageInput}
+                  data-track-category='FileViewer'
+                  data-track-name='SELECT_PDF_PAGE_INPUT'
                   onKeyDown={e => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -218,6 +224,8 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
                 disabled={currentVisiblePage >= numPages}
                 className='flex items-center gap-1 px-3 py-1 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white disabled:text-gray-400 dark:disabled:text-gray-600 disabled:cursor-not-allowed transition-colors'
                 title='Next page'
+                data-track-category='FileViewer'
+                data-track-name='NEXT_PDF_PAGE'
               >
                 {!isMobile && <span>Next</span>}
                 <span className='text-lg'>›</span>

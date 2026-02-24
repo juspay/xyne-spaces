@@ -260,18 +260,13 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
                   void handleDownload();
                 }}
                 className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors'
+                data-track-category='Workflows'
+                data-track-name='DownloadCodeServer'
+                data-track-metadata={JSON.stringify({ executionId })}
               >
                 Download Code Server
               </button>
             )}
-            <button
-              onClick={(): void => {
-                void handleStart();
-              }}
-              className='flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors'
-            >
-              Try Starting Again
-            </button>
             <a
               href='https://github.com/coder/code-server/releases'
               target='_blank'
@@ -302,6 +297,9 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
                 void handleDownload();
               }}
               className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors'
+              data-track-category='Workflows'
+              data-track-name='DownloadCodeServer'
+              data-track-metadata={JSON.stringify({ executionId })}
             >
               Download Code Server
             </button>
@@ -330,6 +328,9 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
             void handleStart();
           }}
           className='text-sm text-blue-600 hover:underline'
+          data-track-category='Workflows'
+          data-track-name='StartCodeServer'
+          data-track-metadata={JSON.stringify({ executionId })}
         >
           Click here if it takes too long
         </button>
@@ -403,6 +404,9 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
         <button
           onClick={handleRetry}
           className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors'
+          data-track-category='Workflows'
+          data-track-name='RetryVSCodeClone'
+          data-track-metadata={JSON.stringify({ executionId })}
         >
           <RefreshCw size={16} />
           Retry
@@ -442,6 +446,9 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
               onClick={handleRetry}
               className='flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors'
               title='Refresh workspace'
+              data-track-category='Workflows'
+              data-track-name='RefreshVSCodeWorkspace'
+              data-track-metadata={JSON.stringify({ executionId })}
             >
               <RefreshCw size={14} />
               Refresh
@@ -450,6 +457,9 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
               onClick={handleEnlargeToggle}
               className='flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors'
               title={isEnlarged ? 'Minimize' : 'Maximize'}
+              data-track-category='Workflows'
+              data-track-name='ToggleVSCodeEnlarge'
+              data-track-metadata={JSON.stringify({ executionId, isEnlarged })}
             >
               {isEnlarged ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               {isEnlarged ? 'Minimize' : 'Maximize'}
@@ -466,6 +476,9 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
             <button
               onClick={() => setCloneError(null)}
               className='text-yellow-500 hover:text-yellow-200'
+              data-track-category='Workflows'
+              data-track-name='DismissVSCodeWarning'
+              data-track-metadata={JSON.stringify({ executionId })}
             >
               <X size={12} />
             </button>

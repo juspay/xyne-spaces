@@ -115,6 +115,9 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
                       ? 'cursor-pointer bg-white text-gray-800'
                       : 'cursor-pointer bg-transparent text-gray-500 hover:bg-white/50 hover:text-gray-700'
                 } ${isDragging && draggedTabId === tab.id ? 'opacity-50' : ''}`}
+                data-track-category='Workflows'
+                data-track-name='SelectTab'
+                data-track-metadata={JSON.stringify({ tabId: tab.id })}
               >
                 <span
                   className={`flex-shrink-0 ${
@@ -136,6 +139,9 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
                     }}
                     className='flex-shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 transition-all'
                     aria-label={`Close ${tab.title}`}
+                    data-track-category='Workflows'
+                    data-track-name='CloseWorkflowTab'
+                    data-track-metadata={JSON.stringify({ tabId: tab.id, tabType: tab.type })}
                   >
                     <X size={10} className='text-gray-400' />
                   </button>
@@ -155,6 +161,8 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
               className='flex-shrink-0 flex items-center justify-center w-9 h-9 text-gray-400 hover:text-gray-600 hover:bg-white/50 transition-colors border-l border-gray-200/50'
               title='New tab'
               aria-label='Add new tab'
+              data-track-category='Workflows'
+              data-track-name='AddWorkflowTab'
             >
               <Plus size={14} />
             </button>

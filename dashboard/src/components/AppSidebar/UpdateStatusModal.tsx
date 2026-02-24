@@ -237,6 +237,8 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             size='sm'
             onClick={onClose}
             className='size-7 p-0 text-gray-500 hover:text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100'
+            data-track-category='Update_User_Status_Modal'
+            data-track-name='Close_Status_Modal'
           >
             <X className='size-4' />
           </Button>
@@ -302,6 +304,12 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         handleSuggestionClick(status.emoji, status.text, status.expiry)
                       }
                       className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-gray-100 transition-colors text-left'
+                      data-track-category='Update_User_Status_Modal'
+                      data-track-name='Select_Recent_Status'
+                      data-track-metadata={JSON.stringify({
+                        statusText: status.text,
+                        expiry: status.expiry,
+                      })}
                     >
                       <span className='text-lg'>{status.emoji}</span>
                       <span className='text-sm text-gray-900'>{status.text}</span>
@@ -330,6 +338,12 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                       handleSuggestionClick(suggestion.emoji, suggestion.text, suggestion.expiry)
                     }
                     className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-gray-100 transition-colors text-left'
+                    data-track-category='Update_User_Status_Modal'
+                    data-track-name='Select_Status_Suggestion'
+                    data-track-metadata={JSON.stringify({
+                      statusText: suggestion.text,
+                      expiry: suggestion.expiry,
+                    })}
                   >
                     <span className='text-lg'>{suggestion.emoji}</span>
                     <span className='text-sm text-gray-900'>{suggestion.text}</span>
@@ -387,12 +401,17 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 placeholder='Update your status'
                 className='flex-1 bg-transparent border-none outline-none text-sm'
                 maxLength={100}
+                data-track-event='blur'
+                data-track-category='Update_User_Status_Modal'
+                data-track-name='Status_Text_Input'
               />
 
               {isEditingMode && (
                 <button
                   onClick={handleClearStatus}
                   className='flex-shrink-0 text-gray-400 hover:text-gray-600'
+                  data-track-category='Update_User_Status_Modal'
+                  data-track-name='Clear_Status_In_Modal'
                 >
                   <X className='size-4' />
                 </button>
@@ -461,7 +480,13 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
 
             {/* Action Buttons */}
             <div className='flex gap-3 pt-2'>
-              <Button variant='ghost' onClick={onClose} className='text-gray-700 hover:bg-gray-100'>
+              <Button
+                variant='ghost'
+                onClick={onClose}
+                className='text-gray-700 hover:bg-gray-100'
+                data-track-category='Update_User_Status_Modal'
+                data-track-name='Cancel_Status_Update'
+              >
                 Cancel
               </Button>
               <Button
@@ -471,6 +496,9 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 disabled={!selectedEmoji && !statusText.trim()}
                 className='ml-auto px-6 text-white disabled:opacity-50 disabled:cursor-not-allowed'
                 style={{ backgroundColor: '#6276BE' }}
+                data-track-category='Update_User_Status_Modal'
+                data-track-name='Save_Status'
+                data-track-metadata={JSON.stringify({ statusText, expiryOption })}
               >
                 Save
               </Button>

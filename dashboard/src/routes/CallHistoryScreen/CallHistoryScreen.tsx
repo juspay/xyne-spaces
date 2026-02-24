@@ -156,6 +156,9 @@ const CallHistoryScreen = (): ReactElement => {
                 <button
                   onClick={() => handleRemoveUser(selectedUser.id)}
                   className='text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100'
+                  data-track-category='Calls'
+                  data-track-name='RemoveUserFilter'
+                  data-track-metadata={JSON.stringify({ userId: selectedUser.id })}
                 >
                   <X size={16} />
                 </button>
@@ -287,6 +290,10 @@ const CallHistoryScreen = (): ReactElement => {
           }`}
           aria-label='Start call'
           data-testid='start-call-button'
+          data-track-event='BUTTON_CLICK'
+          data-track-category='CALLS'
+          data-track-name='START_CALL_BUTTON'
+          data-track-metadata={JSON.stringify({ isMobile: isMobileView })}
         >
           <HuddleIcon size={20} color='white' />
         </button>
@@ -319,6 +326,9 @@ function UserListItem({
       className='px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer'
       onClick={onToggle}
       onKeyDown={handleKeyDown}
+      data-track-category='Calls'
+      data-track-name='ToggleUserFilter'
+      data-track-metadata={JSON.stringify({ userId: user.id, isSelected })}
     >
       <div className='flex items-center gap-3'>
         <Avatar userId={user.id} size='md' />
@@ -334,6 +344,9 @@ function UserListItem({
           onChange={onToggle}
           onClick={e => e.stopPropagation()}
           className='w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600 cursor-pointer'
+          data-track-category='Calls'
+          data-track-name='ToggleUserCheckbox'
+          data-track-metadata={JSON.stringify({ userId: user.id, isSelected })}
         />
       </div>
     </div>

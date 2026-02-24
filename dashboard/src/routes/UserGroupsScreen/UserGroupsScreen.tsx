@@ -107,7 +107,13 @@ const UserGroupsScreen = (): ReactElement => {
                 Manage your organization user groups and teams
               </p>
             </div>
-            <Button onClick={() => setShowCreateModal(true)}>Create User Group</Button>
+            <Button
+              onClick={() => setShowCreateModal(true)}
+              data-track-category='UserGroups'
+              data-track-name='CreateUserGroup'
+            >
+              Create User Group
+            </Button>
           </div>
 
           <div className='flex-1 overflow-y-auto p-4'>

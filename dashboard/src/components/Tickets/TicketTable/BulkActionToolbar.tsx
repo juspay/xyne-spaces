@@ -70,6 +70,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             onClick={onClearSelection}
             className='p-1 text-white hover:text-gray-400 transition-colors flex-shrink-0'
             title='Clear selection'
+            data-track-category='Tickets'
+            data-track-name='ClearTicketSelection'
           >
             <X className='w-4 h-4' />
           </button>
@@ -142,6 +144,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
                   ? 'bg-white/10 text-white'
                   : 'text-gray-400 hover:bg-white/5 hover:text-white',
               )}
+              data-track-category='Tickets'
+              data-track-name='ToggleDueDateMenu'
             >
               <Calendar className='size-4 text-white flex-shrink-0' />
               <span className='text-xs sm:text-sm font-semibold text-white'>Due Date</span>
@@ -191,6 +195,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
                   ? 'bg-white/10 text-white'
                   : 'text-gray-400 hover:bg-white/5 hover:text-white',
               )}
+              data-track-category='Tickets'
+              data-track-name='ToggleTagsMenu'
             >
               <Tag className='size-4 text-white flex-shrink-0' />
               <span className='text-xs sm:text-sm font-semibold text-white'>Tags</span>

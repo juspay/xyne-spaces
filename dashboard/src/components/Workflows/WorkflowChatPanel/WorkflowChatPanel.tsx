@@ -139,6 +139,9 @@ const StepItem: React.FC<{ step: WorkflowStep; defaultExpanded?: boolean }> = ({
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className='w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-gray-50/50 transition-colors min-w-0'
+        data-track-category='Workflows'
+        data-track-name='ToggleStepExpand'
+        data-track-metadata={JSON.stringify({ stepId: step.id })}
       >
         <span className='text-gray-400'>
           {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -647,6 +650,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
             <button
               onClick={() => setMainTab('flow')}
               className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500 transition-colors'
+              data-track-category='Workflows'
+              data-track-name='CloseHistoryTab'
+              data-track-metadata={JSON.stringify({ executionId })}
             >
               <X size={16} />
             </button>
@@ -695,6 +701,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                         ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100'
                         : 'bg-white border-gray-200 hover:border-blue-200 hover:bg-gray-50'
                     }`}
+                    data-track-category='Workflows'
+                    data-track-name='SelectExecutionHistory'
+                    data-track-metadata={JSON.stringify({
+                      executionId: exec.executionId,
+                      attemptNumber,
+                    })}
                   >
                     <div className='flex items-start justify-between mb-1'>
                       <span
@@ -757,6 +769,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     disabled={currentNodeIndex === 0}
                     className='p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
                     title='Previous step'
+                    data-track-category='Workflows'
+                    data-track-name='NavigateToPreviousStep'
+                    data-track-metadata={JSON.stringify({
+                      currentNodeIndex,
+                      totalSteps: graphNodes.length,
+                    })}
                   >
                     <ChevronLeft size={16} className='text-gray-600' />
                   </button>
@@ -772,6 +790,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     }}
                     role='button'
                     tabIndex={0}
+                    data-track-category='Workflows'
+                    data-track-name='ToggleGraphView'
+                    data-track-metadata={JSON.stringify({ currentNodeIndex, executionId })}
                   >
                     {/* Status Icon */}
                     <div
@@ -813,6 +834,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       onClick={handleJumpToRunning}
                       className='px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded hover:bg-blue-100 transition-colors flex items-center gap-1'
                       title='Jump to running step'
+                      data-track-category='Workflows'
+                      data-track-name='JumpToRunningStep'
+                      data-track-metadata={JSON.stringify({ currentNodeIndex, runningNodeIndex })}
                     >
                       <Loader2 size={10} className='animate-spin' />
                       Live
@@ -825,6 +849,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     disabled={currentNodeIndex >= graphNodes.length - 1}
                     className='p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
                     title='Next step'
+                    data-track-category='Workflows'
+                    data-track-name='NavigateToNextStep'
+                    data-track-metadata={JSON.stringify({
+                      currentNodeIndex,
+                      totalSteps: graphNodes.length,
+                    })}
                   >
                     <ChevronRight size={16} className='text-gray-600' />
                   </button>
@@ -847,6 +877,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 className='flex items-center justify-center text-sm font-medium rounded-lg border bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
                 style={{ width: '42px', height: '42px' }}
                 title='History'
+                data-track-category='Workflows'
+                data-track-name='OpenHistoryTab'
+                data-track-metadata={JSON.stringify({ executionId })}
               >
                 <History size={16} />
               </button>
@@ -857,6 +890,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 className='flex items-center justify-center text-sm font-medium rounded-lg border bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
                 style={{ width: '42px', height: '42px' }}
                 title='Thread'
+                data-track-category='Workflows'
+                data-track-name='OpenThreadTab'
+                data-track-metadata={JSON.stringify({ executionId })}
               >
                 <MessageSquare size={16} />
               </button>
@@ -873,6 +909,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     onClick={onClearSelection}
                     className='p-0.5 rounded hover:bg-blue-100 transition-colors'
                     title='Clear'
+                    data-track-category='Workflows'
+                    data-track-name='ClearStepSelection'
+                    data-track-metadata={JSON.stringify({ executionId })}
                   >
                     <X size={10} className='text-blue-600' />
                   </button>
@@ -889,6 +928,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${activeTab === tab.id ? 'text-blue-600 border-blue-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}
+                    data-track-category='Workflows'
+                    data-track-name='SelectAutomationTab'
+                    data-track-metadata={JSON.stringify({ tabId: tab.id, tabLabel: tab.label })}
                   >
                     {tab.icon}
                     {tab.label}
@@ -903,6 +945,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 <button
                   onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
                   className='w-full text-left border rounded-md bg-muted p-2 shadow-sm cursor-pointer hover:bg-muted/80 transition-colors overflow-hidden'
+                  data-track-category='Workflows'
+                  data-track-name='ToggleTicketDescription'
+                  data-track-metadata={JSON.stringify({
+                    executionId,
+                    isExpanded: isDescriptionExpanded,
+                  })}
                 >
                   <div
                     className={`text-sm text-gray-800 prose prose-sm max-w-none ${
@@ -1028,6 +1076,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   disabled={isContinuing}
                   className='w-full px-3 py-2.5 text-sm bg-transparent resize-none focus:outline-none disabled:opacity-50'
                   rows={2}
+                  data-track-category='Workflows'
+                  data-track-name='WorkflowContinuationInput'
+                  data-track-metadata={JSON.stringify({
+                    executionId,
+                    stepName: currentNode?.stepName,
+                  })}
                 />
                 <div className='flex items-center justify-end px-2 py-1.5 border-t border-gray-100'>
                   <button
@@ -1038,6 +1092,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                         ? 'bg-blue-500 text-white hover:bg-blue-600'
                         : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     }`}
+                    data-track-category='Workflows'
+                    data-track-name='SendContinuationMessage'
+                    data-track-metadata={JSON.stringify({ executionId })}
                   >
                     {isContinuing ? (
                       <Loader2 size={14} className='animate-spin' />

@@ -58,7 +58,13 @@ function CallParticipantsContent({
         ))}
       </div>
 
-      <Button onClick={onClose} variant='secondary' className='mt-4 w-full'>
+      <Button
+        onClick={onClose}
+        variant='secondary'
+        className='mt-4 w-full'
+        data-track-category='Calls'
+        data-track-name='CloseParticipantsModal'
+      >
         Close
       </Button>
     </div>

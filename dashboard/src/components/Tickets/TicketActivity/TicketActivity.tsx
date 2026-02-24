@@ -397,6 +397,9 @@ export const TicketActivity = ({
           onClick={toggleSort}
           className='flex items-center text-[13px] text-[#838383] gap-2'
           title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
+          data-track-category='Tickets'
+          data-track-name='ToggleActivitySort'
+          data-track-metadata={JSON.stringify({ sortOrder })}
         >
           <ArrowUpDown size={13} />
           {sortOrder === 'newest' ? <p>Oldest</p> : <p>Newest</p>}

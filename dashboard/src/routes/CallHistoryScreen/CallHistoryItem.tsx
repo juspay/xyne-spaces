@@ -168,6 +168,9 @@ function renderCallItem({
         }
       }}
       data-testid={`${statusText}`}
+      data-track-category='Calls'
+      data-track-name='OpenCallHistory'
+      data-track-metadata={JSON.stringify({ callId: call.id })}
     >
       <div className='flex items-center justify-between gap-4'>
         {/* Left: Icon + Name + Info */}
@@ -225,6 +228,9 @@ function renderCallItem({
               e.stopPropagation();
               onParticipantsClick();
             }}
+            data-track-category='Calls'
+            data-track-name='ViewParticipants'
+            data-track-metadata={JSON.stringify({ callId: call.id })}
             onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
@@ -250,6 +256,9 @@ function renderCallItem({
                   handleGotoTranscript?.();
                 }
               }}
+              data-track-category='Calls'
+              data-track-name='GoToTranscript'
+              data-track-metadata={JSON.stringify({ callId: call.id })}
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();

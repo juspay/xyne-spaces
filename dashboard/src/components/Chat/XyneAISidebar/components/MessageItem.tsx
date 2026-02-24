@@ -500,6 +500,11 @@ const SummarizerContent = ({
                         }}
                         className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
                         title={`Jump to ${keyPoint.citation.entityType || 'message'} ${keyPoint.citation.messageIndex}`}
+                        data-track-category='XyneAI'
+                        data-track-name='CITATION_CLICK'
+                        data-track-metadata={JSON.stringify({
+                          messageIndex: keyPoint.citation.messageIndex,
+                        })}
                       >
                         {keyPoint.citation.messageIndex}
                       </button>
@@ -556,6 +561,9 @@ const GeniusKeyPoints = ({
                   }
                   className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
                   title={`Jump to message ${keypointNum}`}
+                  data-track-category='XyneAI'
+                  data-track-name='KEY_POINT_CITATION_CLICK'
+                  data-track-metadata={JSON.stringify({ keypointNum })}
                 >
                   {keypointNum}
                 </button>
@@ -583,6 +591,8 @@ const MessageActions = ({
         onClick={onCopy}
         className='p-1.5 rounded transition-colors hover:bg-gray-100'
         title={copied ? 'Copied!' : 'Copy'}
+        data-track-category='XyneAI'
+        data-track-name='COPY_MESSAGE'
       >
         {copied ? (
           <img src='/svgs/icons/check-success.svg' alt='Copied' width='16' height='16' />
@@ -596,6 +606,9 @@ const MessageActions = ({
         onClick={() => onFeedback(message.id, 'LIKE')}
         className='p-1.5 rounded transition-colors hover:bg-gray-100'
         title='Like'
+        data-track-category='XyneAI'
+        data-track-name='LIKE_MESSAGE'
+        data-track-metadata={JSON.stringify({ messageId: message.id })}
       >
         <svg
           xmlns='http://www.w3.org/2000/svg'
@@ -634,6 +647,9 @@ const MessageActions = ({
         onClick={() => onFeedback(message.id, 'DISLIKE')}
         className='p-1.5 rounded transition-colors hover:bg-gray-100'
         title='Dislike'
+        data-track-category='XyneAI'
+        data-track-name='DISLIKE_MESSAGE'
+        data-track-metadata={JSON.stringify({ messageId: message.id })}
       >
         <svg
           xmlns='http://www.w3.org/2000/svg'

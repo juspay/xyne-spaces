@@ -58,6 +58,12 @@ const ExecutionAttemptDropdown: React.FC<ExecutionAttemptDropdownProps> = ({
               key={exec.executionId}
               onClick={() => onExecutionSelect(exec.executionId)}
               className={exec.executionId === selectedExecutionId ? 'bg-gray-100' : ''}
+              data-track-category='Workflows'
+              data-track-name='SelectExecutionAttempt'
+              data-track-metadata={JSON.stringify({
+                executionId: exec.executionId,
+                attemptNumber: index + 1,
+              })}
             >
               <div className='flex flex-col gap-1 w-full'>
                 <span className='font-medium'>

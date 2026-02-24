@@ -119,13 +119,31 @@ export const DateRangeSubmenu = ({
         <div className='mb-4'>
           <div className='text-xs font-medium text-gray-500 mb-2'>Quick presets</div>
           <div className='flex gap-2'>
-            <Button onClick={() => handlePresetClick('today')} variant='outline' size='sm'>
+            <Button
+              onClick={() => handlePresetClick('today')}
+              variant='outline'
+              size='sm'
+              data-track-category='Tickets'
+              data-track-name='SelectDatePresetToday'
+            >
               Today
             </Button>
-            <Button onClick={() => handlePresetClick('week')} variant='outline' size='sm'>
+            <Button
+              onClick={() => handlePresetClick('week')}
+              variant='outline'
+              size='sm'
+              data-track-category='Tickets'
+              data-track-name='SelectDatePresetWeek'
+            >
               Last 7 days
             </Button>
-            <Button onClick={() => handlePresetClick('month')} variant='outline' size='sm'>
+            <Button
+              onClick={() => handlePresetClick('month')}
+              variant='outline'
+              size='sm'
+              data-track-category='Tickets'
+              data-track-name='SelectDatePresetMonth'
+            >
               Last 30 days
             </Button>
           </div>
@@ -152,6 +170,8 @@ export const DateRangeSubmenu = ({
                     ? { max: new Date().toISOString().split('T')[0] }
                     : {})}
                 className='w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                data-track-category='Tickets'
+                data-track-name='DateRangeStart'
               />
             </div>
 
@@ -167,6 +187,8 @@ export const DateRangeSubmenu = ({
                 {...(startDate ? { min: startDate } : {})}
                 {...(!allowFutureDates ? { max: new Date().toISOString().split('T')[0] } : {})}
                 className='w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                data-track-category='Tickets'
+                data-track-name='DateRangeEnd'
               />
             </div>
           </div>
@@ -175,7 +197,14 @@ export const DateRangeSubmenu = ({
         {/* Clear Button */}
         {(dateRange.start || dateRange.end) && (
           <div className='border-t border-gray-100 pt-3 mt-4'>
-            <Button onClick={handleClear} variant='ghost' size='sm' className='w-full'>
+            <Button
+              onClick={handleClear}
+              variant='ghost'
+              size='sm'
+              className='w-full'
+              data-track-category='Tickets'
+              data-track-name='ClearDateRangeFilter'
+            >
               Clear date range
             </Button>
           </div>

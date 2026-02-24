@@ -61,7 +61,7 @@ export function CallControls({
   isAIAssistantEnabled,
   aiController,
   localParticipantId,
-  callId: _callId,
+  callId: callId,
   roomLink,
   onToggleMic,
   onToggleCamera,
@@ -215,6 +215,9 @@ export function CallControls({
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               title={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
               data-testid='mic-toggle-button'
+              data-track-category='CALLS'
+              data-track-name='MIC_TOGGLE'
+              data-track-metadata={JSON.stringify({ enabled: isMicEnabled, callId })}
             >
               {isMicEnabled ? (
                 <Mic
@@ -241,6 +244,9 @@ export function CallControls({
                 onClick={() => setShowMicMenu(!showMicMenu)}
                 className='text-white flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select audio devices'
+                data-track-category='Calls'
+                data-track-name='Toggle_Mic_Menu'
+                data-track-metadata={JSON.stringify({ showMicMenu: !showMicMenu, callId })}
               >
                 <ChevronUp
                   className={cn(
@@ -302,6 +308,9 @@ export function CallControls({
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               title={isCameraEnabled ? 'Turn off camera' : 'Turn on camera'}
               data-testid='camera-toggle-button'
+              data-track-category='CALLS'
+              data-track-name='CAMERA_TOGGLE'
+              data-track-metadata={JSON.stringify({ enabled: isCameraEnabled, callId })}
             >
               {isCameraEnabled ? (
                 <Video
@@ -330,6 +339,9 @@ export function CallControls({
                 }}
                 className='text-white flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select camera'
+                data-track-category='Calls'
+                data-track-name='Toggle_Camera_Menu'
+                data-track-metadata={JSON.stringify({ showCameraMenu: !showCameraMenu, callId })}
               >
                 <ChevronUp
                   className={cn(
@@ -375,6 +387,10 @@ export function CallControls({
               ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/50'
               : 'bg-gray-700 hover:bg-gray-600 text-white',
           )}
+          data-track-event='BUTTON_CLICK'
+          data-track-category='CALLS'
+          data-track-name='TOGGLE_SCREEN_SHARE'
+          data-track-metadata={JSON.stringify({ callId, enabled: isScreenSharing })}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
         >
@@ -409,6 +425,10 @@ export function CallControls({
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Participants'
           data-testid='add-participant-button'
+          data-track-event='BUTTON_CLICK'
+          data-track-category='CALLS'
+          data-track-name='TOGGLE_PARTICIPANTS_SIDEBAR'
+          data-track-metadata={JSON.stringify({ isOpen: isParticipantsSidebarOpen })}
         >
           <Users
             className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
@@ -424,6 +444,9 @@ export function CallControls({
           className={cn(buttonClasses, 'relative bg-gray-700 hover:bg-gray-600 text-white')}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Share call link'
+          data-track-category='CALLS'
+          data-track-name='SHARE_CALL_LINK'
+          data-track-metadata={JSON.stringify({ callId })}
         >
           <Share2
             className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
@@ -449,6 +472,9 @@ export function CallControls({
             isChatOpen ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600',
           )}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+          data-track-category='CALLS'
+          data-track-name='TOGGLE_CHAT'
+          data-track-metadata={JSON.stringify({ callId: callId, isOpen: isChatOpen })}
           title='Toggle chat'
         >
           <MessageSquare
@@ -467,6 +493,12 @@ export function CallControls({
             className={cn(buttonClasses, 'text-white relative', getAiButtonColorClass())}
             style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
             title={getAiButtonTitle()}
+            data-track-category='CALLS'
+            data-track-name='AI_Assistant'
+            data-track-metadata={JSON.stringify({
+              isControlledByOther,
+              hasPendingRequest: hasPendingRequestFromOther,
+            })}
           >
             <Bot
               className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
@@ -488,6 +520,9 @@ export function CallControls({
           className={cn(buttonClasses, 'bg-gray-700 hover:bg-gray-600 text-white')}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title={viewMode === 'mini' ? 'Expand view' : 'Minimize view'}
+          data-track-category='CALLS'
+          data-track-name='TOGGLE_VIEW_MODE'
+          data-track-metadata={JSON.stringify({ callId: callId, viewMode })}
         >
           {viewMode === 'mini' ? (
             <Maximize2
@@ -513,6 +548,9 @@ export function CallControls({
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Leave call'
           data-testid='end-call-button'
+          data-track-category='CALLS'
+          data-track-name='END_CALL'
+          data-track-metadata={JSON.stringify({ callId })}
         >
           <PhoneOff
             className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}

@@ -199,6 +199,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 )}
                 aria-invalid={field.state.meta.errors.length > 0}
                 data-testid='channel-name-input'
+                data-track-category='ADD_CHANNEL_FORM'
+                data-track-name='EDIT_CHANNEL_NAME'
+                data-track-metadata={JSON.stringify({ mode, channelName: field.state.value })}
               />
               <div className='absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500'>
                 {getCharacterCount()}/80
@@ -255,6 +258,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               onChange={e => field.handleChange(e.target.value)}
               placeholder='What is this channel about?'
               rows={4}
+              data-track-category='ADD_CHANNEL_FORM'
+              data-track-name='Edit_Channel_Description'
             />
           </div>
         )}
@@ -296,6 +301,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                     variant='secondary'
                     className='cursor-pointer hover:bg-secondary/80 transition-colors'
                     onClick={() => handleTagRemove(tag)}
+                    data-track-category='ADD_CHANNEL_FORM'
+                    data-track-name='Remove_Topic_Tag'
+                    data-track-metadata={JSON.stringify({ tag })}
                   >
                     {tag}
                     <span className='ml-1 text-xs'>×</span>
@@ -310,6 +318,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTagString(e.target.value)}
               onKeyDown={handleTagInputKeyDown}
               placeholder='Type a tag and press Enter or add comma'
+              data-track-category='ADD_CHANNEL_FORM'
+              data-track-name='Edit_Topic_Tag'
             />
             <p className='text-xs text-gray-500'>
               Add tags to help organize and discover this channel
@@ -328,6 +338,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               e.preventDefault();
               onCancel();
             }}
+            data-track-category='ADD_CHANNEL_FORM'
+            data-track-name='Cancel_Create_Channel'
           >
             Cancel
           </Button>
@@ -339,6 +351,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           type='submit'
           className='bg-blue-600 hover:bg-blue-700'
           data-testid='create-channel-button'
+          data-track-category='ADD_CHANNEL_FORM'
+          data-track-name='CREATE_CHANNEL_SUBMIT'
+          data-track-metadata={JSON.stringify({ mode, channelName })}
         >
           {mode === 'promote' ? 'Promote to Channel' : 'Create Channel'}
         </Button>

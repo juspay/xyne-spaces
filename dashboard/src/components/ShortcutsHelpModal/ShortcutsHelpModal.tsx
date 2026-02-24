@@ -81,6 +81,8 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
             onClick={() => onClose()}
             className='p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors'
             aria-label='Close'
+            data-track-category='Help'
+            data-track-name='CloseShortcutsModal'
           >
             <X className='w-5 h-5' />
           </button>

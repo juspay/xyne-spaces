@@ -56,6 +56,9 @@ export function DeviceSelector({
         <button
           onClick={() => setShowDeviceList(!showDeviceList)}
           className='transition-colors w-full cursor-pointer px-2 text-left '
+          data-track-category='CALLS'
+          data-track-name='Toggle_Device_Selector'
+          data-track-metadata={JSON.stringify({ deviceType: label })}
         >
           <div className='flex items-center px-3 py-2 gap-3 hover:bg-gray-700 rounded-lg'>
             {icon &&
@@ -92,6 +95,12 @@ export function DeviceSelector({
                       setShowDeviceList(false);
                     }}
                     className='w-full px-4 py-2.5 rounded-lg text-left text-sm hover:bg-gray-700 flex items-center justify-between transition-colors'
+                    data-track-category='CALLS'
+                    data-track-name='SelectMobileDevice'
+                    data-track-metadata={JSON.stringify({
+                      deviceType: label,
+                      deviceLabel: device.label,
+                    })}
                   >
                     <span className='truncate pr-2 text-white'>{device.label || label}</span>
                     {device.deviceId === currentDeviceId && (
@@ -118,6 +127,9 @@ export function DeviceSelector({
         className={buttonClasses}
         style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
         title={`Select ${label.toLowerCase()}`}
+        data-track-category='CALLS'
+        data-track-name='Toggle_Device_Dropdown'
+        data-track-metadata={JSON.stringify({ deviceType: label })}
       >
         {icon && React.createElement(icon, { className: 'w-4 h-4 flex-shrink-0 text-white' })}
         <div className='flex-1  min-w-0'>
@@ -145,6 +157,12 @@ export function DeviceSelector({
                     setIsOpen(false);
                   }}
                   className='w-full px-4 py-2.5 text-left text-sm hover:bg-gray-700 flex items-center justify-between transition-colors'
+                  data-track-category='CALLS'
+                  data-track-name='Select_Device'
+                  data-track-metadata={JSON.stringify({
+                    deviceType: label,
+                    deviceLabel: device.label,
+                  })}
                 >
                   <span className='truncate pr-2 text-white'>{device.label || label}</span>
                   {device.deviceId === currentDeviceId && (

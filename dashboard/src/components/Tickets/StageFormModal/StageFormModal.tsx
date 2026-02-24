@@ -266,6 +266,8 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
             onClick={onClose}
             className='p-1 rounded-full hover:bg-gray-100 transition-colors'
             aria-label='Close'
+            data-track-category='Tickets'
+            data-track-name='CloseStageFormModal'
           >
             <X className='w-4 h-4 text-gray-500' />
           </button>
@@ -310,6 +312,12 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
                 disabled={isApproved}
                 className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                data-track-category='Tickets'
+                data-track-name='StageFormStringInput'
+                data-track-metadata={JSON.stringify({
+                  fieldId: field.id,
+                  fieldName: field.fieldName,
+                })}
               />
             )}
             {field.fieldType === FormFieldType.NUMBER && (
@@ -319,6 +327,12 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
                 disabled={isApproved}
                 className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                data-track-category='Tickets'
+                data-track-name='StageFormNumberInput'
+                data-track-metadata={JSON.stringify({
+                  fieldId: field.id,
+                  fieldName: field.fieldName,
+                })}
               />
             )}
             {field.fieldType === FormFieldType.BOOLEAN && (
@@ -332,6 +346,12 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                   }
                   disabled={isApproved}
                   className='h-4 w-4 text-blue-600 border-gray-300 rounded disabled:opacity-50'
+                  data-track-category='Tickets'
+                  data-track-name='StageFormCheckbox'
+                  data-track-metadata={JSON.stringify({
+                    fieldId: field.id,
+                    fieldName: field.fieldName,
+                  })}
                 />
                 <label htmlFor={`field-${field.id}`} className='text-sm text-gray-600'>
                   Yes
@@ -345,6 +365,12 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
                 disabled={isApproved}
                 className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                data-track-category='Tickets'
+                data-track-name='StageFormDateInput'
+                data-track-metadata={JSON.stringify({
+                  fieldId: field.id,
+                  fieldName: field.fieldName,
+                })}
               />
             )}
             {(field.fieldType === FormFieldType.SINGLE_SELECT ||
@@ -363,6 +389,12 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 disabled={isApproved}
                 multiple={field.fieldType === FormFieldType.MULTI_SELECT}
                 className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                data-track-category='Tickets'
+                data-track-name='StageFormSelect'
+                data-track-metadata={JSON.stringify({
+                  fieldId: field.id,
+                  fieldName: field.fieldName,
+                })}
               >
                 {(field.fieldEnum as string[] | null | undefined)?.map((option: string) => (
                   <option key={option} value={option}>
@@ -379,6 +411,12 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
                 disabled={isApproved}
                 className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                data-track-category='Tickets'
+                data-track-name='StageFormUserInput'
+                data-track-metadata={JSON.stringify({
+                  fieldId: field.id,
+                  fieldName: field.fieldName,
+                })}
               />
             )}
           </div>
@@ -394,6 +432,8 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                   void handleSubmit(TicketStageRequestStatus.REJECTED);
                 }}
                 disabled={isSubmitting}
+                data-track-category='Tickets'
+                data-track-name='RejectStageForm'
               >
                 {isSubmitting ? 'Rejecting...' : 'Reject'}
               </Button>
@@ -402,6 +442,8 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                   void handleSubmit(TicketStageRequestStatus.APPROVED);
                 }}
                 disabled={isSubmitting}
+                data-track-category='Tickets'
+                data-track-name='ApproveStageForm'
               >
                 {isSubmitting ? 'Approving...' : 'Approve'}
               </Button>
@@ -417,6 +459,8 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                   void handleSubmit(TicketStageRequestStatus.DRAFT);
                 }}
                 disabled={isSubmitting}
+                data-track-category='Tickets'
+                data-track-name='SaveStageFormAsDraft'
               >
                 {isSubmitting ? 'Saving...' : 'Save as Draft'}
               </Button>
@@ -425,6 +469,8 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                   void handleSubmit(TicketStageRequestStatus.SUBMITTED);
                 }}
                 disabled={isSubmitting}
+                data-track-category='Tickets'
+                data-track-name='SubmitStageFormForApproval'
               >
                 {isSubmitting ? 'Submitting...' : 'Submit for Approval'}
               </Button>

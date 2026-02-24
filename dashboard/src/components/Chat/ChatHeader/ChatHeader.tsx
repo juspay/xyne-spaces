@@ -76,7 +76,12 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ channelId }) => {
       <div className='flex items-center justify-between px-4 py-3'>
         {/* Left Section - Channel Info */}
         <div className='flex items-center space-x-3'>
-          <button onClick={handleBackClick} className='md:hidden'>
+          <button
+            onClick={handleBackClick}
+            className='md:hidden'
+            data-track-category='CHAT_HEADER'
+            data-track-name='BACK_TO_DIRECTORY'
+          >
             <ArrowLeft className='w-4 h-4' />
           </button>
           <IconToggleButton
@@ -94,6 +99,9 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ channelId }) => {
               iconSize='md'
               textSize='md'
               onClick={handleChannelNameClick}
+              data-track-category='CHAT_HEADER'
+              data-track-name='OPEN_CHANNEL_INFO'
+              data-track-metadata={JSON.stringify({ channelId })}
             />
           )}
         </div>
@@ -108,6 +116,9 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ channelId }) => {
               text={channel?.participantCount?.toString() || '0'}
               leadingIcon={<Users className='w-4 h-4' />}
               onClick={handleMembersClick}
+              data-track-category='CHAT_HEADER'
+              data-track-name='OPEN_MEMBERS_LIST'
+              data-track-metadata={JSON.stringify({ channelId })}
             />
           )}
 

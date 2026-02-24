@@ -118,6 +118,13 @@ const ChannelItem = ({
         style={shouldShowBold ? { fontWeight: '700' } : undefined}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
+        data-track-category='CHAT_SIDEBAR'
+        data-track-name='OPEN_CHANNEL'
+        data-track-metadata={JSON.stringify({
+          channelId: channel.id,
+          channelName: displayName,
+          isDM,
+        })}
       >
         <div className='flex items-center gap-2 w-full min-w-0'>
           <div className={`flex items-center justify-center flex-shrink-0 `}>{getIcon()}</div>
@@ -156,6 +163,12 @@ const ChannelItem = ({
               className='p-1 rounded hover:bg-gray-300 transition-colors shrink-0'
               aria-label='Close conversation'
               title='Close conversation'
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='CLOSE_DM_CHANNEL'
+              data-track-metadata={JSON.stringify({
+                channelId: channel.id,
+                channelName: displayName,
+              })}
             >
               <X size={14} className='text-gray-500 hover:text-gray-700' />
             </button>

@@ -65,6 +65,8 @@ const AuthScreen = (): ReactElement => {
         className="w-full gap-3 text-base h-9 font-medium inline-flex items-center justify-center whitespace-nowrap transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive cursor-pointer border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 rounded-md px-6 has-[>svg]:px-4"
         onClick={handleGoogleSignIn}
         disabled={isLoading}
+        data-track-category='Auth'
+        data-track-name='GoogleSignIn'
       >
         <>
           <GoogleLogo />
@@ -130,6 +132,8 @@ const AuthScreen = (): ReactElement => {
                         disabled={isLoading}
                         onClick={handleGoogleSignIn}
                         className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#10131F] text-[#525866] rounded-[10px] overflow-hidden h-12'
+                        data-track-category='Auth'
+                        data-track-name='GoogleSignIn'
                       >
                         <span
                           data-button-left-slot='true'

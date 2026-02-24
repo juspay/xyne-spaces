@@ -164,6 +164,9 @@ export const DmListItem = ({
         role='button'
         tabIndex={0}
         aria-label={`Open conversation with ${displayName}`}
+        data-track-category='DM'
+        data-track-name='OPEN_DM_CONVERSATION'
+        data-track-metadata={JSON.stringify({ channelId: channel.id, channelName: channel.name })}
       >
         {/* Avatar */}
         <div className='relative shrink-0 size-[48px] rounded-[8px] overflow-visible'>

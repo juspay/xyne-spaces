@@ -58,6 +58,9 @@ const WebView = (): ReactElement => {
               <button
                 onClick={() => handleTabSwitch(tab.currentUrl)}
                 className='flex items-center gap-2 px-3 py-2 flex-1 text-left'
+                data-track-category='WebView'
+                data-track-name='SwitchTab'
+                data-track-metadata={JSON.stringify({ url: tab.currentUrl })}
               >
                 <span className='text-xs'>🌐</span>
                 <span className='max-w-28 truncate'>{getDomainFromUrl(tab.currentUrl)}</span>
@@ -71,6 +74,9 @@ const WebView = (): ReactElement => {
                 }}
                 className='px-2 py-2 hover:bg-red-100 hover:text-red-600 transition-colors'
                 title='Close tab'
+                data-track-category='WebView'
+                data-track-name='CloseTab'
+                data-track-metadata={JSON.stringify({ url: tab.currentUrl })}
               >
                 <span className='text-xs'>✕</span>
               </button>

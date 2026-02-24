@@ -201,6 +201,9 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
             size='default'
             onClick={handleCancel}
             disabled={isSubmitting || loading}
+            data-track-category='ADD_CHAT_PARTICIPANTS'
+            data-track-name='Cancel_Add_People'
+            data-track-metadata={JSON.stringify({ selectedUsers: selectedUsers })}
           >
             Cancel
           </Button>
@@ -212,6 +215,9 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           disabled={selectedUsers.length === 0 || isSubmitting || loading}
           loading={isSubmitting || loading}
           data-testid='add-people-submit'
+          data-track-category='ADD_CHAT_PARTICIPANTS'
+          data-track-name='ADD_PEOPLE_SUBMIT'
+          data-track-metadata={JSON.stringify({ selectedUsers: selectedUsers })}
         >
           Add Selected Users
         </Button>

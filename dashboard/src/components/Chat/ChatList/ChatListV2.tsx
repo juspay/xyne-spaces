@@ -555,6 +555,12 @@ const ChatListV2: React.FC<ChatListProps> = ({
           onClick={scrollToBottom}
           className='absolute bottom-6 right-6 bg-white border border-gray-300 rounded-full p-3 shadow-lg hover:shadow-xl transition-all duration-200 hover:bg-gray-50 z-50'
           aria-label='Scroll to bottom'
+          data-track-category='CHAT_LIST'
+          data-track-name='SCROLL_TO_BOTTOM'
+          data-track-metadata={JSON.stringify({
+            channelId,
+            currentLatestConversationId: latestConversation.conversationId,
+          })}
         >
           <ArrowDown className='w-5 h-5 text-gray-700' />
         </button>

@@ -249,6 +249,9 @@ const Info = ({
         <button
           onClick={onClose}
           className='w-7 h-7 flex items-center justify-center border border-[#E4E6E7] rounded-[8px] cursor-pointer'
+          data-track-category='CHAT_INFO'
+          data-track-name='CLOSE_INFO'
+          data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           <LucideX color='#505B62' size={16} />
         </button>
@@ -262,6 +265,12 @@ const Info = ({
             headerLinkContainerStyle,
             channelUserStatus?.isStarred ? 'bg-[#FBEFD9] !border-[#FBEFD9]' : '',
           ].join(' ')}
+          data-track-category='CHAT_INFO'
+          data-track-name='TOGGLE_STAR'
+          data-track-metadata={JSON.stringify({
+            isStarred: channelUserStatus?.isStarred,
+            channelId: channel.id,
+          })}
         >
           {channelUserStatus?.isStarred ? (
             <LucideStar size={16} color='#FACC14' fill='#FACC14' />
@@ -279,6 +288,13 @@ const Info = ({
             onClick={handleAddPeopleClick}
             className={headerLinkContainerStyle}
             data-testid='add-people-button'
+            data-track-event='BUTTON_CLICK'
+            data-track-category='CHAT_INFO'
+            data-track-name='ADD_PEOPLE_TO_CHANNEL'
+            data-track-metadata={JSON.stringify({
+              channelId: channel.id,
+              currentParticipantCount: participants.length,
+            })}
           >
             <LucideUserPlus size={16} color='#788187' />
             <div className='text-[#788187] text-[13px]'>Add People</div>
@@ -288,6 +304,9 @@ const Info = ({
           onClick={handleCallTrigger}
           disabled={participants.length === 1}
           className={`${headerLinkContainerStyle} ${participants.length === 1 ? 'opacity-50 cursor-not-allowed' : ''}`}
+          data-track-category='CHAT_INFO'
+          data-track-name='START_CALL'
+          data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           {isUserInCurrentChannelCall ? (
             <PhoneOff className='w-4 h-4 text-[#D14040]' />
@@ -303,13 +322,25 @@ const Info = ({
           </div>
         </button>
         {showPromoteButton && (
-          <button onClick={handlePromoteClick} className={headerLinkContainerStyle}>
+          <button
+            onClick={handlePromoteClick}
+            className={headerLinkContainerStyle}
+            data-track-category='CHAT_INFO'
+            data-track-name='PROMOTE_GROUP_DM'
+            data-track-metadata={JSON.stringify({ channelId: channel.id })}
+          >
             <ArrowUpCircle size={16} color='#788187' />
             <div className='text-[#788187] text-[13px]'>Promote</div>
           </button>
         )}
         {isParticipant && !isDM && !isGroupDM && (
-          <button onClick={handleLeaveChannel} className={headerLinkContainerStyle}>
+          <button
+            onClick={handleLeaveChannel}
+            className={headerLinkContainerStyle}
+            data-track-category='CHAT_INFO'
+            data-track-name='LEAVE_CHANNEL'
+            data-track-metadata={JSON.stringify({ channelId: channel.id })}
+          >
             <LucideLogOut size={16} color='#D14040' />
             <div className='text-[#D14040] text-[13px]'>Leave</div>
           </button>
@@ -495,6 +526,9 @@ const ParticipantListItem = ({
                     <button
                       className={popoverStyle}
                       onClick={() => onRemoveAdmin(participant.userId)}
+                      data-track-category='CHAT_INFO'
+                      data-track-name='REMOVE_ADMIN'
+                      data-track-metadata={JSON.stringify({ userId: participant.userId })}
                     >
                       <LucideUserMinus size={14} />
                       <span className='text-[14px] text-[#181B1D]'>Remove admin</span>
@@ -503,6 +537,9 @@ const ParticipantListItem = ({
                     <button
                       className={popoverStyle}
                       onClick={() => onMakeAdmin(participant.userId)}
+                      data-track-category='CHAT_INFO'
+                      data-track-name='MAKE_ADMIN'
+                      data-track-metadata={JSON.stringify({ userId: participant.userId })}
                     >
                       <LucideUser size={14} />
                       <span className='text-[14px] text-[#181B1D]'>Make admin</span>
@@ -512,6 +549,9 @@ const ParticipantListItem = ({
                   <button
                     className={popoverStyle}
                     onClick={() => onRemove(participant.userId, user?.name || 'this user')}
+                    data-track-category='ChatInfo'
+                    data-track-name='RemoveParticipant'
+                    data-track-metadata={JSON.stringify({ userId: participant.userId })}
                   >
                     <Trash size={14} color='#D14040' />
                     <span className='text-[14px] text-[#D14040]'>Remove</span>

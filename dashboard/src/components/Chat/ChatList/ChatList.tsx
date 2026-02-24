@@ -308,6 +308,9 @@ const ChatList = ({
         <Button
           onClick={() => scrollToBottom(true)}
           className={`pr-5 sticky top-[98.5%] left-1/2 right-1/2 -translate-y-[100%] -translate-x-1/2 z-40 rounded-full flex items-center gap-1 ${conversationId ? 'max-[500px]:hidden' : ''}`}
+          data-track-category='CHAT_LIST'
+          data-track-name='SCROLL_TO_BOTTOM'
+          data-track-metadata={JSON.stringify({ channelId })}
         >
           <span>
             <ArrowDown />

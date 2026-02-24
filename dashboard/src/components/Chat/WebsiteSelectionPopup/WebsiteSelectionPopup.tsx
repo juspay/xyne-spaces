@@ -97,6 +97,12 @@ export const WebsiteSelectionPopup: React.FC<WebsiteSelectionPopupProps> = ({
             key={website.id}
             onClick={() => handleWebsiteClick(website.id)}
             className='w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-gray-100 rounded transition-colors'
+            data-track-category='CHAT_MESSAGE'
+            data-track-name='OPEN_WITH_WEBSITE'
+            data-track-metadata={JSON.stringify({
+              websiteId: website.id,
+              websiteName: website.name,
+            })}
           >
             <div className='flex-shrink-0 w-5 h-5'>
               {website.iconImage ? (
@@ -118,6 +124,8 @@ export const WebsiteSelectionPopup: React.FC<WebsiteSelectionPopupProps> = ({
         <button
           onClick={onClose}
           className='w-full text-xs text-gray-400 hover:text-gray-600 text-center py-1'
+          data-track-category='CHAT_MESSAGE'
+          data-track-name='CANCEL_WEBSITE_SELECTION'
         >
           Cancel
         </button>

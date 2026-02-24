@@ -89,6 +89,8 @@ export const DashboardCreation: React.FC = () => {
               onClick={() => void handleCreateDashboard()}
               disabled={!formData.name.trim()}
               className='w-full'
+              data-track-category='Dashboards'
+              data-track-name='CreateDashboard'
             >
               <LayoutDashboard className='w-4 h-4' />
               Create Dashboard
@@ -126,12 +128,21 @@ export const DashboardCreation: React.FC = () => {
                     <button
                       onClick={() => handleSelectDashboard(dashboard)}
                       className='flex-1 text-left'
+                      data-track-category='Dashboards'
+                      data-track-name='SelectDashboard'
+                      data-track-metadata={JSON.stringify({
+                        dashboardId: dashboard.id,
+                        dashboardName: dashboard.name,
+                      })}
                     >
                       <h3 className='text-md font-medium text-gray-900'>{dashboard.name}</h3>
                     </button>
                     <button
                       onClick={() => void handleDeleteDashboard(dashboard.id)}
                       className='p-1 text-gray-400 hover:text-red-500'
+                      data-track-category='Dashboards'
+                      data-track-name='DeleteDashboard'
+                      data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
                     >
                       <Trash2 className='w-4 h-4' />
                     </button>
@@ -142,6 +153,9 @@ export const DashboardCreation: React.FC = () => {
                   <button
                     onClick={() => handleSelectDashboard(dashboard)}
                     className='text-sm text-blue-600 hover:text-blue-800'
+                    data-track-category='Dashboards'
+                    data-track-name='OpenDashboard'
+                    data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
                   >
                     Open Dashboard →
                   </button>

@@ -64,7 +64,14 @@ const TicketDisplayMode: React.FC<{
 
   return (
     <div className='w-full mt-2'>
-      <TicketCard ticket={ticket} onClick={handleClick} isConversation={true} />
+      <TicketCard
+        ticket={ticket}
+        onClick={handleClick}
+        isConversation={true}
+        data-track-category='CHAT_TICKET'
+        data-track-name='OPEN_TICKET_FROM_MESSAGE'
+        data-track-metadata={JSON.stringify({ ticketId: ticket?.id, conversationId })}
+      />
     </div>
   );
 };

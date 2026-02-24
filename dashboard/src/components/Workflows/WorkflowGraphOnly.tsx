@@ -274,6 +274,8 @@ const GraphInner: React.FC<InnerProps> = ({
           disabled={!onRefresh || loadingStage < 5}
           className='p-2 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 disabled:opacity-50 transition-all'
           title='Refresh'
+          data-track-category='Workflows'
+          data-track-name='RefreshWorkflow'
         >
           <RefreshCw
             size={16}
@@ -284,6 +286,8 @@ const GraphInner: React.FC<InnerProps> = ({
           onClick={onExport}
           className='p-2 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 transition-all'
           title='Export'
+          data-track-category='Workflows'
+          data-track-name='ExportWorkflow'
         >
           <Download size={16} className='text-gray-600' />
         </button>
@@ -291,6 +295,8 @@ const GraphInner: React.FC<InnerProps> = ({
           onClick={toggleFs}
           className='p-2 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 transition-all'
           title={isFullscreen ? 'Exit' : 'Fullscreen'}
+          data-track-category='Workflows'
+          data-track-name='ToggleWorkflowFullscreen'
         >
           {isFullscreen ? (
             <Minimize2 size={16} className='text-gray-600' />
@@ -419,6 +425,8 @@ export const WorkflowGraphOnly: React.FC<WorkflowGraphOnlyProps> = ({
           <button
             onClick={onRefresh}
             className='ml-2 px-2 py-1 bg-blue-500 text-white rounded text-xs'
+            data-track-category='Workflows'
+            data-track-name='RetryLoadGraph'
           >
             Retry
           </button>

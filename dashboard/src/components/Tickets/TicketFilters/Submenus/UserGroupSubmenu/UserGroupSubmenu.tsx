@@ -138,6 +138,9 @@ export const UserGroupSubmenu = ({
                   onClick={() => handleRemoveGroup(group.id)}
                   className='p-1 hover:bg-blue-100 rounded transition-colors flex-shrink-0'
                   title={`Remove ${group.name}`}
+                  data-track-category='Tickets'
+                  data-track-name='RemoveUserGroupFilter'
+                  data-track-metadata={JSON.stringify({ groupId: group.id, groupName: group.name })}
                 >
                   <X className='w-3 h-3 text-blue-600' />
                 </Button>
@@ -161,6 +164,9 @@ export const UserGroupSubmenu = ({
                   variant='ghost'
                   className='flex items-center gap-3 p-2 hover:bg-gray-50 rounded transition-colors w-full justify-start h-auto'
                   type='button'
+                  data-track-category='Tickets'
+                  data-track-name='ToggleUserGroupFilter'
+                  data-track-metadata={JSON.stringify({ groupId: group.id, groupName: group.name })}
                 >
                   <Users className='w-4 h-4 text-gray-600 flex-shrink-0' />
                   <div className='min-w-0 flex-1 text-left'>

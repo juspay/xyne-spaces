@@ -365,6 +365,9 @@ const SupportScreen = (): ReactElement => {
                         ? 'text-primary  bg-gray-200'
                         : 'text-gray-600 hover:text-gray-900',
                     )}
+                    data-track-category='Support'
+                    data-track-name='ToggleMyTickets'
+                    data-track-metadata={JSON.stringify({ showMyTicketsOnly: !showMyTicketsOnly })}
                   >
                     My Tickets
                   </button>
@@ -379,6 +382,8 @@ const SupportScreen = (): ReactElement => {
                           : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
                       )}
                       title='Kanban View'
+                      data-track-category='Support'
+                      data-track-name='SetKanbanView'
                     >
                       <LayoutGrid size={16} />
                     </button>
@@ -391,12 +396,20 @@ const SupportScreen = (): ReactElement => {
                           : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
                       )}
                       title='List View'
+                      data-track-category='Support'
+                      data-track-name='SetListView'
                     >
                       <List size={16} />
                     </button>
                   </div>
                   {ticketId && (
-                    <Button size='sm' variant='ghost' onClick={() => void navigate(`/support`)}>
+                    <Button
+                      size='sm'
+                      variant='ghost'
+                      onClick={() => void navigate(`/support`)}
+                      data-track-category='Support'
+                      data-track-name='CloseTicketPanel'
+                    >
                       <PanelRight size={16} />
                     </Button>
                   )}
@@ -419,7 +432,14 @@ const SupportScreen = (): ReactElement => {
                     />
                     <DragOverlay>
                       {activeTicket ? (
-                        <TicketCard ticket={activeTicket} isCompact={true} onClick={() => {}} />
+                        <TicketCard
+                          ticket={activeTicket}
+                          isCompact={true}
+                          onClick={() => {}}
+                          data-track-category='Support'
+                          data-track-name='DragOverlayTicketClick'
+                          data-track-metadata={JSON.stringify({ ticketId: activeTicket?.id })}
+                        />
                       ) : null}
                     </DragOverlay>
                   </DndContext>
@@ -439,6 +459,12 @@ const SupportScreen = (): ReactElement => {
                             },
                           });
                         }}
+                        data-track-category='Support'
+                        data-track-name='SelectTicket'
+                        data-track-metadata={JSON.stringify({
+                          ticketId: ticket.id,
+                          xyneId: ticket.xyneId,
+                        })}
                       />
                     );
                   })
@@ -715,7 +741,13 @@ ${email.body || 'No content'}
               </div>
               {!isRightPanelOpen && (
                 <div className='text-sm '>
-                  <Button size='sm' variant='ghost' onClick={() => setIsRightPanelOpen(true)}>
+                  <Button
+                    size='sm'
+                    variant='ghost'
+                    onClick={() => setIsRightPanelOpen(true)}
+                    data-track-category='Support'
+                    data-track-name='OpenThreadPanel'
+                  >
                     Open Thread
                   </Button>
                 </div>
@@ -740,6 +772,9 @@ ${email.body || 'No content'}
                             className='p-1 hover:bg-gray-200 rounded transition-colors'
                             aria-label='Regenerate summary'
                             title='Regenerate summary'
+                            data-track-category='Support'
+                            data-track-name='RegenerateAISummary'
+                            data-track-metadata={JSON.stringify({ ticketId })}
                           >
                             <RefreshCw size={16} className='text-gray-600' />
                           </button>
@@ -749,6 +784,12 @@ ${email.body || 'No content'}
                             onClick={() => setIsSummaryCollapsed(!isSummaryCollapsed)}
                             className='p-1 hover:bg-gray-200 rounded transition-colors'
                             aria-label={isSummaryCollapsed ? 'Expand summary' : 'Collapse summary'}
+                            data-track-category='Support'
+                            data-track-name='ToggleAISummaryCollapse'
+                            data-track-metadata={JSON.stringify({
+                              ticketId,
+                              isCollapsed: !isSummaryCollapsed,
+                            })}
                           >
                             {isSummaryCollapsed ? (
                               <ChevronDown size={16} className='text-gray-600' />
@@ -917,6 +958,8 @@ ${email.body || 'No content'}
                           className='p-1.5 hover:bg-gray-100 rounded transition-colors flex items-center justify-center'
                           aria-label='Close panel'
                           title='Close panel'
+                          data-track-category='Support'
+                          data-track-name='CloseRightPanel'
                         >
                           <X size={16} className='text-gray-600' />
                         </button>
@@ -1075,6 +1118,9 @@ const EmailThread = ({ emails }: { emails: Email[] }): ReactElement => {
         <button
           onClick={() => setIsExpanded(true)}
           className='px-4 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors cursor-pointer'
+          data-track-category='Support'
+          data-track-name='ExpandEmailThread'
+          data-track-metadata={JSON.stringify({ collapsedCount })}
         >
           {collapsedCount} {collapsedCount === 1 ? 'more message' : 'more messages'}
         </button>
@@ -1567,6 +1613,9 @@ const EmailComposer = ({
             onClick={() => void handleSendEmail()}
             disabled={!emailContent.trim() || !conversationId || isSending || toEmails.length === 0}
             aria-label='Send email'
+            data-track-category='Support'
+            data-track-name='SendEmailReply'
+            data-track-metadata={JSON.stringify({ conversationId })}
           >
             {isSending ? (
               <RefreshCw size={16} className='text-white animate-spin' />

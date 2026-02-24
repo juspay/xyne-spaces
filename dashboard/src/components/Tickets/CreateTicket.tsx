@@ -352,6 +352,8 @@ export default function CreateTicket({
             <button
               onClick={onClose}
               className='px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors'
+              data-track-category='Tickets'
+              data-track-name='CloseErrorModal'
             >
               Close
             </button>
@@ -446,7 +448,13 @@ export default function CreateTicket({
         )}
 
         <div className='flex justify-end gap-3'>
-          <Button text='Cancel' buttonType={ButtonType.SECONDARY} onClick={onClose} />
+          <Button
+            text='Cancel'
+            buttonType={ButtonType.SECONDARY}
+            onClick={onClose}
+            data-track-category='Tickets'
+            data-track-name='CancelCreateTicket'
+          />
           <Button
             text={createTicketMutation.isPending ? 'Creating...' : 'Create Ticket'}
             buttonType={ButtonType.PRIMARY}

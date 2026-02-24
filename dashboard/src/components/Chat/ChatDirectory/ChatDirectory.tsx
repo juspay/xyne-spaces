@@ -204,6 +204,8 @@ const ChatDirectory = ({
               onClick={() => setIsCommandMenuOpen(true)}
               className='size-8 flex items-center justify-center rounded-md hover:bg-sidebar-item-hover transition-colors'
               aria-label='Search'
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_SEARCH'
             >
               <Search className='size-4 text-sidebar-secondary-foreground' />
             </button>
@@ -231,6 +233,9 @@ const ChatDirectory = ({
             });
             void navigate('/chat/activity');
           }}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_ACTIVITY'
+          data-track-metadata={JSON.stringify({ activityCount })}
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
             <Megaphone className='size-4' />
@@ -254,6 +259,8 @@ const ChatDirectory = ({
           onClick={() => {
             void navigate('/chat/bookmarks');
           }}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_BOOKMARKS'
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
             <Bookmark className='size-4' />
@@ -267,6 +274,8 @@ const ChatDirectory = ({
           onClick={() => {
             void navigate('/chat/dm');
           }}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_DMS'
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
             <MessageCircle className='size-4' />
@@ -280,6 +289,8 @@ const ChatDirectory = ({
           onClick={() => {
             void navigate('/chat/dir/my-tickets');
           }}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_MY_TICKETS'
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
             <Ticket className='size-4' />
@@ -293,6 +304,8 @@ const ChatDirectory = ({
           onClick={() => {
             void navigate('/chat/canvas');
           }}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_MY_CANVAS'
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
             <FileText className='size-4' />
@@ -309,6 +322,9 @@ const ChatDirectory = ({
           onClick={() => {
             void navigate('/chat/dir/threads');
           }}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_THREADS'
+          data-track-metadata={JSON.stringify({ threadCount })}
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
             <CornerDownRight className='size-4' />
@@ -389,6 +405,8 @@ const ChatDirectory = ({
                         e.stopPropagation();
                         void navigate('/chat/search?mode=channels');
                       }}
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name='BROWSE_CHANNELS'
                     >
                       <Search
                         strokeWidth={2.33}
@@ -405,6 +423,10 @@ const ChatDirectory = ({
                         setShowAddChannelForm(true);
                       }}
                       data-testid='create-new-channel'
+                      data-track-event='BUTTON_CLICK'
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name='CREATE_NEW_CHANNEL'
+                      data-track-metadata={JSON.stringify({ source: 'directory' })}
                     >
                       <Plus
                         strokeWidth={2.33}
@@ -448,6 +470,10 @@ const ChatDirectory = ({
                       handleAddDirectMessage();
                     }}
                     data-testid='create-new-dm'
+                    data-track-event='BUTTON_CLICK'
+                    data-track-category='CHAT_SIDEBAR'
+                    data-track-name='CREATE_DIRECT_MESSAGE'
+                    data-track-metadata={JSON.stringify({ source: 'directory' })}
                   >
                     <Plus
                       strokeWidth={2.33}

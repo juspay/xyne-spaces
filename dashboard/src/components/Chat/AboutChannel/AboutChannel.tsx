@@ -95,12 +95,30 @@ const AboutChannel = ({ channel, isParticipant }: AboutChannelProps): ReactEleme
                   className='w-full mt-2 p-2 text-sm border border-[#E4E6E7] rounded-[8px] resize-none focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
                   rows={3}
                   placeholder='Add a description...'
+                  data-track-event='blur'
+                  data-track-category='ABOUT_CHANNEL_FORM'
+                  data-track-name='Edit_Description_Input'
+                  data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                 />
                 <div className='flex gap-1 mt-2 justify-end'>
-                  <Button variant='ghost' size='sm' onClick={handleCancelEdit}>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={handleCancelEdit}
+                    data-track-category='ABOUT_CHANNEL_FORM'
+                    data-track-name='Cancel_Edit_Description'
+                    data-track-metadata={JSON.stringify({ channelId: channel?.id })}
+                  >
                     Cancel
                   </Button>
-                  <Button variant='ghost' size='sm' onClick={handleSaveDescription}>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={handleSaveDescription}
+                    data-track-category='ABOUT_CHANNEL_FORM'
+                    data-track-name='Save_Description'
+                    data-track-metadata={JSON.stringify({ channelId: channel?.id })}
+                  >
                     Save
                   </Button>
                 </div>
@@ -118,6 +136,9 @@ const AboutChannel = ({ channel, isParticipant }: AboutChannelProps): ReactEleme
               variant='ghost'
               size='sm'
               onClick={handleEditDescription}
+              data-track-category='ABOUT_CHANNEL_FORM'
+              data-track-name='Edit_Description'
+              data-track-metadata={JSON.stringify({ channelId: channel?.id })}
             >
               <LucideSquarePen size={12} color='#505B62' />
             </Button>

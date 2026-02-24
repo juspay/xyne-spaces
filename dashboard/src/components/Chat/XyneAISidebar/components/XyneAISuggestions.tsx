@@ -34,6 +34,9 @@ export const XyneAISuggestions = ({
             key={index}
             onClick={() => onSuggestionClick(query)}
             className="px-[12px] py-[6px] rounded-full border border-[#EBEDF0] hover:border-[#D9D9D9] hover:bg-gray-50 bg-white transition-colors text-gray-700 font-medium text-[12px] leading-[22px] font-['Inter']"
+            data-track-category='XyneAI'
+            data-track-name='SELECT_SUGGESTION'
+            data-track-metadata={JSON.stringify({ suggestion: query })}
           >
             {query}
           </button>

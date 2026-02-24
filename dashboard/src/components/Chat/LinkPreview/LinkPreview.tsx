@@ -113,6 +113,9 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
           className='link-preview__close-button absolute top-2 right-2 z-10 p-1 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400'
           onClick={handleClose}
           aria-label='Close link preview'
+          data-track-category='MESSAGE'
+          data-track-name='CLOSE_LINK_PREVIEW'
+          data-track-metadata={JSON.stringify({ url })}
         >
           <X size={14} className='text-gray-600 dark:text-gray-300' />
         </button>

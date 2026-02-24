@@ -97,6 +97,8 @@ export const TicketFilters = ({
             size='sm'
             className='flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700'
             title='Clear all filters'
+            data-track-category='Tickets'
+            data-track-name='ClearAllFilters'
           >
             <X className='w-3 h-3' />
             Clear all
@@ -164,6 +166,8 @@ export const TicketFilters = ({
                   size='sm'
                   className='ml-1 hover:text-blue-900 p-0 h-auto min-w-0'
                   title='Clear priority filter'
+                  data-track-category='Tickets'
+                  data-track-name='ClearPriorityFilter'
                 >
                   <X className='w-3 h-3' />
                 </Button>
@@ -179,6 +183,8 @@ export const TicketFilters = ({
                   size='sm'
                   className='ml-1 hover:text-blue-900 p-0 h-auto min-w-0'
                   title='Clear assignee filter'
+                  data-track-category='Tickets'
+                  data-track-name='ClearAssigneeFilter'
                 >
                   <X className='w-3 h-3' />
                 </Button>

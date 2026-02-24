@@ -2,6 +2,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './global.css';
 import { mixpanelService } from './services/Analytics/mixpanelService';
+import { globalClickTracker } from './services/Analytics/globalClickTracker';
 
 // Expose app version to window for Electron access
 window.__APP_VERSION__ = __APP_VERSION__;
@@ -98,5 +99,7 @@ if ('serviceWorker' in navigator && !isCustomProtocol) {
       });
   });
 }
+
+globalClickTracker.initialize();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);

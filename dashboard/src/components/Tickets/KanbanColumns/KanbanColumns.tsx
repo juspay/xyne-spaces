@@ -37,7 +37,15 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      data-track-category='Tickets'
+      data-track-name='DragTicketCard'
+      data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+    >
       <TicketCard
         ticket={ticket}
         isCompact={true}
@@ -137,6 +145,12 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                         variant='ghost'
                         onClick={() => toggleCollapse(stage.id)}
                         className='!p-0 !bg-transparent'
+                        data-track-category='Tickets'
+                        data-track-name='CollapseKanbanColumn'
+                        data-track-metadata={JSON.stringify({
+                          stageId: stage.id,
+                          stageName: stage.name,
+                        })}
                       >
                         <CollapseIcon />
                       </Button>
@@ -155,6 +169,12 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     }}
                     role='button'
                     tabIndex={0}
+                    data-track-category='Tickets'
+                    data-track-name='ExpandKanbanColumn'
+                    data-track-metadata={JSON.stringify({
+                      stageId: stage.id,
+                      stageName: stage.name,
+                    })}
                   >
                     <div className='flex flex-col items-center gap-2 w-full h-full'>
                       <KanbanIcon status={stage.defaultTicketStatusV2} />
@@ -183,6 +203,12 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                         toggleCollapse(stage.id);
                       }}
                       className='!p-0 !bg-transparent'
+                      data-track-category='Tickets'
+                      data-track-name='CollapseKanbanColumn'
+                      data-track-metadata={JSON.stringify({
+                        stageId: stage.id,
+                        stageName: stage.name,
+                      })}
                     >
                       <ExpandIcon />
                     </Button>

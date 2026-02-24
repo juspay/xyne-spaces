@@ -49,7 +49,13 @@ const FormScreen = (): ReactElement => {
                 Manage and configure forms for different entity types
               </p>
             </div>
-            <Button onClick={handleCreateFormClick}>Create Form</Button>
+            <Button
+              onClick={handleCreateFormClick}
+              data-track-category='Forms'
+              data-track-name='CreateForm'
+            >
+              Create Form
+            </Button>
           </div>
 
           {/* Create/Edit/View Form Modal */}
@@ -67,7 +73,14 @@ const FormScreen = (): ReactElement => {
             {forms && forms.length > 0 ? (
               <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
                 {forms.map((form: Form) => (
-                  <FormCard key={form.id} form={form} onClick={() => handleFormCardClick(form)} />
+                  <FormCard
+                    key={form.id}
+                    form={form}
+                    onClick={() => handleFormCardClick(form)}
+                    data-track-category='Forms'
+                    data-track-name='SelectForm'
+                    data-track-metadata={JSON.stringify({ formId: form.id })}
+                  />
                 ))}
               </div>
             ) : (

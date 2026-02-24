@@ -134,7 +134,11 @@ export const TicketCard: React.FC<TicketCardProps> = ({
 
     if (isEditingAssignee && isCompact) {
       return (
-        <button onClick={e => e.stopPropagation()}>
+        <button
+          onClick={e => e.stopPropagation()}
+          data-track-category='Tickets'
+          data-track-name='EditAssignee'
+        >
           <EntitySelector
             options={assigneeOptions}
             selectedValue={ticket.assignedTo || null}
@@ -187,6 +191,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
             setIsEditingAssignee(true);
           }}
           className='cursor-pointer hover:opacity-80 transition-opacity'
+          data-track-category='Tickets'
+          data-track-name='EditAssigneeInline'
+          data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
         >
           {assigneeDisplay}
         </button>
@@ -266,6 +273,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition-all cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
         isCompact ? 'p-3' : 'p-0',
       )}
+      data-track-category='Tickets'
+      data-track-name='OpenTicketCard'
+      data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
     >
       <div className={`flex ${!isCompact ? 'h-[145px]' : ''}`}>
         {!isCompact && (
@@ -311,6 +321,12 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           setShowIDEModal(true);
                         }}
                         className='flex items-center p-1 hover:bg-gray-100 rounded transition-colors'
+                        data-track-category='Tickets'
+                        data-track-name='OpenTicketInIDE'
+                        data-track-metadata={JSON.stringify({
+                          ticketId: ticket.id,
+                          xyneId: ticket.xyneId,
+                        })}
                       >
                         <Code2 className='w-4 h-4 text-gray-500 hover:text-blue-600' />
                       </button>
@@ -336,7 +352,11 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     className={cn('relative group/priority', isCompact ? '' : 'hidden sm:block')}
                   >
                     {isEditingPriority && isCompact ? (
-                      <button onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={e => e.stopPropagation()}
+                        data-track-category='Tickets'
+                        data-track-name='EditPriorityInline'
+                      >
                         <EntitySelector
                           options={PriorityOptions}
                           selectedValue={ticket.priority || null}
@@ -360,6 +380,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           'flex items-center',
                           isCompact && 'cursor-pointer hover:opacity-80 transition-opacity',
                         )}
+                        data-track-category='Tickets'
+                        data-track-name='OpenPriorityEditor'
+                        data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                       >
                         <Tooltip content={` Priority: ${ticket.priority}`}>
                           <div className='flex items-center'>
@@ -475,6 +498,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                   <button
                     className='flex items-center justify-between'
                     onClick={e => e.stopPropagation()}
+                    data-track-category='Tickets'
+                    data-track-name='EditTagsDropdown'
                   >
                     {showTags &&
                       (isEditingTags ? (
@@ -493,6 +518,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                             e.stopPropagation();
                             setIsEditingTags(true);
                           }}
+                          data-track-category='Tickets'
+                          data-track-name='EditTagsInline'
+                          data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                         >
                           {hasTags ? (
                             <>

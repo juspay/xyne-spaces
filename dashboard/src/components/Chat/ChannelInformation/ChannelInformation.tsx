@@ -76,6 +76,9 @@ export const ChannelInformation: React.FC<ChannelInformationProps> = ({
               size={ButtonSize.SMALL}
               leadingIcon={<X className='w-4 h-4' />}
               onClick={onClose}
+              data-track-category='CHANNEL_INFORMATION'
+              data-track-name='CLOSE_CHANNEL_INFO'
+              data-track-metadata={JSON.stringify({ channelId: channel?.id })}
             />
           )}
         </div>

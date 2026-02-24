@@ -79,6 +79,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ id, data, type }) => {
           w-56 bg-white border border-gray-200 rounded-xl shadow-sm
           px-3 py-2 cursor-pointer hover:shadow-md transition-all relative
         '
+        data-track-category='Workflows'
+        data-track-name='SelectWorkflowStep'
+        data-track-metadata={JSON.stringify({ stepId: id, stepLabel: data.label })}
       >
         <div className='flex items-start justify-between gap-2'>
           <div className='text-[13px] font-semibold text-gray-900 leading-snug whitespace-normal break-words flex-1'>
@@ -112,6 +115,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ id, data, type }) => {
               opacity-0 group-hover:opacity-100 transition
             '
             title='Restart this step'
+            data-track-category='Workflows'
+            data-track-name='RestartWorkflowStep'
+            data-track-metadata={JSON.stringify({ stepId: id, stepLabel: data.label })}
           >
             <RotateCcw size={12} className='text-gray-600' />
           </button>

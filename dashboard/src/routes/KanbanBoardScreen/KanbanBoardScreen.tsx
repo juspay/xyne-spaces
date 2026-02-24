@@ -1161,6 +1161,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           {canCreateTicket && channel && (
             <button
               data-testid='kanban-create-ticket-button'
+              data-track-event='BUTTON_CLICK'
+              data-track-category='TICKETS'
+              data-track-name='CREATE_TICKET_KANBAN'
+              data-track-metadata={JSON.stringify({ boardId, channelId })}
               onClick={() => setIsCreateModalOpen(true)}
               className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-sidebar-badge-accent rounded-lg transition-colors flex-shrink-0'
             >
@@ -1187,6 +1191,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       : 'text-gray-500 hover:text-gray-700'
                   }`}
                   title='Kanban View'
+                  data-track-category='Tickets'
+                  data-track-name='SetKanbanView'
                 >
                   <SquareKanban className='w-3.5 h-3.5' />
                 </button>
@@ -1206,6 +1212,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       : 'text-gray-500 hover:text-gray-700'
                   }`}
                   title='Table View'
+                  data-track-category='Tickets'
+                  data-track-name='SetTableView'
                 >
                   <List className='w-3.5 h-3.5' />
                 </button>
@@ -1286,6 +1294,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     <button
                       onClick={() => setIsCustomizeOpen(false)}
                       className='cursor-pointer hover:bg-gray-100 rounded p-1 transition-colors'
+                      data-track-category='Tickets'
+                      data-track-name='CloseCustomizeView'
                     >
                       <X className='w-3.5 h-3.5' />
                     </button>
@@ -1299,6 +1309,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2 
             transition hover:bg-gray-100 focus:outline-none 
             ${isComfortView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                          data-track-event='BUTTON_CLICK'
+                          data-track-category='TICKETS'
+                          data-track-name='KANBAN_VIEW_COMFORTABLE'
+                          data-track-metadata={JSON.stringify({ boardId, viewMode: 'comfortable' })}
                         >
                           <AcOnSlow className='h-4 w-4' />
                           <span className='text-[13px] font-medium tracking-tight'>
@@ -1311,6 +1325,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2 
             transition hover:bg-white hover:text-gray-900
             ${!isComfortView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                          data-track-event='BUTTON_CLICK'
+                          data-track-category='TICKETS'
+                          data-track-name='KANBAN_VIEW_COMPACT'
+                          data-track-metadata={JSON.stringify({ boardId, viewMode: 'compact' })}
                         >
                           <TextAlignJustify className='h-4 w-4' />
                           <span className='text-[13px] tracking-tight'>Compact</span>
@@ -1442,6 +1460,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   <button
                     onClick={() => toggleGroupExpansion(group.key)}
                     className={`flex items-center gap-3 px-4 py-3 bg-[#F7F7F8] transition-colors w-full text-left ${isExpanded ? 'border-b border-gray-200' : 'border-none'} `}
+                    data-track-category='Tickets'
+                    data-track-name='ToggleGroupExpansion'
+                    data-track-metadata={JSON.stringify({ groupKey: group.key, isExpanded })}
                   >
                     {isExpanded ? (
                       <ChevronDownIcon className='w-4 h-4 text-gray-500 flex-shrink-0' />
@@ -1519,6 +1540,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     {showGroupHeader && (
                       <button
                         onClick={() => toggleGroupExpansion(group.key)}
+                        data-track-category='KanbanBoard'
+                        data-track-name='ToggleGroupExpansion'
+                        data-track-metadata={JSON.stringify({ groupKey: group.key, groupBy })}
                         className={`flex items-center gap-3 p-4 bg-[#F0F0F0] hover:bg-gray-200 transition-colors sticky left-0 z-10 w-full text-left border-b border-gray-200 ${isExpanded ? 'rounded-t-lg ' : 'rounded-lg'}`}
                       >
                         {isExpanded ? (
@@ -1633,7 +1657,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             </p>
 
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={() => setShowBackwardConfirmDialog(false)}>
+              <Button
+                variant='secondary'
+                onClick={() => setShowBackwardConfirmDialog(false)}
+                data-track-category='Tickets'
+                data-track-name='CancelBackwardStageChange'
+              >
                 Cancel
               </Button>
               <Button
@@ -1663,6 +1692,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   }
                 }}
                 className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
+                data-track-category='Tickets'
+                data-track-name='ConfirmBackwardStageChange'
+                data-track-metadata={JSON.stringify({
+                  ticketId: backwardStageChange?.ticketId,
+                  stageName: backwardStageChange?.stageName,
+                })}
               >
                 Confirm
               </Button>

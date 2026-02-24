@@ -99,6 +99,8 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange })
             buttonType={ButtonType.PRIMARY}
             onClick={() => setIsModalOpen(true)}
             text='Create Automation Run'
+            data-track-category='Tickets'
+            data-track-name='CreateAutomationRun'
           />
         )}
       </div>
@@ -119,6 +121,8 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange })
             <button
               onClick={clearAllFilters}
               className='flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors whitespace-nowrap'
+              data-track-category='Tickets'
+              data-track-name='ClearAllSearch'
             >
               <span>Clear All</span>
             </button>
@@ -130,6 +134,8 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange })
             <button
               onClick={clearFilters}
               className='flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors whitespace-nowrap'
+              data-track-category='Tickets'
+              data-track-name='ClearFilters'
             >
               <span>Clear Filters</span>
             </button>

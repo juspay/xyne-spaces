@@ -48,7 +48,12 @@ const ProjectDetailScreen = (): ReactElement => {
       <div className='h-full bg-gray-50 flex items-center justify-center'>
         <div className='text-center'>
           <p className='text-gray-600 mb-4'>Invalid project ID</p>
-          <Button variant='default' onClick={() => void navigate('/listProjects')}>
+          <Button
+            variant='default'
+            onClick={() => void navigate('/listProjects')}
+            data-track-category='ProjectDetail'
+            data-track-name='BackToProjectsInvalidId'
+          >
             Back to Projects
           </Button>
         </div>
@@ -278,7 +283,12 @@ const ProjectDetailScreen = (): ReactElement => {
       <div className='h-full bg-gray-50 flex items-center justify-center'>
         <div className='text-center'>
           <p className='text-gray-600 mb-4'>Project not found</p>
-          <Button variant='default' onClick={() => void navigate('/listProjects')}>
+          <Button
+            variant='default'
+            onClick={() => void navigate('/listProjects')}
+            data-track-category='ProjectDetail'
+            data-track-name='BackToProjectsNotFound'
+          >
             Back to Projects
           </Button>
         </div>
@@ -293,6 +303,8 @@ const ProjectDetailScreen = (): ReactElement => {
         <button
           onClick={() => void navigate('/listProjects')}
           className='flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6 transition-colors'
+          data-track-category='ProjectDetail'
+          data-track-name='BackToProjects'
         >
           <ArrowLeft size={20} />
           <span>Back to Projects</span>
@@ -308,7 +320,13 @@ const ProjectDetailScreen = (): ReactElement => {
                 Created: {new Date(project.createdAt).toLocaleDateString()}
               </div>
             </div>
-            <Button variant='secondary' onClick={() => setShowEditProjectModal(true)}>
+            <Button
+              variant='secondary'
+              onClick={() => setShowEditProjectModal(true)}
+              data-track-category='ProjectDetail'
+              data-track-name='EditProject'
+              data-track-metadata={JSON.stringify({ projectId: project.id })}
+            >
               <Edit2 size={16} />
               Edit Project
             </Button>
@@ -318,7 +336,13 @@ const ProjectDetailScreen = (): ReactElement => {
         {/* Boards Section */}
         <div className='mb-6 flex items-center justify-between'>
           <h2 className='text-2xl font-bold text-gray-900'>Boards</h2>
-          <Button variant='default' onClick={() => setShowCreateBoardModal(true)}>
+          <Button
+            variant='default'
+            onClick={() => setShowCreateBoardModal(true)}
+            data-track-category='ProjectDetail'
+            data-track-name='CreateBoard'
+            data-track-metadata={JSON.stringify({ projectId })}
+          >
             Create Board
           </Button>
         </div>

@@ -884,6 +884,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             <button
               className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2 disabled:pointer-events-none'
               onClick={() => setShowDeleteConfirm(false)}
+              data-track-category='CHAT_BUBBLE'
+              data-track-name='CLOSE_DELETE_CONFIRM_DIALOG'
+              data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
             >
               <X className='h-4 w-4' />
               <span className='sr-only'>Close</span>
@@ -966,6 +969,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 variant='secondary'
                 onClick={() => setShowDeleteConfirm(false)}
                 disabled={isDeleting}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='CANCEL_DELETE_CONFIRM_DIALOG'
+                data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
               >
                 Cancel
               </Button>
@@ -976,6 +982,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 }}
                 loading={isDeleting}
                 disabled={isDeleting}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='CONFIRM_DELETE_MESSAGE'
+                data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
               >
                 {isDeleting ? 'Deleting...' : 'Delete'}
               </Button>

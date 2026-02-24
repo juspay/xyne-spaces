@@ -739,6 +739,8 @@ export const Summary = (props: SummaryProps): ReactElement => {
           <button
             onClick={onClose}
             className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            data-track-category='CHAT_SUMMARY'
+            data-track-name='Close_Summary'
           >
             <X className='w-4 h-4 text-gray-900' />
           </button>
@@ -857,6 +859,9 @@ export const Summary = (props: SummaryProps): ReactElement => {
                                 onClick={(): void => handleCitationClick(messageNumber)}
                                 className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
                                 title={`Jump to message ${keypointNum}`}
+                                data-track-category='CHAT_SUMMARY'
+                                data-track-name='Jump_To_Citation'
+                                data-track-metadata={JSON.stringify({ messageNumber })}
                               >
                                 {keypointNum}
                               </button>
@@ -877,6 +882,8 @@ export const Summary = (props: SummaryProps): ReactElement => {
                 onClick={handleCopy}
                 className='p-1.5 rounded hover:bg-gray-200 transition-colors cursor-pointer'
                 title={copied ? 'Copied!' : 'Copy summary'}
+                data-track-category='CHAT_SUMMARY'
+                data-track-name='Copy_Summary'
               >
                 {copied ? <Check className='w-3.5 h-3.5 text-green-600' /> : <CopyIcon />}
               </button>
@@ -888,7 +895,12 @@ export const Summary = (props: SummaryProps): ReactElement => {
         {state === 'error' && (
           <div className='flex flex-col items-center justify-center h-full gap-4 text-gray-500'>
             <p className='text-red-500'>{error}</p>
-            <Button variant='secondary' onClick={handleRefresh}>
+            <Button
+              variant='secondary'
+              onClick={handleRefresh}
+              data-track-category='CHAT_SUMMARY'
+              data-track-name='Retry_Summary'
+            >
               Try Again
             </Button>
           </div>

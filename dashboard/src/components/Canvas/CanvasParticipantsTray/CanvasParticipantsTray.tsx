@@ -99,6 +99,9 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
           <button
             onClick={onClose}
             className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+            data-track-category='CANVAS'
+            data-track-name='Close_Participants_Tray'
+            data-track-metadata={JSON.stringify({ canvasId })}
           >
             <X className='h-4 w-4' />
             <span className='sr-only'>Close</span>
@@ -124,6 +127,9 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
                   setShowCollaborativeWarning(true);
                 }}
                 className='relative w-12 h-6 rounded-full transition-all duration-200 bg-gray-300 cursor-pointer'
+                data-track-category='CANVAS'
+                data-track-name='Open_Collaborative_Mode_Warning'
+                data-track-metadata={JSON.stringify({ canvasId })}
               >
                 <span
                   aria-hidden='true'
@@ -206,7 +212,13 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
               </div>
             </div>
             <div className='flex justify-end gap-3 mt-6'>
-              <Button variant='secondary' onClick={() => setShowCollaborativeWarning(false)}>
+              <Button
+                variant='secondary'
+                onClick={() => setShowCollaborativeWarning(false)}
+                data-track-category='CANVAS'
+                data-track-name='Cancel_Enable_Collaborative_Mode'
+                data-track-metadata={JSON.stringify({ canvasId })}
+              >
                 Cancel
               </Button>
               <Button
@@ -215,6 +227,9 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
                   void handleToggleCollaborative(true);
                   setShowCollaborativeWarning(false);
                 }}
+                data-track-category='CANVAS'
+                data-track-name='Enable_Collaborative_Mode'
+                data-track-metadata={JSON.stringify({ canvasId })}
               >
                 Enable Collaborative Mode
               </Button>

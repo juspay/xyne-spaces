@@ -164,7 +164,13 @@ const CanvasPanel = (): ReactElement => {
           </div>
           {activeFilter === 'quarto_docs' ? (
             isElectronApp() && (
-              <Button variant='default' size='sm' onClick={() => handleCreateQuartoDoc()}>
+              <Button
+                variant='default'
+                size='sm'
+                onClick={() => handleCreateQuartoDoc()}
+                data-track-category='CANVAS'
+                data-track-name='Create_Quarto_Doc'
+              >
                 <Plus size={16} className='mr-1' />
                 New Quarto Doc
               </Button>
@@ -175,6 +181,8 @@ const CanvasPanel = (): ReactElement => {
               size='sm'
               onClick={() => void handleCreateCanvas()}
               disabled={isCreatingCanvas}
+              data-track-category='CANVAS'
+              data-track-name='Create_Canvas'
             >
               {isCreatingCanvas ? (
                 <Loader2 size={16} className='mr-1 animate-spin' />

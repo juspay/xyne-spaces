@@ -78,6 +78,9 @@ export function MobileCallHeader({
             isMicEnabled ? 'bg-gray-100' : 'bg-gray-200 hover:bg-gray-300',
           )}
           title={isMicEnabled ? 'Mute' : 'Unmute'}
+          data-track-category='CALLS'
+          data-track-name='Mobile_Toggle_Mic'
+          data-track-metadata={JSON.stringify({ enabled: isMicEnabled })}
         >
           {isMicEnabled ? (
             <Mic size={18} className='text-gray-700' />
@@ -91,6 +94,8 @@ export function MobileCallHeader({
           onClick={onExpand}
           variant='ghost'
           className='flex flex-col items-center justify-center flex-1 min-w-0 mx-3 h-auto py-0 hover:bg-gray-50 rounded-full'
+          data-track-category='CALLS'
+          data-track-name='Mobile_Expand_Call'
         >
           <span className='text-[15px] font-medium truncate leading-tight w-full text-center text-gray-900'>
             {participantName}
@@ -108,6 +113,8 @@ export function MobileCallHeader({
           size='icon'
           className='flex-shrink-0 bg-red-600 hover:bg-red-700 rounded-full'
           title='End call'
+          data-track-category='CALLS'
+          data-track-name='Mobile_End_Call'
         >
           <Phone size={18} className='rotate-[135deg]' />
         </Button>

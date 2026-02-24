@@ -300,6 +300,8 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
             className='w-full p-2 border border-gray-200 rounded-md resize-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-sm'
             rows={2}
             disabled={isContinuing}
+            data-track-category='Workflows'
+            data-track-name='AgentContinuationInput'
           />
           <div className='flex items-center justify-between mt-2'>
             <div className='flex-1'>
@@ -309,6 +311,8 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
               onClick={handleContinueAgenticStep}
               disabled={isContinuing || !continuationMessage.trim()}
               className='flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-xs font-medium'
+              data-track-category='Workflows'
+              data-track-name='ContinueAgenticStep'
             >
               {isContinuing ? (
                 <>
@@ -356,6 +360,13 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
               onClick={() => onNavigateAttempt && onNavigateAttempt('previous')}
               disabled={currentAttempt === 1}
               className='disabled:opacity-30 hover:bg-gray-100 p-1 rounded transition-colors'
+              data-track-category='Workflows'
+              data-track-name='NavigateToPreviousStepAttempt'
+              data-track-metadata={JSON.stringify({
+                stepId: originalStep?.id,
+                currentAttempt,
+                totalAttempts,
+              })}
             >
               <ChevronLeft size={14} className='text-gray-400' />
             </button>
@@ -378,6 +389,13 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
               onClick={() => onNavigateAttempt && onNavigateAttempt('next')}
               disabled={currentAttempt === totalAttempts}
               className='disabled:opacity-30 hover:bg-gray-100 p-1 rounded transition-colors'
+              data-track-category='Workflows'
+              data-track-name='NavigateToNextStepAttempt'
+              data-track-metadata={JSON.stringify({
+                stepId: originalStep?.id,
+                currentAttempt,
+                totalAttempts,
+              })}
             >
               <ChevronRight size={14} className='text-gray-400' />
             </button>

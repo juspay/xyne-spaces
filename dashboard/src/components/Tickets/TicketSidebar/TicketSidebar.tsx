@@ -418,6 +418,8 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
               onClick={() => setIsEditing(!isEditing)}
               className='p-2 hover:bg-blue-50 rounded-lg transition-all text-gray-500 hover:text-blue-600'
               title={isEditing ? 'Cancel editing' : 'Edit ticket'}
+              data-track-category='Tickets'
+              data-track-name='ToggleTicketEdit'
             >
               <Edit2 size={16} />
             </button>
@@ -428,6 +430,8 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                 }
               }}
               className='p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all duration-200'
+              data-track-category='Tickets'
+              data-track-name='CloseTicketSidebar'
             >
               <X size={18} />
             </button>
@@ -463,6 +467,9 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
+            data-track-category='Tickets'
+            data-track-name='SelectTicketTab'
+            data-track-metadata={JSON.stringify({ tabId: tab.id })}
           >
             <tab.icon className='w-4 h-4' />
             {tab.label}
@@ -603,6 +610,8 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                               type='button'
                               className='w-full px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-left flex items-center gap-2 justify-between'
                               onClick={() => toggleDropdown('assignee')}
+                              data-track-category='Tickets'
+                              data-track-name='ToggleAssigneeDropdown'
                             >
                               <div className='flex items-center gap-2 flex-1'>
                                 {field.state.value ? (
@@ -634,7 +643,8 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                       value={assigneeSearch}
                                       onChange={e => setAssigneeSearch(e.target.value)}
                                       className='w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
-                                      onClick={e => e.stopPropagation()}
+                                      data-track-category='Tickets'
+                                      data-track-name='SearchAssignee'
                                     />
                                   </div>
                                 </div>
@@ -648,6 +658,8 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                       setAssigneeSearch('');
                                     }}
                                     className='w-full text-left px-3 py-2 text-sm hover:bg-gray-100 transition-colors flex items-center gap-2'
+                                    data-track-category='Tickets'
+                                    data-track-name='UnassignTicket'
                                   >
                                     <div className='w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center'>
                                       <X className='w-3 h-3 text-gray-500' />
@@ -668,6 +680,9 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                         setAssigneeSearch('');
                                       }}
                                       className='w-full text-left px-3 py-2 text-sm hover:bg-gray-100 transition-colors flex items-center gap-2'
+                                      data-track-category='Tickets'
+                                      data-track-name='SelectAssignee'
+                                      data-track-metadata={JSON.stringify({ userId: user.id })}
                                     >
                                       <UserAvatar userId={user.id} showActiveStatus={false} />
                                       <div className='flex-1 min-w-0'>

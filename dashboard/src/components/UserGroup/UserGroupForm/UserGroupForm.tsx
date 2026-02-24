@@ -192,6 +192,8 @@ export const UserGroupForm = ({
                 ? 'border-primary text-primary'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
+            data-track-category='UserGroups'
+            data-track-name='SwitchToAboutTab'
           >
             About
           </Button>
@@ -204,6 +206,8 @@ export const UserGroupForm = ({
                 ? 'border-primary text-primary'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
+            data-track-category='UserGroups'
+            data-track-name='SwitchToMembersTab'
           >
             Members
           </Button>
@@ -322,7 +326,14 @@ export const UserGroupForm = ({
 
       {/* Footer Actions */}
       <div className='border-t border-gray-200 p-6 flex gap-2 justify-end bg-white'>
-        <Button variant='outline' onClick={onCancel} disabled={isLoading} type='button'>
+        <Button
+          variant='outline'
+          onClick={onCancel}
+          disabled={isLoading}
+          type='button'
+          data-track-category='UserGroups'
+          data-track-name='CancelUserGroupForm'
+        >
           Cancel
         </Button>
         <Button variant='default' type='submit' disabled={isLoading}>

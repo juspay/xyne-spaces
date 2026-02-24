@@ -1162,6 +1162,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     event.target.value as TicketReferenceRelation,
                   )
                 }
+                data-track-category='Tickets'
+                data-track-name='ChangeReferenceRelation'
+                data-track-metadata={JSON.stringify({ referenceId: reference.id })}
               >
                 {referenceRelationOptions.map(option => (
                   <option key={option.value} value={option.value}>
@@ -1215,6 +1218,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100'
               onClick={() => handleRemoveReference(reference.id)}
               aria-label='Remove reference'
+              data-track-category='Tickets'
+              data-track-name='RemoveReference'
+              data-track-metadata={JSON.stringify({ referenceId: reference.id })}
             >
               <X size={14} />
             </button>
@@ -1229,7 +1235,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       {expandedView && (
         <div className='flex items-center justify-between mb-6'>
           <div className='flex items-center gap-x-1/2'>
-            <button onClick={handleBackFromExpandedView}>
+            <button
+              onClick={handleBackFromExpandedView}
+              data-track-category='Tickets'
+              data-track-name='BackFromExpandedView'
+            >
               <ChevronLeft size={18} color='#222530' />
             </button>
             <span className='text-[14px] font-medium text-[#2B303B] px-2 py-0.5'>
@@ -1247,6 +1257,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     : 'opacity-40 cursor-not-allowed'
                 }
                 aria-label='Previous ticket'
+                data-track-category='Tickets'
+                data-track-name='NavigateToPreviousTicket'
               >
                 <ChevronUp size={18} color='#222530' />
               </button>
@@ -1259,6 +1271,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     : 'opacity-40 cursor-not-allowed'
                 }
                 aria-label='Next ticket'
+                data-track-category='Tickets'
+                data-track-name='NavigateToNextTicket'
               >
                 <ChevronDown size={18} color='#222530' />
               </button>
@@ -1342,6 +1356,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 }
               }}
               className='flex-1 text-2xl font-semibold text-gray-900 outline-none bg-transparent'
+              data-track-category='Tickets'
+              data-track-name='EditTicketTitle'
+              data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
             />
           </div>
         ) : (
@@ -1356,6 +1373,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 setEditingTitle(true);
               }
             }}
+            data-track-category='Tickets'
+            data-track-name='StartEditTitle'
           >
             {ticket.title}
           </div>
@@ -1376,6 +1395,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 }
               }}
               className='w-full text-sm text-gray-700 leading-relaxed outline-none bg-transparent resize-none min-h-[100px]'
+              data-track-category='Tickets'
+              data-track-name='EditDescription'
+              data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
             />
           </div>
         ) : (
@@ -1390,6 +1412,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 setEditingDescription(true);
               }
             }}
+            data-track-category='Tickets'
+            data-track-name='StartEditDescription'
           >
             {!ticket.description ? (
               <p className='text-sm text-gray-400 italic'>Add description</p>
@@ -1411,6 +1435,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       event.stopPropagation();
                       setShowFullDescription(true);
                     }}
+                    data-track-category='Tickets'
+                    data-track-name='ReadMoreDescription'
                   >
                     Read More
                   </button>
@@ -1422,6 +1448,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       event.stopPropagation();
                       setShowFullDescription(false);
                     }}
+                    data-track-category='Tickets'
+                    data-track-name='ViewLessDescription'
                   >
                     View Less
                   </button>
@@ -1610,6 +1638,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                               onClick={() => void handleRemoveTag(tag.id)}
                               className={`ml-1 p-0.5 rounded transition-colors`}
                               aria-label='Remove tag'
+                              data-track-category='Tickets'
+                              data-track-name='RemoveTag'
+                              data-track-metadata={JSON.stringify({
+                                tagId: tag.id,
+                                tagName: tag.name,
+                              })}
                             >
                               <X size={12} />
                             </button>
@@ -1621,6 +1655,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     onClick={() => setShowTagDropdown(!showTagDropdown)}
                     className='inline-flex items-center justify-center gap-1 text-sm text-gray-600 hover:text-gray-900 transition-colors'
                     aria-label='Add tag'
+                    data-track-category='Tickets'
+                    data-track-name='ToggleTagDropdown'
+                    data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                   >
                     <Plus size={14} />
                     <span>Add</span>
@@ -1639,6 +1676,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         onKeyDown={handleTagKeyDown}
                         placeholder='Search or create tag...'
                         className='w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-blue-500'
+                        data-track-category='Tickets'
+                        data-track-name='SearchTags'
                       />
                     </div>
 
@@ -1648,6 +1687,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         <button
                           onClick={() => void handleToggleTag(tagSearchQuery)}
                           className='w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100'
+                          data-track-category='Tickets'
+                          data-track-name='CreateTag'
+                          data-track-metadata={JSON.stringify({ tagName: tagSearchQuery.trim() })}
                         >
                           <Plus size={14} className='text-blue-600' />
                           <span className='text-blue-600 font-medium'>
@@ -1664,6 +1706,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             key={tagName}
                             onClick={() => void handleToggleTag(tagName)}
                             className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-gray-50'
+                            data-track-category='Tickets'
+                            data-track-name='ToggleTag'
+                            data-track-metadata={JSON.stringify({
+                              tagName,
+                              isSelected: !isSelected,
+                            })}
                           >
                             <div className='flex items-center gap-2'>
                               <Tag size={14} className='text-gray-400' />
@@ -1692,7 +1740,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <TicketKeyValuePair
             ticketKey='Status'
             value={
-              <div data-testid='ticket-detail-status-selector' className='flex items-center gap-2'>
+              <div
+                data-testid='ticket-detail-status-selector'
+                className='flex items-center gap-2'
+                data-track-event='SELECTOR_CHANGE'
+                data-track-category='TICKETS'
+                data-track-name='CHANGE_STATUS'
+                data-track-metadata={JSON.stringify({
+                  ticketId: ticket.id,
+                  boardId: ticket.boardId,
+                  currentStatus: ticket.stageName,
+                })}
+              >
                 <Selector
                   items={stages}
                   selectedValue={ticket.stageName}
@@ -1754,7 +1813,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <TicketKeyValuePair
             ticketKey='Priority'
             value={
-              <div data-testid='ticket-detail-priority-selector'>
+              <div
+                data-testid='ticket-detail-priority-selector'
+                data-track-event='SELECTOR_CHANGE'
+                data-track-category='TICKETS'
+                data-track-name='CHANGE_PRIORITY'
+                data-track-metadata={JSON.stringify({
+                  ticketId: ticket.id,
+                  currentPriority: ticket.priority,
+                })}
+              >
                 <Selector
                   items={priorityItems}
                   selectedValue={ticket.priority}
@@ -1814,6 +1882,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <div
                   className='flex items-center gap-2'
                   data-testid='ticket-detail-stage-eta-input'
+                  data-track-category='Tickets'
+                  data-track-name='EditStageETA'
+                  data-track-metadata={JSON.stringify({
+                    ticketId: ticket.id,
+                    stageName: ticket.stageName,
+                  })}
                 >
                   <input
                     ref={stageEtaInputRef}
@@ -1833,6 +1907,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       }
                     }}
                     className='text-sm border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+                    data-track-category='Tickets'
+                    data-track-name='StageETAInput'
+                    data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                   />
                 </div>
               ) : (
@@ -1842,6 +1919,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   data-testid='ticket-detail-stage-eta-display'
                   className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] cursor-pointer hover:bg-gray-100 px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-gray-200 transition-colors'
                   onClick={() => setEditingStageETA(true)}
+                  data-track-category='TicketDetails'
+                  data-track-name='EditStageETA'
+                  data-track-metadata={JSON.stringify({
+                    ticketId: ticket.id,
+                    stageId: currentStageEntry?.stageId,
+                  })}
                   onKeyDown={e => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
@@ -2032,6 +2115,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   })
                                 }
                                 className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                data-track-category='Tickets'
+                                data-track-name='ContinueDraftStageForm'
+                                data-track-metadata={JSON.stringify({
+                                  stageId: item.stageId,
+                                  formId: item.formId,
+                                })}
                               >
                                 Continue Draft
                               </button>
@@ -2053,6 +2142,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   toast.success('Request submitted for approval');
                                 }}
                                 className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                data-track-category='Tickets'
+                                data-track-name='SubmitStageRequest'
+                                data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                               >
                                 Submit Request
                               </button>
@@ -2078,6 +2170,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     }
                                     className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
                                     aria-label='View form'
+                                    data-track-category='Tickets'
+                                    data-track-name='ViewStageForm'
+                                    data-track-metadata={JSON.stringify({
+                                      stageId: item.stageId,
+                                      formId: item.formId,
+                                    })}
                                   >
                                     <Eye size={16} />
                                   </button>
@@ -2101,6 +2199,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                       })
                                     }
                                     className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg flex items-center gap-2 bg-blue-500 text-white hover:bg-blue-600'
+                                    data-track-category='Tickets'
+                                    data-track-name='ReviewStageForm'
+                                    data-track-metadata={JSON.stringify({
+                                      stageId: item.stageId,
+                                      formId: item.formId,
+                                    })}
                                   >
                                     View request
                                   </button>
@@ -2127,6 +2231,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 }
                                 className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
                                 aria-label='View form'
+                                data-track-category='Tickets'
+                                data-track-name='ViewApprovedStageForm'
+                                data-track-metadata={JSON.stringify({
+                                  stageId: item.stageId,
+                                  formId: item.formId,
+                                })}
                               >
                                 <Eye size={16} />
                               </button>
@@ -2148,6 +2258,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     )
                                   }
                                   className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-green-500 text-white hover:bg-green-600'
+                                  data-track-category='Tickets'
+                                  data-track-name='ApproveStageRequest'
+                                  data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Approve
                                 </button>
@@ -2166,6 +2279,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     )
                                   }
                                   className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600'
+                                  data-track-category='Tickets'
+                                  data-track-name='RejectStageRequest'
+                                  data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Reject
                                 </button>
@@ -2190,6 +2306,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   })
                                 }
                                 className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                data-track-category='Tickets'
+                                data-track-name='ResubmitStageForm'
+                                data-track-metadata={JSON.stringify({
+                                  stageId: item.stageId,
+                                  formId: item.formId,
+                                })}
                               >
                                 Resubmit
                               </button>
@@ -2211,6 +2333,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   toast.success('Stage change request resubmitted for approval');
                                 }}
                                 className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                data-track-category='Tickets'
+                                data-track-name='ResubmitStageRequest'
+                                data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                               >
                                 Resubmit request
                               </button>
@@ -2237,6 +2362,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             }
                             className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
                             aria-label='View form'
+                            data-track-category='Tickets'
+                            data-track-name='ViewStageFormNoApprovers'
+                            data-track-metadata={JSON.stringify({
+                              stageId: item.stageId,
+                              formId: item.formId,
+                            })}
                           >
                             <Eye size={16} />
                           </button>
@@ -2312,6 +2443,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         }
                       }}
                       data-testid={`sub-ticket-item-${subTicket.id}`}
+                      data-track-category='Tickets'
+                      data-track-name='OpenSubTicket'
+                      data-track-metadata={JSON.stringify({
+                        subTicketId: subTicket.id,
+                        mappedTicketId: subTicket.mappedTicketId,
+                      })}
                       className='flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer'
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
@@ -2354,6 +2491,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             <button
               onClick={() => setIsSubTicketModalOpen(true)}
               data-testid='create-sub-ticket-button'
+              data-track-event='BUTTON_CLICK'
+              data-track-category='TICKETS'
+              data-track-name='CREATE_SUB_TICKET'
+              data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
               className='flex items-center gap-2 mt-3 text-sm text-gray-600 hover:text-gray-900 transition-colors'
             >
               <Plus size={16} />
@@ -2440,6 +2581,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             }
                           }}
                           className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                          data-track-category='Tickets'
+                          data-track-name='ViewParentTicket'
+                          data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
                         >
                           View
                         </button>
@@ -2588,7 +2732,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </p>
 
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={() => setShowBackwardConfirmDialog(false)}>
+              <Button
+                variant='secondary'
+                onClick={() => setShowBackwardConfirmDialog(false)}
+                data-track-category='Tickets'
+                data-track-name='CancelBackwardStageChange'
+              >
                 Cancel
               </Button>
               <Button
@@ -2618,6 +2767,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   }
                 }}
                 className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
+                data-track-category='Tickets'
+                data-track-name='ConfirmBackwardStageChange'
+                data-track-metadata={JSON.stringify({ stageName: backwardStageChange?.stageName })}
               >
                 Confirm
               </Button>

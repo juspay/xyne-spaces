@@ -90,13 +90,39 @@ export const UserGroupListItem = ({
             variant='outline'
             size='sm'
             onClick={() => void navigate(`/user-groups/${userGroup.id}/assignment-config`)}
+            data-track-category='UserGroups'
+            data-track-name='OpenAssignmentConfig'
+            data-track-metadata={JSON.stringify({
+              groupId: userGroup.id,
+              groupName: userGroup.name,
+            })}
           >
             Auto Assignment
           </Button>
-          <Button variant='outline' size='sm' onClick={() => onEdit(userGroup)}>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => onEdit(userGroup)}
+            data-track-category='UserGroups'
+            data-track-name='EditUserGroup'
+            data-track-metadata={JSON.stringify({
+              groupId: userGroup.id,
+              groupName: userGroup.name,
+            })}
+          >
             Edit
           </Button>
-          <Button variant='destructive' size='sm' onClick={() => onDelete(userGroup.id)}>
+          <Button
+            variant='destructive'
+            size='sm'
+            onClick={() => onDelete(userGroup.id)}
+            data-track-category='UserGroups'
+            data-track-name='DeleteUserGroup'
+            data-track-metadata={JSON.stringify({
+              groupId: userGroup.id,
+              groupName: userGroup.name,
+            })}
+          >
             Delete
           </Button>
         </div>

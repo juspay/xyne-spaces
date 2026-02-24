@@ -360,6 +360,9 @@ const DocsViewer = ({
               onClick={onClose}
               className='h-8 w-8'
               title='Go back'
+              data-track-category='DocsViewer'
+              data-track-name='CLOSE_DOCS_VIEWER'
+              data-track-metadata={JSON.stringify({ repoName, repoUrl })}
             >
               <ArrowLeft className='h-4 w-4' />
             </Button>
@@ -380,6 +383,9 @@ const DocsViewer = ({
               className='h-8 gap-1.5 px-2'
               title='Edit this document'
               disabled={isEditing}
+              data-track-category='DocsViewer'
+              data-track-name='EDIT_DOCUMENT'
+              data-track-metadata={JSON.stringify({ repoName, repoUrl })}
             >
               {isEditing ? (
                 <Loader2 className='h-4 w-4 animate-spin' />
@@ -396,6 +402,8 @@ const DocsViewer = ({
             className='h-8 w-8'
             title='Refresh'
             disabled={isLoading}
+            data-track-category='DocsViewer'
+            data-track-name='REFRESH_DOCUMENT'
           >
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
           </Button>
@@ -405,6 +413,8 @@ const DocsViewer = ({
             onClick={toggleFullscreen}
             className='h-8 w-8'
             title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            data-track-category='DocsViewer'
+            data-track-name='TOGGLE_DOCUMENT_FULLSCREEN'
           >
             {isFullscreen ? <Minimize2 className='h-4 w-4' /> : <Maximize2 className='h-4 w-4' />}
           </Button>
@@ -430,7 +440,12 @@ const DocsViewer = ({
               <p className='text-sm text-gray-500 max-w-sm'>
                 The documentation could not be loaded.
               </p>
-              <Button variant='outline' onClick={handleRefresh}>
+              <Button
+                variant='outline'
+                onClick={handleRefresh}
+                data-track-category='DocsViewer'
+                data-track-name='RETRY_LOAD_DOCUMENT'
+              >
                 Try Again
               </Button>
             </div>
