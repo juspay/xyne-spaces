@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
 import { Search, X, Users } from 'lucide-react';
 import { createBuilder } from '@rocicorp/zero';
 import { schema } from '@xyne/shared';
@@ -22,6 +22,12 @@ export const UserGroupSubmenu = ({
 }: UserGroupSubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus search input when component mounts
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
 
   // Debounced search query
   useEffect(() => {
@@ -97,6 +103,7 @@ export const UserGroupSubmenu = ({
         <div className='relative'>
           <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none' />
           <Input
+            ref={searchInputRef}
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
