@@ -15,6 +15,8 @@ import { XyneAIInputBox, type Attachment } from './components/XyneAIInputBox';
 import { MessageItem } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
+import { UserActivityPanel } from './components/UserActivityPanel';
+import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
 import type { ResearchContext } from '../../../hooks/useResearchAgent';
@@ -31,6 +33,7 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
   const [conversationId, setConversationId] = useState<string>('');
   const [currentTraceId, setCurrentTraceId] = useState<string | undefined>();
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
+  const [showUserActivityPanel, setShowUserActivityPanel] = useState(false);
   const [conversations, setConversations] = useState<ConversationHistoryType[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
   const [isLoadingConversation, setIsLoadingConversation] = useState(true);
@@ -43,6 +46,7 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
   );
   const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [selectedActivities, setSelectedActivities] = useState<UserActivity[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -367,12 +371,25 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
     setCurrentTraceId(undefined);
     setInputValue('');
     setAttachments([]);
+    setSelectedActivities([]);
     setVisibleCharsMap({});
     setShowHistorySidebar(false);
+    setShowUserActivityPanel(false);
 
     // Abort any ongoing requests
     abortCurrentRequest();
   };
+
+  const handleAddActivities = useCallback((activities: UserActivity[]): void => {
+    if (activities.length === 0) return;
+    setSelectedActivities(prev => {
+      const existingIds = new Set(prev.map(a => a.id));
+      const newActivities = activities.filter(a => !existingIds.has(a.id));
+      return [...prev, ...newActivities];
+    });
+
+    setShowUserActivityPanel(false);
+  }, []);
 
   const handleFeedback = useCallback(
     async (messageId: string, feedbackType: 'LIKE' | 'DISLIKE'): Promise<void> => {
@@ -505,9 +522,26 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
     [navigate, isMobile],
   );
 
+  const formatActivitiesAsText = (activities: UserActivity[]): string => {
+    if (activities.length === 0) return '';
+
+    const activityLines = activities
+      .map(
+        (activity, index) =>
+          `${index + 1}. [${activity.eventName}] (${activity.eventCategory})\n   URL: ${activity.url}\n   Metadata: ${activity.contextMetadata ? JSON.stringify(activity.contextMetadata) : 'N/A'}\n  Timestamp: ${activity.timestamp ?? 'N/A'}\n Platform: ${activity.platform ?? 'N/A'}`,
+      )
+      .join('\n\n');
+
+    return `\n\nUser journey across app:\n\n${activityLines}`;
+  };
+
   const handleSubmit = useCallback(async (): Promise<void> => {
-    if (!inputValue.trim()) return;
-    const query = inputValue;
+    if (!inputValue.trim() && selectedActivities.length === 0) return;
+    let query = inputValue;
+    if (selectedActivities.length > 0) {
+      query = query + formatActivitiesAsText(selectedActivities);
+    }
+
     const currentAttachments = attachments;
 
     // Convert attachments to MessageAttachment format for display
@@ -519,6 +553,7 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
 
     setInputValue('');
     setAttachments([]);
+    setSelectedActivities([]);
 
     // Scroll immediately after clearing input, before query is submitted
     setTimeout(() => {
@@ -526,7 +561,7 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
     }, 50);
 
     await submitQuery(query, messageAttachments);
-  }, [inputValue, attachments, submitQuery, scrollToBottom]);
+  }, [inputValue, attachments, selectedActivities, submitQuery, scrollToBottom]);
 
   return (
     <div
@@ -543,12 +578,19 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
           onDeleteConversation={handleDeleteConversation}
           onRenameConversation={handleRenameConversation}
         />
+      ) : showUserActivityPanel ? (
+        <UserActivityPanel
+          isOpen={showUserActivityPanel}
+          onClose={() => setShowUserActivityPanel(false)}
+          onAddToChat={handleAddActivities}
+        />
       ) : (
         <>
           {/* Header - Fixed at Top */}
           <XyneAIHeader
             onNewChat={handleNewChat}
             onShowHistory={() => setShowHistorySidebar(true)}
+            onShowUserActivity={() => setShowUserActivityPanel(true)}
             isMobile={isMobile}
           />
 
@@ -612,6 +654,8 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
             onResearchContextChange={setSelectedResearchContext}
             onThreadInfoChange={setActiveThreadInfo}
             onAttachmentsChange={setAttachments}
+            selectedActivities={selectedActivities}
+            onActivitiesChange={setSelectedActivities}
             isStreaming={messages.some(m => m.isStreaming)}
             onAbort={abortCurrentRequest}
             webSearchEnabled={webSearchEnabled}

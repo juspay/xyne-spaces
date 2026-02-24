@@ -1,0 +1,191 @@
+import { ReactElement, useState, useCallback, useEffect } from 'react';
+import { ArrowLeft, X } from 'lucide-react';
+import type { UserActivity } from '../../../../hooks/useUserActivity';
+import { useUserActivity } from '../../../../hooks/useUserActivity';
+import { UserActivityItem } from './UserActivityItem';
+import { useIntersectionObserver } from '../../../../hooks/useIntersectionObserver';
+import { usePlatform } from '../../../../hooks/usePlatform';
+import { xyneAIActor } from '../../../../machines/xyneAIMachine';
+
+interface UserActivityPanelProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onAddToChat: (activities: UserActivity[]) => void;
+}
+
+export const UserActivityPanel = ({
+  isOpen,
+  onClose,
+  onAddToChat,
+}: UserActivityPanelProps): ReactElement | null => {
+  const { isMobile } = usePlatform();
+  const { activities, isLoading, hasMore, loadMore, refresh } = useUserActivity();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
+
+  // Reset selection when panel opens
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedIds(new Set());
+      setLastSelectedId(null);
+      void refresh();
+    }
+  }, [isOpen, refresh]);
+
+  // Infinite scroll
+  const loadMoreRef = useIntersectionObserver(
+    () => {
+      void loadMore();
+    },
+    { threshold: 0.1, triggerOnce: false },
+  );
+
+  const handleToggle = useCallback(
+    (activity: UserActivity, isShiftKey: boolean, isMetaKey: boolean) => {
+      if (isShiftKey && lastSelectedId) {
+        // Range selection
+        const ids = activities.map(a => a.id);
+        const startIdx = ids.indexOf(lastSelectedId);
+        const endIdx = ids.indexOf(activity.id);
+        if (startIdx !== -1 && endIdx !== -1) {
+          const range = ids.slice(Math.min(startIdx, endIdx), Math.max(startIdx, endIdx) + 1);
+          setSelectedIds(prev => new Set([...prev, ...range]));
+        }
+      } else if (isMetaKey) {
+        // Toggle single (add/remove)
+        setSelectedIds(prev => {
+          const next = new Set(prev);
+          if (next.has(activity.id)) {
+            next.delete(activity.id);
+          } else {
+            next.add(activity.id);
+          }
+          return next;
+        });
+        setLastSelectedId(activity.id);
+      } else {
+        // Single select (clear others unless already selected)
+        setSelectedIds(prev => {
+          if (prev.has(activity.id) && prev.size === 1) {
+            return new Set();
+          }
+          return new Set([activity.id]);
+        });
+        setLastSelectedId(activity.id);
+      }
+    },
+    [activities, lastSelectedId],
+  );
+
+  const handleAddToChat = useCallback(() => {
+    const selectedActivities = activities.filter(a => selectedIds.has(a.id));
+    onAddToChat(selectedActivities);
+    setSelectedIds(new Set());
+  }, [activities, selectedIds, onAddToChat]);
+
+  const handleClose = useCallback(() => {
+    setSelectedIds(new Set());
+    setLastSelectedId(null);
+    onClose();
+  }, [onClose]);
+
+  const handleXyneAIClose = (): void => {
+    xyneAIActor.send({ type: 'CLOSE' });
+  };
+
+  if (!isOpen) return null;
+
+  const selectedCount = selectedIds.size;
+
+  return (
+    <div className='flex-1 overflow-hidden flex flex-col bg-white h-full'>
+      {/* Header */}
+      <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-b border-gray-200 flex-shrink-0'>
+        <div className='flex items-center gap-2'>
+          <button
+            onClick={handleClose}
+            className={
+              isMobile
+                ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+                : 'p-1 hover:bg-gray-100 rounded transition-colors'
+            }
+          >
+            <ArrowLeft className={isMobile ? 'w-4 h-4 text-gray-700' : 'w-4 h-4 text-gray-700'} />
+          </button>
+          <span className="text-gray-900 text-base font-semibold font-['Inter']">
+            Your Activity
+          </span>
+        </div>
+        <div className='flex items-center gap-2'>
+          {!isMobile && (
+            <button
+              onClick={handleXyneAIClose}
+              className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            >
+              <X className='w-4 h-4 text-gray-600' />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Activity List */}
+      <div className='flex-1 overflow-y-auto min-h-0'>
+        {activities.length === 0 && !isLoading ? (
+          <div className='px-4 py-8 text-center text-gray-500 text-sm'>
+            No activity yet. Start using the app to see your activity here.
+          </div>
+        ) : (
+          <>
+            {activities.map(activity => (
+              <UserActivityItem
+                key={activity.id}
+                activity={activity}
+                isSelected={selectedIds.has(activity.id)}
+                onToggle={handleToggle}
+              />
+            ))}
+
+            {/* Loading state */}
+            {isLoading && (
+              <div className='px-4 py-4 space-y-3'>
+                {Array.from({ length: 3 }, (_, i) => (
+                  <div key={i} className='flex items-start gap-3'>
+                    <div className='w-4 h-4 bg-gray-200 rounded animate-pulse flex-shrink-0 mt-0.5' />
+                    <div className='flex-1 space-y-2'>
+                      <div className='h-4 bg-gray-200 rounded animate-pulse w-3/4' />
+                      <div className='h-3 bg-gray-200 rounded animate-pulse w-1/2' />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Load more trigger */}
+            {hasMore && !isLoading && (
+              <div ref={loadMoreRef} className='h-8 flex items-center justify-center'>
+                <div className='w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin' />
+              </div>
+            )}
+
+            {/* End of list */}
+            {!hasMore && activities.length > 0 && (
+              <div className='px-4 py-4 text-center text-gray-400 text-xs'>No more activity</div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Footer with Add to Chat button */}
+      {selectedCount > 0 && (
+        <div className='p-4 border-t border-gray-200 flex-shrink-0'>
+          <button
+            onClick={handleAddToChat}
+            className='w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors'
+          >
+            Add {selectedCount} {selectedCount === 1 ? 'activity' : 'activities'} to chat
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};

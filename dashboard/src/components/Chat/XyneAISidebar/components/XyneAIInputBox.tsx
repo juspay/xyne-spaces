@@ -23,6 +23,8 @@ const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
   <img src='/svgs/icons/hash.svg' alt='#' className={className} width={16} height={16} />
 );
 
+import type { UserActivity } from '../../../../hooks/useUserActivity';
+
 interface XyneAIInputBoxProps {
   channelId?: string | null;
   channelName?: string;
@@ -37,6 +39,8 @@ interface XyneAIInputBoxProps {
   onResearchContextChange?: (context: ResearchContext | null) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onAttachmentsChange?: (attachments: Attachment[]) => void;
+  selectedActivities?: UserActivity[];
+  onActivitiesChange?: (activities: UserActivity[]) => void;
   isStreaming?: boolean;
   onAbort?: () => void;
   webSearchEnabled?: boolean;
@@ -73,6 +77,8 @@ export const XyneAIInputBox = ({
   onResearchContextChange,
   onThreadInfoChange,
   onAttachmentsChange,
+  selectedActivities = [],
+  onActivitiesChange,
   isStreaming = false,
   onAbort,
   webSearchEnabled = false,
@@ -861,6 +867,25 @@ export const XyneAIInputBox = ({
               </button>
             </div>
           ))}
+
+          {/* Activity Pills */}
+          {selectedActivities.length > 0 && (
+            <div className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-blue-50 flex-shrink-0'>
+              <div className='flex items-center gap-1'>
+                <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap">
+                  {selectedActivities.length}{' '}
+                  {selectedActivities.length === 1 ? 'activity' : 'activities'}
+                </span>
+              </div>
+              <button
+                onClick={() => onActivitiesChange?.([])}
+                className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                aria-label='Remove all activities'
+              >
+                <X className='w-3 h-3' />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Input Area - Text only */}
