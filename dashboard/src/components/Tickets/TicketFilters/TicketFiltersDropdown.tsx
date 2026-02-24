@@ -211,6 +211,11 @@ export const TicketFiltersDropdown = ({
       [key]: value,
     };
 
+    // Clear stages filter when board changes since stages are board-specific
+    if (key === 'boards') {
+      delete newFilters.stages;
+    }
+
     // Remove undefined values to keep filters clean
     Object.keys(newFilters).forEach((filterKey: string) => {
       const k = filterKey as keyof TicketFilters;

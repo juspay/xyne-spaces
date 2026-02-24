@@ -303,6 +303,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Wrapper functions to send events to machine
   const setFilters = useCallback(
     (nextFilters: TicketFilters) => {
+      // Clear stages filter when board changes since stages are board-specific
+      const currentBoardId = filters.boards?.[0] ?? null;
+      const newBoardId = nextFilters.boards?.[0] ?? null;
+      if (currentBoardId !== newBoardId) {
+        delete nextFilters.stages;
+      }
+
       send({
         type: 'SET_FILTERS',
         filters: nextFilters,
@@ -311,7 +318,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       // Persist selected board to DB for channel views
       if (channelId && viewMode === 'project') {
         const selectedBoardId = nextFilters.boards?.[0] ?? null;
-        const currentBoardId = filters.boards?.[0] ?? null;
         if (selectedBoardId !== currentBoardId) {
           void zero.mutate(
             mutators.channel.updateSelectedBoardId({
