@@ -23,6 +23,7 @@ export const ALLOWED_MODELS = new Set([
   'organization',
   'form',
   'activity',
+  'userActivityEvent'
 ])
 
 // Allowed operators for where conditions
