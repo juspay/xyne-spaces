@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { Settings } from 'lucide-react';
+import { Settings, Activity } from 'lucide-react';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { ChatHistory } from '../../../icons/xyne-ai';
 import { CustomInstructionsModal } from './CustomInstructionsModal';
@@ -7,12 +7,14 @@ import { CustomInstructionsModal } from './CustomInstructionsModal';
 interface XyneAIHeaderProps {
   onNewChat: () => void;
   onShowHistory: () => void;
+  onShowUserActivity: () => void;
   isMobile?: boolean;
 }
 
 export const XyneAIHeader = ({
   onNewChat,
   onShowHistory,
+  onShowUserActivity,
   isMobile = false,
 }: XyneAIHeaderProps): ReactElement => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -46,7 +48,7 @@ export const XyneAIHeader = ({
             <div className='text-gray-500 text-base font-medium'>New chat</div>
           </div>
 
-          {/* Right: Settings, Chat History, and Close Icons */}
+          {/* Right: Settings, User Activity, Chat History, and Close Icons */}
           <div className='flex items-center gap-2'>
             <button
               onClick={() => setIsSettingsModalOpen(true)}
@@ -54,6 +56,15 @@ export const XyneAIHeader = ({
               title='Custom instructions'
             >
               <Settings size={16} className='w-4 h-4' />
+            </button>
+            <button
+              onClick={onShowUserActivity}
+              className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+              title='Your activity'
+              data-track-category='XyneAI'
+              data-track-name='SHOW_USER_ACTIVITY_MOBILE'
+            >
+              <Activity size={16} className='w-4 h-4' />
             </button>
             <button
               onClick={onShowHistory}
@@ -115,6 +126,16 @@ export const XyneAIHeader = ({
             data-track-name='SHOW_HISTORY_DESKTOP'
           >
             <ChatHistory />
+          </button>
+          {/* User Activity Icon */}
+          <button
+            onClick={onShowUserActivity}
+            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            title='Your activity'
+            data-track-category='XyneAI'
+            data-track-name='SHOW_USER_ACTIVITY_DESKTOP'
+          >
+            <Activity size={16} />
           </button>
           {/* Settings Icon */}
           <button
