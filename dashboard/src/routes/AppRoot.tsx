@@ -121,14 +121,6 @@ const AppRoot = (): ReactElement => {
     });
   }, []);
 
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      void void window.electronAPI?.browserTabs?.cleanupBeforeReload();
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, []);
-
   // Register global keyboard shortcuts
   useGlobalShortcuts({ leftPanelRef });
 

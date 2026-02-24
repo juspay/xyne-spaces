@@ -20,29 +20,12 @@ export function BrowserPanelHandler(): null {
     if (!api?.onOpenInBrowserPanel) return;
 
     const cleanup = api.onOpenInBrowserPanel((url: string) => {
-      console.log(
-        '[BrowserPanelHandler] Opening external URL:',
-        url,
-        'isOnBrowserRoute:',
-        isOnBrowserRoute,
-        'panelState:',
-        browserPanelState,
-      );
+      xyneAIActor.send({ type: 'CLOSE' });
 
-      if (isOnBrowserRoute) {
-        const browserApi = api.browserTabs;
-        if (browserApi) {
-          void browserApi.create(url);
-        }
+      if (browserPanelState === 'open' || isOnBrowserRoute) {
+        browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
       } else {
-        xyneAIActor.send({ type: 'CLOSE' });
-
-        if (browserPanelState === 'open') {
-          browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
-        } else {
-          // Panel closed - open it with the URL
-          browserPanelActor.send({ type: 'OPEN', urls: [url] });
-        }
+        browserPanelActor.send({ type: 'OPEN', urls: [url] });
       }
     });
 

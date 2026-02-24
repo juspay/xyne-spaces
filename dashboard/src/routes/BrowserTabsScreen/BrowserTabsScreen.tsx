@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSelector } from '@xstate/react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -10,17 +11,18 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { isElectronApp } from '../../utils/electronApp';
-import { browserPanelActor } from '../../machines/browserPanelMachine';
-import { useHasOverlay } from '../../machines/stateMachine';
+import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
 
-interface BrowserTab {
-  id: string;
-  url: string;
-  title: string;
-  favicon?: string;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  isLoading: boolean;
+// Define WebviewTag interface locally since Electron types may not be available in renderer
+interface WebviewTag extends HTMLElement {
+  loadURL(url: string): void;
+  reload(): void;
+  goBack(): void;
+  goForward(): void;
+  canGoBack(): boolean;
+  canGoForward(): boolean;
+  getURL(): string;
+  openDevTools(): void;
 }
 
 interface BrowserTabsScreenProps {
@@ -28,20 +30,107 @@ interface BrowserTabsScreenProps {
   pendingUrls?: string[];
 }
 
+interface WebviewTabProps {
+  tab: BrowserTab;
+  isActive: boolean;
+  webviewRefs: React.MutableRefObject<Record<string, WebviewTag | null>>;
+  onUpdate: (tabId: string, patch: Partial<BrowserTab>) => void;
+  onUrlUpdate: (tabId: string, url: string) => void;
+  onNewWindow: (url: string) => void;
+  isPanel: boolean;
+}
+
+function WebviewTab({
+  tab,
+  isActive,
+  webviewRefs,
+  onUpdate,
+  onUrlUpdate,
+  onNewWindow,
+  isPanel,
+}: WebviewTabProps) {
+  const ref = useRef<WebviewTag>(null);
+  const initialUrlRef = useRef(tab.url);
+
+  useEffect(() => {
+    const wv = ref.current;
+    if (!wv) return;
+    webviewRefs.current[tab.id] = wv;
+
+    const onTitle = (e: Event) => {
+      const detail = (e as CustomEvent<{ title: string }>).detail;
+      onUpdate(tab.id, { title: detail.title });
+    };
+    const onFavicon = (e: Event) => {
+      const detail = (e as CustomEvent<{ favicons: string[] }>).detail;
+      const favicon = detail.favicons[0];
+      onUpdate(tab.id, { favicon: favicon ? favicon : undefined });
+    };
+    const onNav = () => {
+      onUpdate(tab.id, {
+        url: wv.getURL(),
+        canGoBack: wv.canGoBack(),
+        canGoForward: wv.canGoForward(),
+      });
+      onUrlUpdate(tab.id, wv.getURL());
+    };
+    const onStart = () => onUpdate(tab.id, { isLoading: true });
+    const onStop = () => onUpdate(tab.id, { isLoading: false });
+    const onNewWin = (e: Event) => {
+      const detail = (e as CustomEvent<{ url: string }>).detail;
+      onNewWindow(detail.url);
+    };
+
+    wv.addEventListener('page-title-updated', onTitle);
+    wv.addEventListener('page-favicon-updated', onFavicon);
+    wv.addEventListener('did-navigate', onNav);
+    wv.addEventListener('did-navigate-in-page', onNav);
+    wv.addEventListener('did-start-loading', onStart);
+    wv.addEventListener('did-stop-loading', onStop);
+    wv.addEventListener('new-window', onNewWin);
+
+    return () => {
+      wv.removeEventListener('page-title-updated', onTitle);
+      wv.removeEventListener('page-favicon-updated', onFavicon);
+      wv.removeEventListener('did-navigate', onNav);
+      wv.removeEventListener('did-navigate-in-page', onNav);
+      wv.removeEventListener('did-start-loading', onStart);
+      wv.removeEventListener('did-stop-loading', onStop);
+      wv.removeEventListener('new-window', onNewWin);
+      delete webviewRefs.current[tab.id];
+    };
+  }, [tab.id]);
+
+  return (
+    <webview
+      ref={ref}
+      src={initialUrlRef.current}
+      // eslint-disable-next-line react/no-unknown-property
+      partition='persist:browser-tabs'
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        visibility: isActive ? 'visible' : 'hidden',
+        pointerEvents: isActive ? 'auto' : 'none',
+        minHeight: isPanel ? 200 : 400,
+      }}
+    />
+  );
+}
+
 export function BrowserTabsScreen({
   variant = 'fullscreen',
   pendingUrls: externalPendingUrls,
 }: BrowserTabsScreenProps = {}): React.ReactElement {
-  const [tabs, setTabs] = useState<BrowserTab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const tabs = useSelector(browserPanelActor, state => state.context.tabs);
+  const activeTabId = useSelector(browserPanelActor, state => state.context.activeTabId);
   const [urlInput, setUrlInput] = useState('');
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [screenshotDataUrl, setScreenshotDataUrl] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const webviewRefs = useRef<Record<string, WebviewTag | null>>({});
 
   const activeTab = tabs.find(t => t.id === activeTabId);
   const isPanel = variant === 'panel';
-  const hasOverlay = useHasOverlay();
 
   // Normalize URL (add https:// if missing)
   const normalizeUrl = (url: string): string => {
@@ -63,187 +152,34 @@ export function BrowserTabsScreen({
 
   // Handle pending URLs from external prop (panel mode)
   useEffect(() => {
-    if (
-      !externalPendingUrls ||
-      externalPendingUrls.length === 0 ||
-      !isInitialized ||
-      !isElectronApp()
-    )
-      return;
+    if (!externalPendingUrls || externalPendingUrls.length === 0 || !isElectronApp()) return;
 
-    const api = window.electronAPI?.browserTabs;
-    if (!api) return;
-
-    const openPendingUrls = async () => {
-      for (const url of externalPendingUrls) {
-        const existingTab = tabs.find(tab => tab.url === url);
-
-        if (existingTab) {
-          await api.switch(existingTab.id);
-          setActiveTabId(existingTab.id);
-        } else {
-          const result = await api.create(url);
-          if (result.success && result.tab) {
-            setTabs(prev => [...prev, result.tab!]);
-            setActiveTabId(result.tab.id);
-            setUrlInput(result.tab.url);
-          }
-        }
+    for (const url of externalPendingUrls) {
+      const existingTab = tabs.find(tab => tab.url === url);
+      if (existingTab) {
+        browserPanelActor.send({ type: 'SWITCH_TAB', tabId: existingTab.id });
+        setUrlInput(existingTab.url);
+      } else {
+        const id = crypto.randomUUID();
+        browserPanelActor.send({
+          type: 'ADD_TAB',
+          tab: {
+            id,
+            url,
+            title: url,
+            canGoBack: false,
+            canGoForward: false,
+            isLoading: true,
+          },
+        });
+        setUrlInput(url);
       }
-
-      if (isPanel) {
-        browserPanelActor.send({ type: 'OPEN_URLS', urls: [] });
-      }
-    };
-
-    void openPendingUrls();
-  }, [externalPendingUrls, isInitialized, isPanel]);
-
-  // Update bounds when component mounts or resizes
-  const updateBounds = useCallback(() => {
-    if (!isElectronApp() || !containerRef.current) return;
-
-    const rect = containerRef.current.getBoundingClientRect();
-    window.electronAPI?.browserTabs?.setBounds({
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
-    });
-  }, []);
-
-  // Initialize and set up event listeners
-  useEffect(() => {
-    if (!isElectronApp()) return;
-
-    const api = window.electronAPI?.browserTabs;
-    if (!api) return;
-
-    // Fetch existing tabs
-    const initTabs = async () => {
-      const result = await api.getAll();
-      if (result.success) {
-        setTabs(result.tabs);
-        setActiveTabId(result.activeTabId);
-      }
-      setIsInitialized(true);
-
-      // Show the browser tabs view
-      api.show();
-    };
-
-    void initTabs();
-
-    // Set up event listeners
-    const cleanups: Array<() => void> = [];
-
-    cleanups.push(
-      api.onTitleUpdated(data => {
-        setTabs(prev =>
-          prev.map(tab => (tab.id === data.tabId ? { ...tab, title: data.title } : tab)),
-        );
-      }),
-    );
-
-    cleanups.push(
-      api.onFaviconUpdated(data => {
-        setTabs(prev =>
-          prev.map(tab => (tab.id === data.tabId ? { ...tab, favicon: data.favicon } : tab)),
-        );
-      }),
-    );
-
-    cleanups.push(
-      api.onUrlUpdated(data => {
-        setTabs(prev =>
-          prev.map(tab =>
-            tab.id === data.tabId
-              ? {
-                  ...tab,
-                  url: data.url,
-                  canGoBack: data.canGoBack,
-                  canGoForward: data.canGoForward,
-                }
-              : tab,
-          ),
-        );
-        // Update URL input if this is the active tab
-        if (data.tabId === activeTabId) {
-          setUrlInput(data.url);
-        }
-      }),
-    );
-
-    cleanups.push(
-      api.onLoadingChanged(data => {
-        setTabs(prev =>
-          prev.map(tab => (tab.id === data.tabId ? { ...tab, isLoading: data.isLoading } : tab)),
-        );
-      }),
-    );
-
-    cleanups.push(
-      api.onTabSwitched(data => {
-        setActiveTabId(data.tabId);
-      }),
-    );
-
-    cleanups.push(
-      api.onTabClosed(data => {
-        setTabs(prev => prev.filter(tab => tab.id !== data.tabId));
-      }),
-    );
-
-    return () => {
-      // Hide browser tabs when leaving this screen
-      api.hide();
-      cleanups.forEach(cleanup => cleanup());
-    };
-  }, [activeTabId]);
-
-  // Update bounds on mount and resize
-  useEffect(() => {
-    if (!isInitialized) return;
-
-    updateBounds();
-    window.addEventListener('resize', updateBounds);
-
-    // Use ResizeObserver for more accurate size tracking
-    const resizeObserver = new ResizeObserver(updateBounds);
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
     }
 
-    return () => {
-      window.removeEventListener('resize', updateBounds);
-      resizeObserver.disconnect();
-    };
-  }, [isInitialized, updateBounds]);
-
-  // Screenshot + hide approach: when overlays open, capture a screenshot of the
-  // WebContentsView, hide the native view, and show the screenshot as an <img>.
-  // The Dialog's own backdrop-blur-sm + bg-black/50 then applies naturally.
-  useEffect(() => {
-    if (!isElectronApp() || !activeTabId) return;
-
-    const api = window.electronAPI?.browserTabs;
-    if (!api?.captureTab || !api?.setTabVisible) return;
-
-    if (hasOverlay) {
-      // Capture screenshot, then hide native view
-      void api.captureTab(activeTabId).then(result => {
-        if (result.success && result.dataUrl) {
-          setScreenshotDataUrl(result.dataUrl);
-        }
-        // Hide native view so Dialog's backdrop renders on top of the screenshot
-        api.setTabVisible(activeTabId, false);
-      });
-    } else {
-      // Show native view and clear screenshot
-      api.setTabVisible(activeTabId, true);
-      setScreenshotDataUrl(null);
+    if (isPanel) {
+      browserPanelActor.send({ type: 'OPEN_URLS', urls: [] });
     }
-  }, [hasOverlay, activeTabId]);
+  }, [externalPendingUrls, isPanel, tabs]);
 
   // Update URL input when active tab changes
   useEffect(() => {
@@ -252,92 +188,93 @@ export function BrowserTabsScreen({
     } else {
       setUrlInput('');
     }
-  }, [activeTabId, activeTab]);
+  }, [activeTabId, activeTab?.url]);
 
-  const handleCreateTab = async (url?: string) => {
-    const api = window.electronAPI?.browserTabs;
-    if (!api) return;
-
+  const handleCreateTab = (url?: string) => {
     const targetUrl = url || normalizeUrl(urlInput);
     if (!targetUrl) return;
 
     const existingTab = tabs.find(tab => tab.url === targetUrl);
-
     if (existingTab) {
-      await api.switch(existingTab.id);
-      setActiveTabId(existingTab.id);
+      browserPanelActor.send({ type: 'SWITCH_TAB', tabId: existingTab.id });
       setUrlInput(existingTab.url);
-    } else {
-      const result = await api.create(targetUrl);
-      if (result.success && result.tab) {
-        setTabs(prev => [...prev, result.tab!]);
-        setActiveTabId(result.tab.id);
-        setUrlInput(result.tab.url);
-      }
-    }
-  };
-
-  // Switch to a tab
-  const handleSwitchTab = async (tabId: string) => {
-    const api = window.electronAPI?.browserTabs;
-    if (!api) return;
-
-    await api.switch(tabId);
-    setActiveTabId(tabId);
-  };
-
-  // Close a tab
-  const handleCloseTab = async (tabId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const api = window.electronAPI?.browserTabs;
-    if (!api) return;
-
-    await api.close(tabId);
-  };
-
-  // Navigate to URL
-  const handleNavigate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const api = window.electronAPI?.browserTabs;
-    if (!api || !activeTabId) {
-      // No active tab, create a new one
-      await handleCreateTab();
       return;
     }
 
+    const id = crypto.randomUUID();
+    browserPanelActor.send({
+      type: 'ADD_TAB',
+      tab: {
+        id,
+        url: targetUrl,
+        title: targetUrl,
+        canGoBack: false,
+        canGoForward: false,
+        isLoading: true,
+      },
+    });
+    setUrlInput(targetUrl);
+  };
+
+  const handleSwitchTab = (tabId: string) => {
+    browserPanelActor.send({ type: 'SWITCH_TAB', tabId });
+  };
+
+  const handleCloseTab = (tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    delete webviewRefs.current[tabId];
+    browserPanelActor.send({ type: 'CLOSE_TAB', tabId });
+  };
+
+  const handleNavigate = (e: React.FormEvent) => {
+    e.preventDefault();
+    const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
+    if (!wv) {
+      handleCreateTab();
+      return;
+    }
     const url = normalizeUrl(urlInput);
     if (url) {
-      await api.navigate(activeTabId, url);
+      wv.loadURL(url);
     }
   };
 
-  // Navigation controls
-  const handleGoBack = async () => {
-    if (!activeTabId) return;
-    await window.electronAPI?.browserTabs?.goBack(activeTabId);
+  const handleGoBack = () => {
+    const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
+    if (wv?.canGoBack()) wv.goBack();
   };
 
-  const handleGoForward = async () => {
-    if (!activeTabId) return;
-    await window.electronAPI?.browserTabs?.goForward(activeTabId);
+  const handleGoForward = () => {
+    const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
+    if (wv?.canGoForward()) wv.goForward();
   };
 
-  const handleReload = async () => {
-    if (!activeTabId) return;
-    await window.electronAPI?.browserTabs?.reload(activeTabId);
+  const handleReload = () => {
+    const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
+    wv?.reload();
   };
 
-  // Close panel (panel mode only)
   const handleClosePanel = () => {
     if (isPanel) {
       browserPanelActor.send({ type: 'CLOSE' });
     }
   };
 
-  // Open in system browser (panel mode only)
   const handleOpenExternal = () => {
     if (activeTab?.url) {
-      window.electronAPI?.openExternal(activeTab.url);
+      void (
+        window.electronAPI?.openExternal?.(activeTab.url) ?? window.open(activeTab.url, '_blank')
+      );
+    }
+  };
+
+  const handleUpdateTab = (tabId: string, patch: Partial<BrowserTab>) => {
+    browserPanelActor.send({ type: 'UPDATE_TAB', tabId, patch });
+  };
+
+  const handleUrlUpdate = (tabId: string, url: string) => {
+    if (tabId === activeTabId) {
+      setUrlInput(url);
     }
   };
 
@@ -347,17 +284,6 @@ export function BrowserTabsScreen({
         <div className='text-center text-gray-500'>
           <Globe size={48} className='mx-auto mb-4 opacity-50' />
           <p>Browser tabs are only available in the desktop app.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!window.electronAPI?.browserTabs) {
-    return (
-      <div className='flex items-center justify-center h-full bg-gray-50'>
-        <div className='text-center text-gray-500'>
-          <Globe size={48} className='mx-auto mb-4 opacity-50' />
-          <p>Please update to the latest desktop app version to use Xyne Browser.</p>
         </div>
       </div>
     );
@@ -403,7 +329,7 @@ export function BrowserTabsScreen({
           {tabs.map(tab => (
             <button
               key={tab.id}
-              onClick={() => void handleSwitchTab(tab.id)}
+              onClick={() => handleSwitchTab(tab.id)}
               className={`flex items-center gap-2 rounded-md group transition-colors ${
                 isPanel
                   ? 'px-2 py-1 text-xs max-w-[160px] min-w-[80px]'
@@ -430,7 +356,7 @@ export function BrowserTabsScreen({
               )}
               <span className='truncate flex-1 text-left'>{tab.title}</span>
               <button
-                onClick={e => void handleCloseTab(tab.id, e)}
+                onClick={e => handleCloseTab(tab.id, e)}
                 className='opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-300 rounded transition-opacity'
               >
                 <X size={isPanel ? 10 : 12} />
@@ -439,7 +365,7 @@ export function BrowserTabsScreen({
           ))}
         </div>
         <button
-          onClick={() => void handleCreateTab('https://www.google.com')}
+          onClick={() => handleCreateTab('https://www.google.com')}
           className='p-1.5 rounded-md hover:bg-gray-200 text-gray-600'
           title='New tab'
         >
@@ -454,7 +380,7 @@ export function BrowserTabsScreen({
         }`}
       >
         <button
-          onClick={() => void handleGoBack()}
+          onClick={handleGoBack}
           disabled={!activeTab?.canGoBack}
           className='p-1 rounded-md hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed'
           title='Go back'
@@ -462,7 +388,7 @@ export function BrowserTabsScreen({
           <ArrowLeft size={isPanel ? 14 : 16} />
         </button>
         <button
-          onClick={() => void handleGoForward()}
+          onClick={handleGoForward}
           disabled={!activeTab?.canGoForward}
           className='p-1 rounded-md hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed'
           title='Go forward'
@@ -470,7 +396,7 @@ export function BrowserTabsScreen({
           <ArrowRight size={isPanel ? 14 : 16} />
         </button>
         <button
-          onClick={() => void handleReload()}
+          onClick={handleReload}
           disabled={!activeTabId}
           className='p-1 rounded-md hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed'
           title='Reload'
@@ -482,7 +408,7 @@ export function BrowserTabsScreen({
           )}
         </button>
 
-        <form onSubmit={e => void handleNavigate(e)} className='flex-1'>
+        <form onSubmit={handleNavigate} className='flex-1'>
           <input
             type='text'
             value={urlInput}
@@ -497,21 +423,20 @@ export function BrowserTabsScreen({
         </form>
       </div>
 
-      {/* Browser Content Area - WebContentsView renders over this */}
-      <div
-        ref={containerRef}
-        className='flex-1 bg-gray-100 relative'
-        style={{ minHeight: isPanel ? 200 : 400 }}
-      >
-        {/* Screenshot placeholder shown when dialog/overlay is open */}
-        {screenshotDataUrl && (
-          <img
-            src={screenshotDataUrl}
-            alt=''
-            className='absolute inset-0 w-full h-full object-cover'
-            style={{ pointerEvents: 'none' }}
+      {/* Browser Content Area - webview elements render as real DOM */}
+      <div className='flex-1 bg-gray-100 relative overflow-hidden'>
+        {tabs.map(tab => (
+          <WebviewTab
+            key={tab.id}
+            tab={tab}
+            isActive={tab.id === activeTabId}
+            webviewRefs={webviewRefs}
+            onUpdate={handleUpdateTab}
+            onUrlUpdate={handleUrlUpdate}
+            onNewWindow={handleCreateTab}
+            isPanel={isPanel}
           />
-        )}
+        ))}
 
         {tabs.length === 0 && (
           <div
@@ -528,7 +453,7 @@ export function BrowserTabsScreen({
             </p>
             <div className='flex gap-2'>
               <button
-                onClick={() => void handleCreateTab('https://www.google.com')}
+                onClick={() => handleCreateTab('https://www.google.com')}
                 className={`bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors ${
                   isPanel ? 'px-3 py-1.5 text-xs' : 'px-4 py-2'
                 }`}
@@ -536,7 +461,7 @@ export function BrowserTabsScreen({
                 {isPanel ? 'Google' : 'Open Google'}
               </button>
               <button
-                onClick={() => void handleCreateTab('https://github.com')}
+                onClick={() => handleCreateTab('https://github.com')}
                 className={`bg-gray-700 text-white rounded-md hover:bg-gray-800 transition-colors ${
                   isPanel ? 'px-3 py-1.5 text-xs' : 'px-4 py-2'
                 }`}
