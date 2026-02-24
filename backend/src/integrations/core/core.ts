@@ -10,7 +10,7 @@ import { ExternalMessageRepository } from '../../database/repositories/externalM
 import { ConversationRepository } from '../../database/repositories/conversationRepository';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
-import { ExternalSource, ExternalMessage, ChannelType, ExternalEntityType } from '@prisma/client';
+import { ExternalSource, ExternalMessage, ChannelType, ExternalEntityType, EmailType } from '@prisma/client';
 import { logger } from '../../utils/logger';
 import { conversationService } from '../../services/conversationService';
 import { emailService } from '../../services/emailService';
@@ -20,6 +20,7 @@ import {
   DownloadedAttachment,
 } from '@/services/externalAttachmentService';
 import { EmailRepository } from '@/database/repositories';
+import { findDuplicateEmailConversation } from '../../utils/vespaDuplicateDetector';
 
 export class ExternalSourceCore {
   private externalSourceRepo: ExternalSourceRepository;
@@ -294,6 +295,76 @@ export class ExternalSourceCore {
           isBot: true,
         });
         return { conversation, message, email: undefined, isNew: false };
+      }
+    }
+
+    // For email channels, check Vespa for duplicate conversation
+    // This handles cases where tickets were created manually (not via Zoho)
+    if (isEmailChannel && !existingExtMsg && normalizedData.emailData) {
+      logger.info(`[EMAIL_DUPLICATE_CHECK] Checking Vespa for duplicate email`, {
+        channelId: source.channelId,
+        emailFrom: normalizedData.emailData.from,
+        emailSubject: normalizedData.emailData.subject,
+      });
+
+      const duplicateCheck = await findDuplicateEmailConversation(
+        source.channelId,
+        normalizedData.emailData.from || "",
+        normalizedData.emailData.subject || ""
+      );
+
+      if (duplicateCheck.isDuplicate && duplicateCheck.match) {
+        logger.info(`[EMAIL_DUPLICATE_FOUND] Duplicate email found via Vespa - adding to existing conversation`, {
+          existingConversationId: duplicateCheck.match.conversationId,
+          existingTicketId: duplicateCheck.match.ticketId,
+          existingSubject: duplicateCheck.match.subject,
+          newSubject: normalizedData.emailData.subject,
+          from: normalizedData.emailData.from,
+        });
+
+        const conversation = await this.conversationRepo.findById(duplicateCheck.match.conversationId);
+
+        // Conversation must exist since duplicateCheck.match comes from Vespa search results
+        if (!conversation) {
+          throw new Error(`Conversation ${duplicateCheck.match.conversationId} not found`);
+        }
+
+        logger.info(`[EMAIL_DUPLICATE_FOUND] Found existing conversation, adding email to it`, {
+          conversationId: conversation.conversationId,
+          channelId: conversation.channelId,
+        });
+
+        // Convert attachments
+        logger.info(`[EMAIL_DUPLICATE_FOUND] Converting ${downloadedAttachments.length} downloaded attachments to uploaded format`);
+        const uploadedFiles = AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
+        logger.info(`[EMAIL_DUPLICATE_FOUND] Converted to ${uploadedFiles.length} uploaded files`);
+
+        // Add email to existing conversation
+        const { email } = await emailService.addEmailToConversation({
+          conversationId: conversation.conversationId,
+          emailSubject: normalizedData.emailData.subject || "",
+          emailBody: normalizedData.content,
+          emailTo: normalizedData.emailData.to || [],
+          emailFrom: normalizedData.emailData.from || "",
+          emailCc: normalizedData.emailData.cc || [],
+          emailBcc: normalizedData.emailData.bcc || [],
+          externalThreadId: normalizedData.externalThreadId,
+          externalMessageId: normalizedData.externalId,
+          emailType: EmailType.DEFAULT,
+          uploadedFiles: uploadedFiles,
+        });
+
+        logger.info(`[EMAIL_DUPLICATE_SUCCESS] Successfully added email to existing conversation`, {
+          conversationId: conversation.conversationId,
+          emailId: email.id,
+          externalMessageId: normalizedData.externalId,
+        });
+
+        return { conversation, email, isNew: false };
+      } else {
+        logger.info(`[EMAIL_DUPLICATE_NOT_FOUND] No duplicate found in Vespa, will create new conversation`, {
+          reason: duplicateCheck.reason,
+        });
       }
     }
 

@@ -8,6 +8,7 @@ export interface VespaService {
   channelService: ChannelService;
   crudService: CRUDService;
   searchService: SearchService;
+  vespaClient: VespaClient;
 }
 
 export function createVespaService(dependencies: VespaDependencies): VespaService {
@@ -16,6 +17,7 @@ export function createVespaService(dependencies: VespaDependencies): VespaServic
     channelService: new ChannelService(vespaClient, dependencies),
     crudService: new CRUDService(vespaClient, dependencies),
     searchService: new SearchService(vespaClient, dependencies),
+    vespaClient,
   };
 }
 

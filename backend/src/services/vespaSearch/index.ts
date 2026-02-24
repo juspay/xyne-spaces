@@ -317,5 +317,6 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-// Export vespa service for other uses
+// Export vespa service and client for other uses
 export { vespaService };
+export const vespaClient = vespaService.vespaClient;
