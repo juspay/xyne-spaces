@@ -10,7 +10,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, FileText, Maximize2, MoreVertical, Play, Video } from 'lucide-react';
+import { Download, FileText, Image, Maximize2, MoreVertical, Play, Video } from 'lucide-react';
 import { Menu } from '@base-ui/react/menu';
 import {
   formatFileSize,
@@ -165,11 +165,23 @@ const Preview: React.FC<{
   if (isLoading) {
     return (
       <div
-        className='bg-gray-200 animate-pulse flex items-center justify-center'
+        className={cn(
+          'bg-gray-200 animate-pulse flex items-center justify-center min-w-[256px] min-h-[256px]',
+          (isInGrid || fullSize) && 'w-full h-full',
+        )}
         style={
-          imageWidth
-            ? { height: fixedHeight, width: `${imageWidth}px`, minWidth: `${imageWidth}px` }
-            : { width: '100%', minWidth: '256px' }
+          isInGrid || fullSize
+            ? undefined
+            : imageWidth
+              ? {
+                  height: fixedHeight,
+                  width: `${imageWidth}px`,
+                  minWidth: `${imageWidth}px`,
+                }
+              : {
+                  width: '100%',
+                  minWidth: '256px',
+                }
         }
       />
     );
@@ -182,13 +194,19 @@ const Preview: React.FC<{
         <div
           className={cn(
             'h-full w-full bg-gray-100 flex flex-col items-center justify-center gap-2 p-4',
-            !isMobile && 'min-w-64',
+            !isMobile && 'min-w-64 min-h-[256px]',
+            fullSize && 'min-h-[256px]',
           )}
         >
-          {isVideo && (
+          {isVideo ? (
             <>
               <Video size={32} className='text-gray-400' />
               <span className='text-xs text-gray-500 text-center'>Preview unavailable</span>
+            </>
+          ) : (
+            <>
+              <Image size={32} className='text-gray-400' />
+              <span className='text-xs text-gray-500 text-center'>No Preview</span>
             </>
           )}
         </div>
@@ -199,12 +217,14 @@ const Preview: React.FC<{
       <img
         src={imageBlobUrl}
         alt={fileName}
-        className={fullSize ? 'w-full h-auto' : 'w-auto'}
+        className={cn(fullSize ? 'w-full h-auto' : isInGrid ? 'w-full h-full' : 'w-auto')}
         loading='lazy'
         style={
           fullSize
             ? undefined
-            : { objectFit: 'cover', height: fixedHeight, width: `${imageWidth}px` || '300px' }
+            : isInGrid
+              ? { objectFit: 'cover' }
+              : { objectFit: 'cover', height: fixedHeight, width: `${imageWidth}px` || '300px' }
         }
         onError={() => setError(true)}
       />
@@ -237,8 +257,8 @@ const Preview: React.FC<{
   return (
     <div
       className={cn(
-        'bg-gray-100 flex flex-col items-center justify-center gap-2',
-        isInGrid ? 'w-full h-full' : 'w-[256px] h-[256px]',
+        'bg-gray-100 flex flex-col items-center justify-center gap-2 w-full h-full',
+        !isInGrid && 'min-h-[256px]',
       )}
     >
       <div className='bg-white rounded-lg p-3 shadow-sm border border-gray-200'>{icon}</div>
@@ -611,12 +631,7 @@ const InlineVideoPlayer: React.FC<{
                 />
               ) : (
                 // Show video icon if no thumbnail
-                <div
-                  className={cn(
-                    'flex items-center justify-center bg-gray-900 h-64',
-                    !isMobile && 'min-w-64',
-                  )}
-                >
+                <div className={cn('flex items-center justify-center bg-gray-900 h-64 min-w-64')}>
                   {!isMobile && <Video size={64} className='text-gray-600' />}
                 </div>
               )}
@@ -783,7 +798,13 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
       <div
         className={cn(
           'message-attachment group/attachment relative flex flex-col bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
-          compact ? 'w-16 h-16 ' : isMobile ? 'h-full ' : 'w-full h-64',
+          compact
+            ? 'w-16 h-16 '
+            : isInGrid
+              ? 'w-full h-full'
+              : isMobile
+                ? 'h-full '
+                : 'w-full h-64',
         )}
         onClick={handleCardClick}
         onKeyDown={handleKeyDown}

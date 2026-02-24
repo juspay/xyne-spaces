@@ -57,7 +57,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
     const attachment = attachments[0]!;
     const needsFixedSize = !isImageFile(attachment.mimetype) && !isVideoFile(attachment.mimetype);
     return (
-      <div className={`w-full ${needsFixedSize ? 'h-[256px] min-w-[256px]' : ''}`}>
+      <div className={`w-full ${needsFixedSize ? 'h-[256px] min-w-[256px] aspect-square' : ''}`}>
         <MessageAttachment
           attachment={attachment}
           allAttachments={attachments}
@@ -73,7 +73,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
     return (
       <div className='grid grid-cols-2 row-span-2 gap-1'>
         {attachments.map((attachment, index) => (
-          <div key={attachment.id} className='h-full'>
+          <div key={attachment.id} className='h-full min-h-[256px]'>
             <MessageAttachment
               attachment={attachment}
               allAttachments={attachments}
@@ -107,7 +107,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
   // For 4+ attachments: 2x2 grid with +N overlay
   const visibleAttachments = attachments.slice(0, 4);
   const hasMore = attachments.length > 4;
-  const remainingCount = attachments.length - 4;
+  const remainingCount = attachments.length - 3;
 
   return (
     <>
