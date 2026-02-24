@@ -325,7 +325,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
     [hasStackNavigation, currentFileIndex],
   );
 
-  // Also scroll when currentFileIndex changes via navigation
+  // Also scroll when currentFileIndex changes via button/keyboard navigation
   useEffect(() => {
     if (scrollContainerRef.current && hasStackNavigation) {
       scrollContainerRef.current.scrollTo({
@@ -362,8 +362,6 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
       await downloadFile(currentFileUrl, currentFileName);
     }
   };
-
-  // React Query handles cleanup automatically
 
   const renderContent = (): JSX.Element => {
     if (isLoading) {
@@ -427,37 +425,22 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
     );
   };
 
-  // Detect current slide from scroll position for swipe gestures
-  const handleScroll = useCallback(() => {
-    if (!scrollContainerRef.current || !hasStackNavigation) return;
-
-    const container = scrollContainerRef.current;
-    const slideWidth = container.clientWidth;
-    const newIndex = Math.round(container.scrollLeft / slideWidth);
-
-    if (newIndex !== currentFileIndex && newIndex >= 0 && newIndex < totalFiles) {
-      onNavigate?.(newIndex);
-    }
-  }, [hasStackNavigation, currentFileIndex, totalFiles, onNavigate]);
-
   // Scroll-snap carousel — lazy mount ±1 slides, show thumbnail placeholder for others
   const renderCarousel = () => {
     return (
       <div
         ref={scrollContainerCallbackRef}
-        onScroll={handleScroll}
         className='flex w-full h-full overflow-x-auto overflow-y-hidden'
         style={{
           scrollSnapType: 'x mandatory',
           scrollbarWidth: 'none',
-          WebkitOverflowScrolling: 'touch',
+          WebkitOverflowScrolling: 'auto',
         }}
       >
         {files!.map((file, index) => (
           <div
-            key={file.attachmentId || file.fileUrl}
-            className='flex-shrink-0 w-full h-full flex items-center justify-center'
-            style={{ scrollSnapAlign: 'center' }}
+            key={file.attachmentId || `file-${index}-${file.fileName}`}
+            className='flex-shrink-0 w-full h-full flex items-center justify-center [scroll-snap-align:center] [scroll-snap-stop:always]'
           >
             {mountedSlides.has(index) ? (
               <SlideContent file={file} />

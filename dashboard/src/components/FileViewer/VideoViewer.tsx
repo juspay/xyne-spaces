@@ -265,10 +265,10 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
 
     if (error) {
       return (
-        <div className='flex items-center justify-center h-full bg-gray-900'>
+        <div className='flex items-center justify-center h-full bg-gray-900 min-h-64'>
           <div className='text-center text-white'>
             <p className='text-lg font-semibold mb-2'>Failed to load video</p>
-            <p className='text-sm text-gray-400'>{error}</p>
+            <p className='text-sm text-gray-400 px-4'>{error}</p>
           </div>
         </div>
       );
@@ -509,7 +509,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
               </div>
 
               {/* Right side controls */}
-              <div className={cn('flex items-center gap-3')}>
+              <div className='flex items-center gap-3'>
                 {/* Playback Speed */}
                 <Menu.Root>
                   <Menu.Trigger>
@@ -554,7 +554,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                 </Menu.Root>
 
                 {/* Fullscreen/Expand - Show in immersive or when not on mobile/compact */}
-                {(isImmersiveMode || (!isMobile && !isCompactControls)) && (
+                {(isImmersiveMode || !isMobile) && (
                   <button
                     onClick={onExpand}
                     className={cn(
