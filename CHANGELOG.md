@@ -1,3 +1,10 @@
+## [1.56.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.56.0...v1.56.1) (2026-02-24)
+
+
+### Bug Fixes
+
+* making avatar stack appear without white spaces ([5c2c63e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5c2c63eaa800d89ac66eb0d1c351987ac09edab0)), closes [#3525](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3525)
+
 ## [1.56.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.55.1...v1.56.0) (2026-02-23)
 
 
