@@ -174,7 +174,10 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
             side='bottom'
             align='start'
             sideOffset={4}
-            onOpenAutoFocus={e => e.preventDefault()}
+            onOpenAutoFocus={e => {
+              e.preventDefault();
+              inputRef.current?.focus();
+            }}
             onWheel={e => {
               e.stopPropagation();
             }}

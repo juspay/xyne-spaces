@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Check } from 'lucide-react';
 import { FormFieldType } from '@xyne/shared';
 import Input from '../../../../ui/Input/Input';
@@ -30,6 +30,17 @@ export const DynamicFieldSubmenu = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [stringValue, setStringValue] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>({});
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const stringInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus search input when component mounts
+  useEffect(() => {
+    if (fieldType === FormFieldType.STRING || fieldType === FormFieldType.NUMBER) {
+      stringInputRef.current?.focus();
+    } else {
+      searchInputRef.current?.focus();
+    }
+  }, [fieldType]);
 
   // Prepare options and selected values for SELECT fields (always compute to maintain hook order)
   const options = fieldEnum || [];
@@ -91,6 +102,7 @@ export const DynamicFieldSubmenu = ({
             <div className='relative'>
               <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400' />
               <Input
+                ref={searchInputRef}
                 type='text'
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
@@ -235,6 +247,7 @@ export const DynamicFieldSubmenu = ({
       >
         <div className='text-sm font-medium text-gray-900 mb-3'>{fieldName}</div>
         <Input
+          ref={stringInputRef}
           type={fieldType === FormFieldType.NUMBER ? 'number' : 'text'}
           value={stringValue}
           onChange={e => setStringValue(e.target.value)}

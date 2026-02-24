@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Check, Tag } from 'lucide-react';
 import Input from '../../../../ui/Input/Input';
 
@@ -17,6 +17,12 @@ export const TagsSubmenu = ({
 }: TagsSubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus search input when component mounts
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
 
   // Debounced Search
   useEffect(() => {
@@ -59,6 +65,7 @@ export const TagsSubmenu = ({
         <div className='relative'>
           <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none' />
           <Input
+            ref={searchInputRef}
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}

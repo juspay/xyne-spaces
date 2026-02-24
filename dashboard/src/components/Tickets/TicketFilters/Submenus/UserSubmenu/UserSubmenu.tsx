@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Check } from 'lucide-react';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
@@ -21,6 +21,12 @@ export const UserSubmenu = ({
 }: UserSubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus search input when component mounts
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
 
   // 1. Debounced Search
   useEffect(() => {
@@ -73,6 +79,7 @@ export const UserSubmenu = ({
         <div className='relative'>
           <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none' />
           <Input
+            ref={searchInputRef}
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}

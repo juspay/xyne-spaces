@@ -104,12 +104,6 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
     }
   }, [open]);
 
-  useEffect(() => {
-    if (open && variant === 'inline' && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [open, variant]);
-
   // ==================== RENDER HELPER (DEFAULT) ====================
 
   const handleOpenChange = useCallback(
@@ -288,7 +282,10 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           }}
           onWheel={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
-          onOpenAutoFocus={e => e.preventDefault()}
+          onOpenAutoFocus={e => {
+            e.preventDefault();
+            inputRef.current?.focus();
+          }}
         >
           {/* ========== SEARCH INPUT ========== */}
           {variant === 'default' && showSearch && (
@@ -296,6 +293,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
               <div className='relative'>
                 <Search className='absolute left-1 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400' />
                 <input
+                  ref={inputRef}
                   type='text'
                   data-testid={testId ? `${testId}-search` : undefined}
                   placeholder={searchPlaceholder}

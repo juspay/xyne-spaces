@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect } from 'react';
+import { ReactElement, useState, useEffect, useRef } from 'react';
 import { Button } from '../../../../ui/Button';
 import { DateRange } from '../../types';
 
@@ -18,6 +18,12 @@ export const DateRangeSubmenu = ({
 }: DateRangeSubmenuProps): ReactElement => {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  const startDateInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus start date input when component mounts
+  useEffect(() => {
+    startDateInputRef.current?.focus();
+  }, []);
 
   // Initialize date inputs from dateRange
   useEffect(() => {
@@ -135,6 +141,7 @@ export const DateRangeSubmenu = ({
                 Start date
               </label>
               <input
+                ref={startDateInputRef}
                 id='start-date'
                 type='date'
                 value={startDate}
