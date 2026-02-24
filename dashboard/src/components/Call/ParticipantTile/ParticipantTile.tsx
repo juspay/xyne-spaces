@@ -112,6 +112,12 @@ export function ParticipantTile({
       tabIndex={isClickable ? 0 : undefined}
       onClick={onClick}
       onKeyDown={onKeyDown}
+      data-track-category='CALLS'
+      data-track-name='Participant_Tile'
+      data-track-metadata={JSON.stringify({
+        participantIdentity: participant.identity,
+        participantName: participant.name,
+      })}
     >
       {/* Video Track - Using LiveKit's VideoTrack component */}
       {(hasVideo || isScreenShare) && videoTrackRef ? (

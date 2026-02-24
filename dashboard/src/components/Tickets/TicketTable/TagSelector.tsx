@@ -122,6 +122,9 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                   toggle(tag);
                 }}
                 className='hover:bg-gray-200 rounded-full p-0.5'
+                data-track-category='Tickets'
+                data-track-name='RemoveTag'
+                data-track-metadata={JSON.stringify({ tag })}
               >
                 <X className='size-2.5' />
               </button>
@@ -134,6 +137,9 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
             value={search}
             onChange={e => setSearch(e.target.value)}
             onKeyDown={handleKey}
+            data-track-event='blur'
+            data-track-category='Tickets'
+            data-track-name='TagSearchInput'
           />
         </label>
       </Popover.Trigger>
@@ -163,6 +169,9 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                     className={`flex items-center justify-between w-full px-3 py-2 text-sm rounded text-left ${
                       active ? 'bg-gray-100' : ''
                     } ${selected ? 'text-blue-700 font-medium' : 'text-gray-700'}`}
+                    data-track-category='Tickets'
+                    data-track-name='SelectTag'
+                    data-track-metadata={JSON.stringify({ tag, selected: !selected })}
                   >
                     <div className='flex items-center gap-2'>
                       <span className='w-2 h-2 rounded-full bg-[#C27AFF]' />
@@ -186,6 +195,9 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                   className={`flex items-center gap-2 w-full px-3 py-2 text-sm rounded font-medium ${
                     activeIdx === filtered.length ? 'bg-blue-50 text-blue-700' : 'text-blue-600'
                   }`}
+                  data-track-category='Tickets'
+                  data-track-name='CreateTag'
+                  data-track-metadata={JSON.stringify({ tagName: search.trim() })}
                 >
                   <Plus className='size-4' />
                   Create {search.trim()}

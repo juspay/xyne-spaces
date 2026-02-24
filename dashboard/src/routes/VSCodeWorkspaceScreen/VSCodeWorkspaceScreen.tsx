@@ -574,6 +574,8 @@ const VSCodeWorkspaceScreen: React.FC = () => {
             void setupWorkspace();
           }}
           className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors'
+          data-track-category='VSCodeWorkspace'
+          data-track-name='RetrySetup'
         >
           <RefreshCw size={16} />
           Retry
@@ -622,6 +624,9 @@ const VSCodeWorkspaceScreen: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => send({ type: 'SET_ACTIVE_TAB', tabId: tab.id })}
+                  data-track-category='VSCodeWorkspace'
+                  data-track-name='SetActiveTab'
+                  data-track-metadata={JSON.stringify({ tabId: tab.id, tabType: tab.type })}
                   className={`
                     group flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg
                     transition-all duration-200 whitespace-nowrap min-w-fit
@@ -641,6 +646,9 @@ const VSCodeWorkspaceScreen: React.FC = () => {
                         e.stopPropagation();
                         closeTab(tab.id);
                       }}
+                      data-track-category='VSCodeWorkspace'
+                      data-track-name='CloseTab'
+                      data-track-metadata={JSON.stringify({ tabId: tab.id, tabType: tab.type })}
                     />
                   )}
                 </button>
@@ -712,6 +720,9 @@ const VSCodeWorkspaceScreen: React.FC = () => {
                           e.stopPropagation();
                           closeTab(tab.id);
                         }}
+                        data-track-category='VSCodeWorkspace'
+                        data-track-name='CloseTab'
+                        data-track-metadata={JSON.stringify({ tabId: tab.id, tabType: tab.type })}
                       />
                     </DropdownMenu.Item>
                   ))}
@@ -723,6 +734,8 @@ const VSCodeWorkspaceScreen: React.FC = () => {
 
           <button
             onClick={handleRefresh}
+            data-track-category='VSCodeWorkspace'
+            data-track-name='Refresh'
             className='p-1.5 mb-1 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-all'
             title='Refresh'
           >
@@ -733,6 +746,9 @@ const VSCodeWorkspaceScreen: React.FC = () => {
             onClick={handleFullscreenToggle}
             className='p-1.5 mb-1 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-all'
             title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+            data-track-category='VSCode'
+            data-track-name='ToggleFullscreen'
+            data-track-metadata={JSON.stringify({ isFullscreen })}
           >
             {isFullscreen ? (
               <Minimize className='w-3.5 h-3.5' />
@@ -778,6 +794,8 @@ const VSCodeWorkspaceScreen: React.FC = () => {
               <button
                 onClick={() => void handleOpenFolder()}
                 className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 transition-colors'
+                data-track-category='VSCodeWorkspace'
+                data-track-name='OpenFolder'
               >
                 <Folder size={16} />
                 Open Folder

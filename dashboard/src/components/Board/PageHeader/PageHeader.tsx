@@ -20,7 +20,14 @@ export const PageHeader = ({
         <h1 className='text-3xl font-bold text-gray-900'>{title}</h1>
         <p className='text-gray-600 mt-2'>{subtitle}</p>
       </div>
-      <Button buttonType={ButtonType.PRIMARY} text={actionButtonText} onClick={onActionClick} />
+      <Button
+        buttonType={ButtonType.PRIMARY}
+        text={actionButtonText}
+        onClick={onActionClick}
+        data-track-category='Board'
+        data-track-name='Page_Header_Action'
+        data-track-metadata={JSON.stringify({ actionText: actionButtonText })}
+      />
     </div>
   );
 };

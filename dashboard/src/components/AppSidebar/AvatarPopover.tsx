@@ -82,6 +82,9 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                 onKeyDown={handleKeyDown}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
+                data-track-category='App_Sidebar_Avatar_Popover'
+                data-track-name='Edit_Status'
+                data-track-metadata={JSON.stringify({ hasStatus: true, statusContent })}
               >
                 <div className='flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 transition-colors'>
                   <div className='text-xl mt-0.5'>
@@ -101,6 +104,9 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                     onClick={handleClearStatus}
                     className='flex-shrink-0 p-1 h-auto'
                     title='Clear status'
+                    data-track-category='App_Sidebar_Avatar_Popover'
+                    data-track-name='Clear_Status'
+                    data-track-metadata={JSON.stringify({ statusContent })}
                   >
                     <X className='size-4 text-gray-600' />
                   </Button>
@@ -113,6 +119,9 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                 className='cursor-pointer p-2 rounded-lg hover:bg-gray-50 transition-colors'
                 onClick={handleStatusAreaClick}
                 onKeyDown={handleKeyDown}
+                data-track-category='App_Sidebar_Avatar_Popover'
+                data-track-name='Set_Status'
+                data-track-metadata={JSON.stringify({ hasStatus: false })}
               >
                 <div className='flex items-center gap-2'>
                   <Smile className='size-5 text-gray-500' />

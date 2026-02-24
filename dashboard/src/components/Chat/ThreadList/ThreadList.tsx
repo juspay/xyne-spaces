@@ -349,6 +349,9 @@ const ThreadList = ({
                 <button
                   onClick={() => setIsExpanded(true)}
                   className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors group'
+                  data-track-category='THREAD_PANEL'
+                  data-track-name='EXPAND_THREAD'
+                  data-track-metadata={JSON.stringify({ hiddenCount })}
                 >
                   <ChevronRight className='w-3.5 h-3.5 text-gray-500 group-hover:text-gray-700' />
                   <span>
@@ -366,6 +369,8 @@ const ThreadList = ({
           <button
             onClick={() => setIsExpanded(false)}
             className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors group'
+            data-track-category='THREAD_PANEL'
+            data-track-name='COLLAPSE_THREAD'
           >
             <ChevronUp className='w-3.5 h-3.5 text-gray-500 group-hover:text-gray-700' />
             <span>Collapse thread</span>

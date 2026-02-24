@@ -383,7 +383,13 @@ export const AssignmentConfigScreen = ({
           <div className='flex items-center justify-between p-6 border-b border-gray-200 bg-white'>
             <div>
               <div className='flex items-center gap-3 mb-2'>
-                <Button variant='outline' size='sm' onClick={() => void navigate('/user-groups')}>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => void navigate('/user-groups')}
+                  data-track-category='UserGroups'
+                  data-track-name='BackToUserGroups'
+                >
                   ← Back
                 </Button>
                 <h1 className='text-2xl font-bold text-gray-900'>Assignment Configuration</h1>
@@ -398,6 +404,8 @@ export const AssignmentConfigScreen = ({
               size='default'
               onClick={() => void handleSave()}
               disabled={!hasChanges || isSaving || !isPercentageValid}
+              data-track-category='UserGroups'
+              data-track-name='SaveAssignmentConfig'
             >
               {isSaving ? 'Saving...' : 'Save Changes'}
             </Button>
@@ -419,6 +427,9 @@ export const AssignmentConfigScreen = ({
                   value={selectedBoardId ?? ''}
                   onChange={e => setSelectedBoardId(e.target.value || null)}
                   className='block w-full max-w-md px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm'
+                  data-track-event='change'
+                  data-track-category='UserGroups'
+                  data-track-name='SelectBoardFilter'
                 >
                   <option value=''>All Boards</option>
                   {boards.map((board: Board) => (
@@ -459,6 +470,9 @@ export const AssignmentConfigScreen = ({
                     }}
                     placeholder='1'
                     className='block w-32 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                    data-track-event='change'
+                    data-track-category='UserGroups'
+                    data-track-name='SetBoardWeight'
                   />
 
                   <div className='mt-4 pt-4 border-t border-gray-100'>
@@ -580,6 +594,9 @@ export const AssignmentConfigScreen = ({
                                   checked={hasLocalExpertise(user.id)}
                                   onChange={() => handleToggleExpertise(user.id)}
                                   className='h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer'
+                                  data-track-category='UserGroup'
+                                  data-track-name='ToggleExpertise'
+                                  data-track-metadata={JSON.stringify({ userId: user.id })}
                                 />
                               </td>
                               {localUsePercentage && (

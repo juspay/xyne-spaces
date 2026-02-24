@@ -238,6 +238,9 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName }) => {
               onClick={handleRotate}
               className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
               title='Rotate (Ctrl R)'
+              data-track-category='FileViewer'
+              data-track-name='ROTATE_IMAGE'
+              data-track-metadata={JSON.stringify({ source, fileName })}
             >
               <RotateCw className='h-5 w-5' />
             </button>
@@ -245,6 +248,9 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName }) => {
               onClick={handleZoomOut}
               className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
               title='Zoom Out (Ctrl -)'
+              data-track-category='FileViewer'
+              data-track-name='ZOOM_OUR_IMAGE'
+              data-track-metadata={JSON.stringify({ source, fileName })}
             >
               <ZoomOut className='h-5 w-5' />
             </button>
@@ -253,6 +259,9 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName }) => {
               onClick={handleZoomIn}
               className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
               title='Zoom In (Ctrl +)'
+              data-track-category='FileViewer'
+              data-track-name='ZOOM_IN_IMAGE'
+              data-track-metadata={JSON.stringify({ source, fileName })}
             >
               <ZoomIn className='h-5 w-5' />
             </button>
@@ -268,6 +277,9 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName }) => {
               onClick={handleReset}
               className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
               title='Fit to Screen (Ctrl 0)'
+              data-track-category='FileViewer'
+              data-track-name='FIT_IMAGE_TO_SCREEN'
+              data-track-metadata={JSON.stringify({ source, fileName })}
             >
               <Maximize2 className='h-5 w-5' />
             </button>
@@ -276,6 +288,9 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName }) => {
               onClick={handleOpenInNewWindow}
               className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
               title='Open in New Window'
+              data-track-category='FileViewer'
+              data-track-name='OPEN_IMAGE_IN_NEW_WINDOW'
+              data-track-metadata={JSON.stringify({ source, fileName })}
             >
               <ExternalLink className='h-5 w-5' />
             </button>

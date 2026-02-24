@@ -52,6 +52,8 @@ export const BoardFilterBar: React.FC<BoardFilterBarProps> = ({
             ? 'bg-blue-50 text-blue-600 border-b-2 border-b-blue-600'
             : 'text-gray-500 hover:bg-gray-50',
         )}
+        data-track-category='Tickets'
+        data-track-name='SelectAllBoards'
       >
         All Boards
       </Button>
@@ -73,6 +75,9 @@ export const BoardFilterBar: React.FC<BoardFilterBarProps> = ({
                 ? 'text-sidebar-badge-accent border-b-2 border-b-sidebar-badge-accent bg-gray-50'
                 : 'text-gray-500 hover:bg-gray-50',
             )}
+            data-track-category='Tickets'
+            data-track-name='SelectBoardTab'
+            data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
           >
             {board.name}
           </Button>

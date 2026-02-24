@@ -67,6 +67,9 @@ export const AboutChannel: React.FC<AboutChannelProps> = ({ channel }) => {
             onClick={() => void handleCopyChannelId()}
             className='p-1  text-gray-400 hover:text-gray-600 transition-colors'
             title='Copy Channel ID'
+            data-track-category='CHANNEL_INFORMATION'
+            data-track-name='COPY_CHANNEL_ID'
+            data-track-metadata={JSON.stringify({ channelId: channel.id })}
           >
             {copiedChannelId ? (
               <Check className='w-3 h-3 text-green-500' />

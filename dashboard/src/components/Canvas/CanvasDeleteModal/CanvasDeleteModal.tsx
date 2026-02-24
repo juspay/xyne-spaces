@@ -20,10 +20,22 @@ export const CanvasDeleteModal: React.FC<CanvasDeleteModalProps> = ({
         action cannot be undone.
       </p>
       <div className='flex justify-end gap-3'>
-        <Button variant='secondary' onClick={onClose}>
+        <Button
+          variant='secondary'
+          onClick={onClose}
+          data-track-category='CANVAS'
+          data-track-name='Cancel_Delete_Canvas'
+          data-track-metadata={JSON.stringify({ canvasTitle })}
+        >
           Cancel
         </Button>
-        <Button variant='destructive' onClick={onConfirm}>
+        <Button
+          variant='destructive'
+          onClick={onConfirm}
+          data-track-category='CANVAS'
+          data-track-name='Confirm_Delete_Canvas'
+          data-track-metadata={JSON.stringify({ canvasTitle })}
+        >
           Delete
         </Button>
       </div>

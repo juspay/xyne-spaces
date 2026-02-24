@@ -106,6 +106,9 @@ export const ConversationHistory = ({
                   ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
                   : 'p-1 hover:bg-gray-100 rounded transition-colors flex-shrink-0'
               }
+              data-track-category='XyneAI'
+              data-track-name='CloseSearch'
+              data-track-metadata={JSON.stringify({ conversationId })}
             >
               <ArrowLeft className={isMobile ? 'w-4 h-4 text-gray-700' : 'w-4 h-4 text-gray-700'} />
             </button>
@@ -116,6 +119,8 @@ export const ConversationHistory = ({
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="flex-1 bg-transparent outline-none text-gray-900 placeholder:text-gray-400 text-sm font-['Inter']"
+                data-track-category='XyneAI'
+                data-track-name='SearchChatsInput'
               />
               <Search className='w-4 h-4 text-gray-600' />
             </div>
@@ -123,6 +128,8 @@ export const ConversationHistory = ({
               <button
                 onClick={handleClose}
                 className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+                data-track-category='XyneAI'
+                data-track-name='CloseHistory'
               >
                 <X className='w-4 h-4 text-gray-600' />
               </button>
@@ -138,6 +145,8 @@ export const ConversationHistory = ({
                     ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
                     : 'p-1 hover:bg-gray-100 rounded transition-colors'
                 }
+                data-track-category='XyneAI'
+                data-track-name='BackFromHistory'
               >
                 <ArrowLeft className='w-4 h-4 text-gray-700' />
               </button>
@@ -151,6 +160,8 @@ export const ConversationHistory = ({
                     ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
                     : 'p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
                 }
+                data-track-category='XyneAI'
+                data-track-name='OpenSearch'
               >
                 <Search className={isMobile ? 'w-4 h-4 text-gray-600' : 'w-4 h-4 text-gray-600'} />
               </button>
@@ -158,6 +169,8 @@ export const ConversationHistory = ({
                 <button
                   onClick={handleClose}
                   className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+                  data-track-category='XyneAI'
+                  data-track-name='CloseHistory'
                 >
                   <X className='w-4 h-4 text-gray-600' />
                 </button>
@@ -535,6 +548,8 @@ const ConversationItem = ({
           }}
           onBlur={onRename}
           className={`flex-1 text-sm text-gray-900 font-${isStarred ? 'medium' : 'normal'} font-["Inter"] border border-gray-300 rounded px-2 py-1 outline-none focus:border-primary`}
+          data-track-category='XyneAI'
+          data-track-name='RENAME_CONVERSATION_INPUT'
         />
       ) : (
         <button
@@ -544,6 +559,9 @@ const ConversationItem = ({
           onTouchMove={isMobile ? handleTouchMove : undefined}
           onTouchEnd={isMobile ? handleTouchEnd : undefined}
           onTouchCancel={isMobile ? handleTouchEnd : undefined}
+          data-track-category='XyneAI'
+          data-track-name='SELECT_CONVERSATION'
+          data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
         >
           <div
             className={
@@ -585,6 +603,9 @@ const ConversationItem = ({
                 setOpenDropdownId(null);
               }}
               className='w-full px-4 py-4 text-left text-sm active:bg-gray-100 flex items-center gap-3 border-b border-gray-100 touch-manipulation'
+              data-track-category='XyneAI'
+              data-track-name='TOGGLE_STAR_CONVERSATION'
+              data-track-metadata={JSON.stringify({ conversationId: conversation.id, isStarred })}
             >
               {isStarred || conversation.isStarred ? <XyneStarred /> : <XyneUnstarred />}
               <span>{isStarred || conversation.isStarred ? 'Unstar' : 'Star'}</span>
@@ -596,6 +617,9 @@ const ConversationItem = ({
                 setOpenDropdownId(null);
               }}
               className='w-full px-4 py-4 text-left text-sm active:bg-gray-100 flex items-center gap-3 border-b border-gray-100 touch-manipulation'
+              data-track-category='XyneAI'
+              data-track-name='RENAME_CONVERSATION'
+              data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
             >
               <XyneRename />
               <span>Rename</span>
@@ -607,6 +631,9 @@ const ConversationItem = ({
                 setOpenDropdownId(null);
               }}
               className='w-full px-4 py-4 text-left text-sm active:bg-gray-100 flex items-center gap-3 text-red-600 touch-manipulation'
+              data-track-category='XyneAI'
+              data-track-name='DELETE_CONVERSATION'
+              data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
             >
               <XyneDelete />
               <span>Delete</span>
@@ -623,6 +650,8 @@ const ConversationItem = ({
             <button
               onClick={e => e.stopPropagation()}
               className='opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded'
+              data-track-category='XyneAI'
+              data-track-name='OPEN_CONVERSATION_MENU'
             >
               <MoreVertical className='w-4 h-4 text-gray-600' />
             </button>
@@ -636,6 +665,9 @@ const ConversationItem = ({
               setOpenDropdownId(null);
             }}
             className='w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100'
+            data-track-category='XyneAI'
+            data-track-name='TOGGLE_STAR_DESKTOP'
+            data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
           >
             {isStarred || conversation.isStarred ? <XyneStarred /> : <XyneUnstarred />}
             <span>{isStarred || conversation.isStarred ? 'Unstar' : 'Star'}</span>
@@ -647,6 +679,9 @@ const ConversationItem = ({
               setOpenDropdownId(null);
             }}
             className='w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100'
+            data-track-category='XyneAI'
+            data-track-name='RENAME_DESKTOP'
+            data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
           >
             <XyneRename />
             <span>Rename</span>
@@ -658,6 +693,9 @@ const ConversationItem = ({
               setOpenDropdownId(null);
             }}
             className='w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 text-red-600'
+            data-track-category='XyneAI'
+            data-track-name='DELETE_DESKTOP'
+            data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
           >
             <XyneDelete />
             <span>Delete</span>

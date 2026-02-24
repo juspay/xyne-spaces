@@ -134,6 +134,8 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
               <button
                 onClick={() => openUrl('https://www.google.com', 'Google')}
                 className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium'
+                data-track-category='Workflows'
+                data-track-name='OpenGoogleDemo'
               >
                 <ExternalLink size={14} />
                 {isElectron ? 'Open Google.com (Demo)' : 'Open Google.com in New Tab'}
@@ -141,6 +143,8 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
               <button
                 onClick={() => openUrl('https://example.com', 'Example')}
                 className='flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-xs'
+                data-track-category='Workflows'
+                data-track-name='OpenExampleDemo'
               >
                 <Globe size={12} />
                 Open Example.com
@@ -181,6 +185,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
                 <button
                   onClick={() => setActiveTabId(tab.id)}
                   className='flex items-center gap-2 px-3 py-2 flex-1 text-left min-w-0'
+                  data-track-category='Workflows'
+                  data-track-name='SelectPreviewTab'
+                  data-track-metadata={JSON.stringify({ tabId: tab.id, tabTitle: tab.title })}
                 >
                   <Globe size={12} className='flex-shrink-0 text-gray-400' />
                   <span className='truncate max-w-[120px] text-xs font-medium'>
@@ -191,6 +198,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
                   onClick={e => closeTab(tab.id, e)}
                   className='px-2 py-2 opacity-0 group-hover:opacity-100 hover:bg-gray-200 transition-all'
                   title='Close tab'
+                  data-track-category='Workflows'
+                  data-track-name='ClosePreviewTab'
+                  data-track-metadata={JSON.stringify({ tabId: tab.id })}
                 >
                   <X size={12} className='text-gray-400' />
                 </button>
@@ -206,6 +216,8 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
               onClick={() => openUrl('about:blank', 'New Tab')}
               className='flex items-center justify-center p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors'
               title='New tab'
+              data-track-category='Workflows'
+              data-track-name='AddNewPreviewTab'
             >
               <Plus size={14} />
             </button>
@@ -218,6 +230,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
               disabled={isLoading || !activeTab}
               className='p-1.5 rounded hover:bg-gray-200 transition-colors disabled:opacity-50'
               title='Refresh'
+              data-track-category='Workflows'
+              data-track-name='RefreshPreviewTab'
+              data-track-metadata={JSON.stringify({ tabId: activeTabId })}
             >
               <RefreshCw size={14} className={`text-gray-500 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
@@ -226,6 +241,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
               disabled={!activeTab || activeTab.url === 'about:blank'}
               className='p-1.5 rounded hover:bg-gray-200 transition-colors disabled:opacity-50'
               title='Open in browser'
+              data-track-category='Workflows'
+              data-track-name='OpenPreviewInExternalBrowser'
+              data-track-metadata={JSON.stringify({ tabId: activeTabId, url: activeTab?.url })}
             >
               <ExternalLink size={14} className='text-gray-500' />
             </button>

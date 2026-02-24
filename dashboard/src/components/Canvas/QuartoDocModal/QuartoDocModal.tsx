@@ -358,6 +358,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
               ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
               : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600',
           )}
+          data-track-category='CANVAS'
+          data-track-name='Select_Public_Quarto_Doc'
+          data-track-metadata={JSON.stringify({})}
         >
           <Globe className='h-8 w-8 text-blue-500' />
           <span className='font-medium'>Public</span>
@@ -372,6 +375,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
               ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
               : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600',
           )}
+          data-track-category='CANVAS'
+          data-track-name='Select_Private_Quarto_Doc'
+          data-track-metadata={JSON.stringify({})}
         >
           <Lock className='h-8 w-8 text-purple-500' />
           <span className='font-medium'>Private</span>
@@ -398,6 +404,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
         <button
           onClick={() => setDocType(null)}
           className='p-1 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-700'
+          data-track-category='CANVAS'
+          data-track-name='BackTo_Quarto_Doc_Type_Selection'
+          data-track-metadata={JSON.stringify({})}
         >
           <ArrowLeft className='h-4 w-4' />
         </button>
@@ -421,6 +430,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
               <button
                 onClick={() => setShowAddForm(false)}
                 className='text-gray-400 hover:text-gray-600'
+                data-track-category='CANVAS'
+                data-track-name='Cancel_Add_Repository'
+                data-track-metadata={JSON.stringify({})}
               >
                 <X className='h-4 w-4' />
               </button>
@@ -444,6 +456,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
               onClick={() => void handleSaveNewRepo()}
               disabled={isSavingRepo || !newRepoName.trim() || !newRepoUrl.trim()}
               className='w-full'
+              data-track-category='CANVAS'
+              data-track-name='Save_New_Repository'
+              data-track-metadata={JSON.stringify({ repoName: newRepoName })}
             >
               {isSavingRepo ? <Loader2 className='h-4 w-4 animate-spin' /> : 'Add Repository'}
             </Button>
@@ -456,6 +471,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
               <button
                 onClick={() => setEditingRepo(null)}
                 className='text-gray-400 hover:text-gray-600'
+                data-track-category='CANVAS'
+                data-track-name='Cancel_Edit_Repository'
+                data-track-metadata={JSON.stringify({ repoId: editingRepo?.id })}
               >
                 <X className='h-4 w-4' />
               </button>
@@ -479,6 +497,12 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
               onClick={() => void handleSaveEditRepo()}
               disabled={!editRepoName.trim() || !editRepoUrl.trim()}
               className='w-full'
+              data-track-category='CANVAS'
+              data-track-name='Save_Edit_Repository'
+              data-track-metadata={JSON.stringify({
+                repoId: editingRepo?.id,
+                repoName: editRepoName,
+              })}
             >
               Save Changes
             </Button>
@@ -489,6 +513,8 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
             <button
               onClick={() => setShowRepoDropdown(!showRepoDropdown)}
               className='w-full flex items-center justify-between px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+              data-track-category='CANVAS'
+              data-track-name='Toggle_Repo_Dropdown'
             >
               <span className={selectedRepo ? 'text-gray-900 dark:text-white' : 'text-gray-400'}>
                 {selectedRepo?.name || 'Select a repository...'}
@@ -510,6 +536,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
                       value={repoSearchQuery}
                       onChange={e => setRepoSearchQuery(e.target.value)}
                       className='w-full pl-8 pr-3 py-1.5 text-sm border rounded bg-gray-50 dark:bg-gray-700'
+                      data-track-event='blur'
+                      data-track-category='CANVAS'
+                      data-track-name='Repo_Search_Input'
                     />
                   </div>
                 </div>
@@ -533,6 +562,12 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
                           if (branches?.[0]) setSelectedBranch(branches[0]);
                           setShowRepoDropdown(false);
                         }}
+                        data-track-category='CANVAS'
+                        data-track-name='Select_Repository'
+                        data-track-metadata={JSON.stringify({
+                          repoId: repo.id,
+                          repoName: repo.name,
+                        })}
                       >
                         <span className='font-medium'>{repo.name}</span>
                         <span className='text-xs text-gray-500 block truncate'>{repo.url}</span>
@@ -546,6 +581,12 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
                           }}
                           className='p-1 text-gray-400 hover:text-blue-500'
                           title='Edit repository'
+                          data-track-category='CANVAS'
+                          data-track-name='Edit_Repository'
+                          data-track-metadata={JSON.stringify({
+                            repoId: repo.id,
+                            repoName: repo.name,
+                          })}
                         >
                           <Pencil className='h-3.5 w-3.5' />
                         </button>
@@ -558,6 +599,12 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
                           }}
                           className='p-1 text-gray-400 hover:text-red-500'
                           title='Delete repository'
+                          data-track-category='CANVAS'
+                          data-track-name='Delete_Repository'
+                          data-track-metadata={JSON.stringify({
+                            repoId: repo.id,
+                            repoName: repo.name,
+                          })}
                         >
                           <Trash2 className='h-3.5 w-3.5' />
                         </button>
@@ -572,6 +619,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
                     setShowRepoDropdown(false);
                   }}
                   className='w-full flex items-center gap-2 px-3 py-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-t'
+                  data-track-category='CANVAS'
+                  data-track-name='Open_Add_Repository_Form'
+                  data-track-metadata={JSON.stringify({})}
                 >
                   <Plus className='h-4 w-4' />
                   Add new repository
@@ -593,6 +643,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
               <button
                 onClick={() => setShowBranchDropdown(!showBranchDropdown)}
                 className='w-full flex items-center justify-between px-3 py-2 border rounded-lg bg-white dark:bg-gray-800'
+                data-track-category='CANVAS'
+                data-track-name='Toggle_Branch_Dropdown'
+                data-track-metadata={JSON.stringify({ repoId: selectedRepo?.id })}
               >
                 <div className='flex items-center gap-2'>
                   <GitBranch className='h-4 w-4 text-gray-400' />
@@ -616,6 +669,9 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
                         'w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700',
                         selectedBranch === branch && 'bg-blue-50 dark:bg-blue-900/20',
                       )}
+                      data-track-category='CANVAS'
+                      data-track-name='Select_Branch'
+                      data-track-metadata={JSON.stringify({ branch, repoId: selectedRepo?.id })}
                     >
                       {branch}
                     </button>
@@ -663,10 +719,26 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
 
         {canContinue && (
           <div className='flex justify-end gap-2 pt-4 border-t'>
-            <Button variant='outline' onClick={onClose}>
+            <Button
+              variant='outline'
+              onClick={onClose}
+              data-track-category='CANVAS'
+              data-track-name='Cancel_Quarto_Doc_Creation'
+              data-track-metadata={JSON.stringify({ docType })}
+            >
               Cancel
             </Button>
-            <Button onClick={handleContinue} disabled={isLoading}>
+            <Button
+              onClick={handleContinue}
+              disabled={isLoading}
+              data-track-category='CANVAS'
+              data-track-name='Continue_Quarto_Doc_Creation'
+              data-track-metadata={JSON.stringify({
+                docType,
+                repoId: selectedRepo?.id,
+                branch: selectedBranch,
+              })}
+            >
               {isLoading ? (
                 <>
                   <Loader2 className='h-4 w-4 animate-spin mr-2' />

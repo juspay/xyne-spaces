@@ -83,6 +83,9 @@ const SidebarItem = ({
 
         isActive ? 'bg-[#E4E6E7]' : 'bg-transparent',
       )}
+      data-track-category='Projects'
+      data-track-name='SelectSidebarItem'
+      data-track-metadata={JSON.stringify({ label, isActive })}
     >
       {/* Icon */}
       {renderLeadingElement()}

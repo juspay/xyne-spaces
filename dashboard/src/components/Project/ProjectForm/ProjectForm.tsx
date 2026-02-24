@@ -113,6 +113,9 @@ export const ProjectForm = ({
           text='Cancel'
           onClick={onCancel}
           disabled={isLoading}
+          data-track-category='Projects'
+          data-track-name='CancelProjectForm'
+          data-track-metadata={JSON.stringify({ projectId: project?.id, isEdit })}
         />
         <Button
           buttonType={ButtonType.PRIMARY}
@@ -127,6 +130,9 @@ export const ProjectForm = ({
           }
           onClick={handleSubmit}
           disabled={isLoading || !name.trim()}
+          data-track-category='Projects'
+          data-track-name='SubmitProjectForm'
+          data-track-metadata={JSON.stringify({ projectId: project?.id, isEdit })}
         />
       </div>
     </div>

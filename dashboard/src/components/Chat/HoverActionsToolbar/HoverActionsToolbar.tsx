@@ -151,6 +151,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             onClick={e => onReplyInThread(e)}
             title='Reply in thread'
             data-testid='hover-action-reply-in-thread'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='REPLY_IN_THREAD'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <MessageCircleMore className='w-4 h-4' />
           </Button>
@@ -164,6 +167,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onSendToChannel}
             title='Send to channel'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='SEND_TO_CHANNEL'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <CornerUpLeft className='w-4 h-4' />
           </Button>
@@ -179,6 +185,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             onClick={onCreateTicket}
             title='Create ticket'
             data-testid='hover-action-create-ticket'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='CREATE_TICKET_FROM_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <Ticket className='w-4 h-4' />
           </Button>
@@ -193,6 +202,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onCreateSubTicket}
             title='Create subticket'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='CREATE_SUBTICKET_FROM_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <SquareAsterisk className='w-4 h-4' />
           </Button>
@@ -207,6 +219,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onCopyLink}
             title='Copy link'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='COPY_LINK'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <Link className='w-4 h-4' />
           </Button>
@@ -221,6 +236,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onCopyMessage}
             title='Copy message'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='COPY_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <Copy className='w-4 h-4' />
           </Button>
@@ -235,6 +253,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onForwardMessage}
             title='Forward message'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='FORWARD_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <Forward className='w-4 h-4' />
           </Button>
@@ -248,6 +269,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             variant='ghost'
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onPinMessage}
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='TOGGLE_PIN_MESSAGE'
+            data-track-metadata={JSON.stringify({ isPinned, messageId })}
           >
             {isPinned ? <UnpinIcon className='w-4 h-4' /> : <Pin className='w-4 h-4' />}
           </Button>
@@ -277,6 +301,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onBookmark}
             title={isBookmarked ? 'Remove bookmark' : 'Add Bookmark'}
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='TOGGLE_BOOKMARK'
+            data-track-metadata={JSON.stringify({ isBookmarked, messageId })}
           >
             {isBookmarked ? (
               <BookmarkMinus className='w-4 h-4' />
@@ -295,6 +322,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onMarkAsUnread}
             title='Mark as Unread'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='MARK_AS_UNREAD'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <div className='relative flex items-center justify-center w-4 h-4'>
               <div className='w-2.5 h-2.5 rounded-full border-2 border-current' />
@@ -311,6 +341,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-[rgba(120,129,135,1)]'
             onClick={onEditMessage}
             title='Edit in Chat'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='EDIT_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <EditMessageIcon className='w-4 h-4' />
           </Button>
@@ -325,6 +358,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             className='size-7 text-red-600 dark:text-red-400'
             onClick={onDeleteMessage}
             title='Delete'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='DELETE_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId })}
           >
             <Trash2 className='w-4 h-4' />
           </Button>

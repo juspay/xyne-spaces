@@ -59,7 +59,14 @@ const CanvasLink = ({
   };
 
   return (
-    <a href={href} onClick={handleClick} {...props}>
+    <a
+      href={href}
+      onClick={handleClick}
+      {...props}
+      data-track-category='MESSAGE'
+      data-track-name='OPEN_CANVAS_LINK'
+      data-track-metadata={JSON.stringify({ href })}
+    >
       {children}
     </a>
   );
@@ -162,6 +169,9 @@ function ChannelMentionRenderer({
             type='button'
             onClick={handleChannelClick}
             className='text-xs cursor-pointer bg-none border border-gray-200 px-2 py-1 rounded-md text-gray-700 hover:bg-gray-100 w-full'
+            data-track-category='MESSAGE'
+            data-track-name='VIEW_CHANNEL_MENTION'
+            data-track-metadata={JSON.stringify({ channelId })}
           >
             View Channel
           </button>
@@ -207,6 +217,9 @@ function CollapsibleConversationHistory({
         type='button'
         onClick={toggleExpanded}
         className='see-more-btn text-blue-600 hover:text-blue-800 font-medium text-sm underline cursor-pointer bg-none border-none p-0 mb-2'
+        data-track-category='MESSAGE'
+        data-track-name='TOGGLE_CONVERSATION_HISTORY'
+        data-track-metadata={JSON.stringify({ isExpanded })}
       >
         {isExpanded ? 'See less' : 'See more'}
       </button>

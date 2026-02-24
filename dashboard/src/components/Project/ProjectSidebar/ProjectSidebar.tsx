@@ -102,6 +102,8 @@ const ProjectSidebar = ({
               onClick={onClose}
               className='p-2 hover:bg-gray-100 rounded-md transition-colors'
               aria-label='Close sidebar'
+              data-track-category='Projects'
+              data-track-name='CloseProjectSidebar'
             >
               <ChevronLeft className='size-4 text-gray-600' />
             </button>
@@ -139,6 +141,12 @@ const ProjectSidebar = ({
                       console.log('Navigate to favorite:', favorite);
                     }
                   }}
+                  data-track-category='Projects'
+                  data-track-name='SelectFavorite'
+                  data-track-metadata={JSON.stringify({
+                    favoriteId: favorite.id,
+                    favoriteName: favorite.name,
+                  })}
                 />
               ))}
             </div>
@@ -167,6 +175,8 @@ const ProjectSidebar = ({
                 <button
                   onClick={projectsSearch.openSearch}
                   className='p-1 hover:bg-gray-100 rounded transition-colors'
+                  data-track-category='Projects'
+                  data-track-name='OpenProjectSearch'
                 >
                   <Search className='size-3 text-gray-500' />
                 </button>
@@ -233,6 +243,8 @@ const ProjectSidebar = ({
                 <button
                   onClick={groupsSearch.openSearch}
                   className='p-1 hover:bg-gray-100 rounded transition-colors'
+                  data-track-category='Projects'
+                  data-track-name='OpenGroupSearch'
                 >
                   <Search className='size-3 text-gray-500' />
                 </button>
@@ -255,6 +267,12 @@ const ProjectSidebar = ({
                     onClick={() => {
                       void navigate(`/projects?group=${group.id}`);
                     }}
+                    data-track-category='Projects'
+                    data-track-name='SelectGroupFilter'
+                    data-track-metadata={JSON.stringify({
+                      groupId: group.id,
+                      groupName: group.name,
+                    })}
                   />
                 ))
               )}
@@ -284,6 +302,8 @@ const ProjectSidebar = ({
                 <button
                   onClick={personsSearch.openSearch}
                   className='p-1 hover:bg-gray-100 rounded transition-colors'
+                  data-track-category='Projects'
+                  data-track-name='OpenPersonSearch'
                 >
                   <Search className='size-3 text-gray-500' />
                 </button>
@@ -311,6 +331,12 @@ const ProjectSidebar = ({
                       onClick={() => {
                         void navigate(`/projects?assignee=${person.id}`);
                       }}
+                      data-track-category='Projects'
+                      data-track-name='SelectPersonFilter'
+                      data-track-metadata={JSON.stringify({
+                        personId: person.id,
+                        personName: person.name,
+                      })}
                     />
                   ))}
                   {/* Show more button */}
@@ -318,6 +344,8 @@ const ProjectSidebar = ({
                     <button
                       onClick={() => setVisiblePersonsCount(prev => prev + 5)}
                       className='w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors hover:bg-gray-100 group'
+                      data-track-category='Projects'
+                      data-track-name='ShowMorePersons'
                     >
                       <ChevronDown className='size-2 text-gray-400 group-hover:text-gray-500' />
                       <span className='text-[10px] text-gray-400 group-hover:text-gray-600'>

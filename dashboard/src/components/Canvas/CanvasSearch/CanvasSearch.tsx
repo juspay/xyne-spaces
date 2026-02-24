@@ -116,6 +116,9 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
           onKeyDown={handleKeyDown}
           placeholder='Search in canvas...'
           className='w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+          data-track-event='blur'
+          data-track-category='CANVAS'
+          data-track-name='Canvas_Search_Input'
         />
       </div>
 
@@ -126,6 +129,13 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
             className='p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed'
             disabled={matches.length === 0}
             aria-label='Previous match'
+            data-track-category='CANVAS'
+            data-track-name='Search_Previous_Match'
+            data-track-metadata={JSON.stringify({
+              query,
+              currentIndex,
+              totalMatches: matches.length,
+            })}
           >
             <svg
               xmlns='http://www.w3.org/2000/svg'
@@ -151,6 +161,13 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
             className='p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed'
             disabled={matches.length === 0}
             aria-label='Next match'
+            data-track-category='CANVAS'
+            data-track-name='Search_Next_Match'
+            data-track-metadata={JSON.stringify({
+              query,
+              currentIndex,
+              totalMatches: matches.length,
+            })}
           >
             <svg
               xmlns='http://www.w3.org/2000/svg'
@@ -173,6 +190,9 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
         onClick={onClose}
         className='p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700'
         aria-label='Close search'
+        data-track-category='CANVAS'
+        data-track-name='Close_Canvas_Search'
+        data-track-metadata={JSON.stringify({ query })}
       >
         <svg
           xmlns='http://www.w3.org/2000/svg'

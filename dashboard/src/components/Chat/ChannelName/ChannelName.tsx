@@ -71,6 +71,9 @@ export const ChannelName: React.FC<ChannelNameProps> = ({
     <button
       className={`flex items-center space-x-3 ${onClick ? 'cursor-pointer' : ''} ${className}`}
       onClick={onClick}
+      data-track-category='CHANNEL_NAME'
+      data-track-name='OPEN_CHANNEL_DETAILS'
+      data-track-metadata={JSON.stringify({ channelId: channel.id })}
     >
       {showIcon && renderChannelIcon()}
       <span

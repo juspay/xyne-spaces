@@ -215,6 +215,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
               data-testid='canvas-filter-all'
+              data-track-category='CANVAS'
+              data-track-name='FILTER_ALL'
+              data-track-metadata={JSON.stringify({ filter: 'all', canvasCount: canvases.length })}
             >
               All
             </button>
@@ -226,6 +229,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
               data-testid='canvas-filter-created-by-me'
+              data-track-category='CANVAS'
+              data-track-name='FILTER_CREATED_BY_ME'
+              data-track-metadata={JSON.stringify({ filter: 'created_by_me' })}
             >
               Created by me
             </button>
@@ -238,6 +244,12 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                     : 'text-gray-600 hover:bg-gray-50'
                 }`}
                 data-testid='canvas-filter-quarto-docs'
+                data-track-category='CANVAS'
+                data-track-name='FILTER_QUARTO_DOCS'
+                data-track-metadata={JSON.stringify({
+                  filter: 'quarto_docs',
+                  quartoCount: quartoDocs.length,
+                })}
               >
                 <BookMarked className='w-3.5 h-3.5' />
                 Quarto Docs
@@ -294,6 +306,13 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   tabIndex={0}
                   className='group flex items-center px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer'
                   onClick={() => (isQuartoDoc ? handleQuartoDocClick(canvas) : onSelect(canvas))}
+                  data-track-category='CANVAS'
+                  data-track-name={isQuartoDoc ? 'Open_Quarto_Doc' : 'Open_Canvas'}
+                  data-track-metadata={JSON.stringify({
+                    canvasId: canvas.id,
+                    title: canvas.title,
+                    isQuartoDoc,
+                  })}
                   data-testid={`canvas-item-${canvas.id}`}
                   onMouseEnter={() => {
                     if (!isQuartoDoc && canvas.isCollaborative !== false) {
@@ -397,6 +416,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                           setParticipantsTrayCanvas(canvas);
                         }}
                         className='cursor-pointer'
+                        data-track-category='CANVAS'
+                        data-track-name='Open_Participants_Tray'
+                        data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
                       >
                         {/* Mobile: show 2 participants */}
                         <div className='md:hidden'>
@@ -414,6 +436,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                         <button
                           onClick={e => e.stopPropagation()}
                           className='p-1.5 rounded hover:bg-gray-100'
+                          data-track-category='CANVAS'
+                          data-track-name='Open_Canvas_Menu'
+                          data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
                         >
                           <MoreVertical className='w-4 h-4 text-gray-500' strokeWidth={2.5} />
                         </button>
@@ -426,6 +451,12 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                               onDuplicate(canvas.id);
                             }}
                             className='flex items-center gap-2 cursor-pointer'
+                            data-track-category='CANVAS'
+                            data-track-name='Duplicate_Canvas'
+                            data-track-metadata={JSON.stringify({
+                              canvasId: canvas.id,
+                              title: canvas.title,
+                            })}
                           >
                             <Copy className='w-4 h-4' />
                             Duplicate
@@ -445,6 +476,13 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                               }
                             }}
                             className='flex items-center gap-2 cursor-pointer'
+                            data-track-category='CANVAS'
+                            data-track-name={isQuartoDoc ? 'Copy_Quarto_Doc_Link' : 'Share_Canvas'}
+                            data-track-metadata={JSON.stringify({
+                              canvasId: canvas.id,
+                              title: canvas.title,
+                              isQuartoDoc,
+                            })}
                           >
                             <Share2 className='w-4 h-4' />
                             {isQuartoDoc ? 'Copy Link' : 'Share'}
@@ -461,6 +499,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                               }}
                               className='flex items-center gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50'
                               data-testid='canvas-delete-button'
+                              data-track-category='CANVAS'
+                              data-track-name='DELETE_CANVAS'
+                              data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
                             >
                               <Trash2 className='w-4 h-4' />
                               Delete

@@ -32,6 +32,8 @@ export const XyneAIHeader = ({
               onClick={onNewChat}
               className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
               title='New chat'
+              data-track-category='XyneAI'
+              data-track-name='NEW_CHAT'
             >
               <img
                 src='/svgs/icons/new-chat.svg'
@@ -57,6 +59,8 @@ export const XyneAIHeader = ({
               onClick={onShowHistory}
               className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
               title='Chat history'
+              data-track-category='XyneAI'
+              data-track-name='SHOW_HISTORY_MOBILE'
             >
               <ChatHistory />
             </button>
@@ -64,6 +68,8 @@ export const XyneAIHeader = ({
               onClick={handleClose}
               className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
               title='Close'
+              data-track-category='XyneAI'
+              data-track-name='CLOSE_MOBILE'
             >
               <img
                 src='/svgs/icons/close.svg'
@@ -95,6 +101,8 @@ export const XyneAIHeader = ({
             onClick={onNewChat}
             className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
             title='New chat'
+            data-track-category='XyneAI'
+            data-track-name='NEW_CHAT_DESKTOP'
           >
             <img src='/svgs/icons/new-chat.svg' alt='New chat' width='16' height='16' />
           </button>
@@ -103,6 +111,8 @@ export const XyneAIHeader = ({
             onClick={onShowHistory}
             className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
             title='Chat history'
+            data-track-category='XyneAI'
+            data-track-name='SHOW_HISTORY_DESKTOP'
           >
             <ChatHistory />
           </button>
@@ -118,6 +128,8 @@ export const XyneAIHeader = ({
           <button
             onClick={handleClose}
             className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            data-track-category='XyneAI'
+            data-track-name='CLOSE_DESKTOP'
           >
             <img src='/svgs/icons/close.svg' alt='Close' width='16' height='16' />
           </button>

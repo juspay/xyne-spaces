@@ -129,6 +129,8 @@ const MobileChatDirectory = ({
         <button
           onClick={() => setIsCommandMenuOpen(true)}
           className='w-full flex items-center gap-3 px-4 py-3 bg-white bg-opacity-70 rounded-full text-left border border-[#181B1D] border-opacity-[0.06]'
+          data-track-category='MOBILE_CHAT_DIRECTORY'
+          data-track-name='OPEN_SEARCH_MOBILE'
         >
           <Search className='size-5 text-gray-400 shrink-0' />
           <span className='text-sm text-gray-400'>Search...</span>
@@ -198,6 +200,8 @@ const MobileChatDirectory = ({
                       e.stopPropagation();
                       setShowAddChannelForm(true);
                     }}
+                    data-track-category='MOBILE_CHAT_DIRECTORY'
+                    data-track-name='ADD_CHANNEL_MOBILE'
                   >
                     <Plus className='size-5' />
                   </button>
@@ -238,6 +242,8 @@ const MobileChatDirectory = ({
                       e.stopPropagation();
                       handleAddDirectMessage();
                     }}
+                    data-track-category='MOBILE_CHAT_DIRECTORY'
+                    data-track-name='ADD_DM_MOBILE'
                   >
                     <Plus className='size-5' />
                   </button>

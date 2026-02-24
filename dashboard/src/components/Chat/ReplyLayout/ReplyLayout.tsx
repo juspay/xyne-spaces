@@ -67,6 +67,9 @@ const ReplyLayout: React.FC<{
         }`}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
+        data-track-category='MESSAGE'
+        data-track-name='OPEN_THREAD_FROM_REPLY_LAYOUT'
+        data-track-metadata={JSON.stringify({ replyCount: replies?.replyCount, messageId })}
       >
         {/* Participant Avatars */}
         {participants.length > 0 && (

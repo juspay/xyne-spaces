@@ -113,6 +113,9 @@ export function ParticipantsSidebar({
     <button
       onClick={onToggle}
       className='flex items-center justify-between w-full px-3 py-2.5 hover:bg-gray-50 transition-colors'
+      data-track-category='CALLS'
+      data-track-name='Toggle_Participants_Section'
+      data-track-metadata={JSON.stringify({ section: title, isExpanded: !isExpanded })}
     >
       <span className='text-sm font-medium text-foreground'>{title}</span>
       <div className='flex items-center gap-4'>
@@ -141,6 +144,9 @@ export function ParticipantsSidebar({
               className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white hover:bg-gray-100 text-black border border-gray-300 transition-colors'
               title='Add People'
               data-testid='add-people-button'
+              data-track-category='CALLS'
+              data-track-name='ADD_PEOPLE_TO_CALL'
+              data-track-metadata={JSON.stringify({ callId })}
             >
               <UserPlus size={16} />
               <span className='text-sm font-medium'>Add People</span>
@@ -149,6 +155,8 @@ export function ParticipantsSidebar({
               onClick={onClose}
               className='p-1 hover:bg-gray-100 rounded-full transition-colors'
               title='Close'
+              data-track-category='CALLS'
+              data-track-name='Close_Participants_Sidebar'
             >
               <X size={20} className='text-muted-foreground' />
             </button>

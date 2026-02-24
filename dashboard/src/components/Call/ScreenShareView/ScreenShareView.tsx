@@ -190,6 +190,9 @@ export function ScreenShareView({
                 compact={compact}
                 aiController={aiController ?? null}
                 requestedAiController={requestedAiController ?? false}
+                data-track-category='CALLS'
+                data-track-name='Select_Screen_Share'
+                data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
               />
             );
           })}

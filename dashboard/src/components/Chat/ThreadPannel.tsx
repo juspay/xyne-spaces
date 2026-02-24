@@ -830,6 +830,9 @@ export const ThreadMessages = ({
                       onClick={handleCloseTicketDetailsThread}
                       className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
                       aria-label='Close thread panel'
+                      data-track-category='THREAD_PANEL'
+                      data-track-name='CLOSE_THREAD_PANEL'
+                      data-track-metadata={JSON.stringify({ conversationId })}
                     >
                       <X size={20} />
                     </button>
@@ -1069,6 +1072,12 @@ export const ThreadMessages = ({
                           onClick={handleCreateTicket}
                           title='Create ticket'
                           data-testid='thread-create-ticket-button'
+                          data-track-category='THREAD_PANEL'
+                          data-track-name='CREATE_TICKET_FROM_THREAD'
+                          data-track-metadata={JSON.stringify({
+                            channelId: channel?.id,
+                            projectId: channel?.projectId,
+                          })}
                         >
                           <Ticket size={18} />
                           <span className='text-sm font-medium'>Create Ticket</span>
@@ -1090,6 +1099,9 @@ export const ThreadMessages = ({
                           onClick={handleCloseTicketDetailsThread}
                           className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
                           aria-label='Close thread panel'
+                          data-track-category='THREAD_PANEL'
+                          data-track-name='CLOSE_THREAD_PANEL'
+                          data-track-metadata={JSON.stringify({ conversationId })}
                         >
                           <X size={20} />
                         </button>

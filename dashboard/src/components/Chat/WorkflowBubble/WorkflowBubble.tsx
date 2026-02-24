@@ -98,6 +98,9 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
                 void navigator.clipboard.writeText(workflowName);
               }}
               aria-label='Copy workflow name'
+              data-track-category='WORKFLOW_BUBBLE'
+              data-track-name='COPY_WORKFLOW_NAME'
+              data-track-metadata={JSON.stringify({ workflowName, ticketId })}
             >
               <Copy size={12} color='#788187' />
             </button>
@@ -115,6 +118,12 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
               disabled={isRerunning || !latestExecution?.id}
               className='flex items-center gap-1'
               title='Rerun workflow from start'
+              data-track-category='WORKFLOW_BUBBLE'
+              data-track-name='RERUN_WORKFLOW'
+              data-track-metadata={JSON.stringify({
+                ticketId,
+                latestExecutionId: latestExecution?.id,
+              })}
             >
               <RefreshCw size={12} className={isRerunning ? 'animate-spin' : ''} />
               {isRerunning ? 'Rerunning...' : 'Rerun'}
@@ -131,6 +140,9 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
             }}
             color='#788187'
             size={14}
+            data-track-category='WORKFLOW_BUBBLE'
+            data-track-name='OPEN_WORKFLOW_DETAILS'
+            data-track-metadata={JSON.stringify({ ticketId, workflowId: metadata?.workflowId })}
           />
         </div>
       </div>

@@ -604,6 +604,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
             size='sm'
             onClick={() => setShowAddForm(false)}
             className='-mt-1 -ml-1'
+            data-track-category='Tickets'
+            data-track-name='BackFromAddRepoForm'
           >
             <ArrowLeft className='w-4 h-4' />
             Back
@@ -667,6 +669,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
               className='flex-1'
               onClick={() => setShowAddForm(false)}
               disabled={isSavingRepo}
+              data-track-category='Tickets'
+              data-track-name='CancelAddRepo'
             >
               Cancel
             </Button>
@@ -677,6 +681,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                 void handleAddRepo();
               }}
               disabled={isSavingRepo || !newRepoName.trim() || !newRepoUrl.trim()}
+              data-track-category='Tickets'
+              data-track-name='AddRepository'
             >
               {isSavingRepo ? <Loader2 className='w-4 h-4 animate-spin' /> : 'Add Repository'}
             </Button>
@@ -700,6 +706,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
             size='sm'
             onClick={() => setEditingRepo(null)}
             className='-mt-1 -ml-1'
+            data-track-category='Tickets'
+            data-track-name='BackFromEditRepo'
           >
             <ArrowLeft className='w-4 h-4' />
             Back
@@ -758,7 +766,13 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
           )}
 
           <div className='flex gap-2 pt-2'>
-            <Button variant='secondary' className='flex-1' onClick={() => setEditingRepo(null)}>
+            <Button
+              variant='secondary'
+              className='flex-1'
+              onClick={() => setEditingRepo(null)}
+              data-track-category='Tickets'
+              data-track-name='CancelEditRepo'
+            >
               Cancel
             </Button>
             <Button
@@ -766,6 +780,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
               className='flex-1'
               onClick={() => void handleSaveEditRepo()}
               disabled={!editRepoName.trim() || !editRepoUrl.trim()}
+              data-track-category='Tickets'
+              data-track-name='SaveEditRepo'
             >
               Save Changes
             </Button>
@@ -801,7 +817,13 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                   <p className='text-sm text-red-600 mt-1'>{error}</p>
                 </div>
                 <div className='flex gap-3 pt-2 w-full'>
-                  <Button variant='secondary' className='flex-1' onClick={onClose}>
+                  <Button
+                    variant='secondary'
+                    className='flex-1'
+                    onClick={onClose}
+                    data-track-category='Tickets'
+                    data-track-name='CancelQuartoSetup'
+                  >
                     Cancel
                   </Button>
                   <Button
@@ -811,6 +833,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                       setError(null);
                       void handleQuartoAutoOpen();
                     }}
+                    data-track-category='Tickets'
+                    data-track-name='RetryQuartoSetup'
                   >
                     Retry
                   </Button>
@@ -921,6 +945,9 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                         <button
                           className='flex-1 text-left min-w-0'
                           onClick={() => selectRepo(repo)}
+                          data-track-category='Tickets'
+                          data-track-name='SelectRepo'
+                          data-track-metadata={JSON.stringify({ repoId: repo.id })}
                         >
                           <span
                             className={`text-sm font-medium block truncate ${selectedRepo?.id === repo.id ? 'text-blue-700' : 'text-gray-900'}`}
@@ -937,6 +964,12 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                             }}
                             className='p-1 text-gray-400 hover:text-blue-500 rounded'
                             title='Edit repository'
+                            data-track-category='Tickets'
+                            data-track-name='EditRepo'
+                            data-track-metadata={JSON.stringify({
+                              repoId: repo.id,
+                              repoName: repo.name,
+                            })}
                           >
                             <Pencil className='w-3.5 h-3.5' />
                           </button>
@@ -949,6 +982,12 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                             }}
                             className='p-1 text-gray-400 hover:text-red-500 rounded'
                             title='Delete repository'
+                            data-track-category='Tickets'
+                            data-track-name='DeleteRepo'
+                            data-track-metadata={JSON.stringify({
+                              repoId: repo.id,
+                              repoName: repo.name,
+                            })}
                           >
                             <Trash2 className='w-3.5 h-3.5' />
                           </button>
@@ -972,6 +1011,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                     variant='ghost'
                     onClick={() => handleStartAddRepo(repoSearchQuery.trim())}
                     className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-blue-600 hover:bg-blue-50 border-t border-gray-100 justify-start'
+                    data-track-category='Tickets'
+                    data-track-name='AddNewRepoFromSearch'
                   >
                     <Plus className='w-4 h-4' />
                     Add &quot;{repoSearchQuery.trim()}&quot;
@@ -984,6 +1025,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                     variant='ghost'
                     onClick={() => handleStartAddRepo()}
                     className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-gray-600 hover:bg-gray-50 border-t border-gray-100 justify-start'
+                    data-track-category='Tickets'
+                    data-track-name='AddNewRepo'
                   >
                     <Plus className='w-4 h-4' />
                     Add new repository
@@ -1058,6 +1101,9 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                               ? 'bg-blue-50 text-blue-700'
                               : 'text-gray-900 hover:bg-gray-50'
                           }`}
+                          data-track-category='Tickets'
+                          data-track-name='SelectBranch'
+                          data-track-metadata={JSON.stringify({ branch })}
                         >
                           <GitBranch className='w-4 h-4 text-gray-400' />
                           {branch}
@@ -1072,6 +1118,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                           onClick={handleAddNewBranch}
                           disabled={isAddingBranch}
                           className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-blue-600 hover:bg-blue-50 border-t border-gray-100 justify-start'
+                          data-track-category='Tickets'
+                          data-track-name='AddNewBranch'
                         >
                           {isAddingBranch ? (
                             <Loader2 className='w-4 h-4 animate-spin' />
@@ -1152,6 +1200,9 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                               ? 'bg-blue-50 text-blue-700'
                               : 'text-gray-900 hover:bg-gray-50'
                           }`}
+                          data-track-category='Tickets'
+                          data-track-name='SelectPrefix'
+                          data-track-metadata={JSON.stringify({ prefix })}
                         >
                           <Tag className='w-4 h-4 text-gray-400' />
                           {prefix}
@@ -1166,6 +1217,8 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                           onClick={handleAddNewPrefix}
                           disabled={isAddingPrefix}
                           className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-blue-600 hover:bg-blue-50 border-t border-gray-100 justify-start'
+                          data-track-category='Tickets'
+                          data-track-name='AddNewPrefix'
                         >
                           {isAddingPrefix ? (
                             <Loader2 className='w-4 h-4 animate-spin' />
@@ -1235,7 +1288,14 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
 
         {/* Actions */}
         <div className='flex gap-3 pt-2'>
-          <Button variant='secondary' className='flex-1' onClick={onClose} disabled={isLoading}>
+          <Button
+            variant='secondary'
+            className='flex-1'
+            onClick={onClose}
+            disabled={isLoading}
+            data-track-category='Tickets'
+            data-track-name='CancelOpenIDE'
+          >
             Cancel
           </Button>
           <Button
@@ -1245,6 +1305,9 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
               void handleOpenIDE();
             }}
             disabled={isLoading || !selectedRepo}
+            data-track-category='Tickets'
+            data-track-name='OpenIDE'
+            data-track-metadata={JSON.stringify({ repoId: selectedRepo?.id, branch: branchToUse })}
           >
             {isLoading ? (
               <>

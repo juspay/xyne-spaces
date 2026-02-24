@@ -74,6 +74,8 @@ const ApprovalNudgeBanner: React.FC<ApprovalNudgeBannerProps> = ({ ticketId, cla
             'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500',
             'transition-colors duration-150',
           )}
+          data-track-category='Tickets'
+          data-track-name='ReviewAndRespond'
         >
           Review &amp; Respond
         </button>

@@ -53,6 +53,9 @@ export const PrioritySubmenu = ({
               className={`flex items-center justify-between w-full px-3 py-2 transition-colors rounded-md 
                 ${isSelected ? 'bg-[#F2F2F3] text-gray-900' : 'hover:bg-gray-50 text-gray-900'}
               `}
+              data-track-category='Tickets'
+              data-track-name='TogglePriorityFilter'
+              data-track-metadata={JSON.stringify({ priority, selected: !isSelected })}
             >
               <div className='flex items-center gap-2'>
                 <div className='flex items-center justify-center'>

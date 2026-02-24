@@ -160,12 +160,17 @@ const ErrorState: React.FC<{
       <button
         onClick={onRetry}
         className='px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20 transition-colors text-sm backdrop-blur-sm'
+        data-track-category='FileViewer'
+        data-track-name='RETRY_LOAD_FILE'
+        data-track-metadata={JSON.stringify({ error })}
       >
         Try Again
       </button>
       <button
         onClick={onDownload}
         className='px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20 flex items-center gap-2 transition-colors text-sm backdrop-blur-sm'
+        data-track-category='FileViewer'
+        data-track-name='DOWNLOAD_FILE'
       >
         <Download className='h-4 w-4' />
         Download
@@ -187,6 +192,8 @@ const UnsupportedFileState: React.FC<{
     <button
       onClick={onDownload}
       className='px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20 flex items-center gap-2 transition-colors backdrop-blur-sm'
+      data-track-category='FileViewer'
+      data-track-name='DOWNLOAD_UNSUPPORTED_FILE'
     >
       <Download className='h-4 w-4' />
       Download File
@@ -396,6 +403,8 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
           <button
             onClick={() => void handleDownload()}
             className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
+            data-track-category='FileViewer'
+            data-track-name='DOWNLOAD_VIDEO'
           >
             <Download className='h-4 w-4' />
             Download Video
@@ -505,6 +514,8 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
           <button
             onClick={() => void handleDownload()}
             className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+            data-track-category='FileViewer'
+            data-track-name='DOWNLOAD_FILE_FROM_MODAL'
           >
             <Download className='h-4 w-4' />
           </button>

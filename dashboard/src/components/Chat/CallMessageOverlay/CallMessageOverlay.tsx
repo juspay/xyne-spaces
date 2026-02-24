@@ -126,6 +126,9 @@ export function CallMessageOverlay({
               onClick={() => handleCallAction(handleCallClick)}
               className='bg-green-600 hover:bg-green-700 text-white border-green-600 px-3 py-1 rounded-md text-sm font-medium transition-colors'
               data-testid='join-button'
+              data-track-category='CALLS'
+              data-track-name='JOIN_CALL_FROM_MESSAGE'
+              data-track-metadata={JSON.stringify({ callId: call.externalId, isUserInCall: false })}
             >
               Join
             </button>

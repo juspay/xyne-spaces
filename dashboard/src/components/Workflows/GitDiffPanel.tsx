@@ -202,6 +202,8 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
             onClick={() => void handleRefresh()}
             disabled={isRefreshing}
             className='flex items-center gap-1.5 px-3 py-1 bg-white border border-gray-300 text-gray-700 text-xs font-medium rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50'
+            data-track-category='Workflows'
+            data-track-name='RefreshGitDiff'
           >
             <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
             {isRefreshing ? 'Refreshing...' : 'Check for Updates'}
@@ -221,6 +223,9 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
             value={viewType}
             onChange={e => setViewType(e.target.value as 'split' | 'unified')}
             className='px-2 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+            data-track-category='Workflows'
+            data-track-name='ChangeGitDiffViewType'
+            data-track-metadata={JSON.stringify({ viewType })}
           >
             <option value='split'>Split View</option>
             <option value='unified'>Unified View</option>
@@ -249,6 +254,9 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
                       className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded transition-colors text-left ${
                         isSelected ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
                       }`}
+                      data-track-category='Workflows'
+                      data-track-name='SelectGitDiffFile'
+                      data-track-metadata={JSON.stringify({ fileName })}
                     >
                       {getFileIcon(file.type)}
                       <span className='truncate flex-1 font-mono'>{fileName}</span>

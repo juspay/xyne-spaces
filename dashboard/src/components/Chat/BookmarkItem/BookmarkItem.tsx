@@ -273,6 +273,9 @@ export const BookmarkItem = ({
   return (
     <div
       onClick={handleClick}
+      data-track-category='CHAT_BOOKMARK'
+      data-track-name='Open_Bookmark'
+      data-track-metadata={JSON.stringify({ entityId, entityType })}
       onKeyDown={(e): void => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -300,6 +303,9 @@ export const BookmarkItem = ({
               onClick={handleRemoveBookmark}
               className='p-1.5 rounded hover:bg-gray-200 transition-colors duration-150'
               aria-label='Mark as done'
+              data-track-category='CHAT_BOOKMARK'
+              data-track-name='Mark_Bookmark_Done'
+              data-track-metadata={JSON.stringify({ entityId })}
             >
               <Check size={16} className='text-[#788187]' strokeWidth={1.33} />
             </button>
@@ -310,6 +316,9 @@ export const BookmarkItem = ({
                 onClick={handleSnoozeClick}
                 className='p-1.5 rounded hover:bg-gray-200 transition-colors duration-150'
                 aria-label='Snooze'
+                data-track-category='CHAT_BOOKMARK'
+                data-track-name='Open_Snooze_Menu'
+                data-track-metadata={JSON.stringify({ entityId })}
               >
                 <Clock size={16} className='text-[#788187]' strokeWidth={1.33} />
               </button>
@@ -333,6 +342,9 @@ export const BookmarkItem = ({
                     handleSnoozeOption(e, '30mins');
                   }}
                   className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  data-track-category='CHAT_BOOKMARK'
+                  data-track-name='Snooze_Bookmark_30_Mins'
+                  data-track-metadata={JSON.stringify({ entityId })}
                 >
                   30 mins
                 </button>
@@ -341,6 +353,9 @@ export const BookmarkItem = ({
                     handleSnoozeOption(e, '1hour');
                   }}
                   className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  data-track-category='CHAT_BOOKMARK'
+                  data-track-name='Snooze_Bookmark_1_Hour'
+                  data-track-metadata={JSON.stringify({ entityId })}
                 >
                   1 hour
                 </button>
@@ -349,6 +364,9 @@ export const BookmarkItem = ({
                     handleSnoozeOption(e, '3hours');
                   }}
                   className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  data-track-category='CHAT_BOOKMARK'
+                  data-track-name='Snooze_Bookmark_3_Hours'
+                  data-track-metadata={JSON.stringify({ entityId })}
                 >
                   3 hours
                 </button>
@@ -357,6 +375,9 @@ export const BookmarkItem = ({
                     handleSnoozeOption(e, 'tomorrow');
                   }}
                   className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  data-track-category='CHAT_BOOKMARK'
+                  data-track-name='Snooze_Bookmark_Tomorrow'
+                  data-track-metadata={JSON.stringify({ entityId })}
                 >
                   Tomorrow at 9:00 AM
                 </button>
@@ -365,6 +386,9 @@ export const BookmarkItem = ({
                     handleSnoozeOption(e, 'monday');
                   }}
                   className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  data-track-category='CHAT_BOOKMARK'
+                  data-track-name='Snooze_Bookmark_Monday'
+                  data-track-metadata={JSON.stringify({ entityId })}
                 >
                   Monday at 9:00 AM
                 </button>
@@ -374,6 +398,9 @@ export const BookmarkItem = ({
                     handleSnoozeOption(e, 'remove');
                   }}
                   className='w-full text-left px-4 py-2 text-sm text-gray-900 hover:bg-gray-50 transition-colors'
+                  data-track-category='CHAT_BOOKMARK'
+                  data-track-name='Remove_Bookmark_Snooze'
+                  data-track-metadata={JSON.stringify({ entityId })}
                 >
                   Remove Snooze
                 </button>

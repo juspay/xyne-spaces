@@ -105,6 +105,8 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
                 onClick={handleRefreshClick}
                 className='flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 hover:border-gray-400 transition-colors'
                 title='Refresh workflow data'
+                data-track-category='Workflows'
+                data-track-name='RefreshTableData'
               >
                 <svg className='w-4 h-4' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
                   <path
@@ -122,6 +124,13 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
                 onClick={exportData}
                 className='flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 transition-colors'
                 title='Export workflow data'
+                data-track-event='BUTTON_CLICK'
+                data-track-category='WORKFLOWS'
+                data-track-name='EXPORT_DATA'
+                data-track-metadata={JSON.stringify({
+                  ticketId: ticket.id,
+                  stepCount: steps.length,
+                })}
               >
                 <svg className='w-4 h-4' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
                   <path
@@ -181,6 +190,12 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
                       className='flex items-center justify-between w-full text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-lg p-2 -m-2'
                       onClick={() => toggleStepExpansion(step.id)}
                       type='button'
+                      data-track-category='Workflows'
+                      data-track-name='ToggleStepExpansion'
+                      data-track-metadata={JSON.stringify({
+                        stepId: step.id,
+                        stepName: step.stepName,
+                      })}
                     >
                       <div className='flex items-center gap-4 flex-1'>
                         {/* Step Number */}

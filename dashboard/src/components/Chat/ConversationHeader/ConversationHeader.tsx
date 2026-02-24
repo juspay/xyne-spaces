@@ -102,6 +102,9 @@ const ConversationHeader = ({
             }}
             className='text-base font-semibold hover:underline tracking-[-0.17px] flex items-center gap-2'
             data-testid='channel-info-trigger'
+            data-track-category='CHANNELS'
+            data-track-name='OPEN_CHANNEL_INFO'
+            data-track-metadata={JSON.stringify({ channelId: channel.id, isDM })}
           >
             <span className='visual-regression-hide truncate'>{displayName}</span>
             {isDM && (
@@ -126,6 +129,12 @@ const ConversationHeader = ({
                   ? 'bg-[#FBEFD9] border-[#FBEFD9]'
                   : 'bg-white border-gray-200',
               )}
+              data-track-category='CHANNELS'
+              data-track-name='TOGGLE_STAR_CHANNEL'
+              data-track-metadata={JSON.stringify({
+                channelId,
+                isStarred: channelUserStatus?.isStarred,
+              })}
             >
               <Star
                 className='w-4 h-4 text-gray-800'
@@ -143,6 +152,9 @@ const ConversationHeader = ({
                   setIsInfoOpen(true);
                 }}
                 className='flex items-center justify-between gap-2 border border-border rounded-lg p-2 text-primary'
+                data-track-category='CHANNELS'
+                data-track-name='VIEW_MEMBERS'
+                data-track-metadata={JSON.stringify({ channelId })}
               >
                 <span className='shrink-0'>
                   <Users2 className='w-4 h-4' />
@@ -163,6 +175,9 @@ const ConversationHeader = ({
                 xyneAIActor.send({ type: 'OPEN', channelId });
               }}
               className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
+              data-track-category='CHANNELS'
+              data-track-name='OPEN_XYNE_AI'
+              data-track-metadata={JSON.stringify({ channelId })}
             >
               <XyneAIStar />
             </Button>
@@ -195,6 +210,9 @@ const ConversationHeader = ({
               <Tabs.Trigger key={tab.value} value={tab.value} asChild>
                 <button
                   data-testid={`channel-tab-${tab.value}`}
+                  data-track-category='CHANNELS'
+                  data-track-name='SWITCH_TAB'
+                  data-track-metadata={JSON.stringify({ tabValue: tab.value })}
                   onClick={e => setActiveTab?.(tab.value || '', e)}
                   className={cn(
                     'h-8 flex items-center justify-start gap-1.5 px-2 transition-all duration-100 cursor-pointer',

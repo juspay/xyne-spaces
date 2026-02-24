@@ -93,6 +93,9 @@ export const ToolEditRenderer: React.FC<
           <button
             onClick={() => setIsExpanded(!isExpanded)}
             className='w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 transition-colors'
+            data-track-category='Workflows'
+            data-track-name='ToggleFileEditExpand'
+            data-track-metadata={JSON.stringify({ fileName })}
           >
             <span className='text-gray-400'>
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}

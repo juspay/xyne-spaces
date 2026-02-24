@@ -196,6 +196,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               onBlur={() => handleSave()}
               onKeyDown={handleKeyDown}
               className='w-full text-sm text-gray-900 border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+              data-track-category='Tickets'
+              data-track-name='EditDateField'
+              data-track-metadata={JSON.stringify({ fieldName })}
             />
           </div>
         </div>
@@ -306,6 +309,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             onBlur={() => handleSave()}
             onKeyDown={handleKeyDown}
             className='w-full text-sm text-gray-900 border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+            data-track-category='Tickets'
+            data-track-name='EditTextField'
+            data-track-metadata={JSON.stringify({ fieldName, fieldType })}
           />
         </div>
       </div>
@@ -334,6 +340,14 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               setIsEditing(true);
             }
           }}
+          data-track-category='TicketDetails'
+          data-track-name='EditUserField'
+          data-track-metadata={JSON.stringify({
+            fieldName,
+            fieldType,
+            fieldValue,
+            selectedUserIds,
+          })}
         >
           {selectedUsers.length > 0 ? (
             selectedUsers.map(user => (
@@ -373,6 +387,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             setIsEditing(true);
           }
         }}
+        data-track-category='TicketDetails'
+        data-track-name='EditField'
+        data-track-metadata={JSON.stringify({ fieldName, fieldType, fieldValue })}
       >
         {displayValue || '—'}
       </div>

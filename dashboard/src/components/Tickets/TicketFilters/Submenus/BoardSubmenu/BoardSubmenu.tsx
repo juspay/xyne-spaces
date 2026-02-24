@@ -53,6 +53,9 @@ export const BoardSubmenu = ({
         <Button
           variant='ghost'
           onClick={() => onChange([])}
+          data-track-category='TicketFilters'
+          data-track-name='SelectAllBoards'
+          data-track-metadata={JSON.stringify({ filterType: 'board', projectId, selectedBoards })}
           className={`w-full justify-between px-3 py-2 h-auto text-[#181B1D] ${
             isAllBoardsSelected ? 'bg-[#F2F2F3]' : ''
           }`}
@@ -70,6 +73,14 @@ export const BoardSubmenu = ({
               key={board.id}
               variant='ghost'
               onClick={() => handleBoardToggle(board.id)}
+              data-track-category='TicketFilters'
+              data-track-name='ToggleBoard'
+              data-track-metadata={JSON.stringify({
+                filterType: 'board',
+                projectId,
+                boardId: board.id,
+                selectedBoards,
+              })}
               className={`w-full justify-between px-3 py-2 h-auto text-[#181B1D] ${
                 isSelected ? 'bg-[#F2F2F3]' : ''
               }`}

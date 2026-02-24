@@ -726,6 +726,8 @@ export const XyneAIInputBox = ({
             className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-[#E4E6E7] hover:bg-[#E8EAED] transition-all duration-200 ease-in-out flex-shrink-0`}
             aria-label='Select channels'
             title='Select channels'
+            data-track-category='XyneAI'
+            data-track-name='OPEN_CHANNEL_SELECTOR'
           >
             <span className='text-gray-600 font-semibold text-sm'>#</span>
           </button>
@@ -739,6 +741,8 @@ export const XyneAIInputBox = ({
               className={`flex h-7 py-1 px-2 justify-center items-center ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-[#E4E6E7] hover:bg-[#E8EAED] transition-all duration-200 ease-in-out flex-shrink-0 ${isResearchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
               aria-label='Select product or repository for research'
               title='Deep Research'
+              data-track-category='XyneAI'
+              data-track-name='OPEN_RESEARCH_SELECTOR'
             >
               <Search className='w-4 h-4 text-gray-600' />
             </button>
@@ -793,6 +797,9 @@ export const XyneAIInputBox = ({
                 onClick={() => handleRemoveChannel(channel.id)}
                 className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
                 aria-label={`Remove ${channel.name}`}
+                data-track-category='XyneAI'
+                data-track-name='REMOVE_CHANNEL'
+                data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <X className='w-3 h-3' />
               </button>
@@ -820,6 +827,8 @@ export const XyneAIInputBox = ({
                 onClick={handleRemoveResearch}
                 className='hover:bg-gray-200 rounded p-0.5 transition-colors flex-shrink-0'
                 aria-label={`Remove ${selectedResearch.name}`}
+                data-track-category='XyneAI'
+                data-track-name='REMOVE_RESEARCH'
               >
                 <X className='w-3 h-3' />
               </button>
@@ -844,6 +853,9 @@ export const XyneAIInputBox = ({
                 onClick={() => handleRemoveAttachment(attachment.id)}
                 className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
                 aria-label={`Remove ${attachment.name}`}
+                data-track-category='XyneAI'
+                data-track-name='REMOVE_ATTACHMENT'
+                data-track-metadata={JSON.stringify({ attachmentId: attachment.id })}
               >
                 <X className='w-3 h-3' />
               </button>
@@ -879,6 +891,8 @@ export const XyneAIInputBox = ({
               className='p-1.5 -ml-1.5 rounded-lg hover:bg-gray-100 transition-colors'
               aria-label='Attach files'
               title='Attach files'
+              data-track-category='XyneAI'
+              data-track-name='ATTACH_FILES'
             >
               <Plus className='w-4 h-4 text-gray-600' />
             </button>
@@ -915,6 +929,9 @@ export const XyneAIInputBox = ({
                       : 'Enable web search'
                     : "You don't have access to web search."
                 }
+                data-track-category='XyneAI'
+                data-track-name='TOGGLE_WEB_SEARCH'
+                data-track-metadata={JSON.stringify({ enabled: webSearchEnabled })}
               >
                 <Globe className='w-4 h-4' />
               </button>
@@ -932,6 +949,8 @@ export const XyneAIInputBox = ({
                   ? 'bg-[#FF4F4F] text-white hover:bg-[#E64545]'
                   : 'bg-gray-200 text-gray-400 cursor-not-allowed'
             }`}
+            data-track-category='XyneAI'
+            data-track-name={isStreaming ? 'ABORT_MESSAGE' : 'SUBMIT_MESSAGE'}
           >
             {isStreaming ? <StopIcon className='w-2.5 h-2.5' /> : <ArrowUp className='w-4 h-4' />}
           </button>
@@ -954,6 +973,8 @@ export const XyneAIInputBox = ({
               onKeyDown={handleSearchKeyDown}
               placeholder='Search...'
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-['Inter']"
+              data-track-category='XyneAI'
+              data-track-name='CHANNEL_SEARCH_INPUT'
             />
           </div>
 
@@ -969,6 +990,9 @@ export const XyneAIInputBox = ({
                     className={`w-full text-left px-3 py-2 hover:bg-gray-100 transition-colors flex items-center gap-2 ${
                       index === highlightedIndex ? 'bg-gray-100' : ''
                     }`}
+                    data-track-category='XyneAI'
+                    data-track-name='SELECT_CHANNEL'
+                    data-track-metadata={JSON.stringify({ channelId: channel.id })}
                   >
                     <div className='flex-shrink-0'>
                       {String(channel.visibility) === 'PRIVATE' ? (
@@ -1011,6 +1035,8 @@ export const XyneAIInputBox = ({
                   ? 'text-gray-900 border-b-2 border-gray-900 bg-gray-50'
                   : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
               }`}
+              data-track-category='XyneAI'
+              data-track-name='SELECT_PRODUCTS_TAB'
             >
               <Package className='w-4 h-4' />
               Products
@@ -1026,6 +1052,8 @@ export const XyneAIInputBox = ({
                   ? 'text-gray-900 border-b-2 border-gray-900 bg-gray-50'
                   : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
               }`}
+              data-track-category='XyneAI'
+              data-track-name='SELECT_REPOSITORIES_TAB'
             >
               <Code2 className='w-4 h-4' />
               Repositories
@@ -1045,6 +1073,8 @@ export const XyneAIInputBox = ({
               onKeyDown={handleResearchSearchKeyDown}
               placeholder={`Search ${researchTab}...`}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent font-['Inter']"
+              data-track-category='XyneAI'
+              data-track-name='RESEARCH_SEARCH_INPUT'
             />
           </div>
 
@@ -1069,6 +1099,9 @@ export const XyneAIInputBox = ({
                     className={`w-full text-left px-3 py-2 hover:bg-gray-100 transition-colors flex items-center gap-2 ${
                       index === researchHighlightedIndex ? 'bg-gray-100' : ''
                     }`}
+                    data-track-category='XyneAI'
+                    data-track-name='SELECT_RESEARCH_ITEM'
+                    data-track-metadata={JSON.stringify({ itemId: item.id, type: researchTab })}
                   >
                     <div className='flex-shrink-0'>
                       {researchTab === 'products' ? (

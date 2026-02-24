@@ -81,6 +81,8 @@ export const BoardFormSelector = ({
             size='sm'
             onClick={() => setShowCreateModal(true)}
             disabled={disabled}
+            data-track-category='Board'
+            data-track-name='CreateNewForm'
           >
             <Plus size={16} className='mr-1' />
             Create New Form
@@ -121,6 +123,13 @@ export const BoardFormSelector = ({
                         handleCheckboxChange(form.id, e.target.checked);
                       }}
                       className='flex-shrink-0 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer'
+                      data-track-event='change'
+                      data-track-category='Board'
+                      data-track-name='ToggleFormSelection'
+                      data-track-metadata={JSON.stringify({
+                        formId: form.id,
+                        formName: form.formName,
+                      })}
                     />
 
                     <div
@@ -134,6 +143,12 @@ export const BoardFormSelector = ({
                         }
                       }}
                       onClick={!disabled ? () => toggleExpand(form.id) : undefined}
+                      data-track-category='Board'
+                      data-track-name='ExpandFormDetails'
+                      data-track-metadata={JSON.stringify({
+                        formId: form.id,
+                        formName: form.formName,
+                      })}
                     >
                       <div className='flex items-center gap-2'>
                         <span className='font-medium text-gray-900'>{form.formName}</span>
@@ -164,6 +179,12 @@ export const BoardFormSelector = ({
                       }
                     }}
                     onClick={!disabled ? () => toggleExpand(form.id) : undefined}
+                    data-track-category='Board'
+                    data-track-name='ToggleFormAccordion'
+                    data-track-metadata={JSON.stringify({
+                      formId: form.id,
+                      formName: form.formName,
+                    })}
                   >
                     {isExpanded ? (
                       <ChevronDown size={20} className='text-gray-500' />

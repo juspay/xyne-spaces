@@ -1283,6 +1283,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             onClick={onClose}
             disabled={form.state.isSubmitting}
             className='size-6 '
+            data-track-category='Tickets'
+            data-track-name='CloseCreateTicketModal'
           >
             <X strokeWidth={2.33} className='size-3.5' />
           </Button>
@@ -1328,6 +1330,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     aria-label='Ticket Title'
                     placeholder='Issue'
                     data-testid='ticket-title-input'
+                    data-track-category='TICKETS'
+                    data-track-name='EDIT_TICKET_TITLE'
+                    data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                     className={cn(
                       '!text-xl !leading-tight truncate',
                       'px-0 border-none focus-visible:ring-0',
@@ -1364,6 +1369,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   placeholder='Add description ...'
                   aria-label='Ticket Description'
                   data-testid='ticket-description-input'
+                  data-track-category='TICKETS'
+                  data-track-name='EDIT_TICKET_DESCRIPTION'
+                  data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                   onChange={e => {
                     const newValue = e.target.value;
                     field.handleChange(newValue);
@@ -1806,6 +1814,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                                 onClick={() => {
                                   handleDuplicateTicketCopyLink(candidateLink);
                                 }}
+                                data-track-category='Tickets'
+                                data-track-name='CopyDuplicateTicketLink'
                               >
                                 <LinkIcon className='size-3.5' />
                               </Button>
@@ -2131,6 +2141,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               disabled={form.state.isSubmitting}
               className='size-6'
               data-testid='ticket-attachment-button'
+              data-track-category='TICKETS'
+              data-track-name='ATTACH_FILE'
+              data-track-metadata={JSON.stringify({
+                boardId: selectedBoardId,
+                channelId,
+                fileCount: allAttachments.length,
+              })}
             >
               <Paperclip strokeWidth={2.33} className='size-3.5 text-gray-500' />
             </Button>
@@ -2144,6 +2161,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
                 )}
                 data-testid='ticket-submit-button'
+                data-track-category='TICKETS'
+                data-track-name='SUBMIT_CREATE_TICKET_MODAL'
+                data-track-metadata={JSON.stringify({
+                  boardId: selectedBoardId,
+                  channelId,
+                  hasAttachments: allAttachments.length > 0,
+                  isFromAI,
+                })}
               >
                 {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
               </Button>

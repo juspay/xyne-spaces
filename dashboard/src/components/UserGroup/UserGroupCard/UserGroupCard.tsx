@@ -90,10 +90,28 @@ export const UserGroupCard = ({
         </div>
 
         <div className='flex gap-2'>
-          <Button variant='outline' onClick={() => onEdit(userGroup)}>
+          <Button
+            variant='outline'
+            onClick={() => onEdit(userGroup)}
+            data-track-category='UserGroups'
+            data-track-name='EditUserGroup'
+            data-track-metadata={JSON.stringify({
+              groupId: userGroup.id,
+              groupName: userGroup.name,
+            })}
+          >
             Edit
           </Button>
-          <Button variant='destructive' onClick={() => void onDelete(userGroup.id)}>
+          <Button
+            variant='destructive'
+            onClick={() => void onDelete(userGroup.id)}
+            data-track-category='UserGroups'
+            data-track-name='DeleteUserGroup'
+            data-track-metadata={JSON.stringify({
+              groupId: userGroup.id,
+              groupName: userGroup.name,
+            })}
+          >
             Delete
           </Button>
         </div>

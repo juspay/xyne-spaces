@@ -240,6 +240,9 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
             value={searchQuery}
             onChange={handleSearchChange}
             className='w-full bg-white border border-gray-300 text-gray-900 rounded-lg pl-10 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+            data-track-event='blur'
+            data-track-category='CHANNEL_INFORMATION'
+            data-track-name='SEARCH_MEMBERS_INPUT'
           />
         </div>
 
@@ -249,6 +252,9 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
             value={selectedFilter}
             onChange={e => handleFilterChange(e.target.value as FilterType)}
             className='w-full bg-white border border-gray-300 text-gray-900 rounded-lg px-3 py-2 pr-8 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500'
+            data-track-event='change'
+            data-track-category='CHANNEL_INFORMATION'
+            data-track-name='FILTER_MEMBERS_BY_ROLE'
           >
             <option value='everyone'>Everyone</option>
             <option value={ChannelRole.ADMIN}>Admin</option>
@@ -271,6 +277,9 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
                 <button
                   onClick={handleAddPeople}
                   className='flex items-center gap-3 w-full p-3 rounded-lg hover:bg-gray-100 transition-colors group'
+                  data-track-category='CHANNEL_INFORMATION'
+                  data-track-name='OPEN_ADD_PEOPLE_MODAL'
+                  data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                 >
                   <div className='w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center'>
                     <UserPlus className='w-5 h-5 text-white' />
@@ -303,7 +312,15 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
                   </div>
                 </div>
                 {isAuthorizedToRemoveParticipant && context.userID !== participant.userId && (
-                  <button onClick={() => handleRemoveParticipant(participant.userId)}>
+                  <button
+                    onClick={() => handleRemoveParticipant(participant.userId)}
+                    data-track-category='CHANNEL_INFORMATION'
+                    data-track-name='REMOVE_PARTICIPANT'
+                    data-track-metadata={JSON.stringify({
+                      channelId: channel?.id,
+                      userId: participant.userId,
+                    })}
+                  >
                     <Trash2 size={20} className='text-red-500' />
                   </button>
                 )}
@@ -367,6 +384,9 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
                 buttonType={ButtonType.SECONDARY}
                 size={ButtonSize.MEDIUM}
                 onClick={handleModalClose}
+                data-track-category='CHANNEL_INFORMATION'
+                data-track-name='CANCEL_ADD_PEOPLE'
+                data-track-metadata={JSON.stringify({ channelId: channel?.id })}
               />
               <Button
                 text='Add Selected Users'
@@ -374,6 +394,13 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
                 size={ButtonSize.MEDIUM}
                 onClick={() => void handleAddUsersSubmit(includeHistory)}
                 disabled={selectedUsers.length === 0 || addGroupDmParticipantsMutation.isPending}
+                data-track-category='CHANNEL_INFORMATION'
+                data-track-name='ADD_USERS_TO_CHANNEL'
+                data-track-metadata={JSON.stringify({
+                  channelId: channel?.id,
+                  users: selectedUsers,
+                  includeHistory,
+                })}
               />
             </div>
           </div>

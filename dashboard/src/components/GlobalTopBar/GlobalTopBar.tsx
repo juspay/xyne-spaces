@@ -53,6 +53,8 @@ const NavigationAndSearch = (): ReactElement => {
           disabled={!canGoBack}
           className={`p-1 ${canGoBack ? 'cursor-pointer' : 'cursor-not-allowed'}`}
           aria-label='go-back'
+          data-track-category='GLOBAL_TOP_BAR'
+          data-track-name='GoBack'
         >
           <ArrowLeft
             style={{ color: canGoBack ? 'var(--nav-active-icon)' : 'var(--nav-disabled-icon)' }}
@@ -67,6 +69,8 @@ const NavigationAndSearch = (): ReactElement => {
           disabled={!canGoForward}
           className={`p-1 ${canGoForward ? 'cursor-pointer' : 'cursor-not-allowed'}`}
           aria-label='go-next'
+          data-track-category='GLOBAL_TOP_BAR'
+          data-track-name='GoForward'
         >
           <ArrowRight
             style={{ color: canGoForward ? 'var(--nav-active-icon)' : 'var(--nav-disabled-icon)' }}
@@ -85,6 +89,8 @@ const NavigationAndSearch = (): ReactElement => {
             color: 'var(--nav-search-btn-text)',
           }}
           className='flex sm:w-[220px] md:w-[280px] lg:w-[420px] xl:w-[480px] h-[28px] px-2 items-center gap-3 text-[12px] rounded-lg cursor-pointer'
+          data-track-category='GLOBAL_TOP_BAR'
+          data-track-name='OpenSearch'
         >
           <Search size={14} className='' />
           <div className='flex gap-2 items-center'>

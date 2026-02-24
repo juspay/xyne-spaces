@@ -69,6 +69,13 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({ headings, onHe
                       : 'text-gray-500 pl-10 text-xs'
                 }`}
                 title={heading.text}
+                data-track-category='CANVAS'
+                data-track-name='Navigate_To_Heading'
+                data-track-metadata={JSON.stringify({
+                  headingId: heading.id,
+                  headingText: heading.text,
+                  headingLevel: heading.level,
+                })}
               >
                 {heading.text}
               </button>

@@ -362,6 +362,9 @@ const InlineTextFile: React.FC<{
               type='button'
               onClick={() => setIsModalOpen(true)}
               className='flex items-center gap-2 p-2 rounded-md transition-colors duration-150 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200'
+              data-track-category='MESSAGE'
+              data-track-name='OPEN_TEXT_FILE'
+              data-track-metadata={JSON.stringify({ fileName, attachmentId })}
             >
               <FileText className='h-4 w-4' />
               <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
@@ -375,6 +378,9 @@ const InlineTextFile: React.FC<{
               }}
               className='p-2 hover:bg-gray-100 rounded-lg transition-colors'
               title='Download file'
+              data-track-category='MESSAGE'
+              data-track-name='DOWNLOAD_TEXT_FILE'
+              data-track-metadata={JSON.stringify({ fileName, attachmentId })}
             >
               <Download className='h-4 w-4 text-gray-600' />
             </button>
@@ -405,6 +411,9 @@ const InlineTextFile: React.FC<{
           type='button'
           onClick={() => setIsExpanded(!isExpanded)}
           className='flex items-center gap-1 p-2 rounded-md transition-colors duration-150 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200'
+          data-track-category='MESSAGE'
+          data-track-name='TOGGLE_TEXT_PREVIEW'
+          data-track-metadata={JSON.stringify({ fileName, attachmentId, isExpanded })}
         >
           <FileText className='h-4 w-4' />
           <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
@@ -418,6 +427,9 @@ const InlineTextFile: React.FC<{
           }}
           className='p-2 hover:bg-gray-100 rounded-lg transition-colors'
           title='Download file'
+          data-track-category='MESSAGE'
+          data-track-name='DOWNLOAD_TEXT_FILE_INLINE'
+          data-track-metadata={JSON.stringify({ fileName, attachmentId })}
         >
           <Download className='h-4 w-4 text-gray-600' />
         </button>
@@ -778,6 +790,12 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         tabIndex={0}
         role='button'
         aria-label={`Open ${attachment.originalFilename} preview`}
+        data-track-category='MESSAGE'
+        data-track-name='OPEN_ATTACHMENT_PREVIEW'
+        data-track-metadata={JSON.stringify({
+          fileName: attachment.originalFilename,
+          attachmentId: attachment.id,
+        })}
       >
         {/* Preview Section with Action Tray */}
         <div

@@ -126,6 +126,9 @@ const ConversationHeaderMobile = ({
             height: ROOT_SIZE,
             // background: 'linear-gradient(135deg, #FFFFFF 0%, #FFFFFF 100%)',
           }}
+          data-track-category='CHANNELS_MOBILE_VIEW'
+          data-track-name='Back_To_Directory_Mobile'
+          data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           <svg
             width='7'
@@ -152,6 +155,9 @@ const ConversationHeaderMobile = ({
           onClick={() => setIsExpanded(true)}
           className={`absolute text-left z-50 overflow-clip border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]`}
           transition={{ type: 'spring', bounce: 0.1, duration: 0.4 }}
+          data-track-category='CHANNELS_MOBILE_VIEW'
+          data-track-name='EXPAND_HEADER_MOBILE'
+          data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           <motion.div className='flex items-center gap-2 px-2' style={{ height: ROOT_SIZE }}>
             <div style={{ height: ROOT_SIZE }} className='flex items-center justify-center'>
@@ -170,6 +176,9 @@ const ConversationHeaderMobile = ({
               <button
                 onClick={() => setIsAddPeopleDrawerOpen(true)}
                 className='w-full border border-[#EBEBEB] flex items-center justify-center gap-2 rounded-lg py-1.5 px-2  h-[34px]'
+                data-track-category='CHANNELS_MOBILE_VIEW'
+                data-track-name='ADD_PEOPLE_MOBILE'
+                data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <UserRoundPlus className='size-4' />
                 <span className='text-sm font-medium text-gray-900'>Add</span>
@@ -182,6 +191,12 @@ const ConversationHeaderMobile = ({
                     ? 'bg-[#FBEFD9] border-[#FBEFD9]'
                     : 'bg-white border-[#EBEBEB]',
                 )}
+                data-track-category='CHANNELS_MOBILE_VIEW'
+                data-track-name='TOGGLE_STAR_MOBILE'
+                data-track-metadata={JSON.stringify({
+                  channelId: channel.id,
+                  isStarred: channelUserStatus?.isStarred,
+                })}
               >
                 <Star
                   className='size-4'
@@ -196,6 +211,9 @@ const ConversationHeaderMobile = ({
                 onClick={(): void => void navigate('/chat/search')}
                 disabled={true}
                 className='w-full border border-[#EBEBEB] flex items-center justify-center gap-2 rounded-lg py-1.5 px-2 h-[34px] disabled:opacity-50 disabled:cursor-not-allowed'
+                data-track-category='CHANNELS_MOBILE_VIEW'
+                data-track-name='SEARCH_MOBILE'
+                data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <Search className='size-4' />
                 <span className='text-sm font-medium text-gray-900'>Search</span>
@@ -211,6 +229,9 @@ const ConversationHeaderMobile = ({
                       activeTab === tab.label.toLowerCase() ? '#F2F2F3' : 'transparent',
                   }}
                   onClick={() => setActiveTab(tab.label.toLowerCase())}
+                  data-track-category='CHANNELS_MOBILE_VIEW'
+                  data-track-name='SELECT_HEADER_TAB_MOBILE'
+                  data-track-metadata={JSON.stringify({ tab: tab.label })}
                 >
                   {cloneElement(tab.icon, {
                     color: 'currentColor',
@@ -227,6 +248,9 @@ const ConversationHeaderMobile = ({
                   setIsInfoDrawerOpen(true);
                 }}
                 className='w-full text-left px-2 h-10 flex items-center justify-start gap-2 rounded-md transition-all duration-100'
+                data-track-category='CHANNELS_MOBILE_VIEW'
+                data-track-name='VIEW_MEMBERS_MOBILE'
+                data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <span className='size-4 flex items-center justify-center shrink-0'>
                   <Users className='size-4' />
@@ -247,6 +271,9 @@ const ConversationHeaderMobile = ({
                   setIsInfoDrawerOpen(true);
                 }}
                 className='w-full text-left px-2 h-10 flex items-center justify-start gap-2 rounded-md transition-all duration-100'
+                data-track-category='CHANNELS_MOBILE_VIEW'
+                data-track-name='OPEN_SETTINGS_MOBILE'
+                data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <span className='size-4 flex items-center justify-center shrink-0'>
                   <Settings className='size-4' />
@@ -260,6 +287,9 @@ const ConversationHeaderMobile = ({
           onClick={handleCallButtonClick}
           style={{ width: ROOT_SIZE, height: ROOT_SIZE, right: ROOT_SIZE + GAP_SIZE }}
           className='absolute top-0 rounded-full flex items-center justify-center border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
+          data-track-category='CHANNELS_MOBILE_VIEW'
+          data-track-name='START_CALL_MOBILE'
+          data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           <svg
             width='16'
@@ -283,6 +313,9 @@ const ConversationHeaderMobile = ({
           }}
           style={{ width: ROOT_SIZE, height: ROOT_SIZE }}
           className='absolute right-0 top-0 rounded-full flex items-center justify-center border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
+          data-track-category='CHANNELS_MOBILE_VIEW'
+          data-track-name='OPEN_XYNE_AI_MOBILE'
+          data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           <svg
             xmlns='http://www.w3.org/2000/svg'

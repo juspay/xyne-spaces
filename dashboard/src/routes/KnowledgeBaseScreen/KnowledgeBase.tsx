@@ -167,6 +167,12 @@ const KnowledgeBaseScreen = (): ReactElement => {
                     className='p-4 hover:bg-gray-50 transition-colors cursor-pointer'
                     onClick={() => setSelectedDocument(doc)}
                     onKeyDown={e => e.key === 'Enter' && setSelectedDocument(doc)}
+                    data-track-category='KnowledgeBase'
+                    data-track-name='SelectDocument'
+                    data-track-metadata={JSON.stringify({
+                      documentId: doc.id,
+                      documentTitle: doc.title,
+                    })}
                   >
                     <div className='flex items-start justify-between gap-4'>
                       <div className='flex-1 min-w-0'>
@@ -189,6 +195,9 @@ const KnowledgeBaseScreen = (): ReactElement => {
                         disabled={deletingId === doc.id}
                         className='p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-50'
                         title='Delete document'
+                        data-track-category='KnowledgeBase'
+                        data-track-name='DeleteDocument'
+                        data-track-metadata={JSON.stringify({ documentId: doc.id })}
                       >
                         {deletingId === doc.id ? (
                           <Loader2 size={16} className='animate-spin' />
@@ -212,6 +221,9 @@ const KnowledgeBaseScreen = (): ReactElement => {
                       onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                       disabled={currentPage === 1}
                       className='p-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                      data-track-category='KnowledgeBase'
+                      data-track-name='PreviousPage'
+                      data-track-metadata={JSON.stringify({ currentPage, totalPages })}
                     >
                       <ChevronLeft size={16} />
                     </button>
@@ -219,6 +231,9 @@ const KnowledgeBaseScreen = (): ReactElement => {
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                       disabled={currentPage === totalPages}
                       className='p-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                      data-track-category='KnowledgeBase'
+                      data-track-name='NextPage'
+                      data-track-metadata={JSON.stringify({ currentPage, totalPages })}
                     >
                       <ChevronRight size={16} />
                     </button>

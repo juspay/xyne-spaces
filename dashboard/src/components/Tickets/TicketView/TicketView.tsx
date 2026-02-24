@@ -57,6 +57,8 @@ const TicketView = (): ReactElement => {
                   void navigate(-1);
                 }
               }}
+              data-track-category='Tickets'
+              data-track-name='NavigateBackFromTicket'
             />
             <span className='text-[14px] texxt-[#202020] font-mono'>{ticket.xyneId}</span>
           </div>

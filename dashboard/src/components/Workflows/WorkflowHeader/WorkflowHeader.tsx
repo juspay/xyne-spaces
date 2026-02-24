@@ -132,6 +132,8 @@ const MenuItem: React.FC<{
   <button
     onClick={onClick}
     className='w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+    data-track-category='Workflows'
+    data-track-name='SelectMenuItem'
   >
     {icon}
     {children}
@@ -218,6 +220,9 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
             onClick={() => void navigate('/tickets?clear=true')}
             className='p-1.5 rounded-md hover:bg-gray-100 transition-colors'
             title='Back to Workflows'
+            data-track-category='Workflows'
+            data-track-name='NavigateBackToWorkflows'
+            data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
           >
             <ChevronLeft size={24} className='text-gray-500' />
           </button>
@@ -254,6 +259,9 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               onClick={onTriggerWorkflow}
               className='inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors text-xs text-gray-700'
               title='Trigger Workflow'
+              data-track-category='Workflows'
+              data-track-name='TriggerWorkflow'
+              data-track-metadata={JSON.stringify({ ticketId: ticket.id, workflowType })}
             >
               <Play size={14} className='text-gray-600 flex-shrink-0' />
               Trigger
@@ -265,6 +273,9 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               disabled={isCanceling || !executionId}
               className='inline-flex items-center gap-1 px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-300 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed'
               title='Cancel Workflow'
+              data-track-category='Workflows'
+              data-track-name='CancelWorkflow'
+              data-track-metadata={JSON.stringify({ executionId })}
             >
               <XCircle size={14} className='text-red-600 flex-shrink-0' />
               {isCanceling ? 'Canceling...' : 'Cancel'}
@@ -275,6 +286,9 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border transition-colors text-xs ml-2 ${isGraphViewOpen ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100' : 'hover:bg-blue-100 hover:border-blue-300'}`}
               title={isGraphViewOpen ? 'Hide Workflow Graph' : 'Show Workflow Graph'}
               onClick={onGraphViewToggle || onOpenWorkflowGraph}
+              data-track-category='Workflows'
+              data-track-name='ToggleWorkflowGraph'
+              data-track-metadata={JSON.stringify({ isGraphViewOpen })}
             >
               <Workflow
                 size={14}
@@ -302,6 +316,9 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                     : 'border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 hover:border-orange-300'
                 }`}
                 title='Trigger Build'
+                data-track-category='Workflows'
+                data-track-name='ToggleJenkinsPanel'
+                data-track-metadata={JSON.stringify({ branch: gitBranch })}
               >
                 <Rocket size={14} className='text-orange-600 flex-shrink-0' />
                 Build
@@ -367,6 +384,9 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               className='p-1.5 rounded-md hover:bg-gray-100 transition-colors'
               onClick={() => setShowMenu(!showMenu)}
               title='More'
+              data-track-category='Workflows'
+              data-track-name='ToggleMoreMenu'
+              data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
             >
               <MoreVertical size={16} className='text-gray-400' />
             </button>
@@ -379,6 +399,9 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                     setShowMenu(false);
                   }}
                   icon={<Copy size={14} className='text-gray-400' />}
+                  data-track-category='Workflows'
+                  data-track-name='CopyRunId'
+                  data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                 >
                   Copy Run ID
                 </MenuItem>
@@ -389,6 +412,9 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                       setShowMenu(false);
                     }}
                     icon={<Table2 size={14} className='text-gray-400' />}
+                    data-track-category='Workflows'
+                    data-track-name='OpenTableView'
+                    data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                   >
                     Table View
                   </MenuItem>

@@ -388,6 +388,8 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
         disabled={!onRefresh || loadingStage < 5}
         className='flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200'
         title='Refresh workflow data'
+        data-track-category='Workflows'
+        data-track-name='RefreshWorkflowGraph'
       >
         <svg
           className={`w-4 h-4 text-gray-500 ${loadingStage < 5 ? 'animate-spin' : ''}`}
@@ -409,6 +411,8 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
         onClick={onExport}
         className='flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200'
         title='Export workflow data'
+        data-track-category='Workflows'
+        data-track-name='ExportWorkflowData'
       >
         <svg
           className='w-4 h-4 text-gray-500'
@@ -432,6 +436,8 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
         }}
         className='flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow hover:bg-gray-50 transition-all duration-200'
         title='Fullscreen'
+        data-track-category='Workflows'
+        data-track-name='ToggleWorkflowFullscreen'
       >
         <svg
           className='w-4 h-4 text-gray-500'
@@ -658,6 +664,8 @@ export const WorkflowGraph: React.FC<WorkflowGraphComponentProps> = ({
             <button
               onClick={onRefresh}
               className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors'
+              data-track-category='Workflows'
+              data-track-name='RetryLoadWorkflowGraph'
             >
               Try Again
             </button>

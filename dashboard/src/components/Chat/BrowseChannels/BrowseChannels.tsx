@@ -92,6 +92,8 @@ const BrowseChannels = (): ReactElement => {
           onClick={handleBack}
           className='p-2 rounded-md text-gray-600 hover:bg-gray-100 transition-colors'
           aria-label='Back to chat'
+          data-track-category='CHANNEL_SEARCH'
+          data-track-name='BACK_FROM_BROWSE_CHANNELS'
         >
           <ArrowLeft size={20} />
         </button>
@@ -128,6 +130,12 @@ const BrowseChannels = (): ReactElement => {
                     onClick={() => handleChannelClick(channel.id)}
                     className='w-full flex items-center p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer text-left focus:outline-none focus:ring-2 focus:ring-blue-500'
                     aria-label={`${isPrivate ? 'Private channel' : 'Channel'}: ${channel.name}`}
+                    data-track-category='CHANNEL_SEARCH'
+                    data-track-name='SELECT_CHANNEL'
+                    data-track-metadata={JSON.stringify({
+                      channelId: channel.id,
+                      channelName: channel.name,
+                    })}
                   >
                     <div className='flex items-center gap-3 flex-1 min-w-0'>
                       <div className='flex items-center justify-center w-8 h-8 rounded-md bg-gray-100'>
@@ -170,6 +178,9 @@ const BrowseChannels = (): ReactElement => {
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
                   className='p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed'
+                  data-track-category='CHANNEL_SEARCH'
+                  data-track-name='CHANNELS_PREV_PAGE'
+                  data-track-metadata={JSON.stringify({ currentPage })}
                 >
                   <ChevronLeft size={16} className='text-gray-600' />
                 </button>
@@ -180,6 +191,9 @@ const BrowseChannels = (): ReactElement => {
                   onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
                   className='p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed'
+                  data-track-category='CHANNEL_SEARCH'
+                  data-track-name='CHANNELS_NEXT_PAGE'
+                  data-track-metadata={JSON.stringify({ currentPage })}
                 >
                   <ChevronRight size={16} className='text-gray-600' />
                 </button>

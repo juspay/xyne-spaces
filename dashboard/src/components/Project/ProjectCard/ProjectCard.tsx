@@ -40,6 +40,9 @@ export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): Re
       data-testid={`project-card-${project.id}`}
       data-project-name={project.name}
       className='bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer'
+      data-track-category='Projects'
+      data-track-name='OpenProject'
+      data-track-metadata={JSON.stringify({ projectId: project.id, projectName: project.name })}
     >
       <div className='flex items-start justify-between mb-4'>
         <div className='flex-1'>
@@ -56,10 +59,28 @@ export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): Re
         </div>
 
         <div className='flex gap-2'>
-          <Button variant='secondary' onClick={handleEditClick}>
+          <Button
+            variant='secondary'
+            onClick={handleEditClick}
+            data-track-category='Projects'
+            data-track-name='EditProject'
+            data-track-metadata={JSON.stringify({
+              projectId: project.id,
+              projectName: project.name,
+            })}
+          >
             Edit
           </Button>
-          <Button variant='destructive' onClick={handleDeleteClick}>
+          <Button
+            variant='destructive'
+            onClick={handleDeleteClick}
+            data-track-category='Projects'
+            data-track-name='DeleteProject'
+            data-track-metadata={JSON.stringify({
+              projectId: project.id,
+              projectName: project.name,
+            })}
+          >
             Delete
           </Button>
         </div>

@@ -126,6 +126,9 @@ export const TicketListItem = ({
         'flex items-center justify-between px-6 py-3 border-b border-gray-200 w-full cursor-pointer transition-colors gap-10',
         isActive ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50',
       )}
+      data-track-category='Tickets'
+      data-track-name='OpenTicket'
+      data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
     >
       <div className='flex items-center gap-2 min-w-0 flex-1'>
         <Tooltip

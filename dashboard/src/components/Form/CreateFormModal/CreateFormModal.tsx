@@ -472,6 +472,9 @@ export const CreateFormModal = ({
                 size='sm'
                 onClick={handleEditClick}
                 className='flex items-center gap-2'
+                data-track-category='Forms'
+                data-track-name='EditForm'
+                data-track-metadata={JSON.stringify({ formId: form.id })}
               >
                 <Edit2 size={16} />
                 Edit
@@ -561,6 +564,9 @@ export const CreateFormModal = ({
                     onChange={e => onChange(e.target.value as FormContextType)}
                     className='w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100'
                     disabled={isEditMode || createFormMutation.isPending}
+                    data-track-event='change'
+                    data-track-category='Forms'
+                    data-track-name='SelectContextType'
                   >
                     {FORM_CONTEXT_TYPES.map(context => (
                       <option key={context} value={context}>
@@ -597,6 +603,9 @@ export const CreateFormModal = ({
                     onChange={e => onChange(e.target.value)}
                     className='w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100'
                     disabled={isEditMode || createFormMutation.isPending}
+                    data-track-event='change'
+                    data-track-category='Forms'
+                    data-track-name='SelectEntityType'
                   >
                     {getEntityTypesForContext(selectedContextType).map(entity => (
                       <option key={entity} value={entity}>
@@ -624,6 +633,8 @@ export const CreateFormModal = ({
                   size='sm'
                   onClick={addField}
                   disabled={createFormMutation.isPending}
+                  data-track-category='Forms'
+                  data-track-name='AddFormField'
                 >
                   <Plus size={16} className='mr-1' />
                   Add Field
@@ -706,6 +717,8 @@ export const CreateFormModal = ({
                                 updateField(index, { fieldType: newFieldType });
                               }
                             }}
+                            data-track-category='Form'
+                            data-track-name='SelectFieldType'
                             className='w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100'
                             disabled={createFormMutation.isPending}
                           >
@@ -781,6 +794,12 @@ export const CreateFormModal = ({
                                     onClick={() => removeFieldOption(index, optIndex)}
                                     disabled={createFormMutation.isPending}
                                     className='text-red-600 hover:text-red-700 hover:bg-red-50'
+                                    data-track-category='Forms'
+                                    data-track-name='RemoveFieldOption'
+                                    data-track-metadata={JSON.stringify({
+                                      fieldIndex: index,
+                                      optionIndex: optIndex,
+                                    })}
                                   >
                                     <X size={16} />
                                   </Button>
@@ -792,6 +811,9 @@ export const CreateFormModal = ({
                                 size='sm'
                                 onClick={() => addFieldOption(index)}
                                 disabled={createFormMutation.isPending}
+                                data-track-category='Forms'
+                                data-track-name='AddFieldOption'
+                                data-track-metadata={JSON.stringify({ fieldIndex: index })}
                               >
                                 <Plus size={14} className='mr-1' />
                                 Add Option
@@ -809,6 +831,9 @@ export const CreateFormModal = ({
                         onClick={() => removeField(index)}
                         disabled={createFormMutation.isPending}
                         className='mt-6 text-red-600 hover:text-red-700 hover:bg-red-50'
+                        data-track-category='Forms'
+                        data-track-name='RemoveFormField'
+                        data-track-metadata={JSON.stringify({ fieldIndex: index })}
                       >
                         <Trash2 size={16} />
                       </Button>
@@ -828,6 +853,8 @@ export const CreateFormModal = ({
               onClick={() => onOpenChange(false)}
               disabled={createFormMutation.isPending}
               type='button'
+              data-track-category='Forms'
+              data-track-name='CancelFormCreation'
             >
               Cancel
             </Button>
@@ -839,6 +866,9 @@ export const CreateFormModal = ({
                 (isEditMode && fields.length === 0) ||
                 createFormMutation.isPending
               }
+              data-track-category='Forms'
+              data-track-name={isEditMode ? 'UpdateForm' : 'CreateForm'}
+              data-track-metadata={JSON.stringify({ formId: form?.id })}
             >
               {getSubmitButtonText()}
             </Button>

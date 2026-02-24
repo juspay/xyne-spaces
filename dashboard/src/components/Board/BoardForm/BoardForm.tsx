@@ -36,6 +36,9 @@ const ApproverChip: React.FC<{
         onClick={onRemove}
         className='ml-0.5 rounded-full p-0.5 text-gray-500 hover:bg-gray-300 hover:text-gray-800'
         disabled={disabled}
+        data-track-category='Board'
+        data-track-name='Remove_Approver'
+        data-track-metadata={JSON.stringify({ userName })}
       >
         <X size={12} />
       </button>
@@ -589,6 +592,9 @@ export const BoardForm = ({
             onChange={e => setProjectId(e.target.value)}
             disabled={isLoading || loadingProjects || isEdit}
             className='w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+            data-track-event='change'
+            data-track-category='Board_Form'
+            data-track-name='Select_Project'
           >
             <option value=''>{loadingProjects ? 'Loading projects...' : 'Select a project'}</option>
             {projects?.map(project => (
@@ -617,12 +623,21 @@ export const BoardForm = ({
                 onChange={e => setSelectedTemplate(e.target.value as StageTemplateType)}
                 disabled={isLoading}
                 className='px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+                data-track-event='change'
+                data-track-category='Board_Form'
+                data-track-name='Select_Stage_Template'
               >
                 <option value='none'>No Template</option>
                 <option value='default'>Default stages</option>
               </select>
             )}
-            <Button variant='secondary' onClick={addStage} disabled={isLoading}>
+            <Button
+              variant='secondary'
+              onClick={addStage}
+              disabled={isLoading}
+              data-track-category='Board_Form'
+              data-track-name='Add_Stage'
+            >
               Add Stage
             </Button>
           </div>
@@ -682,6 +697,13 @@ export const BoardForm = ({
                         }
                         disabled={isLoading}
                         className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+                        data-track-event='change'
+                        data-track-category='Board_Form'
+                        data-track-name='Select_Stage_Status'
+                        data-track-metadata={JSON.stringify({
+                          stageIndex: index,
+                          stageName: stage.name,
+                        })}
                       >
                         <option value={TicketStatusV2.TODO}>TODO</option>
                         <option value={TicketStatusV2.STARTED}>STARTED</option>
@@ -769,6 +791,13 @@ export const BoardForm = ({
                         }}
                         disabled={isLoading || !stageForms}
                         className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+                        data-track-event='change'
+                        data-track-category='Board_Form'
+                        data-track-name='Select_Stage_Form'
+                        data-track-metadata={JSON.stringify({
+                          stageIndex: index,
+                          stageName: stage.name,
+                        })}
                       >
                         <option value=''>No form required</option>
                         {stageForms?.map(form => (
@@ -786,6 +815,12 @@ export const BoardForm = ({
                       disabled={isLoading}
                       className='flex-shrink-0 text-red-500 hover:text-red-700 p-1'
                       type='button'
+                      data-track-category='Board_Form'
+                      data-track-name='Remove_Stage'
+                      data-track-metadata={JSON.stringify({
+                        stageName: stage.name,
+                        stageIndex: index,
+                      })}
                     >
                       <X size={20} />
                     </button>
@@ -825,7 +860,14 @@ export const BoardForm = ({
       )}
 
       <div className='flex gap-2 justify-end'>
-        <Button variant='secondary' onClick={onCancel} disabled={isLoading}>
+        <Button
+          variant='secondary'
+          onClick={onCancel}
+          disabled={isLoading}
+          data-track-category='Board_Form'
+          data-track-name='Cancel_Board_Form'
+          data-track-metadata={JSON.stringify({ isEdit })}
+        >
           Cancel
         </Button>
         <Button
@@ -833,6 +875,9 @@ export const BoardForm = ({
           onClick={handleSubmit}
           disabled={isLoading || !name.trim() || loadingProjects}
           loading={isLoading}
+          data-track-category='Board_Form'
+          data-track-name='Submit_Board_Form'
+          data-track-metadata={JSON.stringify({ isEdit, boardName: name })}
         >
           {isLoading
             ? isEdit

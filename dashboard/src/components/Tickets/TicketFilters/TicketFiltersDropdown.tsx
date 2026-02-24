@@ -493,6 +493,8 @@ export const TicketFiltersDropdown = ({
               variant='ghost'
               onClick={() => setBoardOpen(!boardOpen)}
               className={cn('rounded-[10px] mb-3')}
+              data-track-category='Tickets'
+              data-track-name='ToggleBoardDropdown'
             >
               <span className='font-semibold text-base'>{boardLabel}</span>
               <ChevronDown
@@ -643,6 +645,12 @@ export const TicketFiltersDropdown = ({
                         'w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-gray-100',
                         isActive ? 'bg-gray-100 font-medium' : '',
                       )}
+                      data-track-category='Tickets'
+                      data-track-name='OpenFilterSubmenu'
+                      data-track-metadata={JSON.stringify({
+                        filterId: item.id,
+                        filterLabel: item.label,
+                      })}
                     >
                       <div className='flex items-center gap-3'>
                         <Icon className='w-4 h-4' />
@@ -675,6 +683,8 @@ export const TicketFiltersDropdown = ({
           variant='outline'
           className='bg-white border border-gray-200 rounded-[10px] h-8'
           onClick={() => void navigate('/analytics-dashboard')}
+          data-track-category='Tickets'
+          data-track-name='OpenAnalyticsDashboard'
         >
           <BarChart3 className='w-4 h-4' />
           <span>Analytics</span>
@@ -686,6 +696,8 @@ export const TicketFiltersDropdown = ({
             variant='outline'
             className='bg-white border border-gray-200 rounded-[10px] h-8'
             onClick={handleClearAllFilters}
+            data-track-category='Tickets'
+            data-track-name='ClearAllFiltersDropdown'
           >
             <X className='w-4 h-4' />
             <span>Clear Filters</span>
@@ -710,6 +722,8 @@ export const TicketFiltersDropdown = ({
               }}
               className='w-full text-sm bg-white border border-gray-200 text-gray-900 rounded-lg pl-10 pr-3 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
               aria-label='Search Tickets'
+              data-track-category='Tickets'
+              data-track-name='SearchTickets'
             />
           </div>
         </div>

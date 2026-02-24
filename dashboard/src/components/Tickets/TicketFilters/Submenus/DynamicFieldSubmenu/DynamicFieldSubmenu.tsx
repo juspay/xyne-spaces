@@ -126,6 +126,9 @@ export const DynamicFieldSubmenu = ({
                       w-full flex items-center justify-between px-3 py-2 rounded-md transition-all
                       ${isSelected ? 'bg-[#F2F2F3] text-black' : 'hover:bg-gray-50 text-gray-700'}
                     `}
+                    data-track-category='Tickets'
+                    data-track-name='ToggleDynamicFieldFilter'
+                    data-track-metadata={JSON.stringify({ option, selected: !isSelected })}
                   >
                     <span className='text-sm'>{option}</span>
                     {isSelected && <Check className='w-4 h-4 text-blue-600' />}
@@ -220,6 +223,8 @@ export const DynamicFieldSubmenu = ({
                 variant='ghost'
                 size='sm'
                 className='w-full'
+                data-track-category='Tickets'
+                data-track-name='ClearDynamicDateRange'
               >
                 Clear date range
               </Button>
@@ -269,10 +274,19 @@ export const DynamicFieldSubmenu = ({
             variant='outline'
             size='sm'
             className='flex-1'
+            data-track-category='Tickets'
+            data-track-name='ClearStringFilter'
           >
             Clear
           </Button>
-          <Button onClick={handleApply} variant='default' size='sm' className='flex-1'>
+          <Button
+            onClick={handleApply}
+            variant='default'
+            size='sm'
+            className='flex-1'
+            data-track-category='Tickets'
+            data-track-name='ApplyStringFilter'
+          >
             Apply
           </Button>
         </div>
@@ -306,6 +320,9 @@ export const DynamicFieldSubmenu = ({
               w-full flex items-center justify-between px-3 py-2 rounded-md transition-all border
               ${isTrueSelected ? 'bg-[#F2F2F3] text-black border-gray-300' : 'hover:bg-gray-50 text-gray-700 border-gray-200'}
             `}
+            data-track-category='Tickets'
+            data-track-name='FilterBooleanTrue'
+            data-track-metadata={JSON.stringify({ fieldName })}
           >
             <span className='text-sm'>True</span>
             {isTrueSelected && <Check className='w-4 h-4 text-blue-600' />}
@@ -316,6 +333,9 @@ export const DynamicFieldSubmenu = ({
               w-full flex items-center justify-between px-3 py-2 rounded-md transition-all border
               ${isFalseSelected ? 'bg-[#F2F2F3] text-black border-gray-300' : 'hover:bg-gray-50 text-gray-700 border-gray-200'}
             `}
+            data-track-category='Tickets'
+            data-track-name='FilterBooleanFalse'
+            data-track-metadata={JSON.stringify({ fieldName })}
           >
             <span className='text-sm'>False</span>
             {isFalseSelected && <Check className='w-4 h-4 text-blue-600' />}

@@ -133,7 +133,18 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
       side='top'
       {...(!isTruncated && { open: false })} // <= disable tooltip when not truncated
     >
-      <Link className='' to={`/chat/dir/${channel.id}`} onClick={handleChannelClick}>
+      <Link
+        className=''
+        to={`/chat/dir/${channel.id}`}
+        onClick={handleChannelClick}
+        data-track-category='CHAT_SIDEBAR'
+        data-track-name='OPEN_CHANNEL'
+        data-track-metadata={JSON.stringify({
+          channelId: channel.id,
+          channelName: displayName,
+          isDM,
+        })}
+      >
         <div
           className={cn(
             'flex items-center gap-2 h-8 group rounded-md px-1.5 transition-colors',
@@ -173,6 +184,12 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
               <button
                 className='group-hover:block hidden p-1 rounded-md -blue'
                 onClick={handleCloseDm}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='CLOSE_DM_CHANNEL'
+                data-track-metadata={JSON.stringify({
+                  channelId: channel.id,
+                  channelName: displayName,
+                })}
               >
                 <X size={14} className='shrink-0' />
               </button>
@@ -207,6 +224,13 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
         )}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
+        data-track-category='CHAT_SIDEBAR'
+        data-track-name='OPEN_CHANNEL'
+        data-track-metadata={JSON.stringify({
+          channelId: channel.id,
+          channelName: displayName,
+          isDM,
+        })}
       >
         <div
           className={cn(
@@ -250,6 +274,9 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
               className='p-1 rounded hover:bg-gray-300 transition-colors shrink-0'
               aria-label='Close conversation'
               title='Close conversation'
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='CLOSE_DM_CHANNEL'
+              data-track-metadata={JSON.stringify({ channelId: channel.id })}
             >
               <X size={14} className='text-gray-500 hover:text-gray-700' />
             </button>

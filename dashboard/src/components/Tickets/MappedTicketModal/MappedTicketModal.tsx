@@ -53,6 +53,8 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
       <div
         className='absolute inset-0 bg-black/50'
         onClick={onClose}
+        data-track-category='Tickets'
+        data-track-name='CloseMappedTicketModal'
         onKeyDown={(e): void => {
           if (e.key === 'Escape') onClose();
         }}
@@ -85,6 +87,9 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
                         : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                     }`}
                     title={ticket.title}
+                    data-track-category='Tickets'
+                    data-track-name='NavigateToParentTicket'
+                    data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                   >
                     {truncateTitle(ticket.title)}
                   </Button>
@@ -96,7 +101,14 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
           </div>
 
           {/* Close Button */}
-          <Button variant='ghost' size='icon' onClick={onClose} className='flex-shrink-0'>
+          <Button
+            variant='ghost'
+            size='icon'
+            onClick={onClose}
+            className='flex-shrink-0'
+            data-track-category='Tickets'
+            data-track-name='CloseMappedTicketModal'
+          >
             <X className='w-5 h-5 text-gray-500' />
           </Button>
         </div>

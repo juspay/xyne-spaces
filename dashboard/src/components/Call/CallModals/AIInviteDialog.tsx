@@ -153,6 +153,13 @@ export function AIInviteDialog({
                   type='button'
                   onClick={() => toggleUser(user.id)}
                   className='w-full flex items-center gap-3 p-3 hover:bg-accent/50 transition-colors text-left'
+                  data-track-category='CALLS'
+                  data-track-name='Toggle_Invite_User'
+                  data-track-metadata={JSON.stringify({
+                    userId: user.id,
+                    userName: user.name,
+                    callId,
+                  })}
                 >
                   <div
                     className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${
@@ -185,6 +192,10 @@ export function AIInviteDialog({
             placeholder='Add a message for the invite...'
             className='w-full px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none'
             rows={3}
+            data-track-event='change'
+            data-track-category='CALLS'
+            data-track-name='Set_Invite_Message'
+            data-track-metadata={JSON.stringify({ callId })}
           />
 
           {/* Call Link Preview */}
@@ -200,7 +211,15 @@ export function AIInviteDialog({
 
         {/* Actions */}
         <div className='flex justify-end gap-3 pt-4 border-t border-border'>
-          <Button variant='ghost' size='default' onClick={handleClose} disabled={isInviting}>
+          <Button
+            variant='ghost'
+            size='default'
+            onClick={handleClose}
+            disabled={isInviting}
+            data-track-category='CALLS'
+            data-track-name='Cancel_AI_Invite'
+            data-track-metadata={JSON.stringify({ callId })}
+          >
             Cancel
           </Button>
           <Button
@@ -209,6 +228,9 @@ export function AIInviteDialog({
             onClick={handleSend}
             disabled={selectedUserIds.size === 0 || isInviting}
             loading={isInviting}
+            data-track-category='CALLS'
+            data-track-name='Send_AI_Invite'
+            data-track-metadata={JSON.stringify({ userCount: selectedUserIds.size, callId })}
           >
             {isInviting
               ? 'Inviting...'

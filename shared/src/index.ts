@@ -8,6 +8,7 @@ export * from './activity';
 export * from './types';
 export * from './board-types';
 export * from './types/workflowApproval';
+export * from './types/userActivity';
 export * from './utils/etaCalculation';
 export * from './types/research';
 export * from './tickets';

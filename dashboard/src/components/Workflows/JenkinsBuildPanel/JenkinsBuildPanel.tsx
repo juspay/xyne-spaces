@@ -131,10 +131,19 @@ export const JenkinsBuildPanel: React.FC<JenkinsBuildPanelProps> = ({
             variant='ghost'
             size='iconSm'
             title='Refresh'
+            data-track-category='Workflows'
+            data-track-name='RefreshJenkinsBuild'
           >
             <RefreshCw size={14} className={`text-gray-500 ${isLoading ? 'animate-spin' : ''}`} />
           </Button>
-          <Button onClick={onClose} variant='ghost' size='iconSm' title='Close'>
+          <Button
+            onClick={onClose}
+            variant='ghost'
+            size='iconSm'
+            title='Close'
+            data-track-category='Workflows'
+            data-track-name='CloseJenkinsBuildPanel'
+          >
             <X size={14} className='text-gray-500' />
           </Button>
         </div>
@@ -214,6 +223,9 @@ export const JenkinsBuildPanel: React.FC<JenkinsBuildPanelProps> = ({
           loading={isTriggering}
           variant='outline'
           className='w-full border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 hover:border-orange-300'
+          data-track-category='Workflows'
+          data-track-name='TriggerJenkinsBuild'
+          data-track-metadata={JSON.stringify({ branch })}
         >
           <Rocket size={16} />
           {isTriggering ? 'Triggering...' : 'Trigger New Build'}

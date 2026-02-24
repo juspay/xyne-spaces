@@ -517,6 +517,8 @@ const WorkflowScreen: React.FC = () => {
           <button
             onClick={() => window.history.back()}
             className='flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors'
+            data-track-category='Workflow'
+            data-track-name='BackFromTicketNotFound'
           >
             <ArrowLeft size={18} />
             <span className='text-sm'>Back</span>
@@ -534,6 +536,8 @@ const WorkflowScreen: React.FC = () => {
             <button
               onClick={() => window.history.back()}
               className='px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors'
+              data-track-category='Workflow'
+              data-track-name='GoBackButton'
             >
               Go Back
             </button>
@@ -575,6 +579,8 @@ const WorkflowScreen: React.FC = () => {
             <button
               onClick={handleRefresh}
               className='px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors'
+              data-track-category='Workflow'
+              data-track-name='TryAgain'
             >
               Try Again
             </button>
@@ -595,6 +601,8 @@ const WorkflowScreen: React.FC = () => {
           <button
             onClick={() => window.location.reload()}
             className='px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors'
+            data-track-category='Workflow'
+            data-track-name='Refresh'
           >
             Refresh
           </button>

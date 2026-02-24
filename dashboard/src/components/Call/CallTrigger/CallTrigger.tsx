@@ -87,6 +87,14 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
           onClick={handleButtonClick}
           disabled={isAlone}
           data-testid='start-call-button'
+          data-track-category='CALLS'
+          data-track-name='Call_Trigger'
+          data-track-metadata={JSON.stringify({
+            hasActiveCall: hasActiveCallInChannel,
+            isInCall,
+            channelId: channelId,
+            targetUserIds,
+          })}
           className={cn(
             'h-[35px] transition-colors rounded-lg w-8.5 !p-2',
             'border border-border bg-white hover:bg-gray-50',

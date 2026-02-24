@@ -78,7 +78,15 @@ export function InviteToCallModal({
         </div>
 
         <div className='flex justify-end gap-3 pt-4 border-t border-border'>
-          <Button variant='ghost' size='default' onClick={handleClose} disabled={isInviting}>
+          <Button
+            variant='ghost'
+            size='default'
+            onClick={handleClose}
+            disabled={isInviting}
+            data-track-category='CALLS'
+            data-track-name='Close_Invite_To_Call_Modal'
+            data-track-metadata={JSON.stringify({ callId })}
+          >
             Cancel
           </Button>
           <Button
@@ -88,6 +96,9 @@ export function InviteToCallModal({
             disabled={selectedUsers.length === 0 || isInviting}
             loading={isInviting}
             data-testid='invite-button'
+            data-track-category='CALLS'
+            data-track-name='Submit_Invite_To_Call_Modal'
+            data-track-metadata={JSON.stringify({ callId, userCount: selectedUsers.length })}
           >
             {isInviting
               ? 'Inviting...'

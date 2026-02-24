@@ -156,6 +156,9 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
                 e.preventDefault();
                 onCancel();
               }}
+              data-track-category='ADD_DM_FORM'
+              data-track-name='Cancel_Create_DM'
+              data-track-metadata={JSON.stringify({ selectedUserCount: selectedUsers })}
             >
               Cancel
             </Button>
@@ -167,6 +170,9 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
             className='bg-blue-600 hover:bg-blue-700'
             loading={loading || false}
             disabled={selectedUsers.length === 0}
+            data-track-category='ADD_DM_FORM'
+            data-track-name='Start_DM'
+            data-track-metadata={JSON.stringify({ selectedUserCount: selectedUsers })}
           >
             Start DM
           </Button>

@@ -195,6 +195,8 @@ const Settings = (): ReactElement => {
               : 'border-gray-200 bg-gray-50',
           )}
           onClick={handleStatusClick}
+          data-track-category='Settings'
+          data-track-name='EditUserStatus'
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
@@ -227,6 +229,8 @@ const Settings = (): ReactElement => {
                 onClick={handleClearStatus}
                 className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
                 title='Clear status'
+                data-track-category='Settings'
+                data-track-name='ClearUserStatus'
               >
                 <X className='size-3 text-gray-600' />
               </Button>
@@ -271,6 +275,8 @@ const Settings = (): ReactElement => {
             title={
               isCurrentlyUnavailable ? 'Paused from assignment' : 'Click to pause from assignment'
             }
+            data-track-category='Settings'
+            data-track-name='OpenAssignmentModal'
           >
             {isCurrentlyUnavailable ? (
               <div className='flex items-center gap-2 min-w-0 flex-1'>
@@ -293,6 +299,8 @@ const Settings = (): ReactElement => {
                 className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
                 title='Resume ticket assignment'
                 onClick={handleResumeAssignment}
+                data-track-category='Settings'
+                data-track-name='ResumeAssignment'
               >
                 <X className='size-3 text-gray-600' />
               </Button>
@@ -311,6 +319,8 @@ const Settings = (): ReactElement => {
         variant='ghost'
         className='w-full text-left hover:bg-gray-100 rounded-md justify-start gap-2'
         onClick={handleProfileClick}
+        data-track-category='Settings'
+        data-track-name='OpenProfile'
       >
         <User className='size-4' />
         Profile
@@ -327,6 +337,9 @@ const Settings = (): ReactElement => {
               key={themeOption.id}
               onClick={() => changeTheme(themeOption.id)}
               className='flex-1 w-25 space-y-1'
+              data-track-category='Settings'
+              data-track-name='SelectTheme'
+              data-track-metadata={JSON.stringify({ themeId: themeOption.id })}
             >
               <div
                 className='w-25 h-[70px] rounded-md relative overflow-clip'
@@ -385,6 +398,8 @@ const Settings = (): ReactElement => {
                 });
             }}
             className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+            data-track-category='Settings'
+            data-track-name='CopyClientId'
           >
             <span>Client ID: {logger.zeroClientID}</span>
             <Copy className='size-3' />
@@ -403,6 +418,8 @@ const Settings = (): ReactElement => {
                 });
             }}
             className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+            data-track-category='Settings'
+            data-track-name='CopyClientGroupId'
           >
             <span>Client Group ID: {logger.zeroClientGroupID}</span>
             <Copy className='size-3' />
@@ -417,6 +434,8 @@ const Settings = (): ReactElement => {
           variant='ghost'
           className='text-destructive w-full text-left hover:bg-transparent hover:text-destructive rounded-md'
           onClick={handleLogout}
+          data-track-category='Settings'
+          data-track-name='Logout'
         >
           Sign out of Xyne Space
         </Button>

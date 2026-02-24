@@ -71,6 +71,9 @@ const StringFieldComponent: React.FC<{
       {...register(field.name, {
         required: field.required === true ? `${field.label} is required` : false,
       })}
+      data-track-category='Tickets'
+      data-track-name='DynamicTextField'
+      data-track-metadata={JSON.stringify({ fieldName: field.name })}
     />
     {renderDescription(field.description)}
     {renderError(error)}
@@ -94,6 +97,9 @@ const NumberFieldComponent: React.FC<{
         required: field.required === true ? `${field.label} is required` : false,
         valueAsNumber: true,
       })}
+      data-track-category='Tickets'
+      data-track-name='DynamicNumberField'
+      data-track-metadata={JSON.stringify({ fieldName: field.name })}
     />
     {renderDescription(field.description)}
     {renderError(error)}
@@ -126,6 +132,9 @@ const BooleanFieldComponent: React.FC<{
           className='sr-only peer'
           defaultChecked={field.default ?? false}
           {...register(field.name)}
+          data-track-category='Tickets'
+          data-track-name='DynamicBooleanField'
+          data-track-metadata={JSON.stringify({ fieldName: field.name })}
         />
         <div className='w-11 h-6 bg-gray-200 dark:bg-gray-700 rounded-full peer peer-checked:bg-blue-600 transition-colors' />
         <div className='absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform peer-checked:translate-x-5' />
@@ -151,6 +160,9 @@ const TextareaFieldComponent: React.FC<{
       {...register(field.name, {
         required: field.required === true ? `${field.label} is required` : false,
       })}
+      data-track-category='Tickets'
+      data-track-name='DynamicTextarea'
+      data-track-metadata={JSON.stringify({ fieldName: field.name })}
     />
     {renderDescription(field.description)}
     {renderError(error)}
@@ -242,6 +254,9 @@ const SelectFieldComponent: React.FC<{
                 onKeyDown={handleKeyDown}
                 placeholder={field.placeholder ?? 'Type or select...'}
                 className='flex-1 bg-transparent outline-none text-foreground placeholder:text-muted-foreground min-w-0'
+                data-track-category='Tickets'
+                data-track-name='DynamicComboboxInput'
+                data-track-metadata={JSON.stringify({ fieldName: field.name })}
               />
               <ChevronDown
                 className={cn(
@@ -280,6 +295,12 @@ const SelectFieldComponent: React.FC<{
                       'outline-none cursor-pointer',
                       'hover:bg-accent hover:text-accent-foreground',
                     )}
+                    data-track-category='Tickets'
+                    data-track-name='SelectDynamicFieldOption'
+                    data-track-metadata={JSON.stringify({
+                      value: option.value,
+                      label: option.label,
+                    })}
                   >
                     <span className='truncate flex-1'>{option.label}</span>
                   </button>
@@ -358,6 +379,12 @@ const SelectFieldComponent: React.FC<{
                         ? 'bg-accent text-accent-foreground'
                         : 'hover:bg-accent hover:text-accent-foreground',
                     )}
+                    data-track-category='Tickets'
+                    data-track-name='SelectMultiSelectOption'
+                    data-track-metadata={JSON.stringify({
+                      value: option.value,
+                      label: option.label,
+                    })}
                   >
                     <span className='w-4 h-4 flex items-center justify-center flex-shrink-0'>
                       {inputValue === option.value && <Check className='w-4 h-4 text-primary' />}

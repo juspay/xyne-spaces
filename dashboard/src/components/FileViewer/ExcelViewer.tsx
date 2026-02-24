@@ -260,6 +260,9 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
             className={`${isMobile ? 'px-2 py-1 text-xs' : 'px-3 py-1 text-sm'} border rounded whitespace-nowrap flex-shrink-0 ${
               idx === activeSheet ? 'bg-blue-500 text-white' : 'bg-background text-foreground '
             }`}
+            data-track-category='FileViewer'
+            data-track-name='SWITCH_SHEET'
+            data-track-metadata={JSON.stringify({ sheetName: sheet.name, sheetIndex: idx })}
           >
             {sheet.name}
           </button>

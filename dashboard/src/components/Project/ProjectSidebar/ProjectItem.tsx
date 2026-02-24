@@ -38,6 +38,9 @@ const ProjectItem = ({
         isExpanded={isExpanded}
         isActive={isActive}
         {...(boardCount > 0 && { badge: boardCount })}
+        data-track-category='Projects'
+        data-track-name='ToggleProjectExpand'
+        data-track-metadata={JSON.stringify({ projectId: project.id, projectName: project.name })}
       />
 
       {/* Nested Boards */}
@@ -51,6 +54,13 @@ const ProjectItem = ({
               isActive={activeBoardId === board.id}
               onClick={() => onBoardClick(board.id)}
               dataTestId={`board-item-${board.id}`}
+              data-track-category='Projects'
+              data-track-name='SelectBoard'
+              data-track-metadata={JSON.stringify({
+                boardId: board.id,
+                boardName: board.name,
+                projectId: project.id,
+              })}
             />
           ))}
         </div>

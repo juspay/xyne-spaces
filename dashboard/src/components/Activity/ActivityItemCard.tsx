@@ -80,10 +80,23 @@ export const ActivityItemCard = ({
         !activity.isRead ? 'bg-[#F2F2F3] hover:bg-[#EDF3F7]' : 'bg-white hover:bg-gray-50',
         className,
       )}
+      data-track-category='ACTIVITY'
+      data-track-name='OPEN_ACTIVITY_ITEM'
+      data-track-metadata={JSON.stringify({
+        activityId: activity.id,
+        actorAction: activity.actorAction,
+        isRead: activity.isRead,
+      })}
     >
       <div className='relative flex-shrink-0'>
         <UserHoverWrapper userId={actorId}>
-          <button onClick={e => e.stopPropagation()} tabIndex={0}>
+          <button
+            onClick={e => e.stopPropagation()}
+            tabIndex={0}
+            data-track-category='ACTIVITY'
+            data-track-name='VIEW_USER_AVATAR'
+            data-track-metadata={JSON.stringify({ activityId: activity.id, userId: actorId })}
+          >
             <UserAvatar userId={actorId} size={AvatarSize.REGULAR} showActiveStatus={false} />
             <div
               className={cn(
@@ -107,6 +120,9 @@ export const ActivityItemCard = ({
                 <button
                   className='font-semibold text-[#181B1D] hover:underline flex-shrink-0'
                   onClick={e => e.stopPropagation()}
+                  data-track-category='ACTIVITY'
+                  data-track-name='VIEW_USER_PROFILE'
+                  data-track-metadata={JSON.stringify({ activityId: activity.id, userId: actorId })}
                 >
                   {actorName}
                 </button>
@@ -133,6 +149,13 @@ export const ActivityItemCard = ({
                   <button
                     className='font-semibold text-[#3B4145] hover:underline cursor-pointer text-left whitespace-normal'
                     onClick={e => e.stopPropagation()}
+                    data-track-category='ACTIVITY'
+                    data-track-name='VIEW_CHANNEL'
+                    data-track-metadata={JSON.stringify({
+                      activityId: activity.id,
+                      channelId: activity.channelId,
+                      channelName: channelDisplayName,
+                    })}
                   >
                     {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
                   </button>

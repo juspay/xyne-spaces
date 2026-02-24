@@ -38,6 +38,9 @@ export const PriorityFilter = ({
             : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
         }`}
         onClick={() => setIsOpen(!isOpen)}
+        data-track-category='TicketFilters'
+        data-track-name='TogglePriorityDropdown'
+        data-track-metadata={JSON.stringify({ filterType: 'priority', isOpen })}
         variant='ghost'
       >
         <span>Priority</span>
@@ -53,6 +56,9 @@ export const PriorityFilter = ({
       {hasSelection && (
         <Button
           onClick={handleClear}
+          data-track-category='TicketFilters'
+          data-track-name='ClearPriorityFilter'
+          data-track-metadata={JSON.stringify({ filterType: 'priority', selectedPriorities })}
           className='absolute -top-1 -right-1 p-1'
           title='Clear priority filter'
           size='icon'
@@ -80,6 +86,9 @@ export const PriorityFilter = ({
                   checked={isSelected}
                   onChange={() => handleToggle(priority as TicketPriority)}
                   className='rounded border-gray-300 text-blue-600 focus:ring-blue-500'
+                  data-track-category='Tickets'
+                  data-track-name='FilterPriority'
+                  data-track-metadata={JSON.stringify({ priority })}
                 />
                 <span className={`px-2 py-1 text-xs font-medium rounded border ${config.color}`}>
                   {config.label}
@@ -92,6 +101,9 @@ export const PriorityFilter = ({
             <div className='mt-2 pt-2 border-t border-gray-100'>
               <Button
                 onClick={handleClear}
+                data-track-category='TicketFilters'
+                data-track-name='ClearAllPriorityFilter'
+                data-track-metadata={JSON.stringify({ filterType: 'priority', selectedPriorities })}
                 className='text-xs text-gray-500 hover:text-gray-700 transition-colors p-0 h-auto'
                 variant='ghost'
               >

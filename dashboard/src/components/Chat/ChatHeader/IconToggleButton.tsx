@@ -73,6 +73,9 @@ export const IconToggleButton: React.FC<IconToggleButtonProps> = ({
         ${!disabled ? currentVariant.hoverBorder : ''}
         ${className}
       `}
+      data-track-category='CHAT_HEADER'
+      data-track-name='TOGGLE_ICON'
+      data-track-metadata={JSON.stringify({ isActive })}
     >
       <Icon
         className={`

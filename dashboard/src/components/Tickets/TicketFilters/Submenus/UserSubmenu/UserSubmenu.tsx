@@ -105,6 +105,13 @@ export const UserSubmenu = ({
                     ${isSelected ? 'bg-[#F2F2F3] text-black' : 'hover:bg-gray-50 text-gray-700'}
                     focus-visible:ring-2 focus-visible:ring-[#F2F2F3]
                   `}
+                  data-track-category='Tickets'
+                  data-track-name='ToggleUserFilter'
+                  data-track-metadata={JSON.stringify({
+                    userId: user.id,
+                    userName: user.name,
+                    selected: !isSelected,
+                  })}
                 >
                   <Avatar userId={user.id} size='sm' className='shrink-0' />
                   <div className='flex-1 text-left min-w-0'>

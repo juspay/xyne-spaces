@@ -54,6 +54,9 @@ const PinList: React.FC<PinListProps> = ({ chatMessages, channelId }) => {
               <button
                 onClick={() => handleOpenOriginalMessage(conv.conversationId)}
                 className='w-full text-left block rounded-xl hover:bg-gray-50 transition'
+                data-track-category='CHAT_PINNED'
+                data-track-name='Open_Pinned_Message'
+                data-track-metadata={JSON.stringify({ conversationId: conv.conversationId })}
               >
                 <ChatBubble
                   message={msg}

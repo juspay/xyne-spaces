@@ -544,6 +544,12 @@ const ActivityListView = (): ReactElement => {
               id='activity-unread-filter'
               checked={showUnreadOnly}
               onCheckedChange={handleUnreadToggle}
+              data-track-category='ACTIVITY'
+              data-track-name='UNREAD_FILTER_TOGGLE'
+              data-track-metadata={JSON.stringify({
+                filter_type: 'unread_only',
+                filter_value: !showUnreadOnly,
+              })}
               className={cn(
                 'relative inline-flex h-5 w-9 items-center rounded-full',
                 'bg-gray-200 transition-colors duration-200',
@@ -565,6 +571,12 @@ const ActivityListView = (): ReactElement => {
           <Button
             variant='outline'
             onClick={markActiveTabUnread}
+            data-track-category='ACTIVITY'
+            data-track-name={`MARK_TAB_READ`}
+            data-track-metadata={JSON.stringify({
+              tab: activeTab,
+              action: 'mark_all_as_read',
+            })}
             className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary'
           >
             <div className='text-xs font-medium text-gray-700'>Mark as read</div>
@@ -576,6 +588,9 @@ const ActivityListView = (): ReactElement => {
               onClick={() => setShowMobileMenu(!showMobileMenu)}
               className='p-2 rounded-md hover:bg-gray-100 transition-colors duration-200'
               aria-label='More options'
+              data-track-category='ACTIVITY'
+              data-track-name='TOGGLE_MOBILE_MENU'
+              data-track-metadata={JSON.stringify({ menuState: !showMobileMenu })}
             >
               <MoreVertical size={20} className='text-gray-700' />
             </button>
@@ -588,6 +603,11 @@ const ActivityListView = (): ReactElement => {
                   <Switch.Root
                     checked={actionableToggle}
                     onCheckedChange={handleActionableToggle}
+                    data-track-category='ACTIVITY'
+                    data-track-name='ACTIONABLE_FILTER_TOGGLE'
+                    data-track-metadata={JSON.stringify({
+                      filter_value: !actionableToggle,
+                    })}
                     className={cn(
                       'relative inline-flex h-5 w-9 items-center rounded-full',
                       'bg-gray-200 transition-colors duration-200',
@@ -618,6 +638,8 @@ const ActivityListView = (): ReactElement => {
                     'w-full px-4 py-2 flex items-center gap-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors',
                     active === 'condensed' && 'bg-gray-100',
                   )}
+                  data-track-category='ACTIVITY'
+                  data-track-name='CHANGE_VIEW_CONDENSED'
                 >
                   <FoldVertical className='h-4 w-4' />
                   <span>Condensed</span>
@@ -633,6 +655,8 @@ const ActivityListView = (): ReactElement => {
                     'w-full px-4 py-2 flex items-center gap-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors',
                     active === 'detailed' && 'bg-gray-100',
                   )}
+                  data-track-category='ACTIVITY'
+                  data-track-name='CHANGE_VIEW_DETAILED'
                 >
                   <Fullscreen className='h-4 w-4' />
                   <span>Detailed</span>
@@ -666,6 +690,9 @@ const ActivityListView = (): ReactElement => {
                 return (
                   <Tabs.Trigger key={tab.value} value={tab.value} asChild>
                     <button
+                      data-track-category='ACTIVITY'
+                      data-track-name={`TAB_CHANGE`}
+                      data-track-metadata={JSON.stringify({ tab: tab.value })}
                       className={cn(
                         'px-1 py-2 flex items-center transition-all duration-100 cursor-pointer sm:px-4 justify-start gap-2',
                         activeTab === tab.value

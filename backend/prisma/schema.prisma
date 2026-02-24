@@ -2050,6 +2050,33 @@ model DraftMessage {
   @@schema("public")
 }
 
+enum Platform {
+  WEB
+  ELECTRON
+  MOBILE
+  @@schema("workflow")
+}
+
+model UserActivityEvent {
+  id              String    @id @default(cuid())
+  userId          String    
+  sessionId       String
+  eventCategory   String
+  eventName       String
+  eventLabel      String?   
+  url             String
+  triggerType     String    @default("CLICK")
+  contextMetadata Json?   
+  platform        Platform    
+  timestamp       DateTime
+
+  @@index([userId])
+  @@index([eventCategory])
+  @@index([eventName])
+  @@index([timestamp])
+  @@map("user_activity_events")
+  @@schema("workflow")
+}
 
 model StageApprovers {
   id                   String       @id @default(cuid())

@@ -91,6 +91,9 @@ export const TagsSubmenu = ({
                     ${isSelected ? 'bg-[#F2F2F3] text-black' : 'hover:bg-gray-50 text-gray-700'}
                     focus-visible:ring-2 focus-visible:ring-[#F2F2F3]
                   `}
+                  data-track-category='Tickets'
+                  data-track-name='ToggleTagFilter'
+                  data-track-metadata={JSON.stringify({ tag, selected: !isSelected })}
                 >
                   <div className='flex items-center justify-center w-5 h-5 shrink-0'>
                     <Tag className='w-4 h-4 text-gray-400' />
