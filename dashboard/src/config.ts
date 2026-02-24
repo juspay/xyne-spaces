@@ -72,4 +72,5 @@ export const TRUSTED_ORIGINS = [
   'https://app.spaces.sandbox.xyne.juspay.net',
   'https://xyne-spaces.web.app',
   'https://xyne-spaces.web',
+  'https://spaces.sandbox.xyne.juspay.net',
 ];

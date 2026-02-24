@@ -91,16 +91,16 @@ async def entrypoint(ctx: JobContext):
     _cleanup_duplicate_handlers()
     # Create secure Google credentials file from JSON environment variable
     # Google Cloud SDKs read credentials from GOOGLE_APPLICATION_CREDENTIALS file path
-    if config.google_credentials_json:
+    if config.google_voice_credentials_json:
         try:
             # Validate JSON and log project info
-            if isinstance(config.google_credentials_json, str):
-                parsed = json.loads(config.google_credentials_json)
+            if isinstance(config.google_voice_credentials_json, str):
+                parsed = json.loads(config.google_voice_credentials_json)
                 logger.info(
                     f"[Google STT] Valid credentials JSON, project={parsed.get('project_id')}"
                 )
             else:
-                parsed = config.google_credentials_json
+                parsed = config.google_voice_credentials_json
                 logger.info(
                     f"[Google STT] Credentials dict format, project={parsed.get('project_id')}"
                 )
@@ -115,7 +115,7 @@ async def entrypoint(ctx: JobContext):
             os.chmod(credentials_file, 0o600)
             
             # Set environment variable to file path for Google SDK auto-discovery
-            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_file
+            # os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_file
             logger.info(f"[Google STT] Credentials file created at {credentials_file}")
             
         except json.JSONDecodeError as e:
@@ -186,7 +186,7 @@ async def entrypoint(ctx: JobContext):
         azure_api_version=config.azure_stt_api_version,
         azure_deployment=config.azure_stt_model,  # Model name is deployment name for Azure
         stt_model=config.stt_model,
-        google_credentials_json=config.google_credentials_json,
+        google_voice_credentials_json=config.google_voice_credentials_json,
         google_stt_model=config.google_stt_model,
         google_stt_language=config.google_stt_language,
         deepgram_api_key=config.deepgram_api_key,
