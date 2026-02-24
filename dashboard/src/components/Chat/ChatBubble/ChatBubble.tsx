@@ -728,7 +728,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...(canEditMessage && !hasTicket && { onEditMessage: handleEditMessage })}
               {...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage })}
               {...(replies &&
-                (!isSystemMessage || isTicketCreationMessage) &&
+                (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
                 !isShowInChannel &&
                 (!isMessageDeleted || context === 'channel') && {
                   onReplyInThread: replies?.onOpenThread,
@@ -776,7 +776,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage })}
               {...(canEditMessage && !hasTicket && { onEditInCanvas: handleEditInCanvas })}
               {...(replies &&
-                (!isSystemMessage || isTicketCreationMessage) &&
+                (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
                 !isShowInChannel &&
                 (!isMessageDeleted || context === 'channel') && {
                   onReplyInThread: (e?: React.MouseEvent) => {
@@ -833,6 +833,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           isThreadOpen={isThreadOpen}
           isMe={message.senderId === user?.id}
           showInChannel={message.showInChannel}
+          isCallMessage={isCallMessage}
           showViewNewerReplies={showViewNewerReplies}
           {...(parentMessage?.conversationId && {
             parentConversationId: parentMessage.conversationId,
