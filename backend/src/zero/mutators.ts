@@ -231,11 +231,13 @@ async function createNonParticipantSystemMessages(
       `<span data-mention="true" data-mention-type="user" data-user-id="${np.userId}" data-username="${np.userName}" class="mention-text">${np.userName}</span>`
     ).join(', ');
 
-    const isMemberInPrivateChannel = channel?.visibility === ChannelVisibility.PRIVATE &&
+    const effectiveAddUserPolicy = channel?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+    const cannotAddUsers =
+      channel?.scopeType !== ChannelScopeType.GROUP_DM &&
       senderParticipation?.role === ChannelRole.MEMBER &&
-      channel?.scopeType !== ChannelScopeType.GROUP_DM;
+      effectiveAddUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY;
 
-    const htmlContent = isMemberInPrivateChannel
+    const htmlContent = cannotAddUsers
       ? `<p>You mentioned ${mentionSpans} but they are not in this channel. Ask an admin to add them.</p>`
       : `<p>You mentioned ${mentionSpans} but they are not in this channel.</p>`;
 
@@ -266,7 +268,7 @@ async function createNonParticipantSystemMessages(
             userId: np.userId,
           })),
           channelId,
-          canAddUsers: !isMemberInPrivateChannel,
+          canAddUsers: !cannotAddUsers,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -311,7 +313,7 @@ async function createNonParticipantSystemMessages(
             userId: np.userId,
           })),
           channelId,
-          canAddUsers: !isMemberInPrivateChannel,
+          canAddUsers: !cannotAddUsers,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -2463,6 +2465,25 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // 3️⃣ Perform the action
           if (action === 'add' || action === 'add_all') {
+            // Enforce addUserPolicy before adding anyone
+            const channel = await tx.run(zql.channels.where('id', channelId).one());
+            if (!channel) throw new Error('Channel not found');
+
+            if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
+              const addUserPolicy = channel.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+              if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY) {
+                const senderParticipation = await tx.run(
+                  zql.channel_participants
+                    .where('channelId', channelId)
+                    .where('userId', authData.sub)
+                    .one()
+                );
+                if (senderParticipation?.role === ChannelRole.MEMBER) {
+                  throw new Error('Only admins can add users to this channel');
+                }
+              }
+            }
+
             // Add users to channel (with validation)
             const validUsers = [];
 
@@ -2484,7 +2505,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
             // Send system message for added participants
             if (validUsers.length > 0) {
-              const channel = await tx.run(zql.channels.where('id', channelId).one());
               if (channel) {
                 await sendAddAndRemoveParticipantsSystemMessage(tx, {
                   channel,
