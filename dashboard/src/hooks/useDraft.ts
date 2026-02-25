@@ -69,9 +69,9 @@ export function useDraft(channelId: string, conversationId: string | null) {
   );
 
   return useMemo(() => {
-    return draftFromDB && draftFromLocal && draftFromLocal.updatedAt > draftFromDB.updatedAt
-      ? draftFromLocal.html
-      : draftFromDB?.content;
+    return draftFromDB && draftFromLocal && draftFromDB.updatedAt > draftFromLocal.updatedAt
+      ? draftFromDB.content
+      : draftFromLocal?.html;
   }, [draftFromLocal, draftFromDB]);
 }
 export function useDraftAttachments() {

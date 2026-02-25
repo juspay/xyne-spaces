@@ -76,6 +76,7 @@ interface ChatBubbleProps {
   replies?: ThreadData;
   showAvatar?: boolean;
   draft?: string | undefined;
+  hasDraftAttachments?: boolean;
   conversation?: ConversationWithTicket;
   variant?: 'default' | 'pinned';
   context?: 'channel' | 'thread';
@@ -93,6 +94,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   showAvatar,
   conversation,
   draft,
+  hasDraftAttachments,
   variant = 'default',
   context = 'channel',
   isFirstInThread = false,
@@ -830,6 +832,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               : replies
           }
           draft={draft}
+          {...(!!hasDraftAttachments && { hasDraftAttachments })}
           isThreadOpen={isThreadOpen}
           isMe={message.senderId === user?.id}
           showInChannel={message.showInChannel}

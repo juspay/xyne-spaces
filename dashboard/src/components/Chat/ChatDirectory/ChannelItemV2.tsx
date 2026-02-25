@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Hash, Pencil, Headphones, X } from 'lucide-react';
 import { ChannelVisibility, Channel, ChannelScopeType } from '@xyne/shared';
 import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
-import { useDraft } from '../../../hooks/useDraft';
+import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
 import { useSelector } from '@xstate/react';
@@ -27,6 +27,15 @@ interface ChannelItemV2Props {
   unreadCount?: number;
 }
 
+const stripHtml = (html: string): string => {
+  if (!html) return '';
+  if (typeof document === 'undefined') return html;
+
+  const tmp = document.createElement('DIV');
+  tmp.innerHTML = html;
+  return tmp.textContent || tmp.innerText || '';
+};
+
 const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactElement => {
   const [isHovered, setIsHovered] = useState(false);
   const zero = useZero();
@@ -41,7 +50,10 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
   const { isMobile } = usePlatform();
 
   const draftMessage = useDraft(channel.id, null);
+  const draftFromDB = useDraftFromDB(channel.id, null);
   const isActive = activeChannelId === channel.id;
+  const shouldShowDraft =
+    (draftMessage || (draftFromDB && draftFromDB.attachments.length > 0)) && !isActive;
   const isPrivate = channel.visibility === ChannelVisibility.PRIVATE;
   const isDM = isDMChannel(channel.scopeType);
 
@@ -126,6 +138,15 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
     checkTruncation();
   }, [bounds.width, displayName]);
 
+  const draftTooltipContent = (
+    <div className='flex flex-col items-center'>
+      {draftMessage && <span>{stripHtml(draftMessage)}</span>}
+      {draftFromDB && draftFromDB.attachments.length > 0 && (
+        <span>{draftFromDB.attachments.length} attachment(s)</span>
+      )}
+    </div>
+  );
+
   return (
     <Tooltip
       content={displayName}
@@ -169,8 +190,8 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
             )}
           </span>
           {hasActiveCall && <Headphones size={14} className='shrink-0' />}
-          {draftMessage && !isActive && (
-            <Tooltip content={draftMessage} side='top' sideOffset={6}>
+          {shouldShowDraft && (
+            <Tooltip content={draftTooltipContent} side='top' sideOffset={6}>
               <Pencil size={14} className='shrink-0' />
             </Tooltip>
           )}
