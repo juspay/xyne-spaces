@@ -161,6 +161,8 @@ const Settings = (): ReactElement => {
                   setLivePresenceStatus('ONLINE');
                 }}
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                data-track-category='SETTINGS'
+                data-track-name='SetPresenceOnline'
               >
                 <div className='w-2 h-2 rounded-full bg-green-500' />
                 <span>Active</span>
@@ -173,6 +175,8 @@ const Settings = (): ReactElement => {
                   setLivePresenceStatus('AWAY');
                 }}
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                data-track-category='SETTINGS'
+                data-track-name='SetPresenceAway'
               >
                 <div className='w-2 h-2 rounded-full border border-gray-400' />
                 <span>Away</span>

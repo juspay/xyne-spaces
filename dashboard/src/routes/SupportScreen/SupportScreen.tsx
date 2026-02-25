@@ -1218,6 +1218,12 @@ const EmailThreadItem = ({
                     disabled={isDemerging}
                     className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                     title='Demerge this email to a new ticket'
+                    data-track-category='SUPPORT'
+                    data-track-name='DemergeEmail'
+                    data-track-metadata={JSON.stringify({
+                      emailId: email.id,
+                      conversationId: email.conversationId,
+                    })}
                   >
                     <Split size={12} />
                     {isDemerging ? 'Demerging...' : 'Demerge'}
@@ -1493,6 +1499,15 @@ const EmailComposer = ({
               type='button'
               className='w-full flex items-center gap-2 cursor-pointer text-left py-1'
               onClick={handleExpand}
+              data-track-category='SUPPORT'
+              data-track-name='ExpandReplyComposer'
+              data-track-metadata={JSON.stringify({
+                toCount: toEmails.length,
+                ccCount: ccEmails.length,
+                bccCount: bccEmails.length,
+                conversationId,
+                draftEmailId: drafts?.[0]?.id,
+              })}
             >
               <ReplyAll size={16} className='text-gray-800 flex-shrink-0' />
               <span className='text-sm text-gray-800 font-medium'>Reply to</span>
@@ -1517,6 +1532,15 @@ const EmailComposer = ({
                   onClick={() => setIsExpanded(false)}
                   className='flex-shrink-0 p-0.5 hover:bg-gray-100 rounded transition-colors mt-0.5'
                   title='Collapse'
+                  data-track-category='SUPPORT'
+                  data-track-name='CollapseReplyComposer'
+                  data-track-metadata={JSON.stringify({
+                    toEmails: toEmails,
+                    ccEmails: ccEmails,
+                    bccEmails: bccEmails,
+                    conversationId,
+                    draftEmailId: drafts?.[0]?.id,
+                  })}
                 >
                   <ReplyAll size={16} className='text-gray-500' />
                 </button>
@@ -1533,6 +1557,15 @@ const EmailComposer = ({
                   }}
                   role='button'
                   tabIndex={0}
+                  data-track-category='SUPPORT'
+                  data-track-name='FocusToField'
+                  data-track-metadata={JSON.stringify({
+                    toEmails: toEmails,
+                    ccEmails: ccEmails,
+                    bccEmails: bccEmails,
+                    conversationId,
+                    draftEmailId: drafts?.[0]?.id,
+                  })}
                 >
                   {toEmails.map(email => (
                     <EmailTagWithAvatar
@@ -1553,6 +1586,15 @@ const EmailComposer = ({
                     placeholder={toEmails.length === 0 ? 'Add recipients...' : ''}
                     className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
                     disabled={isSending}
+                    data-track-category='SUPPORT'
+                    data-track-name='EditToField'
+                    data-track-metadata={JSON.stringify({
+                      toEmails: toEmails,
+                      ccEmails: ccEmails,
+                      bccEmails: bccEmails,
+                      conversationId,
+                      draftEmailId: drafts?.[0]?.id,
+                    })}
                   />
                 </div>
 
@@ -1562,6 +1604,14 @@ const EmailComposer = ({
                     <button
                       onClick={() => setShowCc(true)}
                       className='text-sm text-gray-500 hover:text-gray-700 px-1 transition-colors'
+                      data-track-category='SUPPORT'
+                      data-track-name='ShowCcField'
+                      data-track-metadata={JSON.stringify({
+                        ccMails: ccEmails,
+                        bccCount: bccEmails.length,
+                        conversationId,
+                        draftEmailId: drafts?.[0]?.id,
+                      })}
                     >
                       Cc
                     </button>
@@ -1570,6 +1620,14 @@ const EmailComposer = ({
                     <button
                       onClick={() => setShowBcc(true)}
                       className='text-sm text-gray-500 hover:text-gray-700 px-1 transition-colors'
+                      data-track-category='SUPPORT'
+                      data-track-name='ShowBccField'
+                      data-track-metadata={JSON.stringify({
+                        ccCount: ccEmails.length,
+                        bccEmails: bccEmails,
+                        conversationId,
+                        draftEmailId: drafts?.[0]?.id,
+                      })}
                     >
                       Bcc
                     </button>
@@ -1592,6 +1650,14 @@ const EmailComposer = ({
                     }}
                     role='button'
                     tabIndex={0}
+                    data-track-category='SUPPORT'
+                    data-track-name='FocusCcField'
+                    data-track-metadata={JSON.stringify({
+                      ccCount: ccEmails.length,
+                      bccCount: bccEmails.length,
+                      conversationId,
+                      draftEmailId: drafts?.[0]?.id,
+                    })}
                   >
                     {ccEmails.map(email => (
                       <EmailTagWithAvatar
@@ -1618,6 +1684,14 @@ const EmailComposer = ({
                       placeholder={ccEmails.length === 0 ? 'Add recipients...' : ''}
                       className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
                       disabled={isSending}
+                      data-track-category='SUPPORT'
+                      data-track-name='EditCcField'
+                      data-track-metadata={JSON.stringify({
+                        ccEmails: ccEmails,
+                        bccCount: bccEmails.length,
+                        conversationId,
+                        draftEmailId: drafts?.[0]?.id,
+                      })}
                     />
                   </div>
                 </div>
@@ -1638,6 +1712,13 @@ const EmailComposer = ({
                     }}
                     role='button'
                     tabIndex={0}
+                    data-track-category='SUPPORT'
+                    data-track-name='FocusBccField'
+                    data-track-metadata={JSON.stringify({
+                      bccCount: bccEmails,
+                      conversationId,
+                      draftEmailId: drafts?.[0]?.id,
+                    })}
                   >
                     {bccEmails.map(email => (
                       <EmailTagWithAvatar
@@ -1662,6 +1743,13 @@ const EmailComposer = ({
                         }
                       }}
                       placeholder={bccEmails.length === 0 ? 'Add recipients...' : ''}
+                      data-track-category='SUPPORT'
+                      data-track-name='EditBccField'
+                      data-track-metadata={JSON.stringify({
+                        bccEmails: bccEmails,
+                        conversationId,
+                        draftEmailId: drafts?.[0]?.id,
+                      })}
                       className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
                       disabled={isSending}
                     />

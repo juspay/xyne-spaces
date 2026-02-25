@@ -308,6 +308,9 @@ export function BrowserTabsScreen({
                 onClick={handleOpenExternal}
                 className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
                 title='Open in system browser'
+                data-track-category='BROWSER'
+                data-track-name='OpenInSystemBrowser'
+                data-track-metadata={JSON.stringify({ url: activeTab.url })}
               >
                 <ExternalLink size={14} />
               </button>
@@ -316,6 +319,9 @@ export function BrowserTabsScreen({
               onClick={handleClosePanel}
               className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
               title='Close browser panel'
+              data-track-category='BROWSER'
+              data-track-name='CloseBrowserPanel'
+              data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
             >
               <X size={16} />
             </button>
@@ -339,6 +345,9 @@ export function BrowserTabsScreen({
                   ? 'bg-white shadow-sm text-gray-900'
                   : 'text-gray-600 hover:bg-gray-200'
               }`}
+              data-track-category='BROWSER'
+              data-track-name='SwitchTab'
+              data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
             >
               {tab.isLoading ? (
                 <Loader2 size={isPanel ? 12 : 14} className='animate-spin flex-shrink-0' />
@@ -358,6 +367,9 @@ export function BrowserTabsScreen({
               <button
                 onClick={e => handleCloseTab(tab.id, e)}
                 className='opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-300 rounded transition-opacity'
+                data-track-category='BROWSER'
+                data-track-name='CloseTab'
+                data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
               >
                 <X size={isPanel ? 10 : 12} />
               </button>
@@ -368,6 +380,9 @@ export function BrowserTabsScreen({
           onClick={() => handleCreateTab('https://www.google.com')}
           className='p-1.5 rounded-md hover:bg-gray-200 text-gray-600'
           title='New tab'
+          data-track-category='BROWSER'
+          data-track-name='CreateNewTab'
+          data-track-metadata={JSON.stringify({ url: 'https://www.google.com' })}
         >
           <Plus size={isPanel ? 14 : 16} />
         </button>
@@ -384,6 +399,9 @@ export function BrowserTabsScreen({
           disabled={!activeTab?.canGoBack}
           className='p-1 rounded-md hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed'
           title='Go back'
+          data-track-category='BROWSER'
+          data-track-name='GoBack'
+          data-track-metadata={JSON.stringify({ url: activeTab?.url })}
         >
           <ArrowLeft size={isPanel ? 14 : 16} />
         </button>
@@ -392,6 +410,9 @@ export function BrowserTabsScreen({
           disabled={!activeTab?.canGoForward}
           className='p-1 rounded-md hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed'
           title='Go forward'
+          data-track-category='BROWSER'
+          data-track-name='GoForward'
+          data-track-metadata={JSON.stringify({ url: activeTab?.url })}
         >
           <ArrowRight size={isPanel ? 14 : 16} />
         </button>
@@ -400,6 +421,9 @@ export function BrowserTabsScreen({
           disabled={!activeTabId}
           className='p-1 rounded-md hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed'
           title='Reload'
+          data-track-category='BROWSER'
+          data-track-name='ReloadPage'
+          data-track-metadata={JSON.stringify({ url: activeTab?.url })}
         >
           {activeTab?.isLoading ? (
             <Loader2 size={isPanel ? 14 : 16} className='animate-spin' />
@@ -419,6 +443,8 @@ export function BrowserTabsScreen({
                 ? 'px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500'
                 : 'px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500'
             }`}
+            data-track-category='BROWSER'
+            data-track-name='EditUrlBar'
           />
         </form>
       </div>
@@ -457,6 +483,8 @@ export function BrowserTabsScreen({
                 className={`bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors ${
                   isPanel ? 'px-3 py-1.5 text-xs' : 'px-4 py-2'
                 }`}
+                data-track-category='BROWSER'
+                data-track-name='OpenGoogle'
               >
                 {isPanel ? 'Google' : 'Open Google'}
               </button>
@@ -465,6 +493,8 @@ export function BrowserTabsScreen({
                 className={`bg-gray-700 text-white rounded-md hover:bg-gray-800 transition-colors ${
                   isPanel ? 'px-3 py-1.5 text-xs' : 'px-4 py-2'
                 }`}
+                data-track-category='BROWSER'
+                data-track-name='OpenGitHub'
               >
                 {isPanel ? 'GitHub' : 'Open GitHub'}
               </button>

@@ -965,6 +965,9 @@ const ChannelCommandMenu = ({
               }}
               className='p-1.5 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors flex-shrink-0 flex items-center justify-center'
               aria-label={search.trim() || searchText.trim() ? 'Clear search' : 'Search'}
+              data-track-category='CHANNEL_SEARCH'
+              data-track-name={search.trim() || searchText.trim() ? 'ClearSearch' : 'OpenSearch'}
+              data-track-metadata={JSON.stringify({ searchQuery: searchText })}
             >
               {search.trim() || searchText.trim() ? (
                 <X className='w-4 h-4' />
@@ -1022,6 +1025,9 @@ const ChannelCommandMenu = ({
       <div
         className='relative flex-1 flex flex-col min-h-0'
         role='presentation'
+        data-track-category='CHANNEL_SEARCH'
+        data-track-name='ClickSearchResultsArea'
+        data-track-metadata={JSON.stringify({ hasResults })}
         onClick={() => {
           // Blur input when clicking anywhere in this container
           if (inputRef.current) {

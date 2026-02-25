@@ -53,6 +53,9 @@ export const EmailTagWithAvatar = ({
           }}
           className='hover:bg-gray-100 rounded p-0.5 transition-colors'
           aria-label={`Remove ${email}`}
+          data-track-category='EMAIL'
+          data-track-name='RemoveEmailTag'
+          data-track-metadata={JSON.stringify({ email })}
         >
           <X size={14} className='text-gray-500' />
         </button>

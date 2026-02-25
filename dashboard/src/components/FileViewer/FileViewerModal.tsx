@@ -537,6 +537,8 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             aria-label='Previous file'
             title='Previous (←)'
             type='button'
+            data-track-category='FILE_VIEWER'
+            data-track-name='PreviousFile'
           >
             <ChevronLeft className='h-6 w-6' />
           </button>
@@ -553,6 +555,8 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             aria-label='Next file'
             title='Next (→)'
             type='button'
+            data-track-category='FILE_VIEWER'
+            data-track-name='NextFile'
           >
             <ChevronRight className='h-6 w-6' />
           </button>

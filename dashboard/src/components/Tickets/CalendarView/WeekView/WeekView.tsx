@@ -60,6 +60,12 @@ export function WeekView({
                   className={`p-3 border-r border-gray-100 last:border-r-0 text-left transition-all duration-200 hover:bg-gray-50/50 ${
                     isToday ? 'bg-blue-50/30' : ''
                   }`}
+                  data-track-category='CALENDAR_WEEK_VIEW'
+                  data-track-name='SelectDay'
+                  data-track-metadata={JSON.stringify({
+                    date: dateKey,
+                    ticketCount: dayTickets.length,
+                  })}
                 >
                   <div className='space-y-2'>
                     {dayTickets.slice(0, 8).map((ticket: Ticket) => (

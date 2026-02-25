@@ -78,6 +78,9 @@ export const DeleteButton = memo<DeleteButtonProps>(
           title={buttonLabel}
           aria-label={buttonLabel}
           aria-busy={isDeleting}
+          data-track-category='MESSAGE_ATTACHMENT'
+          data-track-name='DeleteAttachment'
+          data-track-metadata={JSON.stringify({ fileName })}
         >
           {isDeleting ? (
             <Loader2 size={ICON_SIZES[variant]} className='animate-spin' aria-hidden='true' />

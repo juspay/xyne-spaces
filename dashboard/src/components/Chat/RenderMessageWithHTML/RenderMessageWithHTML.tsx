@@ -357,6 +357,9 @@ const parseNode = (
               'text-blue-600 dark:text-blue-400 hover:underline',
               breakLongLinks && 'break-all',
             )}
+            data-track-category='MESSAGE'
+            data-track-name='ClickExternalLink'
+            data-track-metadata={JSON.stringify({ url, isExternal: isExternalUrl })}
           >
             {url}
           </a>,
@@ -681,6 +684,9 @@ const parseNode = (
           };
         }
       }
+      props['data-track-category'] = 'MESSAGE';
+      props['data-track-name'] = isExternal ? 'ClickExternalLink' : 'ClickInternalLink';
+      props['data-track-metadata'] = JSON.stringify({ url: href, isExternal });
     }
   }
 

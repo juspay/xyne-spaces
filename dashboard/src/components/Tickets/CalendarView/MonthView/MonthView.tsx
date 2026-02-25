@@ -67,6 +67,12 @@ export function MonthView({
                   className={`min-h-[120px] p-3 border-r border-b border-gray-100 last:border-r-0 text-left transition-all duration-200 hover:bg-gray-50/50 ${
                     !isCurrentMonth ? 'bg-gray-50/30' : 'bg-white'
                   } ${hasTickets ? 'hover:shadow-inner' : ''}`}
+                  data-track-category='CALENDAR_MONTH_VIEW'
+                  data-track-name='SelectDay'
+                  data-track-metadata={JSON.stringify({
+                    date: dateKey,
+                    ticketCount: dayTickets.length,
+                  })}
                 >
                   {/* Date Number */}
                   <div className='flex items-center justify-between mb-2'>

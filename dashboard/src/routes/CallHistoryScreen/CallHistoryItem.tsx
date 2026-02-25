@@ -290,6 +290,9 @@ function renderCallItem({
                   handleDownloadTranscript?.();
                 }
               }}
+              data-track-category='CALL_HISTORY'
+              data-track-name='DownloadTranscript'
+              data-track-metadata={JSON.stringify({ callId: call.id })}
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
