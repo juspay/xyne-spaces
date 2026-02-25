@@ -121,6 +121,13 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   const createdDateEnd = params.get('createdDateEnd');
   if (createdDateEnd) filters.createdDateEnd = Number(createdDateEnd);
 
+  // My tickets filter toggles (assigned to me / created by me)
+  const assigned = params.get('assigned');
+  if (assigned === '1') filters.assigned = true;
+
+  const created = params.get('created');
+  if (created === '1') filters.created = true;
+
   // Read dynamic fields from URL
   // Dynamic fields are stored with format: df_{fieldId}=value or df_{fieldId}_start=value&df_{fieldId}_end=value
   const dynamicFields: Record<string, string[] | { start?: number; end?: number }> = {};
@@ -171,6 +178,8 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   params.delete('dueDateEnd');
   params.delete('createdDateStart');
   params.delete('createdDateEnd');
+  params.delete('assigned');
+  params.delete('created');
 
   // Clear existing dynamic field params
   for (const key of Array.from(params.keys())) {
@@ -199,6 +208,14 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   }
   if (filters.createdDateEnd !== undefined) {
     params.set('createdDateEnd', filters.createdDateEnd.toString());
+  }
+
+  // My tickets filter toggles (assigned to me / created by me)
+  if (filters.assigned) {
+    params.set('assigned', '1');
+  }
+  if (filters.created) {
+    params.set('created', '1');
   }
 
   // Add dynamic field params

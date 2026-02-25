@@ -40,37 +40,39 @@ export const PrioritySubmenu = ({
   };
 
   return (
-    <div className='py-1.5 px-1 flex flex-col gap-1'>
-      {prioritiesToShow.length > 0 ? (
-        prioritiesToShow.map(([priority, config]) => {
-          const isSelected = selectedPriorities.includes(priority as TicketPriority);
+    <div className='w-56 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden'>
+      <div className='py-1.5 px-1 flex flex-col gap-1 max-h-80 overflow-y-auto'>
+        {prioritiesToShow.length > 0 ? (
+          prioritiesToShow.map(([priority, config]) => {
+            const isSelected = selectedPriorities.includes(priority as TicketPriority);
 
-          return (
-            <button
-              key={priority}
-              onClick={() => handleToggle(priority as TicketPriority)}
-              type='button'
-              className={`flex items-center justify-between w-full px-3 py-2 transition-colors rounded-md 
-                ${isSelected ? 'bg-[#F2F2F3] text-gray-900' : 'hover:bg-gray-50 text-gray-900'}
-              `}
-              data-track-category='Tickets'
-              data-track-name='TogglePriorityFilter'
-              data-track-metadata={JSON.stringify({ priority, selected: !isSelected })}
-            >
-              <div className='flex items-center gap-2'>
-                <div className='flex items-center justify-center'>
-                  {getPriorityIcon(priority as TicketPriority)}
+            return (
+              <button
+                key={priority}
+                onClick={() => handleToggle(priority as TicketPriority)}
+                type='button'
+                className={`flex items-center justify-between w-full px-3 py-2 transition-colors rounded-md
+                  ${isSelected ? 'bg-[#F2F2F3] text-gray-900' : 'hover:bg-gray-50 text-gray-900'}
+                `}
+                data-track-category='Tickets'
+                data-track-name='TogglePriorityFilter'
+                data-track-metadata={JSON.stringify({ priority, selected: !isSelected })}
+              >
+                <div className='flex items-center gap-2'>
+                  <div className='flex items-center justify-center'>
+                    {getPriorityIcon(priority as TicketPriority)}
+                  </div>
+                  <span className='text-sm font-medium'>{config.label}</span>
                 </div>
-                <span className='text-sm font-medium'>{config.label}</span>
-              </div>
 
-              {isSelected && <Check className='w-5 h-5 text-[#3B4145]' strokeWidth={2.5} />}
-            </button>
-          );
-        })
-      ) : (
-        <div className='px-4 py-3 text-sm text-gray-500'>No priority options available</div>
-      )}
+                {isSelected && <Check className='w-5 h-5 text-[#3B4145]' strokeWidth={2.5} />}
+              </button>
+            );
+          })
+        ) : (
+          <div className='px-4 py-3 text-sm text-gray-500'>No priority options available</div>
+        )}
+      </div>
     </div>
   );
 };

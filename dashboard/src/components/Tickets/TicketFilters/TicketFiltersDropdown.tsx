@@ -49,6 +49,7 @@ interface FilterMenuItem {
 }
 
 const FILTER_MENU_ITEMS: FilterMenuItem[] = [
+  { id: 'priority', label: 'Priority', icon: BarChart4Icon, filterKey: 'priority' },
   { id: 'userGroups', label: 'User Groups', icon: Users, filterKey: 'userGroups' },
   { id: 'createdBy', label: 'Created by', icon: User, filterKey: 'createdBy' },
   { id: 'prReviewers', label: 'PR Reviewer', icon: User, filterKey: 'prReviewers' },
@@ -79,7 +80,6 @@ export const TicketFiltersDropdown = ({
 }: TicketFiltersProps & { onSearchChange?: (searchTerm: string) => void }): ReactElement => {
   const [boardOpen, setBoardOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
-  const [priorityOpen, setPriorityOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
@@ -300,15 +300,10 @@ export const TicketFiltersDropdown = ({
     return count;
   };
 
-  const getFilterPriorityCount = (): number => {
-    let count = 0;
-    if (filters.priority?.length) count++;
-    return count;
-  };
-
   const getMoreFiltersActiveCount = (): number => {
     let count = 0;
-    // Excludes boards (auto-selected), assignee and priority (have their own indicators)
+    // Excludes boards (auto-selected) and assignee (has its own indicator)
+    if (filters.priority?.length) count++;
     if (filters.userGroups?.length) count++;
     if (filters.createdBy?.length) count++;
     if (filters.prReviewers?.length) count++;
@@ -323,13 +318,11 @@ export const TicketFiltersDropdown = ({
     return count;
   };
 
-  const getActiveFilterCount =
-    getMoreFiltersActiveCount() + getFilterAssigneeCount() + getFilterPriorityCount();
+  const getActiveFilterCount = getMoreFiltersActiveCount() + getFilterAssigneeCount();
 
   const hasActiveFilters = getActiveFilterCount > 0;
   const hasMoreFiltersActive = getMoreFiltersActiveCount() > 0;
   const hasAssigneeFilter = getFilterAssigneeCount() > 0;
-  const hasPriorityFilter = getFilterPriorityCount() > 0;
 
   const handleClearAllFilters = useCallback((): void => {
     onFiltersChange({});
@@ -567,37 +560,6 @@ export const TicketFiltersDropdown = ({
             </Popover.Content>
           </Popover.Root>
         )}
-        <Popover.Root open={priorityOpen} onOpenChange={setPriorityOpen}>
-          <Popover.Trigger asChild>
-            <Button
-              variant='outline'
-              size='sm'
-              className='rounded-[10px] font-normal border-gray-200 hover:bg-gray-50'
-            >
-              <div className='flex items-center gap-1.5'>
-                <BarChart4Icon className='w-3 h-3 p-px font-medium' />
-                <span className='font-medium'>Priority</span>
-                {hasPriorityFilter && <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />}
-                <ChevronDown
-                  className={cn('w-4 h-4 ml-1 transition-transform', priorityOpen && 'rotate-180')}
-                />
-              </div>
-            </Button>
-          </Popover.Trigger>
-
-          <Popover.Content
-            side='bottom'
-            align='start'
-            sideOffset={6}
-            className='z-[60] min-w-[180px] bg-white border border-gray-200 rounded-lg shadow-lg'
-          >
-            <PrioritySubmenu
-              selectedPriorities={filters.priority || []}
-              onChange={priorities => handleFilterChange('priority', priorities)}
-              availablePriorities={availablePriorities || []}
-            />
-          </Popover.Content>
-        </Popover.Root>
         <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
           <Popover.Trigger asChild>
             <Button
