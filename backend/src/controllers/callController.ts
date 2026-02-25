@@ -1119,7 +1119,95 @@ export class CallController {
       res.status(500).json({ success: false, error: 'Failed to delete recording' });
     }
   };
+
+  /**
+   * POST /api/calls/:callId/pulse-actionable
+   * Browser-initiated "Create Actionable" proxy — forwards the request to the
+   * Pulse S2S API from the server side so that Pulse credentials are never
+   * exposed to the client.
+   */
+  createPulseActionable = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    const { title, description, assignee, merchantName, orgId, merchantId, productId } = req.body as {
+      title?: string;
+      description?: string;
+      assignee?: string;
+      merchantName?: string;
+      orgId?: string;
+      merchantId?: string | null;
+      productId?: string | null;
+    };
+
+    if (!title) {
+      res.status(400).json({ success: false, error: 'title is required' });
+      return;
+    }
+
+    try {
+      const { pulseService } = await import('@/services/pulseService');
+
+      // Fetch call info for meetCode and host
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      const creatorUser = await repositories.users.findById(call.createdByUserId);
+      const host = (creatorUser as any)?.email ?? call.createdByUserId;
+
+      // Prioritize explicit IDs if provided (from pre-resolved frontmatter)
+      let orgContext = orgId
+        ? { orgId, merchantId: merchantId ?? null, productId: productId ?? null }
+        : null;
+
+      // If no explicit IDs, resolve dynamically from merchant name
+      if (!orgContext && merchantName) {
+        orgContext = await pulseService.resolveOrgForMerchant(merchantName);
+      }
+
+      if (!orgContext) {
+        return;
+      }
+
+      const result = await pulseService.postActionables(
+        {
+          meetCode: callId,
+          host,
+          participants: [],
+          summary: description ?? title ?? '',
+          chapters: [{ topic: title ?? 'Action Item' }],
+          action_items: [{ content: title ?? '', assignee: assignee ?? '' }],
+        },
+        orgContext
+      );
+
+      if (result.success) {
+        logger.info(`[Pulse] User ${userId} created actionable for call ${callId}: "${title}"`);
+        res.json({ success: true });
+      } else {
+        logger.error(`[Pulse] Failed to create actionable for call ${callId}: ${result.error}`);
+        res.status(502).json({ success: false, error: result.error });
+      }
+    } catch (error) {
+      logger.error('Failed to create Pulse actionable:', error);
+      res.status(500).json({ success: false, error: 'Failed to create Pulse actionable' });
+    }
+  };
 }
 
 
 export const callController = new CallController();
+

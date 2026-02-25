@@ -49,6 +49,7 @@ import { CallBubble } from './CallBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
 import { TicketSuggestions } from './TicketSuggestions';
+import { PulseTickets } from './PulseTickets';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { hasMessageContent } from '../../../utils/chatUtils';
 import { ProactiveNudgeList } from '../../Chat/Nudges/ProactiveNudgeList';
@@ -310,6 +311,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const ticketSuggestions = parsedMarkdown.ticketSuggestions;
   const ticketsCreated = parsedMarkdown.ticketsCreated;
+
+  const isPulseActionablesMessage = metadata?.['messageSubtype'] === 'pulse_actionables';
 
   const { user } = useAuth();
   const { isMobile } = usePlatform();
@@ -656,6 +659,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   metadata={metadata}
                   conversationId={message.conversationId}
                   showButton={true}
+                />
+              ) : isPulseActionablesMessage && metadata?.callId ? (
+                <PulseTickets
+                  content={message.content}
+                  callId={metadata?.callId}
+                  conversationId={message.conversationId}
+                  messageId={message.messageId}
                 />
               ) : isMarkdownContent ? (
                 <>

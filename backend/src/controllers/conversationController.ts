@@ -33,6 +33,7 @@ import { messageSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { replaceTicketSuggestionWithCreated } from '../utils/ticketSuggestionMarkdownGenerator';
+import { markPulseItemAsSent as rewritePulseItemAsSent } from '../utils/markPulseItemAsSent';
 
 // Local type definitions
 interface UserInfo {
@@ -1450,6 +1451,60 @@ export class ConversationController {
         edited: true,
       });
     } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // PUT /api/conversations/{conversationId}/messages/{messageId}/pulse-item
+  // Mark a Pulse actionable item as sent (moves it from pulseItems → pulseSent in frontmatter)
+  markPulseItemAsSent = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId, messageId } = req.params;
+      const { itemId } = req.body as { itemId: string };
+
+      if (!itemId) {
+        res.status(400).json({ error: 'itemId is required' });
+        return;
+      }
+
+      const message = await this.messageRepository.findById(messageId);
+      if (!message) {
+        res.status(404).json({ error: 'Message not found' });
+        return;
+      }
+
+      if (message.conversationId !== conversationId) {
+        res.status(400).json({ error: 'Message does not belong to this conversation' });
+        return;
+      }
+
+      if (message.msgType !== MessageType.BOT) {
+        res.status(400).json({ error: 'Only bot Pulse messages can be updated' });
+        return;
+      }
+
+      const metadata = message.metadata as Record<string, unknown>;
+      if (metadata?.['messageSubtype'] !== 'pulse_actionables') {
+        res.status(400).json({ error: 'Message is not a Pulse actionables message' });
+        return;
+      }
+
+      // Rewrite frontmatter to mark this item as sent
+      const updatedContent = rewritePulseItemAsSent(message.content, itemId, new Date().toISOString());
+
+      const updatedMessage = await this.messageRepository.update(messageId, {
+        content: updatedContent,
+        edited: true,
+      });
+
+      res.status(200).json({
+        messageId: updatedMessage.messageId,
+        conversationId: updatedMessage.conversationId,
+        content: updatedMessage.content,
+        edited: true,
+      });
+    } catch (error) {
+      logger.error('Error marking Pulse item as sent:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

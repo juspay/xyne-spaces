@@ -80,6 +80,7 @@ export default defineConfig({
       '@/hooks': path.resolve(__dirname, './src/shared/hooks'),
       '@/workflow-ui': path.resolve(__dirname, './src/workflow-ui'),
     },
+    dedupe: ['@rocicorp/zero']
   },
   define: {
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
