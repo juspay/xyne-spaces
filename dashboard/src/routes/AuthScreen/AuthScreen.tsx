@@ -7,6 +7,7 @@ import GoogleLogo from '../../assets/icons/GoogleLogo';
 import { Loader2 } from 'lucide-react';
 import { ShineBorder } from '../../components/ui/shine-border';
 import { ThemeProvider } from '@juspay/blend-design-system';
+import { reactNativeBridge } from '../../utils/reactNativeBridge';
 
 /**
  * AuthScreen - Mobile-Responsive Login Page with Modern Design
@@ -49,6 +50,14 @@ const AuthScreen = (): ReactElement => {
       void indexedDBService.dropAllUserDatabases();
     }
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!reactNativeBridge.isAvailable()) {
+      return;
+    }
+    const path = `${location.pathname}${location.search}${location.hash}`;
+    reactNativeBridge.notifyRouteReady(path);
+  }, [location]);
 
   const handleGoogleSignIn = (): void => {
     clearError();
