@@ -251,8 +251,32 @@ export const applyTicketFilters = (
   tagsByTicketId?: Map<string, TicketTag[]>,
   formValuesByTicketId?: Map<string, FormEntityValues[]>,
   formFieldsById?: Map<string, { fieldType: FormFieldType; fieldEnum?: string[] | null }>,
+  currentUserId?: string,
 ): Ticket[] => {
   return tickets.filter(ticket => {
+    // My tickets filter toggles (assigned to me / created by me)
+    // These filters work together: if both are off, show all (handled outside)
+    // If one or both are on, show tickets matching the selected criteria
+    if (currentUserId && (filters.assigned || filters.created)) {
+      const isAssignedToMe =
+        ticket.assignedTo === `user:${currentUserId}` || ticket.assignedTo === `${currentUserId}`;
+      const isCreatedByMe =
+        ticket.createdBy === `user:${currentUserId}` || ticket.createdBy === `${currentUserId}`;
+
+      // If only assigned is on, require assigned to me
+      if (filters.assigned && !filters.created && !isAssignedToMe) {
+        return false;
+      }
+      // If only created is on, require created by me
+      if (filters.created && !filters.assigned && !isCreatedByMe) {
+        return false;
+      }
+      // If both are on, ticket must match at least one criteria
+      if (filters.assigned && filters.created && !isAssignedToMe && !isCreatedByMe) {
+        return false;
+      }
+    }
+
     // Board filter
     if (filters.boards && filters.boards.length > 0) {
       if (!ticket.boardId || !filters.boards.includes(ticket.boardId)) {

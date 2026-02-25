@@ -618,8 +618,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return ticketsForProject || [];
     }
     if (viewMode === 'my-tickets') {
+      // For my-tickets, show ALL tickets created by OR assigned to user (unfiltered)
+      // This is used for calculating available filter options (boards, priorities, etc.)
+      const userId = user?.id;
+      if (!userId) return [];
+      const isAssignedToMe = (ticket: Ticket) =>
+        ticket.assignedTo === `user:${userId}` || ticket.assignedTo === `${userId}`;
+      const isCreatedByMe = (ticket: Ticket) =>
+        ticket.createdBy === `user:${userId}` || ticket.createdBy === `${userId}`;
       return (ticketsForAll || []).filter(
-        ticket => ticket.assignedTo === `user:${user?.id}` || ticket.assignedTo === `${user?.id}`,
+        ticket => isAssignedToMe(ticket) || isCreatedByMe(ticket),
       );
     }
     if (viewMode === 'user-tickets' && filterByUserId) {
@@ -787,6 +795,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       tagsByTicketId,
       formValuesByTicketId,
       formFieldsById,
+      user?.id,
     );
 
     // Apply search filter
@@ -840,6 +849,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     formValuesByTicketId,
     formFieldsById,
     searchTerm,
+    user?.id,
     showOverdueOnly,
   ]);
 
@@ -1247,6 +1257,48 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               )}
             </div>
 
+            {/* My Tickets Filter Toggles - only show in my-tickets view */}
+            {viewMode === 'my-tickets' && (
+              /* CHANGE 1: Added 'overflow-hidden' */
+              <div className='flex items-center rounded-xl bg-[#F9F9F9] border h-8 overflow-hidden'>
+                <Tooltip content='Assigned To Me'>
+                  <button
+                    onClick={() =>
+                      setFilters({
+                        ...filters,
+                        assigned: !filters.assigned,
+                      })
+                    }
+                    /* CHANGE 2: Replaced 'py-2' with 'h-full' */
+                    className={`px-3 h-full rounded-l-xl transition-colors border-r ${
+                      filters.assigned
+                        ? 'bg-white text-gray-900'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <span className='text-xs font-medium'>Assigned To Me</span>
+                  </button>
+                </Tooltip>
+                <Tooltip content='Created By Me'>
+                  <button
+                    onClick={() =>
+                      setFilters({
+                        ...filters,
+                        created: !filters.created,
+                      })
+                    }
+                    /* CHANGE 3: Replaced 'py-2' with 'h-full' */
+                    className={`px-3 h-full rounded-r-xl transition-colors ${
+                      filters.created
+                        ? 'bg-white text-gray-900'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <span className='text-xs font-medium'>Created By Me</span>
+                  </button>
+                </Tooltip>
+              </div>
+            )}
             {/* Stage Overdue Filter Toggle */}
             <Tooltip content={showOverdueOnly ? 'Show All Tickets' : 'Show Only Overdue Tickets'}>
               <button
