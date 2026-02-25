@@ -3247,6 +3247,18 @@ export const mutators = defineMutators({
         }
       },
     ),
+    deleteByTicketId: defineMutator(
+      z.object({
+        ticketId: z.string(),
+      }),
+      async ({ tx, args: { ticketId } }) => {
+        const requests = await tx.run(zql.ticket_stage_requests.where('ticketId', ticketId));
+
+        for (const request of requests) {
+          await tx.mutate.ticket_stage_requests.delete({ id: request.id });
+        }
+      },
+    ),
   },
   ticketReference: {
     create: defineMutator(

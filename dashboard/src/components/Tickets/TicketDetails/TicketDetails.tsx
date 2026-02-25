@@ -232,6 +232,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     fromSequenceNumber: number;
     newStatus?: TicketStatusV2;
   } | null>(null);
+  const [showBoardChangeConfirmDialog, setShowBoardChangeConfirmDialog] = useState(false);
+  const [pendingBoardChange, setPendingBoardChange] = useState<string | null>(null);
 
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId }));
@@ -411,13 +413,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   // Merge form field definitions with entity values to show all fields including optional ones
   const allFormFields = useMemo((): FormEntityValueWithField[] | undefined => {
+    const currentFormId = formMapping?.formFields?.[0]?.formId;
+
+    const formValues = (formEntityValues as FormEntityValueWithField[] | undefined)?.filter(
+      fev => fev.formField?.formId === currentFormId,
+    );
+
     if (!formMapping?.formFields || formMapping.formFields.length === 0) {
-      return formEntityValues as FormEntityValueWithField[] | undefined;
+      return formValues;
     }
 
     // Build a map of field ID to existing values
     const existingValuesMap = new Map<string, FormEntityValueWithField>();
-    (formEntityValues as FormEntityValueWithField[] | undefined)?.forEach(fev => {
+    formValues?.forEach(fev => {
       if (fev.fieldId) {
         existingValuesMap.set(fev.fieldId, fev);
       }
@@ -435,7 +443,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         fieldId: formField.id,
         entityId: ticketId,
         entityType: FormEntityType.TICKET,
-        contextId: '', // Default empty for board-level form fields
+        contextId: ticket?.boardId || '',
         fieldValue: '',
         actualFieldValue: null,
         createdAt: Date.now(),
@@ -443,7 +451,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         formField,
       };
     });
-  }, [formMapping, formEntityValues, ticketId]);
+  }, [formMapping, formEntityValues, ticketId, ticket?.boardId]);
 
   type FormsToShowItem = {
     type: 'request' | 'form';
@@ -496,7 +504,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       // Group formEntityValues by contextId (stageId)
       const contextIdsWithValue = new Set(
         (formEntityValues as FormEntityValueWithField[])
-          .filter(fev => fev.contextId)
+          .filter(fev => fev.contextId && stagesWithFormInfo.some(s => s.id === fev.contextId))
           .map(fev => fev.contextId!),
       );
 
@@ -1002,14 +1010,33 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const handleBoardChange = (boardId: string | null): void => {
     if (boardId && boardId !== ticket.boardId) {
-      void zero.mutate(
-        mutators.ticket.update({
-          id: ticket.id,
-          boardId,
-          updatedAt: Date.now(),
-        }),
-      );
+      setPendingBoardChange(boardId);
+      setShowBoardChangeConfirmDialog(true);
     }
+  };
+
+  const confirmBoardChange = (): void => {
+    if (!pendingBoardChange || !ticket) return;
+
+    const newBoard = boards?.find(b => b.id === pendingBoardChange);
+    const firstStage = newBoard?.stages?.[0];
+
+    zero.mutate(mutators.ticketStageRequest.deleteByTicketId({ ticketId: ticket.id }));
+
+    void zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        boardId: pendingBoardChange,
+        stageName: firstStage?.name,
+        ...(firstStage?.defaultTicketStatusV2 && {
+          statusV2: firstStage.defaultTicketStatusV2,
+        }),
+        updatedAt: Date.now(),
+      }),
+    );
+
+    setShowBoardChangeConfirmDialog(false);
+    setPendingBoardChange(null);
   };
 
   const handleToggleTag = (tagName: string): void => {
@@ -1117,6 +1144,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           fieldId: formFieldId,
           newValue,
           timestamp: Date.now(),
+          contextId: ticket.boardId,
         }),
       );
     } else {
@@ -2770,6 +2798,34 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 data-track-category='Tickets'
                 data-track-name='ConfirmBackwardStageChange'
                 data-track-metadata={JSON.stringify({ stageName: backwardStageChange?.stageName })}
+              >
+                Confirm
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Board Change Confirmation Dialog */}
+      {showBoardChangeConfirmDialog && (
+        <Dialog
+          open={showBoardChangeConfirmDialog}
+          onOpenChange={setShowBoardChangeConfirmDialog}
+          title='Confirm Board Change'
+        >
+          <div className='p-6'>
+            <p className='text-sm text-gray-600 mb-6'>
+              Changing the board will move this ticket to the first stage of the selected board. All
+              previous stage progress and change requests will be permanently removed.
+            </p>
+
+            <div className='flex justify-end gap-3'>
+              <Button variant='secondary' onClick={() => setShowBoardChangeConfirmDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmBoardChange}
+                className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
               >
                 Confirm
               </Button>
