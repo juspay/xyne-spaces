@@ -221,6 +221,7 @@ export interface ToolDescriptions {
   search_relevant_messages: string;
   search_relevant_tickets: string;
   genius: string;
+  xyne_rca: string;
   field_value_discovery: string;
   web_search: string;
   research_agent: string;

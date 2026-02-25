@@ -34,12 +34,13 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, fieldValueDiscovery, webSearch, researchAgent] = await Promise.all([
+  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, researchAgent] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_TICKETS),
     getPromptFromLangfuse(PROMPT_NAMES.GENIUS),
+    getPromptFromLangfuse(PROMPT_NAMES.XYNE_RCA),
     getPromptFromLangfuse(PROMPT_NAMES.FIELD_VALUE_DISCOVERY),
     getPromptFromLangfuse(PROMPT_NAMES.WEB_SEARCH),
     getPromptFromLangfuse(PROMPT_NAMES.RESEARCH_AGENT),
@@ -51,6 +52,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     search_relevant_messages: searchMessages || 'Search for relevant messages in the channel.',
     search_relevant_tickets: searchTickets || 'Search for relevant support tickets using semantic search.',
     genius: geniusQuery || 'Query Genius for analytics and data insights.',
+    xyne_rca: xyneRcaQuery || 'Query the Xyne RCA Agent for Root Cause Analysis of production issues and errors.',
     field_value_discovery: fieldValueDiscovery || 'Discover field values from data sources.',
     web_search: webSearch || 'Perform a web search to find current information from the internet.',
     research_agent: researchAgent || 'Query the Research Agent for codebase analysis and technical investigation.',

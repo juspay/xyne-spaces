@@ -88,6 +88,8 @@ const envSchema = Joi.object({
   GENIUS_API_URL: Joi.string().uri().default(''),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
   QUERY_ROUTING_KEY: Joi.string().allow('').default(''),
+  // Xyne Investigation API Configuration
+  XYNE_API_KEY: Joi.string().allow('').default(''),
   // Transcription Agent API Key (for S2S authentication)
   TRANSCRIPTION_AGENT_API_KEY: Joi.string().default(''),
   // Superposition Configuration
@@ -268,6 +270,9 @@ export const config = {
     apiUrl: envVars.GENIUS_API_URL,
     apiKey: envVars.GENIUS_API_KEY,
     queryRoutingKey: envVars.QUERY_ROUTING_KEY,
+  },
+  xyne: {
+    apiKey: envVars.XYNE_API_KEY,
   },
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
   bitbucket: {

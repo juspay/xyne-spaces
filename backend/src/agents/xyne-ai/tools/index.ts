@@ -65,6 +65,7 @@ import { createSearchRelevantMessagesTool, getSearchRelevantMessagesTool } from 
 import { createSearchRelevantTicketsTool, getSearchRelevantTicketsTool } from './search_relevant_tickets.js';
 import { createFieldValueDiscoveryTool } from './field_value_discovery.js';
 import { createGeniusTool, getGeniusTool } from './genius.js';
+import { createXyneRcaTool, getXyneRcaTool } from './xyne_rca.js';
 import { createWebSearchTool, getWebSearchTool } from './web_search.js';
 import { createResearchAgentTool, getResearchAgentTool } from './research_agent.js';
 
@@ -91,6 +92,9 @@ export { createFieldValueDiscoveryTool };
 
 // Genius
 export { createGeniusTool, getGeniusTool };
+
+// Xyne RCA
+export { createXyneRcaTool, getXyneRcaTool };
 
 // Web Search
 export { createWebSearchTool, getWebSearchTool };
@@ -127,6 +131,7 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createSearchRelevantTicketsTool(),
     createFieldValueDiscoveryTool(),
     createGeniusTool(),
+    createXyneRcaTool(),
     createResearchAgentTool(),
   ];
 
