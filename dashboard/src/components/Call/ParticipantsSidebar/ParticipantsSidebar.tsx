@@ -55,7 +55,7 @@ export function ParticipantsSidebar({
 
     participants.forEach(participant => {
       // Only show in Contributors if ACCEPTED and hasn't left the call
-      if (participant.response === InvitationResponse.ACCEPTED && !participant.leftAt) {
+      if (participant.response === InvitationResponse.ACCEPTED) {
         contributors.push(participant);
       } else {
         alsoInvited.push(participant);
@@ -71,9 +71,9 @@ export function ParticipantsSidebar({
   }: {
     participant: CallParticipant;
   }): React.ReactElement => {
-    const { response, leftAt, userId } = participant;
+    const { response, userId } = participant;
     const user = useUser(userId);
-    const isInCall = response === InvitationResponse.ACCEPTED && !leftAt;
+    const isInCall = response === InvitationResponse.ACCEPTED;
 
     return (
       <div className='flex items-center gap-3 py-2 px-3 hover:bg-gray-100 rounded-lg transition-colors'>
@@ -87,11 +87,13 @@ export function ParticipantsSidebar({
           <p className='text-sm font-medium text-foreground truncate'>
             {user?.name || 'Unknown User'}
           </p>
-          {leftAt && <p className='text-xs text-muted-foreground'>Left the call</p>}
-          {!leftAt && response === InvitationResponse.INVITED && (
+          {response === InvitationResponse.LEFT && (
+            <p className='text-xs text-muted-foreground'>Left the call</p>
+          )}
+          {response === InvitationResponse.INVITED && (
             <p className='text-xs text-yellow-600'>Invited</p>
           )}
-          {!leftAt && response === InvitationResponse.DECLINED && (
+          {response === InvitationResponse.DECLINED && (
             <p className='text-xs text-red-500'>Declined</p>
           )}
         </div>
