@@ -135,12 +135,15 @@ export const TicketFiltersDropdown = ({
     setUseVespaSearch(false);
   }, [setActiveTab, setUseVespaSearch]);
 
+  const totalBoardCount = allBoardsList?.length || 0;
   const boardLabel =
-    selectedBoards.length === 0
-      ? 'All Boards'
-      : selectedBoards.length === 1 && selectedBoard
-        ? selectedBoard.name
-        : `${selectedBoards.length} Boards`;
+    totalBoardCount === 1 && allBoardsList?.[0]
+      ? allBoardsList[0].name
+      : selectedBoards.length === 0
+        ? 'All Boards'
+        : selectedBoards.length === 1 && selectedBoard
+          ? selectedBoard.name
+          : `${selectedBoards.length} Boards`;
 
   // Helper to get icon for field type
   const getIconForFieldType = (fieldType: FormFieldType): typeof BarChart3 => {
