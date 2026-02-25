@@ -11,4 +11,7 @@ router.post('/:conversationId/messages', uploadMultiple, conversationController.
 // Update message content (for ticket suggestion → ticket created flow)
 router.put('/:conversationId/messages/:messageId/ticket-suggestion', conversationController.updateTicketSuggestion);
 
+// Mark a Pulse actionable item as sent (moves pulseItem → pulseSent in frontmatter)
+router.put('/:conversationId/messages/:messageId/pulse-item', conversationController.markPulseItemAsSent);
+
 export default router;

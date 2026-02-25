@@ -139,6 +139,10 @@ const envSchema = Joi.object({
   //Presence Queue Configuration
   PRESENCE_CLEANUP_INTERVAL_MS: Joi.number().default(600000),
   PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
+  // Pulse Integration
+  PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
+  PULSE_API_URL: Joi.string().uri().default(''),
+  PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -333,4 +337,13 @@ export const config = {
     expirationSeconds: envVars.JWT_EXPIRATION_SECONDS,
   },
   enableImmediateOutputStep: envVars.ENABLE_IMMEDIATE_OUTPUT_STEP,
+  pulse: {
+    // Comma-separated channel IDs that have Pulse enabled (empty = disabled everywhere)
+    enabledChannels: (envVars.PULSE_ENABLED_CHANNELS as string)
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean),
+    apiUrl: envVars.PULSE_API_URL as string,
+    authorization: envVars.PULSE_AUTHORIZATION as string,
+  },
 };

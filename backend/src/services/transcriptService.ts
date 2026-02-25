@@ -10,6 +10,7 @@ import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
 import { GCSService } from '../services/gcsService';
+import { type PulseActionItem } from '@/services/pulseService';
 
 interface TranscriptEntry {
   user: string;
@@ -114,6 +115,42 @@ TRANSCRIPT:
 
 SUMMARY:
 {summary}
+`;
+
+// Pulse data extraction prompt — extracts multiple merchants and their actionable items from the transcript.
+// This is completely separate from Xyne ticket suggestions.
+const PULSE_DATA_PROMPT = `
+You are analyzing a call/meeting transcript between a sales or support team and one or more merchants/customers.
+
+CRITICAL RULES:
+- Output ONLY valid JSON
+- Extract a list of merchants or companies discussed in this call
+- For each merchant, identify concrete action items that need to be done FOR them
+- Each action item must have a clear task description and, if explicitly mentioned, an assignee email
+- Use "unassigned" if no specific person is mentioned for a task
+- Only include tasks that are clearly merchant-related (not internal team tasks)
+- If no merchants are identifiable, return an empty array for "merchants"
+
+JSON STRUCTURE (FOLLOW EXACTLY):
+{
+  "merchants": [
+    {
+      "merchantName": "[Company or merchant name]",
+      "actionItems": [
+        {
+          "content": "[Clear description of what needs to be done for this specific merchant]",
+          "assignee": "[Assignee email from transcript]" | "unassigned"
+        }
+      ]
+    }
+  ]
+}
+
+Only output valid JSON.
+No explanations.
+
+TRANSCRIPT:
+{transcript}
 `;
 
 export interface TicketSuggestion {
@@ -513,7 +550,7 @@ export class TranscriptService {
     try {
       // Try to fetch formatted transcript first
       const formattedPath = `attachments/${callId}_formatted.txt`;
-      
+
       const formattedFile = this.transcriptBucket.file(formattedPath);
       const [formattedExists] = await formattedFile.exists();
 
@@ -549,14 +586,18 @@ export class TranscriptService {
    */
   async downloadFormattedTranscript(callId: string, gcsPath: string): Promise<Buffer | null> {
     try {
-      logger.info(`[${callId}] formatted_transcript_download_started | gcs_path=${gcsPath}, bucket=${config.gcs.transcriptionBucketName}`);
-      
+      logger.info(
+        `[${callId}] formatted_transcript_download_started | gcs_path=${gcsPath}, bucket=${config.gcs.transcriptionBucketName}`
+      );
+
       const serviceToUse = new GCSService(config.gcs.transcriptionBucketName);
       const buffer = await serviceToUse.getFileBuffer(gcsPath);
-      
+
       return buffer;
     } catch (error) {
-      logger.error(`[${callId}] formatted_transcript_download_failed | gcs_path=${gcsPath}, error=${error}`);
+      logger.error(
+        `[${callId}] formatted_transcript_download_failed | gcs_path=${gcsPath}, error=${error}`
+      );
       return null;
     }
   }
@@ -884,6 +925,71 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
+   * Extract the primary merchant/customer name from the transcript using the LLM.
+   * Returns null if no merchant is clearly identified.
+   */
+  /**
+   * Run the dedicated Pulse LLM prompt against the transcript.
+   * Returns extracted merchant name + merchant-specific action items in one call.
+   * Completely independent of Xyne ticket suggestions.
+   */
+  async generatePulseData(
+    transcript: string
+  ): Promise<Array<{ merchantName: string; actionItems: PulseActionItem[] }>> {
+    if (config.pulse.enabledChannels.length === 0) return [];
+
+    const agent = this.createAgent();
+    if (!agent) {
+      logger.warn('[Pulse] Agent creation failed — cannot generate Pulse data');
+      return [];
+    }
+
+    const prompt = PULSE_DATA_PROMPT.replace('{transcript}', transcript);
+
+    try {
+      const result = await agent.execute({ messages: [createUserMessage(prompt)] });
+
+      if (!['completed', 'max_turns'].includes(result.status as string)) {
+        logger.warn('[Pulse] generatePulseData: agent returned non-completed status');
+        return [];
+      }
+
+      const last = result.messages.at(-1);
+      if (!last || !('content' in last) || !last.content) {
+        return [];
+      }
+
+      let jsonContent = last.content.trim();
+      const fence = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
+      if (fence) jsonContent = fence[1].trim();
+
+      const parsed = JSON.parse(jsonContent) as {
+        merchants: Array<{
+          merchantName: string;
+          actionItems: Array<{ content: string; assignee: string }>;
+        }>;
+      };
+
+      if (!parsed.merchants || !Array.isArray(parsed.merchants)) {
+        return [];
+      }
+
+      const groups = parsed.merchants.map((m) => ({
+        merchantName: m.merchantName,
+        actionItems: (m.actionItems ?? [])
+          .filter((i) => i.content)
+          .map((i) => ({ content: i.content, assignee: i.assignee || 'unassigned' })),
+      }));
+
+      logger.info(`[Pulse] generatePulseData: extracted ${groups.length} merchants`);
+      return groups;
+    } catch (error) {
+      logger.error('[Pulse] generatePulseData failed:', error);
+      return [];
+    }
+  }
+
+  /**
    * Post AI summary as a reply to the call message in the same conversation
    * @param conversationId - The conversation ID of the call message
    * @param callId - The external call ID
@@ -969,7 +1075,7 @@ Output ONLY the processed transcript, nothing else.`;
     logger.info(`[postSummaryAsReply] Reply count incremented for conversation ${conversationId}`);
   }
 
-  /**
+/**
    * Process call transcript and generate AI summary
    * This is the main orchestration method that:
    * 1. Checks if transcript exists in GCS
@@ -1088,7 +1194,7 @@ Output ONLY the processed transcript, nothing else.`;
           }
         }
 
-        // Post summary as reply to the call message with ticket suggestions
+        // Post summary + Xyne ticket suggestions as a reply in the chat
         await this.postSummaryAsReply(
           callMessage.conversationId,
           callId,
@@ -1096,6 +1202,59 @@ Output ONLY the processed transcript, nothing else.`;
           call.createdByUserId,
           ticketSuggestions
         );
+
+        // Pulse block — completely separate from Xyne tickets.
+        // Only activates when the call's channel is in PULSE_ENABLED_CHANNELS.
+        if (config.pulse.enabledChannels.length > 0) {
+          try {
+            // Check if this call's channel is in the Pulse allowlist (by channel ID)
+            const isPulseChannel = config.pulse.enabledChannels.includes(call.channelId);
+
+            if (isPulseChannel) {
+              logger.info(`[Pulse] Channel ${call.channelId} is in allowlist — generating Pulse data for call ${callId}`);
+              const pulseGroups = await this.generatePulseData(formattedTranscript);
+              const validatedGroups: Array<{
+                merchantName: string;
+                actionItems: PulseActionItem[];
+                orgContext: import('@/services/pulseService').PulseOrgContext;
+              }> = [];
+
+              for (const group of pulseGroups) {
+                if (group.actionItems.length > 0) {
+                  // Validate the merchant exists in Pulse BEFORE showing the UI card.
+                  const { pulseService } = await import('@/services/pulseService');
+                  const orgContext = group.merchantName
+                    ? await pulseService.resolveOrgForMerchant(group.merchantName)
+                    : null;
+
+                  if (orgContext) {
+                    validatedGroups.push({
+                      merchantName: group.merchantName,
+                      actionItems: group.actionItems,
+                      orgContext,
+                    });
+                  } else {
+                    logger.warn(`[Pulse] Merchant "${group.merchantName}" not found in Pulse — skipping its action items`);
+                  }
+                }
+              }
+
+              if (validatedGroups.length > 0) {
+                await this.postPulseTicketsAsMessage(
+                  callMessage.conversationId,
+                  callId,
+                  validatedGroups,
+                );
+              } else {
+                logger.info(`[Pulse] No valid merchant actionables for call ${callId}`);
+              }
+            } else {
+              logger.info(`[Pulse] Channel ${call.channelId} not in allowlist — skipping Pulse for call ${callId}`);
+            }
+          } catch (err) {
+            logger.error(`[Pulse] Failed to post Pulse tickets message for call ${callId}:`, err);
+          }
+        }
 
         try {
           const { callDocumentService } = await import('@/services/callDocumentService');
@@ -1115,6 +1274,80 @@ Output ONLY the processed transcript, nothing else.`;
       logger.error(`[${callId}] process_call_with_summary_failed | error=${error}`);
       // Don't re-throw - the transcript was already processed successfully
     }
+  }
+
+  /**
+   * Posts a dedicated bot message for Pulse actionables.
+   * Uses the same YAML frontmatter pattern as Xyne ticket suggestions so the
+   * frontend can parse + track which items have been sent to Pulse.
+   *
+   * Frontmatter shape:
+   *   pulseItems:
+   *     - itemId: <uuid>
+   *       content: <action item text>
+   *       assignee: <email>
+   *   pulseSent:    # moved here after user creates the actionable
+   *     - ...
+   */
+  private async postPulseTicketsAsMessage(
+    conversationId: string,
+    callId: string,
+    validatedGroups: Array<{
+      merchantName: string;
+      actionItems: PulseActionItem[];
+      orgContext: import('@/services/pulseService').PulseOrgContext;
+    }>,
+  ): Promise<void> {
+    const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+    if (!xyneAutomaticBot) {
+      logger.error('[Pulse] xyne-automatic bot not found — cannot post Pulse tickets message');
+      return;
+    }
+
+    const merchants = validatedGroups.map((g, idx) => ({
+      id: `m${idx + 1}`,
+      name: g.merchantName,
+      orgId: g.orgContext.orgId,
+      merchantId: g.orgContext.merchantId,
+      productId: g.orgContext.productId,
+    }));
+
+    const pulseItems = validatedGroups.flatMap((g, gIdx) =>
+      g.actionItems.map((item) => ({
+        itemId: randomUUID(),
+        merchantId: `m${gIdx + 1}`,
+        content: item.content,
+        assignee: item.assignee,
+      }))
+    );
+
+    const frontmatterData = {
+      merchants,
+      pulseItems,
+    };
+
+    const content = '---\n' + yaml.dump(frontmatterData) + '---\n\n## Suggested Pulse Actionables';
+
+    await repositories.messages.create({
+      conversationId,
+      senderId: xyneAutomaticBot.id,
+      content,
+      msgType: MessageType.BOT,
+      showInChannel: false,
+      metadata: {
+        messageSubtype: 'pulse_actionables',
+        callId,
+        isAiGenerated: true,
+        contentFormat: 'markdown',
+        hasPulseItems: true,
+        pulseItemCount: pulseItems.length,
+      },
+    });
+
+    await repositories.conversations.incrementReplyCount(conversationId);
+    logger.info(
+      `[Pulse] Posted consolidated Pulse actionables message for call ${callId} (${merchants.length} merchants)`
+    );
   }
 }
 

@@ -27,4 +27,4 @@ turn:
 webhook:
   api_key: devkey
   urls:
-    - http://backend:3001/api/livekit/webhook
+    - http://host.containers.internal:3001/api/livekit/webhook

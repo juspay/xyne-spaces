@@ -448,6 +448,36 @@ export class ConversationService {
       throw error;
     }
   }
+  /**
+   * Mark a Pulse actionable item as sent.
+   * Updates the YAML frontmatter to move the item from pulseItems → pulseSent.
+   */
+  async markPulseItemAsSent(
+    conversationId: string,
+    messageId: string,
+    itemId: string,
+  ): Promise<{ success: boolean; messageId: string; conversationId: string }> {
+    try {
+      const response = await apiInstance.put<{
+        success: boolean;
+        messageId: string;
+        conversationId: string;
+      }>(`/conversations/${conversationId}/messages/${messageId}/pulse-item`, { itemId });
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
 }
 
 export const conversationService = new ConversationService();

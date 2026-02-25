@@ -37,5 +37,9 @@ router.post('/:callId/leave', callController.leaveCall);
 // End call for everyone (host only)
 router.post('/:callId/end-for-all', callController.endCallForAll);
 
+// Pulse actionable proxy (keeps Pulse credentials server-side)
+router.post('/:callId/pulse-actionable', callController.createPulseActionable);
+
 export default router;
+
 

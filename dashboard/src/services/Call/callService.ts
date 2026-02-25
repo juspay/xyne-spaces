@@ -225,6 +225,43 @@ export class CallService {
       staleTime: 10 * 60 * 1000,
     });
   }
+
+  /**
+   * Create a Pulse actionable item for a specific call.
+   * The backend proxies this to Pulse S2S — credentials never reach the browser.
+   */
+  async createPulseActionable(
+    callId: string,
+    payload: {
+      title: string;
+      description?: string;
+      assignee?: string;
+      merchantName?: string;
+      orgId?: string;
+      merchantId?: string | null;
+      productId?: string | null;
+    },
+  ): Promise<{ success: boolean }> {
+    try {
+      const response = await apiInstance.post<{ success: boolean }>(
+        `/calls/${callId}/pulse-actionable`,
+        payload,
+      );
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
 }
 
 export const callService = new CallService();
