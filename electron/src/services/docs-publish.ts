@@ -16,6 +16,8 @@ interface PublishRequest {
     projectPath?: string;
     repoName?: string;
     branchName?: string;
+    /** Doc display title (e.g. file base name for markdown publish). When provided, used instead of _quarto.yml/dir name. */
+    title?: string;
     /** Channel ID to publish to, or null for Personal/private docs */
     channelId: string | null;
     /** If true, replace existing doc without prompting. If false and doc exists in different channel, return conflict. */
@@ -792,8 +794,8 @@ class DocsPublishService {
                     log.info(`[DocsPublish] Entry file: ${entryFile}`);
                 }
 
-                // Get the title from the project directory where _quarto.yml lives
-                const title = this.getDocsTitle(gitInfoPath);
+                // Use title from request (e.g. markdown file name) when provided; otherwise from _quarto.yml or dir name
+                const title = request.title?.trim() || this.getDocsTitle(gitInfoPath);
                 log.info(`[DocsPublish] Publishing docs: ${title}`);
 
                 const docType = this.detectDocType(outputPath);
