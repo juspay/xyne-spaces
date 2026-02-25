@@ -769,8 +769,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     }
   };
 
-  // Render inline text viewer for .txt files using existing TxtViewer component
-  if (isTextFile && !compact) {
+  // Render inline text viewer for .txt files on PC only (mobile shows as regular attachment)
+  if (isTextFile && !compact && !isMobile) {
     const metadata = attachment.metadata as Record<string, unknown> | null;
     return (
       <InlineTextFile

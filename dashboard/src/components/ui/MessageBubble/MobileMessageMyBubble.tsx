@@ -216,7 +216,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                   </div>
                   {/* Attachments inside the forwarded message border - vertical layout same as normal messages */}
                   {attachments.length > 0 && (
-                    <div className='mt-2'>
+                    <div className='mt-2 min-w-[256px]'>
                       <MobileAttachmentsGrid attachments={attachments} />
                     </div>
                   )}
@@ -272,7 +272,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
 
             {/* Attachments (only for non-forwarded messages) */}
             {!isForwardedMessage && attachments.length > 0 && (
-              <div className='border-t border-border/50'>
+              <div className='border-t border-border/50 w-[min(75vw,360px)]'>
                 <MobileAttachmentsGrid attachments={attachments} />
               </div>
             )}
