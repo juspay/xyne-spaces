@@ -1,37 +1,3 @@
-/**
- * FIDO Server Workflow Enhanced
- *
- * An enhanced conformance-driven FIDO2/WebAuthn implementation workflow designed for building secure
- * Relying Party servers in Rust. This workflow follows a rigorous conformance-driven development approach
- * with FIDO conformance script validation.
- *
- * 🚀 Enhanced Workflow Architecture:
- * ┌─────────────────────────────────────────────────────────────────────────────────┐
- * │ Phase 1: Requirement Analysis → LLM analyzes FIDO2/WebAuthn requirements       │
- * │ Phase 2: Architecture Planning → Rust project structure and design             │
- * │ Phase 3: Enhanced Implementation Loop → Code + Build + Review + Test           │
- * │         ┌─────────────────────────────────────────────────────────────────┐     │
- * │         │ 1. 🔧 Code Implementation (LLM writes/fixes code)               │     │
- * │         │ 2. 🔨 Build Verification (Cargo build check)                   │     │
- * │         │ 3. 🔍 Code Review (LLM production readiness review)            │     │
- * │         │ 4. 🧪 FIDO Conformance Testing (Remote testing)               │     │
- * │         └─────────────────────────────────────────────────────────────────┘     │
- * │ Phase 4: Summarization → Documentation and deployment notes                    │
- * └─────────────────────────────────────────────────────────────────────────────────┘
- *
- * ✨ Enhanced Key Features:
- * - Conformance-Driven Development approach using FIDO conformance script
- * - Direct FIDO compliance validation through automated conformance testing
- * - Iterative code-build-conformance loop with strict conformance validation
- * - FIDO2/WebAuthn compliance verification through conformance script
- * - Complete git integration with branch and commit tracking
- * - Rust-specific tooling and cargo integration
- * - Security-focused implementation patterns with conformance coverage
- *
- * @author Xyne Engineering Team
- * @version 5.0.0
- */
-
 import {
   WorkflowEngine,
   LoopControl,
@@ -39,39 +5,38 @@ import {
   AgenticCheckpointConfig,
   GitInfo
 } from '../../workflow-types'
-import { executeRemoteConformanceTesting, runFrameworkHealthChecks } from './utils'
 import { WorkflowDefinition, EmptyPreExecuteResult } from '../../registry/workflowRegistry'
 import { WorkflowType } from '../../types/workflow-enums'
 import type { ConversationResult } from '@framework'
+import { BaseWorkflowContextSchema, baseContextMapper } from '../../schemas/workflow-schema';
 import { z } from 'zod'
 import { 
   FidoServerWorkflowContext, 
-  FidoServerWorkflowOutput, 
+  fidoServerWorkflowOutput, 
   BuildResult, 
   ConformanceResult,
+  FidoWorkType,
 } from './types'
 import { 
-  executeCargoBuild,
+  executeBuildCode,
+  executeRemoteConformanceTesting,
+  executeLocalTesting,
+  executeBoilerCode
 } from './utils'
 import { createRequirementAnalysisTemplate } from './templates/requirement-analysis-template'
 import {logger} from '@/utils/logger';
-
 // =============================================================================
 // WORKFLOW STEP NAMES
 // =============================================================================
-
-export enum FidoEnhancedWorkflowStepsEnum{  // Phase 1: Requirement Understanding
+export enum FidoEnhancedWorkflowStepsEnum{  
   REQUIREMENT_ANALYSIS = 'requirement_analysis',
-  
-  // Phase 3: Conformance Implementation Loop
-  CONFORMANCE_IMPLEMENTATION_LOOP = 'conformance_implementation_loop',
+  CODING_LOOP = 'coding_loop',
   CODE_IMPLEMENTATION = 'code_implementation',
-  FIDO_CONFORMANCE_TESTING_ATTESTATION = 'fido_conformance_assertion_testing',
-  FIDO_CONFORMANCE_TESTING_ASSERTION = 'fido_conformance_attestation_testing',
+  DETERMINISTIC_TESTING = 'deterministic_testing',
   BUILD_CODE = 'build_code',
-  FRAMEWORK_HEALTH_CHECK = 'framework_health_check',
+  POST_IMPLEMENTATION = 'post_implementation',
+  PRE_REQUIREMENT_STEP = 'pre_requirement_step',
 }
-
 /**
  * Extract the last message content from a conversation result
  */
@@ -79,31 +44,107 @@ const extractLastMessageContent = (result: ConversationResult): string => {
   const lastMessage = result.messages[result.messages.length - 1]
   return lastMessage?.content || 'No content generated'
 }
-
 // =============================================================================
 // PROMPT TEMPLATES
 // =============================================================================
-
 /**
  * Creates agent configuration for enhanced requirement analysis
  */
 const getEnhancedRequirementAnalysisConfig = (
-  _projectName: string,
   repositoryUrl: string,
-  _workspaceDirectory: string,
   repoBranch?: string,
   baseBranch?: string,
-  workflowDescription?: string,
-  agentConfigVersions?: any
+  description?: string,
+  type?: FidoWorkType
 ): { agentName: string; config: AgenticCheckpointConfig } => {
   // Use dynamic workflow description or fallback to default
-  const finalDescription = workflowDescription;
+  const finalDescription = description;
   
   return {
-    agentName: 'fido-requirement-analyzer',
+    agentName: 'feature-requirement-analyzer',
     config: {
       conversationContext: {
-        initialUserMessage: createRequirementAnalysisTemplate(finalDescription)
+        initialUserMessage: createRequirementAnalysisTemplate(finalDescription,type)
+      },
+      repoInfo: {
+        repoUrl: repositoryUrl,
+        repoBranch,
+        baseBranch
+      },
+    }
+  }
+}
+/**
+ * Creates agent configuration for file removal
+ */
+const 
+getFileRemovalConfig = (
+  repositoryUrl: string,
+  repoBranch?: string,
+  baseBranch?: string
+): { agentName: string; config: AgenticCheckpointConfig } => {
+  return {
+    agentName: 'feature-implementation-engineer',
+    config: {
+      conversationContext: {
+        initialUserMessage: `Please remove the file named "generated-requirement-analysis.xml" from the repository if it exists. If the file does not exist, simply confirm this and do nothing else. Do not modify any other files.`
+      },
+      repoInfo: {
+        repoUrl: repositoryUrl,
+        repoBranch,
+        baseBranch
+      }
+    }
+  }
+}
+/**
+ * Creates agent configuration for conformance implementation with emphasis on feature Conformance feedback
+ */
+const getConformanceImplementationConfig = (
+  _requirementAnalysis: string,
+  buildFeedback: string | null,
+  repositoryUrl: string,
+  repoBranch?: string,
+  baseBranch?: string,
+  deterministicTestResults?: ConformanceResult | null,
+  _codeReviewFeedback?: string | null,
+  agentConfigVersions?: any,
+  type?: FidoWorkType,
+) => {
+  // Single unified prompt that includes feature Conformance feedback when available
+  const prompt = `
+${buildFeedback ? `**BUILD FAILURE - IMMEDIATE ACTION REQUIRED:**
+**CRITICAL CONSTRAINT:** The existing implementation is based on the requirement analysis and MUST be preserved. Your ONLY task is to fix the build errors below without modifying the core implementation logic, architecture, or functionality.
+**What you MUST do:**
+- Fix syntax errors, missing imports, type mismatches, or compilation issues
+- Maintain 100% compatibility with the existing requirement analysis
+**What you MUST NOT do:**
+- Change the implementation approach or architecture
+- Refactor or restructure existing working code
+- Add new features or modify existing functionality
+- Alter the core logic that was implemented per requirement analysis
+**Build Error Details:**
+${buildFeedback}
+---
+` : ''}
+${deterministicTestResults ? `**TEST RESULTS:**
+Output:
+${JSON.stringify(deterministicTestResults)}
+---
+` : ''}
+${type === FidoWorkType.DEEP ? `
+** REFERENCE DOCUMENTATION:**
+- Requirement Analysis: Check file \`generated-requirement-analysis.xml\` for detailed XML-formatted requirements 
+** IMPORTANT BUILD INSTRUCTION:**
+- Do NOT attempt to compile or run code yourself 
+- The build process is handled automatically by the workflow system after your implementation
+- Focus on writing/fixing the code - the system will compile it for you` : `${_requirementAnalysis}`}`
+logger.info('Generated Implementation Prompt->:',prompt);
+  return {
+    agentName: 'feature-implementation-engineer',
+    config: {
+      conversationContext: {
+        initialUserMessage: prompt
       },
       repoInfo: {
         repoUrl: repositoryUrl,
@@ -114,335 +155,289 @@ const getEnhancedRequirementAnalysisConfig = (
     }
   }
 }
-
-
-
-/**
- * Creates agent configuration for conformance implementation with emphasis on FIDO Conformance feedback
- */
-const getConformanceImplementationConfig = (
-  _requirementAnalysis: string,
-  _architecturePlan: string,
-  buildFeedback: string | null,
-  repositoryUrl: string,
-  _workspaceDirectory: string,
-  repoBranch?: string,
-  conformanceResult?: ConformanceResult | null,
-  _codeReviewFeedback?: string | null,
-  implementationStrategy?: string | null,
-  frameworkResult?: string | null,
-  agentConfigVersions?: any
-) => {
-  // Single unified prompt that includes FIDO Conformance feedback when available
-  const prompt = `
-  ${buildFeedback ? `**Build Issues to Address:**
-  ${buildFeedback}` : ''}
-  ${frameworkResult ? `**Validation Health Check Issues (missing or wrong implementation):**
-  ${frameworkResult}` : ''}
-  ${implementationStrategy} 
-  ${conformanceResult}
-  Use the address http://localhost:8080 for server
-**REFERENCE FILES AVAILABLE:**
-- Requirement Analysis: Check file \`generated-requirement-analysis.xml\` for detailed XML-formatted requirements 
-`
-logger.info('Generated Implementation Prompt->:',prompt);
-  return {
-    agentName: 'fido-implementation-engineer',
-    config: {
-      conversationContext: {
-        initialUserMessage: prompt
-      },
-      repoInfo: {
-        repoUrl: repositoryUrl,
-        repoBranch
-      },
-      agentConfigVersions
-    }
-  }
-}
-
 // =============================================================================
 // WORKFLOW IMPLEMENTATION
 // =============================================================================
-
-const FidoServerWorkflowInputSchema = z.object({
-  projectName: z.string().optional(),
-  repositoryUrl: z.string().url("Repository URL must be valid"),
-  workspaceDirectory: z.string().min(1, "Workspace directory is required"),
+const fidoServerWorkflowInputSchema = BaseWorkflowContextSchema.extend({
+  repositoryUrl: z.string(),
   maxIterations: z.number().positive().optional(),
   repoBranch: z.string().optional(),
+  baseBranch: z.string().optional(),
+  buildCommand: z.string().optional(),
+  testDetails: z.array(z.object({
+    filename: z.string(),
+    command: z.string(),
+    parameters: z.array(z.string())
+  })).optional(),
+  description: z.string(),
+  ispoller: z.boolean().default(false),
+  connectorName: z.string().optional(),
+  connectorBaseUrl: z.string().optional(),
+  type: z.nativeEnum(FidoWorkType).optional(),
   custom: z.record(z.string(), z.unknown()).optional()
 })
-
-const fidoServerWorkflowContextMapper = (payload: z.infer<typeof FidoServerWorkflowInputSchema> & {ticketId: string}): FidoServerWorkflowContext => ({
-  ticketId: payload.ticketId,
-  projectName: payload.projectName,
+const FidoServerWorkflowContextMapper = (payload: z.infer<typeof fidoServerWorkflowInputSchema> & {ticketId: string}): FidoServerWorkflowContext => ({
+   ...baseContextMapper(payload),
   repositoryUrl: payload.repositoryUrl,
-  workspaceDirectory: payload.workspaceDirectory,
   maxIterations: payload.maxIterations,
   repoBranch: payload.repoBranch,
-  custom: payload.custom
+  baseBranch: payload.baseBranch,
+  description: payload.description,
+  buildCommand: payload.buildCommand,
+  testDetails: payload.testDetails,
+  ispoller: payload.ispoller,
+  type: payload.type,
+  connectorName: payload.connectorName,
+  connectorBaseUrl: payload.connectorBaseUrl,
+  custom: payload.custom,
 })
-
 export const fidoServerWorkflow: WorkflowDefinition<
   FidoServerWorkflowContext,
-  FidoServerWorkflowOutput,
+  fidoServerWorkflowOutput,
   typeof FidoEnhancedWorkflowStepsEnum
 > = {
   type: WorkflowType.FIDO_SERVER_WORKFLOW,
   name: 'FIDO Server Workflow',
-  description: 'Enhanced conformance-driven FIDO2/WebAuthn Relying Party server implementation workflow',
+  description: 'Enhanced conformance-driven Feature Server implementation workflow',
   estimatedDuration: 2400000, // 40 minutes (longer for comprehensive conformance validation)
-  tags: ['fido2', 'webauthn', 'rust', 'security', 'authentication', 'conformance', 'validation'],
-  inputSchema: FidoServerWorkflowInputSchema,
-  contextMapper: fidoServerWorkflowContextMapper,
-
-  async execute(workflow: WorkflowEngine<FidoServerWorkflowContext,typeof FidoEnhancedWorkflowStepsEnum>, _preExecuteResult: EmptyPreExecuteResult): Promise<FidoServerWorkflowOutput> {
+  tags: ['feature', 'server', 'rust', 'security', 'authentication', 'conformance', 'validation'],
+  inputSchema: fidoServerWorkflowInputSchema,
+  contextMapper: FidoServerWorkflowContextMapper,
+  async execute(workflow: WorkflowEngine<FidoServerWorkflowContext,typeof FidoEnhancedWorkflowStepsEnum>, _preExecuteResult: EmptyPreExecuteResult): Promise<fidoServerWorkflowOutput> {
     const context = workflow.getContext()
-    const { 
+    let { 
       ticketId, 
-      projectName = 'Enhanced FIDO Server', 
       repositoryUrl, 
-      workspaceDirectory, 
-      maxIterations = 10,
+      repoBranch,
+      baseBranch,
+      description,
+      buildCommand,
+      testDetails,
+      ispoller,
+      type,
+      connectorName,
+      connectorBaseUrl,
       custom,
+      maxIterations = 10,
     } = context
-    
-    // Extract agent config versions from custom configuration
-    const agentConfigVersions = custom?.agentConfigVersions
-    const description= typeof custom?.description === 'string' ? custom.description : undefined
-    const baseBranch = typeof custom?.baseBranch === 'string' ? custom.baseBranch : 'staging'
-    const repoBranch = typeof custom?.repoBranch === 'string' ? custom.repoBranch : undefined
-    const workflowDescription = typeof description === 'string' ? description : undefined
-    const implementationStrategy = custom?.implementationMessage as string | null
-    const fidoValidationTypes=custom?.fidoValidationTypes as string[] | null
-
+    if(!baseBranch){
+    baseBranch = typeof (custom as any)?.baseBranch === 'string' ? (custom as any).baseBranch : 'main'
+    }
+    if(!repoBranch && typeof (custom as any)?.repoBranch === 'string'){
+    repoBranch = typeof (custom as any)?.repoBranch === 'string' ? (custom as any).repoBranch : undefined
+    }
+    if(!description && typeof (custom as any)?.description === 'string'){
+    description = typeof (custom as any)?.description === 'string' ? (custom as any).description : undefined
+    }
+    if(!buildCommand && typeof (custom as any)?.buildCommand === 'string'){
+    buildCommand = typeof (custom as any)?.buildCommand === 'string' ? (custom as any).buildCommand : undefined
+    }
+    if(!testDetails && Array.isArray((custom as any)?.testDetails)){
+    testDetails = Array.isArray((custom as any)?.testDetails) ? (custom as any).testDetails : undefined
+    }
+    if(!ispoller && typeof (custom as any)?.ispoller === 'boolean'){
+    ispoller = typeof (custom as any)?.ispoller === 'boolean' ? (custom as any).ispoller : undefined
+    }
+    if(!type && typeof (custom as any)?.type === 'string'){
+    const typeString = typeof (custom as any)?.type === 'string' ? (custom as any).type : undefined;
+    type = typeString && Object.values(FidoWorkType).includes(typeString as FidoWorkType) ? typeString as FidoWorkType : undefined;
+    }
+    if(!connectorName && typeof (custom as any)?.connectorName === 'string'){
+    connectorName = typeof (custom as any)?.connectorName === 'string' ? (custom as any).connectorName : undefined;
+    }
+    if(!connectorBaseUrl && typeof (custom as any)?.connectorBaseUrl === 'string'){
+    connectorBaseUrl = typeof (custom as any)?.connectorBaseUrl === 'string' ? (custom as any).connectorBaseUrl : undefined;
+    }
+    console.log('Workflow input parameters:', { custom })
+    console.log('Parsed workflow parameters:', { repositoryUrl, repoBranch, baseBranch, description, buildCommand, testDetails, ispoller, type, connectorName, connectorBaseUrl })
 
     // Validate required fields
     if (!repositoryUrl) {
-      throw new Error('Repository URL is required for Enhanced FIDO Server workflow')
+      throw new Error('Repository URL is required for Enhanced FIDO Server Workflow')
     }
     let gitInfo: GitInfo = {
-      branch: repoBranch || 'staging',
+      branch: repoBranch || 'main',
       repoUrl: repositoryUrl,
       hasCommits: false
     }
-
+     let branchCreated: string | undefined = undefined;
+    if(connectorName && connectorBaseUrl){
+      logger.info('Connector details provided, executing boiler code generation checkpoint...')
+    const boilerCode = await workflow.createCheckpoint(FidoEnhancedWorkflowStepsEnum.PRE_REQUIREMENT_STEP, executeBoilerCode,repositoryUrl,baseBranch, connectorName, connectorBaseUrl )
+    if(boilerCode.success){
+      logger.info('Boiler code generation successful, proceeding with workflow execution.')
+         branchCreated = boilerCode.branchName;
+         repoBranch=branchCreated;
+    }
+    else{
+      logger.error('Boiler code generation failed, terminating workflow execution.')
+      return {
+      ticketId,
+      status: 'failed',
+      implementationDetails: {
+        filesChanged: [], 
+        commitHash: gitInfo.commitHash,
+        branch: gitInfo.branch,
+        buildPassed: false,
+        conformancePassed: false,
+        iterationsCompleted: 0
+      },
+      summary: 'Boiler code generation failed.',
+      gitInfo
+    }
+    }
+  }
+  else{
+    logger.info('No connector details provided, skipping boiler code generation checkpoint.')
+  }
     // =========================================================================
     // PHASE 1: REQUIREMENT UNDERSTANDING
     // =========================================================================
-
     // Extract workflow description from custom context (if provided)
-    logger.info('📝 Starting requirement analysis phase...',workflowDescription)
-    logger.info('fidovalidationtype:', fidoValidationTypes)
-
-    const requirementConfig = getEnhancedRequirementAnalysisConfig(projectName, repositoryUrl, workspaceDirectory, repoBranch, baseBranch, workflowDescription, agentConfigVersions)
+    console.log(' Starting requirement analysis phase...',description)
+    console.log('featurevalidationtype:', testDetails?.map((td: any) => td.filename))
+    console.log(' Starting requirement analysis phase...',description)
+    console.log('featurevalidationtype:', testDetails?.map((td: any) => td.filename))
+    const requirementConfig = getEnhancedRequirementAnalysisConfig(repositoryUrl, repoBranch, baseBranch, description,type)
     const requirementResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(
       FidoEnhancedWorkflowStepsEnum.REQUIREMENT_ANALYSIS,
       requirementConfig.agentName,
       requirementConfig.config
     )
-
     const requirementAnalysis = extractLastMessageContent(requirementResult.result)
     gitInfo = { ...gitInfo, ...requirementResult.gitInfo }
-    logger.info('✅ Requirement analysis completed.',requirementAnalysis);
-    // =========================================================================
-    // PHASE 2: ARCHITECTURE PLANNING - COMMENTED OUT
-    // =========================================================================
-
-    // const architectureConfig = getEnhancedArchitecturePlanningConfig(requirementAnalysis, repositoryUrl, workspaceDirectory, gitInfo.branch, agentConfigVersions)
-    // const architectureResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(
-    //   FidoEnhancedWorkflowStepsEnum.ARCHITECTURE_PLANNING,
-    //   architectureConfig.agentName,
-    //   architectureConfig.config
-    // )
-
-    // const architecturePlan = extractLastMessageContent(architectureResult.result)
-    // gitInfo = { ...gitInfo, ...architectureResult.gitInfo }
-    
-
+    console.log(' Requirement analysis completed.',requirementAnalysis);
     // =========================================================================
     // PHASE 3: TDD IMPLEMENTATION AND BUILD LOOP
     // =========================================================================
-
     let buildResult: BuildResult | null = null
     let conformanceResult: ConformanceResult | null = null
-    let codeReviewFeedback: string | null = null
     let buildPassed = false
     let conformancePassed = false
     let iterationsCompleted = 0
-    let frameworkresult: string = "";
-
-    // Implementation loop with FIDO conformance testing
     await workflow.createWhileLoop( 
-      FidoEnhancedWorkflowStepsEnum.CONFORMANCE_IMPLEMENTATION_LOOP, 
+      FidoEnhancedWorkflowStepsEnum.CODING_LOOP, 
       maxIterations, 
       async (iteration, scopedEngine) => {
         iterationsCompleted = iteration + 1
-        logger.info(`🔄 Starting conformance implementation iteration ${iterationsCompleted}/${maxIterations}`)
-
+        console.log(`Starting conformance implementation iteration ${iterationsCompleted}/${maxIterations}`)
         // Prepare build feedback for the implementation agent if previous build failed
         const buildFeedback = buildResult && !buildResult.success 
           ? `Previous cargo build failed:\nError: ${buildResult.error}\nOutput: ${buildResult.output}`
-          : null
-
-        // Implementation step - conformance focused with build and FIDO conformance feedback
+          : null;
+        // Implementation step - conformance focused with build and feature conformance feedback
         const implementationConfig = getConformanceImplementationConfig(
           requirementAnalysis,
-          '', // architecturePlan removed
           buildFeedback,
           repositoryUrl,
-          workspaceDirectory,
           gitInfo.branch,
+          baseBranch,
           conformanceResult,
-          codeReviewFeedback,
-          implementationStrategy,
-          frameworkresult,
-          agentConfigVersions
         )
         const implementationResult: AgenticCheckpointResult = await scopedEngine.createAgenticCheckpoint(
           FidoEnhancedWorkflowStepsEnum.CODE_IMPLEMENTATION,
           implementationConfig.agentName,
           implementationConfig.config
         )
-
          gitInfo = { ...gitInfo, ...implementationResult.gitInfo }
-
         // Non-agentic build step: clone -> cd -> cargo build
-        logger.info('🔨 Running cargo build to check implementation...')
-        buildResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.BUILD_CODE, executeCargoBuild, workspaceDirectory, repositoryUrl, gitInfo.branch)
-
+        console.log('🔨 Running cargo build to check implementation...')
+        if(buildCommand && buildCommand?.trim().length > 0){
+        buildResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.BUILD_CODE, executeBuildCode,buildCommand, repositoryUrl, gitInfo.branch);
+        
         if (!buildResult.success) {
-          logger.info(`❌ Implementation compilation failed - Error: ${buildResult.error}`)
-          logger.info('🔄 Build issues detected - continuing TDD implementation loop to fix errors')
+          console.log(` Implementation compilation failed - Error: ${buildResult.error}`)
+          console.log(' Build issues detected - continuing TDD implementation loop to fix errors')
           buildPassed = false
           return LoopControl.CONTINUE
         }
-
-        logger.info('✅ Implementation compiles successfully!', fidoValidationTypes);
+      }
+        console.log(' Implementation compiles successfully!', testDetails);
         buildPassed = true;
-
-        if (fidoValidationTypes && Array.isArray(fidoValidationTypes) && fidoValidationTypes.length > 0) {
+        if (testDetails && Array.isArray(testDetails) && testDetails.length > 0) {
             let allValidationsPassed = true;
-            for (const fidoValidationType of fidoValidationTypes) {
-                if (fidoValidationType === 'FRAMEWORK') {
-                    logger.info('🩺 Running framework health checks as validation type is FRAMEWORK');
-                    const healthCheckResult = await scopedEngine.createCheckpoint(
-                        FidoEnhancedWorkflowStepsEnum.FRAMEWORK_HEALTH_CHECK,
-                        runFrameworkHealthChecks,
-                        workspaceDirectory,
-                        repositoryUrl,
-                        gitInfo.branch
-                    );
-
-                    if (!healthCheckResult.success) {
-                        logger.info(`❌ Framework health checks failed. Summary:\n${healthCheckResult.summary}`);
-                        frameworkresult = `Framework health checks failed:\n${healthCheckResult.summary}`;
+            if(ispoller){
+              for (const testDetail of testDetails) {
+                console.log(`🌐 Executing feature conformance testing for: ${testDetail.filename}...`);
+                 conformanceResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.DETERMINISTIC_TESTING, executeRemoteConformanceTesting, testDetail, repositoryUrl , gitInfo.branch);
+                 if(conformanceResult){
+                    const { success , output  } = conformanceResult;
+                    console.log(` feature Conformance Results for ${testDetail.filename} - Success: ${success} -- ${output}`);
+                    if (!success) {
                         allValidationsPassed = false;
-                        break; 
+                        break;
                     }
-                    logger.info('✅ Framework health checks passed!');
-                } else if (fidoValidationType === 'ASSERTION' || fidoValidationType === 'ATTESTATION') {
-                  const type = fidoValidationType === 'ATTESTATION' ? FidoEnhancedWorkflowStepsEnum.FIDO_CONFORMANCE_TESTING_ATTESTATION: FidoEnhancedWorkflowStepsEnum.FIDO_CONFORMANCE_TESTING_ASSERTION;
-                    logger.info(`🧪 Running FIDO conformance testing for ${fidoValidationType}...`);
-                    const fidoAppPath: string = "/Applications/FIDO Alliance - Certification Conformance Testing Tools.app/Contents/MacOS/FIDO Alliance - Certification Conformance Testing Tools";
-                    
-                    try {
-                        conformanceResult = await scopedEngine.createCheckpoint(type, executeRemoteConformanceTesting, fidoValidationType, repositoryUrl , gitInfo.branch, fidoAppPath);
-                    } catch (error: any) {
-                        logger.info(`❌ Remote execution failed: ${error.message}`);
-                        if (error.message.includes('Build failed')) {
-                            buildResult = { success: false, output: '', error: error.message, executedAt: new Date().toISOString() };
-                            buildPassed = false;
-                            allValidationsPassed = false;
-                            break;
-                        } else {
-                            conformanceResult = {
-                                success: false,
-                                output: `Remote execution error: ${error.message}`,
-                                executedAt: new Date().toISOString(),
-                                testResults: { passed: 0, failed: 1, total: 1 }
-                            };
-                            allValidationsPassed = false;
-                            break;
-                        }
-
-                    }
-
-                    if (conformanceResult) {
-                        logger.info('✅ FIDO conformance testing completed', {
-                            success: conformanceResult.success,
-                            passed: conformanceResult.testResults?.passed,
-                            failed: conformanceResult.testResults?.failed,
-                            total: conformanceResult.testResults?.total
-                        });
-
-                        const allTestsPassed = conformanceResult.success &&
-                            conformanceResult.testResults?.failed === 0 &&
-                            conformanceResult.testResults?.passed === conformanceResult.testResults?.total &&
-                            conformanceResult.testResults?.total > 0;
-
-                        if (!allTestsPassed) {
-                            logger.info('❌ Not all FIDO conformance tests passed.');
-                            allValidationsPassed = false;
-                          break;
-                        }
-                        logger.info(`🎉 All FIDO conformance tests for ${fidoValidationType} passed!`);
-                    }
-                }
+                 } else {
+                    console.log(` Conformance Results for ${testDetail.filename} - No results returned.`);
+                    allValidationsPassed = false;
+                    break;
+                 }
             }
-
+            }
+            else{
+              console.log('ispoller is false, skipping feature conformance testing.');
+              for (const testDetail of testDetails) {
+                console.log(`🌐 Executing feature conformance testing for: ${testDetail.filename}...`);
+                 conformanceResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.DETERMINISTIC_TESTING, executeLocalTesting, repositoryUrl , gitInfo.branch, testDetail,buildResult!.workingDirectory);
+                 if(conformanceResult){
+                    const { success , output  } = conformanceResult;
+                    console.log(` feature Conformance Results for ${testDetail.filename} - Success: ${success} -- ${output}`);
+                    if (!success) {
+                        allValidationsPassed = false;
+                    }
+                 } else {
+                    console.log(` Conformance Results for ${testDetail.filename} - No results returned.`);
+                    allValidationsPassed = false;
+                 }
+            }
+            }
             if (allValidationsPassed) {
-                logger.info('🎉 All FIDO validation types passed successfully!');
+                console.log('All validation types passed successfully!');
                 conformancePassed = true;
                 return LoopControl.BREAK;
             } else {
-                logger.info('🔄 Some validations failed, continuing implementation loop to fix errors.');
+                console.log(' Some validations failed, continuing implementation loop to fix errors.');
                 conformancePassed = false;
                 return LoopControl.CONTINUE;
             }
         } else {
-            logger.info('✅ No FIDO validation types specified, marking as complete.');
+            console.log(' No feature validation types specified, marking as complete.');
             conformancePassed = true;
             return LoopControl.BREAK;
         }
       }
     )
-
+    if(type === FidoWorkType.DEEP){
+      logger.info('Removing generated-requirement-analysis.xml if it exists...');
+      const removeFileConfig = getFileRemovalConfig(repositoryUrl, gitInfo.branch,baseBranch);
+      await workflow.createAgenticCheckpoint(
+        FidoEnhancedWorkflowStepsEnum.POST_IMPLEMENTATION,
+        removeFileConfig.agentName,
+        removeFileConfig.config
+      );
+    }
     // =========================================================================
     // PHASE 4: SUMMARIZATION - COMMENTED OUT
     // =========================================================================
-
     // const summarizationConfig = getEnhancedSummarizationConfig(ticketId, repositoryUrl, workspaceDirectory, gitInfo.branch, agentConfigVersions)
     // const summarizationResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(
     //   FidoEnhancedWorkflowStepsEnum.SUMMARIZATION,
     //   summarizationConfig.agentName,
     //   summarizationConfig.config
     // )
-
+    // const summarizationConfig = getEnhancedSummarizationConfig(ticketId, repositoryUrl, workspaceDirectory, gitInfo.branch, agentConfigVersions)
+    // const summarizationResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(
+    //   FidoEnhancedWorkflowStepsEnum.SUMMARIZATION,
+    //   summarizationConfig.agentName,
+    //   summarizationConfig.config
+    // )
     // const summary = extractLastMessageContent(summarizationResult.result)
     // gitInfo = { ...gitInfo, ...summarizationResult.gitInfo }
     const summary = ``
     // =========================================================================
     // FINAL RESULTS WITH ENHANCED TDD METRICS
     // =========================================================================
-
     const finalStatus = buildPassed && conformancePassed ? 'completed' : 'failed'
-
-
-    // Extract FIDO Conformance results safely with simplified structure
-    let conformanceResults = undefined
-    if (conformanceResult !== null) {
-      const safeConformanceResult = conformanceResult as ConformanceResult
-      conformanceResults = {
-        totalTests: safeConformanceResult.testResults?.total || 0,
-        passedTests: safeConformanceResult.testResults?.passed || 0,
-        failedTests: safeConformanceResult.testResults?.failed || 0,
-        errorTests: 0,
-        failedTestCases: []
-      }
-    }
-
     return {
       ticketId,
       status: finalStatus,
@@ -452,8 +447,7 @@ export const fidoServerWorkflow: WorkflowDefinition<
         branch: gitInfo.branch,
         buildPassed,
         conformancePassed,
-        iterationsCompleted,
-        conformanceResults
+        iterationsCompleted
       },
       summary,
       gitInfo

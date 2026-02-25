@@ -1,0 +1,10 @@
+{
+    "transaction_id": {
+        "id": ""
+    },
+    "request_ref_id": {
+        "id": ""
+    },
+    "cancellation_reason": "Customer requested cancellation",
+    "currency": "USD"
+}

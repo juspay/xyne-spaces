@@ -2,104 +2,354 @@
 // CHECKPOINT HANDLERS
 // =============================================================================
 
-import { exec, spawn, ChildProcess } from 'child_process'
-import { promisify } from 'util'
-import * as net from 'net'
-import * as path from 'path'
-import * as fs from 'fs'
-import { BuildResult, RunResult, TestResult, ConformanceResult, HealthCheckResult } from './types'
-import { runHealthChecks } from './health-check'
-import {logger} from '@/utils/logger';
+import { exec, spawn, ChildProcess } from 'child_process';
+import { promisify } from 'util';
+import * as path from 'path';
+import * as fs from 'fs';
+import { fileURLToPath } from 'url';
+import { BuildResult, RunResult, TestResult, ConformanceResult, BoilerCodeResult } from './types';
+import { TestDetail } from './types';
+import { logger } from '@/utils/logger';
+const execAsync = promisify(exec);
 
-const execAsync = promisify(exec)
+// Define __dirname for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
- * Execute cargo build and return results
+ * Execute connector boilerplate code generation
+ * Clones the repo, creates a branch, runs the add_connector.sh script,
+ * and pushes the commit
  */
-export const executeCargoBuild = async (
-  baseDir: string, // parent folder like /Users/.../fido-workflow-test
-  repoURL: string,
-  repoBranch?: string
-): Promise<BuildResult> => {
-  logger.info(`🦀 Starting build process in ${baseDir}`);
+/**
+ * Execute a command and stream output to console using line buffering and console.log
+ * Supports shell-style commands with environment variables and quoted arguments
+ */
+async function execWithStreaming(
+  command: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; shell?: boolean } = {}
+): Promise<{ stdout: string; stderr: string }> {
+  console.log(`[execWithStreaming] Spawning: ${command} ${args.join(' ')}`);
 
-  // Create a unique subfolder under fido-workflow-test
-  const workingDirectory = path.join(baseDir, `build-${Date.now()}`);
+  return new Promise((resolve, reject) => {
+    const useShell = options.shell !== false; // Default to true for compatibility
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: { ...process.env, ...options.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: useShell,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    if (child.stdout) {
+      child.stdout.on('data', (data) => {
+        const chunk = data.toString();
+        stdout += chunk;
+        // Use console.log for visibility in log collectors, trimming trailing newline to avoid double spacing
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.trim()) console.log(line);
+        }
+      });
+    }
+
+    if (child.stderr) {
+      child.stderr.on('data', (data) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        // Use console.error for visibility in log collectors
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.trim()) console.error(line);
+        }
+      });
+    }
+
+    child.on('close', (code) => {
+      console.log(`[execWithStreaming] Process exited with code ${code}`);
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const error = new Error(`Command failed with exit code ${code}`);
+        (error as any).stdout = stdout;
+        (error as any).stderr = stderr;
+        reject(error);
+      }
+    });
+
+    child.on('error', (err) => {
+      console.error(`[execWithStreaming] Spawn error:`, err);
+      reject(err);
+    });
+  });
+}
+
+export const executeBoilerCode = async (
+  repoURL: string,
+  baseBranch: string | undefined, // Added baseBranch parameter
+  connectorName: string,
+  connectorBaseUrl: string
+): Promise<BoilerCodeResult> => {
+  const workingDirectory = `/tmp/boiler-${Date.now()}`;
+  const branchName = `feature/xyne-${connectorName}-${Date.now()}`;
 
   try {
     // 1. Clone repo
-    logger.info(`📥 Cloning repo: ${repoURL} into ${workingDirectory}`);
+    console.log(`📥 Cloning repo: ${repoURL} into ${workingDirectory}`);
     await execAsync(`git clone ${repoURL} ${workingDirectory}`);
 
-    // 2. Checkout branch if provided
-    if (repoBranch) {
-      logger.info(`🌿 Attempting to checkout branch: ${repoBranch}`);
+    // Check out base branch if provided
+    if (baseBranch) {
+      console.log(`🌿 Checking out base branch: ${baseBranch}`);
       try {
-        // First try to checkout the branch directly
-        await execAsync(`git checkout ${repoBranch}`, { cwd: workingDirectory });
-        logger.info(`✅ Successfully checked out branch: ${repoBranch}`);
-      } catch (checkoutError) {
-        logger.info(`⚠️ Branch ${repoBranch} not found locally, trying remote...`);
+        await execAsync(`git checkout ${baseBranch}`, { cwd: workingDirectory });
+        console.log(`✅ Successfully checked out base branch: ${baseBranch}`);
+      } catch (checkoutErr: any) {
+        console.error(`❌ Failed to checkout base branch ${baseBranch}: ${checkoutErr.message}`);
+        // Attempt to fetch and checkout remote branch
         try {
-          // Try to checkout from remote
-          await execAsync(`git checkout -b ${repoBranch} origin/${repoBranch}`, { cwd: workingDirectory });
-          logger.info(`✅ Successfully checked out remote branch: ${repoBranch}`);
-        } catch (remoteError) {
-          logger.info(`⚠️ Remote branch not found, creating new branch: ${repoBranch}`);
-          try {
-            // Create new branch
-            await execAsync(`git checkout -b ${repoBranch}`, { cwd: workingDirectory });
-            logger.info(`✅ Successfully created and checked out new branch: ${repoBranch}`);
-          } catch (createError) {
-            logger.warn(`⚠️ Failed to create branch ${repoBranch}, staying on default branch`);
-            logger.warn(`Checkout error details: ${checkoutError}`);
-          }
+          console.log(`🔄 Attempting to fetch and checkout remote branch origin/${baseBranch}`);
+          await execAsync(`git fetch origin ${baseBranch}`, { cwd: workingDirectory });
+          await execAsync(`git checkout ${baseBranch}`, { cwd: workingDirectory });
+          console.log(`✅ Successfully checked out remote base branch: ${baseBranch}`);
+        } catch (remoteErr: any) {
+          console.error(
+            `❌ Failed to checkout remote base branch ${baseBranch}: ${remoteErr.message}`
+          );
+          throw new Error(`Failed to checkout base branch ${baseBranch}`);
         }
       }
     }
 
-    // 3. Run cargo build
-    logger.info(`⚙️ Running cargo build...`);
-    const { stdout, stderr } = await execAsync("cargo build", {
+    // 2. Create and checkout new branch
+    console.log(`🌿 Creating and checking out branch: ${branchName}`);
+    await execAsync(`git checkout -b ${branchName}`, { cwd: workingDirectory });
+    console.log(`✅ Successfully checked out branch: ${branchName}`);
+
+    // 3. Locate the script dynamically
+    console.log(`� Locating script: add_connector.sh`);
+    const { stdout: findStdout } = await execAsync('find . -name "add_connector.sh" | head -n 1', {
       cwd: workingDirectory,
     });
+    let relativeScriptPath = findStdout.trim();
 
-    logger.info(`✅ Cargo build completed successfully`);
+    if (!relativeScriptPath) {
+      // Fallback or extensive search
+      console.log(`❌ Script not found with simple find, listing all files...`);
+      await execAsync('find . -maxdepth 3 -not -path "*/.*"', { cwd: workingDirectory }).then(
+        ({ stdout }) => console.log(stdout)
+      );
+      throw new Error(`Script add_connector.sh not found in the repository`);
+    }
+
+    // Ensure relative path starts with ./
+    if (!relativeScriptPath.startsWith('./') && !relativeScriptPath.startsWith('/')) {
+      relativeScriptPath = `./${relativeScriptPath}`;
+    }
+
+    console.log(`✅ Found script at: ${relativeScriptPath}`);
+
+    // 4. Make the script executable
+    const absoluteScriptPath = path.resolve(workingDirectory, relativeScriptPath);
+    console.log(`🔐 Making script executable: ${absoluteScriptPath}`);
+    await execAsync(`chmod +x "${absoluteScriptPath}"`);
+
+    // 5. Run the connector generation script
+    console.log(`🔨 Running connector generation script...`);
+    console.log(`   Connector: ${connectorName}`);
+    console.log(`   Base URL: ${connectorBaseUrl}`);
+
+    // Use spawn for streaming output
+    console.log(`   Script Path: ${absoluteScriptPath}`);
+
+    const { stdout: scriptStdout, stderr: scriptStderr } = await execWithStreaming(
+      absoluteScriptPath,
+      [connectorName, connectorBaseUrl, '--force', '-y'],
+      { cwd: workingDirectory }
+    );
+
+    const trimmedScriptStderr = scriptStderr.trim();
+    const trimmedScriptStdout = scriptStdout.trim();
+
+    // Check if script failed by looking for errors (simple check, exit code already handled by execWithStreaming)
+    // keeping legacy check but it might be redundant if exit code was verified
+    const scriptHasErrors =
+      trimmedScriptStderr.toLowerCase().includes('failed') ||
+      trimmedScriptStderr.toLowerCase().includes('fatal error');
+
+    if (scriptHasErrors) {
+      console.log(`❌ Script execution indicated potential errors even with exit code 0`);
+      // check if it really failed or just printed failure words
+      // Proceeding with caution
+    }
+
+    console.log(`✅ Script executed successfully`);
+    // console.log(`📄 Script output:\n${trimmedScriptStdout}`); // Already streamed
+
+    // 5. Commit the changes
+    console.log(`💾 Committing changes...`);
+    await execAsync('git add .', { cwd: workingDirectory });
+    await execAsync(`git commit -m "Add connector ${connectorName}"`, { cwd: workingDirectory });
+    console.log(`✅ Changes committed`);
+
+    // 6. Push the branch
+    console.log(`📤 Pushing branch to origin...`);
+    await execAsync(`git push -u origin ${branchName}`, {
+      cwd: workingDirectory,
+    });
+    console.log(`✅ Branch pushed successfully: ${branchName}`);
 
     return {
       success: true,
-      output: stdout.trim(),
-      error: stderr.trim(),
+      output: trimmedScriptStdout,
+      branchName,
+      error: '',
       executedAt: new Date().toISOString(),
     };
   } catch (err: any) {
-    logger.error(`❌ Cargo build process failed`);
+    console.error(`❌ Boilerplate code generation failed`, err);
+
+    if (err.stdout) console.log('Checking stdout from error:', err.stdout);
+    if (err.stderr) console.error('Checking stderr from error:', err.stderr);
 
     const errorMsg = [
-      err.stdout ? err.stdout.trim() : "",
-      err.stderr ? err.stderr.trim() : "",
-      err.message ? err.message.trim() : "",
+      err.stdout ? err.stdout.trim() : '',
+      err.stderr ? err.stderr.trim() : '',
+      err.message ? err.message.trim() : '',
     ]
       .filter(Boolean)
-      .join("\n");
+      .join('\n');
 
     return {
       success: false,
-      output: err.stdout?.trim() || "",
+      output: err.stdout?.trim() || '',
+      branchName,
       error: errorMsg,
       executedAt: new Date().toISOString(),
     };
   } finally {
     // Always cleanup the working directory
     try {
-      logger.info(`🧹 Cleaning up ${workingDirectory}`);
+      console.log(`🧹 Cleaning up ${workingDirectory}`);
       fs.rmSync(workingDirectory, { recursive: true, force: true });
     } catch (cleanupErr) {
-      logger.warn(`⚠️ Cleanup failed: ${cleanupErr}`);
+      console.warn(`⚠️  Cleanup failed: ${cleanupErr}`);
     }
   }
 };
+export const executeBuildCode = async (
+  buildCommand: string,
+  repoURL: string,
+  repoBranch?: string
+): Promise<BuildResult> => {
 
+  // Create a unique subfolder under fido-workflow-test
+  const workingDirectory = `/tmp/build-${Date.now()}`;
+
+  try {
+    // 1. Clone repo
+    console.log(` Cloning repo: ${repoURL} into ${workingDirectory}`);
+    await execAsync(`git clone ${repoURL} ${workingDirectory}`);
+
+    // 2. Checkout branch if provided
+    if (repoBranch) {
+      console.log(` Attempting to checkout branch: ${repoBranch}`);
+      try {
+        // First try to checkout the branch directly
+        await execAsync(`git checkout ${repoBranch}`, { cwd: workingDirectory });
+        console.log(` Successfully checked out branch: ${repoBranch}`);
+      } catch (checkoutError) {
+        console.log(` Branch ${repoBranch} not found locally, trying remote...`);
+        try {
+          // Try to checkout from remote
+          await execAsync(`git checkout -b ${repoBranch} origin/${repoBranch}`, {
+            cwd: workingDirectory,
+          });
+          console.log(` Successfully checked out remote branch: ${repoBranch}`);
+        } catch (remoteError) {
+          console.log(` Remote branch not found, creating new branch: ${repoBranch}`);
+          try {
+            // Create new branch
+            await execAsync(`git checkout -b ${repoBranch}`, { cwd: workingDirectory });
+            console.log(` Successfully created and checked out new branch: ${repoBranch}`);
+          } catch (createError) {
+            console.warn(` Failed to create branch ${repoBranch}, staying on default branch`);
+            console.warn(`Checkout error details: ${checkoutError}`);
+          }
+        }
+      }
+    }
+
+    // 3. Run  build with streaming
+    console.log(` Running build...`);
+
+    // Use shell execution for build commands to support env vars and quoted args
+    const { stdout, stderr } = await execWithStreaming('/bin/sh', ['-c', buildCommand], {
+      cwd: workingDirectory,
+      shell: false, // Disable double shell wrapping since we're explicitly using /bin/sh
+    });
+
+    const trimmedStderr = stderr.trim();
+    const trimmedStdout = stdout.trim();
+
+    // Check if build failed by looking for errors in stderr
+    // Common cargo/build error patterns include: "error:", "Compiling failed", etc.
+    const buildHasErrors =
+      trimmedStderr.toLowerCase().includes('error:') ||
+      trimmedStderr.toLowerCase().includes('compiling failed') ||
+      trimmedStderr.toLowerCase().includes('build failed');
+
+    if (buildHasErrors) {
+      console.log(` Build failed with errors`);
+      return {
+        success: false,
+        output: trimmedStdout,
+        workingDirectory: workingDirectory,
+        error: trimmedStderr,
+        executedAt: new Date().toISOString(),
+      };
+    }
+
+    console.log(` Build completed successfully`);
+
+    return {
+      success: true,
+      output: trimmedStdout,
+      workingDirectory: workingDirectory,
+      error: trimmedStderr,
+      executedAt: new Date().toISOString(),
+    };
+  } catch (err: any) {
+    console.error(` Cargo build process failed`);
+
+    const errorMsg = [
+      err.stdout ? err.stdout.trim() : '',
+      err.stderr ? err.stderr.trim() : '',
+      err.message ? err.message.trim() : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    return {
+      success: false,
+      output: err.stdout?.trim() || '',
+      workingDirectory: workingDirectory,
+      error: errorMsg,
+      executedAt: new Date().toISOString(),
+    };
+  } finally {
+    // Always cleanup the working directory
+    // try {
+    //   console.log(` Cleaning up ${workingDirectory}`);
+    //   fs.rmSync(workingDirectory, { recursive: true, force: true });
+    // } catch (cleanupErr) {
+    //   console.warn(` Cleanup failed: ${cleanupErr}`);
+    // }
+  }
+};
 
 export const executeCargoRun = async (
   baseDir: string,
@@ -107,27 +357,27 @@ export const executeCargoRun = async (
   repoBranch?: string,
   timeoutMs: number = 10000 // default 10s timeout
 ): Promise<RunResult> => {
-  logger.info(`🦀 Starting cargo run process in ${baseDir}`);
+  console.log(` Starting cargo run process in ${baseDir}`);
 
   const workingDirectory = path.join(baseDir, `run-${Date.now()}`);
 
   try {
     // 1. Clone repo
-    logger.info(`📥 Cloning repo: ${repoURL} into ${workingDirectory}`);
+    console.log(` Cloning repo: ${repoURL} into ${workingDirectory}`);
     await execAsync(`git clone ${repoURL} ${workingDirectory}`);
 
     // 2. Checkout branch if provided
     if (repoBranch) {
-      logger.info(`🌿 Checking out branch: ${repoBranch}`);
+      console.log(` Checking out branch: ${repoBranch}`);
       await execAsync(`git checkout ${repoBranch}`, { cwd: workingDirectory });
     }
 
     // 3. Run cargo run with timeout
-    logger.info(`🚀 Running cargo run...`);
+    console.log(` Running cargo run...`);
     return await new Promise<RunResult>((resolve) => {
-      const proc = exec("cargo run", { cwd: workingDirectory });
-      let stdout = "";
-      let stderr = "";
+      const proc = exec('cargo run', { cwd: workingDirectory });
+      let stdout = '';
+      let stderr = '';
       let settled = false;
 
       const timer = setTimeout(() => {
@@ -143,15 +393,15 @@ export const executeCargoRun = async (
         }
       }, timeoutMs);
 
-      proc.stdout?.on("data", (data) => {
+      proc.stdout?.on('data', (data) => {
         stdout += data;
       });
 
-      proc.stderr?.on("data", (data) => {
+      proc.stderr?.on('data', (data) => {
         stderr += data;
       });
 
-      proc.on("close", (code) => {
+      proc.on('close', (code) => {
         if (!settled) {
           clearTimeout(timer);
           settled = true;
@@ -164,7 +414,7 @@ export const executeCargoRun = async (
         }
       });
 
-      proc.on("error", (err) => {
+      proc.on('error', (err) => {
         if (!settled) {
           clearTimeout(timer);
           settled = true;
@@ -178,19 +428,19 @@ export const executeCargoRun = async (
       });
     });
   } catch (err: any) {
-    logger.error(`❌ Cargo run process failed`);
+    console.error(` Cargo run process failed`);
     return {
       success: false,
-      output: err.stdout?.trim() || "",
-      error: err.message?.trim() || "Unknown error",
+      output: err.stdout?.trim() || '',
+      error: err.message?.trim() || 'Unknown error',
       executedAt: new Date().toISOString(),
     };
   } finally {
     try {
-      logger.info(`🧹 Cleaning up ${workingDirectory}`);
+      console.log(` Cleaning up ${workingDirectory}`);
       fs.rmSync(workingDirectory, { recursive: true, force: true });
     } catch (cleanupErr) {
-      logger.warn(`⚠️ Cleanup failed: ${cleanupErr}`);
+      console.warn(` Cleanup failed: ${cleanupErr}`);
     }
   }
 };
@@ -211,22 +461,22 @@ export const executeCargoTest = async (
 
   try {
     // 1. Clone repo
-    logger.info(`📥 Cloning repo: ${repoURL} into ${workingDirectory}`);
+    console.log(` Cloning repo: ${repoURL} into ${workingDirectory}`);
     await execAsync(`git clone ${repoURL} ${workingDirectory}`);
 
     // 2. Checkout branch if provided
     if (repoBranch) {
-      logger.info(`🌿 Checking out branch: ${repoBranch}`);
+      console.log(` Checking out branch: ${repoBranch}`);
       await execAsync(`git checkout ${repoBranch}`, { cwd: workingDirectory });
     }
 
     // 3. Run cargo test
-    logger.info(`⚙️ Running cargo test...`);
-    const { stdout, stderr } = await execAsync("cargo test -- --nocapture", {
+    console.log(` Running cargo test...`);
+    const { stdout, stderr } = await execAsync('cargo test -- --nocapture', {
       cwd: workingDirectory,
     });
 
-    logger.info(`✅ Cargo tests executed successfully`);
+    console.log(` Cargo tests executed successfully`);
 
     // Extract summary
     const summaryMatch = stdout.match(
@@ -253,19 +503,19 @@ export const executeCargoTest = async (
       executedAt: new Date().toISOString(),
     };
   } catch (err: any) {
-    logger.error(`❌ Cargo tests failed`);
+    console.error(` Cargo tests failed`);
 
     const errorMsg = [
-      err.stdout ? err.stdout.trim() : "",
-      err.stderr ? err.stderr.trim() : "",
-      err.message ? err.message.trim() : "",
+      err.stdout ? err.stdout.trim() : '',
+      err.stderr ? err.stderr.trim() : '',
+      err.message ? err.message.trim() : '',
     ]
       .filter(Boolean)
-      .join("\n");
+      .join('\n');
 
     return {
       success: false,
-      output: err.stdout?.trim() || "",
+      output: err.stdout?.trim() || '',
       error: errorMsg,
       testsRun: 0,
       testsPassed: 0,
@@ -276,113 +526,310 @@ export const executeCargoTest = async (
   } finally {
     // Always cleanup
     try {
-      logger.info(`🧹 Cleaning up ${workingDirectory}`);
+      console.log(` Cleaning up ${workingDirectory}`);
       fs.rmSync(workingDirectory, { recursive: true, force: true });
     } catch (cleanupErr) {
-      logger.warn(`⚠️ Cleanup failed: ${cleanupErr}`);
+      console.warn(` Cleanup failed: ${cleanupErr}`);
     }
   }
 };
 
 /**
- * Execute FIDO automation script (run-fido-fixed.js) testing
- * Now includes full server lifecycle: clone repo, build code, start server, run tests, stop server
+ * Helper function to sleep for a specified duration
  */
-/**
- * Execute remote FIDO conformance testing using HTTP (ngrok-based) approach
- */
-export async function executeRemoteConformanceTesting(
-  testType: string,
-  repoURL: string,
-  repoBranch: string,
-  fidoToolPath: string
-): Promise<ConformanceResult> {
-  const executionId = `exec-${Date.now()}`
-  logger.info(`🔗 Starting remote FIDO conformance testing using HTTP/ngrok`)
-  logger.info(`   Repo: ${repoURL}@${repoBranch}`)
-  logger.info(`   FIDO Tool Path: ${fidoToolPath}`)
-  logger.info(`   Execution ID: ${executionId}`)
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  // Get ngrok URL from environment variable or use default
-  const ngrokUrl = process.env.FIDO_NGROK_URL || 'https://dreama-unturning-elizbeth.ngrok-free.dev'
-  
-  if (ngrokUrl === 'https://dreama-unturning-elizbeth.ngrok-free.dev') {
-    logger.warn('⚠️ Using default ngrok URL. Please set FIDO_NGROK_URL environment variable.')
+/**
+ * Execute remote FIDO conformance testing using async job pattern with polling
+ */
+export async function runTestScripts(
+  testDetails: TestDetail,
+  workingDirectory: string
+): Promise<ConformanceResult> {
+  const { filename, command, parameters } = testDetails;
+
+  const scriptPath = path.resolve(__dirname, 'test-scripts', filename);
+
+  // Ensure script exists
+  try {
+    await fs.promises.access(scriptPath, fs.constants.F_OK);
+  } catch {
+    return {
+      success: false,
+      output: `Test script not found: ${scriptPath}`,
+    };
   }
 
+  // Create temporary output file for test results (second arg for scripts that need it)
+  const testOutputFile = path.join('/tmp', `fido-test-results-${Date.now()}.json`);
+
+  // Generic command: command script.cjs [outputFile] param1 param2 ...
+  // Insert outputFile as first parameter for scripts that expect it
+  const scriptArgs = [workingDirectory, testOutputFile, ...parameters]
+    .map((p) => {
+      // If the parameter is an object (e.g. credentials), JSON-stringify it
+      const str = typeof p === 'object' ? JSON.stringify(p) : String(p);
+      return `"${str.replace(/"/g, '\\"')}"`;
+    })
+    .join(' ');
+  const fullCommand = `${command} "${scriptPath}" ${scriptArgs}`;
+
+  console.log(` Running test command`);
+  console.log(` Output file: ${testOutputFile}`);
+  console.log(` Parameters: ${parameters.join(', ')}`);
+  console.log(` ${fullCommand}`);
+
   try {
+    // Use shell execution for test commands to support env vars and quoted args
+    const { stdout } = await execWithStreaming('/bin/sh', ['-c', fullCommand], {
+      env: process.env,
+      cwd: path.dirname(scriptPath),
+      shell: false, // Disable double shell wrapping since we're explicitly using /bin/sh
+    });
+
+    // Try to read results from the output file if it exists
+    let resultOutput = stdout;
+    let resultStatus = false;
+    try {
+      if (fs.existsSync(testOutputFile)) {
+        console.log(` Reading results from file: ${testOutputFile}`);
+        const fileContent = fs.readFileSync(testOutputFile, 'utf8');
+        const fileResults = JSON.parse(fileContent);
+        resultOutput = fileResults.output || fileContent;
+        resultStatus = fileResults.success || false;
+        console.log(`the output form the file is :`, fileResults.output);
+        console.log(`📊 Read result: ${resultOutput}`);
+        // Clean up temp file
+        fs.unlinkSync(testOutputFile);
+      } else {
+        console.log(` Results file not found, using stdout/stderr`);
+      }
+    } catch (readError) {
+      // If we can't read the file, just use stdout/stderr
+      console.log(` Could not read results file, using stdout: ${readError}`);
+    }
+
+    return {
+      success: resultStatus,
+      output: resultOutput,
+    };
+  } catch (error: any) {
+    console.error(` Test execution failed: ${error.message}`);
+    return {
+      success: false,
+      output: error.stderr || error.stdout || error.message,
+    };
+  }
+}
+
+/**
+ * Execute local testing by triggering entry-point.ts directly (same as mac-agent-server.js)
+ */
+export async function executeLocalTesting(
+  repoURL: string,
+  repoBranch: string,
+  testDetails: TestDetail,
+  workingDirectory: string
+): Promise<ConformanceResult> {
+  const executionId = `exec-local-${Date.now()}`;
+  console.log(` Starting local conformance testing`);
+  console.log(`   Repo: ${repoURL}@${repoBranch}`);
+  console.log(`   Execution ID: ${executionId}`);
+
+  try {
+    const result = await runTestScripts(testDetails, workingDirectory);
+    return result;
+  } catch (error: any) {
+    console.error(` [${executionId}] Local execution failed: ${error.message}`);
+
+    return {
+      success: false,
+      output: `Local execution failed: ${error.message}`,
+    };
+  }
+}
+
+export async function executeRemoteConformanceTesting(
+  testDetails: TestDetail,
+  repoURL: string,
+  repoBranch: string
+): Promise<ConformanceResult> {
+  const executionId = `exec-${Date.now()}`;
+  console.log(` Starting remote FIDO conformance testing using async job pattern`);
+  console.log(`   Repo: ${repoURL}@${repoBranch}`);
+  console.log(`   Execution ID: ${executionId}`);
+
+  // Get ngrok URL from environment variable or use default
+  const ngrokUrl = process.env.FIDO_NGROK_URL || 'http://localhost:3000';
+
+  if (ngrokUrl === 'https://dreama-unturning-elizbeth.ngrok-free.dev') {
+    console.warn(' Using default ngrok URL. Please set FIDO_NGROK_URL environment variable.');
+  }
+
+  const maxPollAttempts = 50; // Maximum poll attempts (approx 12.5 minutes with 15s interval)
+  const pollInterval = 15000; // 15 seconds between polls
+
+  try {
+    // STEP 1: Start the job
+    console.log(` [STEP 1] Starting job at: ${ngrokUrl}/run-fido`);
+
     const requestPayload = {
-      testType,
+      testDetails,
       repoURL,
       repoBranch,
       executionId,
-      fidoToolPath
-    }
+    };
 
-    logger.info(`🚀 Sending HTTP request to: ${ngrokUrl}/run-fido`)
-    logger.info(`📦 Payload: ${JSON.stringify(requestPayload, null, 2)}`)
-
-    // Make HTTP request to Mac agent
-    const response = await fetch(`${ngrokUrl}/run-fido`, {
+    const startResponse = await fetch(`${ngrokUrl}/run-fido`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Xyne-FIDO-Workflow/1.0'
+        'User-Agent': 'Xyne-FIDO-Workflow/1.0',
       },
       body: JSON.stringify(requestPayload),
-      signal: AbortSignal.timeout(600000) // 10 minutes timeout
-    })
+      signal: AbortSignal.timeout(30000), // 30 second timeout for initial request
+    });
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    if (!startResponse.ok) {
+      const errorText = await startResponse.text();
+      throw new Error(`Failed to start job: HTTP ${startResponse.status}: ${errorText}`);
     }
 
-    const conformanceResult = await response.json() as ConformanceResult
+    const startData = (await startResponse.json()) as { jobId: string };
+    const jobId = startData.jobId;
 
-    logger.info(`✅ Remote conformance testing completed successfully`)
-    logger.info(`📊 Remote conformance results:`)
-    logger.info(`   Success: ${conformanceResult.success}`)
-    logger.info(`   Tests: ${conformanceResult.testResults?.passed}/${conformanceResult.testResults?.total} passed`)
-    logger.info(`   Executed At: ${conformanceResult.output}`)
-    logger.info(`   Output Length: ${conformanceResult.outputLength || 'N/A'} characters`)
+    if (!jobId) {
+      throw new Error('No jobId returned from Mac agent');
+    }
 
-    return conformanceResult
+    console.log(` [STEP 1] Job started successfully with ID: ${jobId}`);
 
+    // STEP 2: Poll for job completion
+    console.log(
+      ` [STEP 2] Polling job status (max ${maxPollAttempts} attempts, every ${pollInterval}ms)`
+    );
+
+    let attempts = 0;
+    let jobStatus = 'queued';
+    let lastProgress = '';
+
+    while (attempts < maxPollAttempts) {
+      attempts++;
+
+      const statusResponse = await fetch(`${ngrokUrl}/run-fido/status/${jobId}`, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Xyne-FIDO-Workflow/1.0',
+        },
+        signal: AbortSignal.timeout(30000), // 30 second timeout for status check
+      });
+
+      if (!statusResponse.ok) {
+        const errorText = await statusResponse.text();
+        throw new Error(`Failed to get job status: HTTP ${statusResponse.status}: ${errorText}`);
+      }
+
+      const statusData = (await statusResponse.json()) as { status: string; progress?: string };
+      jobStatus = statusData.status;
+
+      // Log progress updates
+      if (statusData.progress && statusData.progress !== lastProgress) {
+        console.log(` [ATTEMPT ${attempts}/${maxPollAttempts}] ${statusData.progress}`);
+        lastProgress = statusData.progress;
+      }
+
+      // Check if job is complete
+      if (jobStatus === 'completed' || jobStatus === 'failed') {
+        console.log(` [STEP 2] Job ${jobStatus} after ${attempts} attempts`);
+        break;
+      }
+
+      // Wait before next poll
+      await sleep(pollInterval);
+    }
+
+    if (attempts >= maxPollAttempts) {
+      throw new Error(
+        `Job timed out after ${maxPollAttempts * pollInterval}ms (max polling attempts exceeded)`
+      );
+    }
+
+    // STEP 3: Fetch the result
+    console.log(` [STEP 3] Fetching job result from: ${ngrokUrl}/run-fido/result/${jobId}`);
+
+    const resultResponse = await fetch(`${ngrokUrl}/run-fido/result/${jobId}`, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Xyne-FIDO-Workflow/1.0',
+      },
+      signal: AbortSignal.timeout(30000), // 30 second timeout for result fetch
+    });
+
+    if (!resultResponse.ok) {
+      const errorText = await resultResponse.text();
+      throw new Error(`Failed to get job result: HTTP ${resultResponse.status}: ${errorText}`);
+    }
+
+    const resultData = (await resultResponse.json()) as {
+      success: boolean;
+      result?: ConformanceResult;
+      error?: string;
+      completedAt?: string;
+    };
+
+    if (!resultData.success) {
+      console.error(` Remote job failed with error: ${resultData.error}`);
+    }
+
+    const conformanceResult = resultData.result || {
+      success: false,
+      output: resultData.error || 'Unknown error',
+    };
+
+    console.log(` Remote conformance testing completed successfully`);
+    console.log(` Remote conformance results:`);
+    console.log(`   Success: ${conformanceResult.success}`);
+    console.log(`   Output: ${conformanceResult.output}`);
+    console.log(`   Total Attempts: ${attempts}`);
+    console.log(`   Completed At: ${resultData.completedAt}`);
+
+    return conformanceResult;
   } catch (httpError: any) {
-    logger.error(`❌ Remote conformance testing failed: ${httpError.message}`)
-    
+    console.error(` Remote conformance testing failed: ${httpError.message}`);
+
     // Handle different types of HTTP errors
-    let errorDetails = httpError.message
-    
+    let errorDetails = httpError.message;
+
     if (httpError.name === 'AbortError' || httpError.name === 'TimeoutError') {
-      errorDetails = 'Remote execution timeout - operation took longer than 10 minutes'
-    } else if (httpError.message.includes('fetch failed') || httpError.message.includes('ENOTFOUND')) {
-      errorDetails = `Mac agent unreachable - check ngrok URL: ${ngrokUrl}`
+      errorDetails = 'Remote execution timeout - operation took longer than expected';
+    } else if (
+      httpError.message.includes('fetch failed') ||
+      httpError.message.includes('ENOTFOUND')
+    ) {
+      errorDetails = `Mac agent unreachable - check ngrok URL: ${ngrokUrl}`;
     } else if (httpError.message.includes('ECONNREFUSED')) {
-      errorDetails = 'Connection refused - Mac agent server may be down'
+      errorDetails = 'Connection refused - Mac agent server may be down';
     } else if (httpError.message.includes('HTTP 404')) {
-      errorDetails = 'Mac agent endpoint not found - check server is running'
+      errorDetails = 'Mac agent endpoint not found - check server is running';
     } else if (httpError.message.includes('HTTP 500')) {
-      errorDetails = 'Mac agent internal error - check server logs'
+      errorDetails = 'Mac agent internal error - check server logs';
     }
 
     // Check if it's a build or server error from the Mac agent response
     if (httpError.message.includes('Build failed:')) {
-      throw new Error(httpError.message)
+      throw new Error(httpError.message);
     } else if (httpError.message.includes('Server startup failed:')) {
-      throw new Error(httpError.message)
+      throw new Error(httpError.message);
     }
 
     return {
       success: false,
       output: `Remote HTTP execution failed: ${errorDetails}\nNgrok URL: ${ngrokUrl}\nOriginal error: ${httpError.message}`,
-      executedAt: new Date().toISOString(),
-      testResults: { passed: 0, failed: 1, total: 1 }
-    }
+    };
   }
 }
-
 
 /**
  * Runs 'diesel migration run' and then 'cargo run' as a background process.
@@ -392,32 +839,35 @@ export const executeMigrateAndCargoRunInBackground = async (
   workingDirectory: string
 ): Promise<{ success: boolean; process?: ChildProcess; error?: string }> => {
   try {
-    logger.info('🗄️ Checking and creating fido_server database...');
+    console.log(' Checking and creating fido_server database...');
     try {
       const env = { ...process.env, DATABASE_URL: 'postgres://localhost/fido_server' };
 
       // Check if database exists, if not create it
-      logger.info('🔍 Checking if fido_server database exists...');
+      console.log(' Checking if fido_server database exists...');
       try {
-        await execAsync('psql -d postgres -c "SELECT 1 FROM pg_database WHERE datname=\'fido_server\'" | grep -q 1', { env });
-        logger.info('✅ fido_server database already exists');
+        await execAsync(
+          'psql -d postgres -c "SELECT 1 FROM pg_database WHERE datname=\'fido_server\'" | grep -q 1',
+          { env }
+        );
+        console.log(' fido_server database already exists');
       } catch (checkErr) {
         logger.info('📦 Creating fido_server database (does not exist)...');
         await execAsync('createdb fido_server', { env });
-        logger.info('✅ fido_server database created successfully');
+        console.log(' fido_server database created successfully');
       }
     } catch (dbErr: any) {
-      logger.error(`❌ Database setup failed: ${dbErr.message}`);
+      console.error(` Database setup failed: ${dbErr.message}`);
       return {
         success: false,
-        error: `Database setup failed: ${dbErr.message}`
+        error: `Database setup failed: ${dbErr.message}`,
       };
     }
 
-    logger.info('🔌 Checking and freeing port 8080...');
+    console.log(' Checking and freeing port 8080...');
     try {
       // Find and kill processes using port 8080
-      const { stdout } = await execAsync("lsof -ti:8080");
+      const { stdout } = await execAsync('lsof -ti:8080');
       if (stdout.trim()) {
         const pids = stdout.trim().split('\n');
         for (const pid of pids) {
@@ -425,14 +875,14 @@ export const executeMigrateAndCargoRunInBackground = async (
           logger.info(`🔪 Killed process ${pid} using port 8080`);
         }
         // Wait a moment for processes to fully terminate
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     } catch (portErr) {
       // No process found on port 8080, which is fine
-      logger.info('✅ Port 8080 is already free');
+      console.log(' Port 8080 is already free');
     }
 
-    logger.info('🚀 Launching cargo run in the background...');
+    console.log(' Launching cargo run in the background...');
     const serverProcess = spawn('cargo', ['run'], {
       cwd: workingDirectory,
       detached: true,
@@ -444,189 +894,36 @@ export const executeMigrateAndCargoRunInBackground = async (
     });
 
     // A small delay to allow the server to start up.
-    await new Promise(resolve => setTimeout(resolve, 30000));
+    await new Promise((resolve) => setTimeout(resolve, 30000));
 
-    logger.info(`✅ Server process started in background with PID: ${serverProcess.pid}`);
+    console.log(` Server process started in background with PID: ${serverProcess.pid}`);
     return { success: true, process: serverProcess };
   } catch (err: any) {
-    logger.error(`❌ Cargo background run process failed: ${err.message}`);
+    console.error(` Cargo background run process failed: ${err.message}`);
     return { success: false, error: err.message };
   }
 };
 
 /**
- * Checks if a service is running by attempting to connect to a host and port.
- */
-const isServiceRunning = (port: number, host: string): Promise<boolean> => {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(1000); // 1 second timeout
-
-    socket.on('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-
-    socket.on('timeout', () => {
-      socket.destroy();
-      resolve(false);
-    });
-
-    socket.on('error', () => {
-      socket.destroy();
-      resolve(false);
-    });
-
-    socket.connect(port, host);
-  });
-};
-
-
-
-/**
- * Orchestrates the entire framework health check process.
- */
-export const runFrameworkHealthChecks = async (
-  baseDir: string,
-  repoURL: string,
-  repoBranch?: string
-): Promise<{ success: boolean; summary: string }> => {
-  logger.info('🏁 Starting framework health check orchestration...');
-  const workingDirectory = path.join(baseDir, `health-check-${Date.now()}`);
-  let serverProcess: ChildProcess | undefined;
-
-  try {
-    // 1. Check if dependent services are already running
-    const postgresRunning = await isServiceRunning(5432, 'localhost');
-    const redisRunning = await isServiceRunning(6379, 'localhost');
-
-    if (postgresRunning && redisRunning) {
-      logger.info('✅ Dependent services (PostgreSQL, Redis) are already running.');
-    } else {
-      logger.info('🚀 Starting dependent services (PostgreSQL, Redis) via Homebrew...');
-      try {
-        const services = ['postgresql', 'redis'];
-        let output = '';
-        for (const service of services) {
-          const { stdout, stderr } = await execAsync(`brew services start ${service}`);
-          if (stderr) logger.warn(`Warning starting ${service}: ${stderr}`);
-          output += stdout;
-        }
-        // Add a delay to allow services to initialize
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        logger.info('✅ Services started successfully.');
-      } catch (error: any) {
-        logger.error(`❌ Failed to start services via Homebrew: ${error.message}`);
-        return {
-          success: false,
-          summary: `Failed to start dependent services: ${error.message}`,
-        };
-      }
-    }
-
-    // 2. Clone and build the repo
-    logger.info('Cloning and building the repository...');
-    await execAsync(`git clone ${repoURL} ${workingDirectory}`);
-    if (repoBranch) {
-      await execAsync(`git checkout ${repoBranch}`, { cwd: workingDirectory });
-    }
-    await execAsync("cargo build", { cwd: workingDirectory });
-    logger.info('✅ Repository built successfully.');
-
-    // 3. Run the server in the background
-    const runResult = await executeMigrateAndCargoRunInBackground(workingDirectory);
-    if (!runResult.success || !runResult.process) {
-      throw new Error(`Failed to run server in background: ${runResult.error}`);
-    }
-    serverProcess = runResult.process;
-
-    // 4. Execute health checks
-    const healthResult = await executeHealthChecks();
-    return {
-      success: healthResult.success,
-      summary: healthResult.summary,
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      summary: `An error occurred during health check orchestration: ${error.message}`,
-    };
-  } finally {
-    // 5. Cleanup
-    if (serverProcess && serverProcess.pid) {
-      try {
-        process.kill(-serverProcess.pid); // Kill the entire process group
-        logger.info('✅ Server process terminated.');
-      } catch (e) {
-        logger.warn(`⚠️ Could not terminate server process: ${e}`);
-      }
-    }
-    
-    // Clean up the working directory
-    try {
-      logger.info(`🧹 Cleaning up ${workingDirectory}`);
-      fs.rmSync(workingDirectory, { recursive: true, force: true });
-    } catch (cleanupErr) {
-      logger.warn(`⚠️ Cleanup failed: ${cleanupErr}`);
-    }
-
-    // stopServices() is no longer needed as the script handles its own lifecycle.
-    logger.info('🧹 Health check complete.');
-  }
-};
-
-
-/**
  * Legacy SSH-based remote conformance testing (kept for fallback)
  */
 export async function executeFIDOAutomationScript(
-  appBinaryPath: string = "/Applications/FIDO Alliance - Certification Conformance Testing Tools.app/Contents/MacOS/FIDO Alliance - Certification Conformance Testing Tools",
+  appBinaryPath: string = '/Applications/FIDO Alliance - Certification Conformance Testing Tools.app/Contents/MacOS/FIDO Alliance - Certification Conformance Testing Tools',
   baseDir: string,
   repoURL: string,
   repoBranch?: string
 ): Promise<ConformanceResult> {
   // This function will be used for local execution when not using remote client
   // For distributed execution, use executeRemoteConformanceTesting instead
-  
-  logger.info(`🤖 Local FIDO automation execution not implemented yet`)
-  logger.info(`Parameters: appBinaryPath=${appBinaryPath}, baseDir=${baseDir}, repoURL=${repoURL}, repoBranch=${repoBranch}`)
-  
+
+  logger.info(`🤖 Local FIDO automation execution not implemented yet`);
+  logger.info(
+    `Parameters: appBinaryPath=${appBinaryPath}, baseDir=${baseDir}, repoURL=${repoURL}, repoBranch=${repoBranch}`
+  );
+
   return {
     success: false,
-    output: 'Local FIDO automation not implemented - use distributed execution via executeRemoteConformanceTesting',
-    executedAt: new Date().toISOString()
-  }
-}
-
-/**
- * Execute a series of health checks for the FIDO server environment
- */
-export const executeHealthChecks = async (): Promise<{
-  success: boolean
-  results: HealthCheckResult[]
-  summary: string
-}> => {
-  logger.info('🩺 Running framework health checks...')
-  const results = await runHealthChecks()
-  const failedChecks = results.filter(r => !r.success)
-  const success = failedChecks.length === 0
-
-  let summary = `Health check summary: ${results.length - failedChecks.length}/${results.length} passed.\n`
-  if (!success) {
-    summary += 'Failed checks:\n'
-    summary += failedChecks
-      .map(
-        check =>
-          `- ${check.check}: ${check.details}\n  Remediation: ${check.remediation}`
-      )
-      .join('\n')
-  }
-
-  logger.info(summary)
-
-  return {
-    success,
-    results,
-    summary,
-  }
+    output:
+      'Local FIDO automation not implemented - use distributed execution via executeRemoteConformanceTesting',
+  };
 }
