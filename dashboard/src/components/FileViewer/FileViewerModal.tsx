@@ -275,6 +275,17 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
     onNavigate?.(currentFileIndex - 1);
   }, [hasStackNavigation, currentFileIndex, onNavigate]);
 
+  // Update index when user scrolls/swipes the carousel
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const { scrollLeft, clientWidth } = container;
+    if (scrollLeft % clientWidth !== 0) return;
+    const newIndex = Math.round(scrollLeft / clientWidth);
+    if (newIndex !== currentFileIndex && newIndex >= 0 && newIndex < totalFiles) {
+      onNavigate?.(newIndex);
+    }
+  };
+
   const handleNext = useCallback(() => {
     if (!hasStackNavigation || currentFileIndex >= totalFiles - 1) return;
     onNavigate?.(currentFileIndex + 1);
@@ -430,6 +441,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
     return (
       <div
         ref={scrollContainerCallbackRef}
+        onScroll={handleScroll}
         className='flex w-full h-full overflow-x-auto overflow-y-hidden'
         style={{
           scrollSnapType: 'x mandatory',
