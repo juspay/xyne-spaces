@@ -5,7 +5,7 @@ import { ChatBubble } from '../ChatBubble/ChatBubble';
 import { DatePill } from '../DatePill';
 import { type ChatListItemWithSeparator } from '../../../utils/chatUtils';
 import { shouldShowAvatar } from '../ChatList/ChatListUtils';
-import { useDraft } from '../../../hooks/useDraft';
+import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { ChannelScopeType } from '@xyne/shared';
 
 type ChatListItemProps = {
@@ -41,6 +41,8 @@ export const ChatListItem = ({
 
   // Hooks must be called unconditionally
   const draft = useDraft(channelId, conversation?.conversationId ?? '');
+  const draftFromDB = useDraftFromDB(channelId, conversation?.conversationId ?? '');
+  const hasDraftAttachments = draftFromDB?.attachments && draftFromDB.attachments?.length > 0;
 
   // Render date separator
   if (item.type === 'date-separator') {
@@ -80,6 +82,7 @@ export const ChatListItem = ({
         showAvatar={showAvatar}
         conversation={conversation}
         {...(draft && { draft })}
+        {...(!!hasDraftAttachments && { hasDraftAttachments })}
         replies={{
           replyCount: conversation.replyCount,
           lastActivityAt: conversation.lastActivityAt,

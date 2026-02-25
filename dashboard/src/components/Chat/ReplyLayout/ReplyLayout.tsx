@@ -9,6 +9,7 @@ import { ViewNewerRepliesButton } from '../../ui/MessageBubble/ThreadMessageIndi
 const ReplyLayout: React.FC<{
   replies: ThreadData;
   draft?: string | undefined;
+  hasDraftAttachments?: boolean;
   isThreadOpen: boolean;
   isMe?: boolean;
   showInChannel?: boolean;
@@ -19,6 +20,7 @@ const ReplyLayout: React.FC<{
 }> = ({
   replies,
   draft,
+  hasDraftAttachments,
   isThreadOpen,
   isMe,
   showInChannel,
@@ -48,7 +50,8 @@ const ReplyLayout: React.FC<{
   // but still need to show their thread indicator for summaries/PRDs posted as replies
   if (showInChannel && !isCallMessage) return null;
 
-  if ((!replies || replies.replyCount === 0) && (!draft || isThreadOpen)) return null;
+  const hasDraft = draft || hasDraftAttachments;
+  if ((!replies || replies.replyCount === 0) && (!hasDraft || isThreadOpen)) return null;
 
   const participants = replies.conversation?.participants || [];
 
