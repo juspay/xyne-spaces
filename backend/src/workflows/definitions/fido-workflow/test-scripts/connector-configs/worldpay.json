@@ -1,0 +1,97 @@
+{
+    "connector": "worldpay",
+    "headers": {
+        "x-connector": "worldpay",
+        "x-auth": "signature-key",
+        "x-api-key": "$WORLDPAY_API_KEY",
+        "x-api-secret": "$WORLDPAY_API_SECRET",
+        "x-key1": "$WORLDPAY_KEY1",
+        "x-merchant-id": "test_merchant",
+        "x-tenant-id": "tenant"
+    },
+    "merchant_account_metadata": {
+        "merchant_name": "Test Merchant"
+    },
+    "card_pm": {
+        "No3DSAutoCapture": {
+            "Request": {
+                "amount": 6000,
+                "minor_amount": 6000,
+                "currency": "USD",
+                "capture_method": "AUTOMATIC",
+                "card": {
+                    "card_number": "4242424242424242",
+                    "card_exp_month": "10",
+                    "card_exp_year": "30",
+                    "card_cvc": "737",
+                    "card_network": "VISA"
+                }
+            },
+            "Response": {
+                "status": "CHARGED"
+            }
+        },
+        "No3DSManualCapture": {
+            "Request": {
+                "amount": 6000,
+                "minor_amount": 6000,
+                "currency": "USD",
+                "capture_method": "MANUAL",
+                "card": {
+                    "card_number": "4242424242424242",
+                    "card_exp_month": "10",
+                    "card_exp_year": "30",
+                    "card_cvc": "737",
+                    "card_network": "VISA"
+                }
+            },
+            "Response": {
+                "status": "AUTHORIZED"
+            }
+        },
+        "Capture": {
+            "Request": {
+                "amount_to_capture": 6000,
+                "currency": "USD"
+            },
+            "Response": {
+                "status": "CHARGED"
+            }
+        },
+        "Void": {
+            "Request": {
+                "cancellation_reason": "Customer requested cancellation",
+                "currency": "USD"
+            },
+            "Response": {
+                "status": "VOIDED"
+            }
+        },
+        "Refund": {
+            "Request": {
+                "payment_amount": 6000,
+                "minor_payment_amount": 6000,
+                "refund_amount": 6000,
+                "minor_refund_amount": 6000,
+                "currency": "USD",
+                "reason": "Customer requested refund"
+            },
+            "Response": {
+                "status": "REFUND_SUCCESS"
+            }
+        },
+        "SyncPayment": {
+            "Request": {
+                "currency": "USD"
+            },
+            "Response": {
+                "status": "CHARGED"
+            }
+        },
+        "SyncRefund": {
+            "Response": {
+                "status": "REFUND_SUCCESS"
+            }
+        }
+    }
+}

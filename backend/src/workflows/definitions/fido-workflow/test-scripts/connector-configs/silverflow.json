@@ -1,0 +1,91 @@
+{
+    "connector": "silverflow",
+    "headers": {
+        "x-connector": "silverflow",
+        "x-auth": "signature-key",
+        "x-api-key": "$SILVERFLOW_API_KEY",
+        "x-api-secret": "$SILVERFLOW_API_SECRET",
+        "x-key1": "mac-default",
+        "x-merchant-id": "reloadhero",
+        "x-tenant-id": "tenant"
+    },
+    "card_pm": {
+        "No3DSAutoCapture": {
+            "Request": {
+                "amount": 2000,
+                "minor_amount": 2000,
+                "currency": "EUR",
+                "capture_method": "AUTOMATIC",
+                "card": {
+                    "card_number": "4761070000000905",
+                    "card_exp_month": "12",
+                    "card_exp_year": "30",
+                    "card_cvc": "196",
+                    "card_network": "VISA"
+                }
+            },
+            "Response": {
+                "status": "CHARGED"
+            }
+        },
+        "No3DSManualCapture": {
+            "Request": {
+                "capture_method": "MANUAL",
+                "card": {
+                    "card_number": "4761070000000905",
+                    "card_exp_month": "12",
+                    "card_exp_year": "30",
+                    "card_cvc": "196",
+                    "card_network": "VISA"
+                }
+            },
+            "Response": {
+                "status": "AUTHORIZED"
+            }
+        },
+        "Capture": {
+            "Request": {
+                "amount_to_capture": 2000,
+                "currency": "EUR"
+            },
+            "Response": {
+                "status": "CHARGED"
+            }
+        },
+        "Void": {
+            "Request": {
+                "cancellation_reason": "Customer requested cancellation",
+                "currency": "EUR"
+            },
+            "Response": {
+                "status": "VOIDED"
+            }
+        },
+        "Refund": {
+            "Request": {
+                "payment_amount": 2000,
+                "minor_payment_amount": 2000,
+                "refund_amount": 1000,
+                "minor_refund_amount": 1000,
+                "currency": "EUR",
+                "reason": "Customer requested partial refund"
+            },
+            "Response": {
+                "status": "REFUND_SUCCESS"
+            }
+        },
+        "SyncPayment": {
+            "Request": {
+                "currency": "EUR"
+            },
+            "Response": {
+                "status": "CHARGED"
+            }
+        },
+        "SyncRefund": {
+            "Response": {
+                "status": "REFUND_SUCCESS"
+            }
+        }
+    }
+}

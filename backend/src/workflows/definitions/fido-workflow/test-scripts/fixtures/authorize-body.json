@@ -1,0 +1,41 @@
+{
+    "request_ref_id": {
+        "id": ""
+    },
+    "amount": 1000,
+    "minor_amount": 1000,
+    "currency": "USD",
+    "capture_method": "AUTOMATIC",
+    "auth_type": "NO_THREE_DS",
+    "payment_method": {
+        "card": {
+            "card_number": {
+                "value": ""
+            },
+            "card_exp_month": {
+                "value": ""
+            },
+            "card_exp_year": {
+                "value": ""
+            },
+            "card_cvc": {
+                "value": ""
+            },
+            "card_network": "VISA"
+        }
+    },
+    "connector_customer_id": "test_customer_123",
+    "return_url": "https://www.example.com/return",
+    "address": {},
+    "enrolled_for_3ds": false,
+    "request_incremental_authorization": false,
+    "browser_info": {
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "accept_header": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "language": "en-US",
+        "color_depth": 24,
+        "screen_height": 1080,
+        "screen_width": 1920,
+        "java_enabled": false
+    }
+}

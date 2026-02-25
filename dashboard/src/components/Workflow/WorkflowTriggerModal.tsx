@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
-import { SelectMenuAlignment, SingleSelect, TextInput } from '@juspay/blend-design-system';
+import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm, Controller, type SubmitHandler, type Path } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
 import { createWorkflow } from '../../services/Workflow/workflowService';
@@ -29,6 +29,7 @@ export default function WorkflowTriggerModal({
 }: WorkflowTriggerModalProps): React.ReactElement | null {
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowTypeSchema | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [showOptionalFields, setShowOptionalFields] = useState(false);
 
   // Fetch ticket data using Zero query
   const ticketDataResult = useCachedQuery(queries.ticketById({ ticketId }));
@@ -132,6 +133,7 @@ export default function WorkflowTriggerModal({
       const wf = workflowTypes.find(w => w.id === workflowId) || null;
       setSelectedWorkflow(wf);
       setValidationErrors([]);
+      setShowOptionalFields(false);
 
       // Reset form values
       form.reset({
@@ -182,6 +184,7 @@ export default function WorkflowTriggerModal({
     });
     setSelectedWorkflow(null);
     setValidationErrors([]);
+    setShowOptionalFields(false);
     createWorkflowMutation.reset();
     onClose();
   };
@@ -227,147 +230,167 @@ export default function WorkflowTriggerModal({
 
     if (selectedWorkflow.schema.length === 0) return null;
 
+    const requiredFields = selectedWorkflow.schema.filter(field => field.required);
+    const optionalFields = selectedWorkflow.schema.filter(field => !field.required);
+
     return (
       <div className='space-y-4 mt-4 border-t pt-4 border-gray-200'>
-        <h3 className='text-sm font-medium text-gray-700'>Required Parameters</h3>
-        {selectedWorkflow.schema.map(field => (
-          <Controller
-            key={field.name}
-            name={`customFields.${field.name}` as Path<TriggerWorkflowFormData>}
-            control={control}
-            rules={{
-              validate: value => {
-                if (!field.required) return true;
-                if (value === '' || value === null || value === undefined) {
-                  return `${field.name} is required`;
-                }
-                if (typeof value === 'string' && value.trim() === '') {
-                  return `${field.name} cannot be empty`;
-                }
-                return true;
-              },
-            }}
-            render={({ field: controllerField }) => (
-              <div className='space-y-1'>
-                <label className='block text-sm font-medium text-gray-700'>
-                  {field.name}
-                  {field.required && <span className='text-red-500 ml-1'>*</span>}
-                  {field.description && (
-                    <span className='text-xs text-gray-500 block mt-1'>{field.description}</span>
-                  )}
-                </label>
+        {requiredFields.length > 0 && (
+          <>
+            <h3 className='text-sm font-medium text-gray-700'>Required Parameters</h3>
+            {requiredFields.map(field => renderField(field))}
+          </>
+        )}
 
-                {/* Render enum fields as select dropdowns */}
-                {field.enumValues && field.enumValues.length > 0 ? (
-                  <SingleSelect
-                    placeholder={`Select ${field.name}`}
-                    items={[
-                      {
-                        items: field.enumValues.map(enumValue => ({
-                          label: enumValue,
-                          value: enumValue,
-                        })),
-                      },
-                    ]}
-                    selected={
-                      (controllerField.value as string) || (field.defaultValue as string) || ''
-                    }
-                    onSelect={controllerField.onChange}
-                    alignment={SelectMenuAlignment.START}
-                  />
-                ) : (
-                  <input
-                    type={field.type === 'number' ? 'number' : 'text'}
-                    className='w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
-                    data-track-category='Workflows'
-                    data-track-name='WorkflowParameterInput'
-                    data-track-metadata={JSON.stringify({
-                      fieldName: field.name,
-                      fieldType: field.type,
-                    })}
-                    value={
-                      field.type === 'number'
-                        ? typeof controllerField.value === 'number'
+        {optionalFields.length > 0 && (
+          <>
+            {!showOptionalFields ? (
+              <Button type='button' variant='secondary' onClick={() => setShowOptionalFields(true)}>
+                Show more fields
+              </Button>
+            ) : (
+              <>
+                <h3 className='text-sm font-medium text-gray-700 mt-6'>Optional Parameters</h3>
+                {optionalFields.map(field => renderField(field))}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderField = (field: WorkflowTypeSchema['schema'][0]) => {
+    return (
+      <Controller
+        key={field.name}
+        name={`customFields.${field.name}` as Path<TriggerWorkflowFormData>}
+        control={control}
+        rules={{
+          validate: value => {
+            if (!field.required) return true;
+            if (value === '' || value === null || value === undefined) {
+              return `${field.name} is required`;
+            }
+            if (typeof value === 'string' && value.trim() === '') {
+              return `${field.name} cannot be empty`;
+            }
+            return true;
+          },
+        }}
+        render={({ field: controllerField }) => (
+          <div className='space-y-1'>
+            <label className='block text-sm font-medium text-gray-700'>
+              {field.name}
+              {field.required && <span className='text-red-500 ml-1'>*</span>}
+              {field.description && (
+                <span className='text-xs text-gray-500 block mt-1'>{field.description}</span>
+              )}
+            </label>
+
+            {/* Render enum fields as select dropdowns */}
+            {field.enumValues && field.enumValues.length > 0 ? (
+              <SingleSelect
+                placeholder={`Select ${field.name}`}
+                items={[
+                  {
+                    items: field.enumValues.map(enumValue => ({
+                      label: enumValue,
+                      value: enumValue,
+                    })),
+                  },
+                ]}
+                selected={(controllerField.value as string) || (field.defaultValue as string) || ''}
+                onSelect={controllerField.onChange}
+                alignment={SelectMenuAlignment.START}
+              />
+            ) : (
+              <input
+                type={field.type === 'number' ? 'number' : 'text'}
+                className='w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+                data-track-category='Workflows'
+                data-track-name='WorkflowParameterInput'
+                data-track-metadata={JSON.stringify({
+                  fieldName: field.name,
+                  fieldType: field.type,
+                })}
+                value={
+                  field.type === 'number'
+                    ? typeof controllerField.value === 'number'
+                      ? controllerField.value
+                      : ''
+                    : field.type === 'boolean'
+                      ? typeof controllerField.value === 'boolean'
+                        ? String(controllerField.value)
+                        : typeof controllerField.value === 'string'
                           ? controllerField.value
                           : ''
-                        : field.type === 'boolean'
-                          ? typeof controllerField.value === 'boolean'
+                      : field.type === 'object' || field.type === 'array'
+                        ? typeof controllerField.value === 'object' &&
+                          controllerField.value !== null
+                          ? JSON.stringify(controllerField.value)
+                          : typeof controllerField.value === 'string'
+                            ? controllerField.value
+                            : ''
+                        : typeof controllerField.value === 'string'
+                          ? controllerField.value
+                          : typeof controllerField.value === 'number'
                             ? String(controllerField.value)
-                            : typeof controllerField.value === 'string'
-                              ? controllerField.value
-                              : ''
-                          : field.type === 'object' || field.type === 'array'
-                            ? typeof controllerField.value === 'object' &&
-                              controllerField.value !== null
-                              ? JSON.stringify(controllerField.value)
-                              : typeof controllerField.value === 'string'
-                                ? controllerField.value
-                                : ''
-                            : typeof controllerField.value === 'string'
-                              ? controllerField.value
-                              : typeof controllerField.value === 'number'
-                                ? String(controllerField.value)
-                                : ''
-                    }
-                    onChange={e => {
-                      let processedValue: unknown = e.target.value;
+                            : ''
+                }
+                onChange={e => {
+                  let processedValue: unknown = e.target.value;
 
-                      // Convert string to appropriate type based on field type
-                      if (typeof e.target.value === 'string') {
-                        switch (field.type) {
-                          case 'number': {
-                            const numValue = Number(e.target.value);
-                            processedValue =
-                              e.target.value === ''
-                                ? ''
-                                : isNaN(numValue)
-                                  ? e.target.value
-                                  : numValue;
-                            break;
-                          }
-                          case 'boolean':
-                            processedValue =
-                              e.target.value === 'true'
-                                ? true
-                                : e.target.value === 'false'
-                                  ? false
-                                  : e.target.value;
-                            break;
-                          case 'object':
-                          case 'array':
-                            if (e.target.value === '') {
-                              processedValue = '';
-                            } else {
-                              try {
-                                processedValue = JSON.parse(e.target.value);
-                              } catch {
-                                processedValue = e.target.value;
-                              }
-                            }
-                            break;
-                        }
+                  // Convert string to appropriate type based on field type
+                  if (typeof e.target.value === 'string') {
+                    switch (field.type) {
+                      case 'number': {
+                        const numValue = Number(e.target.value);
+                        processedValue =
+                          e.target.value === '' ? '' : isNaN(numValue) ? e.target.value : numValue;
+                        break;
                       }
-
-                      controllerField.onChange(processedValue);
-                    }}
-                    placeholder={
-                      field.type === 'object'
-                        ? 'Enter JSON object (e.g., {"key": "value"})'
-                        : field.type === 'array'
-                          ? 'Enter JSON array (e.g., ["item1", "item2"])'
-                          : field.type === 'number'
-                            ? 'Enter a number'
-                            : field.type === 'boolean'
-                              ? 'Enter true or false'
-                              : `Enter ${field.name}`
+                      case 'boolean':
+                        processedValue =
+                          e.target.value === 'true'
+                            ? true
+                            : e.target.value === 'false'
+                              ? false
+                              : e.target.value;
+                        break;
+                      case 'object':
+                      case 'array':
+                        if (e.target.value === '') {
+                          processedValue = '';
+                        } else {
+                          try {
+                            processedValue = JSON.parse(e.target.value);
+                          } catch {
+                            processedValue = e.target.value;
+                          }
+                        }
+                        break;
                     }
-                  />
-                )}
-              </div>
+                  }
+
+                  controllerField.onChange(processedValue);
+                }}
+                placeholder={
+                  field.type === 'object'
+                    ? 'Enter JSON object (e.g., {"key": "value"})'
+                    : field.type === 'array'
+                      ? 'Enter JSON array (e.g., ["item1", "item2"])'
+                      : field.type === 'number'
+                        ? 'Enter a number'
+                        : field.type === 'boolean'
+                          ? 'Enter true or false'
+                          : `Enter ${field.name}`
+                }
+              />
             )}
-          />
-        ))}
-      </div>
+          </div>
+        )}
+      />
     );
   };
 
@@ -476,18 +499,6 @@ export default function WorkflowTriggerModal({
             )}
           />
 
-          <Controller
-            name='context'
-            control={control}
-            render={({ field: { onChange, value } }) => (
-              <TextInput
-                label='Context (Optional)'
-                placeholder='Additional context for the workflow...'
-                value={value}
-                onChange={e => onChange(e.target.value)}
-              />
-            )}
-          />
           {renderFormFields()}
           {validationErrors.length > 0 && (
             <div className='p-3 bg-orange-50 border border-orange-200 rounded-md'>

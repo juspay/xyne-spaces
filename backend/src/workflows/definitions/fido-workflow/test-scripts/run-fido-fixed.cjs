@@ -1,19 +1,15 @@
 // run-fido-fixed.cjs - FIDO Automation with mocha-report content extraction
 const { _electron: electron } = require('playwright');
-
+const { log } = require('console');
 async function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
 // Function to run automation and return structured results
 async function runFidoAutomation(appPath, testType) {
   const results = {
     success: false,
-    testResults: {
-      passed: 0,
-      failed: 0,
-      total: 0
-    },
-    output: ''
-  };
+    output: '',
+    testResults: { passed: 0, failed: 0, total: 0 }
+    };
 
   function log(message) {
     console.error(message);  // Send logs to stderr instead of stdout
@@ -25,7 +21,7 @@ async function runFidoAutomation(appPath, testType) {
     throw new Error(error);
   }
   
-  log('🚀 Starting FIDO Alliance Automation with mocha-report extraction');
+  log(' Starting FIDO Alliance Automation with mocha-report extraction');
   log(`App path: ${appPath} | Test Type: ${testType}`);
 
   const app = await electron.launch({
@@ -35,7 +31,7 @@ async function runFidoAutomation(appPath, testType) {
   });
 
   try {
-    log('✅ FIDO app opened successfully');
+    log(' FIDO app opened successfully');
     const win = await app.firstWindow();
     await win.waitForLoadState('domcontentloaded');
     log(`Title: ${await win.title()}`);
@@ -49,7 +45,7 @@ async function runFidoAutomation(appPath, testType) {
     const runButtonClass = "fido__test__mocha--start.mdl-button.mdl-js-button.mdl-button--raised.mdl-js-ripple-effect.mdl-button--colored.mdl-color-text--white";
     const resultsDivId = "mocha-report";
 
-    log('\n1️⃣ Selecting checkboxes...');
+    log('\n Selecting checkboxes...');
     let checkboxSuccess = 0;
     
     try {
@@ -74,7 +70,7 @@ async function runFidoAutomation(appPath, testType) {
           log(`No specific testType ('${testType}'), selecting default range: checkboxes 1 to 5`);
         }
 
-        log(`📋 Configuring all ${count} checkboxes...`);
+        log(` Configuring all ${count} checkboxes...`);
         for (let i = 0; i < count; i++) {
           const checkbox = checkboxes.nth(i);
           const isChecked = await checkbox.isChecked();
@@ -83,24 +79,24 @@ async function runFidoAutomation(appPath, testType) {
           try {
             if (shouldBeChecked && !isChecked) {
               await checkbox.check();
-              log(`✅ Enabled checkbox ${i + 1}`);
+              log(` Enabled checkbox ${i + 1}`);
               checkboxSuccess++;
             } else if (!shouldBeChecked && isChecked) {
               await checkbox.uncheck();
               log(`Disabled checkbox ${i + 1}`);
             } else if (shouldBeChecked && isChecked) {
-              log(`✅ Checkbox ${i + 1} already enabled`);
+              log(` Checkbox ${i + 1} already enabled`);
               checkboxSuccess++;
             } else {
               // log(`➖ Checkbox ${i + 1} already disabled`);
             }
           } catch (e) {
-            log(`❌ Error configuring checkbox ${i + 1}: ${e.message}`);
+            log(` Error configuring checkbox ${i + 1}: ${e.message}`);
           }
         }
       } else {
         // Try alternative checkbox selectors
-        log('🔄 Trying alternative checkbox selectors...');
+        log('� Trying alternative checkbox selectors...');
         const altSelectors = [
           'input[type="checkbox"]',
           '.mdl-checkbox__input',
@@ -116,17 +112,17 @@ async function runFidoAutomation(appPath, testType) {
               log(`Found ${altCount} checkboxes using selector: ${selector}`);
               // Select only first 5 checkboxes out of total
               const checkboxesToSelect = Math.min(altCount, 5);
-              log(`📋 Selecting first ${checkboxesToSelect} out of ${altCount} checkboxes`);
+              log(` Selecting first ${checkboxesToSelect} out of ${altCount} checkboxes`);
               
               for (let i = 0; i < checkboxesToSelect; i++) {
                 const checkbox = altCheckboxes.nth(i);
                 const isChecked = await checkbox.isChecked();
                 if (!isChecked) {
                   await checkbox.check();
-                  log(`✅ Checkbox ${i + 1} selected (alt method)`);
+                  log(` Checkbox ${i + 1} selected (alt method)`);
                   checkboxSuccess++;
                 } else {
-                  log(`✅ Checkbox ${i + 1} already selected (alt method)`);
+                  log(` Checkbox ${i + 1} already selected (alt method)`);
                   checkboxSuccess++;
                 }
                 await sleep(300);
@@ -139,12 +135,12 @@ async function runFidoAutomation(appPath, testType) {
         }
       }
     } catch (e) {
-      log(`❌ Error finding checkboxes: ${e.message}`);
+      log(` Error finding checkboxes: ${e.message}`);
     }
     
-    log(`📊 Selected ${checkboxSuccess} checkboxes`);
+    log(` Selected ${checkboxSuccess} checkboxes`);
 
-    log('\n2️⃣ Inputting localhost:8080...');
+    log('\n Inputting localhost:8080...');
     try {
       // Use class selector for input field
       const inputField = win.locator(`.${inputFieldClass.replace(/\s+/g, '.')}`);
@@ -153,10 +149,10 @@ async function runFidoAutomation(appPath, testType) {
       if (count > 0) {
         await inputField.first().clear();
         await inputField.first().fill('http://localhost:8080');
-        log('✅ Text input successful: localhost:8080');
+        log(' Text input successful: localhost:8080');
       } else {
         // Try alternative input selectors
-        log('🔄 Trying alternative input selectors...');
+        log(' Trying alternative input selectors...');
         const altInputSelectors = [
           '.mdl-textfield__input',
           '.fido__config__option',
@@ -172,7 +168,7 @@ async function runFidoAutomation(appPath, testType) {
             if (altCount > 0) {
               await altInput.first().clear();
               await altInput.first().fill('localhost:8080');
-              log(`✅ Text input successful using selector: ${selector}`);
+              log(` Text input successful using selector: ${selector}`);
               break;
             }
           } catch (e) {
@@ -181,10 +177,10 @@ async function runFidoAutomation(appPath, testType) {
         }
       }
     } catch (e) {
-      log(`❌ Error inputting text: ${e.message}`);
+      log(` Error inputting text: ${e.message}`);
     }
 
-    log('\n3️⃣ Clicking run button...');
+    log('\n Clicking run button...');
     try {
       // The error showed this is an <a> element, not a button, so try different approach
       const button = win.locator('a.fido__test__mocha--start');
@@ -193,11 +189,11 @@ async function runFidoAutomation(appPath, testType) {
       if (count > 0) {
         // Try force click for <a> elements that might have event handlers
         await button.first().click({ force: true });
-        log(`✅ Button clicked with force: fido__test__mocha--start`);
+        log(` Button clicked with force: fido__test__mocha--start`);
       } else {
-        log(`❌ Button not found with simplified selector`);
+        log(` Button not found with simplified selector`);
         // Try alternative approaches for the button
-        log('🔄 Trying alternative button approaches...');
+        log(' Trying alternative button approaches...');
         
         const alternatives = [
           { selector: 'a[class*="fido__test__mocha--start"]', method: 'force' },
@@ -218,33 +214,33 @@ async function runFidoAutomation(appPath, testType) {
               } else {
                 await altButton.first().click();
               }
-              log(`✅ Button clicked using selector: ${alt.selector} (${alt.method})`);
+              log(` Button clicked using selector: ${alt.selector} (${alt.method})`);
               break;
             }
           } catch (e) {
-            log(`⚠️ Failed with selector ${alt.selector}: ${e.message}`);
+            log(` Failed with selector ${alt.selector}: ${e.message}`);
             // Continue to next selector
           }
         }
       }
     } catch (e) {
-      log(`❌ Error clicking button: ${e.message}`);
+      log(` Error clicking button: ${e.message}`);
       // Don't fail the entire script, continue to wait for results anyway
     }
 
-    log('\n4️⃣ Waiting for test results to complete...');
+    log('\n Waiting for test results to complete...');
     
     // Wait for tests to actually start and complete
     // First wait 10 seconds for tests to start
     await sleep(10000);
-    log('✅ 10 second initial wait completed');
+    log(' 10 second initial wait completed');
     
     // Now wait for tests to complete by checking for completion indicators
     let waitTime = 0;
     const maxWaitTime = 180000; // 3 minutes max
     const checkInterval = 5000; // Check every 5 seconds
     
-    log('🔍 Monitoring test completion...');
+    log(' Monitoring test completion...');
     while (waitTime < maxWaitTime) {
       try {
         // Check if tests are complete by looking for completion indicators
@@ -257,12 +253,12 @@ async function runFidoAutomation(appPath, testType) {
           const hasTestResults = /\d+\s*(passing|failing|tests?)/i.test(content);
           
           if (hasPassFailCounts || hasTestResults) {
-            log(`✅ Tests appear complete after ${(waitTime + 10000)/1000}s (content length: ${content.length})`);
+            log(` Tests appear complete after ${(waitTime + 10000)/1000}s (content length: ${content.length})`);
             break;
           }
         }
         
-        log(`⏳ Still waiting... ${(waitTime + 10000)/1000}s elapsed (content length: ${content?.length || 0})`);
+        log(` Still waiting... ${(waitTime + 10000)/1000}s elapsed (content length: ${content?.length || 0})`);
         await sleep(checkInterval);
         waitTime += checkInterval;
         
@@ -274,7 +270,7 @@ async function runFidoAutomation(appPath, testType) {
     }
     
     if (waitTime >= maxWaitTime) {
-      log(`⚠️ Maximum wait time reached (${(maxWaitTime + 10000)/1000}s), proceeding with extraction`);
+      log(` Maximum wait time reached (${(maxWaitTime + 10000)/1000}s), proceeding with extraction`);
     }
     
     // Extract results from mocha-report div and test count elements
@@ -284,11 +280,11 @@ async function runFidoAutomation(appPath, testType) {
       const count = await resultsDiv.count();
 
       if (count > 0) {
-        log('✅ mocha-report div found');
+        log(' mocha-report div found');
 
         // Extract suites with failed tests
         try {
-          log('🔍 Extracting suites that contain failed tests...');
+          log(' Extracting suites that contain failed tests...');
 
           // Find all suites (li with class "suite") within mocha-report
           const suiteElements = resultsDiv.locator('li.suite');
@@ -308,14 +304,14 @@ async function runFidoAutomation(appPath, testType) {
               const failedTestCount = await failedTestElements.count();
 
               if (failedTestCount > 0) {
-                log(`📋 Suite ${i + 1} contains ${failedTestCount} failed test(s) - extracting content`);
+                log(` Suite ${i + 1} contains ${failedTestCount} failed test(s) - extracting content`);
 
                 // Get the complete suite content
                 const suiteContent = await suite.textContent();
-                log(`✅ Suite ${i + 1} content: ${suiteContent} chars`);
+                log(` Suite ${i + 1} content: ${suiteContent} chars`);
                 if (suiteContent && suiteContent.trim().length > 0) {
                   results.output += `\nSuite ${i + 1} :suiteContent->${suiteContent}\n`;
-                  log(`✅ Extracted suite ${i + 1} content (${suiteContent.length} chars)`);
+                  log(` Extracted suite ${i + 1} content (${suiteContent.length} chars)`);
                 }
 
                 // Count passed and failed tests within this suite
@@ -324,7 +320,7 @@ async function runFidoAutomation(appPath, testType) {
                 totalPasses += passedTestCount;
                 totalFailures += failedTestCount;
 
-                log(`📊 Suite ${i + 1}: ${passedTestCount} passed, ${failedTestCount} failed`);
+                log(` Suite ${i + 1}: ${passedTestCount} passed, ${failedTestCount} failed`);
               } else {
                 // Count only passed tests for suites without failures
                 const passedTestElements = suite.locator('li.test.pass');
@@ -334,25 +330,25 @@ async function runFidoAutomation(appPath, testType) {
                 }
               }
             } catch (suiteError) {
-              log(`⚠️ Error processing suite ${i + 1}: ${suiteError.message}`);
+              log(` Error processing suite ${i + 1}: ${suiteError.message}`);
             }
           }
 
           log(`the suites are:${results.output}, with content length: ${results.output.length}`);
 
         } catch (suiteExtractError) {
-          log(`⚠️ Error extracting suite content: ${suiteExtractError.message}`);
+          log(` Error extracting suite content: ${suiteExtractError.message}`);
 
           // Fallback to basic content extraction
           const fallbackContent = await resultsDiv.textContent();
           if (fallbackContent && fallbackContent.trim().length > 10) {
             results.output = fallbackContent;
-            log(`✅ Fallback: extracted basic content (${fallbackContent.length} chars)`);
+            log(` Fallback: extracted basic content (${fallbackContent.length} chars)`);
           }
         }
 
         try {
-            log('🔍 Extracting test results from <li class="passes"><em>X</em></li> and <li class="failures"><em>Y</em></li>...');
+            log(' Extracting test results from <li class="passes"><em>X</em></li> and <li class="failures"><em>Y</em></li>...');
             
             // Look for <li class="passes"> and extract <em> content within mocha-report
             const passesLiElements = resultsDiv.locator('li.passes');
@@ -371,23 +367,23 @@ async function runFidoAutomation(appPath, testType) {
                 const passesMatch = passesEmText?.match(/(\d+)/);
                 if (passesMatch) {
                   results.testResults.passed = parseInt(passesMatch[1], 10);
-                  log(`✅ Extracted passed tests from <em>: ${results.testResults.passed}`);
+                  log(` Extracted passed tests from <em>: ${results.testResults.passed}`);
                 } else {
-                  log(`⚠️ Could not extract number from passes <em> text: "${passesEmText}"`);
+                  log(` Could not extract number from passes <em> text: "${passesEmText}"`);
                 }
               } else {
-                log(`⚠️ No <em> element found within <li class="passes">`);
+                log(` No <em> element found within <li class="passes">`);
                 // Fallback: try to get text content of the li element itself
                 const passesLiText = await passesLiElements.first().textContent();
                 log(`Passes <li> text fallback: "${passesLiText}"`);
                 const passesMatch = passesLiText?.match(/(\d+)/);
                 if (passesMatch) {
                   results.testResults.passed = parseInt(passesMatch[1], 10);
-                  log(`✅ Extracted passed tests from <li> fallback: ${results.testResults.passed}`);
+                  log(` Extracted passed tests from <li> fallback: ${results.testResults.passed}`);
                 }
               }
             } else {
-              log(`⚠️ No <li class="passes"> elements found`);
+              log(` No <li class="passes"> elements found`);
             }
             
             // Look for <li class="failures"> and extract <em> content within mocha-report
@@ -407,28 +403,28 @@ async function runFidoAutomation(appPath, testType) {
                 const failuresMatch = failuresEmText?.match(/(\d+)/);
                 if (failuresMatch) {
                   results.testResults.failed = parseInt(failuresMatch[1], 10);
-                  log(`✅ Extracted failed tests from <em>: ${results.testResults.failed}`);
+                  log(` Extracted failed tests from <em>: ${results.testResults.failed}`);
                 } else {
-                  log(`⚠️ Could not extract number from failures <em> text: "${failuresEmText}"`);
+                  log(` Could not extract number from failures <em> text: "${failuresEmText}"`);
                 }
               } else {
-                log(`⚠️ No <em> element found within <li class="failures">`);
+                log(` No <em> element found within <li class="failures">`);
                 // Fallback: try to get text content of the li element itself
                 const failuresLiText = await failuresLiElements.first().textContent();
                 log(`Failures <li> text fallback: "${failuresLiText}"`);
                 const failuresMatch = failuresLiText?.match(/(\d+)/);
                 if (failuresMatch) {
                   results.testResults.failed = parseInt(failuresMatch[1], 10);
-                  log(`✅ Extracted failed tests from <li> fallback: ${results.testResults.failed}`);
+                  log(` Extracted failed tests from <li> fallback: ${results.testResults.failed}`);
                 }
               }
             } else {
-              log(`⚠️ No <li class="failures"> elements found`);
+              log(` No <li class="failures"> elements found`);
             }
             
             // Global search fallback if not found within mocha-report
             if (results.testResults.passed === 0 && results.testResults.failed === 0) {
-              log('🔄 Trying global search for <li class="passes"> and <li class="failures">...');
+              log(' Trying global search for <li class="passes"> and <li class="failures">...');
               
               // Global search for <li class="passes"><em>X</em></li>
               const globalPassesLi = win.locator('li.passes');
@@ -441,7 +437,7 @@ async function runFidoAutomation(appPath, testType) {
                   const passesMatch = passesEmText?.match(/(\d+)/);
                   if (passesMatch) {
                     results.testResults.passed = parseInt(passesMatch[1], 10);
-                    log(`✅ Found passed tests (global <em>): ${results.testResults.passed}`);
+                    log(` Found passed tests (global <em>): ${results.testResults.passed}`);
                   }
                 }
               }
@@ -457,27 +453,27 @@ async function runFidoAutomation(appPath, testType) {
                   const failuresMatch = failuresEmText?.match(/(\d+)/);
                   if (failuresMatch) {
                     results.testResults.failed = parseInt(failuresMatch[1], 10);
-                    log(`✅ Found failed tests (global <em>): ${results.testResults.failed}`);
+                    log(` Found failed tests (global <em>): ${results.testResults.failed}`);
                   }
                 }
               }
             }
             
             results.testResults.total = results.testResults.passed + results.testResults.failed;
-            log(`📊 Total test results: ${results.testResults.total} (${results.testResults.passed} passed, ${results.testResults.failed} failed)`);
+            log(` Total test results: ${results.testResults.total} (${results.testResults.passed} passed, ${results.testResults.failed} failed)`);
             
           } catch (testExtractError) {
-            log(`⚠️ Error extracting test counts: ${testExtractError.message}`);
+            log(` Error extracting test counts: ${testExtractError.message}`);
           }
           
           log('\n🎉 Automation completed successfully!');
           results.success = true;
         
         } else {
-        log(`❌ mocha-report div not found: ${resultsDivId}`);
+        log(` mocha-report div not found: ${resultsDivId}`);
         
         // Try alternative div selectors for mocha report
-        log('🔄 Trying alternative mocha-report selectors...');
+        log(' Trying alternative mocha-report selectors...');
         const altSelectors = [
           '[id*="mocha"]',
           '[class*="mocha"]',
@@ -493,7 +489,7 @@ async function runFidoAutomation(appPath, testType) {
             if (altCount > 0) {
               const altContent = await altDiv.textContent();
               if (altContent && altContent.trim().length > 20) {
-                log(`✅ Found mocha-report using selector: ${selector}`);
+                log(` Found mocha-report using selector: ${selector}`);
                 results.output = altContent;
                 
                 // Try to extract passes/failures from this alternative content
@@ -502,12 +498,12 @@ async function runFidoAutomation(appPath, testType) {
                 
                 if (passesMatch) {
                   results.testResults.passed = parseInt(passesMatch[1], 10);
-                  log(`✅ Extracted passed tests from alt content: ${results.testResults.passed}`);
+                  log(` Extracted passed tests from alt content: ${results.testResults.passed}`);
                 }
                 
                 if (failuresMatch) {
                   results.testResults.failed = parseInt(failuresMatch[1], 10);
-                  log(`✅ Extracted failed tests from alt content: ${results.testResults.failed}`);
+                  log(` Extracted failed tests from alt content: ${results.testResults.failed}`);
                 }
                 
                 results.testResults.total = results.testResults.passed + results.testResults.failed;
@@ -521,25 +517,32 @@ async function runFidoAutomation(appPath, testType) {
       }
       
     } catch (e) {
-      log(`❌ Error extracting mocha-report: ${e.message}`);
+      log(` Error extracting mocha-report: ${e.message}`);
     }
 
   } catch (err) {
-    log(`❌ Error during automation: ${err.message}`);
+    log(` Error during automation: ${err.message}`);
   } finally {
     log('\n🔌 Closing application...');
     await app.close();
   }
  // only one debugger here if i put debugger gives me 100k , if dont put debugger gets 65k .
- console.log('🔍 Final structured results:',results.output.length);
-  return results;
+ console.log(' Final structured results:',results.testResults.failed);
+
+  return {
+    success: results.testResults.total > 0 && results.testResults.failed === 0,
+    output: results.output,
+  };
 }
 
 // Main execution
 (async () => {
-  const appPath = process.argv[2];
+  const appPath = "/Applications/FIDO Alliance - Certification Conformance Testing Tools.app/Contents/MacOS/FIDO Alliance - Certification Conformance Testing Tools";
   const outputFile = process.argv[3] || '/tmp/fido-results.json';
   const testType = process.argv[4] || 'all';
+  console.log(` Output file set`,{outputFile});
+  await log(` Output file setasdfasdf`,{outputFile});
+  console.log(` Running FIDO Automation on app: ${appPath} | Test Type: ${testType}`);
   try {
     const results = await runFidoAutomation(appPath, testType);
 
@@ -547,18 +550,17 @@ async function runFidoAutomation(appPath, testType) {
     const fs = require('fs');
     fs.writeFileSync(outputFile, JSON.stringify(results, null, 2));
     
-    console.error(`📁 Results written to ${outputFile} (${results.output.length} chars)`);
+    // console.error(`📁 Results written to ${outputFile} (${results.output.length} chars)`);
     
     // Set exit code based on success
-    process.exit(results.success ? 0 : 1);
+    process.exit(0);
     
   } catch (error) {
-    console.error(`❌ Fatal error: ${error.message}`);
+    console.error(` Fatal error: ${error.message}`);
     
     // Output error as structured result to file
     const errorResults = {
       success: false,
-      testResults: { passed: 0, failed: 0, total: 0 },
       output: ''
     };
     
