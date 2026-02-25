@@ -125,6 +125,14 @@ class LiveKitWebhookController {
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] Marked call ${callId} as ENDED`);
+
+        // Track call metrics (count + duration) as a side effect
+        try {
+          await callSideEffectService.handleCallMetrics(result.call.startedAt, now);
+          logger.info(`[LiveKit Webhook] Triggered call metrics side effects for ${callId}`);
+        } catch (sideEffectError) {
+          logger.error(`[LiveKit Webhook] Failed to trigger call metrics side effects:`, sideEffectError);
+        }
       } else {
         logger.debug(`[LiveKit Webhook] Call ${callId} already marked as ENDED`);
       }
@@ -343,6 +351,14 @@ class LiveKitWebhookController {
           logger.info(`[LiveKit Webhook] Triggered call ended side effects for ${callId}`);
         } catch (sideEffectError) {
           logger.error(`[LiveKit Webhook] Failed to trigger call ended side effects:`, sideEffectError);
+        }
+
+        // Track call metrics (count + duration) as a side effect
+        try {
+          await callSideEffectService.handleCallMetrics(result.call.startedAt, now);
+          logger.info(`[LiveKit Webhook] Triggered call metrics side effects for ${callId}`);
+        } catch (sideEffectError) {
+          logger.error(`[LiveKit Webhook] Failed to trigger call metrics side effects:`, sideEffectError);
         }
       }
 

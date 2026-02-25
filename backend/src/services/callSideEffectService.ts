@@ -4,6 +4,7 @@ import { notificationService } from '@/services/notificationService';
 import { livekitService } from '@/services/liveKitService';
 import { activityService } from '@/services/activity/activityService';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
+import { websocketService } from '@/services/websocketService';
 import { InvitationResponse, NotificationType, ChannelScopeType } from '@prisma/client';
 import { ActivityClassification } from '@xyne/shared';
 
@@ -203,6 +204,33 @@ class CallSideEffectService {
             });
         } catch (error) {
             this.logger.error(`Failed to handle participant invited for ${participantId}:`, error);
+        }
+    }
+
+    /**
+     * Handles call metrics when a call ends:
+     * - Increments today's call count in Redis
+     * - Adds call duration to Redis
+     * Only tracks calls lasting more than 60 seconds.
+     */
+    async handleCallMetrics(startedAt: Date, endedAt: Date): Promise<void> {
+        const callDurationSeconds = (endedAt.getTime() - startedAt.getTime()) / 1000;
+
+        if (callDurationSeconds <= 60) {
+            this.logger.info(`Skipping call metrics: duration ${callDurationSeconds}s is <= 60s`);
+            return;
+        }
+
+        const callDurationMinutes = Math.round((callDurationSeconds / 60) * 10) / 10;
+
+        try {
+            await Promise.all([
+                websocketService.incrementTodayCallCount(),
+                websocketService.addCallDuration(callDurationMinutes),
+            ]);
+            this.logger.info(`Call metrics updated: duration ${callDurationMinutes}m`);
+        } catch (error) {
+            this.logger.error('Failed to update call metrics:', error);
         }
     }
 
