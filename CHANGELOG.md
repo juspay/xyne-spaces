@@ -1,3 +1,16 @@
+## [1.58.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.57.0...v1.58.0) (2026-02-25)
+
+
+### Features
+
+* Fido workflow ([457779c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/457779c545f472dc18c69cf9cd66b5bf12015e1f)), closes [#3340](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3340)
+* test automation ([3d4984f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3d4984f86f96eebdf89ca9dd6a067615d6ac7dba)), closes [#3570](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3570)
+
+
+### Bug Fixes
+
+* Hide 'All Boards' dropdown for projects with single-board ([bcc3fd3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bcc3fd3a030327cc63ee2db8622485da6f4dec7b)), closes [#3407](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3407)
+
 ## [1.57.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.56.1...v1.57.0) (2026-02-24)
 
 
