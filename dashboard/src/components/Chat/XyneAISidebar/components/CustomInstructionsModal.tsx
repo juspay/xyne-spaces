@@ -78,6 +78,8 @@ export const CustomInstructionsModal = ({
             onClick={onClose}
             className='p-2 rounded-lg hover:bg-gray-100 transition-colors'
             disabled={isSaving}
+            data-track-category='XYNE_AI'
+            data-track-name='CloseCustomInstructionsModal'
           >
             <img src='/svgs/icons/close.svg' alt='Close' width='16' height='16' />
           </button>
@@ -100,6 +102,8 @@ export const CustomInstructionsModal = ({
                 }
                 className='w-full h-48 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-sm'
                 disabled={isSaving || isLoading}
+                data-track-category='XYNE_AI'
+                data-track-name='EditCustomInstructions'
               />
             </div>
           </div>
@@ -111,6 +115,8 @@ export const CustomInstructionsModal = ({
             onClick={() => void handleClear()}
             className='px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors'
             disabled={isSaving || isLoading || !instruction}
+            data-track-category='XYNE_AI'
+            data-track-name='ClearCustomInstructions'
           >
             Clear
           </button>
@@ -119,6 +125,8 @@ export const CustomInstructionsModal = ({
               onClick={onClose}
               className='px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors'
               disabled={isSaving}
+              data-track-category='XYNE_AI'
+              data-track-name='CancelCustomInstructions'
             >
               Cancel
             </button>
@@ -126,6 +134,8 @@ export const CustomInstructionsModal = ({
               onClick={() => void handleSave()}
               className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
               disabled={isSaving || isLoading || !instruction.trim()}
+              data-track-category='XYNE_AI'
+              data-track-name='SaveCustomInstructions'
             >
               {isSaving ? 'Saving...' : 'Save'}
             </button>

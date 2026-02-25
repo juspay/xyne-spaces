@@ -177,6 +177,9 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
             type='button'
             onClick={() => void handleCopyNames()}
             className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-[#181B1D] transition-colors hover:bg-[#FAFAFA]'
+            data-track-category='CHANNEL_SETTINGS'
+            data-track-name='CopyMemberNames'
+            data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
           >
             <span className='inline-flex items-center gap-2'>Copy member names</span>
           </button>
@@ -187,6 +190,9 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
             type='button'
             onClick={() => void handleCopyEmails()}
             className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-[#181B1D] transition-colors hover:bg-[#FAFAFA]'
+            data-track-category='CHANNEL_SETTINGS'
+            data-track-name='CopyMemberEmails'
+            data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
           >
             <span className='inline-flex items-center gap-2'>Copy member email addresses</span>
           </button>
@@ -208,6 +214,9 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
                       type='button'
                       onClick={handleMakePublic}
                       className='mt-1 inline-flex items-center self-start rounded-[8px] border border-[#E4E6E7] bg-white px-3 py-1.5 text-sm font-medium text-[#181B1D] hover:bg-[#FAFAFA]'
+                      data-track-category='CHANNEL_SETTINGS'
+                      data-track-name='MakeChannelPublic'
+                      data-track-metadata={JSON.stringify({ channelId: channel.id })}
                     >
                       Change to public
                     </button>

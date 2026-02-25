@@ -191,6 +191,9 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
                 key={index}
                 onClick={() => handleSuggestionClick(status.emoji, status.text, status.expiry)}
                 className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-gray-100 transition-colors text-left'
+                data-track-category='STATUS'
+                data-track-name='SelectRecentStatus'
+                data-track-metadata={JSON.stringify({ emoji: status.emoji, text: status.text })}
               >
                 <span className='text-lg'>{status.emoji}</span>
                 <span className='text-sm text-gray-900'>{status.text}</span>
@@ -218,6 +221,12 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
                 handleSuggestionClick(suggestion.emoji, suggestion.text, suggestion.expiry)
               }
               className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-gray-100 transition-colors text-left'
+              data-track-category='STATUS'
+              data-track-name='SelectStatusSuggestion'
+              data-track-metadata={JSON.stringify({
+                emoji: suggestion.emoji,
+                text: suggestion.text,
+              })}
             >
               <span className='text-lg'>{suggestion.emoji}</span>
               <span className='text-sm text-gray-900'>{suggestion.text}</span>
@@ -399,7 +408,11 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
       <div className='relative flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white'>
         <Popover.Root open={emojiPickerOpen} modal={true} onOpenChange={setEmojiPickerOpen}>
           <Popover.Trigger asChild>
-            <button className='flex-shrink-0 text-gray-400 hover:text-gray-600'>
+            <button
+              className='flex-shrink-0 text-gray-400 hover:text-gray-600'
+              data-track-category='STATUS'
+              data-track-name='OpenEmojiPicker'
+            >
               {selectedEmoji ? (
                 <span className='text-lg'>{selectedEmoji}</span>
               ) : (
@@ -437,12 +450,16 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           placeholder='Update your status'
           className='flex-1 bg-transparent border-none outline-none text-sm'
           maxLength={100}
+          data-track-category='STATUS'
+          data-track-name='EditStatusText'
         />
 
         {isEditingMode && (
           <button
             onClick={handleClearStatus}
             className='flex-shrink-0 text-gray-400 hover:text-gray-600'
+            data-track-category='STATUS'
+            data-track-name='ClearStatus'
           >
             <X className='size-4' />
           </button>
@@ -453,7 +470,11 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
       <div className='space-y-2'>
         <span className='text-sm font-medium text-gray-700'>Remove status after</span>
         <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
-          <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500'>
+          <Select.Trigger
+            className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500'
+            data-track-category='STATUS'
+            data-track-name='SelectExpiryOption'
+          >
             <Select.Value />
             <Select.Icon>
               <ChevronDown className='size-4' />

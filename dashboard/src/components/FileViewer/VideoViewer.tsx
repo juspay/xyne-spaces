@@ -328,6 +328,9 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           autoPlay
           playsInline
           controls={false}
+          data-track-category='VIDEO_PLAYER'
+          data-track-name='ClickVideo'
+          data-track-metadata={JSON.stringify({ attachmentId })}
         >
           <track kind='captions' />
           Your browser does not support the video tag.
@@ -415,6 +418,9 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                         : 'top-0 h-1 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3'
                     } [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:relative [&::-webkit-slider-thumb]:z-10 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer`,
                   )}
+                  data-track-category='VIDEO_PLAYER'
+                  data-track-name='SeekVideo'
+                  data-track-metadata={JSON.stringify({ currentTime, attachmentId })}
                 />
               </div>
             </div>
@@ -442,6 +448,9 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                       : 'text-white hover:text-gray-300 transition-colors'
                   }
                   title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+                  data-track-category='VIDEO_PLAYER'
+                  data-track-name={isPlaying ? 'PauseVideo' : 'PlayVideo'}
+                  data-track-metadata={JSON.stringify({ currentTime, attachmentId })}
                 >
                   {isPlaying ? (
                     <Pause
@@ -464,6 +473,9 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                         : 'text-white hover:text-gray-300 transition-colors'
                     }
                     title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
+                    data-track-category='VIDEO_PLAYER'
+                    data-track-name={isMuted ? 'UnmuteVideo' : 'MuteVideo'}
+                    data-track-metadata={JSON.stringify({ currentTime, attachmentId })}
                   >
                     {isMuted || volume === 0 ? (
                       <VolumeX
@@ -495,6 +507,9 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                         value={volume}
                         onChange={handleVolumeChange}
                         className='absolute top-0 left-0 w-full h-1 appearance-none cursor-pointer bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:relative [&::-webkit-slider-thumb]:z-10 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer'
+                        data-track-category='VIDEO_PLAYER'
+                        data-track-name='AdjustVolume'
+                        data-track-metadata={JSON.stringify({ volume, attachmentId })}
                       />
                     </div>
                   )}
@@ -562,6 +577,9 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                         ? 'inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
                         : 'text-white hover:text-gray-300 transition-colors',
                     )}
+                    data-track-category='VIDEO_PLAYER'
+                    data-track-name={isImmersiveMode ? 'ExitFullscreen' : 'EnterFullscreen'}
+                    data-track-metadata={JSON.stringify({ attachmentId })}
                   >
                     {isImmersiveMode ? (
                       <Minimize2 className='h-5 w-5' />

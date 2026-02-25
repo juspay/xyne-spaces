@@ -36,6 +36,8 @@ export function CalendarToolbar({
             onClick={() => onNavigate('prev')}
             className='p-2 hover:bg-white hover:shadow-sm rounded-md transition-all duration-200'
             aria-label='Previous period'
+            data-track-category='CALENDAR'
+            data-track-name='NavigatePrevious'
           >
             <ChevronLeft className='w-4 h-4 text-gray-600' />
           </button>
@@ -43,6 +45,8 @@ export function CalendarToolbar({
             type='button'
             onClick={() => onNavigate('today')}
             className='px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-white hover:shadow-sm rounded-md transition-all duration-200'
+            data-track-category='CALENDAR'
+            data-track-name='NavigateToday'
           >
             Today
           </button>
@@ -51,6 +55,8 @@ export function CalendarToolbar({
             onClick={() => onNavigate('next')}
             className='p-2 hover:bg-white hover:shadow-sm rounded-md transition-all duration-200'
             aria-label='Next period'
+            data-track-category='CALENDAR'
+            data-track-name='NavigateNext'
           >
             <ChevronRight className='w-4 h-4 text-gray-600' />
           </button>
@@ -74,6 +80,9 @@ export function CalendarToolbar({
                 ? 'bg-white text-gray-900 shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
+            data-track-category='CALENDAR'
+            data-track-name='ChangeViewMode'
+            data-track-metadata={JSON.stringify({ viewMode: mode.value })}
           >
             {mode.label}
           </button>

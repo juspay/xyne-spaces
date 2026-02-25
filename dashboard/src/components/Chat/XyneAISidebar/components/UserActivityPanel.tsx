@@ -1,3 +1,4 @@
+/* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useState, useCallback, useEffect } from 'react';
 import { ArrowLeft, X } from 'lucide-react';
 import type { UserActivity } from '../../../../hooks/useUserActivity';

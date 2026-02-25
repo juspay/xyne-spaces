@@ -90,6 +90,12 @@ export const StagesSubmenu = ({
                     ${isSelected ? 'bg-[#F2F2F3] text-black' : 'hover:bg-gray-50 text-gray-700'}
                     focus-visible:ring-2 focus-visible:ring-[#F2F2F3]
                   `}
+                  data-track-category='TICKETS'
+                  data-track-name='ToggleStageFilter'
+                  data-track-metadata={JSON.stringify({
+                    stageName: stage.name,
+                    selected: !isSelected,
+                  })}
                 >
                   <div className='flex items-center justify-center w-5 h-5 shrink-0'>
                     <KanbanIcon status={stage.status} />

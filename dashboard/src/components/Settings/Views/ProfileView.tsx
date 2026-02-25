@@ -128,6 +128,9 @@ const ProfileView = ({
             <button
               onClick={() => setIsPresenceDropdownOpen(!isPresenceDropdownOpen)}
               className='flex items-center gap-1.5 hover:bg-gray-100 px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
+              data-track-category='PROFILE'
+              data-track-name='TogglePresenceDropdown'
+              data-track-metadata={JSON.stringify({ isOpen: !isPresenceDropdownOpen })}
             >
               {livePresenceStatus === 'ONLINE' ? (
                 <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-white' />
@@ -156,6 +159,9 @@ const ProfileView = ({
                       setIsPresenceDropdownOpen(false);
                     }}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                    data-track-category='PROFILE'
+                    data-track-name='SetPresenceOnline'
+                    data-track-metadata={JSON.stringify({ newStatus: 'ONLINE' })}
                   >
                     <div className='w-2 h-2 rounded-full bg-green-500' />
                     <span>Active</span>
@@ -169,6 +175,9 @@ const ProfileView = ({
                       setIsPresenceDropdownOpen(false);
                     }}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                    data-track-category='PROFILE'
+                    data-track-name='SetPresenceAway'
+                    data-track-metadata={JSON.stringify({ newStatus: 'AWAY' })}
                   >
                     <div className='w-2 h-2 rounded-full border border-gray-400' />
                     <span>Away</span>
@@ -202,6 +211,8 @@ const ProfileView = ({
           role='button'
           tabIndex={0}
           title={hasValidStatus ? 'Click to edit status' : 'Click to set status'}
+          data-track-category='PROFILE'
+          data-track-name={hasValidStatus ? 'EditStatus' : 'SetStatus'}
         >
           {hasValidStatus ? (
             <div className='flex items-center justify-between gap-1 w-full'>
@@ -269,6 +280,8 @@ const ProfileView = ({
             title={
               isCurrentlyUnavailable ? 'Paused from assignment' : 'Click to pause from assignment'
             }
+            data-track-category='PROFILE'
+            data-track-name={isCurrentlyUnavailable ? 'ResumeAssignmentArea' : 'PauseAssignment'}
           >
             {isCurrentlyUnavailable ? (
               <div className='flex items-center gap-2 min-w-0 flex-1'>
@@ -291,6 +304,8 @@ const ProfileView = ({
                 className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
                 title='Resume ticket assignment'
                 onClick={handleResumeAssignment}
+                data-track-category='PROFILE'
+                data-track-name='ResumeAssignment'
               >
                 <X className='size-3 text-gray-600' />
               </Button>
@@ -343,6 +358,9 @@ const ProfileView = ({
               key={themeOption.id}
               onClick={() => changeTheme(themeOption.id)}
               className='flex-1 w-25 space-y-1'
+              data-track-category='PROFILE'
+              data-track-name='SelectTheme'
+              data-track-metadata={JSON.stringify({ themeId: themeOption.id })}
             >
               <div
                 className='w-25 h-[70px] rounded-md relative overflow-clip'
@@ -391,6 +409,8 @@ const ProfileView = ({
           type='button'
           className='!text-white w-full !bg-destructive rounded-3xl h-[44px] active:scale-[0.97] transition-transform duration-200'
           onClick={handleLogout}
+          data-track-category='PROFILE'
+          data-track-name='Logout'
         >
           Sign out
         </Button>
@@ -411,6 +431,8 @@ const ProfileView = ({
                 });
             }}
             className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+            data-track-category='PROFILE'
+            data-track-name='CopyClientId'
           >
             <span>Client ID: {logger.zeroClientID}</span>
             <Copy className='size-3' />
@@ -429,6 +451,8 @@ const ProfileView = ({
                 });
             }}
             className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+            data-track-category='PROFILE'
+            data-track-name='CopyClientGroupId'
           >
             <span>Client Group ID: {logger.zeroClientGroupID}</span>
             <Copy className='size-3' />

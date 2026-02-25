@@ -148,6 +148,9 @@ export const ProactiveNudgeResult: React.FC<ProactiveNudgeResultProps> = ({
               'hover:bg-gray-50 transition-colors',
             )}
             onClick={() => void navigateToSearchResult(result, navigate)}
+            data-track-category='NUDGES'
+            data-track-name='ClickNudgeSearchResult'
+            data-track-metadata={JSON.stringify({ resultId: result.id, resultType: result.type })}
           >
             <div className='font-semibold text-gray-800 truncate'>{result.title}</div>
             {result.subtitle && (

@@ -10,6 +10,9 @@ export function CompactTicketBadge({ ticket, onClick }: CompactTicketBadgeProps)
       onClick={onClick}
       className='w-full text-left group'
       title={`${ticket.xyneId}: ${ticket.title}`}
+      data-track-category='CALENDAR'
+      data-track-name='OpenTicketFromCalendar'
+      data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
     >
       <div className='flex items-center gap-2 p-2 rounded-lg bg-gray-50 hover:bg-white border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200'>
         {/* Status indicator */}

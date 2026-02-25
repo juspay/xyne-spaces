@@ -1,3 +1,4 @@
+/* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useCallback, useState } from 'react';
 import { Check, ChevronRight, ChevronDown } from 'lucide-react';
 import type { UserActivity } from '../../../../hooks/useUserActivity';

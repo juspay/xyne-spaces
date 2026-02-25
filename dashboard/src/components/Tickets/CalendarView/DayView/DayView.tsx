@@ -52,6 +52,12 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
                   key={ticket.id}
                   onClick={() => onTicketClick(ticket)}
                   className='w-full text-left p-4 hover:bg-gray-50 transition-colors cursor-pointer group'
+                  data-track-category='CALENDAR_DAY_VIEW'
+                  data-track-name='OpenTicket'
+                  data-track-metadata={JSON.stringify({
+                    ticketId: ticket.id,
+                    xyneId: ticket.xyneId,
+                  })}
                 >
                   <div className='flex items-start gap-4'>
                     <span className='text-xs font-medium text-gray-400 mt-1'>

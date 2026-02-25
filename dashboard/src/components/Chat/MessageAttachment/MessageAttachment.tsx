@@ -655,6 +655,9 @@ const InlineVideoPlayer: React.FC<{
                   className='p-1 flex items-center justify-center rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
                   title='Play video'
                   aria-label='Play video'
+                  data-track-category='MESSAGE_ATTACHMENT'
+                  data-track-name='PlayVideoAttachment'
+                  data-track-metadata={JSON.stringify({ attachmentId, fileName })}
                 >
                   <Play className='h-5 w-5' />
                 </button>
@@ -667,6 +670,9 @@ const InlineVideoPlayer: React.FC<{
                     className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
                     title='Expand video'
                     aria-label='Expand video'
+                    data-track-category='MESSAGE_ATTACHMENT'
+                    data-track-name='ExpandVideoAttachment'
+                    data-track-metadata={JSON.stringify({ attachmentId, fileName })}
                   >
                     <Maximize2 className='h-4 w-4' />
                   </button>

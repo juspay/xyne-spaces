@@ -1250,6 +1250,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         : 'text-gray-500 hover:text-gray-700'
                     }`}
                     title='Calendar View'
+                    data-track-category='KANBAN'
+                    data-track-name='SetCalendarView'
+                    data-track-metadata={JSON.stringify({
+                      layout: 'calendar',
+                      viewMode,
+                      channelId,
+                    })}
                   >
                     <Calendar className='w-3.5 h-3.5' />
                   </button>
@@ -1275,6 +1282,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         ? 'bg-white text-gray-900'
                         : 'text-gray-500 hover:text-gray-700'
                     }`}
+                    data-track-category='KANBAN'
+                    data-track-name='ToggleAssignedToMeFilter'
+                    data-track-metadata={JSON.stringify({ assigned: !filters.assigned })}
                   >
                     <span className='text-xs font-medium'>Assigned To Me</span>
                   </button>
@@ -1293,6 +1303,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         ? 'bg-white text-gray-900'
                         : 'text-gray-500 hover:text-gray-700'
                     }`}
+                    data-track-category='KANBAN'
+                    data-track-name='ToggleCreatedByMeFilter'
+                    data-track-metadata={JSON.stringify({ created: !filters.created })}
                   >
                     <span className='text-xs font-medium'>Created By Me</span>
                   </button>
@@ -1309,6 +1322,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     : 'bg-white text-gray-500 hover:text-gray-700 border border-gray-300'
                 } rounded-lg flex items-center gap-2`}
                 title='Filter Overdue Tickets'
+                data-track-category='KANBAN'
+                data-track-name='ToggleOverdueFilter'
+                data-track-metadata={JSON.stringify({
+                  showOverdueOnly: !showOverdueOnly,
+                  viewMode,
+                  channelId,
+                })}
               >
                 <svg
                   width='14'

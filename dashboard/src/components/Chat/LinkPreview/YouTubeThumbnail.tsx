@@ -41,6 +41,9 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
             onClose();
           }}
           aria-label='Close link preview'
+          data-track-category='LINK_PREVIEW'
+          data-track-name='CloseYouTubeThumbnail'
+          data-track-metadata={JSON.stringify({ title, watchUrl })}
         >
           <X size={14} className='text-current' />
         </button>
@@ -93,6 +96,9 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
                   onClick={() => setShowPlayer(true)}
                   aria-label='Play video'
                   className='group flex items-center justify-center h-12 w-12 md:h-14 md:w-14 lg:h-20 lg:w-20 rounded-lg md:rounded-xl lg:rounded-2xl text-gray-300 hover:text-white focus:outline-none focus:ring-0 transition-colors'
+                  data-track-category='LINK_PREVIEW'
+                  data-track-name='PlayYouTubeVideo'
+                  data-track-metadata={JSON.stringify({ title, watchUrl })}
                 >
                   <Play className='text-current w-6 h-6 md:w-7 md:h-7 lg:w-10 lg:h-10' />
                 </button>
@@ -104,6 +110,9 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
                   aria-label='Open on YouTube'
                   title='Open on YouTube'
                   className='group flex items-center justify-center h-12 w-12 md:h-14 md:w-14 lg:h-20 lg:w-20 rounded-lg md:rounded-xl lg:rounded-2xl text-gray-300 hover:text-white focus:outline-none focus:ring-0 transition-colors'
+                  data-track-category='LINK_PREVIEW'
+                  data-track-name='OpenOnYouTube'
+                  data-track-metadata={JSON.stringify({ title, watchUrl })}
                 >
                   <ExternalLink className='text-current w-6 h-6 md:w-7 md:h-7 lg:w-10 lg:h-10' />
                 </a>

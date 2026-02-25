@@ -764,6 +764,9 @@ export const XyneAIInputBox = ({
                 onClick={handleThreadPillClick}
                 className='flex items-center gap-1 cursor-pointer hover:bg-gray-50 transition-colors bg-transparent border-0 p-0'
                 aria-label={`Navigate to thread from ${activeThreadInfo.senderName}`}
+                data-track-category='XYNE_AI'
+                data-track-name='ClickThreadContextPill'
+                data-track-metadata={JSON.stringify({ thread: activeThreadInfo })}
               >
                 <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
                   {activeThreadInfo.senderName} • {activeThreadInfo.previewText}
@@ -774,6 +777,9 @@ export const XyneAIInputBox = ({
                 onClick={handleRemoveThreadInfo}
                 className='hover:bg-gray-200 rounded p-0.5 transition-colors flex-shrink-0'
                 aria-label='Remove thread context'
+                data-track-category='XYNE_AI'
+                data-track-name='RemoveThreadContext'
+                data-track-metadata={JSON.stringify({ thread: activeThreadInfo })}
               >
                 <X className='w-3 h-3' />
               </button>
@@ -881,6 +887,9 @@ export const XyneAIInputBox = ({
                 onClick={() => onActivitiesChange?.([])}
                 className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
                 aria-label='Remove all activities'
+                data-track-category='XYNE_AI'
+                data-track-name='RemoveAllActivities'
+                data-track-metadata={JSON.stringify({ activityCount: selectedActivities.length })}
               >
                 <X className='w-3 h-3' />
               </button>

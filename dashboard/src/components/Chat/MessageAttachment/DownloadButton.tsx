@@ -75,6 +75,9 @@ export const DownloadButton = memo<DownloadButtonProps>(
         title={buttonLabel}
         aria-label={buttonLabel}
         aria-busy={isDownloading}
+        data-track-category='MESSAGE_ATTACHMENT'
+        data-track-name='DownloadAttachment'
+        data-track-metadata={JSON.stringify({ fileName, attachmentId })}
       >
         {isDownloading ? (
           <div className='flex items-center gap-2'>

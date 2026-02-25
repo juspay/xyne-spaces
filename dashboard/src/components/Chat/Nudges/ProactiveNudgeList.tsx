@@ -85,6 +85,8 @@ export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
           'px-[6px] py-[3px]',
           'transition-colors hover:bg-[#ededee]',
         )}
+        data-track-category='NUDGES'
+        data-track-name={expanded ? 'CollapseNudgeList' : 'ExpandNudgeList'}
       >
         <XyneAIStar size={14} />
         <span className='text-sm tracking-[-0.1px] text-[#646464]'>{suggestionLabel}</span>
@@ -123,6 +125,8 @@ export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
                     ? 'cursor-not-allowed text-[#d5d7d9]'
                     : 'text-[#9aa0a5] hover:bg-gray-50',
                 )}
+                data-track-category='NUDGES'
+                data-track-name='PreviousNudge'
               >
                 <ChevronLeft className='h-3.5 w-3.5' />
               </button>
@@ -142,6 +146,8 @@ export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
                     ? 'cursor-not-allowed text-[#d5d7d9]'
                     : 'text-[#9aa0a5] hover:bg-gray-50',
                 )}
+                data-track-category='NUDGES'
+                data-track-name='NextNudge'
               >
                 <ChevronRight className='h-3.5 w-3.5' />
               </button>

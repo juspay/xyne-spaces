@@ -123,6 +123,8 @@ export const ExternalStepApprovalRenderer: React.FC<{ step: WorkflowStep }> = ({
         <button
           onClick={() => setIsDialogOpen(true)}
           className='px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 transition-colors'
+          data-track-category='WORKFLOWS'
+          data-track-name='OpenExternalStepResponse'
         >
           Respond
         </button>

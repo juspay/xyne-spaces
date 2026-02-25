@@ -1419,6 +1419,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                               type='button'
                               onClick={saveEditedSubTicket}
                               className='text-[14px] leading-[18px] text-[#8d8d8d] hover:text-[#707070]'
+                              data-track-category='TICKETS'
+                              data-track-name='SaveEditedSubTicket'
+                              data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                             >
                               Done
                             </button>
@@ -1453,6 +1456,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                               type='button'
                               onClick={() => beginEditSubTicket(index)}
                               className='text-[14px] leading-[18px] text-[#adadad] hover:text-[#8d8d8d]'
+                              data-track-category='TICKETS'
+                              data-track-name='EditSubTicket'
+                              data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                             >
                               Edit
                             </button>
@@ -1461,6 +1467,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                               onClick={() => deleteSubTicket(index)}
                               aria-label={`Delete subticket ${index + 1}`}
                               className='text-[#adadad] hover:text-[#8d8d8d]'
+                              data-track-category='TICKETS'
+                              data-track-name='DeleteSubTicket'
+                              data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                             >
                               <Trash2 className='size-[14px]' />
                             </button>

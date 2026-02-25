@@ -157,6 +157,9 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
           }
         }}
         className='group flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer'
+        data-track-category='CHANNEL_LINKS'
+        data-track-name='OpenLink'
+        data-track-metadata={JSON.stringify({ linkId: link.id, url: link.url, title: link.title })}
       >
         {link.favicon ? (
           <img src={link.favicon} alt='' className='w-4 h-4 flex-shrink-0 mt-0.5' />
@@ -185,6 +188,13 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               onClick={e => handleEditLink(link, e)}
               className='p-1.5 rounded-md hover:bg-blue-100 text-blue-600 transition-opacity'
               title='Edit link'
+              data-track-category='CHANNEL_LINKS'
+              data-track-name='EditLink'
+              data-track-metadata={JSON.stringify({
+                linkId: link.id,
+                title: link.title,
+                url: link.url,
+              })}
             >
               <Pencil size={14} />
             </button>
@@ -195,6 +205,13 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               }}
               className='p-1.5 rounded-md hover:bg-red-100 text-red-600 transition-opacity'
               title='Delete link'
+              data-track-category='CHANNEL_LINKS'
+              data-track-name='DeleteLink'
+              data-track-metadata={JSON.stringify({
+                linkId: link.id,
+                title: link.title,
+                url: link.url,
+              })}
             >
               <Trash2 size={14} />
             </button>
@@ -222,7 +239,11 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
             }
           }}
           trigger={
-            <button className='flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm'>
+            <button
+              className='flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm'
+              data-track-category='CHANNEL_LINKS'
+              data-track-name='OpenAddLinkDialog'
+            >
               <Plus size={16} />
               Add Link
             </button>
@@ -249,6 +270,12 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   required
                   disabled={!!linkToEdit}
                   className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:bg-gray-100 disabled:cursor-not-allowed'
+                  data-track-category='CHANNEL_LINKS'
+                  data-track-name='EditLinkUrl'
+                  data-track-metadata={JSON.stringify({
+                    linkId: linkToEdit?.id,
+                    url: formData.url,
+                  })}
                 />
                 {linkToEdit && (
                   <p className='text-xs text-gray-500 mt-1'>URL cannot be changed when editing</p>
@@ -269,6 +296,13 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   placeholder='Link title'
                   required
                   className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm'
+                  data-track-category='CHANNEL_LINKS'
+                  data-track-name='EditLinkTitle'
+                  data-track-metadata={JSON.stringify({
+                    linkId: linkToEdit?.id,
+                    title: formData.title,
+                    url: formData.url,
+                  })}
                 />
               </div>
               <div>
@@ -285,6 +319,14 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   placeholder='Optional description'
                   rows={3}
                   className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none'
+                  data-track-category='CHANNEL_LINKS'
+                  data-track-name='EditLinkDescription'
+                  data-track-metadata={JSON.stringify({
+                    linkId: linkToEdit?.id,
+                    description: formData.description,
+                    url: formData.url,
+                    title: formData.title,
+                  })}
                 />
               </div>
               <fieldset>
@@ -300,6 +342,12 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                         ? 'border-blue-500 bg-blue-50 text-blue-700'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
+                    data-track-category='CHANNEL_LINKS'
+                    data-track-name='SelectSharedVisibility'
+                    data-track-metadata={JSON.stringify({
+                      linkId: linkToEdit?.id,
+                      visibility: 'DEFAULT',
+                    })}
                   >
                     <Globe size={16} />
                     <div className='text-left'>
@@ -315,6 +363,12 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                         ? 'border-blue-500 bg-blue-50 text-blue-700'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
+                    data-track-category='CHANNEL_LINKS'
+                    data-track-name='SelectPersonalVisibility'
+                    data-track-metadata={JSON.stringify({
+                      linkId: linkToEdit?.id,
+                      visibility: 'PERSONAL',
+                    })}
                   >
                     <Lock size={16} />
                     <div className='text-left'>
@@ -333,6 +387,9 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                     setFormData({ url: '', title: '', description: '', visibility: 'DEFAULT' });
                   }}
                   className='flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium'
+                  data-track-category='CHANNEL_LINKS'
+                  data-track-name='CancelAddLink'
+                  data-track-metadata={JSON.stringify({ linkId: linkToEdit?.id })}
                 >
                   Cancel
                 </button>
@@ -444,6 +501,8 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               type='button'
               onClick={() => setIsDeleteDialogOpen(false)}
               className='flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium'
+              data-track-category='CHANNEL_LINKS'
+              data-track-name='CancelDeleteLink'
             >
               Cancel
             </button>
@@ -451,6 +510,8 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               type='button'
               onClick={confirmDelete}
               className='flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium'
+              data-track-category='CHANNEL_LINKS'
+              data-track-name='ConfirmDeleteLink'
             >
               Delete Link
             </button>

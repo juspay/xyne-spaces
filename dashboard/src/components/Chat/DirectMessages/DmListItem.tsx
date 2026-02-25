@@ -109,6 +109,9 @@ export const DmListItem = ({
         className='w-full flex items-start gap-3 px-2 text-left text-select-none active:scale-[0.98] transition-all duration-200'
         onClick={handleClick}
         aria-label={`Open conversation with ${displayName}`}
+        data-track-category='DM_LIST'
+        data-track-name='OpenDMConversation'
+        data-track-metadata={JSON.stringify({ channelId: channel.id, displayName })}
       >
         <DMItemAvatar userId={avatarUserId || null} scopeType={channel.scopeType} />
         <div className='w-full flex-1 min-w-0 space-y-1'>

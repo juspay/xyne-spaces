@@ -16,7 +16,7 @@ const localRules = {
     'no-rocicorp-use-query': require('./eslint-rules/no-rocicorp-use-query.cjs'),
     'no-rocicorp-use-zero': require('./eslint-rules/no-rocicorp-use-zero.cjs'),
     'no-date-now-or-uuid-in-mutators': require('./eslint-rules/no-date-now-or-uuid-in-mutators.cjs'),
-    // 'require-tracking-on-click': require('./eslint-rules/require-tracking-on-click.cjs'),
+    'require-tracking-on-click': require('./eslint-rules/require-tracking-on-click.cjs'),
   }
 };
 
@@ -83,20 +83,20 @@ export default tseslint.config(
       "local-rules/no-rocicorp-use-query": "error",
       "local-rules/no-rocicorp-use-zero": "error",
       "local-rules/no-date-now-or-uuid-in-mutators": "error",
-      // "local-rules/require-tracking-on-click": ["error", {
-      //   exemptComponents: [],
-      //   exemptDataTestIds: [],
-      // }],
+      "local-rules/require-tracking-on-click": ["error", {
+        exemptComponents: [],
+        exemptDataTestIds: [],
+      }],
     },
   },
 
   // Disable tracking requirement for reusable UI components
-  // {
-  //   files: ["src/components/ui/**/*.{ts,tsx}"],
-  //   rules: {
-  //     "local-rules/require-tracking-on-click": "off",
-  //   },
-  // },
+  {
+    files: ["src/components/ui/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/require-tracking-on-click": "off",
+    },
+  },
 
   // TypeScript specific configuration for src files
   {

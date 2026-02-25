@@ -54,6 +54,8 @@ export const XyneAIHeader = ({
               onClick={() => setIsSettingsModalOpen(true)}
               className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
               title='Custom instructions'
+              data-track-category='XYNE_AI'
+              data-track-name='OpenCustomInstructions'
             >
               <Settings size={16} className='w-4 h-4' />
             </button>
@@ -142,6 +144,8 @@ export const XyneAIHeader = ({
             onClick={() => setIsSettingsModalOpen(true)}
             className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
             title='Custom instructions'
+            data-track-category='XYNE_AI'
+            data-track-name='OpenCustomInstructions'
           >
             <Settings size={16} />
           </button>
