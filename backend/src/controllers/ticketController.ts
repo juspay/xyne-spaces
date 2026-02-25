@@ -620,6 +620,7 @@ export class TicketController {
                   entityId: ticket.id,
                   entityType: FormEntityType.TICKET,
                   fieldId: field.id,
+                  contextId: boardId,
                   fieldValue: '', // Empty string for backward compatibility (not used anymore)
                   actualFieldValue: value, // Actual value stored in JSON field
                 };
