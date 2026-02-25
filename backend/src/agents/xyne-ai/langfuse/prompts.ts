@@ -147,12 +147,13 @@ export async function compilePrompt(
 }
 
 export const PROMPT_NAMES = {
-  XYNE_AI_SYSTEM: 'xyne-ai',
+  XYNE_AI_SYSTEM: 'xyne-ai-anirudh',
   FETCH_CHANNEL_MESSAGES: 'fetch_channel_messages',
   FETCH_THREAD_MESSAGES: 'fetch_thread_messages',
   SEARCH_RELEVANT_MESSAGES: 'search_relevant_messages',
   SEARCH_RELEVANT_TICKETS: 'search_relevant_tickets',
   GENIUS: 'genius_as_tool',
+  XYNE_RCA: 'xyne_rca',
   FIELD_VALUE_DISCOVERY: 'field_value_discovery',
   WEB_SEARCH: 'web_search',
   RESEARCH_AGENT: 'research_agent',

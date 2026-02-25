@@ -95,6 +95,24 @@ THREAD CONTEXT - {{thread_context}}
 - "Find the code path for UPI intent payments"
 **Session Continuity:** Supports multi-turn conversations. If agent needs more information, it returns follow_up questions with a session_id for continuation.
 **Constraints:** DO NOT use for analytics (use <tool>genius</tool>). DO NOT use for message search. This is for CODE/IMPLEMENTATION understanding only.
+8. <tool>xyne_rca</tool>
+**Usage:** Log analysis, error investigation, user troubleshooting, and technical debugging (NOT analytics/metrics).
+**Description:** Queries the Xyne RCA Agent to analyze logs, investigate errors, and troubleshoot user-reported issues.
+**When to Use:**
+- User reports issues or errors (e.g., "user@example.com facing errors")
+- Time-based troubleshooting (e.g., "errors in last 30 minutes", "issues yesterday")
+- Log analysis requests (e.g., "show recent errors", "what failed today")
+- Technical debugging (e.g., "why is API returning 500", "investigate payment failures")
+- Root cause analysis for specific incidents or timeframes
+**Examples:**
+- "john.doe@gmail.com was facing issues 30 minutes ago"
+- "Show me recent errors in production logs from the last hour"
+- "What errors did user@xyne.com encounter today?"
+**Output:** Returns investigation results with log analysis, error patterns, and potential root causes.
+**Constraints:** 
+- **DO NOT** use for business metrics, analytics, GMV, revenue, or KPIs (use <tool>genius</tool> instead).
+- **DO NOT** use for code implementation questions (use <tool>research_agent</tool> instead).
+- This tool is specifically for LOG ANALYSIS and ERROR INVESTIGATION only.
 </tools_definition>
 
 <behavior_guidelines>
@@ -444,6 +462,34 @@ Note: The tool streams results as computed. Response includes:
 - confidence: HIGH/MEDIUM/LOW confidence level in the analysis`;
 
 /**
+ * Fallback description for xyne_rca tool
+ */
+const XYNE_RCA_FALLBACK = `Query Xyne RCA Agent to analyze logs, investigate errors, troubleshoot issues, and research code implementations.
+
+Use this tool when the user asks about:
+
+Log Analysis: Recent errors, API failures, system issues within specific time windows
+User Troubleshooting: Issues faced by specific users/emails (e.g., "user@example.com facing errors")
+Error Investigation: Understanding error messages, failure patterns, or exception traces
+Code Research: How specific features or integrations are implemented in the codebase
+Root Cause Analysis: Investigating why something failed or isn't working
+Time-based Queries: Events, logs, or issues within specific timeframes (last 30 mins, yesterday, etc.)
+Technical Debugging: API request/response analysis, integration issues, system behavior
+
+The query should be a natural language question describing the investigation needed, including:
+
+- Time context if relevant (e.g., "30 minutes ago", "yesterday", "last 2 hours")
+- User identifier if investigating user-specific issues (email, user ID)
+- Error details if known (error codes, messages, or symptoms)
+- Context about what's not working or needs investigation
+
+Examples:
+- "john.doe@gmail.com was facing issues 30 minutes ago"
+- "Show me recent errors in production logs from the last hour"
+- "What errors did user@xyne.com encounter today?"
+- "Analyze failed requests in the last 2 hours"`;
+
+/**
  * Fallback prompt for ticket description cleaning
  */
 const TICKET_DESCRIPTION_CLEANER_FALLBACK = `You are cleaning support tickets for semantic embeddings and clustering.
@@ -713,6 +759,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'search_relevant_messages': SEARCH_RELEVANT_MESSAGES_FALLBACK,
   'search_relevant_tickets': SEARCH_RELEVANT_TICKETS_FALLBACK,
   'genius_as_tool': GENIUS_FALLBACK,
+  'xyne_rca': XYNE_RCA_FALLBACK,
   'field_value_discovery': FIELD_VALUE_DISCOVERY_FALLBACK,
   'web_search': WEB_SEARCH_FALLBACK,
   'research_agent': RESEARCH_AGENT_FALLBACK,
