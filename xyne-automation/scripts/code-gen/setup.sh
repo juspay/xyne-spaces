@@ -70,3 +70,27 @@ echo "You can now run:"
 echo "  npm run codegen-and-test -- <spec-file.spec.ts>"
 echo "  npm run codegen -- <spec-file.spec.ts>"
 echo "  npm run codegen-cleanup"
+echo ""
+
+# Export environment variables for Claude Code
+export JUSPAY_API_KEY=your-llm-key
+
+export GEMINI_API_KEY=""
+export GOOGLE_CLOUD_PROJECT=""
+export GOOGLE_APPLICATION_CREDENTIALS=""
+export CLAUDE_CODE_USE_VERTEX=""
+export CLOUD_ML_REGION=""
+export GOOGLE_VERTEX_PROJECT=""
+export ANTHROPIC_VERTEX_PROJECT_ID=""
+
+export ANTHROPIC_BASE_URL="https://grid.ai.example.com/"
+export ANTHROPIC_AUTH_TOKEN="$JUSPAY_API_KEY"
+export ANTHROPIC_MODEL="kimi-latest"
+
+export DISABLE_INTERLEAVED_THINKING=true
+export API_TIMEOUT_MS=600000
+export BASH_MAX_TIMEOUT_MS=300000
+export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
+
+echo "✓ Environment variables exported"
+echo "  Note: Update JUSPAY_API_KEY with your actual API key before running"

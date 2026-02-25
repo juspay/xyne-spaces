@@ -335,6 +335,7 @@ ORIG_DIR="$(pwd)"
 if [ -n "$WORKSPACE_ROOT" ]; then
     cd "$WORKSPACE_ROOT"
     echo -e "${CYAN}  Working directory: $WORKSPACE_ROOT${NC}"
+    echo -e "${CYAN}  Model: $MODEL${NC}"
 fi
 
 set +e
@@ -356,6 +357,7 @@ GEMINI_API_KEY="" \
     API_TIMEOUT_MS=600000 \
     BASH_MAX_TIMEOUT_MS=300000 \
     CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 \
+    # ANTHROPIC_LOG=debug \
     claude --dangerously-skip-permissions "$PROMPT" \
     >> "$LLM_OUTPUT_FILE" 2>&1
 LLM_EXIT_CODE=$?
