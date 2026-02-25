@@ -3,12 +3,10 @@ import { logger } from '@/utils/logger';
 import { userStatusService } from '@/services/userStatusService';
 
 export interface PresenceCleanupJobData {
-  type: 'cleanup-inactive-users' | 'mark-user-offline';
+  type: 'mark-user-offline';
   userId?: string;
 }
 
-// Cleanup interval - catches users whose disconnect didn't fire properly (default: 10 minutes)
-const CLEANUP_INTERVAL_MS = parseInt(process.env.PRESENCE_CLEANUP_INTERVAL_MS || '600000', 10);
 
 // Grace period before marking user offline after disconnect (default: 5 minutes)
 const OFFLINE_GRACE_PERIOD_MS = parseInt(process.env.PRESENCE_OFFLINE_GRACE_PERIOD_MS || '300000', 10);
@@ -59,9 +57,8 @@ class PresenceCleanupQueue {
       this.setupProcessor();
       this.setupEventListeners();
 
-      // Remove any existing repeatable jobs first, then schedule fresh
+      // Remove any stale repeatable jobs from previous deployments
       await this.removeExistingRepeatableJobs();
-      await this.scheduleRepeatableJob();
 
       this.isInitialized = true;
       logger.info('✓ PresenceCleanupQueue initialized successfully');
@@ -80,35 +77,15 @@ class PresenceCleanupQueue {
       const repeatableJobs = await this.queue.getRepeatableJobs();
       for (const job of repeatableJobs) {
         await this.queue.removeRepeatableByKey(job.key);
+        logger.info(`[PRESENCE-CLEANUP] Removed stale repeatable job: ${job.key}`);
       }
     } catch (error) {
       logger.error('Error removing existing repeatable jobs:', error);
     }
   }
 
-  private async scheduleRepeatableJob(): Promise<void> {
-    if (!this.queue) return;
-
-    await this.queue.add(
-      'cleanup-inactive-users',
-      { type: 'cleanup-inactive-users' },
-      {
-        repeat: { every: CLEANUP_INTERVAL_MS },
-        jobId: 'presence-cleanup-repeatable',
-      }
-    );
-    logger.info(`[PRESENCE-CLEANUP] Scheduled cleanup job every ${CLEANUP_INTERVAL_MS / 1000}s`);
-  }
-
   private setupProcessor(): void {
     if (!this.queue) return;
-
-    // Periodic cleanup for users whose TTL expired (handles server restarts, network issues, etc.)
-    this.queue.process('cleanup-inactive-users', async () => {
-      logger.info(`[PRESENCE-CLEANUP] Running cleanup job...`);
-      const cleanedCount = await userStatusService.cleanupInactiveUsers();
-      logger.info(`[PRESENCE-CLEANUP] Cleanup complete, cleaned ${cleanedCount} inactive users`);
-    });
 
     // Delayed job for graceful offline after disconnect
     this.queue.process('mark-user-offline', async (job) => {
