@@ -127,6 +127,10 @@ export const Event = {
   CANVAS_MENTION_DEBUG: 'canvas_mention_debug',
   SHARE_RECORDING: 'share_recording',
   SHARE_RECORDING_ERROR: 'share_recording_error',
+  RECORDING_STATE_CHANGED: 'recording_state_changed',
+  RECORDING_STARTED: 'recording_started',
+  RECORDING_STOPPED: 'recording_stopped',
+  RECORDING_ERROR: 'recording_error',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];
