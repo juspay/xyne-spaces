@@ -105,6 +105,14 @@ export interface TimeSeriesDataPoint {
   stats: PRStatsLegacy
 }
 
+// Message type for filtered messages
+type FilteredMessage = {
+  messageId: string;
+  senderId: string;
+  conversationId: string;
+  metadata: any;
+  createdAt: Date;
+};
 
 /**
  * Helper method to get date filter SQL condition
@@ -160,6 +168,74 @@ export function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lt
 
 
 export class AnalyticsRepository {
+  /**
+   * Centralized helper to fetch and filter valid messages
+   * Accepts a Prisma where clause and returns only valid messages
+   */
+  private async getFilteredMessages(where: any, select?: any): Promise<FilteredMessage[]> {
+    // Always select required fields for filtering
+    const baseSelect = {
+      messageId: true,
+      senderId: true,
+      conversationId: true,
+      metadata: true,
+      createdAt: true
+    };
+    const messagesRaw = await this.prisma.message.findMany({
+      where,
+      select: select ? { ...baseSelect, ...select } : baseSelect
+    });
+    const messages: FilteredMessage[] = messagesRaw.map((m: any) => ({
+      messageId: m.messageId,
+      senderId: m.senderId,
+      conversationId: m.conversationId,
+      metadata: m.metadata,
+      createdAt: m.createdAt,
+    }));
+    const { externalMessageIdSet, validConvSet } = await this.getValidMessageContext(messages);
+    // Filter valid messages
+    return messages.filter((message: FilteredMessage) => {
+      if (externalMessageIdSet.has(message.messageId)) return false;
+      if (
+        message.metadata &&
+        typeof message.metadata === 'object' &&
+        ('ticketId' in (message.metadata as any)) &&
+        (message.metadata as any)['ticketId']
+      ) return false;
+      if (!validConvSet.has(message.conversationId)) return false;
+      return true;
+    });
+  }
+    /**
+     * Helper to fetch context for valid messages
+     */
+    private async getValidMessageContext(messages: any[]) {
+      const excludedChannelIds = [
+        'cmkl0nsjp01vq5n0sczlf058f', 'cmkmh8ksj00fbxkaq0u5u207c',
+        'cmkmir9ys03ntskfrt63lrfex', 'cmkmiz3wb03o7skfr6cos6t3b',
+        'cmkn23y86008b10br13ngegoq', 'cmkn2ohyc009vjja5vbw9qrg7',
+        'cmlpgdr0a09rj11uzf3xql7ad', 'cmkmhn5c803k3skfrc836863n'
+      ];
+      const messageIds = messages.map(m => m.messageId);
+      const conversationIds = Array.from(new Set(messages.map(m => m.conversationId)));
+      const [externalMessages, conversations] = await Promise.all([
+        this.prisma.externalMessage.findMany({
+          where: { messageId: { in: messageIds } },
+          select: { messageId: true }
+        }),
+        this.prisma.conversation.findMany({
+          where: {
+            conversationId: { in: conversationIds },
+            channelId: { notIn: excludedChannelIds }
+          },
+          select: { conversationId: true, channelId: true }
+        })
+      ]);
+      return {
+        externalMessageIdSet: new Set(externalMessages.map(em => em.messageId)),
+        validConvSet: new Set(conversations.map(c => c.conversationId))
+      };
+    }
   private prisma = DatabaseClient.getInstance();
 
   /**
@@ -1294,18 +1370,14 @@ export class AnalyticsRepository {
       ? dateFilter
       : { gte: dateFilter };
 
-    // Get all user IDs from different activity types using Promise.all for parallel execution
-    const [messageUsers, reactionUsers, attachmentUsers] = await Promise.all([
-      // Users who sent messages
-      this.prisma.message.findMany({
-        where: { 
-          createdAt: dateCondition,
-          msgType: 'USER' // Only count user messages, exclude bot messages
-        },
-        select: { senderId: true },
-        distinct: ['senderId'],
-      }),
+    // Use getFilteredMessages for robust message filtering
+    const validMessages = await this.getFilteredMessages({
+      createdAt: dateCondition,
+      msgType: 'USER'
+    });
 
+    // Get all user IDs from different activity types using Promise.all for parallel execution
+    const [reactionUsers, attachmentUsers] = await Promise.all([
       // Users who posted reactions
       this.prisma.reaction.findMany({
         where: { createdAt: dateCondition },
@@ -1349,13 +1421,12 @@ export class AnalyticsRepository {
       })
     ]);
 
-    // Combine all user IDs and get unique count
     const allActiveUserIds = new Set<string>();
 
-    // Add message senders
-    messageUsers.forEach(user => {
-      if (user.senderId) {
-        allActiveUserIds.add(user.senderId);
+    // Add valid message senders
+    validMessages.forEach(message => {
+      if (message.senderId) {
+        allActiveUserIds.add(message.senderId);
       }
     });
 
@@ -1381,35 +1452,19 @@ export class AnalyticsRepository {
    */
   async getOverallMessagesPerUser(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
-
     // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
       ? dateFilter
       : { gte: dateFilter };
 
-    // Get total message count and unique user count
-    const [totalMessages, uniqueUsers] = await Promise.all([
-      this.prisma.message.count({
-        where: { 
-          createdAt: dateCondition,
-          senderId: { not: undefined }, // Only count messages with valid senders
-          msgType: 'USER' // Only count user messages, exclude bot messages
-        },
-      }),
+    // Use getFilteredMessages for robust filtering
+    const validMessages = await this.getFilteredMessages({
+      createdAt: dateCondition,
+      msgType: 'USER'
+    });
 
-      this.prisma.message.findMany({
-        where: { 
-          createdAt: dateCondition,
-          senderId: { not: undefined },
-          msgType: 'USER' // Only count user messages, exclude bot messages
-        },
-        select: { senderId: true },
-        distinct: ['senderId'],
-      })
-    ]);
-
-    // Calculate overall average
-    const uniqueUserCount = uniqueUsers.length;
+    const totalMessages = validMessages.length;
+    const uniqueUserCount = new Set(validMessages.map(m => m.senderId).filter(id => !!id)).size;
     return uniqueUserCount > 0
       ? Math.round((totalMessages / uniqueUserCount) * 100) / 100 // Round to 2 decimal places
       : 0;
@@ -1475,26 +1530,20 @@ export class AnalyticsRepository {
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter ? dateFilter : { gte: dateFilter };
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Use Prisma with includes to get message counts by scope type and date
-    const messages = await this.prisma.message.findMany({
-      where: {
-        createdAt: dateCondition,
-        msgType: 'USER'
-      },
-      select: {
-        createdAt: true,
-        conversationId: true
-      }
+    // Use centralized helper for filtering
+    const validMessages = await this.getFilteredMessages({
+      createdAt: dateCondition,
+      msgType: 'USER'
     });
 
-    // Get conversations and channels in separate queries for better performance
-    const conversationIds = Array.from(new Set(messages.map(m => m.conversationId)));
+    // Get all channelIds from valid messages
+    const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
     const conversations = await this.prisma.conversation.findMany({
       where: { conversationId: { in: conversationIds } },
       select: { conversationId: true, channelId: true }
     });
-
-    const channelIds = conversations.map(c => c.channelId);
+  
+    const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
     const channels = await this.prisma.channel.findMany({
       where: { id: { in: channelIds } },
       select: { id: true, scopeType: true }
@@ -1515,16 +1564,16 @@ export class AnalyticsRepository {
       bucketData.set(bucket, { total: 0, channel: 0, dm: 0, groupDm: 0 });
     });
 
-    // Aggregate messages by date and scope type
-    messages.forEach(message => {
-      const dateKey = this.getBucketKey(message.createdAt, groupBy);
+    // Aggregate valid messages
+    validMessages.forEach(message => {
       const channelId = conversationToChannelMap.get(message.conversationId);
-      const scopeType = channelId ? channelToScopeMap.get(channelId) : null;
-      
+      if (!channelId) return;
+      const dateKey = this.getBucketKey(message.createdAt, groupBy);
+      const scopeType = channelToScopeMap.get(channelId);
       if (bucketData.has(dateKey)) {
         const bucket = bucketData.get(dateKey)!;
         bucket.total += 1;
-        
+
         if (scopeType === 'DEFAULT') {
           bucket.channel += 1;
         } else if (scopeType === 'DM') {
@@ -1594,83 +1643,6 @@ export class AnalyticsRepository {
     return buckets;
   }
 
-  /**
-   * Get all-time unique active users count
-   * Counts all unique users who have been active since Dec 15, 2025
-   */
-  async getAllTimeActiveUsersCount(): Promise<number> {
-    // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
-    // IST midnight = UTC 18:30 previous day
-    const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
-
-    // Get all user IDs from different activity types using Promise.all for parallel execution
-    const [messageUsers, reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      // Users who sent messages
-      this.prisma.message.findMany({
-        where: { 
-          msgType: 'USER',
-          createdAt: { gte: allTimeStartDate }
-        },
-        select: { senderId: true },
-        distinct: ['senderId'],
-      }),
-
-      // Users who posted reactions
-      this.prisma.reaction.findMany({
-        where: { createdAt: { gte: allTimeStartDate } },
-        select: { userId: true },
-        distinct: ['userId'],
-      }),
-
-      // Users who uploaded files
-      this.prisma.messageAttachment.findMany({
-        where: { createdAt: { gte: allTimeStartDate } },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-
-      // Users who created tickets
-      this.prisma.ticket.findMany({
-        where: { createdAt: { gte: allTimeStartDate } },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-
-      // Users who updated ticket activities
-      this.prisma.ticketActivity.findMany({
-        where: { timestamp: { gte: allTimeStartDate } },
-        select: { updatedBy: true },
-        distinct: ['updatedBy'],
-      }),
-
-      // Users who created canvas
-      this.prisma.canvas.findMany({
-        where: { createdAt: { gte: allTimeStartDate } },
-        select: { createdBy: true },
-        distinct: ['createdBy'],
-      }),
-
-      // Users who edited canvas
-      this.prisma.canvasParticipant.findMany({
-        where: { joinedAt: { gte: allTimeStartDate } },
-        select: { userId: true },
-        distinct: ['userId'],
-      })
-    ]);
-
-    // Combine all user IDs and get unique count
-    const allActiveUserIds = new Set<string>();
-
-    messageUsers.forEach(user => { if (user.senderId) allActiveUserIds.add(user.senderId); });
-    reactionUsers.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
-    attachmentUsers.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
-    ticketCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
-    ticketActivityUsers.forEach(user => { if (user.updatedBy) allActiveUserIds.add(user.updatedBy); });
-    canvasCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
-    canvasParticipants.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
-
-    return allActiveUserIds.size;
-  }
 
   /**
    * Get all-time active user IDs as an array
@@ -1681,16 +1653,23 @@ export class AnalyticsRepository {
     // IST midnight = UTC 18:30 previous day
     const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
 
-    // Get all user IDs from different activity types using Promise.all for parallel execution
-    const [messageUsers, reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      this.prisma.message.findMany({
-        where: { 
-          msgType: 'USER',
-          createdAt: { gte: allTimeStartDate }
-        },
-        select: { senderId: true },
-        distinct: ['senderId'],
-      }),
+    // Use getFilteredMessages for robust filtering
+    const validMessages = await this.getFilteredMessages({
+      createdAt: { gte: allTimeStartDate },
+      msgType: 'USER'
+    });
+
+    const allActiveUserIds = new Set<string>();
+
+    // Add valid message senders
+    validMessages.forEach(message => {
+      if (message.senderId) {
+        allActiveUserIds.add(message.senderId);
+      }
+    });
+
+    // Add other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
+    const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
       this.prisma.reaction.findMany({
         where: { createdAt: { gte: allTimeStartDate } },
         select: { userId: true },
@@ -1723,9 +1702,6 @@ export class AnalyticsRepository {
       })
     ]);
 
-    // Combine all user IDs into a Set (deduplicates)
-    const allActiveUserIds = new Set<string>();
-    messageUsers.forEach(user => { if (user.senderId) allActiveUserIds.add(user.senderId); });
     reactionUsers.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
     attachmentUsers.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
     ticketCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
@@ -1748,16 +1724,23 @@ export class AnalyticsRepository {
       ? dateFilter
       : { gte: dateFilter };
 
-    // Get all user IDs from different activity types
-    const [messageUsers, reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      this.prisma.message.findMany({
-        where: { 
-          createdAt: dateCondition,
-          msgType: 'USER'
-        },
-        select: { senderId: true },
-        distinct: ['senderId'],
-      }),
+    // Use getFilteredMessages for robust filtering
+    const validMessages = await this.getFilteredMessages({
+      createdAt: dateCondition,
+      msgType: 'USER'
+    });
+
+    const allActiveUserIds = new Set<string>();
+
+    // Add valid message senders
+    validMessages.forEach(message => {
+      if (message.senderId) {
+        allActiveUserIds.add(message.senderId);
+      }
+    });
+
+    // Add other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
+    const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
       this.prisma.reaction.findMany({
         where: { createdAt: dateCondition },
         select: { userId: true },
@@ -1790,9 +1773,6 @@ export class AnalyticsRepository {
       })
     ]);
 
-    // Combine all user IDs into a Set (deduplicates)
-    const allActiveUserIds = new Set<string>();
-    messageUsers.forEach(user => { if (user.senderId) allActiveUserIds.add(user.senderId); });
     reactionUsers.forEach(user => { if (user.userId) allActiveUserIds.add(user.userId); });
     attachmentUsers.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
     ticketCreators.forEach(user => { if (user.createdBy) allActiveUserIds.add(user.createdBy); });
@@ -1820,15 +1800,14 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Get all users' activities in the date range
-    const [messageUsers, reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      this.prisma.message.findMany({
-        where: { 
-          createdAt: dateCondition,
-          msgType: 'USER' // Only count user messages, exclude bot messages
-        },
-        select: { senderId: true, createdAt: true },
-      }),
+    // Use getFilteredMessages for robust filtering
+    const validMessageActivities = await this.getFilteredMessages({
+      createdAt: dateCondition,
+      msgType: 'USER'
+    });
+
+    // Get other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
+    const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
       this.prisma.reaction.findMany({
         where: { createdAt: dateCondition },
         select: { userId: true, createdAt: true },
@@ -1874,9 +1853,20 @@ export class AnalyticsRepository {
       bucketData.set(bucket, new Set<string>());
     });
 
-    // Group user activities by time buckets
-    const allActivities = [
-      ...messageUsers,
+    // Group valid message activities by time buckets
+    validMessageActivities.forEach(message => {
+      const userId = message.senderId;
+      const timestamp = message.createdAt;
+      if (userId && timestamp) {
+        const bucketKey = this.getBucketKey(timestamp, groupBy);
+        if (bucketData.has(bucketKey)) {
+          bucketData.get(bucketKey)!.add(userId);
+        }
+      }
+    });
+
+    // Group other activities by time buckets
+    const otherActivities = [
       ...reactionUsers,
       ...attachmentUsers,
       ...ticketCreators,
@@ -1884,38 +1874,31 @@ export class AnalyticsRepository {
       ...canvasCreators,
       ...canvasParticipants
     ];
-    
-    allActivities.forEach(activity => {
-      const userId = ('senderId' in activity && activity.senderId) ||
-                    ('userId' in activity && activity.userId) ||
+    otherActivities.forEach(activity => {
+      const userId = ('userId' in activity && activity.userId) ||
                     ('createdBy' in activity && activity.createdBy) ||
                     ('updatedBy' in activity && activity.updatedBy);
-      
-      if (userId) {
-        // Get the appropriate timestamp field based on activity type
-        const timestamp = ('createdAt' in activity && activity.createdAt) ||
-                         ('updatedAt' in activity && activity.updatedAt) ||
-                         ('timestamp' in activity && activity.timestamp);
-        
-        if (timestamp) {
-          const bucketKey = this.getBucketKey(timestamp, groupBy);
-          if (bucketData.has(bucketKey)) {
-            bucketData.get(bucketKey)!.add(userId);
-          }
+      const timestamp = ('createdAt' in activity && activity.createdAt) ||
+                       ('updatedAt' in activity && activity.updatedAt) ||
+                       ('timestamp' in activity && activity.timestamp);
+      if (userId && timestamp) {
+        const bucketKey = this.getBucketKey(timestamp, groupBy);
+        if (bucketData.has(bucketKey)) {
+          bucketData.get(bucketKey)!.add(userId);
         }
       }
     });
 
     // Calculate unique users across entire period
     const allUniqueUsers = new Set<string>();
-    allActivities.forEach(activity => {
-      const userId = ('senderId' in activity && activity.senderId) || 
-                    ('userId' in activity && activity.userId) || 
+    validMessageActivities.forEach(message => {
+      if (message.senderId) allUniqueUsers.add(message.senderId);
+    });
+    otherActivities.forEach(activity => {
+      const userId = ('userId' in activity && activity.userId) ||
                     ('createdBy' in activity && activity.createdBy) ||
                     ('updatedBy' in activity && activity.updatedBy);
-      if (userId) {
-        allUniqueUsers.add(userId);
-      }
+      if (userId) allUniqueUsers.add(userId);
     });
 
     // Convert time series to array format
@@ -1943,15 +1926,10 @@ export class AnalyticsRepository {
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
-
-    // Get messages with sender info
-    const messages = await this.prisma.message.findMany({
-      where: { 
-        createdAt: dateCondition,
-        senderId: { not: undefined },
-        msgType: 'USER' // Only count user messages, exclude bot messages
-      },
-      select: { senderId: true, createdAt: true },
+    // Use centralized helper for filtering
+    const validMessages = await this.getFilteredMessages({
+      createdAt: dateCondition,
+      msgType: 'USER'
     });
 
     // Generate time buckets
@@ -1963,8 +1941,8 @@ export class AnalyticsRepository {
       bucketData.set(bucket, { totalMessages: 0, uniqueUsers: new Set<string>() });
     });
 
-    // Group messages by time buckets
-    messages.forEach(message => {
+    // Group valid messages by time buckets
+    validMessages.forEach(message => {
       if (message.senderId) {
         // Convert UTC time to IST (UTC+5:30) for proper day bucketing
         const istTime = new Date(message.createdAt.getTime() + IST_OFFSET_MS);
@@ -1980,10 +1958,9 @@ export class AnalyticsRepository {
     // Convert to array format with average calculation
     return timeBuckets.map(bucketKey => {
       const data = bucketData.get(bucketKey)!;
-      const avgMessagesPerUser = data.uniqueUsers.size > 0 
-        ? Math.round((data.totalMessages / data.uniqueUsers.size) * 100) / 100 
+      const avgMessagesPerUser = data.uniqueUsers.size > 0
+        ? Math.round((data.totalMessages / data.uniqueUsers.size) * 100) / 100
         : 0;
-      
       return {
         date: bucketKey,
         value: avgMessagesPerUser
@@ -1998,44 +1975,27 @@ export class AnalyticsRepository {
    */
   async getActiveChannels(filters: AnalyticsFilters): Promise<number> {
     const dateFilter = getDateFilter(filters);
-
-    // Build date condition for Prisma query
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
       ? dateFilter
       : { gte: dateFilter };
-
-    // Get messages in date range
-    const messages = await this.prisma.message.findMany({
-      where: {
-        createdAt: dateCondition,
-        msgType: 'USER'
-      },
-      select: {
-        conversationId: true
-      },
-      distinct: ['conversationId']
+    // Use centralized helper for filtering
+    const validMessages = await this.getFilteredMessages({
+      createdAt: dateCondition,
+      msgType: 'USER'
     });
-
-    // Get conversation IDs from messages
-    const conversationIds = messages.map(m => m.conversationId);
-
-    if (conversationIds.length === 0) {
+    if (validMessages.length === 0) {
       return 0;
     }
-
-    // Get conversations with their channels
+    // Get unique conversationIds
+    const validConversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
+    // Get channels for valid conversations
     const conversations = await this.prisma.conversation.findMany({
       where: {
-        conversationId: { in: conversationIds }
+        conversationId: { in: validConversationIds }
       },
-      select: {
-        channelId: true
-      }
+      select: { conversationId: true, channelId: true }
     });
-
-    // Get channel IDs from conversations
-    const channelIds = conversations.map(c => c.channelId).filter((id): id is string => id !== null);
-
+    const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
     if (channelIds.length === 0) {
       return 0;
     }
@@ -2068,36 +2028,24 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Get messages in date range
-    const messages = await this.prisma.message.findMany({
-      where: {
-        createdAt: dateCondition,
-        msgType: 'USER'
-      },
-      select: {
-        createdAt: true,
-        conversationId: true
-      }
+    // Use centralized helper for filtering
+    const validMessages = await this.getFilteredMessages({
+      createdAt: dateCondition,
+      msgType: 'USER'
     });
 
-    // Get conversations and channels in separate queries
-    const conversationIds = Array.from(new Set(messages.map(m => m.conversationId)));
+    // Get all channelIds from valid messages
+    const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
     const conversations = await this.prisma.conversation.findMany({
       where: { conversationId: { in: conversationIds } },
       select: { conversationId: true, channelId: true }
     });
-
-    const channelIds = conversations.map(c => c.channelId).filter((id): id is string => id !== null);
+    const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
+    const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
     const channels = await this.prisma.channel.findMany({
-      where: { 
-        id: { in: channelIds },
-        scopeType: 'DEFAULT'
-      },
+      where: { id: { in: channelIds }, scopeType: 'DEFAULT' },
       select: { id: true }
     });
-
-    // Create lookup maps for efficient processing
-    const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
     const defaultChannelIds = new Set(channels.map(c => c.id));
 
     // Generate time buckets based on groupBy
@@ -2111,14 +2059,13 @@ export class AnalyticsRepository {
       bucketData.set(bucket, new Set<string>());
     });
 
-    // Group channels by time buckets based on message activity
-    messages.forEach(message => {
+    // Group valid channels by time buckets based on valid message activity
+    validMessages.forEach(message => {
       const channelId = conversationToChannelMap.get(message.conversationId);
-      if (channelId && defaultChannelIds.has(channelId)) {
-        const bucketKey = this.getBucketKey(message.createdAt, groupBy);
-        if (bucketData.has(bucketKey)) {
-          bucketData.get(bucketKey)!.add(channelId);
-        }
+      if (!channelId || !defaultChannelIds.has(channelId)) return;
+      const bucketKey = this.getBucketKey(message.createdAt, groupBy);
+      if (bucketData.has(bucketKey)) {
+        bucketData.get(bucketKey)!.add(channelId);
       }
     });
 
@@ -2662,30 +2609,29 @@ export class AnalyticsRepository {
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
       ? dateFilter
       : { gte: dateFilter };
-
-    // Use groupBy to aggregate message counts directly in the database
-    const topSenders = await this.prisma.message.groupBy({
-      by: ['senderId'],
-      where: {
-        createdAt: dateCondition,
-        msgType: 'USER', // Only count user messages, exclude bot messages
-        senderId: { not: undefined }, // Filter out null/undefined senders
-      },
-      _count: {
-        senderId: true,
-      },
-      orderBy: {
-        _count: {
-          senderId: 'desc',
-        },
-      },
-      take: limit,
+    // Use centralized helper for filtering
+    const validMessages = await this.getFilteredMessages({
+      createdAt: dateCondition,
+      msgType: 'USER',
+      senderId: { not: undefined }
     });
 
-    // Extract user IDs from the aggregated results (filter out null/undefined)
-    const topUserIds = topSenders
-      .map(sender => sender.senderId)
-      .filter((id): id is string => id !== null && id !== undefined);
+    // Aggregate message counts by senderId
+    const userMessageCount = new Map<string, number>();
+    validMessages.forEach(message => {
+      if (message.senderId) {
+        userMessageCount.set(
+          message.senderId,
+          (userMessageCount.get(message.senderId) || 0) + 1
+        );
+      }
+    });
+
+    // Sort users by message count descending and take top N
+    const topUserIds = Array.from(userMessageCount.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([userId]) => userId);
 
     // Fetch user details for the top senders
     const users = await this.prisma.user.findMany({
@@ -2700,15 +2646,12 @@ export class AnalyticsRepository {
 
     // Create a map of userId to userName for efficient lookup
     const userMap = new Map(users.map(u => [u.id, u.name]));
-    
-    // Create a map of userId to message count
-    const countMap = new Map(topSenders.map(sender => [sender.senderId, sender._count.senderId]));
 
-    // Build result with user names, maintaining the sort order from the database
+    // Build result with user names, maintaining the sort order
     return topUserIds.map(userId => ({
       userId,
       userName: userMap.get(userId) || 'Unknown User',
-      messageCount: countMap.get(userId) || 0
+      messageCount: userMessageCount.get(userId) || 0
     }));
   }
 
