@@ -27,7 +27,7 @@ export async function generateVideoThumbnail(
   videoFile: File,
   options: ThumbnailOptions = {},
 ): Promise<ThumbnailResult> {
-  const { width = 320, height = 240, quality = 0.85, timeOffset = 1.0 } = options;
+  const { width = 640, height = 360, quality = 1, timeOffset = 1.0 } = options;
 
   return new Promise((resolve, reject) => {
     // Create video element
@@ -174,8 +174,8 @@ function calculateThumbnailDimensions(
   videoWidth: number,
   videoHeight: number,
 ): { width: number; height: number } {
-  const maxWidth = 360;
-  const maxHeight = 280;
+  const maxWidth = 1280;
+  const maxHeight = 720;
   const minWidth = 200;
 
   if (!videoWidth || !videoHeight) {
@@ -211,7 +211,7 @@ export async function generateWebThumbnail(videoFile: File): Promise<ThumbnailRe
   return generateVideoThumbnail(videoFile, {
     width: thumbnailDimensions.width,
     height: thumbnailDimensions.height,
-    quality: 0.92,
+    quality: 1,
     timeOffset: 1.0,
   });
 }
