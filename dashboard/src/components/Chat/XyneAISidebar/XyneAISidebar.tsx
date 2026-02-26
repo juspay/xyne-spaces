@@ -1,7 +1,8 @@
 import { ReactElement, useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { apiInstance } from '../../../services/clients/apiClient';
 import { useChannel } from '../../../hooks/useChannels';
-import { useSelf } from '../../../hooks/useUsers';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { BASE_URL } from '../../../services/clients/apiClient';
 import {
@@ -21,6 +22,10 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
 import type { ResearchContext } from '../../../hooks/useResearchAgent';
 
+interface XyneAIConfigResponse {
+  webSearchAccessible: boolean;
+}
+
 interface XyneAISidebarProps {
   channelId: string | null;
   threadInfo?: ThreadInfo | null;
@@ -38,9 +43,7 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
   const [isLoadingConversation, setIsLoadingConversation] = useState(true);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
-  const currentUser = useSelf();
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
-  const [webSearchAccessible, setWebSearchAccessible] = useState(false);
   const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
     null,
   );
@@ -64,18 +67,16 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
 
   const scopeType = (channel?.['scopeType'] as string) || '';
 
-  // Check if user has access to web search from metadata
-  useEffect(() => {
-    if (currentUser?.metadata) {
-      const metadata = currentUser.metadata as { web_search_enabled?: boolean };
-      const hasAccess = metadata.web_search_enabled === true;
-      setWebSearchAccessible(hasAccess);
-      // Reset web search to off if user loses access
-      if (!hasAccess) {
-        setWebSearchEnabled(false);
-      }
-    }
-  }, [currentUser?.metadata]);
+  // Fetch web search configuration from backend
+  const { data: configData } = useQuery<XyneAIConfigResponse>({
+    queryKey: ['xyne-ai-config'],
+    queryFn: async (): Promise<XyneAIConfigResponse> => {
+      const response = await apiInstance.get<XyneAIConfigResponse>('/xyne-ai/config');
+      return response.data;
+    },
+  });
+
+  const webSearchAccessible = configData?.webSearchAccessible ?? false;
 
   // Suggestion queries - different based on context
   const suggestionQueries = channelId

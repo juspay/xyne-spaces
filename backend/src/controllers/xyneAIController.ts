@@ -306,6 +306,10 @@ export class XyneAIController {
     }
   };
 
+  getConfig = async (_req: Request, res: Response): Promise<void> => {
+    res.json({ webSearchAccessible: !!config.webSearch.url });
+  };
+
   private async streamResponse(
     res: Response,
     request: Omit<XyneAIStreamRequest, 'onStreamEvent'>
