@@ -321,6 +321,19 @@ Examples:
 Rule: Use sender ONLY for "by", "from", "said", "X's messages" queries.
 DO NOT use sender for "for", "to", "about", "assigned to" queries - include the name in query instead.
 
+DATE FILTERS:
+- createdBefore: Filter messages created before this date (ISO format or dd/mm/yyyy). Example: "2024-01-01"
+- createdAfter: Filter messages created after this date (ISO format or dd/mm/yyyy). Example: "2024-12-31"
+- createdOn: Filter messages created on this specific date (ISO format or dd/mm/yyyy). Example: "2024-06-15"
+- createdRange: Filter by time keyword. Valid values: "today", "yesterday", "this week", "last week", "last 7 days", "this month", "last month", "last 30 days", "this morning", "this afternoon", "last hour", "last 24 hours", "recent", "recently", "new", "current", "currently", "last", "latest"
+
+DATE FILTER EXAMPLES:
+- "messages from yesterday" → createdRange="yesterday"
+- "messages from last week" → createdRange="last week"
+- "messages from John today" → sender="John", createdRange="today"
+- "messages before January 15th" → createdBefore="2024-01-15"
+- "messages after December 1st" → createdAfter="2024-12-01"
+
 DO NOT use for summarization - use fetch_thread_messages or fetch_channel_messages instead.
 DO NOT use for basic greetings (hi, hello, thanks) - respond directly without tool calls.
 
@@ -333,11 +346,37 @@ When the user wants to search across specific channels, use the optional "channe
 /**
  * Fallback description for search_relevant_tickets tool
  */
-const SEARCH_RELEVANT_TICKETS_FALLBACK = `Use this tool for NORMAL QUESTIONS that require looking up specific information in support tickets.
-Searches for tickets relevant to the query using semantic search.
-Returns tickets that match the query semantically.
-DO NOT use for summarization - use fetch_thread_messages or fetch_channel_messages instead.
-DO NOT use for basic greetings (hi, hello, thanks) - respond directly without tool calls.`;
+const SEARCH_RELEVANT_TICKETS_FALLBACK = `Use for NORMAL QUESTIONS requiring ticket information. Searches tickets semantically.
+
+IMPORTANT - USER FILTERING:
+For tickets CREATED BY or ASSIGNED TO a person: first call field_value_discovery(field="username", value=["name"]), then pass USERNAME (not ID) as createdBy or assignedTo.
+- "tickets from Revanthvenkat Pasupuleti" → field_value_discovery(field="username", value=["Revanthvenkat Pasupuleti"]) → search_relevant_tickets(query="tickets", createdBy="Revanthvenkat Pasupuleti")
+- "tickets assigned to Revanthvenkat Pasupuleti" → field_value_discovery(field="username", value=["Revanthvenkat Pasupuleti"]) → search_relevant_tickets(query="tickets", assignedTo="Revanthvenkat Pasupuleti")
+
+FILTERS (comma-separated unless noted):
+- status: TODO, STARTED, PAUSED, CANCELLED, COMPLETED
+- priority: LOW, MEDIUM, HIGH, CRITICAL
+- ticketId: TKT-001,TKT-002
+- createdBy: single username (requires field_value_discovery first)
+- assignedTo: Username1,Username2 (requires field_value_discovery first)
+- boardId: board1,board2
+- tags: bug,urgent
+- stage: Development,Testing
+- createdBefore: 2024-01-01 (ISO or dd/mm/yyyy)
+- createdAfter: 2024-12-31 (ISO or dd/mm/yyyy)
+- createdOn: 2024-06-15 (ISO or dd/mm/yyyy)
+- createdRange: today, yesterday, this week, last week, last 7 days, this month, last month, last 30 days, this morning, this afternoon, last hour, last 24 hours, recent, recently, new, current, currently, last, latest
+- channelId: ch-001,ch-002
+- channels: ["channel1","channel2"] (requires field_value_discovery with field="channel" first)
+
+EXAMPLES:
+- "high priority tickets" → search_relevant_tickets(query="", priority="HIGH")
+- "TODO tickets with bug tag" → search_relevant_tickets(query="", status="TODO", tags="bug")
+- "Revanthvenkat Pasupuleti's high priority TODO tickets" → field_value_discovery(field="username", value=["Revanthvenkat Pasupuleti"]) → search_relevant_tickets(query="", createdBy="Revanthvenkat Pasupuleti", priority="HIGH", status="TODO")
+- "critical bugs assigned to Revanthvenkat Pasupuleti this week" → field_value_discovery(field="username", value=["Revanthvenkat Pasupuleti"]) → search_relevant_tickets(query="bug", assignedTo="Revanthvenkat Pasupuleti", priority="CRITICAL", createdRange="this week")
+- "tickets in xyne-support channel" → field_value_discovery(field="channel", value=["xyne-support"]) → search_relevant_tickets(query="bug", channels=["xyne-support"])
+
+DO NOT use for summarization (use fetch_thread_messages or fetch_channel_messages) or basic greetings.`;
 
 /**
  * Fallback description for field_value_discovery tool (Unified FVD)

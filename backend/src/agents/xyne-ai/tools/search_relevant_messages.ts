@@ -8,6 +8,7 @@ import { db } from '../../../database/client.js';
 import { logger } from '../../../utils/logger.js';
 import { vespaService } from '../../../services/vespaSearch/index.js';
 import { transformVespaResults } from '../../../services/vespaSearch/resultTransform.js';
+import type { SlackFilters } from '../../../vespa/src/utils/YqlBuilder.js';
 import type { XyneAIAgentContext, ToolResult, ToolMessage } from './types.js';
 import {
   getDescription,
@@ -32,11 +33,11 @@ async function searchRelevantMessagesWithFiltersImpl(
   channelIds: string[],
   userId: string,
   sessionId: string,
-  sender?: string,
+  slackFilters?: Partial<SlackFilters>,
   precomputedChannelNameMap?: Map<string, string>
 ): Promise<ToolResult> {
   try {
-    logger.info(`[Tool] search_relevant_messages_with_filters: query="${query}", channelIds=${JSON.stringify(channelIds)}, userId=${userId}, sender=${sender}`);
+    logger.info(`[Tool] search_relevant_messages_with_filters: query="${query}", channelIds=${JSON.stringify(channelIds)}, userId=${userId}, filters=${JSON.stringify(slackFilters)}`);
 
     // Validate max channels limit
     if (channelIds.length > 5) {
@@ -47,26 +48,23 @@ async function searchRelevantMessagesWithFiltersImpl(
       };
     }
 
-    // Build Vespa search options based on sender parameter
+    // Build Vespa search options with filters
     const vespaOptions: {
       offset: number;
       limit: number;
       rankProfile: string;
-      slack: {
-        channelId: string[];
-        senderId?: string[];
-      };
+      slack: Partial<SlackFilters>;
     } = {
       offset: 0,
       limit: 100,
       rankProfile: 'default_native',
       slack: {
         channelId: channelIds,
-        senderId: sender ? [sender] : undefined,
+        ...slackFilters,
       },
     };
 
-    logger.info(`[Tool] search_relevant_messages_with_filters: Vespa options - senderId=${sender || 'none'}`);
+    logger.info(`[Tool] search_relevant_messages_with_filters: Vespa options - ${JSON.stringify(vespaOptions.slack)}`);
 
     const vespaResults = await vespaService.searchService.searchVespa(
       query,
@@ -136,7 +134,15 @@ async function searchRelevantMessagesWithFiltersImpl(
 /**
  * Create search_relevant_messages tool with description from Langfuse
  */
-export function createSearchRelevantMessagesTool(): Tool<{ query: string; channels?: string[]; sender?: string }, XyneAIAgentContext> {
+export function createSearchRelevantMessagesTool(): Tool<{
+  query: string;
+  channels?: string[];
+  sender?: string;
+  createdBefore?: string;
+  createdAfter?: string;
+  createdOn?: string;
+  createdRange?: string;
+}, XyneAIAgentContext> {
   return {
     schema: {
       name: 'search_relevant_messages',
@@ -145,10 +151,14 @@ export function createSearchRelevantMessagesTool(): Tool<{ query: string; channe
         query: z.string().describe('The search query to find relevant messages'),
         channels: z.array(z.string()).optional().describe('Optional list of channel names to search in'),
         sender: z.string().optional().describe('Filter by sender - only return messages SENT BY this user. Use when asking "messages from X", "what did X say", "X\'s messages". Pass the USERNAME from field_value_discovery (e.g., "Aman Srivastava").'),
+        createdBefore: z.string().optional().describe('Filter messages created before this date (ISO format or dd/mm/yyyy). Example: "2024-01-01"'),
+        createdAfter: z.string().optional().describe('Filter messages created after this date (ISO format or dd/mm/yyyy). Example: "2024-12-31"'),
+        createdOn: z.string().optional().describe('Filter messages created on this specific date (ISO format or dd/mm/yyyy). Example: "2024-06-15"'),
+        createdRange: z.string().optional().describe('Filter by time keyword. Valid values: "today", "yesterday", "this week", "last week", "last 7 days", "this month", "last month", "last 30 days", "this morning", "this afternoon", "last hour", "last 24 hours", "recent", "recently", "new", "current", "currently", "last", "latest"'),
       }),
     },
     execute: async (args, context) => {
-      const { query, channels, sender } = args;
+      const { query, channels, sender, createdBefore, createdAfter, createdOn, createdRange } = args;
       
       // Resolve sender name to ID if provided
       let resolvedSenderId: string | undefined;
@@ -160,6 +170,14 @@ export function createSearchRelevantMessagesTool(): Tool<{ query: string; channe
         resolvedSenderId = userId || undefined;
         logger.info(`[Tool] Resolved sender name "${sender}" to ID: ${resolvedSenderId}`);
       }
+
+      // Build comprehensive filter object
+      const slackFilters: Partial<SlackFilters> = {};
+      if (resolvedSenderId) slackFilters.senderId = [resolvedSenderId];
+      if (createdBefore) slackFilters.createdBefore = createdBefore;
+      if (createdAfter) slackFilters.createdAfter = createdAfter;
+      if (createdOn) slackFilters.createdOn = createdOn;
+      if (createdRange) slackFilters.createdRange = createdRange;
       
       // If channels are provided, resolve names to IDs and use multi-channel search
       if (channels && channels.length > 0) {
@@ -212,7 +230,7 @@ export function createSearchRelevantMessagesTool(): Tool<{ query: string; channe
           return `Error: You do not have access to the following channels: ${inaccessibleChannelNames.join(', ')}. Please use field_value_discovery to get a list of channels you have access to.`;
         }
 
-        const result = await searchRelevantMessagesWithFiltersImpl(query, accessibleChannelIds, context.userId, context.sessionId, resolvedSenderId, context.contextChannelIdToName);
+        const result = await searchRelevantMessagesWithFiltersImpl(query, accessibleChannelIds, context.userId, context.sessionId, slackFilters, context.contextChannelIdToName);
         const prefix = await getNextPrefix(context.sessionId);
         if (result.success && result.messages.length > 0) {
           await appendSessionMappings(context.sessionId, buildMessageMappings(result), prefix);
@@ -221,8 +239,8 @@ export function createSearchRelevantMessagesTool(): Tool<{ query: string; channe
       }
       
       // Default: search in all channels from context
-      logger.info(`[Tool] search_relevant_messages called with query="${query}", context.channelIds=${JSON.stringify(context.channelIds)}, sender=${sender} (resolved: ${resolvedSenderId})`);
-      const result = await searchRelevantMessagesWithFiltersImpl(query, context.channelIds, context.userId, context.sessionId, resolvedSenderId, context.contextChannelIdToName);
+      logger.info(`[Tool] search_relevant_messages called with query="${query}", context.channelIds=${JSON.stringify(context.channelIds)}, filters=${JSON.stringify(slackFilters)}`);
+      const result = await searchRelevantMessagesWithFiltersImpl(query, context.channelIds, context.userId, context.sessionId, slackFilters, context.contextChannelIdToName);
       const prefix = await getNextPrefix(context.sessionId);
       if (result.success && result.messages.length > 0) {
         await appendSessionMappings(context.sessionId, buildMessageMappings(result), prefix);
