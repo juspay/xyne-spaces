@@ -58,6 +58,9 @@ import { RouterErrorFallback } from '../components/ErrorBoundary';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
 import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
+import RecordingsScreen from './RecordingsScreen/RecordingsScreen';
+import RecordingDetailScreen from './RecordingDetailScreen/RecordingDetailScreen';
+import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import FormScreen from './FormScreen/FormScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
@@ -422,6 +425,7 @@ const AppRoot = (): ReactElement => {
             )}
             <IncomingCallModal />
             <GlobalCallOverlay />
+            <RecordingOverlay />
             <NotificationHandler />
             <BrowserPanelHandler />
             <GlobalCommandMenu />
@@ -706,6 +710,14 @@ export const router = createBrowserRouter([
               {
                 path: '/calls/:callId/:callType',
                 element: <CallPage />,
+              },
+              {
+                path: '/recordings',
+                element: <RecordingsScreen />,
+              },
+              {
+                path: '/recordings/:recordingId',
+                element: <RecordingDetailScreen />,
               },
               {
                 path: '/user-groups/:userGroupId/assignment-config',

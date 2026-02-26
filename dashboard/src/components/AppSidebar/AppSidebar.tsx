@@ -65,6 +65,11 @@ const navigationItems = [
     icon: <Phone size={16} color='var(--app-sidebar-active-foreground)' />,
   },
   {
+    path: '/recordings',
+    label: 'Recordings',
+    icon: <Mic size={16} color='var(--app-sidebar-active-foreground)' />,
+  },
+  {
     path: '/tickets',
     label: 'Tickets',
     icon: <Ticket size={16} color='var(--app-sidebar-active-foreground)' />,

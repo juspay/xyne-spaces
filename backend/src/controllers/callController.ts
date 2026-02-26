@@ -486,9 +486,16 @@ export class CallController {
 
       // Find the call message's messageId for sharing functionality
       let messageId: string | null = null;
+      let conversationId: string | null = null;
+      let channelId: string | null = null;
       try {
         const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
         messageId = callMessage?.messageId || null;
+        conversationId = callMessage?.conversationId || null;
+        if (conversationId) {
+          const conversation = await repositories.conversations.findById(conversationId);
+          channelId = conversation?.channelId || null;
+        }
       } catch (msgError) {
         logger.warn(`Failed to find message for call ${callId}: ${msgError}`);
       }
@@ -504,10 +511,14 @@ export class CallController {
           durationMs: call.endedAt
             ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
             : null,
+          hasTranscript: !!transcriptContent,
+          hasSummary: !!call.aiSummary,
           transcript: transcriptContent,
           aiSummary: call.aiSummary,
           aiSummaryFormat,
           messageId,
+          conversationId,
+          channelId,
         },
       });
     } catch (error) {
