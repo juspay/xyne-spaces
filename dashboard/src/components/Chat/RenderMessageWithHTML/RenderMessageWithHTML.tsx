@@ -230,6 +230,9 @@ function GroupMentionRenderer({
             handleClick();
           }
         }}
+        data-track-category='MESSAGE'
+        data-track-name='CLICK_GROUP_MENTION'
+        data-track-metadata={JSON.stringify({ groupId })}
       >
         {alias || groupName}
       </span>
@@ -711,9 +714,7 @@ const parseNode = (
               e.preventDefault();
               const newWindowPath = `/newWindow${urlObj.pathname}${urlObj.search}${urlObj.hash}`;
               const newWindow = window.open(newWindowPath, '_blank');
-              if (!newWindow) {
-                console.warn('Failed to open new window - popup may be blocked');
-              } else {
+              if (newWindow) {
                 newWindow.focus();
               }
             }
