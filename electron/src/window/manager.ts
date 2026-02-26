@@ -91,11 +91,14 @@ export async function loadApp(window: BrowserWindow) {
  * Creates the main application window
  */
 export async function createMainWindow(): Promise<BrowserWindow> {
+  const iconPath = path.join(__dirname, '..', '..', 'assets', 'images', 'xyne.ico');
+
   mainWindow = new BrowserWindow({
     width: config.window.width,
     height: config.window.height,
     title: config.window.title,
     titleBarStyle: 'hiddenInset',
+    icon: iconPath,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

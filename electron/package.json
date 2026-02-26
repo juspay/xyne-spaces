@@ -1,21 +1,20 @@
 {
   "name": "xyne-spaces-electron",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "description": "Xyne Spaces - Electron Desktop App (Thin Client)",
   "main": "dist/app/main.js",
   "scripts": {
-    "dev": "tsc && NODE_ENV=development electron .",
-    "dev:bundled": "tsc && NODE_ENV=development USE_BUNDLED_UI=true electron .",
+    "dev": "tsc && cross-env NODE_ENV=development electron .",
+    "dev:win": "tsc && cross-env NODE_ENV=development electron .",
+    "dev:bundled": "tsc && cross-env NODE_ENV=development USE_BUNDLED_UI=true electron .",
     "dev:fresh": "npm run clear-ui-data && npm run dev:bundled",
-    "dev:watch": "concurrently \"tsc -w\" \"NODE_ENV=development nodemon --watch dist --watch ../dashboard --exec electron .\"",
-    "prebuild": "cd ../dashboard && NODE_OPTIONS=\"--max-old-space-size=16384\" npm run build",
+    "dev:watch": "concurrently \"tsc -w\" \"cross-env NODE_ENV=development nodemon --watch dist --watch ../dashboard --exec electron .\"",
+    "prebuild": "cd ../dashboard && cross-env NODE_OPTIONS=--max-old-space-size=16384 npm run build",
     "build": "tsc && npm run copy-ui && electron-builder",
-    "copy-ui": "rm -rf ui-active && cp -r ../dashboard/dist ui-active",
-    "clear-ui-data": "rm -rf ~/Library/Application\\ Support/xyne-spaces-electron/ui-data/",
-    "test-release-server": "npx ts-node scripts/test-release-server.ts",
-    "test-release-server:publish": "npx ts-node scripts/test-release-server.ts --publish",
+    "copy-ui": "rimraf ui-active && cpy \"../dashboard/dist/**\" ui-active",
+    "clear-ui-data": "rimraf ~/Library/Application\\ Support/xyne-spaces-electron/ui-data/",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist release ui-active"
+    "clean": "rimraf dist release ui-active"
   },
   "keywords": [
     "electron",
@@ -50,11 +49,15 @@
     "@types/form-data": "^2.2.1",
     "@types/node-fetch": "^2.6.13",
     "@types/tar": "^6.1.13",
+    "@types/uuid": "^10.0.0",
     "concurrently": "^9.2.1",
+    "cpy-cli": "^7.0.0",
+    "cross-env": "^10.1.0",
     "electron": "^33.3.1",
     "electron-builder": "^26.1.1",
     "express": "^4.21.0",
     "nodemon": "^3.1.11",
+    "rimraf": "^6.1.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
@@ -101,10 +104,11 @@
       }
     },
     "win": {
-      "icon": "assets/images/xyne.png"
+      "icon": "assets/images/xyne.png",
+      "signAndEditExecutable": false
     },
     "linux": {
-      "icon": "assets/images/xyne.png",
+      "icon": "assets/images/xyne.ico",
       "category": "Utility"
     }
   }

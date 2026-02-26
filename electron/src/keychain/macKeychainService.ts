@@ -3,17 +3,18 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
-import { Logger } from './services/logger/Logger';
-import { EnrollmentEvent } from './services/logger/enrollment-events';
-import { devicePasswordPopup } from './services/enrollmentMetrics';
-import { safeRecordMetric } from './services/telemetry';
+import { Logger } from '../services/logger/Logger';
+import { EnrollmentEvent } from '../services/logger/enrollment-events';
+import { devicePasswordPopup } from '../services/enrollmentMetrics';
+import { safeRecordMetric } from '../services/telemetry';
 import { app } from 'electron';
+import { IKeychain } from './IKeychain';
 
 const execAsync = promisify(exec);
 const writeFileAsync = promisify(fs.writeFile);
 const unlinkAsync = promisify(fs.unlink);
 
-class KeychainService {
+class MacKeychainService implements IKeychain {
     // Store private key PEM in memory for the duration of the session
     // In a real app, you might want to persist these securely until enrollment is complete
     private privateKeyPem: string | null = null;
@@ -279,4 +280,4 @@ class KeychainService {
 }
 
 
-export const keychain = new KeychainService();
+export const macKeychainService = new MacKeychainService();
