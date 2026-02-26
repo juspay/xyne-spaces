@@ -8,6 +8,7 @@ import { ChannelScopeType } from '@xyne/shared';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { useShortcutById } from '../../../shortcuts';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface CallTriggerProps {
   channelId: string;
@@ -18,6 +19,7 @@ interface CallTriggerProps {
   channelName?: string | undefined;
   participantCount?: number | undefined;
   callDisplayName?: string; // Display name for CallKit (DM: participant name, Channel: channel name)
+  conversationId?: string; // Optional: for thread-initiated calls
 }
 
 /**
@@ -40,12 +42,14 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   channelName,
   participantCount,
   callDisplayName,
+  conversationId,
 }) => {
   const { handleCallClick, hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } =
     useCallActions({
       channelId,
       targetUserIds,
       callDisplayName,
+      conversationId,
     });
 
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
@@ -64,6 +68,8 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
 
   // Keyboard shortcut for huddle toggle (Cmd+Shift+H)
   useShortcutById('huddle.toggle', handleButtonClick);
+
+  const { isMobile } = usePlatform();
 
   // Check if user is alone in the channel
   const isAlone = participantCount === 1;
@@ -96,19 +102,22 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             targetUserIds,
           })}
           className={cn(
-            'h-[35px] transition-colors rounded-lg w-8.5 !p-2',
-            'border border-border bg-white hover:bg-gray-50',
-            hasActiveCallInChannel && !isUserInCurrentChannelCall
-              ? 'bg-green-500 hover:bg-green-600 border-green-500'
+            'h-full transition-colors w-8.5 p-2',
+            'border ',
+            hasActiveCallInChannel && !isUserInCurrentChannelCall && !isMobile
+              ? '!bg-green-500 !hover:bg-green-600 !border-green-500'
               : '',
             isAlone ? 'opacity-50 cursor-not-allowed' : '',
+            isMobile
+              ? 'p-3 rounded-full border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
+              : 'rounded-lg bg-white border-border hover:bg-gray-50',
             className,
           )}
         >
           {isUserInCurrentChannelCall ? (
-            <PhoneOff className='w-4 h-4 text-red-500' />
+            <PhoneOff className={cn('h-4 w-4', isMobile ? 'text-black w-6' : 'text-red-500')} />
           ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
-            <HuddleIcon color='#FFFFFF' />
+            <HuddleIcon color={isMobile ? 'black' : '#FFFFFF'} />
           ) : (
             <HuddleIcon />
           )}

@@ -144,7 +144,11 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
               />
             )}
           </span>
-          {hasActiveCall && <Headphones size={14} className='shrink-0' />}
+          {hasActiveCall && (
+            <span className='shrink-0 rounded-full bg-[#2D881F] px-2 py-1 text-white'>
+              <Headphones size={14} />
+            </span>
+          )}
           {draftMessage && !isActive && (
             <Tooltip content={draftMessage} side='top' sideOffset={6}>
               <Pencil size={14} className='shrink-0' />

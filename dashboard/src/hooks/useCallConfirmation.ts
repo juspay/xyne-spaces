@@ -15,6 +15,7 @@ interface UseCallConfirmationParams {
   hasActiveCallInChannel: boolean;
   isUserInCurrentChannelCall: boolean;
   isInCall: boolean;
+  onlyShowSwitchModal?: boolean;
 }
 
 interface UseCallConfirmationReturn {
@@ -58,6 +59,7 @@ export const useCallConfirmation = ({
   hasActiveCallInChannel,
   isUserInCurrentChannelCall,
   isInCall,
+  onlyShowSwitchModal = false,
 }: UseCallConfirmationParams): UseCallConfirmationReturn => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [modalContent, setModalContent] = useState<CallConfirmationState>({
@@ -92,7 +94,7 @@ export const useCallConfirmation = ({
     }
 
     // Case 3: User is initiating a NEW call in a channel while not in any call - show confirmation
-    if (isChannel && !isUserInAnyCall) {
+    if (isChannel && !isUserInAnyCall && !onlyShowSwitchModal) {
       setModalContent({
         title: `Start a call in this channel?`,
         subtitle: `You'll be starting a call that all ${participantCount || 0} members of # ${channelName || 'this channel'} can join.`,

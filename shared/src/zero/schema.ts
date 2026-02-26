@@ -201,6 +201,12 @@ export enum CallType {
 }
 
 // @ts-ignore TS1294
+export enum CallOrigin {
+  CHANNEL = 'CHANNEL',
+  CONVERSATION = 'CONVERSATION',
+}
+
+// @ts-ignore TS1294
 export enum CallStatus {
   SCHEDULED = 'SCHEDULED',
   ACTIVE = 'ACTIVE',
@@ -977,6 +983,7 @@ export const conversationTable = table("conversations")
     pinned: boolean(),
     ticketId: string().optional(),
     metadata: json().optional(),
+    callId: string().optional(),
     createdAt: number(),
   })
   .primaryKey("conversationId");
@@ -1159,6 +1166,7 @@ export const callTable = table('calls')
     orgName: string().optional(),
     description: string().optional(),
     callType: enumeration<CallType>(),
+    callOrigin: enumeration<CallOrigin>(),
     status: enumeration<CallStatus>(),
     roomLink: string().optional(),
     startsAt: number().optional(),
@@ -2179,6 +2187,11 @@ export const conversationTableRelationships = relationships(conversationTable, (
     sourceField: ['ticketId'],
     destField: ['id'],
     destSchema: ticketTable,
+  }),
+  call: one({
+    sourceField: ['callId'],
+    destField: ['externalId'],
+    destSchema: callTable,
   }),
 }));
 

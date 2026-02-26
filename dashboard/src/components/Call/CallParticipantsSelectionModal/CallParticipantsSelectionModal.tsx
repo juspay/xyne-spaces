@@ -1,0 +1,244 @@
+import { X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useUsers } from '../../../hooks/useUsers';
+import { useQuery } from '../../../hooks/useQuery';
+import { queries } from '../../../zero/queries';
+import Avatar from '../../ui/Avatar/Avatar';
+import Button from '../../ui/Button';
+import Dialog from '../../ui/Dialog';
+import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
+import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
+import { useChannel } from '../../../hooks/useChannels';
+import { ChannelScopeType } from '@xyne/shared';
+import { useAuth } from '../../../hooks/useAuth';
+
+interface InstantCallModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  channelId: string;
+  conversationId?: string;
+  onCallInitiated?: () => void;
+}
+
+export const InstantCallModal: React.FC<InstantCallModalProps> = ({
+  isOpen,
+  onClose,
+  channelId,
+  conversationId,
+  onCallInitiated,
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
+  const hasAutoInitiatedRef = useRef(false);
+
+  const { initiateCall } = useCallJoinOrInitiate();
+  const { user: currentUser } = useAuth();
+  const channel = useChannel(channelId);
+  const [channelParticipants] = useQuery(queries.channelParticipants({ channelId }));
+  const allUsers = useUsers();
+
+  const channelParticipantUserIds = useMemo(() => {
+    if (!channelParticipants) return new Set<string>();
+    return new Set(channelParticipants.map(p => p.userId));
+  }, [channelParticipants]);
+
+  // Filter users to only show those in the current channel, excluding current user
+  const channelUsers = useMemo(() => {
+    if (!allUsers) return [];
+    return allUsers.filter(
+      user => channelParticipantUserIds.has(user.id) && user.id !== currentUser?.id,
+    );
+  }, [allUsers, channelParticipantUserIds, currentUser?.id]);
+
+  // Filter channel users by search query
+  const filteredUsers = useMemo(() => {
+    if (!searchQuery.trim()) return channelUsers;
+    const query = searchQuery.toLowerCase();
+    return channelUsers.filter(user => {
+      const name = user.name?.toLowerCase() || '';
+      const email = user.email?.toLowerCase() || '';
+      return name.includes(query) || email.includes(query);
+    });
+  }, [channelUsers, searchQuery]);
+
+  const inviteUserOptions = useMemo(
+    () =>
+      filteredUsers.map(user => ({
+        label: user.name ?? user.email,
+        value: `user:${user.id}`,
+        icon: (
+          <Avatar
+            userId={user.id}
+            size='sm'
+            showActiveStatus={false}
+            className='rounded-md size-[18px] flex items-center justify-center bg-white'
+          />
+        ),
+        subtitle: user.email,
+      })),
+    [filteredUsers],
+  );
+
+  // Get selected users for display
+  const selectedUsers = useMemo(() => {
+    return selectedParticipants
+      .filter(p => p.startsWith('user:'))
+      .map(p => {
+        const userId = p.replace('user:', '');
+        return allUsers?.find(u => u.id === userId);
+      })
+      .filter((user): user is NonNullable<typeof user> => user !== undefined);
+  }, [selectedParticipants, allUsers]);
+
+  const initiateCallWithParticipants = useCallback(
+    (targetUserIds: string[]) => {
+      initiateCall({
+        channelId,
+        ...(targetUserIds.length > 0 && { targetUserIds }),
+        ...(conversationId && { conversationId }),
+        onComplete: () => {
+          onCallInitiated?.();
+          onClose();
+        },
+      });
+    },
+    [channelId, conversationId, initiateCall, onCallInitiated, onClose],
+  );
+
+  useEffect(() => {
+    if (
+      isOpen &&
+      channel?.scopeType === ChannelScopeType.DM &&
+      channelParticipants &&
+      !hasAutoInitiatedRef.current
+    ) {
+      const targetUserIds = channelParticipants.map(p => p.userId);
+      if (currentUser?.id && !targetUserIds.includes(currentUser.id)) {
+        targetUserIds.push(currentUser.id);
+      }
+      hasAutoInitiatedRef.current = true;
+      initiateCallWithParticipants(targetUserIds);
+    }
+
+    if (!isOpen) {
+      hasAutoInitiatedRef.current = false;
+    }
+  }, [
+    isOpen,
+    channel?.scopeType,
+    channelParticipants,
+    initiateCallWithParticipants,
+    currentUser?.id,
+  ]);
+
+  const handleSubmit = () => {
+    const targetUserIds = selectedParticipants
+      .filter(p => p.startsWith('user:'))
+      .map(p => p.replace('user:', ''));
+
+    if (currentUser?.id && !targetUserIds.includes(currentUser.id)) {
+      targetUserIds.push(currentUser.id);
+    }
+
+    setSelectedParticipants([]);
+    setSearchQuery('');
+    initiateCallWithParticipants(targetUserIds);
+  };
+
+  const handleClose = () => {
+    setSelectedParticipants([]);
+    setSearchQuery('');
+    onClose();
+  };
+
+  if (channel?.scopeType === ChannelScopeType.DM) {
+    return null;
+  }
+
+  return (
+    <Dialog
+      open={isOpen}
+      onOpenChange={open => !open && handleClose()}
+      className='max-w-[584px] rounded-xl overflow-hidden'
+    >
+      <div className='flex flex-col w-full'>
+        <div className='flex items-start justify-between px-5 py-3.5 border-b border-gray-200 h-14'>
+          <h2 className='text-[15px] font-semibold text-gray-900 leading-5'>
+            Start an Instant Call
+          </h2>
+          <Button variant='outline' size='icon' className='size-7 rounded-lg' onClick={handleClose}>
+            <X className='size-4' />
+          </Button>
+        </div>
+        <div className='p-5 space-y-5'>
+          <div className='space-y-2'>
+            <p className='text-[#788187] text-[13px] leading-5'>Add Participants</p>
+            {/* Selected participants list - horizontal with wrap */}
+            {selectedUsers.length > 0 && (
+              <div className='flex flex-wrap gap-2 mb-3'>
+                {selectedUsers.map(user => (
+                  <div
+                    key={user.id}
+                    className='flex items-center gap-1.5 rounded-md bg-gray-50 border border-gray-200 px-2 py-1.5'
+                  >
+                    <Avatar
+                      userId={user.id}
+                      size='sm'
+                      showActiveStatus={false}
+                      className='rounded-md flex-shrink-0'
+                    />
+                    <span className='text-sm font-medium text-gray-900 whitespace-nowrap'>
+                      {user.name ?? user.email}
+                    </span>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        const valueToRemove = `user:${user.id}`;
+                        setSelectedParticipants(
+                          selectedParticipants.filter(p => p !== valueToRemove),
+                        );
+                      }}
+                      className='text-gray-400 hover:text-gray-600 flex-shrink-0'
+                    >
+                      <X className='size-4' strokeWidth={2.5} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className='[&_span]:hidden'>
+              <EntityMultiSelector
+                options={inviteUserOptions.filter(opt => !selectedParticipants.includes(opt.value))}
+                selectedValues={selectedParticipants}
+                onMultiSelect={setSelectedParticipants}
+                placeholder='Search users in this channel...'
+                searchPlaceholder='Search users in this channel...'
+                onSearchChange={setSearchQuery}
+                variant='inline'
+                width='100%'
+              />
+            </div>
+          </div>
+          <div className='flex items-center justify-between'>
+            <Button
+              variant='outline'
+              size='sm'
+              className='rounded-lg text-[13px]'
+              onClick={handleClose}
+            >
+              Cancel
+            </Button>
+            <Button
+              size='sm'
+              onClick={handleSubmit}
+              disabled={selectedParticipants.length === 0}
+              className='rounded-lg text-[13px] text-white bg-sidebar-badge-accent hover:bg-sidebar-badge-accent hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
+            >
+              Start Call
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Dialog>
+  );
+};

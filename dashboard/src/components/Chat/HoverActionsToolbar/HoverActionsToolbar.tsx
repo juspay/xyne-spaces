@@ -14,6 +14,7 @@ import {
   SquareAsterisk,
   Forward,
   Copy,
+  Headphones,
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
@@ -52,6 +53,8 @@ interface HoverActionsToolbarProps {
   isBookmarked?: boolean;
   isPinned?: boolean;
   onMarkAsUnread?: () => void;
+  onInitiateCall?: () => void;
+  isCallDisabled?: boolean;
 }
 
 export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
@@ -75,6 +78,8 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   isBookmarked = false,
   isPinned = false,
   onMarkAsUnread,
+  onInitiateCall,
+  isCallDisabled = false,
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -157,6 +162,24 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
           >
             <MessageCircleMore className='w-4 h-4' />
           </Button>
+        </Tooltip>
+      )}
+
+      {/* Initiate Call */}
+      {onInitiateCall && (
+        <Tooltip content={isCallDisabled ? 'Call already in progress' : 'Start call'} side='top'>
+          <span className='inline-flex cursor-pointer'>
+            <Button
+              variant='ghost'
+              className='size-7 text-[rgba(120,129,135,1)]'
+              onClick={onInitiateCall}
+              disabled={isCallDisabled}
+              title={isCallDisabled ? 'Call already in progress' : 'Start call'}
+              data-testid='hover-action-initiate-call'
+            >
+              <Headphones className='w-4 h-4' />
+            </Button>
+          </span>
         </Tooltip>
       )}
 

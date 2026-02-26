@@ -15,7 +15,7 @@ import ConversationHeaderMobile from '../ConversationHeaderMobile/ConversationHe
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import { ConversationTabListType } from '../ConversationPannel/ConversationPannel.utils';
 import { Button } from '../../ui/Button';
-import { CallTrigger } from '../../Call/CallTrigger/CallTrigger';
+import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { getTargetUserIdForCall } from './ConversationHeader.utils';
 import { useUser } from '../../../hooks/useUsers';
 import { isDMChannel, isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
@@ -193,7 +193,7 @@ const ConversationHeader = ({
               </Button>
             </Tooltip>
           }
-          <CallTrigger
+          <CallTriggerModal
             channelId={channelId}
             targetUserIds={targetUserId ? [targetUserId] : []}
             scopeType={channel.scopeType}

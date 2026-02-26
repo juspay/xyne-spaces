@@ -15,6 +15,7 @@ import {
   BookmarkMinus,
   Forward,
   Copy,
+  Headphones,
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
@@ -51,6 +52,8 @@ export interface MessageActionsDrawerProps {
   isBookmarked?: boolean;
   isPinned?: boolean;
   onMarkAsUnread?: () => void;
+  onInitiateCall?: () => void;
+  isCallDisabled?: boolean;
 }
 
 export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
@@ -74,6 +77,8 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   isBookmarked = false,
   isPinned = false,
   onMarkAsUnread,
+  onInitiateCall,
+  isCallDisabled = false,
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -116,13 +121,17 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
     label: string;
     onClick: () => void;
     variant?: 'default' | 'destructive';
-  }> = ({ icon, label, onClick, variant = 'default' }) => (
+    disabled?: boolean;
+  }> = ({ icon, label, onClick, variant = 'default', disabled = false }) => (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg ${
-        variant === 'destructive'
-          ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10'
-          : 'text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700'
+        disabled
+          ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50'
+          : variant === 'destructive'
+            ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10'
+            : 'text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700'
       }`}
       data-track-category='MESSAGE'
       data-track-name='MESSAGE_ACTION'
@@ -182,6 +191,16 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
             icon={<MessageCircleMore className='w-5 h-5' />}
             label='Reply in Thread'
             onClick={() => handleActionClick(onReplyInThread)}
+          />
+        )}
+
+        {/* Initiate Call */}
+        {onInitiateCall && (
+          <ActionButton
+            icon={<Headphones className='w-5 h-5' />}
+            label={isCallDisabled ? 'Call already in progress' : 'Start Call'}
+            onClick={() => handleActionClick(onInitiateCall)}
+            disabled={isCallDisabled}
           />
         )}
 

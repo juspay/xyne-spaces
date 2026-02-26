@@ -1,8 +1,9 @@
 import { DatabaseClient } from '../client';
 import { v4 as uuidv4 } from 'uuid';
-import { CallStatus, CallType, InvitationResponse, type Call, type CallParticipant, type Prisma } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, type Call, type CallParticipant, type Prisma } from '@prisma/client';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
+import { logger } from '@/utils/logger';
 
 export type { Call, CallParticipant };
 
@@ -69,7 +70,30 @@ export class CallRepository {
     const result = await DatabaseClient.getInstance().call.findFirst({
       where: { 
         channelId,
-        status: CallStatus.ACTIVE
+        status: CallStatus.ACTIVE,
+        callOrigin: CallOrigin.CHANNEL,
+      },
+      orderBy: {
+        startedAt: 'desc'
+      }
+    });
+    return result;
+  }
+  
+
+  async findActiveCallByChannelIdAndConversationId(
+    channelId: string,
+    conversationId: string
+  ): Promise<Call | null> {
+    const result = await DatabaseClient.getInstance().call.findFirst({
+      where: { 
+        channelId,
+        status: CallStatus.ACTIVE,
+        callOrigin: CallOrigin.CONVERSATION,
+        metadata: {
+          path: ['conversationId'],
+          equals: conversationId
+        }
       },
       orderBy: {
         startedAt: 'desc'
@@ -424,6 +448,20 @@ export class CallRepository {
         tx,
       });
 
+      // Clear conversation.callId when call ends (for conversation calls)
+      const callMetadata = call.metadata as { conversationId?: string } | null;
+      if (callMetadata?.conversationId) {
+        try {
+          await tx.conversation.update({
+            where: { conversationId: callMetadata.conversationId },
+            data: { callId: null },
+          });
+          logger.info(`[handleRoomFinished] Cleared conversation.callId for conversation ${callMetadata.conversationId}`);
+        } catch (err) {
+          logger.error(`[handleRoomFinished] Failed to clear conversation.callId for conversation ${callMetadata.conversationId}`, err);
+        }
+      }
+
       return { shouldEndCall, messageUpdated, call };
     });
   }
@@ -446,6 +484,7 @@ export class CallRepository {
       conversationId: string;
       messageId: string;
       now: Date;
+      callOrigin?: CallOrigin;
     }
   ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
@@ -459,7 +498,8 @@ export class CallRepository {
       channelParticipants,
       conversationId,
       messageId,
-      now
+      now,
+      callOrigin
     } = params;
 
     const isHeadless = callType === CallType.HEADLESS;
@@ -480,6 +520,7 @@ export class CallRepository {
           recordingEnabled: isHeadless,
           startedAt: now,
           lastActivityAt: now,
+          callOrigin: callOrigin || CallOrigin.CHANNEL,
           metadata: {
             systemMessageId: messageId,
             conversationId: conversationId,
@@ -518,19 +559,40 @@ export class CallRepository {
         select: { name: true }
       });
 
-      // Create conversation
-      await tx.conversation.create({
-        data: {
-          conversationId,
-          channelId: channelId,
-          createdBy: 'system',
-          initialMessageId: messageId,
-          metadata: isHeadless ? {
-            isHeadlessRecording: true,
-            callId: roomName,
-          } : undefined,
-        },
-      });
+      if (callOrigin === CallOrigin.CONVERSATION) {
+        const existingConversation = await tx.conversation.findUnique({
+          where: { conversationId },
+        });
+
+        if (existingConversation) {
+          if (existingConversation.channelId !== channelId) {
+            throw new Error(`Conversation ${conversationId} does not belong to channel ${channelId}`);
+          }
+
+          await tx.conversation.update({
+            where: { conversationId },
+            data: {
+              callId: roomName,
+              lastActivityAt: now,
+            },
+          });
+        } else {
+          throw new Error(`Conversation ${conversationId} not found for conversation call`);
+        }
+      } else {
+        await tx.conversation.create({
+          data: {
+            conversationId,
+            channelId: channelId,
+            createdBy: 'system',
+            initialMessageId: messageId,
+            metadata: isHeadless ? {
+              isHeadlessRecording: true,
+              callId: roomName,
+            } : undefined,
+          },
+        });
+      }
 
       // Create system message
       await tx.message.create({

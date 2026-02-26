@@ -198,6 +198,12 @@ enum CallType {
   @@schema("public")
 }
 
+enum CallOrigin {
+  CHANNEL
+  CONVERSATION
+  @@schema("public")
+}
+
 enum CallStatus {
   SCHEDULED
   ACTIVE
@@ -1206,11 +1212,14 @@ model Conversation {
   pinned            Boolean  @default(false)
   ticketId          String?  // Direct reference to ticket (no FK constraint)
   metadata          Json?
+  callId            String?  
   createdAt         DateTime @default(now())
 
   @@index([channelId, lastActivityAt]) // Fast channel conversation lookup
   @@index([channelId]) // Alternative simple index
   @@index([ticketId]) // Fast ticket lookup
+  @@index([callId])
+  @@index([conversationId, callId])
   @@map("conversations")
   @@schema("public")
 }
@@ -1629,6 +1638,7 @@ model Call {
   orgName          String?     // Organization name (no FK constraint)
   description      String?     // Meeting description/agenda
   callType         CallType    @default(VIDEO)
+  callOrigin       CallOrigin  @default(CHANNEL)
   status           CallStatus  @default(ACTIVE)
   roomLink         String?     // LiveKit room URL/token
   startsAt         DateTime?   // Scheduled start time

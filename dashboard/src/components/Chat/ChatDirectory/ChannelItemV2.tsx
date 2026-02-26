@@ -189,7 +189,11 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
               />
             )}
           </span>
-          {hasActiveCall && <Headphones size={14} className='shrink-0' />}
+          {hasActiveCall && (
+            <span className='shrink-0 rounded-full bg-[#2D881F] px-2 py-1 text-white'>
+              <Headphones size={14} />
+            </span>
+          )}
           {shouldShowDraft && (
             <Tooltip content={draftTooltipContent} side='top' sideOffset={6}>
               <Pencil size={14} className='shrink-0' />

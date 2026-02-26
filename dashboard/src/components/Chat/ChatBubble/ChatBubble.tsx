@@ -32,6 +32,7 @@ import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUti
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import ReplyLayout from '../ReplyLayout/ReplyLayout';
+import { CallLayout } from '../CallLayout';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
 import { formatRelativeTimestamp } from '../../../utils/dateUtils';
@@ -60,6 +61,7 @@ import { SubTicketModal } from '../../Tickets/SubTicketModal/SubTicketModal';
 import { ForwardMessageForm } from '../ForwardMessageModal/ForwardMessageModal';
 import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
 import DOMPurify from 'dompurify';
+import { CallParticipantsSelectionModal } from '../../Call/CallParticipantsSelectionModal';
 
 export interface ThreadData {
   replyCount: number;
@@ -105,6 +107,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
   const [isActionsDrawerOpen, setIsActionsDrawerOpen] = useState(false);
+  const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const zero = useZero();
   const { onMessageChange } = useSummaryCache();
   const { togglePin } = usePin();
@@ -116,6 +119,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const { isMobile } = usePlatform();
   // Get sender info from useUser hook
   const sender = useUser(message.senderId);
+
+  const messageConversationId = message.conversationId;
+
+  const hasActiveCallForConversation = useMemo(() => {
+    return !!conversation?.callId;
+  }, [conversation?.callId]);
 
   const isMessageDeleted = message.isDeleted;
 
@@ -304,6 +313,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     } finally {
       setIsDeleting(false);
     }
+  };
+
+  const handleInitiateCall = (): void => {
+    setShowParticipantsModal(true);
   };
 
   const handleToggleBookmark = (): void => {
@@ -735,6 +748,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (!isMessageDeleted || context === 'channel') && {
                   onReplyInThread: replies?.onOpenThread,
                 })}
+              {...(!isSystemMessage &&
+                !isMessageDeleted && {
+                  onInitiateCall: handleInitiateCall,
+                  isCallDisabled: hasActiveCallForConversation,
+                })}
               {...(conversation &&
                 (!isSystemMessage || isTicketCreationMessage) &&
                 !isMessageDeleted &&
@@ -788,6 +806,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                     }
                     replies?.onOpenThread?.(e);
                   },
+                })}
+              {...(!isSystemMessage &&
+                !isMessageDeleted && {
+                  onInitiateCall: handleInitiateCall,
+                  isCallDisabled: hasActiveCallForConversation,
                 })}
               {...(conversation &&
                 (!isSystemMessage || isTicketCreationMessage) &&
@@ -844,6 +867,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           messageId={message.messageId}
         />
       )}
+
+      {conversation?.callId && context === 'channel' && <CallLayout callId={conversation.callId} />}
 
       {projectId && conversation && (
         <BotBubble
@@ -1004,6 +1029,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onSuccess={() => setIsForwardModalOpen(false)}
         />
       </Dialog>
+
+      <CallParticipantsSelectionModal
+        isOpen={showParticipantsModal}
+        onClose={() => setShowParticipantsModal(false)}
+        channelId={channelId}
+        conversationId={messageConversationId}
+      />
     </div>
   );
 };

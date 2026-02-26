@@ -1,9 +1,11 @@
 import { useSelector } from '@xstate/react';
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { QueryResultType } from '@rocicorp/zero';
 import { roomActor } from '../machines/roomMachine';
 import { queries } from '../zero/queries';
 import { InvitationResponse } from '@xyne/shared';
+import { useCachedQuery } from './useCachedQuery';
+import { htmlToPlainText } from '../utils/sanitizer';
 
 // Type for active call with relations
 type ActiveCallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
@@ -22,6 +24,48 @@ export const getActiveParticipants = <
   participants: readonly T[],
 ): T[] => {
   return participants.filter(p => p.response === InvitationResponse.ACCEPTED);
+};
+
+/**
+ * Formats participant text for display based on participant count
+ * @param participants - Array of call participants (only needs userId field)
+ * @param userMap - Map of user IDs to user data for quick lookups
+ * @returns Formatted participant text string
+ */
+export const formatParticipantText = <T extends { userId: string }>(
+  participants: readonly T[] | T[],
+  userMap: Map<string, { id: string; name?: string }>,
+): string => {
+  // Helper function to extract the first name from a full name
+  const getFirstName = (fullName: string | undefined): string => {
+    if (!fullName) return 'Someone';
+    return fullName.split(' ')[0] || fullName;
+  };
+
+  const count = participants.length;
+  if (count === 0) return '';
+
+  if (count === 1) {
+    const firstParticipant = participants[0];
+    if (!firstParticipant) return '';
+    const user = userMap.get(firstParticipant.userId);
+    return getFirstName(user?.name);
+  }
+
+  if (count === 2) {
+    const names = participants.slice(0, 2).map(p => {
+      const user = userMap.get(p.userId);
+      return getFirstName(user?.name);
+    });
+    return names.join(' and ');
+  }
+
+  const firstParticipant = participants[0];
+  if (!firstParticipant) return '';
+  const firstUser = userMap.get(firstParticipant.userId);
+  const firstName = getFirstName(firstUser?.name);
+  const othersCount = count - 1;
+  return `${firstName} and ${othersCount} ${othersCount === 1 ? 'other' : 'others'}`;
 };
 
 /**
@@ -99,4 +143,74 @@ export const useIsCallActive = (callId: string | undefined): boolean => {
   }
 
   return activeCalls.some(call => call.externalId === callId);
+};
+
+/**
+ * Hook to track call duration with real-time updates
+ * @param startedAt - The timestamp when the call started (in milliseconds)
+ * @param isActive - Whether the call is currently active
+ * @param format - Format type: 'detailed' (M:SS min, updates every second) or 'simple' (X min, updates every minute)
+ * @returns Formatted duration string (e.g., "5:23 min" or "5 min") or empty string if not active
+ */
+export const useCallDuration = (
+  startedAt: number | undefined,
+  isActive: boolean,
+  format: 'detailed' | 'simple' = 'detailed',
+): string => {
+  const [duration, setDuration] = useState('');
+
+  const formatCallDuration = (durationMs: number): string => {
+    const minutes = Math.floor(durationMs / 60000);
+    if (format === 'simple') {
+      return minutes > 0 ? `${minutes} min` : '';
+    }
+    const seconds = Math.floor((durationMs % 60000) / 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')} min`;
+  };
+
+  useEffect(() => {
+    if (!startedAt || !isActive) {
+      setDuration('');
+      return;
+    }
+
+    const updateDuration = (): void => {
+      const now = Date.now();
+      const durationMs = now - startedAt;
+      setDuration(formatCallDuration(durationMs));
+    };
+
+    // Update immediately
+    updateDuration();
+
+    // Update interval based on format
+    const intervalMs = format === 'simple' ? 60000 : 1000;
+    const interval = setInterval(updateDuration, intervalMs);
+    return (): void => clearInterval(interval);
+  }, [startedAt, isActive, format]);
+
+  return duration;
+};
+
+/**
+ * Hook to fetch and truncate conversation message preview for a call
+ * @param callId - The external call ID
+ * @param truncateLength - Maximum length for the preview (default: 20)
+ * @returns Truncated plain text preview or null if content is empty
+ */
+export const useFetchCallTitle = (
+  callId: string | undefined,
+  truncateLength: number = 20,
+): string => {
+  const [conversation] = useCachedQuery(queries.getConversationByCallId({ callId: callId || '' }), {
+    enabled: !!callId,
+  });
+
+  return useMemo(() => {
+    if (!conversation?.initialMessage?.content) return 'Group Call';
+    const plainText = htmlToPlainText(conversation.initialMessage.content);
+    return plainText.length <= truncateLength
+      ? plainText
+      : plainText.slice(0, truncateLength) + '...';
+  }, [conversation?.initialMessage?.content, truncateLength]);
 };

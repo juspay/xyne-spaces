@@ -1,6 +1,6 @@
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../../../machines/roomMachine';
-import { useCallActions } from '../../../hooks/useCallActions';
+import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../../hooks/useChannels';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
@@ -38,23 +38,24 @@ export function CallMessageOverlay({
 
   // Subscribe to roomMachine for live call data
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
-  const currentCallId = useSelector(roomActor, state => state.context.callId);
-  // Get channel info for confirmation logic
+  const currentCallId = useSelector(roomActor, state => state.context.externalId);
+  // Get channel info for confirmation modal text
   const channel = useChannel(channelId);
   const { displayName } = useChannelDisplayName(channel, context.userID);
 
-  const { handleCallClick, isUserInCurrentChannelCall, hasActiveCallInChannel, isInCall } =
-    useCallActions({ channelId, callDisplayName: displayName });
+  // Use joinCall to join this specific callId
+  const { joinCall, isInCall } = useCallJoinOrInitiate();
 
-  // Use centralized confirmation logic
+  // Use centralized confirmation logic - only need switch-call modal since we're always joining an existing call
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
     useCallConfirmation({
       scopeType: channel?.scopeType,
       channelName: displayName,
       participantCount: channel?.participantCount,
-      hasActiveCallInChannel,
-      isUserInCurrentChannelCall,
+      hasActiveCallInChannel: true,
+      isUserInCurrentChannelCall: currentCallId === callId,
       isInCall,
+      onlyShowSwitchModal: true,
     });
 
   // Get all users - must be called before any early returns (Rules of Hooks)
@@ -68,16 +69,27 @@ export function CallMessageOverlay({
     return <></>;
   }
 
-  // Check if user is currently in this call (either by callId match or by checking if user is in this channel's call)
-  const isUserInCall = currentCallId === callId || isUserInCurrentChannelCall;
+  // Check if user is currently in this specific call
+  const isUserInCall = currentCallId === callId;
 
   // Get active participants count from call_participants
   const allParticipants = call.participants || [];
+
+  // Only show Join button if user is a participant of this call (was invited)
+  const isUserCallParticipant = allParticipants.some(p => p.userId === context.userID);
   const activeParticipants = allParticipants.filter(
     (p: CallParticipant) => p.response === (InvitationResponse.ACCEPTED as string),
   );
 
   const participantCount = activeParticipants.length;
+
+  const handleJoinClick = () => {
+    handleCallAction(() => joinCall({ callId }));
+  };
+
+  const handleConfirmJoin = () => {
+    handleConfirmCall(() => joinCall({ callId }));
+  };
 
   // Create a map of userId to user for quick lookup
   const userMap = new Map(allUsers.map(u => [u.id, u]));
@@ -119,11 +131,11 @@ export function CallMessageOverlay({
           </div>
         </div>
 
-        {/* Join Button - only show if user is NOT in the call */}
-        {!isUserInCall && (
+        {/* Join Button - only show if user is invited to the call and not already in it */}
+        {isUserCallParticipant && !isUserInCall && (
           <div className='flex-shrink-0'>
             <button
-              onClick={() => handleCallAction(handleCallClick)}
+              onClick={handleJoinClick}
               className='bg-green-600 hover:bg-green-700 text-white border-green-600 px-3 py-1 rounded-md text-sm font-medium transition-colors'
               data-testid='join-button'
               data-track-category='CALLS'
@@ -139,7 +151,7 @@ export function CallMessageOverlay({
       <CallConfirmationModal
         isOpen={showConfirmModal}
         onClose={closeModal}
-        onConfirm={() => handleConfirmCall(handleCallClick)}
+        onConfirm={handleConfirmJoin}
         title={modalContent.title}
         subtitle={modalContent.subtitle}
         description={modalContent.description}
