@@ -40,9 +40,8 @@ import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/ch
 import { convert } from 'html-to-text';
 import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
-import { ticketAssignmentService } from '@/services/ticketAssignmentService';
 import { logger } from '@/utils/logger';
-import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
+import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import {
@@ -3711,14 +3710,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const activityId = uuidv4();
             const messageId = uuidv4();
             const timestamp = params.updatedAt;
+            // Use the new board if changed, otherwise use existing board
+            const targetBoardId = params.boardId !== undefined ? params.boardId : ticket.boardId;
 
             asyncTasks.push(async () => {
               try {
-                const assignmentResult = await ticketAssignmentService.assignTicket({
-                  userGroupId: params.userGroupId!,
-                });
+                // Skip auto-assignment if no board is available
+                if (!targetBoardId) {
+                  logger.info(`[AUTO-ASSIGN] Skipping auto-assignment for ticket ${params.id}: no board available`);
+                  return;
+                }
 
-                if (assignmentResult) {
+                const assignmentResult = await evaluateAssignmentRule(
+                  params.userGroupId!,
+                  targetBoardId,
+                  AssignmentType.TICKET_ASSIGNEE
+                );
+
+                if (assignmentResult.assignedUserId) {
                   await tx.mutate.tickets.update({
                     id: params.id,
                     assignedTo: assignmentResult.assignedUserId,
@@ -3763,16 +3772,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   }
 
                   // Sync workload mapping using Prisma (like Zoho tickets do)
-                  if (ticket.boardId) {
-                    await syncUserWorkload(
-                      assignmentResult.assignedUserId,
-                      params.userGroupId!,
-                      ticket.boardId,
-                      authData.sub
-                    );
-                  }
+                  await syncUserWorkload(
+                    assignmentResult.assignedUserId,
+                    params.userGroupId!,
+                    targetBoardId,
+                    authData.sub
+                  );
 
-                  logger.info(`[AUTO-ASSIGN] Ticket ${params.id} assigned to ${assignmentResult.assignedUserId}: ${assignmentResult.reason}`);
+                  logger.info(`[AUTO-ASSIGN] Ticket ${params.id} assigned to ${assignmentResult.assignedUserId} (group change)`);
+                } else {
+                  logger.info(`[AUTO-ASSIGN] No user assigned for ticket ${params.id}. Reason: ${assignmentResult.reason}`);
                 }
               } catch (error) {
                 logger.error(`[AUTO-ASSIGN] Failed to auto-assign ticket ${params.id}:`, error);
