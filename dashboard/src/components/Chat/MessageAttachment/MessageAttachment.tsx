@@ -614,7 +614,7 @@ const InlineVideoPlayer: React.FC<{
   return (
     <>
       <div className='h-full' style={{ contain: 'layout' }}>
-        <div className='relative bg-black rounded-lg overflow-hidden border border-gray-200 shadow-sm h-full w-full'>
+        <div className='relative bg-black rounded-lg overflow-hidden border border-gray-200 shadow-sm h-full w-full max-w-md'>
           {/* Show thumbnail on mobile or until user clicks to play on desktop */}
           {loading ? (
             <div className='bg-gray-200 animate-pulse flex items-center justify-center h-full' />
