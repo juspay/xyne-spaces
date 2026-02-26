@@ -77,4 +77,7 @@ router.get('/list-products', xyneAIController.listProducts);
  */
 router.get('/list-repositories', xyneAIController.listRepositories);
 
+// GET /api/xyne-ai/config - Public endpoint returning web search config
+router.get('/config', xyneAIController.getConfig);
+
 export default router;
