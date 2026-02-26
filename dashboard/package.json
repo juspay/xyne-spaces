@@ -30,9 +30,9 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@base-ui/react": "^1.1.0",
-    "@blocknote/core": "0.42.3",
-    "@blocknote/mantine": "0.42.3",
-    "@blocknote/react": "0.42.3",
+    "@blocknote/core": "0.46.2",
+    "@blocknote/mantine": "0.46.2",
+    "@blocknote/react": "0.46.2",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",

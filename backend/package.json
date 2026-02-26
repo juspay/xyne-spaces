@@ -51,8 +51,8 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@blocknote/core": "^0.42.3",
-    "@blocknote/server-util": "^0.42.3",
+    "@blocknote/core": "^0.46.2",
+    "@blocknote/server-util": "^0.46.2",
     "@clearfeed-ai/slack-to-html": "^1.1.0",
     "@google-cloud/storage": "^7.7.0",
     "@langfuse/client": "^4.5.1",
