@@ -20,6 +20,7 @@ export interface UserActivity {
   platform: Platform;
   timestamp: string; // ISO 8601
   hasAlias: boolean;
+  relatedData: unknown;
   isBlacklisted: boolean;
 }
 

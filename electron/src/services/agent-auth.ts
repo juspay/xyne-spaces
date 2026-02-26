@@ -121,6 +121,8 @@ class AgentAuthService {
         await this.handleAuthRelease(req, res);
       } else if (req.method === 'POST' && url.pathname === '/interact') {
         await this.handleInteract(req, res);
+      } else if (req.method === 'GET' && url.pathname === '/search') {
+        await this.handleSearch(req, res, url);
       } else if (req.method === 'GET' && url.pathname === '/health') {
         this.sendJson(res, 200, { status: 'ok' });
       } else {
@@ -277,6 +279,62 @@ class AgentAuthService {
 
     } catch (error: any) {
       log.error('[AgentAuth] Backend request failed:', error);
+      this.sendJson(res, 500, { 
+        error: 'Backend Request Failed',
+        message: error.message 
+      });
+    }
+  }
+
+  /**
+   * Handle /search endpoint - proxy search requests to backend with user's access token
+   * Supports query parameters: q, app, filterOnly, and any additional Vespa parameters
+   */
+  private async handleSearch(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    // Validate agent authorization token
+    const agentToken = this.extractToken(req);
+    if (!agentToken || !this.validateToken(agentToken)) {
+      this.sendJson(res, 401, { 
+        error: 'Unauthorized',
+        message: 'Invalid or missing agent authorization token' 
+      });
+      return;
+    }
+
+    try {
+      // Get access token from cookies
+      const cookies = await session.defaultSession.cookies.get({});
+      const accessTokenCookie = cookies.find(c => c.name === 'google_access_token');
+      
+      if (!accessTokenCookie) {
+        this.sendJson(res, 401, { 
+          error: 'Unauthorized',
+          message: 'No user access token found in session' 
+        });
+        return;
+      }
+
+      // Build backend URL with all query parameters
+      const searchParams = new URLSearchParams(url.searchParams);
+      const backendUrl = `${config.BACKEND_URL}/api/vespaSearch?${searchParams.toString()}`;
+      log.info(`[AgentAuth] Proxying GET vespaSearch request to ${backendUrl}`);
+
+      // Make request to backend with user's access token
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessTokenCookie.value}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      // Forward backend response to agent
+      res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(backendResponse.data));
+
+    } catch (error: any) {
+      log.error('[AgentAuth] Backend search request failed:', error);
       this.sendJson(res, 500, { 
         error: 'Backend Request Failed',
         message: error.message 

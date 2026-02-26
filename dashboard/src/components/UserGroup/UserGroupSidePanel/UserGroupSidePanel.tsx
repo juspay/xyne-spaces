@@ -83,10 +83,10 @@ export const UserGroupSidePanel = (): ReactElement | null => {
         </div>
         <button
           onClick={handleClose}
+          data-track-category='USER_GROUP_SIDEPANEL'
+          data-track-name='CLOSE_SIDEPANEL'
           className='p-1.5 hover:bg-gray-100 rounded transition-colors flex-shrink-0 ml-2'
           aria-label='Close'
-          data-track-category='USER_GROUP'
-          data-track-name='CLOSE_USER_GROUP_SIDE_PANEL'
         >
           <X className='w-5 h-5 text-gray-500' />
         </button>

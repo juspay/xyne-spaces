@@ -272,15 +272,18 @@ export const UserActivityPanel = ({
           </div>
         ) : (
           <>
-            {activities.map(activity => (
-              <UserActivityItem
-                key={activity.id}
-                activity={activity}
-                isSelected={selectedIds.has(activity.id)}
-                onToggle={handleToggle}
-                onConfigure={handleConfigure}
-                canConfigure={canManageUserActivity}
-              />
+            {activities.map((activity, index) => (
+              <div key={activity.id}>
+                <UserActivityItem
+                  key={activity.id}
+                  activity={activity}
+                  isSelected={selectedIds.has(activity.id)}
+                  onToggle={handleToggle}
+                  onConfigure={handleConfigure}
+                  canConfigure={canManageUserActivity}
+                />
+                {index < activities.length - 1 && <div className='border-b border-gray-100' />}
+              </div>
             ))}
 
             {/* Loading state */}
