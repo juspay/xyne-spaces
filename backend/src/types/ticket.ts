@@ -118,3 +118,32 @@ export enum PR_STAGES {
   COMPLETED = 'Completed',
   IN_PROGRESS = 'In Progress',
 }
+
+/**
+ * Board suggestion types for AI-powered board detection
+ */
+
+export interface TicketBoardCandidate {
+  id: string;
+  name: string;
+  description?: string;
+  boardType?: string;
+  stageCount?: number;
+}
+
+export interface TicketBoardAnalysis {
+  suggestedBoardId: string | null;
+  suggestedBoardName: string | null;
+  error?: string;
+}
+
+export interface TicketBoardSuggestionRequest {
+  title: string;
+  description: string;
+  projectId: string;
+}
+
+export interface TicketBoardSuggestionResponse {
+  candidates: TicketBoardCandidate[];
+  analysis: TicketBoardAnalysis;
+}

@@ -13,6 +13,10 @@ import {
   GetTicketDetailsResponse,
   TicketDuplicateCheckRequest,
   TicketDuplicateCheckResponse,
+  TicketBoardSuggestionRequest,
+  TicketBoardCandidate,
+  TicketBoardAnalysis,
+  TicketBoardSuggestionResponse,
 } from '../types/ticket';
 import { evaluateAssignmentRule } from '../utils/assignmentEngine';
 import { syncUserWorkload } from '../utils/workloadUtils';
@@ -27,6 +31,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketBoardService } from '@/services/ticketBoardService';
 import { BaseTicketType, FormContextType, FormEntityType } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
@@ -930,5 +935,74 @@ export class TicketController {
     }
 
     return null;
+  }
+
+  suggestBoard = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { title, description, projectId } = req.body as TicketBoardSuggestionRequest;
+
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      const { candidates, analysis } = await this.analyzeBoardCandidates({
+        title,
+        description,
+        projectId,
+        userId,
+      });
+
+      const response: TicketBoardSuggestionResponse = {
+        candidates,
+        analysis,
+      };
+
+      res.json({ success: true, data: response });
+    } catch (error) {
+      logger.error('Error suggesting board:', error);
+      res.status(500).json({ error: 'Failed to suggest board' });
+    }
+  };
+
+  private async getBoardCandidates(projectId: string): Promise<TicketBoardCandidate[]> {
+    const boards = await this.boardRepository.findBoardsByProject(projectId);
+
+    return boards.map(board => ({
+      id: board.id,
+      name: board.name,
+      description: undefined, // Board model doesn't have description field
+      boardType: board.boardType || undefined,
+      stageCount: undefined, // Can be populated if needed by fetching stages count
+    }));
+  }
+
+  private async analyzeBoardCandidates(params: {
+    title: string;
+    description: string;
+    projectId: string;
+    userId: string;
+  }): Promise<{ candidates: TicketBoardCandidate[]; analysis: TicketBoardAnalysis }> {
+    const { title, description, projectId, userId } = params;
+    const candidates = await this.getBoardCandidates(projectId);
+
+    if (candidates.length === 0) {
+      return {
+        candidates,
+        analysis: {
+          suggestedBoardId: null,
+          suggestedBoardName: null,
+        },
+      };
+    }
+
+    const analysis = await ticketBoardService.suggestBoard(
+      { title, description },
+      candidates,
+      { userId, projectId },
+    );
+
+    return { candidates, analysis };
   }
 }
