@@ -48,3 +48,10 @@ export const useHasResourceAccess = (resourceName: string): boolean => {
   const permissions = usePermissions();
   return permissions.some(p => p.resourceName === resourceName && p.accessType === 'ADMIN');
 };
+
+export const useCanManageUserActivity = (): boolean => {
+  const permissions = usePermissions();
+  return permissions.some(
+    permission => permission.resourceName === 'USER_ACTIVITY' && permission.accessType === 'ADMIN',
+  );
+};

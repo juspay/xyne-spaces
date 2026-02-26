@@ -2095,6 +2095,23 @@ model UserActivityEvent {
   @@schema("workflow")
 }
 
+model ActivityAlias {
+  id                   String   @id @default(cuid())
+  eventName         String   // The current name to lookup (original or already aliased)
+  eventCategory     String   // The current category to lookup
+  aliasEventName       String   // The new display name
+  aliasEventCategory   String   // The new display category
+  isBlacklisted        Boolean  @default(false)
+  createdAt            DateTime
+  updatedAt            DateTime @updatedAt
+
+  @@unique([eventName, eventCategory])
+  @@index([eventName])
+  @@index([eventCategory])
+  @@map("activity_aliases")
+  @@schema("workflow")
+}
+
 model StageApprovers {
   id                   String       @id @default(cuid())
   userId               String

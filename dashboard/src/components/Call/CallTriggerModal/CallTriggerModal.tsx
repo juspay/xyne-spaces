@@ -196,6 +196,9 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
           <button
             className='flex items-center gap-3 w-full px-6 py-4 rounded-lg hover:bg-gray-50 transition-colors'
             onClick={() => handleCallAction(handleInitiateCall)}
+            data-track-category='CALL'
+            data-track-name='StartCallNow'
+            data-track-metadata={JSON.stringify({ channelId, targetUserIds })}
           >
             <div className='rounded-md bg-gray-200 p-2'>
               <Headphones className='w-5 h-5 text-black' />

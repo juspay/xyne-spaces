@@ -4,19 +4,23 @@ export enum Platform {
   MOBILE = 'MOBILE',
 }
 
-// UserActivity type for API responses - matches Prisma userActivityEvent model
+// UserActivity type for API responses
 export interface UserActivity {
   id: string;
   userId: string;
   sessionId: string;
   eventCategory: string;
   eventName: string;
+  originalEventCategory: string;
+  originalEventName: string;
   eventLabel: string | null;
   url: string;
   triggerType: string;
   contextMetadata: Record<string, unknown> | null;
   platform: Platform;
   timestamp: string; // ISO 8601
+  hasAlias: boolean;
+  isBlacklisted: boolean;
 }
 
 export interface UserActivityResponse {
@@ -65,4 +69,33 @@ export interface TrackActivityOptions {
   url?: string;
   eventLabel?: string;
   contextMetadata?: Record<string, unknown>;
+}
+
+export interface ActivityAlias {
+  id: string;
+  eventName: string;
+  eventCategory: string;
+  aliasEventName: string;
+  aliasEventCategory: string;
+  isBlacklisted: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ActivityAliasesResponse {
+  aliases: ActivityAlias[];
+}
+
+export interface CreateActivityAliasInput {
+  eventName: string;
+  eventCategory: string;
+  aliasEventName: string;
+  aliasEventCategory: string;
+  isBlacklisted?: boolean;
+}
+
+export interface UpdateActivityAliasInput {
+  aliasEventName: string;
+  aliasEventCategory: string;
+  isBlacklisted?: boolean;
 }
