@@ -224,15 +224,15 @@ function GroupMentionRenderer({
         onClick={handleClick}
         role='button'
         tabIndex={0}
+        data-track-category='MESSAGE'
+        data-track-name='VIEW_GROUP_MENTION'
+        data-track-metadata={JSON.stringify({ groupId })}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             handleClick();
           }
         }}
-        data-track-category='MESSAGE'
-        data-track-name='CLICK_GROUP_MENTION'
-        data-track-metadata={JSON.stringify({ groupId })}
       >
         {alias || groupName}
       </span>

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import type { UserActivityResponse, Platform } from '@xyne/shared';
+import { userActivityService } from '@/services/userActivityService';
 
 /**
  * Get user activities with aliases applied
@@ -39,8 +40,13 @@ export async function getUserActivities(req: Request, res: Response): Promise<vo
       return;
     }
 
+    const resolvedActivities = await Promise.all(
+      activities.map(async (activity) => userActivityService.resolveActivity(activity))
+    );
+
+
     // Get unique event keys for alias lookup
-    const eventKeys = activities.map(a => ({
+    const eventKeys = resolvedActivities.map(a => ({
       eventName: a.eventName,
       eventCategory: a.eventCategory,
     }));
@@ -57,9 +63,11 @@ export async function getUserActivities(req: Request, res: Response): Promise<vo
       aliases.map(a => [`${a.eventName}|${a.eventCategory}`, a])
     );
 
+
+
     // Transform activities: apply aliases, filter blacklisted
     const transformedData = [];
-    for (const activity of activities) {
+    for (const activity of resolvedActivities) {
       const key = `${activity.eventName}|${activity.eventCategory}`;
       const alias = aliasMap.get(key);
 
@@ -85,6 +93,7 @@ export async function getUserActivities(req: Request, res: Response): Promise<vo
           ? (activity.contextMetadata as Record<string, unknown>)
           : null,
         platform: activity.platform as Platform,
+        relatedData: activity.relatedData,
         timestamp: activity.timestamp.toISOString(),
         hasAlias: !!alias,
         isBlacklisted: false,
@@ -94,7 +103,7 @@ export async function getUserActivities(req: Request, res: Response): Promise<vo
     const hasMore = transformedData.length > limit;
     const data = hasMore ? transformedData.slice(0, -1) : transformedData;
     const nextCursor = hasMore && data.length > 0
-      ? activities[activities.length - 1].timestamp.toISOString()
+      ? resolvedActivities[resolvedActivities.length - 1].timestamp.toISOString()
       : null;
 
     const response: UserActivityResponse = {

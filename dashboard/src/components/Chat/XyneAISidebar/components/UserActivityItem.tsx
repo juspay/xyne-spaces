@@ -1,7 +1,20 @@
 /* eslint-disable local-rules/require-tracking-on-click */
-import { ReactElement, useCallback, useState } from 'react';
-import { Check, ChevronRight, ChevronDown, Settings } from 'lucide-react';
+import { ReactElement, ReactNode, useCallback, useState } from 'react';
+import {
+  Check,
+  ChevronRight,
+  ChevronDown,
+  ExternalLink,
+  MessageSquare,
+  Ticket,
+  FileText,
+  RefreshCw,
+  Activity,
+  Settings,
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import type { UserActivity } from '../../../../hooks/useUserActivity';
+import { RenderMessageWithHTML } from '../../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 
 interface UserActivityItemProps {
   activity: UserActivity;
@@ -10,6 +23,43 @@ interface UserActivityItemProps {
   onConfigure?: (activity: UserActivity) => void;
   canConfigure?: boolean;
 }
+
+const toTitleCase = (str: string): string => {
+  if (!str) return '';
+  return str
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+};
+
+const getActivityIcon = (activity: UserActivity): ReactNode => {
+  const { eventName, contextMetadata } = activity;
+  const eventLower = eventName.toLowerCase();
+
+  // Check for specific entity types in contextMetadata first
+  if (contextMetadata) {
+    if (contextMetadata['messageId'] || contextMetadata['message']) {
+      return <MessageSquare className='w-4 h-3.5 text-blue-500' />;
+    }
+    if (contextMetadata['xyneId'] || contextMetadata['ticketId']) {
+      return <Ticket className='w-4 h-3.5 text-green-500' />;
+    }
+    if (contextMetadata['canvasId']) {
+      return <FileText className='w-4 h-3.5 text-purple-500' />;
+    }
+  }
+
+  if (
+    eventLower.includes('switch') ||
+    eventLower.includes('toggle') ||
+    eventLower.includes('open')
+  ) {
+    return <RefreshCw className='w-4 h-3.5 text-orange-500' />;
+  }
+
+  // Default icon
+  return <Activity className='w-4 h-3.5 text-gray-400' />;
+};
 
 const formatEventName = (eventName: string): string => {
   if (!eventName) return '';
@@ -30,16 +80,104 @@ const formatEventName = (eventName: string): string => {
     .trim();
 };
 
-const truncateUrl = (url: string, maxLength: number = 35): string => {
-  try {
-    const urlObj = new URL(url);
-    const path = urlObj.pathname + urlObj.search;
-    const full = urlObj.host + path;
-    if (full.length <= maxLength) return full;
-    return full.substring(0, maxLength - 3) + '...';
-  } catch {
-    return url.length > maxLength ? url.substring(0, maxLength - 3) + '...' : url;
+const formatActivityHeading = (activity: UserActivity): string => {
+  const { eventName, contextMetadata } = activity;
+
+  switch (eventName.toLowerCase()) {
+    case 'switch_tab':
+      if (contextMetadata && contextMetadata['tabValue']) {
+        return `${formatEventName(eventName)} to ${contextMetadata['tabValue'] as string}`;
+      }
+      return formatEventName(eventName);
+    case 'sidebar_nav_item':
+      if (contextMetadata && contextMetadata['label']) {
+        return `${formatEventName(eventName)} to ${contextMetadata['label'] as string}`;
+      }
+      return formatEventName(eventName);
+    default:
+      // Please dont change the ordering
+      if (contextMetadata) {
+        if (contextMetadata['messageId']) {
+          return formatEventName(eventName);
+        }
+        if (contextMetadata['xyneId']) {
+          return (
+            formatEventName(eventName) +
+            ' | ' +
+            ((contextMetadata['xyneId'] as string) || 'Unknown Ticket')
+          );
+        }
+        if (contextMetadata['canvasId']) {
+          return (
+            formatEventName(eventName) +
+            ' | ' +
+            ((contextMetadata['title'] as string) || 'Unknown Channel')
+          );
+        }
+        if (contextMetadata['channelId']) {
+          return (
+            formatEventName(eventName) +
+            ' | ' +
+            ((contextMetadata['channelName'] as string) || 'Unknown Channel')
+          );
+        }
+      }
+
+      return formatEventName(eventName);
   }
+
+  // Customize based on event type and available metadata
+};
+
+const getRedirection = (
+  activity: UserActivity,
+  navigate: ReturnType<typeof useNavigate>,
+): ReactNode => {
+  if (activity.contextMetadata) {
+    let url = '';
+
+    if (activity.contextMetadata['canvasId']) {
+      const u = activity.contextMetadata['canvasId'] as string;
+      url = `/chat/dir/canvas/${u}`;
+    }
+    if (activity.contextMetadata['channelId']) {
+      const u = activity.contextMetadata['channelId'] as string;
+      url = `/chat/dir/${u}`;
+    }
+    if (activity.contextMetadata['messageId']) {
+      const u = activity.contextMetadata['messageId'] as string;
+      const channelId = activity.contextMetadata['channelId'] as string;
+      const conversationId = activity.contextMetadata['conversationId'] as string;
+      url = `/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${u}`;
+    }
+    if (activity.contextMetadata['ticketId']) {
+      const u = activity.contextMetadata['ticketId'] as string;
+      const channelId = activity.contextMetadata['channelId'] as string;
+      const conversationId = activity.contextMetadata['conversationId'] as string;
+      url = `/chat/dir/${channelId}?tab=tickets&ticketId=${u}&conversationId=${conversationId}`;
+    }
+
+    if (!url) {
+      return null;
+    }
+
+    const handleClick = (e: React.MouseEvent): void => {
+      e.stopPropagation();
+      void navigate(url);
+    };
+
+    return (
+      <button
+        type='button'
+        onClick={handleClick}
+        className='flex-shrink-0 p-1 hover:bg-gray-200 rounded transition-colors cursor-pointer'
+        title={`Go to ${url}`}
+      >
+        <ExternalLink className='w-4 h-3.5 text-gray-500' />
+      </button>
+    );
+  }
+  return null;
 };
 
 const formatTimestamp = (timestamp: string): string => {
@@ -59,6 +197,24 @@ const formatTimestamp = (timestamp: string): string => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+const renderMessageIfAny = (activity: UserActivity): React.ReactNode => {
+  const contextMetadata = activity.contextMetadata;
+  if (contextMetadata === null) {
+    return null;
+  }
+  const message = contextMetadata['message'] as string | undefined;
+
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <div className='text-sm text-gray-600 mt-1'>
+      <RenderMessageWithHTML message={message} />
+    </div>
+  );
+};
+
 export const UserActivityItem = ({
   activity,
   isSelected,
@@ -66,6 +222,7 @@ export const UserActivityItem = ({
   onConfigure,
   canConfigure,
 }: UserActivityItemProps): ReactElement => {
+  const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
 
   const handleToggleExpand = useCallback((e: React.MouseEvent) => {
@@ -100,12 +257,12 @@ export const UserActivityItem = ({
       <button
         type='button'
         onClick={handleClick}
-        className='w-full flex items-center gap-2 px-4 py-2.5 text-left group'
+        className='w-full flex items-center gap-2 px-4 py-1 text-left'
       >
         {/* Expand/Collapse Chevron */}
         <div
           onClick={handleToggleExpand}
-          className='flex-shrink-0 p-0.5 hover:bg-gray-200 rounded transition-colors cursor-pointer'
+          className='flex-shrink-0 p-1.5 hover:bg-gray-200 rounded transition-colors cursor-pointer self-start'
           role='button'
           tabIndex={0}
           onKeyDown={e => {
@@ -124,17 +281,28 @@ export const UserActivityItem = ({
 
         {/* Content */}
         <div className='flex-1 min-w-0'>
-          <div className='text-sm font-medium text-gray-900 truncate'>
-            {formatEventName(activity.eventName)}
+          <div className='flex items-start gap-2'>
+            <div className='mt-1'>{getActivityIcon(activity)}</div>
+            <div className='flex-1 min-w-0'>
+              <div className='text-sm font-medium text-gray-900 truncate'>
+                {toTitleCase(formatActivityHeading(activity))}
+              </div>
+              <div className='text-sm font-medium text-gray-900 truncate'>
+                {renderMessageIfAny(activity)}
+              </div>
+            </div>
           </div>
-          <div className='flex items-center gap-1.5'>
-            <span className='text-xs text-gray-500'>{activity.eventCategory}</span>
-            <span className='text-xs text-gray-300'>|</span>
-            <span className='text-xs text-gray-500 truncate' title={activity.url}>
-              {truncateUrl(activity.url)}
-            </span>
-          </div>
+          {/* <div className='flex items-center gap-1.5'>  */}
+          {/* <span className='text-xs text-gray-500'>{activity.eventCategory}</span> */}
+          {/* <span className='text-xs text-gray-300'></span> */}
+          {/* // <span className='text-xs text-gray-500 truncate' title={activity.url}>
+            //   {truncateUrl(activity.url)}
+            // </span> */}
+          {/* </div>  */}
         </div>
+
+        {/* Redirection Icon */}
+        {getRedirection(activity, navigate)}
 
         {/* Checkmark (when selected) */}
         {isSelected && <Check className='w-4 h-4 text-blue-600 shrink-0' aria-hidden='true' />}

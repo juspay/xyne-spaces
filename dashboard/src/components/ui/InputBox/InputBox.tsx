@@ -1003,6 +1003,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             }
                             data-track-metadata={JSON.stringify({
                               ...(conversationId !== null ? { conversationId } : { channelId }),
+                              message: editor?.getText().trim() || '',
                               hasAttachments: allAttachments.length > 0,
                             })}
                           >

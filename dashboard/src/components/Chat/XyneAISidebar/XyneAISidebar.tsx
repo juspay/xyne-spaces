@@ -530,13 +530,17 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
     if (activities.length === 0) return '';
 
     const activityLines = activities
+      .reverse()
       .map(
         (activity, index) =>
-          `${index + 1}. [${activity.eventName}] (${activity.eventCategory})\n   URL: ${activity.url}\n   Metadata: ${activity.contextMetadata ? JSON.stringify(activity.contextMetadata) : 'N/A'}\n  Timestamp: ${activity.timestamp ?? 'N/A'}\n Platform: ${activity.platform ?? 'N/A'}`,
+          `${index + 1}. [${activity.eventName}] (${activity.eventCategory})
+          Metadata: ${activity.contextMetadata ? JSON.stringify(activity.contextMetadata) : 'N/A'}
+          RelatedInformation: ${activity.relatedData ? JSON.stringify(activity.relatedData) : 'N/A'}
+          Timestamp: ${activity.timestamp ?? 'N/A'}\n`,
       )
-      .join('\n\n');
+      .join('\n');
 
-    return `\n\nUser journey across app:\n\n${activityLines}`;
+    return `\nUser journey across app:\n${activityLines}`;
   };
 
   const handleSubmit = useCallback(async (): Promise<void> => {
