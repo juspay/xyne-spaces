@@ -112,7 +112,6 @@ class CodeServerService {
         const binaryPath = this.getBinaryPath();
         try {
             fs.accessSync(binaryPath, fs.constants.X_OK);
-            Logger.debug(ElectronEvent.CODE_SERVER_BINARY_CHECK, { installed: true, binaryPath }, 'CodeServer');
             return true;
         } catch {
             Logger.debug(ElectronEvent.CODE_SERVER_BINARY_CHECK, { installed: false, binaryPath }, 'CodeServer');

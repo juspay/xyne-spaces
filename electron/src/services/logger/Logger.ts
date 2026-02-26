@@ -42,7 +42,7 @@ interface LogEntry {
 
 class LoggerService {
   private clientSessionId: string;
-  private platformName: string = 'electron';
+  private platformName: string;
   private electronVersion: string;
   private emailId: string | null = null;
   private logs: LogEntry[] = [];
@@ -57,6 +57,10 @@ class LoggerService {
   constructor() {
     this.clientSessionId = uuidv4();
     this.electronVersion = app.getVersion();
+    this.platformName = 
+      os.platform() === 'win32' ? 'windows' : 
+      os.platform() === 'darwin' ? 'macos' : 
+      os.platform();
     // Use a non-mTLS endpoint for pre-enrollment logs
     this.loggerUrl = `${config.UNPROTECTED_URL}/godel/events`;
     this.startBackgroundFlush();

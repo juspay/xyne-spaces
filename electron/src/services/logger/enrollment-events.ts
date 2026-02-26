@@ -24,6 +24,7 @@ export const EnrollmentEvent = {
   CERTIFICATE_IMPORT_START: 'certificate_import_start',
   CERTIFICATE_IMPORT_SUCCESS: 'certificate_import_success',
   CERTIFICATE_STORAGE_FAILED: 'certificate_storage_failed',
+  USER_CANCELLED_ENROLLMENT: 'user_cancelled_enrollment',
   ENROLLMENT_SUCCESS: 'enrollment_success',
   
   // Identity management
