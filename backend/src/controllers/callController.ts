@@ -8,6 +8,7 @@ import { transcriptService } from '@/services/transcriptService';
 import { CallOrigin, CallStatus, CallType, InvitationResponse } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import z from 'zod';
 
 export class CallController {
@@ -105,6 +106,11 @@ export class CallController {
 
           logger.info(`[${existingCall.externalId}] joining_existing_call | user_id=${userId}, channel_id=${finalChannelId}, correlation_id=${correlationId}`);
 
+          void userActivityTrackingService.trackCallJoined(userId, {
+            callId: existingCall.externalId,
+            channelId: finalChannelId,
+          });
+
           // Return credentials for existing call
           res.json({
             success: true,
@@ -169,6 +175,12 @@ export class CallController {
         userName: userName || userEmail || 'Unknown',
       });
 
+      void userActivityTrackingService.trackCallInitiated(userId, {
+        callId: callExternalId,
+        channelId: finalChannelId,
+        callType,
+      });
+
       // Return credentials - DB records will be created by webhook
       res.json({
         success: true,
@@ -223,6 +235,11 @@ export class CallController {
       });
 
       logger.info(`LiveKit credentials generated for user ${user.id} to join call ${callId}`);
+
+      void userActivityTrackingService.trackCallJoined(user.id, {
+        callId,
+        channelId: call?.channelId || undefined,
+      });
 
       // Return credentials - participant record will be handled by webhook
       res.json({

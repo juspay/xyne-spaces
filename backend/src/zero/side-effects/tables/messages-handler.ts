@@ -16,6 +16,7 @@ import {
 import { createDirectMessageActivities } from '@/utils/messageActivityUtils';
 import { ticketNudgeService } from '@/services/ticketNudgeService';
 import { proactiveNudgeWorker } from '@/workers/proactiveNudgeWorker';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 
 const LARGE_GROUP_DM_THRESHOLD = 8;
@@ -46,6 +47,16 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelId: true,
         initialMessageId: true
       },
+    });
+
+    userActivityTrackingService.trackMessageSent(this.ctx.userID, {
+      messageId,
+      hasAttachment: message.hasAttachment,
+    }).catch(error => {
+      logger.error('[UserActivityTracking] Failed to track message sent activity:', {
+        messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
 
     if (!conversation?.channelId) {

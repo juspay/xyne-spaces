@@ -14,6 +14,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { isElectronApp } from '../../utils/electronApp';
 import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
+import { useActivityTracking } from '../../hooks/useActivityTracking';
 
 // Define WebviewTag interface locally since Electron types may not be available in renderer
 interface WebviewTag extends HTMLElement {
@@ -130,6 +131,7 @@ export function BrowserTabsScreen({
   const activeTabId = useSelector(browserPanelActor, state => state.context.activeTabId);
   const [urlInput, setUrlInput] = useState('');
   const webviewRefs = useRef<Record<string, WebviewTag | null>>({});
+  const { track } = useActivityTracking();
   const navigate = useNavigate();
 
   const activeTab = tabs.find(t => t.id === activeTabId);
@@ -285,6 +287,15 @@ export function BrowserTabsScreen({
   const handleUrlUpdate = (tabId: string, url: string) => {
     if (tabId === activeTabId) {
       setUrlInput(url);
+      track({
+        eventCategory: 'BROWSER',
+        eventName: 'INTERNAL_NAVIGATION',
+        eventLabel: url,
+        contextMetadata: {
+          tabId,
+          url,
+        },
+      });
     }
   };
 

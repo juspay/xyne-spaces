@@ -4,6 +4,7 @@ import type { SideEffectJobConfig, TicketPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 
 interface TicketActivity {
@@ -29,6 +30,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     // Detect field changes and build activities
     const activities: TicketActivity[] = [];
     const fieldsToTrack = ['stageName', 'eta', 'boardId', 'assignedTo'] as const;
+    const changedFields: string[] = [];
 
     for (const field of fieldsToTrack) {
       if (args[field] !== undefined && args[field] !== prev[field]) {
@@ -45,7 +47,21 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
             newValue: args[field],
           },
         });
+        changedFields.push(field);
       }
+    }
+
+    if (changedFields.length > 0) {
+      void userActivityTrackingService.trackTicketUpdated(actorId, {
+        ticketId,
+        fields: changedFields,
+        boardId: args.boardId || prev.boardId || undefined,
+      }).catch(error => {
+        logger.error('[UserActivityTracking] Failed to track ticket updated activity:', {
+          ticketId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
 
     // Send notification to the newly assigned user

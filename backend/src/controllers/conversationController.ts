@@ -34,6 +34,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { replaceTicketSuggestionWithCreated } from '../utils/ticketSuggestionMarkdownGenerator';
 import { markPulseItemAsSent as rewritePulseItemAsSent } from '../utils/markPulseItemAsSent';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 
 // Local type definitions
 interface UserInfo {
@@ -417,6 +418,15 @@ export class ConversationController {
         entityType: 'messages',
         operation: 'insert'
       }).catch(err => logger.error('Side-effect handler error: createConversation', err));
+
+      userActivityTrackingService.trackMessageSent(userId, {
+        messageId: message.messageId,
+      }).catch(error => {
+        logger.error('[UserActivityTracking] Failed to track message sent activity:', {
+          messageId: message.messageId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
 
       res.status(201).json({
         conversationId: conversation.conversationId,
