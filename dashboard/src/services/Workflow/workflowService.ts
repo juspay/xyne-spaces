@@ -18,6 +18,25 @@ export interface CreateWorkflowRequest extends WorkflowBaseFields {
   [key: string]: unknown;
 }
 
+export interface CreateWorkflowResponse {
+  workflow: {
+    id: string;
+    ticketId: string;
+    status: string;
+    workflowType: string;
+    workflowName: string;
+    createdAt: string;
+  };
+  execution: {
+    id: string;
+    workflowId: string;
+    status: string;
+    tag: string;
+    createdAt: string;
+  };
+  message: string;
+}
+
 export interface RerunFromStartResponse {
   rerunExecutionId: string;
   sourceExecutionId: string;
@@ -29,8 +48,10 @@ export interface RerunFromStartResponse {
 /**
  * Create a new workflow
  */
-export const createWorkflow = async (workflowData: CreateWorkflowRequest): Promise<void> => {
-  const response = await apiInstance.post<void>('/workflows', workflowData);
+export const createWorkflow = async (
+  workflowData: CreateWorkflowRequest,
+): Promise<CreateWorkflowResponse> => {
+  const response = await apiInstance.post<CreateWorkflowResponse>('/workflows', workflowData);
 
   // Invalidate related queries after successful workflow creation
   await queryClient.invalidateQueries({

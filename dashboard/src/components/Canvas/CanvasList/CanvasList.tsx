@@ -252,7 +252,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 })}
               >
                 <BookMarked className='w-3.5 h-3.5' />
-                Quarto Docs
+                Docs
               </button>
             )}
           </div>

@@ -13,22 +13,20 @@ import {
   Check,
   ArrowLeft,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
-import { isElectronApp } from '../../../utils/electronApp';
 import { useZero } from '../../../hooks/useZero';
 import { Repo } from '@xyne/shared';
 import { toast } from 'sonner';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
-import { useVSCode } from '../../../contexts/VSCodeContext';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { apiInstance } from '../../../services/clients/apiClient';
 import { useAuth } from '../../../hooks/useAuth';
 import { cn } from '../../../utils/classNames';
 import { logger, Event } from '../../../utils/logger';
+import { apiInstance } from '../../../services/clients/apiClient';
+import { QuartoInstructionsModal } from '../QuartoInstructionsModal/QuartoInstructionsModal';
 
 type QuartoDocType = 'public' | 'private';
 
@@ -41,9 +39,7 @@ const PUBLIC_REPO_URL = 'ssh://git@github.com/example-org/xyne-spaces-docs.git';
 
 export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose }) => {
   const z = useZero();
-  const navigate = useNavigate();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const { registerSession } = useVSCode();
   const { user } = useAuth();
 
   const [allRepos] = useCachedQuery(queries.getAllRepos());
@@ -77,6 +73,14 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
   const [editRepoName, setEditRepoName] = useState('');
   const [editRepoUrl, setEditRepoUrl] = useState('');
   const [editRepoBranches, setEditRepoBranches] = useState('');
+
+  // Instructions modal state
+  const [showInstructionsModal, setShowInstructionsModal] = useState(false);
+  const [instructionsModalData, setInstructionsModalData] = useState<{
+    repoUrl: string;
+    branchName: string;
+    repoName: string;
+  } | null>(null);
 
   // Filter repos based on search
   const filteredRepos = useMemo(() => {
@@ -231,24 +235,13 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
 
   const handleOpenQuarto = useCallback(
     async (repoUrl: string, branch: string) => {
-      if (!isElectronApp()) {
-        toast.info('Quarto doc creation is only available in the Electron app');
-        return;
-      }
+      // Extract repo name from URL for display
+      const repoName = repoUrl.split('/').pop()?.replace('.git', '') || 'quarto-docs';
 
-      const api = window.electronAPI?.codeServer;
-      if (!api?.prepareForTicket) {
-        toast.error('Please restart the Electron app to enable this feature');
-        return;
-      }
-
-      setIsLoading(true);
-      const loadingToastId = toast.loading('Setting up Quarto workspace...');
-      logger.info(Event.QUARTO_SETUP_STARTED, { repoUrl, branch, docType });
-
-      try {
-        // For public docs, also setup access
-        if (docType === 'public') {
+      if (docType === 'public') {
+        setIsLoading(true);
+        const loadingToastId = toast.loading('Setting up Quarto access...');
+        try {
           const setupResponse = await apiInstance.post<{
             success: boolean;
             repoUrl: string;
@@ -269,66 +262,26 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
             return;
           }
           logger.info(Event.QUARTO_ACCESS_SETUP_SUCCESS, { docType: 'public' });
-        }
-
-        const result = await api.prepareForTicket(repoUrl, branch, branch);
-
-        if (!result.success) {
-          logger.error(Event.QUARTO_SETUP_FAILED, { error: result.error, repoUrl, branch });
           toast.dismiss(loadingToastId);
-          toast.error('Failed to prepare workspace', {
-            description: result.error ?? 'Unknown error',
-          });
+        } catch (err) {
+          toast.dismiss(loadingToastId);
+          const message = err instanceof Error ? err.message : 'Failed to setup quarto access';
+          logger.error(Event.QUARTO_SETUP_FAILED, { error: message, repoUrl, branch });
+          toast.error('Error', { description: message });
           setIsLoading(false);
           return;
         }
-
-        if (result.stashedChanges) {
-          toast.warning('Uncommitted changes were stashed', {
-            description: 'Use "git stash pop" to restore them',
-            duration: 5000,
-          });
-        }
-
-        const codeServerUrl = await api.getUrlWithFolder(result.workspacePath);
-        if (!codeServerUrl) {
-          logger.error(Event.QUARTO_SETUP_FAILED, {
-            error: 'Failed to get VS Code URL',
-            repoUrl,
-            branch,
-          });
-          toast.dismiss(loadingToastId);
-          toast.error('Failed to get VS Code URL');
-          setIsLoading(false);
-          return;
-        }
-
-        // Extract repo name from URL for display
-        const repoName = repoUrl.split('/').pop()?.replace('.git', '') || 'quarto-docs';
-
-        registerSession(result.workspacePath, codeServerUrl, branch, repoName, undefined);
-
-        logger.info(Event.QUARTO_WORKSPACE_READY, {
-          repoUrl,
-          branch,
-          repoName,
-          workspacePath: result.workspacePath,
-        });
-        toast.dismiss(loadingToastId);
-        toast.success(`Quarto workspace ready on branch ${branch}`);
-
-        onClose();
-        void navigate('/vscode');
-      } catch (err) {
-        toast.dismiss(loadingToastId);
-        const message = err instanceof Error ? err.message : 'Failed to setup quarto access';
-        logger.error(Event.QUARTO_SETUP_FAILED, { error: message, repoUrl, branch });
-        toast.error('Error', { description: message });
-      } finally {
         setIsLoading(false);
       }
+
+      setInstructionsModalData({
+        repoUrl,
+        branchName: branch,
+        repoName,
+      });
+      setShowInstructionsModal(true);
     },
-    [docType, navigate, onClose, registerSession],
+    [docType],
   );
 
   const handleContinue = useCallback(() => {
@@ -713,48 +666,67 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={open => !open && onClose()} title='Create Quarto Document'>
-      <div className='p-4 space-y-6'>
-        {renderContent()}
+    <>
+      <Dialog
+        open={isOpen && !showInstructionsModal}
+        onOpenChange={open => !open && onClose()}
+        title='Create Quarto Document'
+      >
+        <div className='p-4 space-y-6'>
+          {renderContent()}
 
-        {canContinue && (
-          <div className='flex justify-end gap-2 pt-4 border-t'>
-            <Button
-              variant='outline'
-              onClick={onClose}
-              data-track-category='CANVAS'
-              data-track-name='Cancel_Quarto_Doc_Creation'
-              data-track-metadata={JSON.stringify({ docType })}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleContinue}
-              disabled={isLoading}
-              data-track-category='CANVAS'
-              data-track-name='Continue_Quarto_Doc_Creation'
-              data-track-metadata={JSON.stringify({
-                docType,
-                repoId: selectedRepo?.id,
-                branch: selectedBranch,
-              })}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className='h-4 w-4 animate-spin mr-2' />
-                  Opening...
-                </>
-              ) : (
-                <>
-                  <Check className='h-4 w-4 mr-2' />
-                  Continue
-                </>
-              )}
-            </Button>
-          </div>
-        )}
-      </div>
-    </Dialog>
+          {canContinue && (
+            <div className='flex justify-end gap-2 pt-4 border-t'>
+              <Button
+                variant='outline'
+                onClick={onClose}
+                data-track-category='CANVAS'
+                data-track-name='Cancel_Quarto_Doc_Creation'
+                data-track-metadata={JSON.stringify({ docType })}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleContinue}
+                disabled={isLoading}
+                data-track-category='CANVAS'
+                data-track-name='Continue_Quarto_Doc_Creation'
+                data-track-metadata={JSON.stringify({
+                  docType,
+                  repoId: selectedRepo?.id,
+                  branch: selectedBranch,
+                })}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className='h-4 w-4 animate-spin mr-2' />
+                    Opening...
+                  </>
+                ) : (
+                  <>
+                    <Check className='h-4 w-4 mr-2' />
+                    Continue
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+        </div>
+      </Dialog>
+
+      <QuartoInstructionsModal
+        isOpen={showInstructionsModal}
+        onClose={() => {
+          setShowInstructionsModal(false);
+          setInstructionsModalData(null);
+          onClose(); // Also close the initial modal to fully dismiss
+        }}
+        repoUrl={instructionsModalData?.repoUrl || ''}
+        branchName={instructionsModalData?.branchName || 'main'}
+        repoName={instructionsModalData?.repoName || 'quarto-docs'}
+        mode='create'
+      />
+    </>
   );
 };
 
