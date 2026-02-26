@@ -35,6 +35,7 @@ export enum TriggerType {
   CLICK = 'CLICK',
   CHANGE = 'SELECTION_CHANGE',
   BLUR = 'INPUT_CHANGE',
+  DB_MUTATION = 'DB_MUTATION',
 }
 
 export interface ActivityEventPayload {

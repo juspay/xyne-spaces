@@ -35,6 +35,7 @@ import { ticketBoardService } from '@/services/ticketBoardService';
 import { BaseTicketType, FormContextType, FormEntityType } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 
 const prisma = DatabaseClient.getInstance();
 const DUPLICATE_REFERENCE_LIMIT = 10;
@@ -643,6 +644,12 @@ export class TicketController {
           // Don't fail ticket creation if form entity values creation fails
         }
       }
+
+      void userActivityTrackingService.trackTicketCreated(userId, {
+        ticketId: ticket.id,
+        title: ticket.title,
+        boardId: ticket.boardId,
+      });
 
       // Sync workload mapping if ticket was assigned to a user
       if (ticket.assignedTo && userGroupId) {

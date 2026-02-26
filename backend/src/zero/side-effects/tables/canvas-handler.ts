@@ -3,6 +3,7 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { repositories } from '@/database/repositories/index';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
@@ -35,6 +36,12 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
         logger.warn(`[CanvasSideEffectHandler] Canvas ${canvasId} not found`);
         return;
       }
+
+      // Track canvas creation activity
+      void userActivityTrackingService.trackCanvasCreated(this.ctx.userID, {
+        canvasId: canvas.id,
+        title: canvas.title,
+      });
 
       // Extract mentioned user IDs from metadata
       const metadata = canvas.metadata as any;

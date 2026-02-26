@@ -48,6 +48,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   tickets: ['update'],
   ticket_assignments: ['insert', 'update'],
   ticket_stage_eta: ['update'],
+  canvases: ['insert'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

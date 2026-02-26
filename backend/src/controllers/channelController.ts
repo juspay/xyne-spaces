@@ -20,6 +20,7 @@ import {
 import { websocketService } from '../services/websocketService';
 import { createChannelCreatedActivity } from '../utils/channelActivityUtils';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
@@ -793,6 +794,14 @@ export class ChannelController {
 
       // Create activities for all channel members (excluding creator)
       await createChannelCreatedActivity(channel.id, userId);
+
+      // Track channel creation activity
+      void userActivityTrackingService.trackChannelCreated(userId, {
+        channelId: channel.id,
+        name: channel.name,
+        scopeType: channel.scopeType,
+        projectId: channel.projectId,
+      });
 
       // Queue channel for Vespa ingestion AFTER participants are added
       //await this.channelRepository.queueChannelForVespa(channel.id, 'feed');
