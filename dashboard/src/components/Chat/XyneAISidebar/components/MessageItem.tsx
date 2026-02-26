@@ -321,7 +321,40 @@ const MessageContent = ({
     {/* Genius: Summary text */}
     {(!message.agentType || message.agentType === 'genius') && displayContent && (
       <div className="text-sm font-['Inter'] leading-6 font-normal">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a: ({ href, children, ...props }) => {
+              // Check if URL is external
+              const isExternal = (() => {
+                if (!href) return false;
+                try {
+                  const urlObj = new URL(href, window.location.origin);
+                  return urlObj.origin !== window.location.origin;
+                } catch {
+                  return true; // Treat invalid URLs as external for safety
+                }
+              })();
+
+              // Add target="_blank" for external links
+              if (isExternal) {
+                return (
+                  <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                    {children}
+                  </a>
+                );
+              }
+
+              return (
+                <a href={href} {...props}>
+                  {children}
+                </a>
+              );
+            },
+          }}
+        >
+          {displayContent}
+        </ReactMarkdown>
       </div>
     )}
 
@@ -458,7 +491,38 @@ const SummarizerContent = ({
     {message.summarizerOutput?.summary && (
       <div className='relative'>
         <div className="text-sm font-['Inter'] leading-6 font-normal">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: ({ href, children, ...props }) => {
+                // Check if URL is external
+                const isExternal = (() => {
+                  if (!href) return false;
+                  try {
+                    const urlObj = new URL(href, window.location.origin);
+                    return urlObj.origin !== window.location.origin;
+                  } catch {
+                    return true; // Treat invalid URLs as external for safety
+                  }
+                })();
+
+                // Add target="_blank" for external links
+                if (isExternal) {
+                  return (
+                    <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                      {children}
+                    </a>
+                  );
+                }
+
+                return (
+                  <a href={href} {...props}>
+                    {children}
+                  </a>
+                );
+              },
+            }}
+          >
             {message.isStreaming
               ? message.summarizerOutput.summary.slice(0, visibleChars || 0)
               : message.summarizerOutput.summary}
@@ -480,6 +544,32 @@ const SummarizerContent = ({
                   remarkPlugins={[remarkGfm]}
                   components={{
                     p: ({ children }) => <span>{children}</span>,
+                    a: ({ href, children, ...props }) => {
+                      // Check if URL is external
+                      const isExternal = (() => {
+                        if (!href) return false;
+                        try {
+                          const urlObj = new URL(href, window.location.origin);
+                          return urlObj.origin !== window.location.origin;
+                        } catch {
+                          return true;
+                        }
+                      })();
+
+                      if (isExternal) {
+                        return (
+                          <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                            {children}
+                          </a>
+                        );
+                      }
+
+                      return (
+                        <a href={href} {...props}>
+                          {children}
+                        </a>
+                      );
+                    },
                   }}
                 >
                   {keyPoint.point}
@@ -544,6 +634,32 @@ const GeniusKeyPoints = ({
                 remarkPlugins={[remarkGfm]}
                 components={{
                   p: ({ children }) => <span>{children}</span>,
+                  a: ({ href, children, ...props }) => {
+                    // Check if URL is external
+                    const isExternal = (() => {
+                      if (!href) return false;
+                      try {
+                        const urlObj = new URL(href, window.location.origin);
+                        return urlObj.origin !== window.location.origin;
+                      } catch {
+                        return true;
+                      }
+                    })();
+
+                    if (isExternal) {
+                      return (
+                        <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                          {children}
+                        </a>
+                      );
+                    }
+
+                    return (
+                      <a href={href} {...props}>
+                        {children}
+                      </a>
+                    );
+                  },
                 }}
               >
                 {point}
