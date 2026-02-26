@@ -107,9 +107,14 @@ export async function createMainWindow(): Promise<BrowserWindow> {
   });
 
   // Handle external links
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  mainWindow.webContents.setWindowOpenHandler((details) => {
      try {
+      const url = details.url;
+
+
       const urlObj = new URL(url);
+      const currentUrl = mainWindow?.webContents.getURL();
+      const currentUrlObj = new URL(currentUrl || '');
       const currentAppUrl = new URL(config.FRONTEND_URL);
       const isInternalUrl = urlObj.origin === currentAppUrl.origin;
       
@@ -117,10 +122,23 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
         return { action: 'deny' };
       }
-      
-      // External URLs - open in browser panel instead of system browser
+
+      if(currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
+        shell.openExternal(url);
+        return { action: 'deny' };
+      }
+
+
+
+      // External URLs
       if (!isInternalUrl) {
-        mainWindow?.webContents.send('open-in-browser-panel', url);
+        if (details.disposition === 'foreground-tab') {
+          mainWindow?.webContents.send('open-in-browser-panel', url);
+        }
+        if (details.disposition === 'background-tab') {
+          shell.openExternal(url);
+        }
+        
         return { action: 'deny' };
       }
       
@@ -128,7 +146,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       return { action: 'allow' };
       
     } catch (error) {
-       console.warn('Failed to parse URL in setWindowOpenHandler:', url, error);
+      console.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
       return { action: 'deny' };
     }
 });
@@ -142,9 +160,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     mainWindow?.webContents.openDevTools();
   }
 
-  // Handle keyboard shortcuts for reload
-  // Cmd+R / Ctrl+R: Soft reload (in-page reload) - handled by default Electron behavior
-  // Cmd+Shift+R / Ctrl+Shift+R: Hard refresh (reload URL from scratch using loadApp)
+  // Track modifier key state for link clicks
   mainWindow.webContents.on('before-input-event', (event, input) => {
     const isMac = process.platform === 'darwin';
     const modifierKey = isMac ? input.meta : input.control;
