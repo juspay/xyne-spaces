@@ -30,6 +30,7 @@ import {
   LifeBuoy,
   Code2,
   Clipboard,
+  ClipboardCheck,
   PieChart,
   FileText,
   Mic,
@@ -124,6 +125,11 @@ const navigationItems = [
     label: 'Forms',
     icon: <Clipboard size={16} color='var(--app-sidebar-active-foreground)' />,
   },
+  // {
+  //   path: '/rca',
+  //   label: 'RCA',
+  //   icon: <ClipboardCheck size={16} color='var(--app-sidebar-active-foreground)' />,
+  // },
 ];
 
 const mobileNavigationItems = [
@@ -166,6 +172,11 @@ const mobileNavigationItems = [
     path: '/chat/bookmarks',
     label: 'Bookmarks',
     icon: Bookmark,
+  },
+  {
+    path: '/rca',
+    label: 'RCA',
+    icon: ClipboardCheck,
   },
   {
     path: '/chat/threads',

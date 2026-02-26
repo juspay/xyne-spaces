@@ -404,8 +404,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           type='button'
           className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2'
           onClick={onCancel}
-          data-track-category='FORWARD_MESSAGE_MODAL'
-          data-track-name='CLOSE_FORWARD_MODAL'
+          data-track-category='Chat'
+          data-track-name='CloseForwardMessageModal'
         >
           <X className='h-4 w-4' />
           <span className='sr-only'>Close</span>
@@ -430,12 +430,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                   onClick={() => handleRemoveTarget(target.id)}
                   className='rounded-full p-0.5 transition-colors'
                   aria-label={`Remove ${target.name}`}
-                  data-track-category='FORWARD_MESSAGE_MODAL'
-                  data-track-name='REMOVE_FORWARD_TARGET'
-                  data-track-metadata={JSON.stringify({
-                    targetId: target.id,
-                    targetName: target.name,
-                  })}
+                  data-track-category='Chat'
+                  data-track-name='RemoveForwardTarget'
                 >
                   <X className='h-3 w-3' />
                 </button>
@@ -572,8 +568,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             type='button'
             onClick={onCancel}
             disabled={form.state.isSubmitting}
-            data-track-category='FORWARD_MESSAGE_MODAL'
-            data-track-name='CANCEL_FORWARD'
           >
             Cancel
           </Button>
@@ -581,9 +575,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             type='submit'
             loading={form.state.isSubmitting}
             disabled={selectedTargets.length === 0 || form.state.isSubmitting}
-            data-track-category='FORWARD_MESSAGE_MODAL'
-            data-track-name='FORWARD_MESSAGE'
-            data-track-metadata={JSON.stringify({ targetCount: selectedTargets })}
           >
             {form.state.isSubmitting ? 'Forwarding...' : 'Forward'}
           </Button>

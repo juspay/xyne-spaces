@@ -16,7 +16,7 @@ export interface CreateMessageAttachmentInput {
   uploadedByUserId: string;
   createdBy: string;
   storageProvider: string;
-  conversationId: string;
+  conversationId: string | null;
   metadata?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 

@@ -1,5 +1,5 @@
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
-import { channelSchema, InsertDocument, messageSchema, projectSchema, schemaToDocType, ticketSchema, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaProjectDocument, VespaSchema, VespaTicketDocument } from '@/vespa/src/types';
+import { channelSchema, InsertDocument, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import { ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
@@ -9,7 +9,9 @@ import { Conversation, Channel, Message, Project, Ticket, VespaOperationType as 
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
-import {logger} from '@/utils/logger';
+import { logger } from '@/utils/logger';
+import { RCAWithRelations, ReleaseRepository } from '@/database/repositories/releaseRepository';
+import { fileSchema } from '@xyne/vespa-ts';
 
 type ChannelsSchema = Schema['tables']['channels'];
 type MessagesSchema = Schema['tables']['messages'];
@@ -28,17 +30,17 @@ const toTimestamp = (timestamp: Date | string | number | null | undefined): numb
 }
 const toDateString = (date: Date | string | number | null | undefined): string => {
   if (!date) return '';
-  
-  const d = typeof date === 'object' && date instanceof Date 
-    ? date 
+
+  const d = typeof date === 'object' && date instanceof Date
+    ? date
     : new Date(date);
-  
+
   if (isNaN(d.getTime())) return '';
-  
+
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
   const year = d.getFullYear();
-  
+
   return `${day}/${month}/${year}`;
 };
 
@@ -68,7 +70,7 @@ const resolveChannelName = async (channelName: string, scopeType: string | null 
   if (scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM) {
     const userIds = channelName.split(",");
     const usernames = await db.user.findMany({
-      where: { id: { in: userIds }},
+      where: { id: { in: userIds } },
       select: { name: true }
     });
     return usernames.map(u => u.name).join(",");
@@ -113,7 +115,7 @@ const resolveTicketRelationships = async (ticketId: string): Promise<{
     const subTicketIds = childMappings.map(m => m.subTicketId);
 
     const subTickets = await db.subTicket.findMany({
-      where: { id: { in: subTicketIds }},
+      where: { id: { in: subTicketIds } },
       select: { mappedTicketId: true }
     });
 
@@ -123,7 +125,7 @@ const resolveTicketRelationships = async (ticketId: string): Promise<{
 
     if (mappedTicketIds.length > 0) {
       const childTickets = await db.ticket.findMany({
-        where: { id: { in: mappedTicketIds }},
+        where: { id: { in: mappedTicketIds } },
         select: { xyneId: true }
       });
       childTicketXyneIds = childTickets.map(t => t.xyneId);
@@ -335,7 +337,7 @@ export const mapAndUpdatePreviousMessagesMentions = async (
   conversationId: string,
 ): Promise<{ threadMentions: string[], threadSenders: string[] }> => {
   const { messages, threadMentions, threadSenders } = await getThreadInfo(conversationId);
- 
+
   const filteredMessages = messages.filter(m => m.messageId !== messageId);
   logger.info(`[MESSAGE THREAD MENTIONS UPDATE] Updating messages for conversationId: ${conversationId}`);
 
@@ -428,8 +430,8 @@ export const mapMessage = async (
     channelWeightedSet: {
       [`channel:${conversation.channelId}`]: 1
     },
-    userWeightedSet:{
-      [`user:${args.senderId}`] : 1
+    userWeightedSet: {
+      [`user:${args.senderId}`]: 1
     },
     attachmentIds: attachments.map(a => a.entityId),
     reactions: 0, // TODO
@@ -580,14 +582,82 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
 }
 
 
+export const mapRCA = (args: RCAWithRelations): VespaFileDocument => {
+  const chunks: string[] = [];
+
+  if (args.title) chunks.push(`Title: ${args.title}`);
+  if (args.summary) chunks.push(`Summary: ${args.summary}`);
+  if (args.rootCause) chunks.push(`Root Cause: ${args.rootCause}`);
+  if (args.severity) chunks.push(`Severity: ${args.severity}`);
+  if (args.bugTypeId) chunks.push(`Bug Type: ${args.bugTypeId}`);
+  if (args.categoryTypeId) chunks.push(`Category Type: ${args.categoryTypeId}`);
+  if (args.issueStartAt) chunks.push(`Issue Start Time: ${new Date(args.issueStartAt).toISOString()}`);
+
+  args.impacts?.forEach((impact, idx) => {
+    chunks.push(`Impact ${idx + 1}: ${impact.impact}`);
+  });
+
+  args.coes?.forEach((coe, idx) => {
+    chunks.push(`COE Action ${idx + 1}: ${coe.action}`);
+  });
+
+  const chunks_pos = chunks.map((_, i) => String(i));
+
+  return {
+    docType: VespaDocType.FILE,
+    docId: args.id,
+    fileName: `RCA-${args.ticketTitle || args.ticketId}`,
+    description: args.summary || `Root Cause Analysis for ticket ${args.ticketTitle || args.ticketId}`,
+    chunks,
+    chunks_pos,
+    image_chunks: [],
+    image_chunks_pos: [],
+    metadata: JSON.stringify({
+      ticketId: args.ticketId,
+      status: args.status,
+      impactCount: args.impacts?.length || 0,
+      coeCount: args.coes?.length || 0,
+    }),
+    createdBy: args.ownerId,
+    createdAt: toTimestamp(args.createdAt),
+    updatedAt: toTimestamp(args.updatedAt),
+    ownerId: args.ownerId,
+    permissions: [],
+    urlInternal: `/rca/${args.id}`,
+    urlOriginal: `/rca/${args.id}`,
+    fileSize: 0,
+    isPrivate: false,
+    mimeType: 'text/markdown',
+    subApp: SubApp.RCA,
+  };
+};
+
 export const mapBySchema = async (
   schemaName: VespaSchema,
   args: VespaPayload,
   jobType: VespaJobType,
+  app?: SubApp
 ): Promise<InsertDocument | Partial<InsertDocument>> => {
   const docType = schemaToDocType[schemaName];
   if (!docType) {
     throw new Error(`Unknown schema: ${schemaName}`);
+  }
+
+  if (app) {
+    const appSpecificMappers: Record<SubApp, (schema: VespaSchema, args: VespaPayload) => Promise<InsertDocument>> = {
+      [SubApp.RCA]: async (schema, args) => {
+        if (schema !== fileSchema) {
+          throw new Error(`Unknown schema ${schema} for sub-app ${app}`);
+        }
+        return mapRCA(args as RCAWithRelations);
+      }
+    }
+
+    if (appSpecificMappers[app]) {
+      return await appSpecificMappers[app](schemaName, args);
+    } else {
+      throw new Error(`No mapper defined for sub-app ${app}`);
+    }
   }
 
   if (jobType === 'feed') {
@@ -606,7 +676,7 @@ export const mapBySchema = async (
   }
 
   if (jobType === 'update') {
-    switch(schemaName){
+    switch (schemaName) {
       case channelSchema:
         throw new Error(`${schemaName}:Schema not defined for update`);
       case messageSchema:
@@ -632,7 +702,26 @@ export const queueVespaJob = (schema: VespaSchema, jobType: VespaJobType, data: 
 export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,
-): Promise<Channel | Message | Project | Ticket | null> => {
+  app?: SubApp
+): Promise<Channel | Message | Project | Ticket | RCAWithRelations | null> => {
+  if (app) {
+    const appSpecificFetchers: Record<SubApp, (schema: VespaSchema, docId: string) => Promise<any>> = {
+      [SubApp.RCA]: async (schema, docId) => {
+        if (schema !== fileSchema) {
+          throw new Error(`Unknown schema ${schema} for sub-app ${app}`);
+        }
+
+        const releaseRepository = new ReleaseRepository();
+        return await releaseRepository.getRCAById(docId, { includeImpacts: true, includeCOEs: true });
+      }
+    }
+    if (appSpecificFetchers[app]) {
+      return await appSpecificFetchers[app](schema, docId);
+    } else {
+      throw new Error(`No fetcher defined for sub-app ${app}`);
+    }
+  }
+
   switch (schema) {
     case channelSchema:
       return await db.channel.findUnique({
@@ -662,7 +751,8 @@ export const fetchDataBySchema = async (
 export const fetchAndMapBySchema = async (
   schema: VespaSchema,
   docId: string,
-  jobType: VespaJobType
+  jobType: VespaJobType,
+  app?: SubApp,
 ): Promise<InsertDocument | Partial<InsertDocument>> => {
 
   if (jobType === 'delete') {
@@ -687,13 +777,13 @@ export const fetchAndMapBySchema = async (
     return { docType, docId } as Partial<InsertDocument>;
   }
 
-  const rawData = await fetchDataBySchema(schema, docId);
+  const rawData = await fetchDataBySchema(schema, docId, app);
 
   if (!rawData) {
     throw new Error(`Data not found for ${schema}/${docId}`);
   }
 
-  return await mapBySchema(schema, rawData, jobType);
+  return await mapBySchema(schema, rawData, jobType, app);
 }
 
 

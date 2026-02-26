@@ -124,6 +124,7 @@ enum AttachmentEntityType {
   CANVAS
   EMAIL
   DRAFT
+  IMPACT
   @@schema("public")
 }
 
@@ -1925,6 +1926,23 @@ enum FormEntityType {
 // Lookup value types for dynamic enumeration values
 enum LookupType {
   TICKET_TYPE
+  COE_ACTION_TYPE
+  COE_ACTION_TYPE_RELIABILITY_CHANGE
+  COE_ACTION_TYPE_RELIABILITY_CAPACITY
+  COE_ACTION_TYPE_RELIABILITY_FAULT
+  COE_ACTION_TYPE_PERF
+  COE_ACTION_TYPE_UIUX
+  IMPACT_TYPE
+  BUG_TYPE
+  BUG_CATEGORY_TYPE
+  BUG_ISSUE_TYPE
+  BUG_ISSUE_CATEGORY_CAPACITY
+  BUG_ISSUE_CATEGORY_CHANGE
+  BUG_ISSUE_CATEGORY_FAULT
+  BUG_RESOLUTION_CAPACITY
+  BUG_RESOLUTION_CHANGE
+  BUG_RESOLUTION_FAULT
+  QUICK_FIX_OPTION
   @@schema("public")
 }
 
@@ -2151,6 +2169,13 @@ enum ReleaseEventType {
   @@schema("public")
 }
 
+enum RCAStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  CLOSED
+  @@schema("public")
+}
 
 // Services that can be released
 model Application {
@@ -2272,5 +2297,103 @@ model TicketStageRequest {
   @@index([formId])
   @@unique([ticketId, stageId])
   @@map("ticket_stage_requests")
+  @@schema("public")
+}
+enum COEStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  @@schema("public")
+}
+
+enum SEVERITY {
+  SEV_1
+  SEV_2
+  SEV_3
+  @@schema("public")
+}
+
+
+// Root cause analysis for issues
+model RCA {
+  id                    String     @id @default(cuid())
+  title                 String  
+  ticketId              String     // Ticket ID
+  ownerId               String     // User ID (no FK constraint)
+  summary               String?
+  rootCause             String?
+  severity              SEVERITY
+  status                RCAStatus  @default(DRAFT)
+  bugTypeId             String     // bug type
+  categoryTypeId        String     // category type
+  issueCategoryId       String?
+  issueStartAt          DateTime?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  @@index([ticketId])
+  @@index([ownerId])
+  @@index([status])
+  @@map("rcas")
+  @@schema("public")
+}
+
+// Impact caused by an issue
+model Impact {
+  id                    String      @id @default(cuid())
+  ticketId              String      // Ticket ID
+  rcaId                 String?     // RCA ID
+  impactTypeId          String
+  impact                String      // Description of impact
+  createdAt             DateTime    @default(now())
+
+  @@index([ticketId])
+  @@index([rcaId])
+  @@index([impactTypeId])
+  @@map("impacts")
+  @@schema("public")
+}
+
+// Actions to fix issues identified in RCA
+model COE {
+  id              String        @id @default(cuid())
+  rcaId           String        // RCA ID
+  ownerId         String        // User ID (no FK constraint)
+  actionTypeId    String        // COEActionType ID
+  action          String        // Description of the action
+  status          COEStatus     @default(OPEN)
+  dueDate         DateTime?
+  createdAt       DateTime      @default(now())
+  completedAt     DateTime?
+
+  @@index([rcaId])
+  @@index([ownerId])
+  @@index([status])
+  @@index([actionTypeId])
+  @@map("coes")
+  @@schema("public")
+}
+
+enum AttributionConfidence {
+  LOW
+  MEDIUM
+  HIGH
+  @@schema("public")
+}
+
+model ReleaseAttribution {
+  id                      String                 @id @default(cuid())
+  ticketId                String                 // Ticket ID of the newly reported issue
+  releaseId               String                 // Release ticket ID
+  releaseApplicationId    String?                // Application release ID (SubTicket ID)
+  rootCauseTicketId       String?                // Root cause ticket
+  confidence              AttributionConfidence  @default(LOW)
+  createdAt               DateTime               @default(now())
+
+  @@index([ticketId])
+  @@index([releaseId])
+  @@index([releaseApplicationId])
+  @@index([rootCauseTicketId])
+  @@map("release_attributions")
   @@schema("public")
 }

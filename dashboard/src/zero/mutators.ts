@@ -30,6 +30,10 @@ import {
   BoardType,
   TicketStageRequestStatus,
   ActivityType,
+  RCAStatus,
+  COEStatus,
+  SEVERITY,
+  AttributionConfidence,
 } from '@xyne/shared';
 import { extractAllMentions } from '../utils/mentionParser';
 import { z } from 'zod';
@@ -50,7 +54,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
-        ctx,
+        ctx: _ctx,
         args: { channelId, channelParticipantId, channelUserStatusId, timestamp },
       }) => {
         const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -63,14 +67,14 @@ export const mutators = defineMutators({
           throw new Error('Can only join public channels');
         }
 
-        const joiningUser = await tx.run(zql.users.where('id', ctx.userID).one());
+        const joiningUser = await tx.run(zql.users.where('id', _ctx.userID).one());
         if (!joiningUser) {
           throw new Error('Invalid user requesting to join');
         }
 
         // Check if user is already a participant
         const existingParticipant = await tx.run(
-          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_participants.where('channelId', channelId).where('userId', _ctx.userID).one(),
         );
 
         if (existingParticipant) {
@@ -83,7 +87,7 @@ export const mutators = defineMutators({
           channelId: channelId,
           joinedAt: timestamp,
           role: ChannelRole.MEMBER,
-          userId: ctx.userID,
+          userId: _ctx.userID,
 
           // TODO: deprecated columns needs to be removed
           lastViewedAt: timestamp,
@@ -95,7 +99,7 @@ export const mutators = defineMutators({
           id: channelUserStatusId,
           channelId: channelId,
           lastViewedAt: timestamp,
-          userId: ctx.userID,
+          userId: _ctx.userID,
           isStarred: false,
           isClosed: false,
           unreadCount: 0,
@@ -1890,7 +1894,15 @@ export const mutators = defineMutators({
           throw new Error('Attachment not found');
         }
 
-        if (attachment.entityType !== AttachmentEntityType.DRAFT) {
+        if (
+          attachment.entityType !== AttachmentEntityType.DRAFT &&
+          attachment.entityType !== AttachmentEntityType.CHAT
+        ) {
+          await tx.mutate.message_attachments.delete({ id: attachment.id });
+          return;
+        }
+
+        if (attachment.entityType === AttachmentEntityType.CHAT) {
           await tx.mutate.message_attachments.delete({ id: attachment.id });
 
           const remainingAttachments = await tx.run(
@@ -4896,6 +4908,284 @@ export const mutators = defineMutators({
             updatedAt: timestamp,
           });
         }
+      },
+    ),
+  },
+
+  rca: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        ticketId: z.string(),
+        ownerId: z.string().optional(),
+        title: z.string(),
+        summary: z.string().optional(),
+        rootCause: z.string().optional(),
+        severity: z.nativeEnum(SEVERITY),
+        bugTypeId: z.string(),
+        categoryTypeId: z.string(),
+        issueCategoryId: z.string().optional(),
+        issueStartAt: z.number().optional().nullable(),
+        status: z.nativeEnum(RCAStatus),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          id,
+          ticketId,
+          ownerId,
+          title,
+          summary,
+          rootCause,
+          severity,
+          bugTypeId,
+          categoryTypeId,
+          issueCategoryId,
+          issueStartAt,
+          status,
+          timestamp,
+        },
+      }) => {
+        const resolvedOwnerId = ownerId || ctx.userID;
+
+        await tx.mutate.rcas.insert({
+          id,
+          ticketId,
+          ownerId: resolvedOwnerId,
+          title,
+          summary: summary || null,
+          rootCause: rootCause || null,
+          severity,
+          bugTypeId,
+          categoryTypeId,
+          issueCategoryId: issueCategoryId ?? null,
+          issueStartAt: issueStartAt ?? null,
+          status,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        ticketId: z.string().optional(),
+        title: z.string().optional(),
+        summary: z.string().optional(),
+        rootCause: z.string().optional(),
+        severity: z.nativeEnum(SEVERITY).optional(),
+        bugTypeId: z.string().optional(),
+        categoryTypeId: z.string().optional(),
+        issueCategoryId: z.string().optional(),
+        issueStartAt: z.number().optional().nullable(),
+        status: z.nativeEnum(RCAStatus).optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        args: {
+          id,
+          ticketId,
+          title,
+          summary,
+          rootCause,
+          severity,
+          bugTypeId,
+          categoryTypeId,
+          issueCategoryId,
+          issueStartAt,
+          status,
+          timestamp,
+        },
+      }) => {
+        const rca = await tx.run(zql.rcas.where('id', id).one());
+        if (!rca) {
+          throw new Error('RCA not found');
+        }
+
+        await tx.mutate.rcas.update({
+          id,
+          ...(ticketId !== undefined && { ticketId }),
+          ...(title !== undefined && { title }),
+          ...(summary !== undefined && { summary }),
+          ...(rootCause !== undefined && { rootCause }),
+          ...(severity !== undefined && { severity }),
+          ...(bugTypeId !== undefined && { bugTypeId }),
+          ...(categoryTypeId !== undefined && { categoryTypeId }),
+          ...(issueCategoryId !== undefined && { issueCategoryId }),
+          ...(issueStartAt !== undefined && { issueStartAt }),
+          ...(status !== undefined && { status }),
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+  releaseAttribution: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        ticketId: z.string(),
+        releaseId: z.string(),
+        releaseApplicationId: z.string().optional().nullable(),
+        rootCauseTicketId: z.string().optional().nullable(),
+        confidence: z.nativeEnum(AttributionConfidence),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        args: {
+          id,
+          ticketId,
+          releaseId,
+          releaseApplicationId,
+          rootCauseTicketId,
+          confidence,
+          timestamp,
+        },
+      }) => {
+        await tx.mutate.release_attributions.insert({
+          id,
+          ticketId,
+          releaseId,
+          releaseApplicationId: releaseApplicationId ?? null,
+          rootCauseTicketId: rootCauseTicketId ?? null,
+          confidence,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        releaseId: z.string().optional(),
+        releaseApplicationId: z.string().optional().nullable(),
+        rootCauseTicketId: z.string().optional().nullable(),
+        confidence: z.nativeEnum(AttributionConfidence).optional(),
+      }),
+      async ({
+        tx,
+        args: { id, releaseId, releaseApplicationId, rootCauseTicketId, confidence },
+      }) => {
+        await tx.mutate.release_attributions.update({
+          id,
+          ...(releaseId !== undefined && { releaseId }),
+          ...(releaseApplicationId !== undefined && { releaseApplicationId }),
+          ...(rootCauseTicketId !== undefined && { rootCauseTicketId }),
+          ...(confidence !== undefined && { confidence }),
+        });
+      },
+    ),
+    delete: defineMutator(z.object({ id: z.string() }), async ({ tx, args: { id } }) => {
+      await tx.mutate.release_attributions.delete({ id });
+    }),
+  },
+  impact: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        ticketId: z.string(),
+        impactTypeId: z.string(),
+        impact: z.string(),
+        rcaId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { id, ticketId, impactTypeId, impact, rcaId, timestamp } }) => {
+        if (!rcaId) {
+          throw new Error('RCA ID is required for creating an impact');
+        }
+
+        await tx.mutate.impacts.insert({
+          id,
+          ticketId,
+          impactTypeId,
+          impact,
+          rcaId: rcaId || null,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        impactTypeId: z.string().optional(),
+        impact: z.string().optional(),
+      }),
+      async ({ tx, args: { id, impactTypeId, impact } }) => {
+        await tx.mutate.impacts.update({
+          id,
+          ...(impactTypeId !== undefined && { impactTypeId }),
+          ...(impact !== undefined && { impact }),
+        });
+      },
+    ),
+    delete: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        await tx.mutate.impacts.delete({ id });
+      },
+    ),
+  },
+  coe: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        rcaId: z.string(),
+        ownerId: z.string(),
+        actionTypeId: z.string(),
+        action: z.string(),
+        status: z.nativeEnum(COEStatus),
+        dueDate: z.number().optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        args: { id, rcaId, ownerId, actionTypeId, action, status, dueDate, timestamp },
+      }) => {
+        await tx.mutate.coes.insert({
+          id,
+          rcaId,
+          ownerId,
+          actionTypeId,
+          action,
+          status,
+          dueDate: dueDate || null,
+          createdAt: timestamp,
+          completedAt: null,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        ownerId: z.string().optional(),
+        actionTypeId: z.string().optional(),
+        action: z.string().optional(),
+        status: z.nativeEnum(COEStatus).optional(),
+        dueDate: z.number().optional(),
+        completedAt: z.number().optional(),
+      }),
+      async ({ tx, args: { id, ownerId, actionTypeId, action, status, dueDate, completedAt } }) => {
+        await tx.mutate.coes.update({
+          id,
+          ...(ownerId !== undefined && { ownerId }),
+          ...(actionTypeId !== undefined && { actionTypeId }),
+          ...(action !== undefined && { action }),
+          ...(status !== undefined && { status }),
+          ...(dueDate !== undefined && { dueDate }),
+          ...(completedAt !== undefined && { completedAt }),
+        });
+      },
+    ),
+    delete: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        await tx.mutate.coes.delete({ id });
       },
     ),
   },

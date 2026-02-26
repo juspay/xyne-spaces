@@ -51,6 +51,7 @@ export interface TransformedSearchResult {
     mimeType?: string;
     internalUrl?: string;
     originalUrl?: string;
+    xyneId?: string;
   };
   debugInfo?: {
     matchfeatures?: Record<string, any>;
@@ -482,6 +483,7 @@ function transformTicket(
       assignedTo: doc.assignedTo,
       assigneeName: assigneeName || undefined,
       conversationId: doc.convId,
+      xyneId: doc.xyneId,
     },
   };
 }

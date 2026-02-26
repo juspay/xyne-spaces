@@ -7,6 +7,7 @@ import { MessagesVespaHandler } from '../tables/messages-handler';
 import { TicketsVespaHandler } from '../tables/tickets-handler';
 import { ChannelsVespaHandler } from '../tables/channels-handler';
 import { ProjectsVespaHandler } from '../tables/projects-handler';
+import { RCAVespaHandler } from '../tables/rca-handler';
 
 /**
  * Factory for getting the appropriate Vespa handler for a given table.
@@ -40,6 +41,8 @@ export class VespaHandlerFactory {
       // Project tables
       case 'projects':
         return new ProjectsVespaHandler(ctx);
+      case "rcas":
+        return new RCAVespaHandler(ctx);
 
       // TODO: Add more handlers as needed
       // case 'users':

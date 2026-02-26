@@ -100,7 +100,6 @@ export class SearchService {
           limit: data.limit,
         };
       }
-
       // Handle flat results (backward compatible)
       return {
         results: data.results || [],

@@ -1,5 +1,6 @@
 import { createBuilder, defineQueries } from '@rocicorp/zero';
 import {
+  BaseTicketType,
   CanvasVisibility,
   defineQuery,
   DocType,
@@ -826,6 +827,25 @@ export const queries = defineQueries({
       .orderBy('createdAt', 'desc');
   }),
 
+  attachmentsByImpact: defineQuery(z.object({ impactId: z.string() }), ({ args: { impactId } }) => {
+    return zql.message_attachments
+      .where('entityId', impactId)
+      .where('entityType', AttachmentEntityType.IMPACT)
+      .orderBy('createdAt', 'desc');
+  }),
+  attachmentsByImpactIds: defineQuery(
+    z.object({ impactIds: z.array(z.string()) }),
+    ({ args: { impactIds } }) => {
+      if (impactIds.length === 0) {
+        return zql.message_attachments.where('id', '__none__');
+      }
+      return zql.message_attachments
+        .where('entityType', AttachmentEntityType.IMPACT)
+        .where(helpers => helpers.or(...impactIds.map(id => helpers.cmp('entityId', '=', id))))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
   channelConversationsPaginated: defineQuery(
     z.object({
       channelId: z.string(),
@@ -1217,6 +1237,111 @@ export const queries = defineQueries({
     },
   ),
 
+  // RCA Queries
+  allRCAsPaginated: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ createdAt: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ args: { limit, start } }) => {
+      let query = zql.rcas
+        .orderBy('createdAt', 'desc')
+        .related('ticket');
+
+      if (start) {
+        query = query.start(
+          { createdAt: start.createdAt, id: start.id },
+          { inclusive: false }
+        );
+      }
+
+      return query.limit(limit);
+    }
+  ),
+
+  rcaById: defineQuery(z.object({ rcaId: z.string() }), ({ args: { rcaId } }) => {
+    return zql.rcas
+      .where('id', rcaId)
+      .related('impacts')
+      .related('coes')
+      .related('ticket')
+      .one();
+  }),
+
+  rcaByTicketId: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+    return zql.rcas
+      .where('ticketId', ticketId)
+      .related('impacts')
+      .related('coes')
+      .related('ticket')
+      .one();
+  }),
+
+  releaseAttributionsByTicketId: defineQuery(
+    z.object({ ticketId: z.string() }),
+    ({ args: { ticketId } }) => {
+      return zql.release_attributions
+        .where('ticketId', ticketId)
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
+  releaseTickets: defineQuery(() => {
+    return zql.tickets
+      .where('ticketType', BaseTicketType.Release)
+      .orderBy('createdAt', 'desc');
+  }),
+  releaseTicketsSearch: defineQuery(
+    z.object({
+      search: z.string().optional(),
+      limit: z.number().optional(),
+    }),
+    ({ args: { search, limit } }) => {
+      let query = zql.tickets
+        .where('ticketType', BaseTicketType.Release)
+        .orderBy('createdAt', 'desc');
+      if (search && search.trim()) {
+        const searchValue = `%${search.trim()}%`;
+        query = query.where(helpers =>
+          helpers.or(
+            helpers.cmp('xyneId', 'ILIKE', searchValue),
+            helpers.cmp('title', 'ILIKE', searchValue),
+          ),
+        );
+      }
+      return query.limit(limit ?? 10);
+    },
+  ),
+
+  ticketsSearch: defineQuery(
+    z.object({
+      search: z.string().optional(),
+      limit: z.number().optional(),
+    }),
+    ({ args: { search, limit } }) => {
+      let query = zql.tickets
+        .where(helpers => helpers.cmp('ticketType', '!=', BaseTicketType.Release))
+        .orderBy('createdAt', 'desc');
+      if (search && search.trim()) {
+        const searchValue = `%${search.trim()}%`;
+        query = query.where(helpers =>
+          helpers.or(
+            helpers.cmp('xyneId', 'ILIKE', searchValue),
+            helpers.cmp('title', 'ILIKE', searchValue),
+          ),
+        );
+      }
+      return query.limit(limit ?? 10);
+    },
+  ),
+
+  subTicketsByIds: defineQuery(
+    z.object({ subTicketIds: z.array(z.string()) }),
+    ({ args: { subTicketIds } }) => {
+      return zql.sub_tickets.where(helpers => helpers.cmp('id', 'IN', subTicketIds));
+    },
+  ),
+
   // Links queries
   channelLinks: defineQuery(
     z.object({ channelId: z.string() }),
@@ -1250,4 +1375,3 @@ export const queries = defineQueries({
     },
   ),
 });
- 

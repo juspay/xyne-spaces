@@ -1,9 +1,16 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 import { AttachmentController } from '../controllers/attachmentController';
 import { config } from '../config/env';
 
 const router = Router();
 const attachmentController = new AttachmentController();
+const upload = multer({
+  limits: {
+    fileSize: 1024 * 1024 * 1024,
+    files: 20,
+  },
+});
 
 /**
  * Middleware to set cross-origin headers for media streaming.
@@ -41,5 +48,12 @@ router.get('/attachments/:attachmentId/thumbnail', attachmentController.download
 
 // Download file by GCS path (query parameter)
 router.get('/attachments/file', attachmentController.downloadByPath.bind(attachmentController));
+
+// Upload attachments for an entity (e.g., IMPACT)
+router.post(
+  '/attachments/upload',
+  upload.fields([{ name: 'files', maxCount: 10 }]),
+  attachmentController.uploadAttachments.bind(attachmentController),
+);
 
 export default router;

@@ -1,5 +1,5 @@
 import { schema } from '@xyne/shared';
-import type { SchemaDataMap } from '@/vespa/src/types';
+import type { SchemaDataMap, SubApp } from '@/vespa/src/types';
 import { DeleteID, InsertValue, UpdateValue, UpsertValue } from '@rocicorp/zero';
 
 /**
@@ -16,6 +16,7 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
   jobType: VespaJobType;
   docId: string;
   userId?: string; // For error logging and data fetching
+  app?: SubApp; // when schema can belong to multiple sub-applications
   data?: SchemaDataMap[S] | Partial<SchemaDataMap[S]>;
 }
 
