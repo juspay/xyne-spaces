@@ -4,6 +4,7 @@ import CanvasScreen from '../../components/Canvas/CanvasScreen';
 import ChatView from '../../components/Chat/ChatView/ChatView';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
 import ProfileSidebar from '../../components/ProfileSidebar/ProfileSidebar';
+import UserGroupSidePanel from '../../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 
 /**
  * Shared routing structure for:
@@ -43,6 +44,16 @@ export const sharedChatRoutes: RouteObject[] = [
           {
             index: true,
             element: <ProfileSidebar />,
+          },
+        ],
+      },
+      {
+        path: 'group/:groupId',
+        element: <ChatView />,
+        children: [
+          {
+            index: true,
+            element: <UserGroupSidePanel />,
           },
         ],
       },

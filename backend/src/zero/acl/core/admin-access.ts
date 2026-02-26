@@ -1,6 +1,7 @@
 import { Transaction } from '@rocicorp/zero';
-import { Schema, AccessType } from '@xyne/shared';
+import { Schema, AccessType, UserResponsibility } from '@xyne/shared';
 import { zql } from '../../queries';
+import { MutationACLError, TableName } from './types';
 
 /**
  * Checks if the current user has ADMIN access to the USER-GROUPS resource (direct or via group).
@@ -37,4 +38,22 @@ export async function hasUserGroupsAdminAccess(ctx: { userID: string }, tx: Tran
     if (groupAccess) return true;
   }
   return false;
+}
+
+export async function verifyManagerOrTeamLead(ctx: { userID: string }, userGroupId: string, tx: Transaction<Schema>, tableName: TableName = 'user_group_mappings'): Promise<void> {
+  const requesterMapping = await tx.run(
+    zql.user_group_mappings
+      .where('userGroupId', userGroupId)
+      .where('userId', ctx.userID)
+      .one()
+  );
+    
+  if (!requesterMapping) {
+    throw new MutationACLError('Operation failed: you must be a member of the group', tableName);
+  }
+
+  if (requesterMapping.responsibility !== UserResponsibility.MANAGER && 
+      requesterMapping.responsibility !== UserResponsibility.TEAM_LEAD) {
+    throw new MutationACLError('Operation failed: only MANAGER or TEAM_LEAD can perform this operation', tableName);
+  }
 }

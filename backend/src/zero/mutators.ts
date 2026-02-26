@@ -4236,11 +4236,71 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', userId).one(),
               );
               if (mapping) {
+                const oldResponsibility = mapping.responsibility;
                 await tx.mutate.user_group_mappings.update({
                   id: mapping.id,
                   responsibility,
                   updatedAt: timestamp,
                 });
+
+                // Handle resource_access for USER-GROUPS based on role changes
+                const wasManagerOrLead = oldResponsibility === UserResponsibility.MANAGER ||
+                                         oldResponsibility === UserResponsibility.TEAM_LEAD;
+                const isManagerOrLead = responsibility === UserResponsibility.MANAGER ||
+                                        responsibility === UserResponsibility.TEAM_LEAD;
+
+                if (!wasManagerOrLead && isManagerOrLead) {
+                  // Upgraded to MANAGER/TEAM_LEAD → grant WRITE access
+                  const userGroupsResource = await tx.run(zql.resources.where('name', 'USER-GROUPS').one());
+                  if (userGroupsResource) {
+                    const existingAccess = await tx.run(
+                      zql.resource_access
+                        .where('userId', userId)
+                        .where('resourceId', userGroupsResource.id)
+                    );
+                    const hasWriteAccess = existingAccess.some(
+                      a => a.accessType === AccessType.WRITE || a.accessType === AccessType.ADMIN
+                    );
+                    if (!hasWriteAccess) {
+                      const now = Date.now();
+                      await tx.mutate.resource_access.insert({
+                        id: uuidv4(),
+                        userId: userId,
+                        resourceId: userGroupsResource.id,
+                        accessType: AccessType.WRITE,
+                        createdAt: now,
+                        updatedAt: now,
+                      });
+                      logger.info(`[Mutator] Granted WRITE access to USER-GROUPS for user ${userId}`);
+                    }
+                  }
+                } else if (wasManagerOrLead && !isManagerOrLead) {
+                  // Downgraded from MANAGER/TEAM_LEAD → check if other MANAGER/TEAM_LEAD roles exist
+                  const otherManagerMappings = await tx.run(
+                    zql.user_group_mappings
+                      .where('userId', userId)
+                      .where('responsibility', 'IN', [UserResponsibility.MANAGER, UserResponsibility.TEAM_LEAD])
+                  );
+                  // Filter out current mapping (still has old value in transaction)
+                  const hasOtherManagerRole = otherManagerMappings.some(m => m.id !== mapping.id);
+                  if (!hasOtherManagerRole) {
+                    // Revoke WRITE access
+                    const userGroupsResource = await tx.run(zql.resources.where('name', 'USER-GROUPS').one());
+                    if (userGroupsResource) {
+                      const existingAccess = await tx.run(
+                        zql.resource_access
+                          .where('userId', userId)
+                          .where('resourceId', userGroupsResource.id)
+                          .where('accessType', AccessType.WRITE)
+                          .one()
+                      );
+                      if (existingAccess) {
+                        await tx.mutate.resource_access.delete({ id: existingAccess.id });
+                        logger.info(`[Mutator] Revoked WRITE access to USER-GROUPS for user ${userId}`);
+                      }
+                    }
+                  }
+                }
               }
             }
 

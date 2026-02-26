@@ -18,9 +18,12 @@ export const ResourceProtectedRoute = ({
 }: ResourceProtectedRouteProps): ReactElement => {
   const permissions = usePermissions();
 
-  const hasAccess = permissions.some(
-    p => p.resourceName === resourceName && p.accessType === 'ADMIN',
-  );
+  const hasAccess = permissions.some(p => {
+    if (p.resourceName !== resourceName) return false;
+    if (p.accessType === 'ADMIN') return true;
+    if (resourceName === 'USER-GROUPS' && p.accessType === 'WRITE') return true;
+    return false;
+  });
 
   if (!hasAccess) {
     return <Navigate to='/' replace />;

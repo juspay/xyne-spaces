@@ -62,6 +62,10 @@ const ChatView = (): ReactElement => {
   const { isMobile } = usePlatform();
   const bounds = useMeasure({ ref: chatViewContainerRef, observeResize: true });
 
+  // Check for group panel from URL params
+  const { groupId } = useParams<{ groupId?: string }>();
+  const isGroupPanelOpen = !!groupId;
+
   // Reopen DM if user navigates to a closed DM (only on navigation, not on data updates)
   useEffect(() => {
     // Only run when channelId changes (navigation), not on data updates
@@ -135,7 +139,11 @@ const ChatView = (): ReactElement => {
   const isThreadActive = !!conversationId;
   const isProfileActive = !!userId;
   const showSecondaryPanel =
-    isThreadActive || isCanvasActive || isProfileActive || isChannelSummaryActive;
+    isThreadActive ||
+    isCanvasActive ||
+    isProfileActive ||
+    isChannelSummaryActive ||
+    isGroupPanelOpen;
 
   // Stack when either narrow view OR parent says to stack (XyneAI > 700px with thread)
   const shouldStack = bounds.width < 700 || shouldStackThreadFromParent;

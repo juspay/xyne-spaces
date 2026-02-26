@@ -1,30 +1,11 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { Schema, UserResponsibility } from '@xyne/shared';
+import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { hasUserGroupsAdminAccess } from '../core/admin-access';
+import { hasUserGroupsAdminAccess, verifyManagerOrTeamLead } from '../core/admin-access';
 
 export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
-
-  private async verifyManagerOrTeamLead(userGroupId: string, tx: Transaction<Schema>): Promise<void> {
-    // Check if the requester is a MANAGER or TEAM_LEAD in this group
-    const requesterMapping = await tx.run(
-      zql.user_group_mappings
-        .where('userGroupId', userGroupId)
-        .where('userId', this.ctx.userID)
-        .one()
-    );
-      
-    if (!requesterMapping) {
-      throw new MutationACLError('User group mapping operation failed: you must be a member of the group', 'user_group_mappings');
-    }
-
-    if (requesterMapping.responsibility !== UserResponsibility.MANAGER && 
-        requesterMapping.responsibility !== UserResponsibility.TEAM_LEAD) {
-      throw new MutationACLError('User group mapping operation failed: only MANAGER or TEAM_LEAD can perform this operation', 'user_group_mappings');
-    }
-  }
 
   async canInsert(args: InsertValue<TableSchema<'user_group_mappings'>>, tx: Transaction<Schema>): Promise<void> {
     // Check if the user group exists
@@ -45,7 +26,7 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
     }
 
     // Otherwise, verify user is MANAGER or TEAM_LEAD
-    await this.verifyManagerOrTeamLead(args.userGroupId, tx);
+    await verifyManagerOrTeamLead(this.ctx, args.userGroupId, tx, 'user_group_mappings');
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'user_group_mappings'>>, tx: Transaction<Schema>): Promise<void> {
@@ -67,7 +48,7 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
     }
 
     // Otherwise, verify user is MANAGER or TEAM_LEAD
-    await this.verifyManagerOrTeamLead(userGroupMapping.userGroupId, tx);
+    await verifyManagerOrTeamLead(this.ctx, userGroupMapping.userGroupId, tx, 'user_group_mappings');
   }
 
   async canDelete(args: DeleteID<TableSchema<'user_group_mappings'>>, tx: Transaction<Schema>): Promise<void> {
@@ -89,6 +70,6 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
     }
 
     // Otherwise, verify user is MANAGER or TEAM_LEAD
-    await this.verifyManagerOrTeamLead(userGroupMapping.userGroupId, tx);
+    await verifyManagerOrTeamLead(this.ctx, userGroupMapping.userGroupId, tx, 'user_group_mappings');
   }
 }
