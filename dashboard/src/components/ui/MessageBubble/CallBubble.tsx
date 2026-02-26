@@ -33,7 +33,7 @@ interface CallBubbleProps {
 /**
  * Button component for generating PRD from call transcript
  */
-const GeneratePRDButton: React.FC<{
+export const GeneratePRDButton: React.FC<{
   callId: string;
   messageId: string;
   isCanvasCreated?: boolean;
@@ -85,7 +85,7 @@ const GeneratePRDButton: React.FC<{
 /**
  * Button component for generating detailed summary from call transcript
  */
-const GenerateDetailedSummaryButton: React.FC<{
+export const GenerateDetailedSummaryButton: React.FC<{
   callId: string;
   messageId: string;
   isSummaryCanvasCreated?: boolean;

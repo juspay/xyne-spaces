@@ -516,4 +516,28 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     return message;
   }
 
+  /**
+   * Find the head call message for a given callId.
+   * Head messages have isCallMessage: true in their metadata.
+   */
+  async findHeadMessageByCallId(callId: string): Promise<Message | null> {
+    return await this.db.message.findFirst({
+      where: {
+        AND: [
+          {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+          {
+            metadata: {
+              path: ['isCallMessage'],
+              equals: true,
+            },
+          },
+        ],
+      },
+    });
+  }
 }

@@ -125,6 +125,8 @@ export const Event = {
   LIVEKIT_SCREEN_SHARE_RENDERED: 'livekit_screen_share_rendered',
   LIVEKIT_ROOM_EVENT: 'livekit_room_event',
   CANVAS_MENTION_DEBUG: 'canvas_mention_debug',
+  SHARE_RECORDING: 'share_recording',
+  SHARE_RECORDING_ERROR: 'share_recording_error',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

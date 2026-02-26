@@ -382,20 +382,32 @@ export class CallController {
     try {
       const recordings = await repositories.calls.findByUserAndType(userId, 'HEADLESS' as CallType);
 
-      // Transform to response format, sorted newest first
-      const response = recordings
+      // Map to response format and fetch messageIds for each head message
+      const response = await Promise.all(recordings
         .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
-        .map(call => ({
-          id: call.id,
-          externalId: call.externalId,
-          title: call.title || 'Untitled Recording',
-          startedAt: call.startedAt,
-          endedAt: call.endedAt,
-          durationMs: call.endedAt
-            ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
-            : null,
-          hasTranscript: !!call.transcript,
-          hasSummary: !!call.aiSummary,
+        .map(async (call) => {
+          let messageId: string | null = null;
+          try {
+             // Find the matching head message using repository method
+             const callMessage = await repositories.messages.findHeadMessageByCallId(call.externalId);
+             messageId = callMessage?.messageId || null;
+          } catch (e) {
+            logger.warn(`Failed to find head message for call ${call.externalId}`);
+          }
+
+          return {
+            id: call.id,
+            externalId: call.externalId,
+            title: call.title || 'Untitled Recording',
+            startedAt: call.startedAt,
+            endedAt: call.endedAt,
+            durationMs: call.endedAt
+              ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
+              : null,
+            hasTranscript: !!call.transcript,
+            hasSummary: !!call.aiSummary,
+            messageId,
+          };
         }));
 
       res.json({ success: true, recordings: response });
@@ -455,6 +467,15 @@ export class CallController {
         aiSummaryFormat = (!hasHtmlTags || startsWithMarkdown) ? 'markdown' : 'html';
       }
 
+      // Find the call message's messageId for sharing functionality
+      let messageId: string | null = null;
+      try {
+        const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
+        messageId = callMessage?.messageId || null;
+      } catch (msgError) {
+        logger.warn(`Failed to find message for call ${callId}: ${msgError}`);
+      }
+
       res.json({
         success: true,
         recording: {
@@ -469,6 +490,7 @@ export class CallController {
           transcript: transcriptContent,
           aiSummary: call.aiSummary,
           aiSummaryFormat,
+          messageId,
         },
       });
     } catch (error) {
@@ -515,15 +537,8 @@ export class CallController {
       // For headless recordings, update the system message content
       if (call.callType === CallType.HEADLESS) {
         try {
-          // Find the message associated with this call
-          const callMessage = await repositories.messages['db'].message.findFirst({
-            where: {
-              metadata: {
-                path: ['callId'],
-                equals: callId
-              }
-            }
-          });
+          // Find the message associated with this call using repository method
+          const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
 
           if (callMessage) {
             await repositories.messages.update(callMessage.messageId, {
