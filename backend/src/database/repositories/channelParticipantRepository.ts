@@ -208,6 +208,39 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
     return await this.findMany({ channelId });
   }
 
+  /**
+   * Get all participants for a channel with their user details.
+   * ChannelParticipant has no Prisma FK relation to User, so we do a two-step
+   * batch fetch: participants → user IDs → users (same pattern as callRepository).
+   * Used for building mention maps in documents / AI prompts.
+   */
+  async getChannelParticipantsWithUserDetails(
+    channelId: string
+  ): Promise<Array<{ userId: string; userName: string; userEmail: string; userPicture: string | null }>> {
+    // Step 1: get participant user IDs
+    const participants = await this.db.channelParticipant.findMany({
+      where: { channelId },
+      select: { userId: true },
+    });
+
+    if (participants.length === 0) return [];
+
+    const userIds = participants.map(p => p.userId);
+
+    // Step 2: batch-fetch user details
+    const users = await this.db.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, name: true, email: true, picture: true },
+    });
+
+    return users.map(u => ({
+      userId: u.id,
+      userName: u.name,
+      userEmail: u.email,
+      userPicture: u.picture,
+    }));
+  }
+
   async getUserChannels(userId: string): Promise<ChannelParticipant[]> {
     return await this.findMany({ userId });
   }
