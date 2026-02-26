@@ -386,7 +386,10 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
     setSelectedActivities(prev => {
       const existingIds = new Set(prev.map(a => a.id));
       const newActivities = activities.filter(a => !existingIds.has(a.id));
-      return [...prev, ...newActivities];
+      const combined = [...prev, ...newActivities];
+      return combined.sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
     });
 
     setShowUserActivityPanel(false);

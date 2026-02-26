@@ -9,7 +9,9 @@ import {
   Globe,
   Loader2,
   ExternalLink,
+  Maximize2,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { isElectronApp } from '../../utils/electronApp';
 import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
 
@@ -128,6 +130,7 @@ export function BrowserTabsScreen({
   const activeTabId = useSelector(browserPanelActor, state => state.context.activeTabId);
   const [urlInput, setUrlInput] = useState('');
   const webviewRefs = useRef<Record<string, WebviewTag | null>>({});
+  const navigate = useNavigate();
 
   const activeTab = tabs.find(t => t.id === activeTabId);
   const isPanel = variant === 'panel';
@@ -268,6 +271,13 @@ export function BrowserTabsScreen({
     }
   };
 
+  const handleOpenFullscreen = () => {
+    void navigate('/browser');
+    if (isPanel) {
+      browserPanelActor.send({ type: 'CLOSE' });
+    }
+  };
+
   const handleUpdateTab = (tabId: string, patch: Partial<BrowserTab>) => {
     browserPanelActor.send({ type: 'UPDATE_TAB', tabId, patch });
   };
@@ -303,6 +313,16 @@ export function BrowserTabsScreen({
             <span className='text-sm font-medium text-gray-700'>Browser</span>
           </div>
           <div className='flex items-center gap-1'>
+            <button
+              onClick={handleOpenFullscreen}
+              className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
+              title='Open in fullscreen browser'
+              data-track-category='BROWSER'
+              data-track-name='OpenFullscreenBrowser'
+              data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
+            >
+              <Maximize2 size={14} />
+            </button>
             {activeTab && (
               <button
                 onClick={handleOpenExternal}

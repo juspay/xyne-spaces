@@ -199,6 +199,13 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                         );
                       }}
                       className='text-gray-400 hover:text-gray-600 flex-shrink-0'
+                      data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+                      data-track-name='RemoveCallParticipant'
+                      data-track-metadata={JSON.stringify({
+                        userId: user.id,
+                        channelId,
+                        conversationId,
+                      })}
                     >
                       <X className='size-4' strokeWidth={2.5} />
                     </button>

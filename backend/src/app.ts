@@ -86,6 +86,7 @@ import customInstructionRoutes from '@/routes/customInstruction';
 import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
+import activityAliasesRoutes from '@/routes/activityAliases';
 import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
 import { verifySamCallback } from '@/middleware/samCallbackAuth';
@@ -348,6 +349,8 @@ export class App {
 
     // User activity routes (auth required)
     this.app.use('/api/user-activity', authMiddleware.authenticate, userActivityRoutes);
+
+    this.app.use('/api/activity-aliases', authMiddleware.authenticate, activityAliasesRoutes);
 
     // Chat routes (auth only, no ACL for now)
 

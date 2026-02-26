@@ -138,6 +138,8 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
                 isUserInCall ? 'text-black' : 'text-white',
               )}
               type='button'
+              data-track-category='CALL'
+              data-track-name='JoinCallFromLayout'
             >
               Join Call
             </button>

@@ -1,12 +1,14 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useCallback, useState } from 'react';
-import { Check, ChevronRight, ChevronDown } from 'lucide-react';
+import { Check, ChevronRight, ChevronDown, Settings } from 'lucide-react';
 import type { UserActivity } from '../../../../hooks/useUserActivity';
 
 interface UserActivityItemProps {
   activity: UserActivity;
   isSelected: boolean;
   onToggle: (activity: UserActivity, isShiftKey: boolean, isMetaKey: boolean) => void;
+  onConfigure?: (activity: UserActivity) => void;
+  canConfigure?: boolean;
 }
 
 const formatEventName = (eventName: string): string => {
@@ -61,6 +63,8 @@ export const UserActivityItem = ({
   activity,
   isSelected,
   onToggle,
+  onConfigure,
+  canConfigure,
 }: UserActivityItemProps): ReactElement => {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -76,6 +80,14 @@ export const UserActivityItem = ({
     [activity, onToggle],
   );
 
+  const handleConfigure = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onConfigure?.(activity);
+    },
+    [activity, onConfigure],
+  );
+
   return (
     <div
       className={`
@@ -88,7 +100,7 @@ export const UserActivityItem = ({
       <button
         type='button'
         onClick={handleClick}
-        className='w-full flex items-center gap-2 px-4 py-2.5 text-left'
+        className='w-full flex items-center gap-2 px-4 py-2.5 text-left group'
       >
         {/* Expand/Collapse Chevron */}
         <div
@@ -126,6 +138,17 @@ export const UserActivityItem = ({
 
         {/* Checkmark (when selected) */}
         {isSelected && <Check className='w-4 h-4 text-blue-600 shrink-0' aria-hidden='true' />}
+
+        {onConfigure && canConfigure && (
+          <button
+            onClick={handleConfigure}
+            className='rounded'
+            title='Configure activity'
+            type='button'
+          >
+            <Settings className='w-3.5 h-3.5 text-gray-400 hover:text-gray-600' />
+          </button>
+        )}
 
         {/* Timestamp (when not selected, or always visible) */}
         <span className='text-xs text-gray-400 shrink-0 ml-1'>

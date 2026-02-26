@@ -142,6 +142,8 @@ export const QuartoInstructionsModal: React.FC<QuartoInstructionsModalProps> = (
           <button
             onClick={onClose}
             className='ml-auto p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
+            data-track-category='QUARTO_INSTRUCTIONS_MODAL'
+            data-track-name='CloseButton'
           >
             <X className='h-5 w-5' />
           </button>
