@@ -1,3 +1,49 @@
+## [1.59.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.58.0...v1.59.0) (2026-02-26)
+
+
+### Features
+
+* : Implemented a new xyne_rca tool for the Xyne AI agent ([15bca9a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/15bca9a367d422ffb67c5e9838583d10754db729)), closes [#3474](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3474)
+* add optional title to PublishRequest for markdown publishing ([9a3103a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9a3103a6bce61d415f07fa49cfec4b62921afeb4)), closes [#3588](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3588)
+* added recorder in desktop ([d130ebf](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d130ebf3e4e35f9893c56046dd8f8bae39d9bf34)), closes [#3678](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3678)
+* AI_assisted_board_detection_for_ticket ([5d9e5c9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5d9e5c903d894dc5924cdf1014e84d3237680980)), closes [#3144](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3144)
+* alias for modifying existing names and categories ([41cbcd8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/41cbcd83b950c709d1472ad74975671450c3b54e)), closes [#3649](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3649)
+* backend event ([47a5a49](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/47a5a4982972869112e9f64fcb6813bdf94a123d)), closes [#3682](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3682)
+* board transfer stage set ([5a39cbc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5a39cbc7db1382906765886e7be0cbcf4c6f439c)), closes [#3455](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3455)
+* call recording thread share ([382c017](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/382c01747d4a36a86d364390b7037eacaab3d5de)), closes [#3619](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3619)
+* Enable call initiation from conversation view ([98bc1ac](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/98bc1ac7723d22d274a7a9b27b53c7b7cc97d7c5)), closes [#3334](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3334)
+* enable linter for user activity tracking ([04e585e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/04e585ed6ed1a833f409dd0d45a5943fa8f83ce1)), closes [#3617](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3617)
+* enabling web search for all ([b20510d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b20510dbcf52fd1104763acc208a27b9867b1b78)), closes [#3582](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3582)
+* enhancing search tools in xyne ai ([907ee13](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/907ee132b3470c0731f795d8293a7f757af6f2ee)), closes [#3580](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3580)
+* getting tickets that a user is assigned to and created by ([b357645](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b357645d7bdefb5f93a04d90db9d7c52853c19ad)), closes [#3395](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3395)
+* Pulse integration with calls ([f27dd9c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f27dd9cc7ef95d9148f1d6adc332c7fc0a465205)), closes [#3577](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3577)
+* removed the anchoring on leftAt ([0c523df](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0c523df06582e799b965ab21be69eb34aa3e277a)), closes [#3581](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3581)
+* Root Cause Analysis Panel ([cdd0b26](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cdd0b26ce357d2af9b406af2de5dcf80fb693abc)), closes [#3539](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3539)
+* Write access people can see the user group side bar options ([7436353](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/74363532c889a146a49ccd036ea51f2a1ae72a20)), closes [#3467](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3467)
+* xyne-spaces support for windows ([7109746](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/710974696d4ed264812e9c06a08289ee2fc7cf65)), closes [#3415](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3415)
+
+
+### Bug Fixes
+
+* added required tracking ([3a01bb9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3a01bb9896cb398ccd8c0b2b32056a44dbd65424)), closes [#3645](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3645)
+* change the editing workflow for quarto docs, and fix some workflow issues ([ab0b7e5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ab0b7e5f9c67fcbecf5cb1435e3aaf3962e45602))
+* Default check to make sure created user is always invitedd ([508bd91](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/508bd9143ee03caa840a4b7133a21114f3e7c404)), closes [#3660](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3660)
+* draft fix ([f9a8ab8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f9a8ab8ca0f0f05669f42c34fda505c3d355d619)), closes [#3586](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3586)
+* fix call metrics ([2a083fa](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2a083fa6891e67ebb1be4add628a8e9b8c08ac63))
+* fixes settings tab bug ([d315858](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d3158586c0890f9eeea3026cb7e4ac59955068d4))
+* fixing activity strcuture in the uii ([69f596d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/69f596d778a0340110b56bce6dbe98f2bfc35898))
+* fixing the attachment skeleton coming small issue ([d72f3a0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d72f3a0f841ba89b590002329fe50a9a627baefe))
+* fixing the blur video thumbnail ([5d9f80b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5d9f80b65f9384635f188e941b0574f3769af240))
+* logging web app boot duration ([1afda31](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1afda3117646542cbf5a033c93de0ff9ee14a83d)), closes [#3594](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3594)
+* making user appear online on reconnect ([def80eb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/def80eb9a56be016aab93e4c5c33e4d7608c077e)), closes [#3572](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3572)
+* modified the assignment logic so that QA wont get ticket assigned and PR eviewer cant be assigned to her/his  own ticket as asssignee ([e793f4f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e793f4ff5a309d414923e90a81d0827b30fc108e)), closes [#3609](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3609)
+* one normal clicks open links in xs browser or cmd click open in default browser ([75b3f7f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75b3f7f04b2570ae6624b8307aaae1bb3901967b)), closes [#3576](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3576)
+* open ask AI links in new tab ([1eb75d2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1eb75d2410c8f8e83d8157eca18cf5f24f264bd8)), closes [#3631](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3631)
+* prompt name change ([2c53e12](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2c53e1260c49bf1346391dfa2b6eede6743f28d9)), closes [#3624](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3624)
+* remove count of external messages ([5673695](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/567369548a4c9fc33617063f44bbc48b5c609262)), closes [#3607](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3607)
+* restricted participant map to channel only ([1930c47](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1930c47b8a36d2f79dc86cbac112c76844c635fb)), closes [#3620](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3620)
+* Upgrade blocknote version to 46.2 ([29d0e29](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/29d0e29edfbfce1038dc0aec9e497b7cc1c0795f)), closes [#3642](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3642)
+
 ## [1.58.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.57.0...v1.58.0) (2026-02-25)
 
 
