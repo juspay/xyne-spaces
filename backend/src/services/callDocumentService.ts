@@ -124,22 +124,22 @@ function parseTextWithMentions(
 
 
 /**
- * Build participant map from call ID
- * Maps lowercase participant name -> participant info
+ * Build participant map from the channel that owns the call.
+ * Maps lowercase participant name -> participant info.
+ * Using channel participants (not just call attendees) ensures the AI prompt
+ * and @mention resolution covers everyone who could be referenced.
  */
-async function buildParticipantMap(callId: string): Promise<Map<string, ParticipantInfo>> {
+async function buildParticipantMap(channelId: string): Promise<Map<string, ParticipantInfo>> {
   const participantMap = new Map<string, ParticipantInfo>();
 
   try {
-    // Get participants with user details from repository
-    const participants = await repositories.calls.getCallParticipantsWithUserDetails(callId);
+    const participants = await repositories.channelParticipants.getChannelParticipantsWithUserDetails(channelId);
 
     if (participants.length === 0) {
-      logger.warn(`[CallDocumentService] No participants found for call ${callId}`);
+      logger.warn(`[CallDocumentService] No channel participants found for channelId=${channelId}`);
       return participantMap;
     }
 
-    // Build participant map
     for (const participant of participants) {
       const lowerName = participant.userName.toLowerCase();
       participantMap.set(lowerName, {
@@ -148,10 +148,10 @@ async function buildParticipantMap(callId: string): Promise<Map<string, Particip
         userEmail: participant.userEmail,
         userPicture: participant.userPicture || undefined,
       });
-      logger.info(`[CallDocumentService] Added participant to map: "${participant.userName}" (lowercase: "${lowerName}") -> ${participant.userId}`);
+      logger.info(`[CallDocumentService] Added channel participant to map: "${participant.userName}" (lowercase: "${lowerName}") -> ${participant.userId}`);
     }
 
-    logger.info(`[CallDocumentService] Built participant map with ${participantMap.size} participants for call ${callId}`);
+    logger.info(`[CallDocumentService] Built participant map with ${participantMap.size} channel participants for channelId=${channelId}`);
     logger.info(`[CallDocumentService] Participant names in map: ${Array.from(participantMap.keys()).join(', ')}`);
   } catch (error) {
     logger.error('[CallDocumentService] Error building participant map:', error);
@@ -636,8 +636,15 @@ export class CallDocumentService {
     }
 
     try {
-      // Build participant map to get correct participant names
-      const participantMap = await buildParticipantMap(callId);
+      // Resolve channelId from the call so we can build the channel participant map
+      const call = await repositories.calls.findByExternalId(callId);
+      const channelId = call?.channelId;
+
+      // Build participant map from channel members (covers all channel participants, not just call attendees)
+      const participantMap = channelId
+        ? await buildParticipantMap(channelId)
+        : new Map<string, ParticipantInfo>();
+
       const participantList = Array.from(participantMap.values())
         .map(p => `- ${p.username}`)
         .join('\n');
@@ -777,9 +784,10 @@ export class CallDocumentService {
         }
       }
 
-      // Build participant map for mention resolution
-      const participantMap = await buildParticipantMap(callId);
-      logger.info(`[CallDocumentService] Built participant map with ${participantMap.size} participants for mentions`);
+      // Build participant map from channel members for mention resolution
+      // channelId is already available as a method parameter
+      const participantMap = await buildParticipantMap(channelId);
+      logger.info(`[CallDocumentService] Built channel participant map with ${participantMap.size} participants for mentions`);
 
       // Convert markdown to BlockNote with mention support
       // mentionedUserIds are collected during the same pass — no second scan needed
