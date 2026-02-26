@@ -83,6 +83,7 @@ import DashboardCreation from './DashboardCreation/DashboardCreation';
 import QueryBuilderScreen from './QueryBuilderScreen/QueryBuilderScreen.tsx';
 import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
+import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 
 const AppRoot = (): ReactElement => {
   // Create panel refs for WebView
@@ -265,6 +266,7 @@ const AppRoot = (): ReactElement => {
     <ZeroProvider>
       <InitialStateLoader>
         <ZeroFallbackProvider>
+          <ShareRecordingHandler />
           <EditProvider>
             {shouldShowMobileHeader && externalId && (
               <MobileCallHeader

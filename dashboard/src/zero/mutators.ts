@@ -1181,6 +1181,110 @@ export const mutators = defineMutators({
           content: forwardedContent,
         });
 
+        // Update user's last viewed time
+        const userStatus = await tx.run(
+          zql.channel_user_status
+            .where('channelId', targetChannelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (userStatus) {
+          await tx.mutate.channel_user_status.update({
+            id: userStatus.id,
+            lastViewedAt: now,
+            lastViewedConversationId: conversationId,
+          });
+        }
+
+        // --- Call Message Forwarding Specifics ---
+
+        let replyCount = 0;
+        const originalMetadata = originalMessage.metadata as Record<string, unknown> | undefined;
+        const isCallMessage = originalMetadata?.['isCallMessage'] === true;
+
+        // Define metadata for the new forwarded message
+        const forwardedMessageMetadata = {} as Record<string, unknown>;
+        if (isCallMessage) {
+          forwardedMessageMetadata['isCallMessage'] = true;
+          if (originalMetadata?.['callId']) {
+            forwardedMessageMetadata['callId'] = originalMetadata['callId'];
+          }
+        }
+
+        // If it is a call message, we want to clone all non-user bot messages (like transcipts/summaries)
+        if (isCallMessage) {
+          // Get all bot thread messages from the original conversation
+          const botMessages = await tx.run(
+            zql.messages
+              .where('conversationId', originalMessage.conversationId)
+              .where('msgType', MessageType.BOT),
+          );
+
+          replyCount = botMessages.length;
+
+          // Insert the cloned bot messages into the new conversation
+          for (let i = 0; i < botMessages.length; i++) {
+            const botMsg = botMessages[i]!;
+            const clonedMessageId = `${conversationId}-botmsg-${i}`;
+
+            await tx.mutate.messages.insert({
+              messageId: clonedMessageId,
+              conversationId,
+              senderId: botMsg.senderId,
+              content: botMsg.content,
+              msgType: botMsg.msgType,
+              hasAttachment: botMsg.hasAttachment,
+              edited: botMsg.edited,
+              isDeleted: botMsg.isDeleted,
+              isSent: botMsg.isSent,
+              showInChannel: botMsg.showInChannel,
+              childConversationId: botMsg.childConversationId,
+              createdAt: botMsg.createdAt,
+              metadata: botMsg.metadata,
+              visibleTo: botMsg.visibleTo,
+            });
+
+            // If the bot message had attachments, we need to clone the attachment references
+            if (botMsg.hasAttachment) {
+              const originalAttachments = await tx.run(
+                zql.message_attachments
+                  .where('entityId', botMsg.messageId)
+                  .where('entityType', AttachmentEntityType.CHAT),
+              );
+
+              for (let j = 0; j < originalAttachments.length; j++) {
+                const attInfo = originalAttachments[j]! as unknown as {
+                  fileUrl?: string;
+                  url?: string;
+                  originalFilename?: string;
+                  size?: number;
+                  thumbnailUrl?: string;
+                  mimetype?: string;
+                  createdAt?: number;
+                  storageProvider?: string;
+                };
+                // Generate a deterministic ID for the attachment mapping
+                const clonedAttId = `${clonedMessageId}-att-${j}`;
+                await tx.mutate.message_attachments.insert({
+                  id: clonedAttId,
+                  entityId: clonedMessageId,
+                  entityType: AttachmentEntityType.CHAT,
+                  conversationId: conversationId,
+                  url: attInfo.fileUrl || attInfo.url || '',
+                  originalFilename: attInfo.originalFilename || '',
+                  size: attInfo.size || 0,
+                  thumbnailUrl: attInfo.thumbnailUrl,
+                  mimetype: attInfo.mimetype || '',
+                  createdAt: attInfo.createdAt || now,
+                  storageProvider: attInfo.storageProvider || 's3',
+                  uploadedByUserId: ctx.userID,
+                  createdBy: ctx.userID,
+                });
+              }
+            }
+          }
+        }
+
         // Create the forwarded message with XML content
         await tx.mutate.messages.insert({
           messageId,
@@ -1194,27 +1298,14 @@ export const mutators = defineMutators({
           isSent: false,
           showInChannel: false,
           createdAt: now,
-          metadata: {},
+          metadata: forwardedMessageMetadata as ReadonlyJSONValue,
         });
 
-        // Update channel last activity
-        await tx.mutate.channels.update({
-          id: targetChannelId,
-          lastActivityAt: now,
-        });
-
-        // Update user's last viewed time
-        const userStatus = await tx.run(
-          zql.channel_user_status
-            .where('channelId', targetChannelId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-        if (userStatus) {
-          await tx.mutate.channel_user_status.update({
-            id: userStatus.id,
-            lastViewedAt: now,
-            lastViewedConversationId: conversationId,
+        // Update reply count if bots were added
+        if (replyCount > 0) {
+          await tx.mutate.conversations.update({
+            conversationId,
+            replyCount,
           });
         }
 

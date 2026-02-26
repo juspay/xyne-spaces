@@ -1704,6 +1704,103 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
 
+          // --- Call Message Forwarding Specifics ---
+          
+          let replyCount = 0;
+          const originalMetadata = originalMessage.metadata as Record<string, unknown> | undefined;
+          const isCallMessage = originalMetadata?.['isCallMessage'] === true;
+          
+          // Define metadata for the new forwarded message
+          if (isCallMessage) {
+            const forwardedMessageMetadata = { ...(originalMessage.metadata as Record<string, unknown> || {}) };
+            forwardedMessageMetadata['isCallMessage'] = true;
+            if (originalMetadata?.['callId']) {
+              forwardedMessageMetadata['callId'] = originalMetadata['callId'];
+            }
+            
+            // Re-update the inserted message metadata with call indicators
+            await tx.mutate.messages.update({
+              messageId,
+              metadata: forwardedMessageMetadata as any,
+            });
+          }
+
+          // If it is a call message, we want to clone all non-user messages (like transcipts/summaries/system msg)
+          if (isCallMessage) {
+            // Get all system/bot thread messages from the original conversation
+            const threadMessages = await tx.run(
+              zql.messages
+                .where('conversationId', originalMessage.conversationId)
+            );
+
+            // Filter for only BOT and SYSTEM messages
+            const systemMessages = threadMessages.filter(msg => msg.msgType === MessageType.BOT || msg.msgType === MessageType.SYSTEM);
+
+            replyCount = systemMessages.length;
+
+            if (replyCount > 0) {
+              // We'll just fetch them in the loop to be safe with zql limits if any
+              for (let i = 0; i < systemMessages.length; i++) {
+                const sysMsg = systemMessages[i]!;
+                const clonedMessageId = uuidv4(); // Generate a new UUID for the duplicated message
+                
+                await tx.mutate.messages.insert({
+                  messageId: clonedMessageId,
+                  conversationId,
+                  senderId: sysMsg.senderId,
+                  content: sysMsg.content,
+                  msgType: sysMsg.msgType,
+                  hasAttachment: sysMsg.hasAttachment,
+                  edited: sysMsg.edited,
+                  isDeleted: sysMsg.isDeleted,
+                  isSent: sysMsg.isSent,
+                  showInChannel: sysMsg.showInChannel,
+                  childConversationId: sysMsg.childConversationId,
+                  createdAt: sysMsg.createdAt,
+                  metadata: sysMsg.metadata as any,
+                  visibleTo: sysMsg.visibleTo,
+                });
+
+                // If the system message had attachments, we need to clone the attachment references
+                if (sysMsg.hasAttachment) {
+                   const originalAtts = await tx.run(
+                     zql.message_attachments
+                      .where('entityId', sysMsg.messageId)
+                      .where('entityType', AttachmentEntityType.CHAT)
+                   );
+
+                   for (let j = 0; j < originalAtts.length; j++) {
+                     const attInfo = originalAtts[j]!;
+                     await tx.mutate.message_attachments.insert({
+                        id: uuidv4(),
+                        entityId: clonedMessageId,
+                        entityType: AttachmentEntityType.CHAT,
+                        originalFilename: attInfo.originalFilename,
+                        size: attInfo.size,
+                        mimetype: attInfo.mimetype,
+                        url: (attInfo as any).url || (attInfo as any).fileUrl || '',
+                        thumbnailUrl: attInfo.thumbnailUrl,
+                        uploadedByUserId: authData.sub,
+                        createdBy: authData.sub,
+                        storageProvider: (attInfo as any).storageProvider || 's3',
+                        conversationId: conversationId,
+                        metadata: attInfo.metadata as any,
+                        createdAt: now,
+                     });
+                   }
+                }
+              }
+            }
+          }
+
+          // Update reply count if bots were added
+          if (replyCount > 0) {
+            await tx.mutate.conversations.update({
+               conversationId,
+               replyCount
+            });
+          }
+
           // Update channel last activity
           await tx.mutate.channels.update({
             id: targetChannelId,

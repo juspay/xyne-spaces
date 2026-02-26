@@ -632,7 +632,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isCallMessage && metadata?.callId ? (
+          {isCallMessage && metadata?.callId && !isForwardedMessage ? (
             <CallBubble
               message={{
                 messageId: message.messageId,
@@ -737,30 +737,52 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         </span>
                       )}
                     </div>
-                    <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-gray-600 ${getEmojiFontSizeClass(forwardedMessageData.content)}`}
-                    >
-                      {isMobile ? (
-                        <ExpandableMessage
-                          message={forwardedMessageData.content}
-                          showEdited={false}
-                          maxHeight={500}
+                    {metadata?.isCallMessage && metadata?.callId ? (
+                      <>
+                        <CallBubble
+                          message={{
+                            messageId: message.messageId,
+                            content: forwardedMessageData.content,
+                            createdAt: forwardedMessageData.originalCreatedAt || message.createdAt,
+                            hasAttachment: message.hasAttachment,
+                            metadata,
+                          }}
+                          callId={metadata.callId}
+                          isActiveCall={isActiveCall}
+                          {...(channelId && { channelId })}
+                          showAvatar={false}
+                          {...(context && { context })}
+                          attachments={attachments}
                         />
-                      ) : (
-                        <div className='jp-message-html inline-block'>
-                          <RenderMessageWithHTML
-                            message={forwardedMessageData.content}
-                            showEdited={false}
-                          />
+                      </>
+                    ) : (
+                      <>
+                        <div
+                          className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-gray-600 ${getEmojiFontSizeClass(forwardedMessageData.content)}`}
+                        >
+                          {isMobile ? (
+                            <ExpandableMessage
+                              message={forwardedMessageData.content}
+                              showEdited={false}
+                              maxHeight={500}
+                            />
+                          ) : (
+                            <div className='jp-message-html inline-block'>
+                              <RenderMessageWithHTML
+                                message={forwardedMessageData.content}
+                                showEdited={false}
+                              />
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                    {/* Attachments inside the forwarded message border */}
-                    <AttachmentsBlock
-                      attachments={attachments}
-                      isMobile={isMobile}
-                      className='mt-2'
-                    />
+                        {/* Attachments inside the forwarded message border */}
+                        <AttachmentsBlock
+                          attachments={attachments}
+                          isMobile={isMobile}
+                          className='mt-2'
+                        />
+                      </>
+                    )}
                     {/* Posted in link for forwarded messages */}
                     {forwardedMessageData?.originalChannelId &&
                       forwardedMessageData?.originalConversationId && (

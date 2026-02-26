@@ -6,7 +6,7 @@ import { MessageRepository, CreateMessageInput } from '../database/repositories/
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository';
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
-import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType } from '@prisma/client';
+import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma } from '@prisma/client';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
@@ -407,6 +407,14 @@ export class ChannelController {
           },
         });
 
+        const forwardedMessageMetadata = {} as Record<string, unknown>;
+        if (isCall) {
+          forwardedMessageMetadata['isCallMessage'] = true;
+          if (meta?.callId) {
+            forwardedMessageMetadata['callId'] = meta.callId;
+          }
+        }
+
         // Create the forwarded message with XML content
         const createdMessage = await tx.message.create({
           data: {
@@ -415,7 +423,7 @@ export class ChannelController {
             content: xmlContent,
             msgType: MessageType.FORWARDED,
             hasAttachment: originalAttachments.length > 0,
-            metadata: {},
+            metadata: forwardedMessageMetadata as Prisma.InputJsonValue,
           },
         });
 
@@ -443,10 +451,78 @@ export class ChannelController {
           }
         }
 
-        // Update conversation with real initial message ID
+        let totalReplyCount = 0;
+
+        // If it is a call message, we want to clone all non-user bot messages (like transcipts/summaries)
+        if (isCall) {
+          // Get all bot thread messages from the original conversation
+          const botMessages = await tx.message.findMany({
+            where: {
+              conversationId: originalMessage.conversationId,
+              msgType: MessageType.BOT
+            }
+          });
+
+          totalReplyCount = botMessages.length;
+
+          // Insert the cloned bot messages into the new conversation
+          for (let i = 0; i < botMessages.length; i++) {
+            const botMsg = botMessages[i]!;
+            const clonedMessage = await tx.message.create({
+              data: {
+                conversationId: conversation.conversationId,
+                senderId: botMsg.senderId,
+                content: botMsg.content,
+                msgType: botMsg.msgType,
+                hasAttachment: botMsg.hasAttachment,
+                edited: botMsg.edited,
+                isDeleted: botMsg.isDeleted,
+                isSent: botMsg.isSent,
+                showInChannel: botMsg.showInChannel,
+                childConversationId: botMsg.childConversationId,
+                metadata: (botMsg.metadata as Prisma.InputJsonValue) || {},
+                visibleTo: botMsg.visibleTo,
+              }
+            });
+
+            // If the bot message had attachments, clone them too
+            if (botMsg.hasAttachment) {
+              const botOriginalAttachments = await tx.messageAttachment.findMany({
+                where: {
+                  entityId: botMsg.messageId,
+                  entityType: AttachmentEntityType.CHAT
+                }
+              });
+
+              for (const originalAtt of botOriginalAttachments) {
+                await tx.messageAttachment.create({
+                  data: {
+                    entityId: clonedMessage.messageId,
+                    entityType: AttachmentEntityType.CHAT,
+                    originalFilename: originalAtt.originalFilename,
+                    size: originalAtt.size,
+                    mimetype: originalAtt.mimetype,
+                    url: originalAtt.url,
+                    thumbnailUrl: originalAtt.thumbnailUrl || undefined,
+                    uploadedByUserId: senderId,
+                    createdBy: senderId,
+                    storageProvider: originalAtt.storageProvider,
+                    conversationId: conversation.conversationId,
+                    metadata: (originalAtt.metadata as Prisma.InputJsonValue) || {}
+                  }
+                });
+              }
+            }
+          }
+        }
+
+        // Update conversation with real initial message ID and replyCount
         await tx.conversation.update({
           where: { conversationId: conversation.conversationId },
-          data: { initialMessageId: createdMessage.messageId },
+          data: { 
+            initialMessageId: createdMessage.messageId,
+            replyCount: totalReplyCount,
+          },
         });
 
         // Update channel last activity

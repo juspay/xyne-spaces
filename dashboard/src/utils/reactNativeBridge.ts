@@ -93,6 +93,8 @@ const nativeInboundMessageTypeValues = {
   // Keyboard events
   KEYBOARD_OPEN: 'KEYBOARD_OPEN',
   KEYBOARD_HIDDEN: 'KEYBOARD_HIDDEN',
+  // Share recording from native RecordingDetailScreen
+  SHARE_RECORDING: 'SHARE_RECORDING',
 } as const;
 
 export type NativeInboundMessageType = keyof typeof nativeInboundMessageTypeValues;
@@ -119,6 +121,8 @@ const nativeOutboundMessageTypeValues = {
   DRAWER_OPENED: 'DRAWER_OPENED',
   DRAWER_CLOSED: 'DRAWER_CLOSED',
   REQUEST_CLIENT_SESSION_ID: 'REQUEST_CLIENT_SESSION_ID',
+  RESTORE_RECORDING_SCREEN: 'RESTORE_RECORDING_SCREEN',
+  CLEAR_RECORDING_STATE: 'CLEAR_RECORDING_STATE',
 } as const;
 
 export type NativeOutboundMessageType = keyof typeof nativeOutboundMessageTypeValues;
@@ -283,6 +287,8 @@ type ReactNativeInboundPayloadMap = {
   // Keyboard events
   KEYBOARD_OPEN: undefined;
   KEYBOARD_HIDDEN: undefined;
+  // Share recording from native RecordingDetailScreen
+  SHARE_RECORDING: { messageId: string };
 };
 
 type ReactNativeOutboundPayloadMap = {
@@ -328,6 +334,8 @@ type ReactNativeOutboundPayloadMap = {
   START_NOTE_TAKER: undefined;
   DRAWER_OPENED: undefined;
   DRAWER_CLOSED: undefined;
+  RESTORE_RECORDING_SCREEN: undefined;
+  CLEAR_RECORDING_STATE: undefined;
 };
 
 export type ReactNativeInboundMessage = {
