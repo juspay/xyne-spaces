@@ -1096,6 +1096,7 @@ model Board {
   projectId   String    // Project ID (no FK constraint)
   createdBy   String    // User ID (no FK constraint)
   updatedBy   String?   // User ID (no FK constraint)
+  description String?   // Board description
   metadata    Json?     // Board configuration including ticketFormConfig
   createdAt   DateTime  @default(now())
   updatedAt   DateTime? @updatedAt

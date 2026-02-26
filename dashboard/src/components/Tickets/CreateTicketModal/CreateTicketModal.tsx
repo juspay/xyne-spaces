@@ -48,6 +48,7 @@ import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck'
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useUserSearch, useUsers } from '../../../hooks/useUsers';
 import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
+import { useBoardSuggestion } from '../../../hooks/useBoardSuggestion';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
@@ -470,6 +471,20 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     isOpen,
     debounceMs: 2000,
   });
+
+  const {
+    boardSuggestion,
+    isCheckingBoard: _isCheckingBoard,
+    resetBoardSuggestionState,
+  } = useBoardSuggestion({
+    title: titleValue,
+    description: descriptionValue,
+    projectId,
+    currentBoardId: formValues?.boardId || '',
+    isOpen,
+    debounceMs: 2000,
+  });
+
   // Query all tickets in the project to extract available tags
   const [projectTickets] = useCachedQuery(queries.ticketsByProject({ projectId: projectId }));
 
@@ -1540,6 +1555,60 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               )}
             </form.Field>
           </div>
+
+          {/* Board Suggestion */}
+          {boardSuggestion?.analysis.suggestedBoardId &&
+            boardSuggestion.analysis.suggestedBoardId !== formValues?.boardId && (
+              <div className='rounded-lg border border-blue-200 bg-blue-50 p-4 mb-2 transition-all duration-200 ease-out'>
+                <div className='space-y-2'>
+                  <div className='flex items-center justify-between pb-0.5'>
+                    <span className='flex items-center gap-2'>
+                      <SquareKanban className='size-3' strokeWidth={2.5} />
+                      <p className='text-sm font-medium text-gray-800 leading-5'>Suggested board</p>
+                    </span>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      onClick={resetBoardSuggestionState}
+                      className='size-6 '
+                    >
+                      <X strokeWidth={2.33} className='size-3.5' />
+                    </Button>
+                  </div>
+                  <div className='border border-blue-100 rounded-lg p-2.5 flex items-center justify-between gap-2 bg-white group'>
+                    <span className='flex items-center gap-2 overflow-hidden cursor-default'>
+                      <p className='text-gray-900 text-sm font-medium truncate'>
+                        {boardSuggestion.analysis.suggestedBoardName || 'Unknown Board'}
+                      </p>
+                    </span>
+                    <span className='opacity-100 flex items-center gap-1'>
+                      <Tooltip
+                        content='Apply suggestion'
+                        side='top'
+                        className='text-[10px] font-semibold leading-3  p-1.5'
+                      >
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='icon'
+                          className='size-6'
+                          onClick={() => {
+                            if (boardSuggestion.analysis.suggestedBoardId) {
+                              form.setFieldValue(
+                                'boardId',
+                                boardSuggestion.analysis.suggestedBoardId,
+                              );
+                            }
+                          }}
+                        >
+                          <CircleCheck className='size-3.5 text-blue-500' />
+                        </Button>
+                      </Tooltip>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
           {/* Dynamic Form Fields */}
           {requiredDynamicFields.length > 0 && (
