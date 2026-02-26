@@ -83,6 +83,8 @@ import DashboardCreation from './DashboardCreation/DashboardCreation';
 import QueryBuilderScreen from './QueryBuilderScreen/QueryBuilderScreen.tsx';
 import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
+import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
+import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 
 const AppRoot = (): ReactElement => {
@@ -465,6 +467,14 @@ export const router = createBrowserRouter([
               {
                 path: '/onboarding',
                 element: <OnboardingScreen />,
+              },
+              {
+                path: '/rca',
+                element: <RCAListScreen />,
+              },
+              {
+                path: '/rca/:rcaId',
+                element: <RCADetailScreen />,
               },
               {
                 path: '/chat',

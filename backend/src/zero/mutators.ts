@@ -27,7 +27,13 @@ import {
   AccessType,
   BoardType,
   TicketStageRequestStatus,
+  COEStatus,
+  RCAStatus,
+  SEVERITY,
+  LookupType,
   AttachmentEntityType,
+  AttributionConfidence,
+  BaseTicketType,
   LinkVisibility,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -2877,7 +2883,27 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error("Attachment doesn't exist");
           }
 
-          if (attachment.entityType !== AttachmentEntityType.DRAFT) {
+          if (
+            attachment.entityType !== AttachmentEntityType.DRAFT &&
+            attachment.entityType !== AttachmentEntityType.CHAT
+          ) {
+            await tx.mutate.message_attachments.delete({ id: attachmentId });
+            asyncTasks.push(async () => {
+              try {
+                if (attachment.url) {
+                  await gcsService.deleteFile(attachment.url);
+                  if (attachment.thumbnailUrl) {
+                    await gcsService.deleteFile(attachment.thumbnailUrl);
+                  }
+                }
+              } catch (error) {
+                logger.error(`Failed to delete GCS file for attachmentId ${attachment.id}:`, error);
+              }
+            });
+            return;
+          }
+
+          if (attachment.entityType === AttachmentEntityType.CHAT) {
             const message = await tx.run(zql.messages
             .where('messageId', attachment.entityId)
             .one());
@@ -6565,13 +6591,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             updatedAt,
             ...(existingApproval
               ? {
-                  submittedBy: existingApproval.submittedBy,
-                  createdAt: existingApproval.createdAt,
-                }
+                submittedBy: existingApproval.submittedBy,
+                createdAt: existingApproval.createdAt,
+              }
               : {
-                  submittedBy: updatedBy,
-                  createdAt: updatedAt,
-                }),
+                submittedBy: updatedBy,
+                createdAt: updatedAt,
+              }),
             ...(reviewedBy !== undefined && { reviewedBy }),
           };
 
@@ -6756,6 +6782,568 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }
       },
     ),
+    rca: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          ticketId: z.string(),
+          ownerId: z.string().optional(),
+          title: z.string(),
+          summary: z.string().optional(),
+          rootCause: z.string().optional(),
+          severity: z.nativeEnum(SEVERITY),
+          bugTypeId: z.string(),
+          categoryTypeId: z.string(),
+          issueCategoryId: z.string().optional(),
+          issueStartAt: z.number().optional().nullable(),
+          status: z.nativeEnum(RCAStatus),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            id,
+            ticketId,
+            ownerId,
+            title,
+            summary,
+            rootCause,
+            severity,
+            bugTypeId,
+          categoryTypeId,
+          issueCategoryId,
+          issueStartAt,
+          status,
+          timestamp,
+        },
+      }) => {
+          // Validate ticket exists
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          if (!ticket) {
+            throw new Error('Ticket not found');
+          }
+
+          // Use provided ownerId or fallback to authData.sub
+          const resolvedOwnerId = ownerId || authData.sub;
+
+          // Validate owner exists
+          const owner = await tx.run(zql.users.where('id', resolvedOwnerId).one());
+          if (!owner) {
+            throw new Error('Owner not found');
+          }
+
+          // Validate bug type exists (skip if empty - will be set later during RCA phase)
+          if (bugTypeId) {
+            const bugType = await tx.run(
+              zql.lookup_values.where('id', bugTypeId).where('type', LookupType.BUG_TYPE).one(),
+            );
+            if (!bugType) {
+              throw new Error('Bug type not found');
+            }
+          }
+
+          // Validate category type exists (skip if empty - will be set later during RCA phase)
+          if (categoryTypeId) {
+            const categoryType = await tx.run(
+              zql.lookup_values
+                .where('id', categoryTypeId)
+                .where('type', LookupType.BUG_CATEGORY_TYPE)
+                .one(),
+            );
+            if (!categoryType) {
+              throw new Error('Category type not found');
+            }
+          }
+
+          await tx.mutate.rcas.insert({
+            id,
+            ticketId,
+            ownerId: resolvedOwnerId,
+            title,
+            summary: summary || null,
+            rootCause: rootCause || null,
+            severity,
+            bugTypeId,
+            categoryTypeId,
+            issueCategoryId: issueCategoryId ?? null,
+            issueStartAt: issueStartAt ?? null,
+            status,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          ticketId: z.string().optional(),
+          title: z.string().optional(),
+          summary: z.string().optional(),
+          rootCause: z.string().optional(),
+          severity: z.nativeEnum(SEVERITY).optional(),
+          bugTypeId: z.string().optional(),
+          categoryTypeId: z.string().optional(),
+          issueCategoryId: z.string().optional(),
+          issueStartAt: z.number().optional().nullable(),
+          status: z.nativeEnum(RCAStatus).optional(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            id,
+            ticketId,
+            title,
+            summary,
+            rootCause,
+            severity,
+            bugTypeId,
+          categoryTypeId,
+          issueCategoryId,
+          issueStartAt,
+          status,
+          timestamp,
+        },
+      }) => {
+          const rca = await tx.run(zql.rcas.where('id', id).one());
+          if (!rca) {
+            throw new Error('RCA not found');
+          }
+
+          // Validate owner exists if provided
+          const owner = await tx.run(zql.users.where('id', authData.sub).one());
+          if (!owner) {
+            throw new Error('Owner not found');
+          }
+
+          // Validate bug type if provided
+          if (bugTypeId) {
+            const bugType = await tx.run(
+              zql.lookup_values.where('id', bugTypeId).where('type', LookupType.BUG_TYPE).one(),
+            );
+            if (!bugType) {
+              throw new Error('Bug type not found');
+            }
+          }
+
+          // Validate category type if provided
+          if (categoryTypeId) {
+            const categoryType = await tx.run(
+              zql.lookup_values
+                .where('id', categoryTypeId)
+                .where('type', LookupType.BUG_CATEGORY_TYPE)
+                .one(),
+            );
+            if (!categoryType) {
+              throw new Error('Category type not found');
+            }
+          }
+
+          await tx.mutate.rcas.update({
+            id,
+            ...(ticketId !== undefined && { ticketId }),
+            ...(title !== undefined && { title }),
+            ...(summary !== undefined && { summary }),
+          ...(rootCause !== undefined && { rootCause }),
+          ...(severity !== undefined && { severity }),
+          ...(bugTypeId !== undefined && { bugTypeId }),
+            ...(categoryTypeId !== undefined && { categoryTypeId }),
+            ...(issueCategoryId !== undefined && { issueCategoryId }),
+            ...(issueStartAt !== undefined && { issueStartAt }),
+            ...(status !== undefined && { status }),
+            updatedAt: timestamp,
+          });
+        },
+      ),
+    },
+    releaseAttribution: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          ticketId: z.string(),
+          releaseId: z.string(),
+          releaseApplicationId: z.string().optional().nullable(),
+          rootCauseTicketId: z.string().optional().nullable(),
+          confidence: z.nativeEnum(AttributionConfidence),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            id,
+            ticketId,
+            releaseId,
+            releaseApplicationId,
+            rootCauseTicketId,
+            confidence,
+            timestamp,
+          },
+        }) => {
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          if (!ticket) {
+            throw new Error('Ticket not found');
+          }
+
+          const releaseTicket = await tx.run(zql.tickets.where('id', releaseId).one());
+          if (!releaseTicket) {
+            throw new Error('Release ticket not found');
+          }
+          if (releaseTicket.ticketType !== BaseTicketType.Release) {
+            throw new Error('Only release tickets can be attributed');
+          }
+
+          if (releaseApplicationId) {
+            const subTicket = await tx.run(zql.sub_tickets.where('id', releaseApplicationId).one());
+            if (!subTicket) {
+              throw new Error('Application release not found');
+            }
+
+            const mapping = await tx.run(
+              zql.ticket_sub_ticket_mappings
+                .where('ticketId', releaseId)
+                .where('subTicketId', releaseApplicationId)
+                .one(),
+            );
+            if (!mapping) {
+              throw new Error('Application release is not linked to this release ticket');
+            }
+          }
+
+          if (rootCauseTicketId) {
+            const rootCauseTicket = await tx.run(
+              zql.tickets.where('id', rootCauseTicketId).one(),
+            );
+            if (!rootCauseTicket) {
+              throw new Error('Root cause ticket not found');
+            }
+          }
+
+          await tx.mutate.release_attributions.insert({
+            id,
+            ticketId,
+            releaseId,
+            releaseApplicationId: releaseApplicationId ?? null,
+            rootCauseTicketId: rootCauseTicketId ?? null,
+            confidence,
+            createdAt: timestamp,
+          });
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          releaseId: z.string().optional(),
+          releaseApplicationId: z.string().optional().nullable(),
+          rootCauseTicketId: z.string().optional().nullable(),
+          confidence: z.nativeEnum(AttributionConfidence).optional(),
+        }),
+        async ({
+          tx,
+          args: { id, releaseId, releaseApplicationId, rootCauseTicketId, confidence },
+        }) => {
+          const attribution = await tx.run(zql.release_attributions.where('id', id).one());
+          if (!attribution) {
+            throw new Error('Release attribution not found');
+          }
+
+          const effectiveReleaseId = releaseId ?? attribution.releaseId;
+          if (releaseId) {
+            const releaseTicket = await tx.run(zql.tickets.where('id', releaseId).one());
+            if (!releaseTicket) {
+              throw new Error('Release ticket not found');
+            }
+            if (releaseTicket.ticketType !== BaseTicketType.Release) {
+              throw new Error('Only release tickets can be attributed');
+            }
+          }
+
+          if (releaseApplicationId) {
+            const subTicket = await tx.run(zql.sub_tickets.where('id', releaseApplicationId).one());
+            if (!subTicket) {
+              throw new Error('Application release not found');
+            }
+
+            const mapping = await tx.run(
+              zql.ticket_sub_ticket_mappings
+                .where('ticketId', effectiveReleaseId)
+                .where('subTicketId', releaseApplicationId)
+                .one(),
+            );
+            if (!mapping) {
+              throw new Error('Application release is not linked to this release ticket');
+            }
+          }
+
+          if (rootCauseTicketId) {
+            const rootCauseTicket = await tx.run(
+              zql.tickets.where('id', rootCauseTicketId).one(),
+            );
+            if (!rootCauseTicket) {
+              throw new Error('Root cause ticket not found');
+            }
+          }
+
+          await tx.mutate.release_attributions.update({
+            id,
+            ...(releaseId !== undefined && { releaseId }),
+            ...(releaseApplicationId !== undefined && { releaseApplicationId }),
+            ...(rootCauseTicketId !== undefined && { rootCauseTicketId }),
+            ...(confidence !== undefined && { confidence }),
+          });
+        },
+      ),
+      delete: defineMutator(
+        z.object({ id: z.string() }),
+        async ({ tx, args: { id } }) => {
+          const attribution = await tx.run(zql.release_attributions.where('id', id).one());
+          if (!attribution) {
+            throw new Error('Release attribution not found');
+          }
+          await tx.mutate.release_attributions.delete({ id });
+        },
+      ),
+    },
+    impact: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          ticketId: z.string(),
+          impactTypeId: z.string(),
+          impact: z.string(),
+          rcaId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            id,
+            ticketId,
+            impactTypeId,
+            impact,
+            rcaId,
+            timestamp
+          },
+        }) => {
+
+          if (!rcaId) {
+            throw new Error('RCA ID is required for creating an impact');
+          }
+          // Validate RCA exists if provided
+          const rca = await tx.run(zql.rcas.where('id', rcaId).one());
+          if (!rca) {
+            throw new Error('RCA not found');
+          }
+          // Validate ticket exists
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          if (!ticket) {
+            throw new Error('Ticket not found');
+          }
+
+          // Validate impact type exists
+          const impactType = await tx.run(zql.lookup_values.where('id', impactTypeId).where("type", LookupType.IMPACT_TYPE).one());
+          if (!impactType) {
+            throw new Error('Impact type not found');
+          }
+
+          await tx.mutate.impacts.insert({
+            id,
+            ticketId,
+            impactTypeId,
+            impact,
+            rcaId: rcaId || null,
+            createdAt: timestamp
+          });
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          impactTypeId: z.string().optional(),
+          impact: z.string().optional(),
+        }),
+        async ({ tx, args: { id, impactTypeId, impact } }) => {
+          const existingImpact = await tx.run(zql.impacts.where('id', id).one());
+          if (!existingImpact) {
+            throw new Error('Impact not found');
+          }
+
+          // Validate impact type exists if provided
+          if (impactTypeId) {
+            const impactType = await tx.run(zql.lookup_values.where('id', impactTypeId).where("type", LookupType.IMPACT_TYPE).one());
+            if (!impactType) {
+              throw new Error('Impact type not found');
+            }
+          }
+
+          await tx.mutate.impacts.update({
+            id,
+            ...(impactTypeId !== undefined && { impactTypeId }),
+            ...(impact !== undefined && { impact }),
+          });
+        },
+      ),
+      delete: defineMutator(
+        z.object({
+          id: z.string(),
+        }),
+        async ({ tx, args: { id } }) => {
+          const existingImpact = await tx.run(zql.impacts.where('id', id).one());
+          if (!existingImpact) {
+            throw new Error('Impact not found');
+          }
+
+          await tx.mutate.impacts.delete({ id });
+        },
+      ),
+    },
+    coe: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          rcaId: z.string(),
+          ownerId: z.string(),
+          actionTypeId: z.string(),
+          action: z.string(),
+          status: z.nativeEnum(COEStatus),
+          dueDate: z.number().optional(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            id,
+            rcaId,
+            ownerId,
+            actionTypeId,
+            action,
+            status,
+            dueDate,
+            timestamp
+          },
+        }) => {
+          // Validate RCA exists
+          const rca = await tx.run(zql.rcas.where('id', rcaId).one());
+          if (!rca) {
+            throw new Error('RCA not found');
+          }
+
+          // Validate owner exists
+          const owner = await tx.run(zql.users.where('id', ownerId).one());
+          if (!owner) {
+            throw new Error('Owner not found');
+          }
+
+          // Validate action type exists
+          const allowedTypes: LookupType[] = [
+            LookupType.COE_ACTION_TYPE,
+            LookupType.COE_ACTION_TYPE_RELIABILITY_CHANGE,
+            LookupType.COE_ACTION_TYPE_RELIABILITY_CAPACITY,
+            LookupType.COE_ACTION_TYPE_RELIABILITY_FAULT,
+            LookupType.COE_ACTION_TYPE_PERF,
+            LookupType.COE_ACTION_TYPE_UIUX,
+          ];
+          const actionType = await tx.run(
+            zql.lookup_values
+              .where('id', actionTypeId)
+              .where('type', 'IN', allowedTypes)
+              .one(),
+          );
+          if (!actionType) {
+            throw new Error('COE action type not found');
+          }
+          await tx.mutate.coes.insert({
+            id,
+            rcaId,
+            ownerId,
+            actionTypeId,
+            action,
+            status,
+            dueDate: dueDate || null,
+            createdAt: timestamp,
+            completedAt: null,
+          });
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          ownerId: z.string().optional(),
+          actionTypeId: z.string().optional(),
+          action: z.string().optional(),
+          status: z.nativeEnum(COEStatus).optional(),
+          dueDate: z.number().optional(),
+          completedAt: z.number().optional(),
+        }),
+        async ({
+          tx,
+          args: {
+            id,
+            ownerId,
+            actionTypeId,
+            action,
+            status,
+            dueDate,
+            completedAt,
+          },
+        }) => {
+          const coe = await tx.run(zql.coes.where('id', id).one());
+          if (!coe) {
+            throw new Error('COE not found');
+          }
+
+          // Validate owner exists if provided
+          if (ownerId) {
+            const owner = await tx.run(zql.users.where('id', ownerId).one());
+            if (!owner) {
+              throw new Error('Owner not found');
+            }
+          }
+
+          // Validate action type exists if provided
+          if (actionTypeId) {
+            const allowedTypes: LookupType[] = [
+              LookupType.COE_ACTION_TYPE,
+              LookupType.COE_ACTION_TYPE_RELIABILITY_CHANGE,
+              LookupType.COE_ACTION_TYPE_RELIABILITY_CAPACITY,
+              LookupType.COE_ACTION_TYPE_RELIABILITY_FAULT,
+              LookupType.COE_ACTION_TYPE_PERF,
+              LookupType.COE_ACTION_TYPE_UIUX,
+            ];
+            const actionType = await tx.run(
+              zql.lookup_values
+                .where('id', actionTypeId)
+                .where('type', 'IN', allowedTypes)
+                .one(),
+            );
+            if (!actionType) {
+              throw new Error('COE action type not found');
+            }
+          }
+          await tx.mutate.coes.update({
+            id,
+            ...(ownerId !== undefined && { ownerId }),
+            ...(actionTypeId !== undefined && { actionTypeId }),
+            ...(action !== undefined && { action }),
+            ...(status !== undefined && { status }),
+            ...(dueDate !== undefined && { dueDate }),
+            ...(completedAt !== undefined && { completedAt }),
+          });
+        },
+      ),
+      delete: defineMutator(
+        z.object({
+          id: z.string(),
+        }),
+        async ({ tx, args: { id } }) => {
+          const existingCoe = await tx.run(zql.coes.where('id', id).one());
+          if (!existingCoe) {
+            throw new Error('Coe not found');
+          }
+
+          await tx.mutate.coes.delete({ id });
+        },
+      ),
+    },
     links: {
       create: defineMutator(
         z.object({

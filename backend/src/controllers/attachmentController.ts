@@ -1,10 +1,15 @@
 import { Request, Response } from 'express';
-import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository';
+import {
+  MessageAttachmentRepository,
+  CreateMessageAttachmentInput,
+} from '../database/repositories/messageAttachmentRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { gcsService, GCSService } from '../services/gcsService';
 import { logger } from '../utils/logger';
 import { AttachmentEntityType } from '@prisma/client';
+import { uploadFiles } from '../services/fileUploadService';
+import { config } from '../config/env';
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -337,6 +342,81 @@ export class AttachmentController {
       if (!res.headersSent) {
         res.status(500).json({ error: 'Failed to stream attachment' });
       }
+    }
+  };
+
+  /**
+   * POST /api/attachments/upload
+   * Upload multiple attachments for an entity (e.g., IMPACT)
+   */
+  uploadAttachments = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { entityId, entityType, fileMetadata: fileMetadataJson } = req.body;
+      if (!entityId || !entityType) {
+        res.status(400).json({ error: 'entityId and entityType are required' });
+        return;
+      }
+
+      if (entityType !== AttachmentEntityType.IMPACT) {
+        res.status(400).json({ error: 'Only IMPACT attachments are supported' });
+        return;
+      }
+
+      const reqFiles = req.files as { [fieldname: string]: Express.Multer.File[] };
+      const files = reqFiles?.['files'];
+      if (!files || files.length === 0) {
+        res.status(400).json({ error: 'Files are required' });
+        return;
+      }
+
+      let parsedFileMetadata: Array<{ fileIndex: number; hasThumbnail?: boolean; width?: number; height?: number }> = [];
+      if (fileMetadataJson) {
+        try {
+          parsedFileMetadata = JSON.parse(fileMetadataJson);
+        } catch (error) {
+          logger.warn('Failed to parse fileMetadata:', error);
+        }
+      }
+
+      const fileMetadataArray = parsedFileMetadata.map((metadata, index) => ({
+        fileIndex: metadata.fileIndex ?? index,
+        hasThumbnail: metadata.hasThumbnail ?? false,
+        thumbnailIndex: metadata.hasThumbnail ? index : undefined,
+        width: metadata.width,
+        height: metadata.height,
+      }));
+
+      const uploadedFiles = await uploadFiles(files, undefined, fileMetadataArray);
+
+      const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
+        entityId,
+        entityType: AttachmentEntityType.IMPACT,
+        originalFilename: file.originalName,
+        size: file.fileSize,
+        mimetype: file.mimeType,
+        url: file.fileUrl,
+        thumbnailUrl: file.thumbnailUrl ?? undefined,
+        width: file.width,
+        height: file.height,
+        uploadedByUserId: userId,
+        createdBy: userId,
+        storageProvider: config.fileStorage.provider,
+        conversationId: null,
+        metadata: file.metadata || {},
+      }));
+
+      await this.messageAttachmentRepository.createMany(attachmentData);
+
+      res.status(200).json({ success: true, count: attachmentData.length });
+    } catch (error) {
+      logger.error('Error uploading attachments:', error);
+      res.status(500).json({ error: 'Failed to upload attachments' });
     }
   };
 }

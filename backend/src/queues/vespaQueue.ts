@@ -79,7 +79,7 @@ class VespaQueue {
 	/**
 	 * Add a job to the queue
 	 */
-	async addJob({ schema, docId, jobType, data, userId }: VespaJob): Promise<Bull.Job<VespaJob>> {
+	async addJob({ schema, docId, jobType, data, userId, app }: VespaJob): Promise<Bull.Job<VespaJob>> {
 		if (!this.queue || !this.isInitialized) {
 			throw new Error('Vespa queue not initialized Properly');
 		}
@@ -91,6 +91,7 @@ class VespaQueue {
 					docId,
 					jobType,
 					data,
+					app,
 					userId
 				},
 				{

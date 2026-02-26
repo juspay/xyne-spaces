@@ -19,6 +19,7 @@ import {
   Workflow,
   ExternalLink,
   ArrowLeft,
+  ClipboardCheck,
 } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
@@ -37,7 +38,8 @@ import { FileBubble } from '../ui/FileBubble/FileBubble';
 import { WorkflowBubble } from './WorkflowBubble/WorkflowBubble';
 import { MessageMetadata } from '../ui/MessageBubble/MessageBubble.utils';
 import { FailedStatusIcon, SuccessStatusIcon } from '../../assets/icons/WorkflowIcons';
-import { MessageType, ChannelScopeType } from '@xyne/shared';
+import { MessageType, ChannelScopeType, BaseTicketType } from '@xyne/shared';
+import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
 import { mixpanelService } from '../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../services/Analytics/mixpanel.types';
@@ -55,8 +57,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { useUser } from '../../hooks/useUsers';
 
-type TabType = 'thread' | 'details' | 'files' | 'workflows';
-type UnderTicketTabType = 'replies' | 'workflows';
+type TabType = 'thread' | 'details' | 'files' | 'workflows' | 'rca';
+type UnderTicketTabType = 'replies' | 'workflows' | 'rca';
 
 interface ThreadMessagesProps {
   channelId?: string;
@@ -102,7 +104,7 @@ export const ThreadMessages = ({
 
   const [searchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
-  const validTabs: TabType[] = ['thread', 'details', 'files', 'workflows'];
+  const validTabs: TabType[] = ['thread', 'details', 'files', 'workflows', 'rca'];
   const selectedTab: TabType = validTabs.includes(selectedTabParam as TabType)
     ? (selectedTabParam as TabType)
     : 'thread';
@@ -392,6 +394,23 @@ export const ThreadMessages = ({
   }, [workflowMessages]);
 
   // Build tabs array - exclude Details tab when ticketId is present
+  const isFixTicket = ticket?.ticketType === BaseTicketType.Fix;
+
+  // Support URL-driven tab selection for the compact side panel mode as well.
+  useEffect(() => {
+    if (!underTicketView) return;
+
+    if (selectedTab === 'rca' && isFixTicket) {
+      setUnderTicketActiveTab('rca');
+      return;
+    }
+    if (selectedTab === 'workflows') {
+      setUnderTicketActiveTab('workflows');
+      return;
+    }
+    setUnderTicketActiveTab('replies');
+  }, [underTicketView, selectedTab, isFixTicket]);
+
   const tabs = useMemo(() => {
     const allTabs = [
       { value: 'thread' as const, label: 'Messages', icon: <MessageCircle size={12} /> },
@@ -403,11 +422,14 @@ export const ThreadMessages = ({
         status: latestWorkflowStatus,
         icon: <Workflow size={12} />,
       },
+      ...(isFixTicket
+        ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheck size={12} /> }]
+        : []),
     ];
 
     // Filter out Details tab when ticketId doesn't exist
     return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
-  }, [files.length, latestWorkflowStatus, ticketId, derivedTicketId]);
+  }, [files.length, latestWorkflowStatus, ticketId, derivedTicketId, isFixTicket]);
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
@@ -578,6 +600,33 @@ export const ThreadMessages = ({
                       ) : null)}
                   </button>
                 </Tabs.Trigger>
+
+                {/* RCA Tab */}
+                {isFixTicket && (
+                  <Tabs.Trigger asChild value='rca'>
+                    <button
+                      className={cn(
+                        'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                        underTicketActiveTab === 'rca'
+                          ? 'border-b-2 border-primary'
+                          : 'border-b-2 border-transparent',
+                      )}
+                    >
+                      <span
+                        className={
+                          underTicketActiveTab === 'rca' ? 'text-primary' : 'text-muted-foreground'
+                        }
+                      >
+                        <ClipboardCheck size={12} />
+                      </span>
+                      <span
+                        className={`text-sm font-medium ${underTicketActiveTab === 'rca' ? 'text-primary' : 'text-muted-foreground'}`}
+                      >
+                        RCA
+                      </span>
+                    </button>
+                  </Tabs.Trigger>
+                )}
               </Tabs.List>
             </div>
           </div>
@@ -649,6 +698,23 @@ export const ThreadMessages = ({
               </div>
             )}
           </Tabs.Content>
+
+          {/* RCA Tab Content */}
+          {isFixTicket && (
+            <Tabs.Content
+              value='rca'
+              className='flex-1 overflow-hidden bg-white data-[state=inactive]:hidden'
+            >
+              {derivedTicketId ? (
+                <RCAPanelView ticketId={derivedTicketId} />
+              ) : (
+                <div className='flex flex-col items-center justify-center h-full text-gray-500'>
+                  <ClipboardCheck size={48} className='mb-2 text-gray-400' />
+                  <p>Ticket ID not found</p>
+                </div>
+              )}
+            </Tabs.Content>
+          )}
         </Tabs.Root>
       </div>
     );
@@ -881,8 +947,18 @@ export const ThreadMessages = ({
             value='details'
             className='flex-1 bg-white overflow-auto data-[state=inactive]:hidden'
           >
-            <TicketDetails ticketId={derivedTicketId} />
+            <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
           </Tabs.Content>
+
+          {/* RCA Tab Content */}
+          {isFixTicket && (
+            <Tabs.Content
+              value='rca'
+              className='flex-1 overflow-hidden bg-white data-[state=inactive]:hidden'
+            >
+              <RCAPanelView ticketId={derivedTicketId} />
+            </Tabs.Content>
+          )}
 
           {/* Files Tab Content */}
           <Tabs.Content

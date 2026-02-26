@@ -156,6 +156,12 @@ export class ACLFactory {
         return new NoAcl<'channel_user_status'>(ctx);
       case 'user_profiles':
         return new NoAcl<'user_profiles'>(ctx);
+      case 'rcas':
+        return new NoAcl<'rcas'>(ctx);
+      case 'impacts':
+        return new NoAcl<'impacts'>(ctx);
+      case 'coes':
+        return new NoAcl<'coes'>(ctx);
       default:
         return new NoAcl<any>(ctx);
     }

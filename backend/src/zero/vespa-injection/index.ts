@@ -20,3 +20,4 @@ export { MessagesVespaHandler } from './tables/messages-handler';
 export { TicketsVespaHandler } from './tables/tickets-handler';
 export { ChannelsVespaHandler } from './tables/channels-handler';
 export { ProjectsVespaHandler } from './tables/projects-handler';
+export { RCAVespaHandler } from './tables/rca-handler';

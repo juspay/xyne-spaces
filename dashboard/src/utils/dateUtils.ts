@@ -137,10 +137,9 @@ export const formatThreadTimestamp = (date: Date | number): string => {
       return 'Just now';
     } else if (diffInMinutes < 60) {
       return `${diffInMinutes}m ago`;
-    } else {
-      // For hours within today
-      return `${diffInHours}h ago`;
     }
+    // For hours within today
+    return `${diffInHours}h ago`;
   }
 
   // Yesterday: "Yesterday at 2:30 PM"

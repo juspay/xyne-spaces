@@ -7,7 +7,6 @@ export const channelSchema = 'chat_container';
 export const projectSchema = 'project';
 export const userSchema = 'user';
 export const fileSchema = 'file'
-
 export type VespaSchema =
   | typeof ticketSchema
   | typeof messageSchema
@@ -17,15 +16,15 @@ export type VespaSchema =
   | typeof projectSchema
   | typeof fileSchema
 
-  export const VESPA_SCHEMAS: VespaSchema[] = [
-    ticketSchema,
-    messageSchema,
-    attachmentSchema,
-    channelSchema,
-    projectSchema,
-    userSchema,
-    fileSchema
-  ];
+export const VESPA_SCHEMAS: VespaSchema[] = [
+  ticketSchema,
+  messageSchema,
+  attachmentSchema,
+  channelSchema,
+  projectSchema,
+  userSchema,
+  fileSchema,
+];
 
 // Deprecated: Use VESPA_SCHEMAS instead
 export const AllSources: VespaSchema[] = VESPA_SCHEMAS;
@@ -37,6 +36,10 @@ export enum VespaDocType {
   PROJECT = 'project',
   USER = 'user',
   FILE = 'file'
+}
+
+export enum SubApp {
+  RCA = "RCA"
 }
 
 export interface VespaDocument {
@@ -64,7 +67,7 @@ export enum RankProfile {
 }
 
 export type User = {
-  id:  string,
+  id: string,
   name: string,
   email: string
 }
@@ -244,7 +247,7 @@ export type VespaSearchResult =
   | VespaTicketDocument
   | VespaProjectDocument
   | VespaUserDocument
-  | VespaFileDocument;
+  | VespaFileDocument
 
 export interface VespaSearchHit {
   id: string;
@@ -287,7 +290,8 @@ export type InsertDocument =
   | VespaChatMessageDocument
   | VespaProjectDocument
   | VespaTicketDocument
-  | VespaUserDocument;
+  | VespaUserDocument
+  | VespaFileDocument
 
 export type SchemaDataMap = {
   [messageSchema]: VespaChatMessageDocument;
@@ -306,7 +310,7 @@ export const schemaToDocType: Record<VespaSchema, VespaDocType> = {
   [ticketSchema]: VespaDocType.TICKET,
   [userSchema]: VespaDocType.USER,
   [attachmentSchema]: VespaDocType.ATTACHMENT,
-  [fileSchema]: VespaDocType.FILE
+  [fileSchema]: VespaDocType.FILE,
 };
 
 export interface MatchFeatures {

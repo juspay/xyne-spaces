@@ -53,6 +53,7 @@ export interface SearchContext {
   senderName?: string;
   senderId?: string;
   ticketId?: string;
+  xyneId?: string;
   ticketStatus?: string;
   attachmentId?: string;
   fileName?: string;

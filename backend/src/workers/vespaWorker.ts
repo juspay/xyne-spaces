@@ -160,7 +160,7 @@ export class VespaWorker {
 	 * Process a single job from the queue
 	 */
 	private async processJob(job: Bull.Job<VespaJob>): Promise<any> {
-		const { schema, docId, jobType } = job.data;
+		const { schema, docId, jobType, app } = job.data;
 
 		logger.info(
 			`[VESPA_WORKER] Processing ${jobType} job for ${schema}/${docId} (Job ID: ${job.id}, Job Name: ${job.name})`
@@ -168,7 +168,7 @@ export class VespaWorker {
 
 		try {
 			logger.info(`[VESPA_WORKER] Fetching data from database for ${schema}/${docId}`);
-			const mappedData = await fetchAndMapBySchema(schema, docId, jobType);
+			const mappedData = await fetchAndMapBySchema(schema, docId, jobType, app);
 
 			const handlers: Record<VespaJobType, () => Promise<void>> = {
 				feed: () => this.handleFeed(schema, mappedData as InsertDocument),

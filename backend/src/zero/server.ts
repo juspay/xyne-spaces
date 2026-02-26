@@ -157,6 +157,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
             jobType: job.jobType,
             docId: job.docId,
             userId: authData!.sub,
+            ...(job.app ? { app: job.app } : {}),
             ...(job.jobType === "update" ? { data: job.data } : {})
           });
         } catch (err) {

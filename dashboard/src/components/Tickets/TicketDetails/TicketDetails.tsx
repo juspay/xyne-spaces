@@ -20,6 +20,8 @@ import {
   Clock,
   Eye,
   AlertCircle,
+  ClipboardCheck,
+  ArrowRight,
 } from 'lucide-react';
 import type {
   SubTicket,
@@ -37,6 +39,7 @@ import {
   FormContextType,
   FormEntityType,
   TicketStageRequestStatus,
+  BaseTicketType,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -165,6 +168,7 @@ interface TicketDetailsProps {
   };
   onNavigatePrevious?: () => void;
   onNavigateNext?: () => void;
+  onFillRCA?: () => void;
 }
 
 const TicketKeyValuePair = ({
@@ -191,6 +195,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   navigation,
   onNavigatePrevious,
   onNavigateNext,
+  onFillRCA,
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
@@ -2406,6 +2411,48 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 );
               })}
           </div>
+        </div>
+      )}
+
+      {/* Fill RCA Button - shown for Fix tickets */}
+      {ticket?.ticketType === BaseTicketType.Fix && (
+        <div className='mt-6'>
+          <button
+            type='button'
+            onClick={() => {
+              if (onFillRCA) {
+                onFillRCA();
+                return;
+              }
+
+              const nextSearchParams = new URLSearchParams(location.search);
+              nextSearchParams.set('selectedTab', 'rca');
+              void navigate(
+                {
+                  pathname: location.pathname,
+                  search: `?${nextSearchParams.toString()}`,
+                },
+                { replace: true },
+              );
+            }}
+            data-track-category='Tickets'
+            data-track-name='FillRCA'
+            data-testid='fill-rca-button'
+            className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 shadow-sm hover:shadow-md hover:border-gray-300 transition-all'
+          >
+            <span className='inline-flex items-center gap-3'>
+              <span className='flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-700'>
+                <ClipboardCheck size={18} />
+              </span>
+              <span className='flex flex-col text-left'>
+                <span className='text-sm font-semibold text-gray-900'>Fill RCA</span>
+                <span className='text-xs text-gray-600'>
+                  Add root cause, impact, and COE details
+                </span>
+              </span>
+            </span>
+            <ArrowRight className='h-4 w-4 text-gray-500 transition-transform group-hover:translate-x-0.5' />
+          </button>
         </div>
       )}
 

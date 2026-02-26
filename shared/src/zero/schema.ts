@@ -92,6 +92,8 @@ export enum AttachmentEntityType {
   CHAT = 'CHAT',
   CANVAS = 'CANVAS',
   DRAFT = 'DRAFT',
+  EMAIL = 'EMAIL',
+  IMPACT = 'IMPACT',
 }
 
 // @ts-ignore TS1294
@@ -411,7 +413,7 @@ export enum FormContextType {
 export enum BoardType {
   DEFAULT = 'DEFAULT',
   RELEASE = 'RELEASE',
-  
+
 }
 
 // @ts-ignore TS1294
@@ -425,6 +427,23 @@ export enum FormEntityType {
 // @ts-ignore TS1294
 export enum LookupType {
   TICKET_TYPE = 'TICKET_TYPE',
+  COE_ACTION_TYPE = 'COE_ACTION_TYPE',
+  COE_ACTION_TYPE_RELIABILITY_CHANGE = 'COE_ACTION_TYPE_RELIABILITY_CHANGE',
+  COE_ACTION_TYPE_RELIABILITY_CAPACITY = 'COE_ACTION_TYPE_RELIABILITY_CAPACITY',
+  COE_ACTION_TYPE_RELIABILITY_FAULT = 'COE_ACTION_TYPE_RELIABILITY_FAULT',
+  COE_ACTION_TYPE_PERF = 'COE_ACTION_TYPE_PERF',
+  COE_ACTION_TYPE_UIUX = 'COE_ACTION_TYPE_UIUX',
+  IMPACT_TYPE = 'IMPACT_TYPE',
+  BUG_TYPE = 'BUG_TYPE',
+  BUG_CATEGORY_TYPE = 'BUG_CATEGORY_TYPE',
+  BUG_ISSUE_TYPE = 'BUG_ISSUE_TYPE',
+  BUG_ISSUE_CATEGORY_CAPACITY = 'BUG_ISSUE_CATEGORY_CAPACITY',
+  BUG_ISSUE_CATEGORY_CHANGE = 'BUG_ISSUE_CATEGORY_CHANGE',
+  BUG_ISSUE_CATEGORY_FAULT = 'BUG_ISSUE_CATEGORY_FAULT',
+  BUG_RESOLUTION_CAPACITY = 'BUG_RESOLUTION_CAPACITY',
+  BUG_RESOLUTION_CHANGE = 'BUG_RESOLUTION_CHANGE',
+  BUG_RESOLUTION_FAULT = 'BUG_RESOLUTION_FAULT',
+  QUICK_FIX_OPTION = 'QUICK_FIX_OPTION',
 }
 
 // Release Management Enums
@@ -462,6 +481,67 @@ export enum TicketStageRequestStatus {
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED',
 }
+export enum ReleaseEnvironment {
+  SANDBOX = 'SANDBOX',
+  PROD = 'PROD',
+}
+
+// @ts-ignore TS1294
+export enum ReleaseTicketStatus {
+  CREATED = 'CREATED',
+  ENV_READY = 'ENV_READY',
+  INITIATED = 'INITIATED',
+  TESTED = 'TESTED',
+  APPROVED = 'APPROVED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  MONITORING = 'MONITORING',
+  COMPLETED = 'COMPLETED',
+  REVERTED = 'REVERTED',
+}
+
+// @ts-ignore TS1294
+export enum ApplicationReleaseStatus {
+  PLANNED = 'PLANNED',
+  TESTING = 'TESTING',
+  APPROVED = 'APPROVED',
+  DEPLOYING = 'DEPLOYING',
+  DEPLOYED = 'DEPLOYED',
+  MONITORING = 'MONITORING',
+  STABILIZED = 'STABILIZED',
+  FAILED = 'FAILED',
+  REVERTING = 'REVERTING',
+  REVERTED = 'REVERTED',
+}
+
+// @ts-ignore TS1294
+export enum RCAStatus {
+  DRAFT = 'DRAFT',
+  IN_REVIEW = 'IN_REVIEW',
+  APPROVED = 'APPROVED',
+  CLOSED = 'CLOSED',
+}
+
+// @ts-ignore TS1294
+export enum COEStatus {
+  OPEN = 'OPEN',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+}
+
+// @ts-ignore TS1294
+export enum SEVERITY {
+  SEV_1 = 'SEV_1',
+  SEV_2 = 'SEV_2',
+  SEV_3 = 'SEV_3',
+}
+
+// @ts-ignore TS1294
+export enum AttributionConfidence {
+  LOW = 'LOW',
+  MEDIUM = 'MEDIUM',
+  HIGH = 'HIGH',
+}
+
 
 // Define tables
 
@@ -1496,6 +1576,63 @@ export const releaseChangeTypeTable = table('release_change_types')
   })
   .primaryKey('id');
 
+
+export const rcaTable = table('rcas')
+  .columns({
+    id: string(),
+    title: string(),
+    ticketId: string(),
+    ownerId: string(),
+    summary: string().optional(),
+    rootCause: string().optional(),
+    severity: enumeration<SEVERITY>(),
+    status: enumeration<RCAStatus>(),
+    bugTypeId: string(),
+    categoryTypeId: string(),
+    issueCategoryId: string().optional(),
+    issueStartAt: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const impactTable = table('impacts')
+  .columns({
+    id: string(),
+    ticketId: string(),
+    rcaId: string().optional(),
+    impactTypeId: string(),
+    impact: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const coeTable = table('coes')
+  .columns({
+    id: string(),
+    rcaId: string(),
+    ownerId: string(),
+    actionTypeId: string(),
+    action: string(),
+    status: enumeration<COEStatus>(),
+    dueDate: number().optional(),
+    createdAt: number(),
+    completedAt: number().optional(),
+  })
+  .primaryKey('id');
+
+export const releaseAttributionTable = table('release_attributions')
+  .columns({
+    id: string(),
+    ticketId: string(),
+    releaseId: string(),
+    releaseApplicationId: string().optional(),
+    rootCauseTicketId: string().optional(),
+    confidence: enumeration<AttributionConfidence>(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
   .columns({
     id: string(),
@@ -1894,9 +2031,9 @@ export const stageTableRelationships = relationships(stageTable, ({ one, many })
   }),
   formContextMappings: many({
     sourceField: ['id'],
-      destField: ['contextId'],
-      destSchema: formContextMappingTable,
-    }),
+    destField: ['contextId'],
+    destSchema: formContextMappingTable,
+  }),
 }));
 
 export const stagePRStatusMappingTableRelationships = relationships(
@@ -2706,6 +2843,67 @@ export const releaseEventTableRelationships = relationships(releaseEventTable, (
 }));
 
 
+export const rcaTableRelationships = relationships(rcaTable, ({ one, many }) => ({
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  owner: one({
+    sourceField: ['ownerId'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+  impacts: many({
+    sourceField: ['id'],
+    destField: ['rcaId'],
+    destSchema: impactTable,
+  }),
+  coes: many({
+    sourceField: ['id'],
+    destField: ['rcaId'],
+    destSchema: coeTable,
+  }),
+  releaseAttributions: many({
+    sourceField: ['ticketId'],
+    destField: ['ticketId'],
+    destSchema: releaseAttributionTable,
+  }),
+}));
+
+export const impactTableRelationships = relationships(impactTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  rca: one({
+    sourceField: ['rcaId'],
+    destField: ['id'],
+    destSchema: rcaTable,
+  }),
+}));
+
+export const coeTableRelationships = relationships(coeTable, ({ one, many }) => ({
+  rca: one({
+    sourceField: ['rcaId'],
+    destField: ['id'],
+    destSchema: rcaTable,
+  }),
+  owner: one({
+    sourceField: ['ownerId'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+}));
+
+export const releaseAttributionTableRelationships = relationships(releaseAttributionTable, ({ one }) => ({
+  rca: one({
+    sourceField: ['ticketId'],
+    destField: ['ticketId'],
+    destSchema: rcaTable,
+  }),
+}));
 
 
 // Define schema
@@ -2787,6 +2985,12 @@ export const schema = createSchema({
     applicationTable,
     applicationReleaseTicketTable,
     releaseEventTable,
+    releaseChangeTable,
+    releaseChangeTypeTable,
+    rcaTable,
+    impactTable,
+    coeTable,
+    releaseAttributionTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -2857,6 +3061,10 @@ export const schema = createSchema({
     applicationTableRelationships,
     applicationReleaseTicketTableRelationships,
     releaseEventTableRelationships,
+    rcaTableRelationships,
+    impactTableRelationships,
+    coeTableRelationships,
+    releaseAttributionTableRelationships,
   ],
 });
 
@@ -2935,6 +3143,12 @@ export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Application = Row<typeof schema.tables.applications>;
 export type ApplicationReleaseTicket = Row<typeof schema.tables.application_release_tickets>;
 export type ReleaseEvent = Row<typeof schema.tables.release_events>;
+export type ReleaseChange = Row<typeof schema.tables.release_changes>;
+export type ReleaseChangeType = Row<typeof schema.tables.release_change_types>;
+export type RCA = Row<typeof schema.tables.rcas>;
+export type Impact = Row<typeof schema.tables.impacts>;
+export type COE = Row<typeof schema.tables.coes>;
+export type ReleaseAttribution = Row<typeof schema.tables.release_attributions>;
 
 export type Context = {
   userID: string;
