@@ -1,0 +1,244 @@
+import React, { useMemo, useState } from 'react';
+import { Headphones, ChevronDown } from 'lucide-react';
+import { Popover } from '../../ui/Popover/Popover';
+import { Drawer } from '../../ui/Drawer/Drawer';
+import { cn } from '../../../utils/classNames';
+import { ChannelScopeType } from '@xyne/shared';
+import { CallTrigger } from '../CallTrigger/CallTrigger';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
+import { useSelector } from '@xstate/react';
+import { roomActor } from '../../../machines/roomMachine';
+import { Badge } from '../../ui/Badge/Badge';
+import { useCallActions } from '../../../hooks/useCallActions';
+import { CallConfirmationModal } from '../CallConfirmationModal';
+import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
+import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
+import { usePlatform } from '../../../hooks/usePlatform';
+import { CallCard } from './CallCard';
+import { CallOrigin, InvitationResponse } from '@xyne/shared';
+
+interface CallParticipant {
+  userId: string;
+  response?: InvitationResponse | null;
+}
+
+export interface CallData {
+  externalId?: string;
+  createdByUserId?: string;
+  channelId?: string;
+  startedAt?: number;
+  participants?: readonly CallParticipant[];
+  callOrigin?: CallOrigin;
+}
+
+interface CallTriggerModalProps {
+  channelId: string;
+  targetUserIds?: string[];
+  scopeType?: ChannelScopeType;
+  channelName?: string;
+  participantCount?: number;
+  callDisplayName?: string;
+  className?: string;
+  disabled?: boolean;
+}
+
+export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
+  channelId,
+  targetUserIds,
+  scopeType,
+  channelName,
+  participantCount,
+  callDisplayName,
+  className,
+  disabled = false,
+}) => {
+  const { isMobile } = usePlatform();
+
+  const { hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } = useCallActions({
+    channelId,
+    targetUserIds,
+    callDisplayName,
+  });
+
+  // Use the new hook for initiating calls
+  const { initiateCall, joinCall } = useCallJoinOrInitiate();
+
+  // Use call confirmation hook (same as CallTrigger)
+  const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
+    useCallConfirmation({
+      scopeType,
+      channelName,
+      participantCount,
+      hasActiveCallInChannel,
+      isUserInCurrentChannelCall,
+      isInCall,
+    });
+
+  const [activeCalls] = useCachedQuery(queries.activeCallsInChannel({ channelId }));
+  const currentCallId = useSelector(roomActor, state => state.context.externalId);
+
+  const validActiveCalls = useMemo(
+    () => (activeCalls && Array.isArray(activeCalls) ? (activeCalls as CallData[]) : []),
+    [activeCalls],
+  );
+
+  const hasActiveCalls = validActiveCalls.length > 0;
+
+  const currentCallData = useMemo((): CallData | null => {
+    if (!currentCallId) return null;
+    return validActiveCalls.find(call => call.externalId === currentCallId) || null;
+  }, [currentCallId, validActiveCalls]);
+
+  const liveCalls = useMemo(
+    () => validActiveCalls.filter(call => call.externalId !== currentCallId),
+    [validActiveCalls, currentCallId],
+  );
+
+  const hasChannelCall = useMemo(
+    () => validActiveCalls.some(call => call.callOrigin !== CallOrigin.CONVERSATION),
+    [validActiveCalls],
+  );
+
+  const [isOpen, setIsOpen] = useState(false);
+  const handleClose = (): void => setIsOpen(false);
+  const handleOpenChange = (open: boolean): void => setIsOpen(open);
+
+  const handleInitiateCall = (): void => {
+    initiateCall({
+      channelId,
+      ...(targetUserIds && { targetUserIds }),
+      ...(callDisplayName && { callDisplayName }),
+      onComplete: handleClose,
+    });
+  };
+
+  const triggerButton = (
+    <button
+      disabled={disabled}
+      className={cn(
+        'h-full transition-colors rounded-lg w-8.5 !p-2 bg-sidebar-badge-accent',
+        'flex items-center justify-center gap-2',
+        disabled ? 'opacity-50 cursor-not-allowed' : '',
+        className,
+      )}
+    >
+      <Headphones className={cn('h-4 w-4', isMobile ? 'text-black !w-6' : 'text-white')} />
+      {!isMobile && hasActiveCalls && (
+        <Badge className='bg-white text-sidebar-badge-accent'>{validActiveCalls.length}</Badge>
+      )}
+      {!isMobile && <div className='h-4 w-px bg-gray-300' />}
+      {!isMobile && <ChevronDown className='w-4 h-4 text-white' />}
+    </button>
+  );
+
+  if (!hasActiveCalls || (validActiveCalls.length === 1 && hasChannelCall && !isMobile)) {
+    return (
+      <CallTrigger
+        channelId={channelId}
+        targetUserIds={targetUserIds}
+        scopeType={scopeType}
+        channelName={channelName}
+        participantCount={participantCount}
+        {...(callDisplayName && { callDisplayName })}
+      />
+    );
+  }
+
+  const content = (
+    <div className={cn('flex flex-col pb-2', isMobile ? 'pt-4' : '')}>
+      <div>
+        {currentCallData && (isMobile ? hasChannelCall && validActiveCalls.length === 1 : true) && (
+          <CallCard
+            call={currentCallData}
+            currentCallId={currentCallId}
+            onActionClick={handleClose}
+            isMobileLiveCall={isMobile && hasChannelCall && validActiveCalls.length === 1}
+            joinCall={joinCall}
+            isInCall={isInCall}
+          />
+        )}
+      </div>
+      {liveCalls.length > 0 && (
+        <div>
+          <div
+            className={cn(
+              'text-xs font-medium text-gray-600 p-6 pb-2 font-mono',
+              isMobile ? '!pt-2' : '',
+            )}
+          >
+            Live Calls
+          </div>
+          <div>
+            {liveCalls.map(call => (
+              <CallCard
+                key={call.externalId}
+                call={call}
+                currentCallId={currentCallId}
+                onActionClick={handleClose}
+                joinCall={joinCall}
+                isInCall={isInCall}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {!hasChannelCall && (
+        <div>
+          <div
+            className={cn(
+              'text-xs font-medium text-gray-600 p-6 pb-2 font-mono',
+              isMobile && validActiveCalls.length === 1 && currentCallData ? '!pt-2' : '',
+            )}
+          >
+            Other Options
+          </div>
+          <button
+            className='flex items-center gap-3 w-full px-6 py-4 rounded-lg hover:bg-gray-50 transition-colors'
+            onClick={() => handleCallAction(handleInitiateCall)}
+          >
+            <div className='rounded-md bg-gray-200 p-2'>
+              <Headphones className='w-5 h-5 text-black' />
+            </div>
+            <span className='text-sm font-semibold text-black'>Start call now</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      {isMobile ? (
+        <Drawer
+          trigger={triggerButton}
+          open={isOpen}
+          onOpenChange={handleOpenChange}
+          title='Active Calls'
+          description='View and manage active calls'
+        >
+          {content}
+        </Drawer>
+      ) : (
+        <Popover
+          trigger={triggerButton}
+          side='left'
+          sideOffset={-100}
+          className='w-auto min-w-[400px] rounded-lg border border-gray-200 bg-white shadow-lg p-0 mt-24 z-[1000]'
+          open={isOpen}
+          onOpenChange={handleOpenChange}
+        >
+          {content}
+        </Popover>
+      )}
+      <CallConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={closeModal}
+        onConfirm={() => handleConfirmCall(handleInitiateCall)}
+        title={modalContent.title}
+        subtitle={modalContent.subtitle}
+        description={modalContent.description}
+      />
+    </>
+  );
+};

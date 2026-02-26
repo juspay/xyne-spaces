@@ -132,7 +132,11 @@ const ChannelItem = ({
           <span ref={nameRef} className='text-[13px] flex-1 truncate min-w-0'>
             {displayName}
           </span>
-          {hasActiveCall && <Headphones size={14} className='text-[#464C53] shrink-0' />}
+          {hasActiveCall && (
+            <span className='shrink-0 rounded-full bg-[#2D881F] px-2 py-1 text-white'>
+              <Headphones size={14} />
+            </span>
+          )}
           {draftMessage && !isActive && (
             <Tooltip
               content={

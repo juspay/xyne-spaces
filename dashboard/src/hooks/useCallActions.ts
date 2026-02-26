@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import { useZero } from './useZero';
 import { roomActor } from '../machines/roomMachine';
-import { CallType } from '@xyne/shared';
+import { CallType, CallOrigin } from '@xyne/shared';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { usePlatform } from './usePlatform';
 
@@ -12,12 +12,14 @@ interface PendingAction {
   channelId?: string;
   targetUserIds?: string[];
   callDisplayName?: string;
+  conversationId?: string;
 }
 
 interface UseCallActionsOptions {
   channelId: string;
   targetUserIds?: string[] | undefined;
   callDisplayName?: string | undefined; // Display name for CallKit (DM: participant name, Channel: channel name)
+  conversationId?: string | undefined; // Optional: for thread-initiated calls
 }
 
 interface UseCallActionsReturn {
@@ -38,6 +40,7 @@ export const useCallActions = ({
   channelId,
   targetUserIds,
   callDisplayName,
+  conversationId,
 }: UseCallActionsOptions): UseCallActionsReturn => {
   const zero = useZero();
   const { isMobile } = usePlatform();
@@ -60,7 +63,9 @@ export const useCallActions = ({
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
 
   // Find active call in the current channel
-  const currentChannelCall = activeCalls?.find(call => call.channelId === channelId);
+  const currentChannelCall = activeCalls?.find(
+    call => call.channelId === channelId && call.callOrigin !== CallOrigin.CONVERSATION,
+  );
   const hasActiveCallInChannel = !!currentChannelCall;
 
   // Check if user is actually in this channel's call (for both initiator and receiver)
@@ -99,6 +104,7 @@ export const useCallActions = ({
           viewMode: isMobile ? 'full' : 'mini',
           ...(action.targetUserIds && { targetUserIds: action.targetUserIds }),
           ...(action.callDisplayName && { callDisplayName: action.callDisplayName }),
+          ...(action.conversationId && { conversationId: action.conversationId }),
         });
       }
     }
@@ -141,6 +147,7 @@ export const useCallActions = ({
           channelId,
           ...(targetUserIds && { targetUserIds }),
           ...(callDisplayName && { callDisplayName }),
+          ...(conversationId && { conversationId }),
         };
         roomActor.send({ type: 'DISCONNECT' });
       } else {
@@ -159,6 +166,7 @@ export const useCallActions = ({
           viewMode: isMobile ? 'full' : 'mini',
           ...(targetUserIds && { targetUserIds }),
           ...(callDisplayName && { callDisplayName }),
+          ...(conversationId && { conversationId }),
         });
       }
     }

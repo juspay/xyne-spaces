@@ -12,6 +12,7 @@ export interface InitiateCallRequest {
   invitedUserIds?: string[];
   callType: CallType;
   isHeadless?: boolean; // For recordings without a specific channel
+  conversationId?: string; // Optional: for thread-initiated calls
 }
 
 export interface InitiateCallResponse {
@@ -92,6 +93,7 @@ export class CallService {
         invitedUserIds: data.invitedUserIds,
         callType: data.callType,
         isHeadless: data.isHeadless,
+        ...(data.conversationId && { conversationId: data.conversationId }),
       });
 
       return response.data;

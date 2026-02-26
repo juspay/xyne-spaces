@@ -120,6 +120,19 @@ export const queries = defineQueries({
         .one();
     }
   ),
+  getConversationByCallId: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ ctx, args: { callId } }) => {
+      return zql.conversations
+        .where('callId', callId)
+        .related('initialMessage', (im) =>
+          im.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
+          )
+        )
+        .one();
+    }
+  ),
   getConversationByTimestamp: defineQuery(
     z.object({ channelId: z.string(), timestamp: z.number() }),
     ({ args: { channelId, timestamp } }) => {
@@ -489,6 +502,17 @@ export const queries = defineQueries({
       .orderBy('startedAt', 'desc')
       .related('participants');
   }),
+
+  activeCallsInChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.calls
+        .where('channelId', channelId)
+        .where('status', CallStatus.ACTIVE)
+        .orderBy('startedAt', 'desc')
+        .related('participants');
+    }
+  ),
 
   userCallHistory: defineQuery(() => {
     return zql.calls.orderBy('startedAt', 'desc').limit(100).related('participants');

@@ -132,6 +132,7 @@ export type RoomMachineEvent =
       zero: Zero | null;
       callDisplayName?: string; // Display name for CallKit (DM: participant name, Channel: channel name)
       viewMode?: 'mini' | 'full';
+      conversationId?: string; // Optional: for thread-initiated calls
     }
   | {
       type: 'JOIN_CALL';
@@ -228,15 +229,17 @@ export const roomMachine = setup({
           channelId?: string;
           callType: CallType;
           targetUserIds?: string[];
+          conversationId?: string;
         };
       }) => {
-        const { channelId, callType, targetUserIds } = input;
+        const { channelId, callType, targetUserIds, conversationId } = input;
 
         // Backend now only generates LiveKit credentials, no DB writes
         // If targetUserIds is provided without channelId, backend will find/create DM or group DM channel
         const result = await callService.initiateCall({
           ...(channelId && { channelId }),
           ...(targetUserIds && targetUserIds.length > 0 && { invitedUserIds: targetUserIds }),
+          ...(conversationId && { conversationId }),
           callType,
         });
 
@@ -1135,6 +1138,8 @@ export const roomMachine = setup({
               event.type === 'INITIATE_CALL' ? (event.callDisplayName ?? null) : null,
             viewMode: ({ event }) =>
               event.type === 'INITIATE_CALL' && event.viewMode ? event.viewMode : ('mini' as const),
+            conversationId: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.conversationId ?? null) : null,
             isInitiator: () => true,
           }),
         },
@@ -1191,6 +1196,7 @@ export const roomMachine = setup({
             channelId?: string;
             callType: CallType;
             targetUserIds?: string[];
+            conversationId?: string;
           } = {
             callType: context.callType,
           };
@@ -1199,6 +1205,9 @@ export const roomMachine = setup({
           }
           if (context.targetUserIds && context.targetUserIds.length > 0) {
             input.targetUserIds = context.targetUserIds;
+          }
+          if (context.conversationId) {
+            input.conversationId = context.conversationId;
           }
           return input;
         },

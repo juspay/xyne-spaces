@@ -181,6 +181,9 @@ class LiveKitWebhookController {
         const channelId = roomMetadata.channelId;
         const createdBy = roomMetadata.createdBy || participant.identity;
         const callType = roomMetadata.callType;
+        const callOrigin = roomMetadata.callOrigin;
+        const existingConversationId = roomMetadata.conversationId;
+        const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
 
         if (!channelId) {
           logger.error(`[LiveKit Webhook] Missing channelId in room metadata for ${roomName}`);
@@ -202,11 +205,18 @@ class LiveKitWebhookController {
         logger.info(`[LiveKit Webhook] ACL validation passed for call creation: channel=${channelId}, creator=${createdBy}, joiner=${participant.identity}`);
 
         // Get channel participants for creating participant records
-        const channelParticipants = await repositories.channelParticipants.getChannelParticipants(channelId);
+        let participantsToInvite: Array<{ userId: string }>;
+        if (invitedUserIds && Array.isArray(invitedUserIds) && invitedUserIds.length > 0) {
+          // Use only the explicitly selected participants
+          participantsToInvite = invitedUserIds.map((userId: string) => ({ userId }));
+        } else {
+          // Use all channel participants (default behavior for channel calls)
+          participantsToInvite = await repositories.channelParticipants.getChannelParticipants(channelId);
+        }
+        
         const now = new Date();
 
-        // Generate IDs upfront for conversation and message
-        const conversationId = uuidv4();
+        const conversationId = existingConversationId || uuidv4();
         const messageId = uuidv4();
         const callId = uuidv4();
 
@@ -222,10 +232,11 @@ class LiveKitWebhookController {
           callType,
           roomLink,
           joiningUserId: participant.identity,
-          channelParticipants,
+          channelParticipants: participantsToInvite,
           conversationId,
           messageId,
           now,
+          callOrigin,
         });
 
         call = result.call;

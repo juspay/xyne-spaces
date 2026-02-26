@@ -5,7 +5,7 @@ import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { transcriptService } from '@/services/transcriptService';
-import { CallStatus, CallType, InvitationResponse } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, InvitationResponse } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import z from 'zod';
@@ -36,7 +36,7 @@ export class CallController {
     let callExternalId: string | undefined;
 
     try {
-      const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel } = req.body;
+      const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel, conversationId } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.name;
       const userEmail = req.user?.email;
@@ -82,9 +82,13 @@ export class CallController {
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
-      logger.info(`[${correlationId}] existing_call_check | channel_id=${finalChannelId}`);
+      logger.info(`[${correlationId}] existing_call_check | channel_id=${finalChannelId}, conversation_id=${conversationId || 'none'}`);
+      // If conversationId is provided, check for calls matching both channelId and conversationId
+      // Otherwise, check for calls matching only channelId
       const existingCall = isHeadless
         ? null
+        : conversationId
+        ? await repositories.calls.findActiveCallByChannelIdAndConversationId(finalChannelId, conversationId)
         : await repositories.calls.findActiveCallByChannelId(finalChannelId);
 
       if (existingCall) {
@@ -141,9 +145,12 @@ export class CallController {
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
         projectId: channel.projectId,
+        callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType: isHeadless ? 'HEADLESS' : callType,
         sttModel: sttModel || 'azure',
         createdBy: userId,
+        ...(conversationId && { conversationId }),
+        ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
       });
 
       await livekitService.createRoom({
