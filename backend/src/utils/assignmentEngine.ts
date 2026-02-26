@@ -10,7 +10,7 @@ import type {
 
 export interface AssignmentResult {
   assignedUserId?: string;
-  reason?: 'NO_ON_CALL_USERS';
+  reason?: 'NO_ON_CALL_USERS' | 'EXCLUDED_USER_ONLY_CANDIDATE';
 }
 
 export interface AssignmentCandidate {
@@ -83,14 +83,20 @@ function filterUsersByResponsibility(
  *
  * Lower score = higher priority (fewer active tasks = more available).
  *
- * Returns: { assignedUserId } or { reason: "NO_ON_CALL_USERS" }
+ * PR Reviewer Special Rule:
+ * - If excludeUserId is provided (the ticket assignee), the PR reviewer cannot be the same person
+ * - The system picks the second-lowest score candidate if the lowest is the excluded user
+ * - If no other candidates exist after exclusion, returns { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' }
+ *
+ * Returns: { assignedUserId } or { reason: "NO_ON_CALL_USERS" | "EXCLUDED_USER_ONLY_CANDIDATE" }
  */
 export async function evaluateAssignmentRule(
   userGroupId: string,
   boardId: string,
-  assignmentType: AssignmentType = AssignmentType.TICKET_ASSIGNEE
+  assignmentType: AssignmentType = AssignmentType.TICKET_ASSIGNEE,
+  excludeUserId?: string
 ): Promise<AssignmentResult> {
-  logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}`);
+  logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}`);
 
   // Fetch user group mappings
   const userGroupMappings = await repositories.userGroupMapping.findMany({
@@ -267,15 +273,32 @@ export async function evaluateAssignmentRule(
   candidates.sort((a, b) => a.score - b.score);
 
   // Pick the first candidate who has not exceeded their maxTickets (if set)
+  // For PR_REVIEWER, exclude the ticket assignee (excludeUserId) - pick second best if assignee would be selected
   let selectedUser: AssignmentCandidate | undefined = undefined;
+  let excludedCandidate: AssignmentCandidate | undefined = undefined;
+
   for (const candidate of candidates) {
     const { maxTickets, userTickets } = candidate.details || {};
     // -1 means unlimited, so only skip if maxTickets >= 0 and user has exceeded the limit
     if (typeof maxTickets === 'number' && maxTickets >= 0 && userTickets > maxTickets) {
       continue; // skip, above maxTickets
     }
+
+    // For PR_REVIEWER assignment, if this candidate is the excluded user (assignee), skip and remember them
+    if (assignmentType === AssignmentType.PR_REVIEWER && excludeUserId && candidate.userId === excludeUserId) {
+      excludedCandidate = candidate;
+      continue;
+    }
+
     selectedUser = candidate;
     break;
+  }
+
+  // If no valid candidate found after filtering, and we skipped the excluded user,
+  // it means only the excluded user was available
+  if (!selectedUser && excludedCandidate) {
+    logger.info(`[Assignment] Only excluded user (${excludeUserId}) available for PR reviewer assignment`);
+    return { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' };
   }
 
   if (!selectedUser) {
@@ -342,17 +365,34 @@ export async function evaluateAssignmentRule(
     }
     
     fallbackCandidates.sort((a, b) => a.score - b.score);
-    
+
     // Pick first fallback candidate who hasn't exceeded maxTickets
+    // For PR_REVIEWER, exclude the ticket assignee (excludeUserId) - pick second best if assignee would be selected
+    let fallbackExcludedCandidate: AssignmentCandidate | undefined = undefined;
+
     for (const candidate of fallbackCandidates) {
       const { maxTickets, userTickets } = candidate.details || {};
       if (typeof maxTickets === 'number' && maxTickets >= 0 && userTickets > maxTickets) {
         continue;
       }
+
+      // For PR_REVIEWER assignment, if this candidate is the excluded user (assignee), skip and remember them
+      if (assignmentType === AssignmentType.PR_REVIEWER && excludeUserId && candidate.userId === excludeUserId) {
+        fallbackExcludedCandidate = candidate;
+        continue;
+      }
+
       selectedUser = candidate;
       break;
     }
-    
+
+    // If no valid candidate found after filtering, and we skipped the excluded user,
+    // it means only the excluded user was available
+    if (!selectedUser && fallbackExcludedCandidate) {
+      logger.info(`[Assignment] Only excluded user (${excludeUserId}) available for PR reviewer assignment (fallback)`);
+      return { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' };
+    }
+
     if (!selectedUser) {
       return { reason: 'NO_ON_CALL_USERS' };
     }

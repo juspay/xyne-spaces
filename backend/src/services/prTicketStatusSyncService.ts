@@ -45,6 +45,7 @@ interface TicketInfo {
   boardId: string;
   userGroupId: string | null;
   channelId: string | null;
+  assignedTo: string | null;
 }
 
 interface StageInfo {
@@ -388,6 +389,7 @@ export class PRTicketStatusSyncService {
           boardId: true,
           userGroupId: true,
           channelId: true,
+          assignedTo: true,
         },
       });
       if (ticket) {
@@ -421,6 +423,7 @@ export class PRTicketStatusSyncService {
               boardId: true,
               userGroupId: true,
               channelId: true,
+              assignedTo: true,
             },
           });
           if (ticket) {
@@ -754,10 +757,13 @@ export class PRTicketStatusSyncService {
       }
 
       // Call assignment engine with the appropriate type
+      // For PR_REVIEWER, exclude the ticket assignee to avoid self-review
+      const excludeUserId = assignmentType === AssignmentType.PR_REVIEWER ? (ticket.assignedTo ?? undefined) : undefined;
       const assignmentResult = await evaluateAssignmentRule(
         ticket.userGroupId,
         ticket.boardId,
-        assignmentType
+        assignmentType,
+        excludeUserId
       );
 
       if (!assignmentResult.assignedUserId) {
