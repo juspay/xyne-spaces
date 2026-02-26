@@ -207,8 +207,10 @@ class LiveKitWebhookController {
         // Get channel participants for creating participant records
         let participantsToInvite: Array<{ userId: string }>;
         if (invitedUserIds && Array.isArray(invitedUserIds) && invitedUserIds.length > 0) {
-          // Use only the explicitly selected participants
           participantsToInvite = invitedUserIds.map((userId: string) => ({ userId }));
+          if (!participantsToInvite.some((p) => p.userId === createdBy)) {
+            participantsToInvite = [{ userId: createdBy }, ...participantsToInvite];
+          }
         } else {
           // Use all channel participants (default behavior for channel calls)
           participantsToInvite = await repositories.channelParticipants.getChannelParticipants(channelId);
