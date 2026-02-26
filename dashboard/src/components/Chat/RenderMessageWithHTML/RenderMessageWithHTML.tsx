@@ -9,6 +9,7 @@ import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/Gener
 import { ALLOWED_TAGS, isValidURL, sanitizeDomTree } from '../../../utils/sanitizer';
 import { tokenizeMessage, isEmojiOnly } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
+import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopover';
 import { ToolOutputRenderer, type ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import { cn } from '../../../utils/classNames';
 import { isElectronApp, isElectronStandaloneWindow } from '../../../utils/electronApp';
@@ -195,6 +196,44 @@ function ChannelMentionRenderer({
         {channelName}
       </span>
     </GenericMentionHoverPopover>
+  );
+}
+
+function GroupMentionRenderer({
+  groupId,
+  groupName,
+  alias,
+}: {
+  groupId: string;
+  groupName: string;
+  alias: string;
+}): JSX.Element {
+  const navigate = useNavigate();
+  const { channelId } = useParams<{ channelId: string }>();
+
+  const handleClick = (): void => {
+    if (channelId) {
+      void navigate(`/chat/dir/${channelId}/group/${groupId}`);
+    }
+  };
+
+  return (
+    <GroupHoverWrapper groupId={groupId}>
+      <span
+        className='mention-text cursor-pointer'
+        onClick={handleClick}
+        role='button'
+        tabIndex={0}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleClick();
+          }
+        }}
+      >
+        {alias || groupName}
+      </span>
+    </GroupHoverWrapper>
   );
 }
 
@@ -396,20 +435,17 @@ const parseNode = (
 
   if (el.getAttribute('data-mention-type') === 'group') {
     const groupName = el.getAttribute('data-group-name') || '';
+    const groupId = el.getAttribute('data-group-id') || '';
     // const count = parseInt(el.getAttribute('data-member-count') || '0', 10);
     const alias = el.getAttribute('data-group-alias') || '';
 
     return (
-      <GenericMentionHoverPopover
+      <GroupMentionRenderer
         key={`${keyPrefix}-group-${idx}`}
-        data={{
-          icon: '👥',
-          title: groupName,
-          // subtitle: `${count} members`,
-        }}
-      >
-        <span className='mention-text'>{alias || groupName}</span>
-      </GenericMentionHoverPopover>
+        groupId={groupId}
+        groupName={groupName}
+        alias={alias}
+      />
     );
   }
 

@@ -7,20 +7,26 @@ import { UserResponsibility } from '@xyne/shared';
 import { useUsers } from '../../../../hooks/useUsers';
 
 interface UserManagementProps {
-  userGroupId: string;
-  disabled?: boolean;
-  onUsersChange?: () => void;
+  userGroupId: string | undefined;
+  selectedUsers: User[] | undefined;
+  onUsersChange: ((users: User[]) => void) | undefined;
+  disabled: boolean | undefined;
   responsibilities: Map<string, UserResponsibility>;
 }
 
 export const UserManagement = ({
   userGroupId,
-  disabled = false,
+  selectedUsers,
   onUsersChange,
+  disabled = false,
   responsibilities,
 }: UserManagementProps): ReactElement => {
+  const isCreateMode = !userGroupId;
+
+  // Edit mode: fetch from server
   const [userGroupMembers] = useCachedQuery(
-    queries.getUserGroupMembers({ userGroupId: userGroupId }),
+    queries.getUserGroupMembers({ userGroupId: userGroupId ?? '' }),
+    { enabled: !!userGroupId },
   );
 
   const allUsers = useUsers();
@@ -32,18 +38,25 @@ export const UserManagement = ({
     return map;
   }, [allUsers]);
 
-  // Extract users from mappings using userId and XState user store
-  const currentUsers =
-    userGroupMembers
-      ?.map(mapping => usersById.get(mapping.userId))
-      .filter((user): user is User => Boolean(user)) || [];
+  // Edit mode: use server data; Create mode: use local state
+  const currentUsers = isCreateMode
+    ? selectedUsers || []
+    : userGroupMembers
+        ?.map(mapping => usersById.get(mapping.userId))
+        .filter((user): user is User => Boolean(user)) || [];
 
-  const handleUsersAdded = (): void => {
-    onUsersChange?.();
+  const handleAddUser = (user: User): void => {
+    if (isCreateMode) {
+      responsibilities.set(user.id, UserResponsibility.MEMBER);
+      onUsersChange?.([...currentUsers, user]);
+    }
   };
 
-  const handleUserRemoved = (): void => {
-    onUsersChange?.();
+  const handleRemoveUser = (userId: string): void => {
+    if (isCreateMode) {
+      responsibilities.delete(userId);
+      onUsersChange?.(currentUsers.filter(u => u.id !== userId));
+    }
   };
 
   return (
@@ -58,8 +71,8 @@ export const UserManagement = ({
           userGroupId={userGroupId}
           users={currentUsers}
           responsibilities={responsibilities}
-          onUserRemove={handleUserRemoved}
-          onUsersAdded={handleUsersAdded}
+          onAddUser={handleAddUser}
+          onRemoveUser={handleRemoveUser}
           disabled={disabled}
         />
       </div>

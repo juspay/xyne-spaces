@@ -69,6 +69,7 @@ export type GroupMentionProps = BaseMentionTextProps & {
   groupAlias?: string;
   description?: string;
   memberCount?: number;
+  onGroupClick?: (groupId: string) => void;
 };
 
 export type ChannelMentionProps = BaseMentionTextProps & {

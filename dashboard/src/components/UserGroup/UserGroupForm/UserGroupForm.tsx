@@ -5,7 +5,6 @@ import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
 import { UserManagement } from '../UserManagement';
-import { UserSelector } from '../UserManagement/UserSelector/UserSelector';
 import type { UserGroup, User } from '@xyne/shared';
 import { UserResponsibility } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
@@ -290,36 +289,13 @@ export const UserGroupForm = ({
 
         {activeTab === 'members' && (
           <div className='h-full flex flex-col'>
-            {isEdit && userGroup ? (
-              <UserManagement
-                userGroupId={userGroup.id}
-                disabled={isLoading}
-                responsibilities={responsibilities}
-                onUsersChange={() => {
-                  // Force re-render if needed
-                }}
-              />
-            ) : (
-              <div className='p-6'>
-                <UserSelector
-                  userGroupId='' // Will be set after creation
-                  excludeUserIds={[]}
-                  onUsersAdded={() => {
-                    // Users are handled in form submission
-                  }}
-                  disabled={
-                    isLoading
-                      ? {
-                          value: true,
-                          reason: 'Cannot add users while creating group',
-                        }
-                      : false
-                  }
-                  selectedUsersOverride={selectedUsers}
-                  onSelectedUsersChange={setSelectedUsers}
-                />
-              </div>
-            )}
+            <UserManagement
+              userGroupId={userGroup?.id}
+              selectedUsers={isEdit ? undefined : selectedUsers}
+              onUsersChange={isEdit ? undefined : setSelectedUsers}
+              disabled={isLoading}
+              responsibilities={responsibilities}
+            />
           </div>
         )}
       </div>

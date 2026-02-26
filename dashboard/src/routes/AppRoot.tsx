@@ -64,6 +64,7 @@ import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
 import { useSwipeBack } from '../hooks/useSwipeBack';
 import DmsPage from '../components/Chat/DirectMessages/DmsPage';
 import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
+import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 import GlobalTopBar from '../components/GlobalTopBar/GlobalTopBar';
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
 import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
@@ -506,6 +507,10 @@ export const router = createBrowserRouter([
                                 Select a conversation to view messages
                               </div>
                             ),
+                          },
+                          {
+                            path: 'group/:groupId',
+                            element: <UserGroupSidePanel />,
                           },
                           {
                             path: ':conversationId',

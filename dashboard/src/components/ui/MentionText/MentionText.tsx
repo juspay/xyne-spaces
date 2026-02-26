@@ -1,16 +1,20 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Lock, Users, Clock, Hash } from 'lucide-react';
 import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
+import { GroupHoverWrapper } from '../GroupMentionPopover/GroupMentionPopover';
 import { GenericMentionHoverPopover } from '../GenericMentionPopover/GenericMentionPopover';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { MentionTextProps } from './MentionText.types';
 import { useUser } from '../../../hooks/useUsers';
 import { useChannel } from '../../../hooks/useChannels';
+import { useRouteContext } from '../../../hooks/useRouteContext';
 
 export const MentionText: React.FC<MentionTextProps> = props => {
   const context = useAuthContextValues();
   const navigate = useNavigate();
+  const { baseRoute } = useRouteContext();
+  const { channelId: currentChannelId } = useParams<{ channelId: string }>();
   const user = useUser(props.type === 'user' ? props.userId : '');
   const channel = useChannel(props.type === 'channel' ? props.channelId : '');
   const isCurrentUser = context.userID === user?.id;
@@ -131,20 +135,30 @@ export const MentionText: React.FC<MentionTextProps> = props => {
     );
   }
 
+  const handleGroupClick = (): void => {
+    if (currentChannelId) {
+      void navigate(`${baseRoute}/${currentChannelId}/group/${props.groupId}`);
+    }
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent): void => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleGroupClick();
+    }
+  };
+
   return (
-    <GenericMentionHoverPopover
-      data={{
-        icon: '👥',
-        title: props.groupAlias || props.groupName,
-        ...(props.groupAlias &&
-          props.groupName !== props.groupAlias && { subtitle: props.groupName }),
-        ...(props.description && { description: props.description }),
-        // ...(props.memberCount !== undefined && { meta: `${props.memberCount} members` }),
-      }}
-    >
-      <span className='text-[#3D74B6] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[#113F67]'>
+    <GroupHoverWrapper groupId={props.groupId}>
+      <span
+        role='button'
+        tabIndex={0}
+        onClick={handleGroupClick}
+        onKeyDown={handleKeyDown}
+        className='text-[#3D74B6] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[#113F67]'
+      >
         @{props.groupAlias || props.groupName}
       </span>
-    </GenericMentionHoverPopover>
+    </GroupHoverWrapper>
   );
 };

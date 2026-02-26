@@ -18,7 +18,9 @@ interface UserListProps {
   onUserRemove?: () => void;
   onUsersAdded?: () => void;
   disabled?: boolean;
-  userGroupId: string;
+  userGroupId: string | undefined;
+  onAddUser?: (user: User) => void;
+  onRemoveUser?: (userId: string) => void;
 }
 
 export const UserList = ({
@@ -28,11 +30,14 @@ export const UserList = ({
   onUsersAdded,
   disabled = false,
   userGroupId,
+  onAddUser,
+  onRemoveUser,
 }: UserListProps): ReactElement => {
   const zero = useZero();
   const [searchTerm, setSearchTerm] = useState('');
   const [, forceUpdate] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isCreateMode = !userGroupId;
 
   // Get users matching search query (for adding)
   const searchResults = useUserSearch(searchTerm, 10);
@@ -67,12 +72,19 @@ export const UserList = ({
   }, [searchResults, users, searchTerm]);
 
   const handleAddUser = (user: User): void => {
-    const mappingId = uuidv4();
+    // Create mode: use callback
+    if (isCreateMode) {
+      onAddUser?.(user);
+      inputRef.current?.focus();
+      return;
+    }
 
+    // Edit mode: call API
+    const mappingId = uuidv4();
     try {
       zero.mutate(
         mutators.userGroup.addUsers({
-          userGroupId,
+          userGroupId: userGroupId,
           userIds: [user.id],
           mappingIds: { [user.id]: mappingId },
           timestamp: Date.now(),
@@ -88,14 +100,20 @@ export const UserList = ({
   };
 
   const handleRemoveUser = (userId: string): void => {
+    // Create mode: use callback
+    if (isCreateMode) {
+      onRemoveUser?.(userId);
+      return;
+    }
+
+    // Edit mode: call API
     try {
       zero.mutate(
         mutators.userGroup.removeUsers({
-          userGroupId,
+          userGroupId: userGroupId,
           userIds: [userId],
         }),
       );
-
       onUserRemove?.();
     } catch (error) {
       toast.error(
@@ -171,8 +189,8 @@ export const UserList = ({
                           </Button>
                         )}
 
-                        {/* Responsibility Selector */}
-                        {!disabled && (
+                        {/* Responsibility Selector - only in edit mode */}
+                        {!disabled && !isCreateMode && (
                           <div className='w-[140px] shrink-0 [&>div]:h-7 [&>div]:w-[140px] [&_button]:h-7 [&_button]:w-[140px] [&_button]:!text-xs [&_button]:rounded-md [&_span]:!text-xs [&_div]:!text-xs [&_*]:!text-xs'>
                             <SingleSelect
                               placeholder='Role'
@@ -224,7 +242,7 @@ export const UserList = ({
                         data-track-name='AddUserToChannel'
                         data-track-metadata={JSON.stringify({ userId: user.id })}
                       >
-                        Add to Channel
+                        Add to Group
                       </Button>
                     </div>
                   ))}

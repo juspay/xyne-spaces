@@ -227,9 +227,21 @@ const AppSidebar = (): ReactElement => {
     return navigationItems.filter(item => {
       const resourceName = PATH_TO_RESOURCE[item.path];
       const requiresAccess = resourceName !== undefined;
-      const hasAccess = requiresAccess
-        ? permissions.some(p => p.resourceName === resourceName && p.accessType === 'ADMIN')
-        : true;
+
+      let hasAccess = true;
+      if (requiresAccess) {
+        if (resourceName === 'USER-GROUPS') {
+          hasAccess = permissions.some(
+            p =>
+              p.resourceName === resourceName &&
+              (p.accessType === 'ADMIN' || p.accessType === 'WRITE'),
+          );
+        } else {
+          hasAccess = permissions.some(
+            p => p.resourceName === resourceName && p.accessType === 'ADMIN',
+          );
+        }
+      }
 
       if (item.path === '/vscode' && !isElectronApp()) return false;
       if (item.path === '/browser' && !isElectronApp()) return false;

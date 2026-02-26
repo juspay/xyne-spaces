@@ -741,6 +741,10 @@ export const queries = defineQueries({
       return zql.user_group_mappings.where('userGroupId', userGroupId).orderBy('createdAt', 'desc');
     },
   ),
+  // Query for user group mappings by user ID
+  getUserGroupMappingsByUserId: defineQuery(({ ctx }) => {
+    return zql.user_group_mappings.where('userId', ctx.userID);
+  }),
   // Query for user's bookmarks
   userBookmarks: defineQuery(() => {
     return zql.bookmarks.orderBy('createdAt', 'desc');
