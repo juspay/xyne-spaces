@@ -120,19 +120,10 @@ const WorkflowScreen: React.FC = () => {
     return combinedStepsData?.workflows?.[0]?.gitInfo;
   }, [combinedStepsData]);
 
-  // Check if git diff tab should be enabled (requires baseCommitHash)
-  const hasGitInfo = useMemo(() => {
-    return Boolean(gitInfo?.baseCommitHash && gitInfo?.branch && gitInfo?.repoUrl);
-  }, [gitInfo]);
-
   // Check if preview tab should be enabled
   const previewInfo = useMemo(() => {
     return gitInfo?.preview;
   }, [gitInfo]);
-
-  const hasPreview = useMemo(() => {
-    return Boolean(previewInfo?.url && previewInfo?.userAgent);
-  }, [previewInfo]);
 
   const effectiveSelectedExecutionId = useMemo(() => {
     return selectedExecutionId || executionId;
@@ -159,7 +150,6 @@ const WorkflowScreen: React.FC = () => {
     setActiveTabId: setActiveTabIdInternal,
     addTab,
     closeTab,
-    updateTab,
   } = useWorkflowTabs(
     [
       ...(isElectron
@@ -180,8 +170,8 @@ const WorkflowScreen: React.FC = () => {
         type: 'git-diff',
         icon: <GitBranch size={14} />,
         closable: false,
-        disabled: !hasGitInfo,
-        disabledTooltip: 'Git diff not available for this workflow',
+        disabled: false,
+        disabledTooltip: 'Git diff will be available after workflow completes',
       },
       ...(isElectron
         ? [
@@ -191,27 +181,14 @@ const WorkflowScreen: React.FC = () => {
               type: 'live-preview' as const,
               icon: <Eye size={14} />,
               closable: false,
-              disabled: true,
-              disabledTooltip: 'Preview not available for this workflow',
+              disabled: false,
+              disabledTooltip: 'Preview will be available after workflow completes',
             },
           ]
         : []),
     ],
     state.context.activeTabId,
   ); // Pass persisted activeTabId
-
-  // Sync tab states when git info changes
-  useEffect(() => {
-    updateTab('git-diff', {
-      disabled: !hasGitInfo,
-    });
-  }, [hasGitInfo, updateTab]);
-
-  useEffect(() => {
-    updateTab('live-preview', {
-      disabled: !hasPreview,
-    });
-  }, [hasPreview, updateTab]);
 
   // Wrapper to sync tab changes with state machine
   const setActiveTabId = useCallback(
@@ -221,29 +198,6 @@ const WorkflowScreen: React.FC = () => {
     },
     [setActiveTabIdInternal, send],
   );
-
-  // Update git-diff tab disabled state based on gitInfo availability
-  useEffect(() => {
-    const updates: { disabled: boolean; disabledTooltip?: string } = {
-      disabled: !hasGitInfo,
-    };
-    if (!hasGitInfo) {
-      updates.disabledTooltip = 'Git diff not available for this workflow';
-    }
-    updateTab('git-diff', updates);
-  }, [hasGitInfo, updateTab]);
-
-  // Update live-preview tab disabled state based on preview availability (only in Electron)
-  useEffect(() => {
-    if (!isElectron) return;
-    const updates: { disabled: boolean; disabledTooltip?: string } = {
-      disabled: !hasPreview,
-    };
-    if (!hasPreview) {
-      updates.disabledTooltip = 'Preview not available for this workflow';
-    }
-    updateTab('live-preview', updates);
-  }, [hasPreview, updateTab, isElectron]);
 
   // Type guard for RCA data extraction
   interface StepDataWithRca {
@@ -640,6 +594,7 @@ const WorkflowScreen: React.FC = () => {
           isOpen={isWorkflowModalOpen}
           onClose={() => setIsWorkflowModalOpen(false)}
           ticketId={ticket.id}
+          redirectOnSuccess={true}
         />
       )}
 

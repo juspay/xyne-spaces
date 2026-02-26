@@ -12,7 +12,6 @@ import { useAuth } from '../../../hooks/useAuth';
 import { Button } from '../../ui/Button';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
-import { isElectronApp } from '../../../utils/electronApp';
 import { QuartoDocModal } from '../QuartoDocModal';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import {
@@ -163,18 +162,16 @@ const CanvasPanel = (): ReactElement => {
             <h2 className='text-lg font-semibold text-gray-900'>Canvases</h2>
           </div>
           {activeFilter === 'quarto_docs' ? (
-            isElectronApp() && (
-              <Button
-                variant='default'
-                size='sm'
-                onClick={() => handleCreateQuartoDoc()}
-                data-track-category='CANVAS'
-                data-track-name='Create_Quarto_Doc'
-              >
-                <Plus size={16} className='mr-1' />
-                New Quarto Doc
-              </Button>
-            )
+            <Button
+              variant='default'
+              size='sm'
+              onClick={() => handleCreateQuartoDoc()}
+              data-track-category='CANVAS'
+              data-track-name='Create_Quarto_Doc'
+            >
+              <Plus size={16} className='mr-1' />
+              New Doc
+            </Button>
           ) : (
             <Button
               variant='default'

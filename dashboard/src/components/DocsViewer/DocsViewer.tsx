@@ -1,3 +1,4 @@
+import { QuartoInstructionsModal } from '../Canvas/QuartoInstructionsModal/QuartoInstructionsModal';
 import { ReactElement, useState, useCallback, useEffect, useRef } from 'react';
 import {
   FileText,
@@ -7,16 +8,14 @@ import {
   Maximize2,
   Minimize2,
   Pencil,
+  Share2,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { API_BASE_URL } from '../../config';
 import axios from 'axios';
 import JSZip from 'jszip';
-import { isElectronApp } from '../../utils/electronApp';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
 import { logger } from '../../utils/logger';
-import { useVSCode } from '../../contexts/VSCodeContext';
 import { v4 as uuidv4 } from 'uuid';
 
 interface DocsViewerProps {
@@ -90,24 +89,23 @@ const DocsViewer = ({
   repoUrl,
   onClose,
 }: DocsViewerProps): ReactElement => {
-  const navigate = useNavigate();
-  const { registerSession } = useVSCode();
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [docTitle, setDocTitle] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
   const [docRepoUrl, setDocRepoUrl] = useState<string | undefined>(repoUrl);
-  const [docBaseBranch, setDocBaseBranch] = useState<string>('main');
+  const [showInstructionsModal, setShowInstructionsModal] = useState(false);
+  const [instructionsModalData, setInstructionsModalData] = useState<{
+    repoUrl: string;
+    branchName: string;
+    repoName: string;
+  } | null>(null);
   const sessionIdRef = useRef<string>(generateSessionId());
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  // Check if running in Electron
-  const inElectron = isElectronApp();
 
   // Fetch doc metadata (title, baseBranch) from check endpoint
   useEffect(() => {
@@ -138,9 +136,6 @@ const DocsViewer = ({
         if (response.data?.doc?.repoUrl && !docRepoUrl) {
           setDocRepoUrl(response.data.doc.repoUrl);
         }
-        if (response.data?.doc?.baseBranch) {
-          setDocBaseBranch(response.data.doc.baseBranch);
-        }
       } catch {
         setDocTitle('');
       }
@@ -152,61 +147,28 @@ const DocsViewer = ({
     setIsFullscreen(prev => !prev);
   }, []);
 
-  // Handle Edit button click - clone repo, checkout branch, open VS Code
-  const handleEdit = useCallback(async () => {
-    if (!inElectron) {
-      toast.error('Edit is only available in the desktop app');
-      return;
-    }
-
+  // Handle Edit button click - open Quarto instructions modal
+  const handleEdit = useCallback(() => {
     if (!docRepoUrl) {
       toast.error('Repository URL not available for this document');
       return;
     }
 
-    const api = window.electronAPI?.codeServer;
-    if (!api) {
-      toast.error('Code server not available');
-      return;
-    }
+    setInstructionsModalData({
+      repoUrl: docRepoUrl,
+      branchName: branchName,
+      repoName,
+    });
+    setShowInstructionsModal(true);
+  }, [docRepoUrl, repoName, branchName]);
 
-    setIsEditing(true);
-    try {
-      toast.info('Setting up workspace...', {
-        description: `Cloning ${repoName} and checking out ${branchName}`,
-      });
-
-      // Use prepareForTicket to clone and checkout the branch
-      const result = await api.prepareForTicket(docRepoUrl, docBaseBranch, branchName);
-
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to prepare workspace');
-      }
-
-      // Get VS Code URL with the workspace folder
-      const vsCodeUrl = await api.getUrlWithFolder(result.workspacePath);
-
-      if (vsCodeUrl) {
-        toast.success('Workspace ready!', {
-          description: 'Opening VS Code with the document branch',
-        });
-
-        registerSession(result.workspacePath, vsCodeUrl, branchName, repoName);
-
-        // Navigate to VS Code workspace screen
-        void navigate('/vscode');
-      } else {
-        throw new Error('Failed to get VS Code URL');
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      toast.error('Failed to open editor', {
-        description: errorMessage,
-      });
-    } finally {
-      setIsEditing(false);
-    }
-  }, [inElectron, docRepoUrl, docBaseBranch, repoName, branchName, navigate, registerSession]);
+  const handleShare = useCallback(() => {
+    const url = `${window.location.origin}/docs/${repoName}/${branchName}`;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => toast.success('Link copied to clipboard!'))
+      .catch(() => toast.error('Failed to copy link'));
+  }, [repoName, branchName]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
@@ -340,130 +302,157 @@ const DocsViewer = ({
   }, [docTitle]);
 
   return (
-    <div
-      ref={containerRef}
-      className={`flex flex-col bg-white overflow-hidden ${
-        isFullscreen ? 'fixed inset-0 z-50' : 'h-full w-full rounded-2xl'
-      }`}
-    >
-      {/* Toolbar */}
+    <>
       <div
-        className={`flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 ${
-          isFullscreen ? '' : 'rounded-t-2xl'
+        ref={containerRef}
+        className={`flex flex-col bg-white overflow-hidden ${
+          isFullscreen ? 'fixed inset-0 z-50' : 'h-full w-full rounded-2xl'
         }`}
       >
-        <div className='flex items-center gap-3'>
-          {onClose && !isFullscreen && (
-            <Button
-              variant='ghost'
-              size='icon'
-              onClick={onClose}
-              className='h-8 w-8'
-              title='Go back'
-              data-track-category='DocsViewer'
-              data-track-name='CLOSE_DOCS_VIEWER'
-              data-track-metadata={JSON.stringify({ repoName, repoUrl })}
-            >
-              <ArrowLeft className='h-4 w-4' />
-            </Button>
-          )}
-          <FileText className='h-5 w-5 text-blue-600' />
-          <span className='text-sm font-medium text-gray-900 truncate max-w-md'>
-            {docTitle || 'Documentation'}
-          </span>
-        </div>
+        {/* Toolbar */}
+        <div
+          className={`flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 ${
+            isFullscreen ? '' : 'rounded-t-2xl'
+          }`}
+        >
+          <div className='flex items-center gap-3'>
+            {onClose && !isFullscreen && (
+              <Button
+                variant='ghost'
+                size='icon'
+                onClick={onClose}
+                className='h-8 w-8'
+                title='Go back'
+                data-track-category='DocsViewer'
+                data-track-name='CLOSE_DOCS_VIEWER'
+                data-track-metadata={JSON.stringify({ repoName, repoUrl })}
+              >
+                <ArrowLeft className='h-4 w-4' />
+              </Button>
+            )}
+            <FileText className='h-5 w-5 text-blue-600' />
+            <span className='text-sm font-medium text-gray-900 truncate max-w-md'>
+              {docTitle || 'Documentation'}
+            </span>
+          </div>
 
-        <div className='flex items-center gap-1'>
-          {/* Edit button - only shown in Electron when repo URL is available */}
-          {inElectron && docRepoUrl && (
+          <div className='flex items-center gap-1'>
+            {/* Share button */}
             <Button
               variant='ghost'
               size='sm'
-              onClick={() => void handleEdit()}
+              onClick={handleShare}
               className='h-8 gap-1.5 px-2'
-              title='Edit this document'
-              disabled={isEditing}
+              title='Share documentation'
               data-track-category='DocsViewer'
-              data-track-name='EDIT_DOCUMENT'
-              data-track-metadata={JSON.stringify({ repoName, repoUrl })}
+              data-track-name='SHARE_DOCUMENT'
+              data-track-metadata={JSON.stringify({ repoName, branchName })}
             >
-              {isEditing ? (
-                <Loader2 className='h-4 w-4 animate-spin' />
-              ) : (
-                <Pencil className='h-4 w-4' />
-              )}
-              <span className='hidden sm:inline'>Edit</span>
+              <Share2 className='h-4 w-4' />
+              <span className='hidden sm:inline'>Share</span>
             </Button>
-          )}
-          <Button
-            variant='ghost'
-            size='icon'
-            onClick={handleRefresh}
-            className='h-8 w-8'
-            title='Refresh'
-            disabled={isLoading}
-            data-track-category='DocsViewer'
-            data-track-name='REFRESH_DOCUMENT'
-          >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-          </Button>
-          <Button
-            variant='ghost'
-            size='icon'
-            onClick={toggleFullscreen}
-            className='h-8 w-8'
-            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-            data-track-category='DocsViewer'
-            data-track-name='TOGGLE_DOCUMENT_FULLSCREEN'
-          >
-            {isFullscreen ? <Minimize2 className='h-4 w-4' /> : <Maximize2 className='h-4 w-4' />}
-          </Button>
-        </div>
-      </div>
 
-      {/* Content Area */}
-      <div className='flex-1 relative' ref={previewContainerRef}>
-        {isLoading && (
-          <div className='absolute inset-0 flex items-center justify-center bg-white/80 z-10'>
-            <div className='flex flex-col items-center gap-2'>
-              <Loader2 className='h-8 w-8 animate-spin text-blue-600' />
-              <span className='text-sm text-gray-500'>Loading documentation...</span>
-            </div>
-          </div>
-        )}
-
-        {hasError && (
-          <div className='absolute inset-0 flex items-center justify-center bg-white z-10'>
-            <div className='flex flex-col items-center gap-4 text-center p-4'>
-              <div className='text-4xl'>😕</div>
-              <h3 className='text-lg font-semibold text-gray-900'>Failed to load documentation</h3>
-              <p className='text-sm text-gray-500 max-w-sm'>
-                The documentation could not be loaded.
-              </p>
+            {/* Edit button */}
+            {docRepoUrl && (
               <Button
-                variant='outline'
-                onClick={handleRefresh}
+                variant='ghost'
+                size='sm'
+                onClick={handleEdit}
+                className='h-8 gap-1.5 px-2'
+                title='Edit this document'
                 data-track-category='DocsViewer'
-                data-track-name='RETRY_LOAD_DOCUMENT'
+                data-track-name='EDIT_DOCUMENT'
+                data-track-metadata={JSON.stringify({ repoName, repoUrl })}
               >
-                Try Again
+                <Pencil className='h-4 w-4' />
+                <span className='hidden sm:inline'>Edit</span>
               </Button>
-            </div>
+            )}
+            <Button
+              variant='ghost'
+              size='icon'
+              onClick={handleRefresh}
+              className='h-8 w-8'
+              title='Refresh'
+              disabled={isLoading}
+              data-track-category='DocsViewer'
+              data-track-name='REFRESH_DOCUMENT'
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </Button>
+            <Button
+              variant='ghost'
+              size='icon'
+              onClick={toggleFullscreen}
+              className='h-8 w-8'
+              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              data-track-category='DocsViewer'
+              data-track-name='TOGGLE_DOCUMENT_FULLSCREEN'
+            >
+              {isFullscreen ? <Minimize2 className='h-4 w-4' /> : <Maximize2 className='h-4 w-4' />}
+            </Button>
           </div>
-        )}
+        </div>
 
-        {previewUrl && (
-          <iframe
-            ref={iframeRef}
-            key={refreshKey}
-            src={previewUrl}
-            title={docTitle || 'Documentation'}
-            className='w-full h-full border-0'
-            onLoad={handleIframeLoad}
-          />
-        )}
+        {/* Content Area */}
+        <div className='flex-1 relative' ref={previewContainerRef}>
+          {isLoading && (
+            <div className='absolute inset-0 flex items-center justify-center bg-white/80 z-10'>
+              <div className='flex flex-col items-center gap-2'>
+                <Loader2 className='h-8 w-8 animate-spin text-blue-600' />
+                <span className='text-sm text-gray-500'>Loading documentation...</span>
+              </div>
+            </div>
+          )}
+
+          {hasError && (
+            <div className='absolute inset-0 flex items-center justify-center bg-white z-10'>
+              <div className='flex flex-col items-center gap-4 text-center p-4'>
+                <div className='text-4xl'>😕</div>
+                <h3 className='text-lg font-semibold text-gray-900'>
+                  Failed to load documentation
+                </h3>
+                <p className='text-sm text-gray-500 max-w-sm'>
+                  The documentation could not be loaded.
+                </p>
+                <Button
+                  variant='outline'
+                  onClick={handleRefresh}
+                  data-track-category='DocsViewer'
+                  data-track-name='RETRY_LOAD_DOCUMENT'
+                >
+                  Try Again
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {previewUrl && (
+            <iframe
+              ref={iframeRef}
+              key={refreshKey}
+              src={previewUrl}
+              title={docTitle || 'Documentation'}
+              className='w-full h-full border-0'
+              onLoad={handleIframeLoad}
+            />
+          )}
+        </div>
+
+        {/* Instructions Modal - shown after workspace setup instead of redirecting to editor */}
+        <QuartoInstructionsModal
+          isOpen={showInstructionsModal}
+          onClose={() => {
+            setShowInstructionsModal(false);
+            setInstructionsModalData(null);
+          }}
+          repoUrl={instructionsModalData?.repoUrl || ''}
+          branchName={instructionsModalData?.branchName || 'main'}
+          repoName={instructionsModalData?.repoName || 'quarto-docs'}
+          mode='edit'
+        />
       </div>
-    </div>
+    </>
   );
 };
 

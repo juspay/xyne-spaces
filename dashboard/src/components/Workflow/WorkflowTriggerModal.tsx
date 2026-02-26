@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm, Controller, type SubmitHandler, type Path } from 'react-hook-form';
@@ -20,13 +21,16 @@ interface WorkflowTriggerModalProps {
   isOpen: boolean;
   onClose: () => void;
   ticketId: string;
+  redirectOnSuccess?: boolean;
 }
 
 export default function WorkflowTriggerModal({
   isOpen,
   onClose,
   ticketId,
+  redirectOnSuccess = false,
 }: WorkflowTriggerModalProps): React.ReactElement | null {
+  const navigate = useNavigate();
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowTypeSchema | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [showOptionalFields, setShowOptionalFields] = useState(false);
@@ -80,11 +84,14 @@ export default function WorkflowTriggerModal({
 
       return createWorkflow(workflowRequest);
     },
-    onSuccess: () => {
+    onSuccess: data => {
       form.reset();
       setSelectedWorkflow(null);
       setValidationErrors([]);
       onClose();
+      if (redirectOnSuccess) {
+        void navigate(`/tickets/${ticketId}/workflow/${data.workflow.id}`);
+      }
     },
     onError: error => {
       const errorMessage = error instanceof Error ? error.message : 'Failed to trigger workflow';
