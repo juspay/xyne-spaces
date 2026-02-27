@@ -30,7 +30,7 @@ const ResearchContextSchema = z.object({
 // Request validation schema
 // Note: channel_ids can be empty [] - agent will ask user to specify channel if needed
 const XyneAIRequestSchema = z.object({
-  query: z.string().min(1, 'Query cannot be empty').max(10000, 'Query too long'),
+  query: z.string().min(1, 'Query cannot be empty').max(50000, 'Query too long'),
   session_id: z.preprocess(emptyToUndefined, z.string().uuid().optional()),
   channel_ids: z.array(z.string().min(1)).default([]), // Allow empty array - agent handles clarification
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
