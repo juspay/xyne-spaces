@@ -975,9 +975,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     isDraggingRef.current = !!activeTicket;
   }, [activeTicket]);
 
-  // Handle navigation for ticket click
   const handleTicketClick = useCallback(
-    (ticket: Ticket) => {
+    (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
+      const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
+      const ticketUrl = `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
+
+      // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
+      if (!isMobile && isCmdClick) {
+        window.open(ticketUrl, '_blank');
+        return;
+      }
+
       const currentUrl = window.location.pathname + window.location.search;
 
       // On mobile: navigate directly to ThreadMessages route with details tab
@@ -1522,7 +1530,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       {/* Board-wise View */}
       {layoutView === 'calendar' ? (
         <div className='flex-1 overflow-hidden bg-white'>
-          <CalendarView tickets={filteredTickets} onTicketClick={handleTicketClick} />
+          <CalendarView
+            tickets={filteredTickets}
+            onTicketClick={(ticket: Ticket) => handleTicketClick({} as React.MouseEvent, ticket)}
+          />
         </div>
       ) : layoutView === 'table' ? (
         <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-white pb-14'>

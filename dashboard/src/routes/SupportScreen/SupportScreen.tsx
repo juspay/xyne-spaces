@@ -17,7 +17,7 @@ import {
 import { EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '../../utils/classNames';
 import { useZero } from '../../hooks/useZero';
@@ -41,6 +41,7 @@ import TextareaAutosize from 'react-textarea-autosize';
 import { Button } from '../../components/ui/Button/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useAuthContextValues } from '../../hooks/useAuth';
+import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListItem } from '../../components/Tickets/TicketListItem/TicketListItem';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import {
@@ -171,6 +172,7 @@ const SupportScreen = (): ReactElement => {
   const navigate = useNavigate();
   const zero = useZero();
   const { userID } = useAuthContextValues();
+  const { isMobile } = usePlatform();
   const [showMyTicketsOnly, setShowMyTicketsOnly] = useState(false);
   const [selectedMerchantMid, setSelectedMerchantMid] = useState<string | null>(null);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(() => {
@@ -313,9 +315,19 @@ const SupportScreen = (): ReactElement => {
   );
 
   const handleTicketClick = useCallback(
-    (ticket: Ticket) => {
+    (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
+      const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       const ticketData = ticket as SupportTicket;
-      void navigate(`/support/${ticketData.xyneId}`, {
+      const ticketUrl = `/support/${ticketData.xyneId}`;
+
+      // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
+      if (!isMobile && isCmdClick) {
+        const urlWithParams = `${ticketUrl}?conversationId=${ticketData.conversationId ?? ''}&title=${encodeURIComponent(ticketData.title ?? '')}&ticketId=${ticketData.id ?? ''}`;
+        window.open(urlWithParams, '_blank');
+        return;
+      }
+
+      void navigate(ticketUrl, {
         state: {
           conversationId: ticketData.conversationId,
           title: ticketData.title,
@@ -323,7 +335,7 @@ const SupportScreen = (): ReactElement => {
         },
       });
     },
-    [navigate],
+    [navigate, isMobile],
   );
 
   return (
@@ -509,14 +521,16 @@ const SupportTicketDetail = (): ReactElement => {
   const { ticketId: ticketIdParam } = useParams<{ ticketId?: string }>();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const routerState = location.state as {
     conversationId?: string | null;
     title?: string | null;
     ticketId?: string | null;
   };
-  const conversationId = routerState?.conversationId;
-  const title = routerState?.title;
-  const ticketId = routerState?.ticketId;
+  // Fall back to query params when state is not available (e.g., Cmd+Click new tab)
+  const conversationId = routerState?.conversationId ?? searchParams.get('conversationId');
+  const title = routerState?.title ?? searchParams.get('title');
+  const ticketId = routerState?.ticketId ?? searchParams.get('ticketId');
   const [emails] = useCachedQuery(
     queries.getEmailsForTicket({ conversationId: conversationId || '' }),
   );

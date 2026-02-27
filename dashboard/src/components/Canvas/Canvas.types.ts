@@ -87,7 +87,7 @@ export interface CanvasParticipant {
 
 export interface CanvasListProps {
   canvases: Canvas[];
-  onSelect: (canvas: Canvas) => void;
+  onSelect: (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => void;
   onDelete?: (canvasId: string) => void;
   onDuplicate?: (canvasId: string) => void;
   loading?: boolean;

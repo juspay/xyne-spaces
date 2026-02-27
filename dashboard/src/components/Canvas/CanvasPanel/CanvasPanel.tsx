@@ -73,23 +73,36 @@ const CanvasPanel = (): ReactElement => {
   }, []);
 
   const handleSelectCanvas = useCallback(
-    (canvas: Canvas) => {
+    (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => {
       if (!navigator.onLine) {
         toast.info('Canvas Unavailable', {
           description: 'Canvases are available online only. Please check your connection.',
         });
         return;
       }
+      const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       // If it's a Quarto doc, navigate to docs
       if (canvas.docType === DocType.Quarto && canvas.userRepo) {
-        void navigate(`/docs/${canvas.userRepo}`);
+        const docsUrl = `/docs/${canvas.userRepo}`;
+        // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
+        if (!isMobile && isCmdClick) {
+          window.open(docsUrl, '_blank');
+        } else {
+          void navigate(docsUrl);
+        }
         return;
       }
 
       // Navigate to the canvas in the right panel
-      void navigate(`/chat/canvas/${canvas.id}`);
+      const canvasUrl = `/chat/canvas/${canvas.id}`;
+      // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
+      if (!isMobile && isCmdClick) {
+        window.open(canvasUrl, '_blank');
+      } else {
+        void navigate(canvasUrl);
+      }
     },
-    [navigate],
+    [navigate, isMobile],
   );
 
   const handleDeleteCanvas = useCallback(

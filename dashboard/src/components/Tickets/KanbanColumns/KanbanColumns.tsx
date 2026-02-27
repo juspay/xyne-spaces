@@ -67,7 +67,7 @@ interface KanbanColumnsProps {
   stages: Stage[];
   ticketsByStage: Record<string, Ticket[]>;
   tagsByTicketId: Map<string, TicketTag[]>;
-  onTicketClick: (ticket: Ticket) => void;
+  onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   keyPrefix?: string;
   availableTags?: string[];
   containerClassName?: string;
@@ -231,7 +231,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                             ticket={ticket}
                             tags={tagsByTicketId.get(ticket.id) || []}
                             availableTags={availableTags}
-                            onClick={() => onTicketClick(ticket)}
+                            onClick={e => onTicketClick(e, ticket)}
                             visibleColumns={visibleColumns}
                           />
                         </div>
