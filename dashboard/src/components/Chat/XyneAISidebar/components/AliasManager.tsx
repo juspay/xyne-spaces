@@ -40,7 +40,7 @@ export const AliasManager = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='bg-white rounded-lg shadow-lg w-full max-w-4xl mx-4 overflow-hidden flex flex-col max-h-[80vh]'>
+      <div className='bg-white rounded-lg shadow-lg w-fit min-w-[56rem] max-w-[90vw] mx-4 overflow-hidden flex flex-col max-h-[80vh]'>
         {/* Header */}
         <div className='flex items-center justify-between px-4 py-3 border-b border-gray-200 flex-shrink-0'>
           <div>
@@ -68,8 +68,8 @@ export const AliasManager = ({
               </p>
             </div>
           ) : (
-            <div className='border border-gray-200 rounded-lg overflow-hidden'>
-              <table className='w-full text-sm'>
+            <div className='border border-gray-200 rounded-lg overflow-x-auto'>
+              <table className='w-full min-w-max text-sm'>
                 <thead className='bg-gray-50 border-b border-gray-200'>
                   <tr>
                     <th className='px-4 py-3 text-left font-medium text-gray-700'>Key Name</th>
