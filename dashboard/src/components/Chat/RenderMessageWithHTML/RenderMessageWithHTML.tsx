@@ -1,5 +1,6 @@
 import React, { JSX, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { Lock, Users, Clock } from 'lucide-react';
 import { highlightCodeBlocks } from './utils';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -35,10 +36,19 @@ const CanvasLink = ({
   const navigate = useNavigate();
   const location = useLocation();
   const { channelId } = useParams<{ channelId: string }>();
+  const { isMobile } = usePlatform();
 
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
     if (!href) return;
     const url = new URL(href, window.location.origin);
+
+    // Check for Cmd/Ctrl+Click to open in new tab (desktop only)
+    const isCmdClick = event.metaKey || event.ctrlKey;
+    if (!isMobile && isCmdClick) {
+      event.preventDefault();
+      window.open(href, '_blank');
+      return;
+    }
 
     if (url.origin === window.location.origin && url.pathname.startsWith('/chat/canvas/')) {
       event.preventDefault();

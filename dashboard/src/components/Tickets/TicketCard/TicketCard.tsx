@@ -22,7 +22,7 @@ interface TicketCardProps {
   ticket: Ticket;
   tags?: TicketTag[];
   availableTags?: string[];
-  onClick?: () => void;
+  onClick?: (e: React.MouseEvent | KeyboardEvent) => void;
   width?: string;
   isCompact?: boolean;
   visibleColumns?: Set<string> | undefined;
@@ -266,7 +266,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   return (
     <button
       type='button'
-      onClick={onClick}
+      onClick={e => onClick?.(e)}
       data-testid={`ticket-card-${ticket.id}`}
       className={cn(
         width,

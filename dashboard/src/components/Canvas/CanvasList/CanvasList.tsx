@@ -28,6 +28,7 @@ import {
 } from '../../ui/dropdown-menu';
 import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { CanvasShareModal } from '../CanvasShareModal';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { queries } from '../../../zero/queries';
 import { CanvasParticipantsTray, type ParticipantItem } from '../CanvasParticipantsTray';
 import { useNavigate } from 'react-router-dom';
@@ -90,6 +91,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   onFilterChange,
 }) => {
   const navigate = useNavigate();
+  const { isMobile } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingCanvasId, setDeletingCanvasId] = useState<string | null>(null);
   const [internalActiveFilter, setInternalActiveFilter] = useState<FilterTab>('all');
@@ -154,9 +156,15 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     return filtered;
   }, [canvases, quartoDocs, activeFilter, currentUserId, searchQuery]);
 
-  const handleQuartoDocClick = (canvas: Canvas): void => {
-    if (canvas.userRepo) {
-      void navigate(`/docs/${canvas.userRepo}`);
+  const handleQuartoDocClick = (e: React.MouseEvent | KeyboardEvent, canvas: Canvas): void => {
+    const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
+    const docsUrl = `/docs/${canvas.userRepo}`;
+
+    // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
+    if (!isMobile && isCmdClick) {
+      window.open(docsUrl, '_blank');
+    } else {
+      void navigate(docsUrl);
     }
   };
 
@@ -305,7 +313,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   role='button'
                   tabIndex={0}
                   className='group flex items-center px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer'
-                  onClick={() => (isQuartoDoc ? handleQuartoDocClick(canvas) : onSelect(canvas))}
+                  onClick={e =>
+                    isQuartoDoc ? handleQuartoDocClick(e, canvas) : onSelect(e, canvas)
+                  }
                   data-track-category='CANVAS'
                   data-track-name={isQuartoDoc ? 'Open_Quarto_Doc' : 'Open_Canvas'}
                   data-track-metadata={JSON.stringify({
@@ -332,9 +342,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       if (isQuartoDoc) {
-                        handleQuartoDocClick(canvas);
+                        handleQuartoDocClick(e as unknown as KeyboardEvent, canvas);
                       } else {
-                        onSelect(canvas);
+                        onSelect(e as unknown as KeyboardEvent, canvas);
                       }
                     }
                   }}

@@ -21,7 +21,7 @@ export interface SortableTicketCardProps {
   ticket: Ticket;
   tags: TicketTag[];
   availableTags?: string[];
-  onClick: () => void;
+  onClick: (e: React.MouseEvent | KeyboardEvent) => void;
   visibleColumns?: Set<string> | undefined;
 }
 

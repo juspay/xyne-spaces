@@ -3,6 +3,7 @@ import { TicketCard } from '../../Tickets/TicketCard/TicketCard';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { useChannel } from '../../../hooks/useChannels';
 import { createWorkflow, CreateWorkflowRequest } from '../../../services/Workflow/workflowService';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 import { Ticket } from '@xyne/shared';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
@@ -43,22 +44,36 @@ const TicketDisplayMode: React.FC<{
 }> = ({ ticket, channelId, conversationContext, conversationId }) => {
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
+  const { isMobile } = usePlatform();
 
-  const handleClick = (e?: React.MouseEvent<HTMLDivElement>): void => {
+  const handleClick = (e: React.MouseEvent | KeyboardEvent): void => {
+    // Check for Cmd/Ctrl+Click to open in new tab (desktop only)
+    const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
+    const ticketUrl = `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
+
+    // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
+    if (!isMobile && isCmdClick) {
+      window.open(ticketUrl, '_blank');
+      return;
+    }
+
+    // Only pass event if it's a MouseEvent (has clientX property)
+    const event = 'clientX' in e ? e : undefined;
+
     if (conversationContext === 'channel') {
       standaloneNavigate(
         navigate,
         `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
-        { event: e },
+        { event },
       );
     } else if (conversationContext === 'thread') {
       standaloneNavigate(
         navigate,
         `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
-        { event: e },
+        { event },
       );
     } else if (channelId && conversationId) {
-      standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}`, { event: e });
+      standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}`, { event });
     }
   };
 
