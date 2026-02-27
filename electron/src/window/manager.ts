@@ -156,6 +156,14 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 
   console.log('✅ setWindowOpenHandler configured for main window');
 
+  // Configure webview behavior when webviews are attached
+  mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    delete webPreferences.preload;
+    // Disable Node.js integration in webviews for security
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+  });
+
   // Setup spellchecker context menu
   setupSpellcheckerContextMenu(mainWindow);
 
