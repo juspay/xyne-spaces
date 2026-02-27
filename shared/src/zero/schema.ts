@@ -1073,7 +1073,8 @@ export const conversationParticipantTable = table('conversation_participants')
     id: string(),
     conversationId: string(),
     userId: string(),
-    participationType: enumeration<ConversationParticipation>(),
+    participationType: enumeration<ConversationParticipation>().optional(),
+    isSubscribed: boolean(),
     joinedAt: number(),
   })
   .primaryKey('id');

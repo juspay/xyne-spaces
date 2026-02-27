@@ -6,10 +6,12 @@ export interface CreateConversationParticipantInput {
   conversationId: string;
   userId: string;
   participationType?: ConversationParticipation;
+  isSubscribed?: boolean;
 }
 
 export interface UpdateConversationParticipantInput {
   participationType?: ConversationParticipation;
+  isSubscribed?: boolean;
 }
 
 export interface ConversationParticipantFilters {
@@ -39,7 +41,8 @@ export class ConversationParticipantRepository extends BaseRepository<
       data: {
         conversationId: data.conversationId,
         userId: data.userId,
-        participationType: data.participationType ?? ConversationParticipation.MENTIONED,
+        participationType: data.participationType ?? null, // Can be AUTHOR, MENTIONED, or null (manual subscription)
+        isSubscribed: data.isSubscribed ?? true, // Default to subscribed
       },
     });
   }

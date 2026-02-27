@@ -797,6 +797,7 @@ export const mutators = defineMutators({
           conversationId,
           userId: ctx.userID,
           participationType: ConversationParticipation.AUTHOR,
+          isSubscribed: true,
           joinedAt: now,
         });
       },
@@ -932,6 +933,7 @@ export const mutators = defineMutators({
           conversationId,
           userId: ctx.userID,
           participationType: ConversationParticipation.AUTHOR,
+          isSubscribed: true,
           joinedAt: now,
         });
       },
@@ -1318,8 +1320,84 @@ export const mutators = defineMutators({
           id: conversationParticipantId,
           conversationId,
           userId: ctx.userID,
+          isSubscribed: true,
           participationType: ConversationParticipation.AUTHOR,
           joinedAt: now,
+        });
+      },
+    ),
+    subscribeToConversation: defineMutator(
+      z.object({
+        conversationId: z.string(),
+        timestamp: z.number(),
+        participantId: z.string(),
+      }),
+      async ({ tx, ctx, args: { conversationId, timestamp, participantId } }) => {
+        // Check if conversation exists
+        const conversation = await tx.run(
+          zql.conversations.where('conversationId', conversationId).one(),
+        );
+
+        if (!conversation) {
+          throw new Error('Conversation not found');
+        }
+
+        // Check if user is already a participant
+        const existingParticipant = await tx.run(
+          zql.conversation_participants
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+
+        if (existingParticipant) {
+          // User already exists, just update isSubscribed to true
+          if (!existingParticipant.isSubscribed) {
+            await tx.mutate.conversation_participants.update({
+              id: existingParticipant.id,
+              isSubscribed: true,
+            });
+          }
+          return;
+        }
+
+        // Create new manual subscription entry with null participationType
+        await tx.mutate.conversation_participants.insert({
+          id: participantId,
+          conversationId,
+          userId: ctx.userID,
+          isSubscribed: true,
+          joinedAt: timestamp,
+        });
+      },
+    ),
+    unsubscribeFromConversation: defineMutator(
+      z.object({
+        conversationId: z.string(),
+      }),
+      async ({ tx, ctx, args: { conversationId } }) => {
+        // Find user's subscription
+        const subscription = await tx.run(
+          zql.conversation_participants
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+
+        if (!subscription) {
+          // User is not a participant
+          return;
+        }
+
+        if (!subscription.isSubscribed) {
+          // Already unsubscribed
+          return;
+        }
+
+        // Set isSubscribed to false (keeps participation record)
+        await tx.mutate.conversation_participants.update({
+          id: subscription.id,
+          isSubscribed: false,
         });
       },
     ),

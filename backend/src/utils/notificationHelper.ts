@@ -22,12 +22,12 @@ export class NotificationHelper {
    */
   static async handleChannelMessageNotifications(data: MessageNotificationData): Promise<void> {
     try {
-      // Get MENTIONED conversation participants (people who should receive notifications)
-      // AUTHOR participants (message senders) are excluded automatically
+      // Get subscribed conversation participants (people who should receive notifications)
       const db = DatabaseClient.getInstance();
       const conversationParticipants = await db.conversationParticipant.findMany({
         where: {
           conversationId: data.conversationId,
+          isSubscribed: true, // Only notify subscribed participants
         },
         select: {
           userId: true

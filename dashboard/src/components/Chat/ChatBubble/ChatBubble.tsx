@@ -713,6 +713,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               isVisible={showHoverActions && variant !== 'pinned' && !isMentionUserAddition}
               showEditAction={canEditMessage}
               messageId={message.messageId}
+              conversationId={conversation?.conversationId || message.conversationId}
               reactions={isMessageDeleted ? [] : (message.reactions ?? [])}
               onCopyLink={onCopyLink}
               {...(!isMessageDeleted &&
@@ -772,6 +773,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               open={isActionsDrawerOpen}
               onOpenChange={handleActionsDrawerOpenChange}
               messageId={message.messageId}
+              conversationId={conversation?.conversationId || message.conversationId}
               reactions={isMessageDeleted ? [] : (message.reactions ?? [])}
               showEditAction={canEditMessage}
               isBookmarked={isBookmarked}

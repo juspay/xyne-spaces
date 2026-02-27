@@ -27,6 +27,7 @@ import { queries } from '../../../zero/queries';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Button from '../../ui/Button';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { ConversationSubscription } from '../ConversationSubscription';
 
 type ReactionWithUser = QueryResultType<
   typeof queries.conversationMessages
@@ -35,6 +36,7 @@ type ReactionWithUser = QueryResultType<
 interface HoverActionsToolbarProps {
   isVisible: boolean;
   messageId: string;
+  conversationId?: string;
   showEditAction?: boolean;
   reactions?: readonly ReactionWithUser[];
   onReplyInThread?: (e?: React.MouseEvent) => void;
@@ -60,6 +62,7 @@ interface HoverActionsToolbarProps {
 export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   isVisible,
   messageId,
+  conversationId,
   showEditAction = false,
   reactions = [],
   onReplyInThread,
@@ -334,6 +337,17 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               <Bookmark className='w-4 h-4' />
             )}
           </Button>
+        </Tooltip>
+      )}
+
+      {/* Subscribe/Unsubscribe to Conversation */}
+      {onReplyInThread && conversationId && (
+        <Tooltip content='Toggle notification subscription' side='top'>
+          <ConversationSubscription
+            conversationId={conversationId}
+            variant='icon-only'
+            className='size-7 flex items-center justify-center text-[rgba(120,129,135,1)] hover:bg-gray-100 rounded transition-colors'
+          />
         </Tooltip>
       )}
 

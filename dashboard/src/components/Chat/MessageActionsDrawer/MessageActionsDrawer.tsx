@@ -26,6 +26,7 @@ import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { ConversationSubscription } from '../ConversationSubscription';
 
 type ReactionWithUser = QueryResultType<
   typeof queries.conversationMessages
@@ -35,6 +36,7 @@ export interface MessageActionsDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   messageId: string;
+  conversationId?: string;
   showEditAction?: boolean;
   reactions?: readonly ReactionWithUser[];
   onReplyInThread?: (e?: React.MouseEvent) => void;
@@ -60,6 +62,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   open,
   onOpenChange,
   messageId,
+  conversationId,
   showEditAction = false,
   reactions = [],
   onReplyInThread,
@@ -279,6 +282,15 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
             }
             label={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
             onClick={() => handleActionClick(onBookmark)}
+          />
+        )}
+
+        {/* Conversation Subscription */}
+        {onReplyInThread && conversationId && (
+          <ConversationSubscription
+            conversationId={conversationId}
+            variant='full'
+            className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700'
           />
         )}
 

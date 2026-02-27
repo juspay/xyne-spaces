@@ -162,6 +162,18 @@ export class TicketController {
         },
       });
 
+      // Add ticket creator as MENTIONED participant (subscribed by default)
+      await db.conversationParticipant.create({
+        data: {
+          id: randomUUID(),
+          conversationId,
+          userId: createdBy,
+          participationType: 'MENTIONED',
+          isSubscribed: true,
+          joinedAt: now,
+        },
+      });
+
       await this.channelRepository.updateLastActivity(channelId);
 
       return ticket;
@@ -377,6 +389,18 @@ export class TicketController {
             data: { ticketId: ticket.id },
           });
 
+          // Add ticket creator as MENTIONED participant (subscribed by default)
+          await tx.conversationParticipant.create({
+            data: {
+              id: randomUUID(),
+              conversationId,
+              userId: finalCreatedBy,
+              participationType: 'MENTIONED',
+              isSubscribed: true,
+              joinedAt: new Date(),
+            },
+          });
+
           if (existingConversation.initialMessageId) {
             const initialMessage = await this.messageRepository.findById(existingConversation.initialMessageId);
 
@@ -462,6 +486,18 @@ export class TicketController {
           await tx.conversation.update({
             where: { conversationId },
             data: { ticketId: ticket.id },
+          });
+
+          // Add ticket creator as MENTIONED participant (subscribed by default)
+          await tx.conversationParticipant.create({
+            data: {
+              id: randomUUID(),
+              conversationId,
+              userId: finalCreatedBy,
+              participationType: 'MENTIONED',
+              isSubscribed: true,
+              joinedAt: new Date(),
+            },
           });
         }
 
