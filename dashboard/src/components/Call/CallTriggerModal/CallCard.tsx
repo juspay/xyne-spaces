@@ -166,30 +166,31 @@ export const CallCard: React.FC<CallCardProps> = ({
           </div>
         </div>
 
-        <div className='flex-shrink-0'>
+        <div className='flex-shrink-0 flex items-center gap-4'>
           {isCurrentCall ? (
-            <button
-              className='flex items-center gap-4'
-              onClick={handleLeaveCall}
-              data-track-category='CALL'
-              data-track-name='LeaveCall'
-              data-track-metadata={JSON.stringify({
-                callId: call.externalId,
-                channelId: call.channelId,
-              })}
-            >
+            <>
               {!isMobileLiveCall && callDuration && (
                 <div className='text-xs text-gray-600'>{callDuration}</div>
               )}
-              <span
-                className={cn(
-                  'text-sm font-semibold text-white bg-red-500 rounded-full px-4 py-2',
-                  isMobileLiveCall ? 'mt-6 !px-8' : '',
-                )}
+              <button
+                onClick={handleLeaveCall}
+                data-track-category='CALL'
+                data-track-name='LeaveCall'
+                data-track-metadata={JSON.stringify({
+                  callId: call.externalId,
+                  channelId: call.channelId,
+                })}
               >
-                Leave
-              </span>
-            </button>
+                <span
+                  className={cn(
+                    'text-sm font-semibold text-white bg-red-500 rounded-full px-4 py-2',
+                    isMobileLiveCall ? 'mt-6 !px-8' : '',
+                  )}
+                >
+                  Leave
+                </span>
+              </button>
+            </>
           ) : (
             isUserCallParticipant && (
               <button
