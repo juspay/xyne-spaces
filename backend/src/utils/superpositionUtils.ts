@@ -34,24 +34,27 @@ export function extractDomainFromEmail(email: string | null | undefined): string
  * @param params.sourceName - External source name (e.g., "zoho-local-test")
  * @param params.email - Email address (optional, can be empty string)
  * @param params.domain - Domain extracted from email (optional, will be extracted if not provided)
+ * @param params.emailSubject - Email subject line (optional, useful for subject-based filtering)
  * @returns Standardized Superposition context object
  * 
  * @example
  * ```typescript
  * const context = createBlockingContext({
  *   sourceName: 'zoho-local-test',
- *   email: 'user@example.com'
+ *   email: 'user@example.com',
+ *   emailSubject: 'Support Request: Login Issue'
  * });
- * // Returns: { sourceName: 'zoho-local-test', email: 'user@example.com', domain: 'example.com' }
+ * // Returns: { sourceName: 'zoho-local-test', email: 'user@example.com', domain: 'example.com', emailSubject: 'Support Request: Login Issue' }
  * ```
  */
 export function createBlockingContext(params: {
   sourceName: string;
   email?: string | null;
   domain?: string | null;
+  emailSubject?: string | null;
 }): SuperpositionContext {
-  const { sourceName, email, domain } = params;
-  
+  const { sourceName, email, domain, emailSubject } = params;
+
   const context: SuperpositionContext = {
     sourceName,
   };
@@ -70,6 +73,11 @@ export function createBlockingContext(params: {
     // Include domain even if email is not provided
     context.domain = domain;
   }
-  
+
+  // Include email subject if provided (useful for filtering/blocking based on subject patterns)
+  if (emailSubject !== undefined && emailSubject !== null) {
+    context.emailSubject = emailSubject;
+  }
+
   return context;
 }
