@@ -75,10 +75,19 @@ export async function uploadFiles(
         scopeId: 'temp', // Will be updated by caller
       });
 
-      // Handle thumbnail for video files (frontend-generated only)
+      // Handle thumbnail for video and document files (frontend-generated)
       let thumbnailUrl: string | undefined;
       const isVideo = file.mimetype.startsWith('video/');
-      if (isVideo && metadataMap.size > 0 && thumbnailFiles) {
+      const isDocument = [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'text/csv',
+        'text/comma-separated-values',
+      ].includes(file.mimetype);
+      if ((isVideo || isDocument) && metadataMap.size > 0 && thumbnailFiles) {
         // Get metadata for this file using O(1) map lookup
         const metadata = metadataMap.get(fileIndex);
 
@@ -90,8 +99,8 @@ export async function uploadFiles(
             try {
               logger.info(`Using frontend-generated thumbnail (index ${metadata.thumbnailIndex}) for video: ${file.originalname}`);
 
-              // Generate thumbnail filename (same path structure with _thumb.jpg suffix)
-              const thumbnailFilename = gcsResult.gcsPath.replace(/\.(mp4|m4v|webm|avi|mov)$/i, '_thumb.jpg');
+              // Generate thumbnail filename: strip original extension and append _thumb.jpg
+              const thumbnailFilename = gcsResult.gcsPath.replace(/\.[^/.]+$/, '') + '_thumb.jpg';
 
               // Upload frontend-generated thumbnail to GCS
               const thumbnailGcsResult = await gcsService.uploadFile(frontendThumbnail.buffer, {

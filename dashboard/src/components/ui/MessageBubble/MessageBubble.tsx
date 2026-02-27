@@ -149,6 +149,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                   const isImageOrText =
                     attachment.mimetype.startsWith('image/') ||
                     attachment.mimetype === 'text/plain';
+                  const hasDocumentPreview = !isImageOrText && !!attachment.thumbnailUrl;
                   // Calculate the actual index in the full attachments array
                   const videoCount = attachments.filter(att =>
                     att.mimetype.startsWith('video/'),
@@ -158,7 +159,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                   return (
                     <div
                       key={attachment.id}
-                      className={`flex items-center gap-2 py-2 text-sm ${!isImageOrText ? 'w-[256px] aspect-square' : ''} ${isMobile ? 'flex-shrink-0' : ''}`}
+                      className={`flex items-center gap-2 py-2 text-sm ${hasDocumentPreview ? 'w-[420px]' : !isImageOrText ? 'w-[256px] aspect-square' : ''} ${isMobile ? 'flex-shrink-0' : ''}`}
                     >
                       <MessageAttachment
                         attachment={attachment}

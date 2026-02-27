@@ -1,0 +1,19 @@
+<svg viewBox="0 0 3600 3600" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- Rounded Square Background -->
+  <path d="M0 800C0 358.172 358.172 0 800 0H2800C3241.83 0 3600 358.172 3600 800V2800C3600 3241.83 3241.83 3600 2800 3600H800C358.172 3600 0 3241.83 0 2800V800Z" fill="#45B058"/>
+
+  <!-- Perfectly Centered Text -->
+  <text 
+    x="50%" 
+    y="55%" 
+    fill="white" 
+    font-size="900" 
+    font-family="Arial, Helvetica, sans-serif" 
+    font-weight="500"
+    text-anchor="middle" 
+    dominant-baseline="middle">
+    CSV
+  </text>
+
+</svg>
