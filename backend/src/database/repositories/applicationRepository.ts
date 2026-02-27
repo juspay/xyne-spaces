@@ -85,10 +85,10 @@ export class ApplicationRepository {
     affectedApplications: (Application & { matchedFiles: string[] })[],
     prLinksByApplication: Map<string, string[]>,
     isHotFix?: boolean
-  ): Promise<{ subTicketId: string, mappedTicketId: string }[]> {
+  ): Promise<{ subTicketId: string, mappedTicketId: string, xyneId: string }[]> {
     logger.info(`Creating sub-tickets for ${affectedApplications.length} affected applications`);
 
-    const subTicketIds: { subTicketId: string, mappedTicketId: string }[] = [];
+    const subTicketIds: { subTicketId: string, mappedTicketId: string, xyneId: string }[] = [];
 
     for (const application of affectedApplications) {
       try {
@@ -172,7 +172,7 @@ export class ApplicationRepository {
           return { subTicketId: subTicket.id, mappedTicketId: ticket.id, xyneId };
         });
 
-        subTicketIds.push({ subTicketId: result.subTicketId, mappedTicketId: result.mappedTicketId });
+        subTicketIds.push({ subTicketId: result.subTicketId, mappedTicketId: result.mappedTicketId, xyneId: result.xyneId });
 
         logger.info(`Created sub-ticket ${result.subTicketId} and ticket ${result.xyneId} (${result.mappedTicketId}) for application ${application.name}`);
       } catch (error) {

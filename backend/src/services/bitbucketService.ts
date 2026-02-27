@@ -293,45 +293,66 @@ export class BitbucketService {
     }
   }
 
-  /**
-   * Get the first (most recent) merged pull request for a commit
-   *
-   * @param projectKey - Project key
-   * @param repositorySlug - Repository slug
-   * @param commitHash - Commit SHA
-   * @returns Pull request info or null if not found
-   */
+
   async getMergedPullRequest(
     projectKey: string,
     repositorySlug: string,
     commitHash: string,
     branch?: string
   ): Promise<PullRequestInfo | null> {
-    const mergedPRs = await this.getPullRequestsForCommit(
+    const allPRs = await this.getPullRequestsForCommit(
       projectKey,
       repositorySlug,
       commitHash,
     );
 
-    // Filter pr's for the branch
-    const filteredPRs = mergedPRs.filter((pr) => pr.toRef.displayId === branch);
-    console.log(
-      `Found ${mergedPRs.length} merged PR(s) for commit ${commitHash} in ${projectKey}/${repositorySlug}`
+    logger.info(
+      `Found ${allPRs.length} PR(s) for commit ${commitHash} in ${projectKey}/${repositorySlug}`
     );
-    if (filteredPRs.length === 0) {
+
+    if (allPRs.length === 0) {
+      return null;
+    }
+    const mergedPRs = allPRs.filter((pr) => pr.state === 'MERGED');
+    if (mergedPRs.length === 0) {
+      logger.info(
+        `No merged PRs found for commit ${commitHash} (found ${allPRs.length} PR(s) in other states)`
+      );
       return null;
     }
 
-    // Sort by creation date (most recent first) and take the first one
-    filteredPRs.sort((a, b) => b.createdDate - a.createdDate);
+    const relevantPRs = mergedPRs.filter((pr) => {
+      const targetBranch = pr.toRef.displayId;
+      // TODO: branch name should be as per project
+      if (!branch || targetBranch === branch || targetBranch === 'main') {
+        return true;
+      }
 
-    const pr = filteredPRs[0];
+      return false;
+    });
 
-    if (filteredPRs.length > 1) {
-      console.log(
-        `Commit ${commitHash} is associated with ${filteredPRs.length} merged PRs. Using PR #${pr.id} (most recent).`
+    if (relevantPRs.length === 0) {
+      logger.info(
+        `No relevant PRs found for commit ${commitHash} on branch ${branch} (filtered from ${allPRs.length} total)`
       );
+      return null;
     }
+
+    relevantPRs.sort((a, b) => {
+      const aTarget = a.toRef.displayId;
+      const bTarget = b.toRef.displayId;
+
+      // Prefer PRs targeting the current branch over main
+      if (branch) {
+        const aIsTargetBranch = aTarget === branch;
+        const bIsTargetBranch = bTarget === branch;
+        if (aIsTargetBranch && !bIsTargetBranch) return -1;
+        if (!aIsTargetBranch && bIsTargetBranch) return 1;
+      }
+      return b.createdDate - a.createdDate;
+    });
+
+    const pr = relevantPRs[0];
 
     return {
       id: pr.id,
