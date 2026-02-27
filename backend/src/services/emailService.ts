@@ -265,6 +265,7 @@ export class EmailService {
         const context = createBlockingContext({
           sourceName: sourceName,
           email: emailFrom,
+          emailSubject: emailSubject,
         });
 
         if (!superpositionClient.isReady()) {
