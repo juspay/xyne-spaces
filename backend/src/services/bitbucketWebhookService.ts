@@ -77,48 +77,11 @@ export class BitbucketWebhookService {
 
       // Extract PR context
       const context = this.extractPRContext(payload);
-
-      // Check if PR exists in database and has workflowExecutionId - skip validation if so
-      const existingPr = await this.prisma.pullRequests.findUnique({
-        where: {
-          prId_prUrl: {
-            prId: context.prId,
-            prUrl: context.prUrl,
-          },
-        },
-        select: {
-          workflowExecutionId: true,
-          ticketId: true,
-        },
-      });
-
       let validationResult: { isValid: boolean; ticketId?: string };
 
-      if (existingPr && existingPr.workflowExecutionId) {
-        // PR exists and was created by a workflow - skip validation
-        logger.info(
-          `[Bitbucket-Webhook] PR ${context.prId} created by workflow, skipping validation`
-        );
-
-        // Get ticketId - either from PR directly or via workflow chain
-        let ticketId = existingPr.ticketId;
-        if (!ticketId) {
-          logger.debug(
-            `[Bitbucket-Webhook] ticketId not set on PR ${context.prId}, fetching via workflow chain`
-          );
-          ticketId = await this.getTicketIdForPR({
-            workflowExecutionId: existingPr.workflowExecutionId,
-          });
-        }
-
-        validationResult = {
-          isValid: true,
-          ticketId: ticketId || undefined,
-        };
-      } else {
         // PR doesn't exist or wasn't created by workflow - run full validation
         logger.debug(
-          `[Bitbucket-Webhook] PR ${context.prId} is manual or new, running validation`
+          `[Bitbucket-Webhook] PR ${context.prId}, running validation`
         );
         validationResult = await this.validatePRTitle(context);
 
@@ -129,7 +92,6 @@ export class BitbucketWebhookService {
           );
           return { success: true, message: 'PR validation failed, event skipped' };
         }
-      }
 
       // Route to appropriate handler based on event type, passing validation result
       await this.routePREvent(eventKey as BitbucketPREventType, context, validationResult);
