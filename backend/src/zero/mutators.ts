@@ -329,6 +329,7 @@ async function createNonParticipantSystemMessages(
         conversationId: newConversationId,
         userId: senderId,
         participationType: ConversationParticipation.AUTHOR,
+        isSubscribed: true,
         joinedAt: now,
       });
 
@@ -470,6 +471,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             conversationId: conversationId,
             userId: authData.sub,
             participationType: ConversationParticipation.AUTHOR,
+            isSubscribed: true,
             joinedAt: timestamp,
           });
         },
@@ -1098,6 +1100,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             conversationId,
             userId: authData.sub,
             participationType: ConversationParticipation.AUTHOR,
+            isSubscribed: true,
             joinedAt: now,
           });
         },
@@ -1254,6 +1257,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             conversationId,
             userId: authData.sub,
             participationType: ConversationParticipation.AUTHOR,
+            isSubscribed: true,
             joinedAt: now,
           });
         },
@@ -1399,6 +1403,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             conversationId,
             userId: authData.sub,
             participationType: ConversationParticipation.MENTIONED,
+            isSubscribed: true,
             joinedAt: now,
           });
 
@@ -1426,6 +1431,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   conversationId,
                   userId,
                   participationType: ConversationParticipation.MENTIONED,
+                  isSubscribed: true,
                   joinedAt: now,
                 });
               }
@@ -1834,12 +1840,89 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             conversationId,
             userId: authData.sub,
             participationType: ConversationParticipation.AUTHOR,
+            isSubscribed: true,
             joinedAt: now,
           });
 
           logger.info(
             `📤 [MUTATOR-FORWARD] Message ${originalMessageId} forwarded to channel ${targetChannelId} as ${messageId}`
           );
+        }
+      ),
+      subscribeToConversation: defineMutator(
+        z.object({
+          conversationId: z.string(),
+          timestamp: z.number(),
+          participantId: z.string(),
+        }),
+        async ({ tx, args: { conversationId, timestamp, participantId } }) => {
+          // Check if conversation exists
+          const conversation = await tx.run(
+            zql.conversations.where('conversationId', conversationId).one()
+          );
+          
+          if (!conversation) {
+            throw new Error('Conversation not found');
+          }
+
+          // Check if user is already a participant
+          const existingParticipant = await tx.run(
+            zql.conversation_participants
+              .where('conversationId', conversationId)
+              .where('userId', authData.sub)
+              .one()
+          );
+
+          if (existingParticipant) {
+            // User already exists, just update isSubscribed to true
+            if (!existingParticipant.isSubscribed) {
+              await tx.mutate.conversation_participants.update({
+                id: existingParticipant.id,
+                isSubscribed: true,
+              });
+            }
+            return;
+          }
+
+          // Create new manual subscription entry with null participationType
+          await tx.mutate.conversation_participants.insert({
+            id: participantId,
+            conversationId,
+            userId: authData.sub,
+            participationType: null as any, // Manual subscription (null = not AUTHOR/MENTIONED)
+            isSubscribed: true,
+            joinedAt: timestamp,
+          });
+        }
+      ),
+      unsubscribeFromConversation: defineMutator(
+        z.object({
+          conversationId: z.string(),
+        }),
+        async ({ tx, args: { conversationId } }) => {
+          // Find user's subscription
+          const subscription = await tx.run(
+            zql.conversation_participants
+              .where('conversationId', conversationId)
+              .where('userId', authData.sub)
+              .one()
+          );
+
+          if (!subscription) {
+            // User is not a participant
+            return;
+          }
+
+          if (!subscription.isSubscribed) {
+            // Already unsubscribed
+            return;
+          }
+
+          // Set isSubscribed to false (keeps participation record)
+          await tx.mutate.conversation_participants.update({
+            id: subscription.id,
+            isSubscribed: false,
+          });
         }
       ),
     },
@@ -2025,6 +2108,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               conversationId,
               userId: authData.sub,
               participationType: ConversationParticipation.AUTHOR,
+              isSubscribed: true,
               joinedAt: timestamp,
             });
           }
@@ -2053,6 +2137,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   conversationId,
                   userId: dmParticipant.userId,
                   participationType: ConversationParticipation.MENTIONED,
+                  isSubscribed: true,
                   joinedAt: timestamp,
                 });
               }
@@ -2079,6 +2164,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   conversationId,
                   userId,
                   participationType: ConversationParticipation.MENTIONED,
+                  isSubscribed: true,
                   joinedAt: timestamp,
                 });
               }
@@ -2270,6 +2356,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   conversationId: message.conversationId,
                   userId,
                   participationType: ConversationParticipation.MENTIONED,
+                  isSubscribed: true,
                   joinedAt: now,
                 });
               }

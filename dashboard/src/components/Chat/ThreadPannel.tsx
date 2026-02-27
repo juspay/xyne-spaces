@@ -25,6 +25,7 @@ import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from './DragAndDropOverlay';
+import { ConversationSubscription } from './ConversationSubscription';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { insertDateSeparatorsForThreadMessages } from '../../utils/chatUtils';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -539,93 +540,109 @@ export const ThreadMessages = ({
           {/* Tab Header */}
           <div className='w-full p-4 pb-0 bg-white'>
             <div className='border-b border-gray-200'>
-              <Tabs.List className='flex items-center'>
-                {/* Replies Tab */}
-                <Tabs.Trigger asChild value='replies'>
-                  <button
-                    className={cn(
-                      'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                      underTicketActiveTab === 'replies'
-                        ? 'border-b-2 border-primary'
-                        : 'border-b-2 border-transparent',
-                    )}
-                  >
-                    <span
-                      className={
-                        underTicketActiveTab === 'replies'
-                          ? 'text-primary'
-                          : 'text-muted-foreground'
-                      }
-                    >
-                      <CornerDownRight size={12} />
-                    </span>
-                    <span
-                      className={`text-sm font-medium ${underTicketActiveTab === 'replies' ? 'text-primary' : 'text-muted-foreground'}`}
-                    >
-                      Messages
-                    </span>
-                  </button>
-                </Tabs.Trigger>
-
-                {/* Workflows Tab */}
-                <Tabs.Trigger asChild value='workflows'>
-                  <button
-                    className={cn(
-                      'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                      underTicketActiveTab === 'workflows'
-                        ? 'border-b-2 border-primary'
-                        : 'border-b-2 border-transparent',
-                    )}
-                  >
-                    <span
-                      className={
-                        underTicketActiveTab === 'workflows'
-                          ? 'text-primary'
-                          : 'text-muted-foreground'
-                      }
-                    >
-                      <Workflow size={12} />
-                    </span>
-                    <span
-                      className={`text-sm font-medium ${underTicketActiveTab === 'workflows' ? 'text-primary' : 'text-muted-foreground'}`}
-                    >
-                      Workflows
-                    </span>
-                    {latestWorkflowStatus &&
-                      (latestWorkflowStatus === 'FAILED' ? (
-                        <FailedStatusIcon />
-                      ) : latestWorkflowStatus === 'RUNNING' ||
-                        latestWorkflowStatus === 'SUCCESS' ? (
-                        <SuccessStatusIcon />
-                      ) : null)}
-                  </button>
-                </Tabs.Trigger>
-
-                {/* RCA Tab */}
-                {isFixTicket && (
-                  <Tabs.Trigger asChild value='rca'>
+              <Tabs.List className='flex items-center justify-between'>
+                <div className='flex items-center'>
+                  {/* Replies Tab */}
+                  <Tabs.Trigger asChild value='replies'>
                     <button
                       className={cn(
                         'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                        underTicketActiveTab === 'rca'
+                        underTicketActiveTab === 'replies'
                           ? 'border-b-2 border-primary'
                           : 'border-b-2 border-transparent',
                       )}
                     >
                       <span
                         className={
-                          underTicketActiveTab === 'rca' ? 'text-primary' : 'text-muted-foreground'
+                          underTicketActiveTab === 'replies'
+                            ? 'text-primary'
+                            : 'text-muted-foreground'
                         }
                       >
-                        <ClipboardCheck size={12} />
+                        <CornerDownRight size={12} />
                       </span>
                       <span
-                        className={`text-sm font-medium ${underTicketActiveTab === 'rca' ? 'text-primary' : 'text-muted-foreground'}`}
+                        className={`text-sm font-medium ${underTicketActiveTab === 'replies' ? 'text-primary' : 'text-muted-foreground'}`}
                       >
-                        RCA
+                        Messages
                       </span>
                     </button>
                   </Tabs.Trigger>
+
+                  {/* Workflows Tab */}
+                  <Tabs.Trigger asChild value='workflows'>
+                    <button
+                      className={cn(
+                        'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                        underTicketActiveTab === 'workflows'
+                          ? 'border-b-2 border-primary'
+                          : 'border-b-2 border-transparent',
+                      )}
+                    >
+                      <span
+                        className={
+                          underTicketActiveTab === 'workflows'
+                            ? 'text-primary'
+                            : 'text-muted-foreground'
+                        }
+                      >
+                        <Workflow size={12} />
+                      </span>
+                      <span
+                        className={`text-sm font-medium ${underTicketActiveTab === 'workflows' ? 'text-primary' : 'text-muted-foreground'}`}
+                      >
+                        Workflows
+                      </span>
+                      {latestWorkflowStatus &&
+                        (latestWorkflowStatus === 'FAILED' ? (
+                          <FailedStatusIcon />
+                        ) : latestWorkflowStatus === 'RUNNING' ||
+                          latestWorkflowStatus === 'SUCCESS' ? (
+                          <SuccessStatusIcon />
+                        ) : null)}
+                    </button>
+                  </Tabs.Trigger>
+
+                  {/* RCA Tab */}
+                  {isFixTicket && (
+                    <Tabs.Trigger asChild value='rca'>
+                      <button
+                        className={cn(
+                          'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                          underTicketActiveTab === 'rca'
+                            ? 'border-b-2 border-primary'
+                            : 'border-b-2 border-transparent',
+                        )}
+                      >
+                        <span
+                          className={
+                            underTicketActiveTab === 'rca'
+                              ? 'text-primary'
+                              : 'text-muted-foreground'
+                          }
+                        >
+                          <ClipboardCheck size={12} />
+                        </span>
+                        <span
+                          className={`text-sm font-medium ${underTicketActiveTab === 'rca' ? 'text-primary' : 'text-muted-foreground'}`}
+                        >
+                          RCA
+                        </span>
+                      </button>
+                    </Tabs.Trigger>
+                  )}
+                </div>
+                {/* Subscription Button */}
+                {derivedConversationId && (
+                  <Tooltip content='Toggle notification subscription'>
+                    <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                      <ConversationSubscription
+                        conversationId={derivedConversationId}
+                        variant='icon-only'
+                        className='flex items-center justify-center'
+                      />
+                    </div>
+                  </Tooltip>
                 )}
               </Tabs.List>
             </div>
@@ -728,11 +745,25 @@ export const ThreadMessages = ({
       {/* Drag and Drop Overlay */}
       <DragAndDropOverlay isVisible={isDragging} />
       {showHeader && (
-        <div className='flex gap-2 items-center w-full pt-4 px-4'>
-          <CornerDownRight className='size-4 flex-shrink-0' />
-          <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
-            {isTicketThread && ticket ? ticket.title : 'Thread message'}
-          </h3>
+        <div className='flex gap-2 items-center justify-between w-full pt-4 px-4'>
+          <div className='flex gap-2 items-center min-w-0'>
+            <CornerDownRight className='size-4 flex-shrink-0' />
+            <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
+              {isTicketThread && ticket ? ticket.title : 'Thread message'}
+            </h3>
+          </div>
+
+          {derivedConversationId && (
+            <Tooltip content='Toggle notification subscription'>
+              <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                <ConversationSubscription
+                  conversationId={derivedConversationId}
+                  variant='icon-only'
+                  className='flex items-center justify-center'
+                />
+              </div>
+            </Tooltip>
+          )}
         </div>
       )}
       {derivedTicketId && ticket && !simpleView && (
@@ -747,6 +778,17 @@ export const ThreadMessages = ({
             </h3>
           </div>
           <div className='flex gap-x-2'>
+            {derivedConversationId && (
+              <Tooltip content='Toggle notification subscription'>
+                <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                  <ConversationSubscription
+                    conversationId={derivedConversationId}
+                    variant='icon-only'
+                    className='flex items-center justify-center'
+                  />
+                </div>
+              </Tooltip>
+            )}
             {!isMobile && (
               <Tooltip content='Expand View'>
                 <Button
@@ -1053,6 +1095,18 @@ export const ThreadMessages = ({
 
                   {/* Action Buttons */}
                   <div className='flex items-center gap-2'>
+                    {/* Subscription Button */}
+                    {derivedConversationId && (
+                      <Tooltip content='Toggle notification subscription'>
+                        <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                          <ConversationSubscription
+                            conversationId={derivedConversationId}
+                            variant='icon-only'
+                            className='flex items-center justify-center'
+                          />
+                        </div>
+                      </Tooltip>
+                    )}
                     {/* Ask AI Button */}
                     {!isStandaloneWindow() && (
                       <Tooltip content='Ask AI Conversation'>
@@ -1104,6 +1158,15 @@ export const ThreadMessages = ({
                   <h3 className='flex-1 font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
                     {isTicketThread && ticket ? ticket.title : 'Thread message'}
                   </h3>
+                  <Tooltip content='Toggle notification subscription'>
+                    <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                      <ConversationSubscription
+                        conversationId={derivedConversationId}
+                        variant='icon-only'
+                        className='flex items-center justify-center'
+                      />
+                    </div>
+                  </Tooltip>
 
                   {/* Action Buttons */}
                   {!underTicketView && (

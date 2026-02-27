@@ -270,7 +270,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     channelParticipantIds: Set<string>
   ): Promise<void> {
     const participants = await db.conversationParticipant.findMany({
-      where: { conversationId },
+      where: { 
+        conversationId,
+        isSubscribed: true, // Only notify subscribed participants
+      },
       select: { userId: true },
     });
 
