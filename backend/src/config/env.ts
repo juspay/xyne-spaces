@@ -136,6 +136,7 @@ const envSchema = Joi.object({
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
+  JENKINS_WEBHOOK_SECRET: Joi.string().allow('').default(''),
   //Presence Queue Configuration
   PRESENCE_CLEANUP_INTERVAL_MS: Joi.number().default(600000),
   PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
@@ -304,6 +305,7 @@ export const config = {
     jobPath: envVars.JENKINS_JOB_PATH,
     username: envVars.JENKINS_USERNAME,
     apiToken: envVars.JENKINS_API_TOKEN,
+    webhookSecret: envVars.JENKINS_WEBHOOK_SECRET,
   },
   openCode: {
     enabled: envVars.OPENCODE_ENABLED,

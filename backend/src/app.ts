@@ -99,7 +99,7 @@ import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
-import { bitbucketWebhookMiddleware } from './middleware/bitbucketWebhookValidator';
+
 import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
 import emojiRoutes from '@/routes/emojis';
@@ -183,7 +183,7 @@ export class App {
     this.app.use('/api/webhooks',
       express.raw({ type: 'application/json' }),
       webhookLimiter,
-      bitbucketWebhookMiddleware.verify, 
+      
       webhookRoutes);
 
     // LiveKit webhook routes (MUST be before body parser for raw body signature verification)
