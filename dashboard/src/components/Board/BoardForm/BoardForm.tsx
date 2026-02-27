@@ -50,7 +50,8 @@ interface Stage {
   id?: string;
   tempId: number;
   name: string;
-  eta: string;
+  eta: string | undefined;
+  etaEnabled: boolean;
   sequenceNumber: string;
   defaultTicketStatusV2: TicketStatusV2;
   prStatuses?: PRStatusEvent[];
@@ -76,7 +77,8 @@ const PR_STATUS_OPTIONS = Object.values(PRStatusEvent).map(status => ({
 const createEmptyStage = (sequenceNumber: number): Stage => ({
   tempId: Date.now() + sequenceNumber,
   name: '',
-  eta: '',
+  eta: undefined,
+  etaEnabled: false,
   sequenceNumber: String(sequenceNumber),
   defaultTicketStatusV2: TicketStatusV2.STARTED,
   prStatuses: [],
@@ -219,7 +221,8 @@ export const BoardForm = ({
     {
       tempId: Date.now(),
       name: '',
-      eta: '',
+      eta: undefined,
+      etaEnabled: false,
       sequenceNumber: '1',
       defaultTicketStatusV2: TicketStatusV2.STARTED,
       prStatuses: [],
@@ -263,7 +266,8 @@ export const BoardForm = ({
           id: s.id,
           tempId: Date.now() + idx,
           name: s.name,
-          eta: String(s.eta),
+          eta: s.eta !== null ? String(s.eta) : undefined,
+          etaEnabled: s.eta !== null,
           sequenceNumber: String(s.sequenceNumber),
           defaultTicketStatusV2: s.defaultTicketStatusV2 || TicketStatusV2.STARTED,
           prStatuses: s.prStatusMappings
@@ -290,6 +294,7 @@ export const BoardForm = ({
             tempId: Date.now() + idx,
             name: stage.name,
             eta: stage.eta,
+            etaEnabled: !!stage.eta,
             sequenceNumber: stage.sequenceNumber,
             defaultTicketStatusV2: stage.defaultTicketStatusV2,
             approverIds: [],
@@ -313,7 +318,8 @@ export const BoardForm = ({
       {
         tempId: Date.now(),
         name: '',
-        eta: '',
+        eta: undefined,
+        etaEnabled: false,
         sequenceNumber: String(nextSequenceNumber),
         defaultTicketStatusV2: TicketStatusV2.STARTED,
         approverIds: [],
@@ -331,7 +337,7 @@ export const BoardForm = ({
   const updateStage = (
     index: number,
     field: keyof Stage,
-    value: string | TicketStatusV2 | boolean | PRStatusEvent[] | User[] | string[],
+    value: string | TicketStatusV2 | boolean | PRStatusEvent[] | User[] | string[] | undefined,
   ): void => {
     const newStages = [...stages];
     const currentStage = newStages[index];
@@ -359,10 +365,13 @@ export const BoardForm = ({
         return;
       }
 
-      const etaValue = parseInt(stage.eta);
-      if (isNaN(etaValue) || etaValue <= 0) {
-        setError('All stages must have a valid ETA (hours)');
-        return;
+      // Validate ETA only if eta is provided
+      if (stage.eta) {
+        const etaValue = parseInt(stage.eta);
+        if (isNaN(etaValue) || etaValue <= 0) {
+          setError('All stages with ETA must have a valid ETA (hours)');
+          return;
+        }
       }
 
       const sequenceValue = parseInt(stage.sequenceNumber);
@@ -418,7 +427,7 @@ export const BoardForm = ({
             stages?: Array<{
               id?: string;
               name: string;
-              eta: number;
+              eta?: number;
               sequenceNumber: number;
               defaultTicketStatusV2: TicketStatusV2;
               prStatuses?: PRStatusEvent[];
@@ -460,7 +469,7 @@ export const BoardForm = ({
           updateData.stages = stages.map(stage => ({
             ...(stage.id && { id: stage.id }),
             name: stage.name.trim(),
-            eta: parseInt(stage.eta),
+            ...(stage.eta && { eta: parseInt(stage.eta) }),
             sequenceNumber: parseInt(stage.sequenceNumber),
             defaultTicketStatusV2: stage.defaultTicketStatusV2,
             prStatuses: stage.prStatuses || [],
@@ -522,7 +531,7 @@ export const BoardForm = ({
             boardType,
             stages: stages.map(stage => ({
               name: stage.name.trim(),
-              eta: parseInt(stage.eta),
+              ...(stage.eta && { eta: parseInt(stage.eta) }),
               sequenceNumber: parseInt(stage.sequenceNumber),
               defaultTicketStatusV2: stage.defaultTicketStatusV2,
               prStatuses: stage.prStatuses || [],
@@ -659,23 +668,49 @@ export const BoardForm = ({
                       placeholder='Stage name'
                       disabled={isLoading}
                     />
-                    <div className='grid grid-cols-2 gap-2'>
-                      <TextInput
-                        label=''
-                        value={stage.eta}
-                        onChange={e => updateStage(index, 'eta', e.target.value)}
-                        placeholder='ETA (hours)'
-                        type='number'
-                        disabled={isLoading}
-                      />
-                      <TextInput
-                        label=''
-                        value={stage.sequenceNumber}
-                        onChange={e => updateStage(index, 'sequenceNumber', e.target.value)}
-                        placeholder='Sequence #'
-                        type='number'
-                        disabled={isLoading}
-                      />
+                    <div className='grid grid-cols-12 gap-2'>
+                      <div className={`col-span-5 ${!stage.etaEnabled ? 'opacity-50' : ''}`}>
+                        <TextInput
+                          label=''
+                          value={stage.eta || ''}
+                          onChange={e => updateStage(index, 'eta', e.target.value)}
+                          placeholder='ETA (hrs)'
+                          type='number'
+                          disabled={isLoading || !stage.etaEnabled}
+                        />
+                      </div>
+                      <div className='col-span-1 flex items-center justify-center pt-2'>
+                        <input
+                          type='checkbox'
+                          checked={stage.etaEnabled}
+                          onChange={e => {
+                            const isChecked = e.target.checked;
+                            const newStages = [...stages];
+                            const currentStage = newStages[index];
+                            if (currentStage) {
+                              newStages[index] = {
+                                ...currentStage,
+                                etaEnabled: isChecked,
+                                eta: isChecked ? '1' : undefined,
+                              };
+                            }
+                            setStages(newStages);
+                          }}
+                          disabled={isLoading}
+                          className='w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer'
+                          title='Toggle ETA'
+                        />
+                      </div>
+                      <div className='col-span-6'>
+                        <TextInput
+                          label=''
+                          value={stage.sequenceNumber}
+                          onChange={e => updateStage(index, 'sequenceNumber', e.target.value)}
+                          placeholder='Seq #'
+                          type='number'
+                          disabled={isLoading}
+                        />
+                      </div>
                     </div>
                     {/* Default Ticket Status Dropdown */}
                     <div className='mt-2'>

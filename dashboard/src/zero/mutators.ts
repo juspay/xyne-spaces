@@ -2533,12 +2533,17 @@ export const mutators = defineMutators({
         id: z.string(),
         stageEta: z.number(),
         updatedAt: z.number(),
+        ticketId: z.string().optional(),
+        stageId: z.string().optional(),
       }),
-      async ({ tx, args: { id, stageEta, updatedAt } }) => {
+      async ({ tx, ctx, args: { id, stageEta, updatedAt, ticketId, stageId } }) => {
         await tx.mutate.ticket_stage_eta.update({
           id,
           stageEta,
           updatedAt,
+          updatedBy: ctx.userID,
+          ...(ticketId && { ticketId }),
+          ...(stageId && { stageId }),
         });
       },
     ),
@@ -2896,7 +2901,7 @@ export const mutators = defineMutators({
             z.object({
               id: z.string().optional(),
               name: z.string(),
-              eta: z.number(),
+              eta: z.number().optional(),
               sequenceNumber: z.number(),
               defaultTicketStatusV2: z.string().optional(),
               prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
@@ -2976,7 +2981,7 @@ export const mutators = defineMutators({
             await tx.mutate.stages.upsert({
               id: stageId,
               name: stage.name,
-              eta: stage.eta,
+              ...(stage.eta !== undefined && { eta: stage.eta }),
               sequenceNumber: stage.sequenceNumber,
               boardId: boardId,
               createdBy: existingStageMap.get(stageId)?.createdBy || ctx.userID,

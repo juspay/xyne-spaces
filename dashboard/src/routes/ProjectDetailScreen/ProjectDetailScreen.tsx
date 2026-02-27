@@ -75,7 +75,7 @@ const ProjectDetailScreen = (): ReactElement => {
       stages?: Array<{
         id?: string;
         name: string;
-        eta: number;
+        eta?: number;
         sequenceNumber: number;
         defaultTicketStatusV2?: string;
         prStatuses?: PRStatusEvent[];

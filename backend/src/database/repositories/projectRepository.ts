@@ -60,28 +60,24 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
         data: [
           {
             name: 'To Do',
-            eta: 24,
             sequenceNumber: 1,
             boardId: board.id,
             createdBy: data.createdBy,
           },
           {
             name: 'In Progress',
-            eta: 24,
             sequenceNumber: 2,
             boardId: board.id,
             createdBy: data.createdBy,
           },
           {
             name: 'Review',
-            eta: 24,
             sequenceNumber: 3,
             boardId: board.id,
             createdBy: data.createdBy,
           },
           {
             name: 'Completed',
-            eta: 24,
             sequenceNumber: 4,
             boardId: board.id,
             createdBy: data.createdBy,

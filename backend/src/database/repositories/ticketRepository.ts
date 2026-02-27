@@ -58,11 +58,11 @@ export class TicketRepository {
       }
     }
 
-    // Calculate total ETA by summing all stage ETAs (in hours)
-    const totalEtaHours = stages.reduce((sum, stage) => sum + stage.eta, 0);
+    // Calculate total ETA by summing only stages with ETA (in hours)
+    const totalEtaHours = stages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
 
-    // Calculate ETA deadline using working hours logic
-    const etaDeadline = calculateETADeadline(new Date(), totalEtaHours);
+    // Calculate ETA deadline only if at least one stage has ETA
+    const etaDeadline = totalEtaHours > 0 ? calculateETADeadline(new Date(), totalEtaHours) : null;
 
     // Upsert merchant if merchantId is provided
     if (data.merchantId) {
@@ -93,7 +93,7 @@ export class TicketRepository {
         stageName: selectedStage.name,
         statusV2: data.statusV2 || TicketStatusV2.TODO,
         priority: data.priority || TicketPriority.LOW,
-        eta: data.eta || etaDeadline,
+        ...(etaDeadline && { eta: etaDeadline }),
         metadata: data.metadata as Prisma.InputJsonValue,
         closedAt: data.closedAt,
         closedBy: data.closedBy,
@@ -104,7 +104,9 @@ export class TicketRepository {
     });
 
     const stageEnteredAt = new Date();
-    const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta);
+    // Only create TicketStageEta entry if the selected stage has ETA
+    if (selectedStage.eta !== null) {
+const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta);
     await prisma.ticketStageEta.create({
       data: {
         ticketId: ticket.id,
@@ -115,6 +117,7 @@ export class TicketRepository {
         updatedBy: data.createdBy,
       }
     });
+    }
 
     const isHotFix = ticket.ticketType === BaseTicketType.Hotfix
     // If it's a hotfix, add 'hotfix' tag to the ticket
@@ -273,7 +276,8 @@ export class TicketRepository {
           }
         });
       } else {
-        // First time entering this stage - create new entry
+        // First time entering this stage - create new entry only if stage has ETA
+        if (targetStage.eta !== null) {
 
         const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
         
@@ -287,6 +291,7 @@ export class TicketRepository {
             updatedBy: updatedBy
           }
         });
+      }
       }
     } else {
       // BACKWARD MOVEMENT: Delete all forward stage entries, reactivate target
@@ -333,20 +338,19 @@ export class TicketRepository {
         });
       } else {
         // Entry doesn't exist (edge case - create it)
-
-        const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
-        await prisma.ticketStageEta.create({
-          data: {
-            ticketId: ticketId,
-            stageId: targetStage.id,
-            stageEnteredAt: now,
-            stageLeftAt: null,
-            stageEta: stageEtaDeadline,
-            updatedBy: updatedBy
-          }
-        });
-
-
+        if (targetStage.eta !== null) {
+          const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
+          await prisma.ticketStageEta.create({
+            data: {
+              ticketId: ticketId,
+              stageId: targetStage.id,
+              stageEnteredAt: now,
+              stageLeftAt: null,
+              stageEta: stageEtaDeadline,
+              updatedBy: updatedBy
+            }
+          });
+        }
       }
     }
 

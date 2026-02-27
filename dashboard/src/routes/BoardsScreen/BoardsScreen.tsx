@@ -26,7 +26,7 @@ const BoardsScreen = (): ReactElement => {
     projectId?: string;
     stages?: Array<{
       name: string;
-      eta: number;
+      eta?: number;
       sequenceNumber: number;
       defaultTicketStatusV2?: string;
       prStatuses?: PRStatusEvent[];
@@ -49,7 +49,7 @@ const BoardsScreen = (): ReactElement => {
       stages?: Array<{
         id?: string;
         name: string;
-        eta: number;
+        eta?: number;
         sequenceNumber: number;
         defaultTicketStatusV2?: string;
         prStatuses?: PRStatusEvent[];
