@@ -8,10 +8,10 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { conversationService } from '@/services/conversationService';
-import { formatCommitAnalysisMessage } from '@/utils/commitAnalysisMessageFormatter';
 import { BitbucketConfig } from '@/types/bitbucket';
-import { prepareResultsContent, ReleaseService } from '@/services/release/core/';
+import { AffectedApplicationInfo, ReleaseService } from '@/services/release/core/';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
+import { createCommitAnalysisCanvas } from '@/utils/commitAnalysisCanvas';
 
 async function postLoadingMessage(conversationId: string, userId: string): Promise<string> {
   const message = await conversationService.addMessageToConversation({
@@ -28,14 +28,6 @@ async function postLoadingMessage(conversationId: string, userId: string): Promi
   return message.message.messageId;
 }
 
-async function getInitialMessageId(conversationId: string | null): Promise<string | undefined> {
-  if (!conversationId) return undefined;
-  const message = await db.message.findFirst({
-    where: { conversationId },
-    orderBy: { createdAt: 'asc' }
-  });
-  return message?.messageId;
-}
 
 export interface CommitAnalysisParams {
   workspace: string;
@@ -56,6 +48,7 @@ export interface CommitAnalysisResponse {
   success: boolean;
   data?: CommitAnalysisResult[];
   error?: string;
+  canvasUrl?: string;
 }
 
 export class CommitAnalysisController {
@@ -152,13 +145,7 @@ export class CommitAnalysisController {
 
       // If we have a ticket and applications, run the release orchestration
       const currentTicketId = await this.conversationRepository!.getTicketIdByConversationId(conversationId);
-      let affectedApplications: Array<{
-        id: string;
-        name: string;
-        subTicketId?: string;
-        mappedTicketId?: string;
-        matchedFiles: string[];
-      }> = [];
+      let affectedApplications: AffectedApplicationInfo[] = [];
       let migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
       let envChanges: Array<{ fileName: string; filePath: string; newValue: string }> = [];
 
@@ -199,52 +186,87 @@ export class CommitAnalysisController {
             channelId,
             affectedApplications,
             userId,
+            deployedCommitId,
+            newCommitId,
             envChanges,
             migrationLinks
           );
         }
       }
 
-      // Format and update the message with results
-      const currentTicket = currentTicketId
-        ? await this.ticketRepository!.getTicketById(currentTicketId)
-        : null;
-      const parentTicket = parentTicketId
-        ? await this.ticketRepository!.getTicketById(parentTicketId)
-        : null;
+      // Create canvas for detailed analysis
+      let canvasUrl: string | undefined;
+      const shouldCreateCanvas = results.length > 0;
 
-      const messageId = Boolean(parentTicketId && currentTicket) ?
-        await getInitialMessageId(parentTicket?.conversationId ?? null) :
-        currentTicket ?
-          await getInitialMessageId(currentTicket.conversationId) : undefined;
+      if (shouldCreateCanvas) {
+        const canvasViewAccessId = await createCommitAnalysisCanvas(
+          results,
+          affectedApplications,
+          envChanges,
+          migrationLinks,
+          userId,
+          {
+            projectId,
+            conversationId,
+            channelId,
+            workspace,
+            repoSlug,
+            deployedCommitId,
+            newCommitId,
+            affectedApplicationCount: affectedApplications.length,
+            migrationCount: migrationLinks.length,
+            envChangeCount: envChanges.length,
+          }
+        );
 
-      const resultsContent = prepareResultsContent(
-        results,
-        workspace,
-        repoSlug,
-        conversationId,
-        channelId,
-        affectedApplications,
-        currentTicket,
-        parentTicket,
-        loadingMessageId,
-        parentTicketId,
-        envChanges,
-        migrationLinks,
-        messageId
-      );
+        if (canvasViewAccessId) {
+          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasViewAccessId}`;
+        }
+      }
+
+      // Create a concise summary for the message
+      const totalCommits = results.length;
+      const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
+      const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
+
+      let summaryContent = `<p><strong>📦 Release Analysis Complete</strong></p>`;
+      summaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${workspace}/${repoSlug}</em></p>`;
+      summaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets</em></p>`;
+
+      if (affectedApplications.length > 0) {
+        summaryContent += `<p class="m-0 leading-6 mt-2"><strong class="font-semibold">Services to be deployed:</strong></p>`;
+        summaryContent += `<blockquote class="border-l-4 border-gray-400 pl-4 text-gray-700">`;
+        for (const app of affectedApplications.slice(0, 5)) {
+          summaryContent += `<p class="m-0 leading-6"><strong class="font-semibold">${app.name}</strong></p>`;
+        }
+        if (affectedApplications.length > 5) {
+          summaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">... and ${affectedApplications.length - 5} more</em></p>`;
+        }
+        summaryContent += `</blockquote>`;
+      }
+
+      // Add migration and env change indicators
+      summaryContent += `<p class="m-0 leading-6 mt-2"><strong class="font-semibold">Migration Change: ${migrationLinks.length > 0 ? 'Yes' : 'No'}</strong></p>`;
+      summaryContent += `<p class="m-0 leading-6"><strong class="font-semibold">Env Change: ${envChanges.length > 0 ? 'Yes' : 'No'}</strong></p>`;
+
+      // Add canvas link if created
+      if (canvasUrl) {
+        summaryContent += `<p class="m-0 leading-6 mt-3"><a target="_blank" rel="noopener noreferrer" class="text-blue-600 underline cursor-pointer hover:text-blue-700" href="${canvasUrl}">📄 View Full Analysis Report →</a></p>`;
+      }
 
       await conversationService.updateMessageContent({
         messageId: loadingMessageId,
-        content: resultsContent,
+        content: summaryContent,
         metadata: {
           messageSubtype: 'commit_analysis_report',
+          canvasUrl: canvasUrl || undefined,
         },
       });
 
       return {
         success: true,
         data: results,
+        canvasUrl,
       };
     } catch (error) {
       await this.handleError(error, loadingMessageId);
@@ -277,8 +299,10 @@ export class CommitAnalysisController {
     repoSlug: string,
     conversationId: string,
     channelId: string | undefined,
-    affectedApplications: Array<{ id: string; name: string; matchedFiles: string[] }>,
+    affectedApplications: AffectedApplicationInfo[],
     userId: string,
+    deployedCommitId: string,
+    newCommitId: string,
     envChanges?: Array<{ filePath: string; fileName: string; newValue: string }>,
     migrationLinks?: Array<{ filePath: string; diffUrl: string }>
   ): Promise<void> {
@@ -286,45 +310,86 @@ export class CommitAnalysisController {
       const parentTicket = await this.ticketRepository!.getTicketById(parentTicketId);
       if (!parentTicket?.conversationId) return;
 
-      const subTicketInitialMessage = await getInitialMessageId(conversationId);
       const currentTicket = await this.ticketRepository!.getTicketById(
         await this.conversationRepository!.getTicketIdByConversationId(conversationId) || ''
       );
 
-      const parentResultsContent = formatCommitAnalysisMessage(
-        results,
-        workspace,
-        repoSlug,
-        10000,
-        conversationId,
-        channelId,
-        affectedApplications,
-        currentTicket
-          ? {
-            isSubTicket: false,
-            ticketId: currentTicket.id,
-            xyneId: currentTicket.xyneId,
-            conversationId,
-            messageId: subTicketInitialMessage,
+      let canvasUrl: string | undefined;
+      if (results.length > 0) {
+        const canvasViewAccessId = await createCommitAnalysisCanvas(
+          results,
+          affectedApplications,
+          envChanges,
+          migrationLinks,
+          userId,
+          {
+            channelId,
+            workspace,
+            repoSlug,
+            deployedCommitId,
+            newCommitId,
+            affectedApplicationCount: affectedApplications.length,
+            migrationCount: migrationLinks?.length || 0,
+            envChangeCount: envChanges?.length || 0,
           }
-          : undefined,
-        envChanges,
-        migrationLinks
-      );
+        );
+
+        if (canvasViewAccessId) {
+          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasViewAccessId}`;
+        }
+      }
+
+      // Create concise summary for parent ticket
+      const totalCommits = results.length;
+      const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
+      const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
+
+      let parentSummaryContent = `<p><strong>📦 Release Analysis - Sub-ticket Update</strong></p>`;
+
+      // Add sub-ticket link if available
+      if (currentTicket && channelId) {
+        const subTicketUrl = `${config.slackFrontendUrl}/chat/${channelId}?tab=tickets&ticketId=${currentTicket.id}&conversationId=${conversationId}`;
+        parentSummaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">Sub-Ticket: <a target="_blank" rel="noopener noreferrer" class="text-blue-600 underline cursor-pointer hover:text-blue-700" href="${subTicketUrl}">${currentTicket.xyneId}</a></em></p>`;
+      }
+
+      parentSummaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${workspace}/${repoSlug}</em></p>`;
+      parentSummaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets</em></p>`;
+
+      if (affectedApplications.length > 0) {
+        parentSummaryContent += `<p class="m-0 leading-6 mt-2"><strong class="font-semibold">Services affected:</strong></p>`;
+        parentSummaryContent += `<blockquote class="border-l-4 border-gray-400 pl-4 text-gray-700">`;
+        for (const app of affectedApplications.slice(0, 5)) {
+          parentSummaryContent += `<p class="m-0 leading-6"><strong class="font-semibold">${app.name}</strong></p>`;
+        }
+        if (affectedApplications.length > 5) {
+          parentSummaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">... and ${affectedApplications.length - 5} more</em></p>`;
+        }
+        parentSummaryContent += `</blockquote>`;
+      }
+
+      parentSummaryContent += `
+      <p class="m-0 leading-6 mt-2"><strong class="font-semibold">Migration Change: ${migrationLinks && migrationLinks.length > 0 ? 'Yes' : 'No'}</strong></p>
+      `;
+      parentSummaryContent += `<p class="m-0 leading-6"><strong class="font-semibold">Env Change: ${envChanges && envChanges.length > 0 ? 'Yes' : 'No'}</strong></p>`;
+
+      if (canvasUrl) {
+        parentSummaryContent += `<p class="m-0 leading-6 mt-3"><a target="_blank" rel="noopener noreferrer" class="text-blue-600 underline cursor-pointer hover:text-blue-700" href="${canvasUrl}">📄 View Full Analysis Report →</a></p>`;
+      }
 
       await conversationService.addMessageToConversation({
         conversationId: parentTicket.conversationId,
         userId,
-        content: parentResultsContent,
+        content: parentSummaryContent,
         msgType: 'SYSTEM',
         metadata: {
           messageSubtype: 'commit_analysis_report',
           fromSubTicket: true,
           subTicketConversationId: conversationId,
+          canvasUrl: canvasUrl || undefined,
         },
       });
 
-      logger.info(`Posted commit analysis to parent ticket ${parentTicket.xyneId} conversation`);
+      logger.info(`Posted commit analysis to parent ticket ${parentTicket.xyneId} conversation with canvas`);
     } catch (error) {
       logger.error('Failed to post commit analysis to parent ticket:', error);
     }

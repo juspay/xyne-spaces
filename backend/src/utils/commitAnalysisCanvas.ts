@@ -1,0 +1,459 @@
+import { DatabaseClient } from "@/database/client";
+import { BlockNoteBlock, BlockNoteInlineContent } from "@/types/blockNoteTypes";
+import { v4 as uuidv4 } from 'uuid';
+import { logger } from '@/utils/logger';
+import { CommitAnalysisResult } from "@/services/commitAnalysisService";
+import { AffectedApplicationInfo } from "@/services/release/core";
+import { config } from '@/config/env';
+
+const prisma = DatabaseClient.getInstance();
+
+export interface CommitAnalysisCanvasMetadata {
+  projectId?: string | null;
+  conversationId?: string;
+  channelId?: string;
+  workspace: string;
+  repoSlug: string;
+  deployedCommitId: string;
+  newCommitId: string;
+  affectedApplicationCount: number;
+  migrationCount: number;
+  envChangeCount: number;
+}
+
+export async function createCommitAnalysisCanvas(
+  results: CommitAnalysisResult[],
+  affectedApplications: AffectedApplicationInfo[],
+  envChanges: Array<{ filePath: string; fileName: string; newValue: string }> | undefined,
+  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
+  createdByUserId: string,
+  metadata: CommitAnalysisCanvasMetadata
+): Promise<string | null> {
+  try {
+    const now = new Date();
+
+    // Generate IDs
+    const canvasId = uuidv4();
+    const viewAccessId = uuidv4();
+    const participantId = uuidv4();
+
+    const dateStr = now.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const finalTitle = `📦 Release Analysis: ${metadata.workspace}/${metadata.repoSlug} - ${dateStr}`;
+
+    // Format analysis to BlockNote content
+    const content = formatCommitAnalysisToBlockNote(
+      results,
+      affectedApplications,
+      envChanges,
+      migrationLinks,
+      metadata,
+      finalTitle
+    );
+
+    // Create the canvas with PUBLIC visibility (read-only)
+    await prisma.canvas.create({
+      data: {
+        id: canvasId,
+        title: finalTitle,
+        content: content as any,
+        createdBy: createdByUserId,
+        viewAccessId,
+        editAccessId: null,
+        visibility: 'PUBLIC',
+        isTemplate: false,
+        isCollaborative: false,
+        lastEditedBy: createdByUserId,
+        lastEditedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        channelId: metadata.channelId || null,
+        metadata: {
+          source: 'commit_analysis',
+          workspace: metadata.workspace,
+          repoSlug: metadata.repoSlug,
+          deployedCommitId: metadata.deployedCommitId,
+          newCommitId: metadata.newCommitId,
+          commitCount: results.length,
+          affectedApplicationCount: metadata.affectedApplicationCount,
+          migrationCount: metadata.migrationCount,
+          envChangeCount: metadata.envChangeCount,
+          ...(metadata.projectId && { projectId: metadata.projectId }),
+          ...(metadata.conversationId && { conversationId: metadata.conversationId }),
+        },
+      },
+    });
+
+    // (read-only canvas)
+    await prisma.canvasParticipant.create({
+      data: {
+        id: participantId,
+        canvasId,
+        userId: createdByUserId,
+        role: 'VIEWER',
+        joinedAt: now,
+        updatedAt: now,
+      },
+    });
+
+    logger.info(
+      `[CanvasService] Created commit analysis canvas ${canvasId} with ${results.length} commits for ${metadata.workspace}/${metadata.repoSlug}`
+    );
+
+    return viewAccessId;
+  } catch (error) {
+    logger.error('[CanvasService] Failed to create commit analysis canvas:', error);
+    return null;
+  }
+}
+
+function formatCommitAnalysisToBlockNote(
+  results: Array<{
+    commitId: string;
+    pullRequest: { id: number; title: string; url: string; author: { displayName: string } } | null;
+    ticket: { id: string; xyneId: string; title: string; status: string } | null;
+    filePaths: string[];
+  }>,
+  affectedApplications: Array<{
+    id: string;
+    name: string;
+    subTicketId?: string;
+    subTicketXyneId?: string;
+    mappedTicketId?: string;
+    matchedFiles: string[];
+  }>,
+  envChanges: Array<{ filePath: string; fileName: string; newValue: string }> | undefined,
+  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
+  metadata: CommitAnalysisCanvasMetadata,
+  title: string
+): BlockNoteBlock[] {
+  const blocks: BlockNoteBlock[] = [];
+  const totalCommits = results.length;
+  const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
+  const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
+
+  // Main title
+  blocks.push({
+    id: uuidv4(),
+    type: 'heading',
+    props: { level: 1 },
+    content: [{ type: 'text', text: title, styles: { bold: true } }],
+  });
+
+  // Repository info
+  blocks.push({
+    id: uuidv4(),
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: 'Repository: ', styles: { bold: true } },
+      { type: 'text', text: `${metadata.workspace}/${metadata.repoSlug}`, styles: {} },
+    ],
+  });
+
+  // Commit range
+  blocks.push({
+    id: uuidv4(),
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: 'Commit Range: ', styles: { bold: true } },
+      { type: 'text', text: `${metadata.deployedCommitId.slice(0, 8)}...${metadata.newCommitId.slice(0, 8)}`, styles: { code: true } },
+    ],
+  });
+
+  // Summary statistics
+  blocks.push({
+    id: uuidv4(),
+    type: 'heading',
+    props: { level: 2 },
+    content: [{ type: 'text', text: '📊 Summary', styles: {} }],
+  });
+
+  blocks.push({
+    id: uuidv4(),
+    type: 'paragraph',
+    content: [{ type: 'text', text: `${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets`, styles: {} }],
+  });
+
+  // Services to deploy
+  if (affectedApplications.length > 0) {
+    blocks.push({
+      id: uuidv4(),
+      type: 'heading',
+      props: { level: 2 },
+      content: [{ type: 'text', text: '🚀 Services to be Deployed', styles: {} }],
+    });
+
+    for (const app of affectedApplications) {
+      const content: BlockNoteInlineContent[] = [
+        { type: 'text', text: app.name, styles: { bold: true } },
+      ];
+
+      // Add ticket link if mappedTicketId exists
+      if (app.mappedTicketId && metadata.channelId) {
+        const ticketUrl = `${config.slackFrontendUrl}/chat/${metadata.channelId}?tab=tickets&ticketId=${app.mappedTicketId}&conversationId=${metadata.conversationId || ''}`;
+        content.push({ type: 'text', text: ' - ', styles: {} });
+        content.push({ type: 'link', href: ticketUrl, content: [{ type: 'text', text: 'Ticket →', styles: {} }] });
+      }
+
+      blocks.push({
+        id: uuidv4(),
+        type: 'bulletListItem',
+        content,
+      });
+    }
+  }
+
+  // Environment and Migration changes
+  blocks.push({
+    id: uuidv4(),
+    type: 'heading',
+    props: { level: 2 },
+    content: [{ type: 'text', text: '⚙️ Configuration Changes', styles: {} }],
+  });
+
+  blocks.push({
+    id: uuidv4(),
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: 'Migration Changes: ', styles: { bold: true } },
+      { type: 'text', text: metadata.migrationCount > 0 ? `Yes (${metadata.migrationCount} files)` : 'No', styles: {} },
+    ],
+  });
+
+  blocks.push({
+    id: uuidv4(),
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: 'Environment Changes: ', styles: { bold: true } },
+      { type: 'text', text: metadata.envChangeCount > 0 ? `Yes (${metadata.envChangeCount} files)` : 'No', styles: {} },
+    ],
+  });
+
+  // Environment changes section
+  if (envChanges && envChanges.length > 0) {
+    blocks.push({
+      id: uuidv4(),
+      type: 'heading',
+      props: { level: 3 },
+      content: [{ type: 'text', text: '🔧 Environment Variables', styles: {} }],
+    });
+
+    const envChangesByPath = new Map<string, { fileName: string; newValue: string }>();
+    for (const change of envChanges) {
+      if (change.filePath && change.fileName && change.newValue) {
+        envChangesByPath.set(change.filePath, { fileName: change.fileName, newValue: change.newValue });
+      }
+    }
+
+    const envVarRegex = /^([+-])\s*([A-Z][A-Z0-9_]*)(?:\s*=|\s*:)/gm;
+    const envVarStatusMap = new Map<string, { added: boolean; removed: boolean }>();
+
+    for (const [, change] of envChangesByPath) {
+      let match;
+      envVarRegex.lastIndex = 0;
+      while ((match = envVarRegex.exec(change.newValue)) !== null) {
+        const sign = match[1];
+        const varName = match[2];
+        if (!envVarStatusMap.has(varName)) {
+          envVarStatusMap.set(varName, { added: false, removed: false });
+        }
+        const status = envVarStatusMap.get(varName)!;
+        if (sign === '+') status.added = true;
+        if (sign === '-') status.removed = true;
+      }
+    }
+
+    const envVarList = Array.from(envVarStatusMap.entries())
+      .map(([name, flags]) => {
+        let status = 'MODIFIED';
+        if (flags.added && !flags.removed) status = 'ADDED';
+        else if (!flags.added && flags.removed) status = 'DELETED';
+        return { name, status };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const item of envVarList) {
+      blocks.push({
+        id: uuidv4(),
+        type: 'bulletListItem',
+        content: [
+          { type: 'text', text: item.name, styles: { code: true } },
+          { type: 'text', text: ` [${item.status}]`, styles: { bold: true } },
+        ],
+      });
+    }
+  }
+
+  // Pull Requests and Tickets section
+  blocks.push({
+    id: uuidv4(),
+    type: 'heading',
+    props: { level: 2 },
+    content: [{ type: 'text', text: '🔀 Pull Requests & Tickets', styles: {} }],
+  });
+
+  // Group results by PR (unique PRs only)
+  const uniquePRs = new Map<number, typeof results[0]>();
+  for (const result of results) {
+    if (result.pullRequest) {
+      if (!uniquePRs.has(result.pullRequest.id)) {
+        uniquePRs.set(result.pullRequest.id, result);
+      }
+    }
+  }
+
+  // Create maps for env and migration changes by filePath
+  const envChangesByPath = new Map<string, { fileName: string; newValue: string }>();
+  if (envChanges) {
+    for (const change of envChanges) {
+      if (change.filePath && change.fileName && change.newValue) {
+        envChangesByPath.set(change.filePath, { fileName: change.fileName, newValue: change.newValue });
+      }
+    }
+  }
+
+  const migrationLinksByPath = new Map<string, string>();
+  if (migrationLinks) {
+    for (const link of migrationLinks) {
+      migrationLinksByPath.set(link.filePath, link.diffUrl);
+    }
+  }
+
+  for (const [, result] of uniquePRs) {
+    if (!result.pullRequest) continue;
+
+    const pr = result.pullRequest;
+
+    // PR Title as heading
+    blocks.push({
+      id: uuidv4(),
+      type: 'heading',
+      props: { level: 3 },
+      content: [
+        { type: 'text', text: `PR #${pr.id}: `, styles: { bold: true } },
+        { type: 'text', text: pr.title, styles: {} },
+      ],
+    });
+
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'URL: ', styles: { bold: true } },
+        { type: 'link', href: pr.url, content: [{ type: 'text', text: pr.url, styles: {} }] },
+      ],
+    });
+
+    // Author
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Author: ', styles: { bold: true } },
+        { type: 'text', text: pr.author.displayName, styles: {} },
+      ],
+    });
+
+    // Ticket info if present
+    if (result.ticket && metadata.channelId) {
+      const ticketUrl = `${config.slackFrontendUrl}/chat/${metadata.channelId}?tab=tickets&ticketId=${result.ticket.id}&conversationId=${metadata.conversationId || ''}`;
+      blocks.push({
+        id: uuidv4(),
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Ticket: ', styles: { bold: true } },
+          { type: 'link', href: ticketUrl, content: [{ type: 'text', text: `${result.ticket.xyneId}`, styles: {} }] },
+          { type: 'text', text: ` - ${result.ticket.title} (${result.ticket.status})`, styles: {} },
+        ],
+      });
+    }
+
+    // Display env changes for this PR
+    const prEnvChanges = result.filePaths.filter(fp => envChangesByPath.has(fp));
+    if (prEnvChanges.length > 0) {
+      blocks.push({
+        id: uuidv4(),
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'Environment Changes:', styles: { bold: true } }],
+      });
+
+      const envVarStatusMap = new Map<string, { added: boolean; removed: boolean }>();
+      const envVarRegex = /^([+-])\s*([A-Z][A-Z0-9_]*)(?:\s*=|\s*:)/gm;
+
+      prEnvChanges.forEach((filePath) => {
+        const change = envChangesByPath.get(filePath);
+        if (change?.newValue) {
+          let match;
+          envVarRegex.lastIndex = 0;
+          while ((match = envVarRegex.exec(change.newValue)) !== null) {
+            const sign = match[1];
+            const varName = match[2];
+            if (!envVarStatusMap.has(varName)) {
+              envVarStatusMap.set(varName, { added: false, removed: false });
+            }
+            const status = envVarStatusMap.get(varName)!;
+            if (sign === '+') status.added = true;
+            if (sign === '-') status.removed = true;
+          }
+        }
+      });
+
+      const envVarList = Array.from(envVarStatusMap.entries())
+        .map(([name, flags]) => {
+          let status = 'MODIFIED';
+          if (flags.added && !flags.removed) status = 'ADDED';
+          else if (!flags.added && flags.removed) status = 'DELETED';
+          return { name, status };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      for (const item of envVarList) {
+        blocks.push({
+          id: uuidv4(),
+          type: 'bulletListItem',
+          content: [
+            { type: 'text', text: item.name, styles: { code: true } },
+            { type: 'text', text: ` [${item.status}]`, styles: { bold: true } },
+          ],
+        });
+      }
+    }
+
+    // Display migration changes for this PR
+    const prMigrationChanges = result.filePaths.filter(fp => migrationLinksByPath.has(fp));
+    if (prMigrationChanges.length > 0) {
+      blocks.push({
+        id: uuidv4(),
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'Migration Changes:', styles: { bold: true } }],
+      });
+
+      for (const filePath of prMigrationChanges) {
+        const fileName = filePath.split('/').pop() || filePath;
+        const diffUrl = migrationLinksByPath.get(filePath);
+        blocks.push({
+          id: uuidv4(),
+          type: 'bulletListItem',
+          content: [
+            { type: 'link', href: diffUrl!, content: [{ type: 'text', text: 'View Diff → ', styles: {} }] },
+            { type: 'text', text: fileName, styles: { code: true } },
+          ],
+        });
+      }
+    }
+
+    // Spacing
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [],
+    });
+  }
+
+  return blocks;
+}

@@ -29,8 +29,14 @@ export interface BlockNoteMentionInline {
         groupName?: string;
     };
 }
+interface BlockNoteLinkContent {
+    type: 'link';
+    href: string;
+    content: BlockNoteTextInline[];
+}
 
-export type BlockNoteInlineContent = BlockNoteTextInline | BlockNoteMentionInline;
+
+export type BlockNoteInlineContent = BlockNoteTextInline | BlockNoteMentionInline | BlockNoteLinkContent;
 
 // ---------------------------------------------------------------------------
 // Block types

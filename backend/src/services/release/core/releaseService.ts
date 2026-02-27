@@ -28,6 +28,7 @@ export interface AffectedApplicationInfo {
 	id: string;
 	name: string;
 	subTicketId?: string;
+	subTicketXyneId?: string;
 	mappedTicketId?: string;
 	matchedFiles: string[];
 }
@@ -138,6 +139,7 @@ export class ReleaseService {
 						id: app.id,
 						name: app.name,
 						subTicketId: subTicketIds[index]?.subTicketId,
+						subTicketXyneId: subTicketIds[index]?.xyneId,
 						mappedTicketId: subTicketIds[index]?.mappedTicketId,
 						matchedFiles: app.matchedFiles,
 					}));

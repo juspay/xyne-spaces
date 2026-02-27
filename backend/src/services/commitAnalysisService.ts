@@ -53,6 +53,7 @@ export interface TicketInfo {
   assignedTo: string | null;
 }
 
+
 export class CommitAnalysisService {
   private bitbucketService: BitbucketService;
   private ticketRepository: TicketRepository | null = null;

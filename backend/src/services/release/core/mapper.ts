@@ -1,7 +1,6 @@
 import { CommitAnalysisResult } from '@/services/commitAnalysisService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { formatCommitAnalysisMessage } from '@/utils/commitAnalysisMessageFormatter';
 
 export interface ApplicationMappingInput {
 	id: string;
@@ -102,53 +101,4 @@ export function filterResultsByApplication(
 			)
 		}))
 		.filter(r => r.filePaths.length > 0);
-}
-
-
-export function prepareResultsContent(
-	results: CommitAnalysisResult[],
-	workspace: string,
-	repoSlug: string,
-	conversationId: string,
-	channelId: string | undefined,
-	affectedApplications: Array<{
-		id: string;
-		name: string;
-		subTicketId?: string;
-		matchedFiles: string[];
-	}>,
-	currentTicket: { id: string; xyneId: string; conversationId: string | null } | null,
-	parentTicket: { xyneId: string | null; conversationId: string | null } | null,
-	loadingMessageId: string,
-	parentTicketId: string | undefined,
-	envChanges: Array<{ filePath: string; fileName: string; newValue: string }>,
-	migrationLinks: Array<{ filePath: string; diffUrl: string }>,
-	initialMessageId?: string | undefined
-): string {
-	const isSubTicket = Boolean(parentTicketId && currentTicket);
-
-	return formatCommitAnalysisMessage(
-		results,
-		workspace,
-		repoSlug,
-		10000,
-		conversationId,
-		channelId,
-		affectedApplications,
-		isSubTicket && currentTicket
-			? {
-				isSubTicket: true,
-				ticketId: currentTicket.id,
-				xyneId: currentTicket.xyneId,
-				conversationId,
-				messageId: loadingMessageId,
-				parentTicketId: parentTicketId!,
-				parentXyneId: parentTicket?.xyneId || '',
-				parentConversationId: parentTicket?.conversationId || '',
-				parentMessageId: initialMessageId,
-			}
-			: undefined,
-		envChanges.length > 0 ? envChanges : undefined,
-		migrationLinks.length > 0 ? migrationLinks : undefined
-	);
 }
