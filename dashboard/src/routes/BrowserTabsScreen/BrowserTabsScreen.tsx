@@ -10,6 +10,7 @@ import {
   Loader2,
   ExternalLink,
   Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { isElectronApp } from '../../utils/electronApp';
@@ -283,6 +284,20 @@ export function BrowserTabsScreen({
     }
   };
 
+  const handleMinimizeToPanel = () => {
+    // Navigate back to previous page
+    void navigate(-1);
+    browserPanelActor.send({ type: 'OPEN' });
+    track({
+      eventCategory: 'BROWSER',
+      eventName: 'MinimizeToDocked',
+      eventLabel: 'Minimize from fullscreen to panel',
+      contextMetadata: {
+        tabs: tabs.map(t => ({ id: t.id, url: t.url })),
+      },
+    });
+  };
+
   const handleUpdateTab = (tabId: string, patch: Partial<BrowserTab>) => {
     browserPanelActor.send({ type: 'UPDATE_TAB', tabId, patch });
   };
@@ -320,7 +335,7 @@ export function BrowserTabsScreen({
       }`}
     >
       {/* Header with close button (panel mode only) */}
-      {isPanel && (
+      {isPanel ? (
         <div className='flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200'>
           <div className='flex items-center gap-2'>
             <Globe size={16} className='text-gray-500' />
@@ -359,6 +374,37 @@ export function BrowserTabsScreen({
             >
               <X size={16} />
             </button>
+          </div>
+        </div>
+      ) : (
+        <div className='flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200'>
+          <div className='flex items-center gap-2'>
+            <Globe size={18} className='text-gray-500' />
+            <span className='text-base font-medium text-gray-700'>Browser</span>
+          </div>
+          <div className='flex items-center gap-1'>
+            <button
+              onClick={handleMinimizeToPanel}
+              className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
+              title='Minimize to docked panel'
+              data-track-category='BROWSER'
+              data-track-name='MinimizeToDocked'
+              data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
+            >
+              <Minimize2 size={16} />
+            </button>
+            {activeTab && (
+              <button
+                onClick={handleOpenExternal}
+                className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
+                title='Open in system browser'
+                data-track-category='BROWSER'
+                data-track-name='OpenInSystemBrowser'
+                data-track-metadata={JSON.stringify({ url: activeTab.url })}
+              >
+                <ExternalLink size={16} />
+              </button>
+            )}
           </div>
         </div>
       )}
