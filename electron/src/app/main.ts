@@ -217,6 +217,27 @@ function setupAppStateListeners(): void {
   });
 }
 
+// Handle new window requests from webviews
+app.on('web-contents-created', (_event, webContents) => {
+  if (webContents.getType() === 'webview') {
+    webContents.setWindowOpenHandler(({ url }) => {      
+      try {
+        const urlObj = new URL(url);
+        if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
+          const mainWindow = getMainWindow();
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('open-in-browser-panel', url);
+          }
+        }
+      } catch (e) {
+        // Invalid URL, ignore
+      }
+      
+      return { action: 'deny' };
+    });
+  }
+});
+
 void app.whenReady().then(initializeApp);
 
 app.on('window-all-closed', () => {

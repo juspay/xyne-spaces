@@ -104,22 +104,25 @@ function WebviewTab({
     };
   }, [tab.id]);
 
+  const webviewProps = {
+    ref,
+    src: initialUrlRef.current,
+    partition: 'persist:browser-tabs',
+    style: {
+      position: 'absolute' as const,
+      inset: 0,
+      width: '100%',
+      height: '100%',
+      visibility: isActive ? ('visible' as const) : ('hidden' as const),
+      pointerEvents: isActive ? ('auto' as const) : ('none' as const),
+      minHeight: isPanel ? 200 : 400,
+    },
+  };
+
   return (
-    <webview
-      ref={ref}
-      src={initialUrlRef.current}
-      // eslint-disable-next-line react/no-unknown-property
-      partition='persist:browser-tabs'
-      style={{
-        position: 'absolute',
-        inset: 0,
-        width: '100%',
-        height: '100%',
-        visibility: isActive ? 'visible' : 'hidden',
-        pointerEvents: isActive ? 'auto' : 'none',
-        minHeight: isPanel ? 200 : 400,
-      }}
-    />
+    // @ts-expect-error - webview is an Electron-specific element, allowpopups="" is required
+    // eslint-disable-next-line react/no-unknown-property
+    <webview {...webviewProps} allowpopups='' />
   );
 }
 
