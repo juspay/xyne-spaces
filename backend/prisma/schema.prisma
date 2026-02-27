@@ -1111,7 +1111,7 @@ model Board {
 model Stage {
   id                   String       @id @default(cuid())
   name                 String
-  eta                  Int
+  eta                  Int?
   boardId              String       // Board ID (no FK constraint)
   sequenceNumber       Int
   createdBy            String       // User ID (no FK constraint)

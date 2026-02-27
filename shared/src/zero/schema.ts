@@ -746,7 +746,7 @@ export const stageTable = table('stages')
   .columns({
     id: string(),
     name: string(),
-    eta: number(),
+    eta: number().optional(),
     boardId: string(),
     sequenceNumber: number(),
     createdBy: string(),

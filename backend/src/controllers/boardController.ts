@@ -47,8 +47,9 @@ export class BoardController {
             res.status(400).json({ error: 'All stages must have a name' });
             return;
           }
-          if (typeof stage.eta !== 'number' || stage.eta <= 0) {
-            res.status(400).json({ error: 'All stages must have a valid ETA (hours)' });
+          // ETA is optional - only validate if provided
+          if (stage.eta !== undefined && (typeof stage.eta !== 'number' || stage.eta <= 0)) {
+            res.status(400).json({ error: 'If provided, ETA must be a valid positive number' });
             return;
           }
           if (typeof stage.sequenceNumber !== 'number' || stage.sequenceNumber <= 0) {

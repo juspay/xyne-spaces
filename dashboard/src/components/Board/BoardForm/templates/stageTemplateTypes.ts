@@ -3,7 +3,7 @@ import { ReactElement } from 'react';
 
 export interface StageDefinition {
   name: string;
-  eta: string;
+  eta?: string;
   sequenceNumber: string;
   defaultTicketStatusV2: TicketStatusV2;
 }

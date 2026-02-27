@@ -11,7 +11,7 @@ import type { TicketStatusV2, PRStatusEvent } from '@xyne/shared';
 export interface BoardStageData {
   id?: string;
   name: string;
-  eta: number;
+  eta?: number;
   sequenceNumber: number;
   defaultTicketStatusV2?: TicketStatusV2;
   prStatuses?: PRStatusEvent[];

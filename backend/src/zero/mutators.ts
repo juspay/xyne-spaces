@@ -3784,35 +3784,35 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 );
 
                 const existingEntry = existingEntries[0]; // Get first entry if exists
-
-                if (existingEntry) {
-                  // Re-entering a stage - reactivate it
-                  const newStageEtaDeadline = calculateETADeadline(
-                    new Date(existingEntry.stageEnteredAt),
-                    newStage.eta // Add stage ETA hours
-                  ).getTime();
-                  await tx.mutate.ticket_stage_eta.update({
-                    id: existingEntry.id,
-                    stageLeftAt: null,
-                    stageEta: newStageEtaDeadline,
-                    updatedAt: now,
-                    updatedBy: authData.sub
-                  });
-                } else {
-                  // First time entering this stage - create new entry
-                  const newEntryId = uuidv4();
-                  const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
-                  await tx.mutate.ticket_stage_eta.insert({
-                    id: newEntryId,
-                    ticketId: params.id,
-                    stageId: newStage.id,
-                    stageEnteredAt: now,
-                    stageLeftAt: null,
-                    stageEta: stageEtaDeadline,
-                    createdAt: now,
-                    updatedBy: authData.sub
-                  });
-
+                if (newStage.eta !== null) {
+                  if (existingEntry) {
+                    // Re-entering a stage - reactivate it
+                    const newStageEtaDeadline = calculateETADeadline(
+                      new Date(existingEntry.stageEnteredAt),
+                      newStage.eta // Add stage ETA hours
+                    ).getTime();
+                    await tx.mutate.ticket_stage_eta.update({
+                      id: existingEntry.id,
+                      stageLeftAt: null,
+                      stageEta: newStageEtaDeadline,
+                      updatedAt: now,
+                      updatedBy: authData.sub
+                    });
+                  } else {
+                    // First time entering this stage - create new entry only if stage has ETA
+                      const newEntryId = uuidv4();
+                      const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
+                      await tx.mutate.ticket_stage_eta.insert({
+                        id: newEntryId,
+                        ticketId: params.id,
+                        stageId: newStage.id,
+                        stageEnteredAt: now,
+                        stageLeftAt: null,
+                        stageEta: stageEtaDeadline,
+                        createdAt: now,
+                        updatedBy: authData.sub
+                      });
+                    }
                 }
               } else {
                 // BACKWARD MOVEMENT: Delete all forward stage entries, reactivate target
@@ -3857,19 +3857,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     updatedBy: authData.sub
                   });
                 } else {
-                  // Create new entry if it didn't exist
-                  const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
-                  const newEntryId = uuidv4();
-                  await tx.mutate.ticket_stage_eta.insert({
-                    id: newEntryId,
-                    ticketId: params.id,
-                    stageId: newStage.id,
-                    stageEnteredAt: now,
-                    stageLeftAt: null,
-                    stageEta: stageEtaDeadline,
-                    createdAt: now,
-                    updatedBy: authData.sub
-                  });
+                  // Create new entry only if stage has ETA
+                  if (newStage.eta !== null) {
+                    const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
+                    const newEntryId = uuidv4();
+                    await tx.mutate.ticket_stage_eta.insert({
+                      id: newEntryId,
+                      ticketId: params.id,
+                      stageId: newStage.id,
+                      stageEnteredAt: now,
+                      stageLeftAt: null,
+                      stageEta: stageEtaDeadline,
+                      createdAt: now,
+                      updatedBy: authData.sub
+                    });
+                  }
                 }
               }
             }
@@ -4143,30 +4145,47 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           id: z.string(),
           stageEta: z.number(),
           updatedAt: z.number(),
+          ticketId: z.string().optional(),
+          stageId: z.string().optional(),
         }),
         async ({ tx, args }) => {
-          const { id, stageEta, updatedAt } = args;
+          const { id, stageEta, updatedAt, ticketId, stageId } = args;
 
           // 1. Fetch the OLD ticket stage ETA entry BEFORE updating
           const oldTicketStageEtaEntry = await tx.run(
             zql.ticket_stage_eta.where('id', id).one()
           );
 
-          if (!oldTicketStageEtaEntry) return;
-
           // Store the old value for activity logging
-          const oldStageEta = oldTicketStageEtaEntry.stageEta;
+          const oldStageEta = oldTicketStageEtaEntry?.stageEta ?? null;
 
-          // 2. Update the current stage ETA entry
-          await tx.mutate.ticket_stage_eta.update({
+          // If entry doesn't exist, require ticketId and stageId
+          if (!oldTicketStageEtaEntry && (!ticketId || !stageId)) {
+            logger.warn('[MUTATOR] Ticket stage ETA entry not found and no ticketId/stageId provided');
+            return;
+          }
+
+          const now = Date.now();
+
+          // 2. Upsert the current stage ETA entry (will create if not exists, update if exists)
+          await tx.mutate.ticket_stage_eta.upsert({
             id,
+            ticketId: oldTicketStageEtaEntry?.ticketId ?? ticketId!,
+            stageId: oldTicketStageEtaEntry?.stageId ?? stageId!,
+            stageEnteredAt: oldTicketStageEtaEntry?.stageEnteredAt ?? now,
+            stageLeftAt: null,
             stageEta,
+            createdAt: oldTicketStageEtaEntry?.createdAt ?? now,
             updatedAt,
             updatedBy: authData.sub,
           });
 
-          // 3. Use the old entry for other data (ticketId, stageId don't change)
-          const ticketStageEtaEntry = oldTicketStageEtaEntry;
+          // 3. Use the old entry for other data
+          const ticketStageEtaEntry = oldTicketStageEtaEntry ?? {
+            id,
+            ticketId: ticketId!,
+            stageId: stageId!,
+          } as any;
 
           // 3. Fetch the associated ticket
           const ticket = await tx.run(
@@ -4192,36 +4211,44 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             .filter(stage => stage.sequenceNumber > currentStage.sequenceNumber)
             .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
 
-          // 7. Calculate total hours needed for future stages
+          // 7. Calculate total hours needed for future stages (only stages with ETA)
           const futureStagesHours = futureStages.reduce(
-            (totalHours, stage) => totalHours + stage.eta, 
+            (totalHours, stage) => totalHours + (stage.eta || 0),
             0
           );
 
           // 8. Get the NEW current stage deadline (what user just set)
           const currentStageDeadline = new Date(stageEta);
 
-          // 9. Calculate overall ticket ETA using working hours logic
-          // Starting from: current stage deadline
-          // Adding: working hours for all future stages
-          const overallTicketEta = calculateETADeadline(
-            currentStageDeadline,  // Start from user's new deadline for current stage
-            futureStagesHours      // Add working hours for future stages
-          );
+          // 9. Calculate overall ticket ETA only if there are future stages with ETA
+          if (futureStagesHours > 0) {
+            // Calculate overall ticket ETA using working hours logic
+            // Starting from: current stage deadline
+            // Adding: working hours for all future stages
+            const overallTicketEta = calculateETADeadline(
+              currentStageDeadline,  // Start from user's new deadline for current stage
+              futureStagesHours      // Add working hours for future stages
+            );
 
-          // 10. Update the ticket's overall ETA
-          await tx.mutate.tickets.update({
-            id: ticket.id,
-            eta: overallTicketEta.getTime(),
-            updatedAt: Date.now(),
-          });
+            // 10. Update the ticket's overall ETA
+            await tx.mutate.tickets.update({
+              id: ticket.id,
+              eta: overallTicketEta.getTime(),
+              updatedAt: Date.now(),
+            });
 
-          logger.info('[MUTATOR] Updated ticket ETA', {
-            ticketId: ticket.id,
-            currentStageDeadline: currentStageDeadline.toISOString(),
-            futureStagesHours,
-            newOverallEta: overallTicketEta.toISOString(),
-          });
+            logger.info('[MUTATOR] Updated ticket ETA', {
+              ticketId: ticket.id,
+              currentStageDeadline: currentStageDeadline.toISOString(),
+              futureStagesHours,
+              newOverallEta: overallTicketEta.toISOString(),
+            });
+          } else {
+            logger.info('[MUTATOR] No future stages with ETA, ticket ETA not updated', {
+              ticketId: ticket.id,
+              futureStagesHours,
+            });
+          }
 
           // 11. Create ticket activity for stage ETA change
           const newStageEta = stageEta;
@@ -4243,9 +4270,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (ticket.conversationId) {
             const user = await tx.run(zql.users.where('id', authData.sub).one());
             const userName = user?.name || 'Someone';
-            const oldDate = new Date(oldStageEta).toLocaleDateString();
-            const newDate = new Date(newStageEta).toLocaleDateString();
-            const activityMessage = `${userName} updated "${currentStage.name}" stage deadline from ${oldDate} to ${newDate}`;
+
+            let activityMessage: string;
+            if (oldStageEta === null) {
+              // New entry - setting deadline for the first time
+              const newDate = new Date(newStageEta).toLocaleDateString();
+              activityMessage = `${userName} set "${currentStage.name}" stage deadline to ${newDate}`;
+            } else {
+              // Updating existing deadline
+              const oldDate = new Date(oldStageEta).toLocaleDateString();
+              const newDate = new Date(newStageEta).toLocaleDateString();
+              activityMessage = `${userName} updated "${currentStage.name}" stage deadline from ${oldDate} to ${newDate}`;
+            }
 
             await tx.mutate.messages.insert({
               messageId: uuidv4(),
@@ -4670,7 +4706,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               z.object({
                 id: z.string().optional(),
                 name: z.string(),
-                eta: z.number(),
+                eta: z.number().optional(),
                 sequenceNumber: z.number(),
                 defaultTicketStatusV2: z.string().optional(),
                 prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
@@ -4740,7 +4776,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   await tx.mutate.stages.update({
                     id: stage.id,
                     name: stage.name,
-                    eta: stage.eta,
+                    eta: stage.eta !== undefined ? stage.eta : null,
                     sequenceNumber: stage.sequenceNumber,
                     defaultTicketStatusV2:
                       (stage.defaultTicketStatusV2 as TicketStatusV2) || undefined,

@@ -51,7 +51,9 @@ export const BoardCard = ({ board, onEdit, onDelete }: BoardCardProps): ReactEle
                   <span>
                     {stage.sequenceNumber}. {stage.name}
                   </span>
-                  <span className='text-gray-400'>{stage.eta}h</span>
+                  <span className='text-gray-400'>
+                    {stage.eta !== null ? `${stage.eta}h` : '-'}
+                  </span>
                 </div>
               ))}
           </div>

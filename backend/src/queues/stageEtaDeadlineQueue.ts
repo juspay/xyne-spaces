@@ -174,7 +174,7 @@ class StageEtaDeadlineQueue {
     const stageIds = [...new Set(activeStageEntries.map(e => e.stageId))];
     const stages = await db.stage.findMany({
       where: { id: { in: stageIds } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, eta: true },
     });
 
     const ticketMap = new Map(tickets.map(t => [t.id, t]));
@@ -185,6 +185,9 @@ class StageEtaDeadlineQueue {
       const stage = stageMap.get(entry.stageId);
 
       if (!ticket || !stage) continue;
+
+      // Skip if stage ETA is not set on the board (ETA was disabled after entry was created)
+      if (stage.eta === null) continue;
 
       // Get stage name from stage entry and compare with ticket's current stage
       if (!stage || stage.name !== ticket.stageName) continue;

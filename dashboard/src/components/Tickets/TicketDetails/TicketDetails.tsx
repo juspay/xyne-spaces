@@ -100,6 +100,7 @@ interface StageInfo {
   defaultTicketStatusV2?: TicketStatusV2;
   approvers?: readonly { userId: string; stageId: string }[];
   formId?: string | null;
+  eta: number | null;
 }
 
 const getStageProgress = (
@@ -228,6 +229,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [editingStageETA, setEditingStageETA] = useState(false);
   const [stageEtaValue, setStageEtaValue] = useState('');
   const stageEtaInputRef = useRef<HTMLInputElement>(null);
+  const [editingETA, setEditingETA] = useState(false);
+  const [etaValue, setEtaValue] = useState('');
+  const etaInputRef = useRef<HTMLInputElement>(null);
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [needsReadMore, setNeedsReadMore] = useState(false);
   const descriptionRef = useRef<HTMLDivElement>(null);
@@ -351,6 +355,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const currentStageEntry = useMemo(() => {
     return ticket?.stageEtaEntries?.find(entry => entry.stageLeftAt === null);
   }, [ticket?.stageEtaEntries]);
+
+  // Get current stage info (including eta) to determine if status deadline should be shown
+  const currentStageInfo = useMemo(() => {
+    return stages?.find(s => s.name === ticket?.stageName);
+  }, [stages, ticket?.stageName]);
 
   // Query ticket attachments
   const [ticketAttachments] = useCachedQuery(queries.attachmentsByTicket({ ticketId }));
@@ -648,6 +657,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         name: stage.name,
         sequenceNumber: stage.sequenceNumber,
         defaultTicketStatusV2: stage.defaultTicketStatusV2,
+        eta: stage.eta ?? null,
       });
       stageMap.set(stage.boardId, existing);
     });
@@ -715,6 +725,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       stageEtaInputRef.current.select();
     }
   }, [editingStageETA]);
+
+  // Initialize ETA edit value when ticket changes
+  useEffect(() => {
+    if (ticket?.eta) {
+      setEtaValue(getLocalISOString(ticket.eta));
+    }
+  }, [ticket?.eta]);
+
+  // Auto-focus ETA input when entering edit mode
+  useEffect(() => {
+    if (editingETA && etaInputRef.current) {
+      etaInputRef.current.focus();
+      etaInputRef.current.select();
+    }
+  }, [editingETA]);
 
   // Click outside handlers
   useEffect(() => {
@@ -977,12 +1002,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const handleStageETAChange = (): void => {
-    if (!currentStageEntry) {
+    if (!ticket) {
       setEditingStageETA(false);
       return;
     }
 
-    const originalStageETA = currentStageEntry.stageEta
+    // Get current stage info
+    const currentStage = stages?.find(s => s.name === ticket.stageName);
+    if (!currentStage) {
+      setEditingStageETA(false);
+      return;
+    }
+
+    const originalStageETA = currentStageEntry?.stageEta
       ? getLocalISOString(currentStageEntry.stageEta)
       : '';
 
@@ -1002,15 +1034,58 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       return;
     }
 
+    // Use existing entry ID or generate a new one
+    const entryId = currentStageEntry?.id || uuidv4();
+
     void zero.mutate(
       mutators.ticketStageEta.update({
-        id: currentStageEntry.id,
+        id: entryId,
         stageEta: newStageEtaDate.getTime(),
         updatedAt: Date.now(),
+        ticketId: ticket.id,
+        stageId: currentStage.id,
       }),
     );
 
     setEditingStageETA(false);
+  };
+
+  const handleETAChange = (): void => {
+    if (!ticket) {
+      setEditingETA(false);
+      return;
+    }
+
+    const originalETA = ticket.eta ? getLocalISOString(ticket.eta) : '';
+
+    if (etaValue.trim() === originalETA) {
+      setEditingETA(false);
+      return;
+    }
+
+    const updateData: {
+      id: string;
+      updatedAt: number;
+      eta?: number;
+    } = {
+      id: ticket.id,
+      updatedAt: Date.now(),
+    };
+
+    if (!etaValue.trim()) {
+      // Clear the ETA - omit eta field entirely
+      setEditingETA(false);
+    } else {
+      const newETADate = new Date(etaValue);
+      if (isNaN(newETADate.getTime())) {
+        setEditingETA(false);
+        return;
+      }
+      updateData.eta = newETADate.getTime();
+    }
+
+    void zero.mutate(mutators.ticket.update(updateData));
+    setEditingETA(false);
   };
 
   const handleBoardChange = (boardId: string | null): void => {
@@ -1878,65 +1953,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <TicketKeyValuePair
             ticketKey='Due Date'
             value={
-              <div
-                role='button'
-                tabIndex={0}
-                data-testid='ticket-detail-eta-display'
-                className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] px-2 py-1 -mx-2 rounded-md border border-transparent'
-              >
-                <Calendar
-                  size={14}
-                  className={
-                    ticket.eta &&
-                    new Date(ticket.eta) < new Date() &&
-                    ticket.statusV2 !== TicketStatusV2.COMPLETED &&
-                    ticket.statusV2 !== TicketStatusV2.CANCELLED
-                      ? 'text-red-500'
-                      : 'text-gray-500'
-                  }
-                />
-                <span>{formatETADisplay(ticket.eta)}</span>
-                {ticket.eta &&
-                  new Date(ticket.eta) < new Date() &&
-                  ticket.statusV2 !== TicketStatusV2.COMPLETED &&
-                  ticket.statusV2 !== TicketStatusV2.CANCELLED && (
-                    <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
-                      Overdue
-                    </span>
-                  )}
-              </div>
-            }
-          />
-          {/* Status Deadline - NEW FIELD */}
-          <TicketKeyValuePair
-            ticketKey='Status Deadline'
-            value={
-              editingStageETA ? (
-                <div
-                  className='flex items-center gap-2'
-                  data-testid='ticket-detail-stage-eta-input'
-                  data-track-category='Tickets'
-                  data-track-name='EditStageETA'
-                  data-track-metadata={JSON.stringify({
-                    ticketId: ticket.id,
-                    stageName: ticket.stageName,
-                  })}
-                >
+              editingETA ? (
+                <div className='flex items-center gap-2' data-testid='ticket-detail-eta-input'>
                   <input
-                    ref={stageEtaInputRef}
+                    ref={etaInputRef}
                     type='datetime-local'
-                    value={stageEtaValue}
-                    onChange={e => setStageEtaValue(e.target.value)}
-                    onBlur={handleStageETAChange}
+                    value={etaValue}
+                    onChange={e => setEtaValue(e.target.value)}
+                    onBlur={handleETAChange}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') handleStageETAChange();
+                      if (e.key === 'Enter') handleETAChange();
                       if (e.key === 'Escape') {
-                        setStageEtaValue(
-                          currentStageEntry?.stageEta
-                            ? getLocalISOString(currentStageEntry.stageEta)
-                            : '',
-                        );
-                        setEditingStageETA(false);
+                        setEtaValue(ticket.eta ? getLocalISOString(ticket.eta) : '');
+                        setEditingETA(false);
                       }
                     }}
                     className='text-sm border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
@@ -1949,46 +1978,135 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <div
                   role='button'
                   tabIndex={0}
-                  data-testid='ticket-detail-stage-eta-display'
+                  data-testid='ticket-detail-eta-display'
                   className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] cursor-pointer hover:bg-gray-100 px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-gray-200 transition-colors'
-                  onClick={() => setEditingStageETA(true)}
                   data-track-category='TicketDetails'
                   data-track-name='EditStageETA'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
                     stageId: currentStageEntry?.stageId,
                   })}
+                  onClick={() => {
+                    if (ticket.eta) {
+                      setEtaValue(getLocalISOString(ticket.eta));
+                    }
+                    setEditingETA(true);
+                  }}
                   onKeyDown={e => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setEditingStageETA(true);
+                      if (ticket.eta) {
+                        setEtaValue(getLocalISOString(ticket.eta));
+                      }
+                      setEditingETA(true);
                     }
                   }}
                 >
-                  <Clock
+                  <Calendar
                     size={14}
                     className={
-                      currentStageEntry?.stageEta &&
-                      new Date(currentStageEntry.stageEta) < new Date() &&
+                      ticket.eta &&
+                      new Date(ticket.eta) < new Date() &&
                       ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                       ticket.statusV2 !== TicketStatusV2.CANCELLED
                         ? 'text-red-500'
                         : 'text-gray-500'
                     }
                   />
-                  <span>{formatETADisplay(currentStageEntry?.stageEta)}</span>
-                  {currentStageEntry?.stageEta &&
-                    new Date(currentStageEntry.stageEta) < new Date() &&
+                  <span>{ticket.eta ? formatETADisplay(ticket.eta) : 'Set Due Date'}</span>
+                  {ticket.eta &&
+                    new Date(ticket.eta) < new Date() &&
                     ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                     ticket.statusV2 !== TicketStatusV2.CANCELLED && (
                       <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
-                        Stage Overdue
+                        Overdue
                       </span>
                     )}
                 </div>
               )
             }
           />
+          {/* Status Deadline - only show if current stage has eta configured */}
+          {currentStageInfo?.eta && (
+            <TicketKeyValuePair
+              ticketKey='Status Deadline'
+              value={
+                editingStageETA ? (
+                  <div
+                    className='flex items-center gap-2'
+                    data-testid='ticket-detail-stage-eta-input'
+                  >
+                    <input
+                      ref={stageEtaInputRef}
+                      type='datetime-local'
+                      value={stageEtaValue}
+                      onChange={e => setStageEtaValue(e.target.value)}
+                      onBlur={handleStageETAChange}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') handleStageETAChange();
+                        if (e.key === 'Escape') {
+                          setStageEtaValue(
+                            currentStageEntry?.stageEta
+                              ? getLocalISOString(currentStageEntry.stageEta)
+                              : '',
+                          );
+                          setEditingStageETA(false);
+                        }
+                      }}
+                      className='text-sm border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+                    />
+                  </div>
+                ) : (
+                  <div
+                    role='button'
+                    tabIndex={0}
+                    data-testid='ticket-detail-stage-eta-display'
+                    className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] cursor-pointer hover:bg-gray-100 px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-gray-200 transition-colors'
+                    onClick={() => {
+                      if (currentStageEntry?.stageEta) {
+                        setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
+                      }
+                      setEditingStageETA(true);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (currentStageEntry?.stageEta) {
+                          setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
+                        }
+                        setEditingStageETA(true);
+                      }
+                    }}
+                  >
+                    <Clock
+                      size={14}
+                      className={
+                        currentStageEntry?.stageEta &&
+                        new Date(currentStageEntry.stageEta) < new Date() &&
+                        ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+                        ticket.statusV2 !== TicketStatusV2.CANCELLED
+                          ? 'text-red-500'
+                          : 'text-gray-500'
+                      }
+                    />
+                    <span>
+                      {currentStageEntry?.stageEta
+                        ? formatETADisplay(currentStageEntry.stageEta)
+                        : 'Set Stage Deadline'}
+                    </span>
+                    {currentStageEntry?.stageEta &&
+                      new Date(currentStageEntry.stageEta) < new Date() &&
+                      ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+                      ticket.statusV2 !== TicketStatusV2.CANCELLED && (
+                        <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
+                          Stage Overdue
+                        </span>
+                      )}
+                  </div>
+                )
+              }
+            />
+          )}
 
           {/* Projected deadline (while PAUSED) */}
           {ticket.statusV2 === TicketStatusV2.PAUSED && (
@@ -2385,6 +2503,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   name: 'Unknown Stage',
                                   sequenceNumber: 0,
                                   boardId: ticket.boardId || '',
+                                  eta: null,
                                 },
                                 sourceStageName: previousStage?.name || 'Unknown Stage',
                                 formId: item.formId,
