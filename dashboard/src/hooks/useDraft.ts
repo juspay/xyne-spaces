@@ -6,6 +6,10 @@ import { mutators } from '../zero/mutators';
 import { apiInstance } from '../services/clients/apiClient';
 import { v4 as uuidv4 } from 'uuid';
 import { generateWebThumbnail, isVideoFile } from '../services/thumbnailService';
+import {
+  generateDocumentThumbnail,
+  isPreviewableDocument,
+} from '../services/documentThumbnailService';
 import type { UploadedFile } from '../components/ui/files/Files.types';
 
 // Format: Record<attachmentId, File> - local cache of File objects for newly uploaded files
@@ -103,6 +107,15 @@ export function useDraftAttachments() {
             thumbnailBlob = thumbnailResult.blob;
           } catch (error) {
             console.warn('Failed to generate thumbnail for video:', file.name, error);
+          }
+        }
+        // Generate thumbnail for previewable document files (PDF, DOCX, XLSX, CSV)
+        else if (isPreviewableDocument(file.type)) {
+          try {
+            const blob = await generateDocumentThumbnail(file);
+            if (blob) thumbnailBlob = blob;
+          } catch (error) {
+            console.warn('Failed to generate thumbnail for document:', file.name, error);
           }
         }
         // Get dimensions for image files

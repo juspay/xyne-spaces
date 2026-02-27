@@ -21,6 +21,7 @@ import {
   getFileIcon,
   truncateFileName,
 } from './utils';
+import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import TxtViewer from '../../FileViewer/TxtViewer';
@@ -101,6 +102,7 @@ const Preview: React.FC<{
 }) => {
   const isImage = isImageFile(mimeType);
   const isVideo = isVideoFile(mimeType);
+  const isDocumentWithThumbnail = isPreviewableDocument(mimeType) && !!thumbnailUrl;
 
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -119,8 +121,8 @@ const Preview: React.FC<{
   const imageWidth = calculatedWidth;
 
   useEffect(() => {
-    // Fetch image or video thumbnail
-    if (!isImage && !(isVideo && thumbnailUrl)) {
+    // Fetch image, video thumbnail, or document thumbnail
+    if (!isImage && !(isVideo && thumbnailUrl) && !isDocumentWithThumbnail) {
       setIsLoading(false);
       return;
     }
@@ -131,10 +133,12 @@ const Preview: React.FC<{
       setIsLoading(true);
       setError(false);
       try {
-        // For videos with thumbnails, use thumbnail endpoint
+        // For videos/documents with thumbnails, use the thumbnail endpoint
         // For images, use download endpoint (pass ID, createPreviewUrl will resolve it)
         const source =
-          isVideo && thumbnailUrl ? `/attachments/${attachmentId}/thumbnail` : attachmentId;
+          (isVideo || isDocumentWithThumbnail) && thumbnailUrl
+            ? `/attachments/${attachmentId}/thumbnail`
+            : attachmentId;
 
         const blob = await createPreviewUrl(source);
         blobUrl = URL.createObjectURL(blob);
@@ -158,7 +162,15 @@ const Preview: React.FC<{
         URL.revokeObjectURL(blobUrl);
       }
     };
-  }, [attachmentId, isImage, isVideo, thumbnailUrl, compact, calculatedWidth]);
+  }, [
+    attachmentId,
+    isImage,
+    isVideo,
+    isDocumentWithThumbnail,
+    thumbnailUrl,
+    compact,
+    calculatedWidth,
+  ]);
 
   const { isMobile } = usePlatform();
 
@@ -187,9 +199,30 @@ const Preview: React.FC<{
     );
   }
 
-  // Show image or video thumbnail preview
-  if (isImage || (isVideo && thumbnailUrl)) {
+  // Show image, video thumbnail, or document thumbnail preview
+  if (isImage || (isVideo && thumbnailUrl) || isDocumentWithThumbnail) {
     if (error || !imageBlobUrl) {
+      if (isDocumentWithThumbnail) {
+        const ext = getFileExtension(mimeType);
+        const size = formatFileSize(fileSize);
+        const docIcon = getFileIcon(mimeType, 20);
+        return (
+          <div
+            className={cn(
+              'bg-gray-100 flex flex-col items-center justify-center gap-2',
+              isInGrid ? 'w-full h-full' : 'w-full h-full min-h-[180px]',
+            )}
+          >
+            <div className='bg-white rounded-lg p-3 shadow-sm border border-gray-200'>
+              {docIcon}
+            </div>
+            <div className='text-center'>
+              <div className='text-sm font-semibold text-gray-700'>{ext}</div>
+              <div className='text-xs text-gray-500'>{size}</div>
+            </div>
+          </div>
+        );
+      }
       return (
         <div
           className={cn(
@@ -209,6 +242,79 @@ const Preview: React.FC<{
               <span className='text-xs text-gray-500 text-center'>No Preview</span>
             </>
           )}
+        </div>
+      );
+    }
+
+    // Document thumbnail — render as a contained image (no fixed aspect ratio)
+    if (isDocumentWithThumbnail) {
+      const extension = getFileExtension(mimeType).toUpperCase();
+
+      // Document type configuration map
+      const documentConfig: Record<string, { icon: string; label: string }> = {
+        'application/pdf': {
+          icon: '/svgs/icons/attachment-icons/pdf.svg',
+          label: 'PDF Document',
+        },
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': {
+          icon: '/svgs/icons/attachment-icons/docx.svg',
+          label: 'Word Document',
+        },
+        'application/msword': {
+          icon: '/svgs/icons/attachment-icons/docx.svg',
+          label: 'Word Document',
+        },
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': {
+          icon: '/svgs/icons/attachment-icons/excel.svg',
+          label: 'Excel Spreadsheet',
+        },
+        'application/vnd.ms-excel': {
+          icon: '/svgs/icons/attachment-icons/excel.svg',
+          label: 'Excel Spreadsheet',
+        },
+        'text/csv': {
+          icon: '/svgs/icons/attachment-icons/csv.svg',
+          label: 'CSV Document',
+        },
+        'text/comma-separated-values': {
+          icon: '/svgs/icons/attachment-icons/csv.svg',
+          label: 'CSV Document',
+        },
+      };
+
+      const config = documentConfig[mimeType] ?? {
+        icon: '/svgs/icons/attachment-icons/pdf.svg',
+        label: `${extension} Document`,
+      };
+
+      // Truncate filename if too long
+      const displayFileName = fileName.length > 30 ? `${fileName.substring(0, 27)}...` : fileName;
+
+      return (
+        <div className='w-full h-full min-h-0 flex flex-col'>
+          {/* File metadata header - Slack style */}
+          <div className='bg-gray-50 px-3 py-2.5 border-b border-gray-200 flex items-center gap-3 shrink-0'>
+            {/* File icon */}
+            <div className='shrink-0 w-8 h-8'>
+              <img src={config.icon} alt={extension} className='w-full h-full' />
+            </div>
+            {/* File info - truncate to prevent overflow on mobile */}
+            <div className='flex flex-col min-w-0 flex-1 overflow-hidden'>
+              <span className='text-sm text-gray-900 font-medium'>{displayFileName}</span>
+              <span className='text-xs text-gray-500'>{config.label}</span>
+            </div>
+          </div>
+          {/* Document preview - fixed height area, content clipped */}
+          <div className='flex-1 min-h-0 overflow-hidden'>
+            <img
+              src={imageBlobUrl}
+              alt={fileName}
+              className='w-full h-full'
+              loading='lazy'
+              style={{ objectFit: 'cover', objectPosition: 'top' }}
+              onError={() => setError(true)}
+            />
+          </div>
         </div>
       );
     }

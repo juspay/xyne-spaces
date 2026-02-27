@@ -5,6 +5,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { isImageFile, isVideoFile } from '../../Chat/MessageAttachment/utils';
+import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 
 type Attachment = QueryResultType<
   typeof queries.conversationMessages
@@ -55,9 +56,12 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
   // For single attachment
   if (attachments.length === 1) {
     const attachment = attachments[0]!;
-    const needsFixedSize = !isImageFile(attachment.mimetype) && !isVideoFile(attachment.mimetype);
+    const isMedia = isImageFile(attachment.mimetype) || isVideoFile(attachment.mimetype);
+    const isDocument = isPreviewableDocument(attachment.mimetype);
     return (
-      <div className={`w-full ${needsFixedSize ? 'h-[256px] min-w-[256px] aspect-square' : ''}`}>
+      <div
+        className={`w-full ${isDocument ? 'h-[220px] min-w-[75vw]' : !isMedia ? 'h-[256px] min-w-[256px] aspect-square' : ''}`}
+      >
         <MessageAttachment
           attachment={attachment}
           allAttachments={attachments}
