@@ -34,6 +34,8 @@ import {logger} from '@/utils/logger';
 // Bitbucket Bot - system bot for Bitbucket webhook events
 import '@/bots/implementations/bitbucket-bot/bitbucket-bot.js';
 
+import '@/bots/implementations/qa-alert-bot/qa-alert-bot.js';
+
 // Add more internal bot imports here...
 // import '@/bots/implementations/my-bot/my-bot.js';
 

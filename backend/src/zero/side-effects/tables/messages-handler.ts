@@ -37,7 +37,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       },
     });
 
-    if (!message || message.msgType === "SYSTEM" || message.msgType === "BOT") {
+    if (!message || message.msgType === "SYSTEM" ) {
       return;
     }
 

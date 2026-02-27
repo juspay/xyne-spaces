@@ -1,6 +1,9 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response} from 'express';
 import { bitbucketWebhookService } from "@/services/bitbucketWebhookService";
+import { bitbucketWebhookMiddleware } from "@/middleware/bitbucketWebhookValidator";
+import { jenkinsWebhookMiddleware } from "@/middleware/jenkinsWebhookValidator";
 import { logger } from "@/utils/logger";
+import { handleJenkinsWebhook } from '@/bots/implementations/qa-alert-bot/qa-alert-bot';
 
 const router = Router();
 
@@ -182,7 +185,14 @@ async function handleBitbucketWebhook(req: Request, res: Response): Promise<void
     }
 }
 
-// Get bitbucket webhook via bitbot
-router.post('/bitbucket', handleBitbucketWebhook);
+
+router.post('/bitbucket', bitbucketWebhookMiddleware.verify, handleBitbucketWebhook);
+
+// Use raw body parser for Jenkins webhook to preserve exact bytes for HMAC verification
+router.post('/qa-alerts', 
+   
+  jenkinsWebhookMiddleware.verify, 
+  handleJenkinsWebhook
+);
 
 export default router;
