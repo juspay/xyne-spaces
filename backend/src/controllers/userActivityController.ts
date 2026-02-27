@@ -18,14 +18,23 @@ export async function getUserActivities(req: Request, res: Response): Promise<vo
     const cursor = req.query.cursor as string | undefined;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
 
-    // Fetch activities with original names
+    const aliases = await db.activityAlias.findMany();
+
+    const aliasMap = new Map(
+      aliases.map(a => [`${a.eventName}|${a.eventCategory}`, a])
+    );
+    const blacklistedKeys = aliases
+      .filter(a => a.isBlacklisted)
+      .map(a => ({ eventName: a.eventName, eventCategory: a.eventCategory }));
+
     const activities = await db.userActivityEvent.findMany({
       where: {
         userId,
         ...(cursor ? { timestamp: { lt: new Date(cursor) } } : {}),
+        ...(blacklistedKeys.length > 0 ? { NOT: blacklistedKeys } : {}),
       },
       orderBy: { timestamp: 'desc' },
-      take: limit + 1, // Fetch one extra to check if there's more
+      take: limit + 1, 
     });
 
     if (activities.length === 0) {
@@ -40,43 +49,17 @@ export async function getUserActivities(req: Request, res: Response): Promise<vo
       return;
     }
 
+    const hasMore = activities.length > limit;
+    const activitiesToProcess = hasMore ? activities.slice(0, limit) : activities;
+
     const resolvedActivities = await Promise.all(
-      activities.map(async (activity) => userActivityService.resolveActivity(activity))
+      activitiesToProcess.map(async (activity) => userActivityService.resolveActivity(activity))
     );
 
-
-    // Get unique event keys for alias lookup
-    const eventKeys = resolvedActivities.map(a => ({
-      eventName: a.eventName,
-      eventCategory: a.eventCategory,
-    }));
-
-    // Fetch all aliases for these events in one query
-    const aliases = await db.activityAlias.findMany({
-      where: {
-        OR: eventKeys,
-      },
-    });
-
-    // Create lookup map: "eventName|eventCategory" -> alias
-    const aliasMap = new Map(
-      aliases.map(a => [`${a.eventName}|${a.eventCategory}`, a])
-    );
-
-
-
-    // Transform activities: apply aliases, filter blacklisted
-    const transformedData = [];
-    for (const activity of resolvedActivities) {
+    const data = resolvedActivities.map((activity) => {
       const key = `${activity.eventName}|${activity.eventCategory}`;
       const alias = aliasMap.get(key);
-
-      // Skip blacklisted activities
-      if (alias?.isBlacklisted) {
-        continue;
-      }
-
-      transformedData.push({
+      return {
         id: activity.id,
         userId: activity.userId,
         sessionId: activity.sessionId,
@@ -97,13 +80,11 @@ export async function getUserActivities(req: Request, res: Response): Promise<vo
         timestamp: activity.timestamp.toISOString(),
         hasAlias: !!alias,
         isBlacklisted: false,
-      });
-    }
+      };
+    });
 
-    const hasMore = transformedData.length > limit;
-    const data = hasMore ? transformedData.slice(0, -1) : transformedData;
     const nextCursor = hasMore && data.length > 0
-      ? resolvedActivities[resolvedActivities.length - 1].timestamp.toISOString()
+      ? data[data.length - 1].timestamp
       : null;
 
     const response: UserActivityResponse = {
