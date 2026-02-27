@@ -1,12 +1,13 @@
 import { Phone, Video, PhoneOff } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useEffect, useRef, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
 import { useAuth } from '../../../hooks/useAuth';
 import { callActor } from '../../../machines/callMachine';
 import { roomActor } from '../../../machines/roomMachine';
-import { CallParticipant, CallType, Channel } from '@xyne/shared';
+import { CallOrigin, CallParticipant, CallType, Channel } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import { InvitationResponse, ChannelScopeType } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
@@ -22,6 +23,7 @@ import {
   Modal,
 } from '@juspay/blend-design-system';
 import { useUsers } from '../../../hooks/useUsers';
+import { cn } from '../../../utils/classNames';
 
 type CallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
 
@@ -84,7 +86,10 @@ export function IncomingCallModal(): React.ReactElement | null {
     const channel = call.channelId ? channelMap.get(call.channelId) : null;
 
     // Filter out DEFAULT scope channel calls
-    if (channel?.scopeType === ChannelScopeType.DEFAULT) {
+    if (
+      channel?.scopeType === ChannelScopeType.DEFAULT &&
+      callWithRelations.callOrigin === CallOrigin.CHANNEL
+    ) {
       return false;
     }
 
@@ -144,6 +149,7 @@ export function IncomingCallModal(): React.ReactElement | null {
             picture: inviterUser?.picture ?? '',
           },
           callType: call.callType,
+          ...(callWithRelations.title && { title: callWithRelations.title }),
         };
 
         callActor.send({
@@ -311,9 +317,25 @@ export function IncomingCallModal(): React.ReactElement | null {
 
   // Show incoming call modal when in ringing state
   if (isRinging && incomingCallData) {
+    const latestCallData = allActiveCalls?.find(
+      call => call.externalId === incomingCallData.callId,
+    );
+    const title = latestCallData?.title || incomingCallData.title;
+    const metadata = latestCallData?.metadata as { conversationId?: string } | undefined;
+    const conversationId = metadata?.conversationId;
+    const channelId = latestCallData?.channelId;
+    const callOrigin = (latestCallData as CallWithRelations)?.callOrigin;
+    const notificationWithTitle = {
+      ...incomingCallData,
+      ...(title && { title }),
+    };
+
     return (
       <CallNotificationUI
-        notification={incomingCallData}
+        notification={notificationWithTitle}
+        {...(conversationId && { conversationId })}
+        {...(channelId && { channelId })}
+        {...(callOrigin && { callOrigin })}
         onAccept={() => handleAcceptCall(incomingCallData.callId)}
         onReject={() => handleRejectCall(incomingCallData.callId)}
         isInActiveCall={isInActiveCall}
@@ -334,7 +356,11 @@ interface CallNotificationUIProps {
       picture?: string;
     };
     callType: CallType;
+    title?: string;
   };
+  conversationId?: string;
+  channelId?: string;
+  callOrigin?: CallOrigin;
   queuedCallsCount?: number; // Number of calls in queue
   isInActiveCall?: boolean; // Whether user is currently in an active call
   onAccept: () => void;
@@ -343,12 +369,25 @@ interface CallNotificationUIProps {
 
 function CallNotificationUI({
   notification,
+  conversationId,
+  channelId,
+  callOrigin,
   queuedCallsCount = 0,
   isInActiveCall = false,
   onAccept,
   onReject,
 }: CallNotificationUIProps): React.ReactElement {
   const { caller, callType } = notification;
+  const navigate = useNavigate();
+  const hasTitle = !!(notification.title && notification.title.trim());
+
+  // Handle title click - navigate to conversation for thread calls
+  const handleTitleClick = useCallback(() => {
+    if (conversationId && channelId && callOrigin === CallOrigin.CONVERSATION) {
+      onReject();
+      void navigate(`/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`);
+    }
+  }, [conversationId, channelId, callOrigin, navigate, onReject]);
 
   return (
     <Modal
@@ -370,6 +409,27 @@ function CallNotificationUI({
               : `You have ${queuedCallsCount} incoming calls waiting`}
           </div>
         )}
+
+        {/* Call Title */}
+        <div className='min-h-[1.75rem] flex items-center justify-center'>
+          {hasTitle && notification.title && (
+            <button
+              type='button'
+              className={cn(
+                'text-lg font-medium text-gray-700 dark:text-gray-300 bg-transparent border-none p-0',
+                conversationId && channelId ? 'cursor-pointer hover:underline' : 'cursor-default',
+              )}
+              onClick={handleTitleClick}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') handleTitleClick();
+              }}
+              data-track-category='CALLS_NOTIFICATIONS'
+              data-track-name='CALL_TITLE_CLICK'
+            >
+              {notification.title}
+            </button>
+          )}
+        </div>
 
         {/* Caller Avatar */}
         <div className='flex justify-center'>

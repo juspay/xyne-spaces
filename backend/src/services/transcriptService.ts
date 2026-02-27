@@ -1,6 +1,6 @@
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
-import { AttachmentEntityType } from '@prisma/client';
+import { AttachmentEntityType, CallOrigin } from '@prisma/client';
 import { config } from '@/config/env';
 import { Storage, Bucket } from '@google-cloud/storage';
 import { Agent, createUserMessage, createSystemMessage } from '@framework';
@@ -853,6 +853,45 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
+   * Format conversation messages for title generation
+   */
+  private async formatConversationMessagesForTitle(conversationId: string): Promise<string | null> {
+    try {
+      const messages = await repositories.messages.getConversationMessages(conversationId);
+      const messagesArray = Array.isArray(messages) ? messages : messages.data;
+      
+      // Filter valid messages once
+      const validMessages = messagesArray.filter(
+        (msg) => msg.msgType !== 'SYSTEM' && msg.senderId && msg.content?.trim()
+      );
+      if (!validMessages.length) return null;
+
+      // Get unique user IDs and fetch user names
+      const userIds = [...new Set(validMessages.map((msg) => msg.senderId))];
+      const users = await db.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true, email: true },
+      });
+      const userMap = new Map(users.map((u) => [u.id, u.name || u.email || u.id]));
+
+      return validMessages
+        .map((msg) => `${userMap.get(msg.senderId) || msg.senderId}: ${msg.content}`)
+        .join('\n');
+    } catch (error) {
+      logger.error(`Failed to format conversation messages for title: ${conversationId}`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Generate a title for a call based on conversation messages
+   */
+  async generateCallTitleFromConversation(conversationId: string): Promise<string | null> {
+    const formatted = await this.formatConversationMessagesForTitle(conversationId);
+    return formatted ? await this.generateCallTitle(formatted) : null;
+  }
+
+  /**
    * Generate ticket suggestions from call transcript and summary
    * @param transcript - The formatted transcript text
    * @param summary - The AI-generated call summary
@@ -1128,13 +1167,22 @@ Output ONLY the processed transcript, nothing else.`;
 
       const formattedTranscript = this.formatTranscript(entries, callId);
 
+      // For CONVERSATION origin calls, combine conversation messages with transcript for title
+      let titleInput = formattedTranscript;
+      if (call.callOrigin === CallOrigin.CONVERSATION && callMessage.conversationId) {
+        const conversationMessages = await this.formatConversationMessagesForTitle(callMessage.conversationId).catch(() => null);
+        if (conversationMessages) {
+          titleInput = `CONVERSATION CONTEXT:\n${conversationMessages}\n\nCALL TRANSCRIPT:\n${formattedTranscript}`;
+        }
+      }
+
       const startTime = Date.now();
       const [summary, title, ticketSuggestions] = await Promise.all([
         this.generateCallSummary(formattedTranscript, callId).catch((err) => {
           logger.error(`Failed to generate summary: ${err}`);
           return null;
         }),
-        this.generateCallTitle(formattedTranscript).catch((err) => {
+        this.generateCallTitle(titleInput).catch((err) => {
           logger.error(`Failed to generate title: ${err}`);
           return null;
         }),

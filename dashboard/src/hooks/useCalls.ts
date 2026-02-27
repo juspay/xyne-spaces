@@ -193,24 +193,31 @@ export const useCallDuration = (
 };
 
 /**
- * Hook to fetch and truncate conversation message preview for a call
+ * Hook to fetch call title with priority: call.title > conversation message > "Group Call"
  * @param callId - The external call ID
  * @param truncateLength - Maximum length for the preview (default: 20)
- * @returns Truncated plain text preview or null if content is empty
+ * @returns Call title string
  */
 export const useFetchCallTitle = (
   callId: string | undefined,
   truncateLength: number = 20,
 ): string => {
+  const activeCall = useActiveCall(callId || '');
   const [conversation] = useCachedQuery(queries.getConversationByCallId({ callId: callId || '' }), {
     enabled: !!callId,
   });
 
   return useMemo(() => {
-    if (!conversation?.initialMessage?.content) return 'Group Call';
-    const plainText = htmlToPlainText(conversation.initialMessage.content);
-    return plainText.length <= truncateLength
-      ? plainText
-      : plainText.slice(0, truncateLength) + '...';
-  }, [conversation?.initialMessage?.content, truncateLength]);
+    if (activeCall?.title) {
+      const title = activeCall.title;
+      return title.length <= truncateLength ? title : title.slice(0, truncateLength) + '...';
+    }
+    if (conversation?.initialMessage?.content) {
+      const plainText = htmlToPlainText(conversation.initialMessage.content);
+      return plainText.length <= truncateLength
+        ? plainText
+        : plainText.slice(0, truncateLength) + '...';
+    }
+    return 'Group Call';
+  }, [activeCall?.title, conversation?.initialMessage?.content, truncateLength]);
 };
