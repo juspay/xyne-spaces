@@ -1,6 +1,8 @@
 import type { Room } from 'livekit-client';
 import { ConnectionState, Track } from 'livekit-client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useSelector } from '@xstate/react';
+import { CallOrigin } from '@xyne/shared';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
@@ -70,6 +72,17 @@ export function FullCallView({
   // UI state
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
+
+  // Get call title and origin from activeCalls
+  const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
+  const { callTitle, callOrigin } = useMemo(() => {
+    const activeCall = activeCalls?.find(call => call.externalId === callId);
+    return {
+      callTitle: (activeCall as { title?: string })?.title,
+      callOrigin: (activeCall as { callOrigin?: CallOrigin })?.callOrigin,
+    };
+  }, [activeCalls, callId]);
+  const hasTitle = callTitle && callTitle.trim();
 
   // Get all participants sharing screen
   // In native mode, use isScreenShareEnabled flag; in web mode, check the actual track publication
@@ -172,6 +185,38 @@ export function FullCallView({
               aiController={aiController}
               requestedAiController={requestedAiController}
             />
+          </div>
+        )}
+
+        {/* Call Title */}
+        {hasTitle && !isSidebarOpen && (
+          <div className='absolute bottom-6 left-4 z-50'>
+            <button
+              type='button'
+              className={cn(
+                'text-md font-medium text-white/90 p-3 transition-transform duration-150 bg-transparent border-none',
+                callOrigin === CallOrigin.CONVERSATION
+                  ? 'cursor-pointer hover:text-white'
+                  : 'cursor-default',
+              )}
+              onClick={() => {
+                if (callOrigin === CallOrigin.CONVERSATION) {
+                  onToggleThread();
+                }
+              }}
+              onKeyDown={e => {
+                if (
+                  (e.key === 'Enter' || e.key === ' ') &&
+                  callOrigin === CallOrigin.CONVERSATION
+                ) {
+                  onToggleThread();
+                }
+              }}
+              data-track-category='CALLS'
+              data-track-name='CALL_TITLE_TOGGLE_THREAD'
+            >
+              {callTitle}
+            </button>
           </div>
         )}
 

@@ -8,6 +8,8 @@ import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { livekitWebhookACL } from './livekitWebhookACL';
+import { transcriptService } from '@/services/transcriptService';
+import { CallOrigin } from '@prisma/client';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -244,6 +246,21 @@ class LiveKitWebhookController {
         call = result.call;
 
         logger.info(`[LiveKit Webhook] Successfully created all records for first participant in call ${roomName}`);
+
+        // Generate title from thread call
+        if (callOrigin === CallOrigin.CONVERSATION && existingConversationId && call) {
+          const callIdForUpdate = call.id;
+          transcriptService.generateCallTitleFromConversation(existingConversationId)
+            .then(async (generatedTitle) => {
+              if (generatedTitle) {
+                await repositories.calls.update(callIdForUpdate, { title: generatedTitle });
+                logger.info(`[LiveKit Webhook] Generated and saved title "${generatedTitle}" for call ${roomName}`);
+              }
+            })
+            .catch((error) => {
+              logger.error(`[LiveKit Webhook] Failed to generate title for call ${roomName}:`, error);
+            });
+        }
 
         // Trigger notifications for invited participants
         if (result.invitedParticipantIds.length > 0) {
