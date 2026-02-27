@@ -1,3 +1,22 @@
+## [1.60.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.59.0...v1.60.0) (2026-02-27)
+
+
+### Features
+
+* add QA alert bott ([4503bde](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4503bdebf5dea33a8ec45bb2a69011cd5d13cf4c)), closes [#3495](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3495)
+* CMD + click to open Tickets & Canvas in new window ([ed6f8ee](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ed6f8eeaa50ef1314f582f5b0c436e5b66b729b8)), closes [#2985](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/2985)
+* Feature/DocThumbnails ([112067b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/112067b6805bd41f84da4e4adbd5a59d266cc1bf)), closes [#3602](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3602)
+* including emailSubject for blocking tickets ([f8d2b59](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f8d2b591c6ead231c02ae05ed1c387965ee243c6)), closes [#3611](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3611)
+
+
+### Bug Fixes
+
+* : Added release analysis to canvas ([8510685](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/851068549dc82040440dab950929b87dae85a67f)), closes [#3414](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3414)
+* add pr validation for workflow prs as well ([da95947](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/da959473384b6088e8b424d95b5838ce1aa0d7f9)), closes [#3543](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3543)
+* alias-filtering fix for user activity ([6fd4b9c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6fd4b9cb96f405eecd1b9f9ad273829cec97928b))
+* Removing call duration from leave button ([44ad2da](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/44ad2da8b3f7e44b88dc98d3baa5ab6a25560a43)), closes [#3709](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3709)
+* webview target blank handling ([75bf3bf](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75bf3bf52b456caa0676dd7383196f2578e831b0)), closes [#3687](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3687)
+
 ## [1.59.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.58.0...v1.59.0) (2026-02-26)
 
 
