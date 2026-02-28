@@ -128,23 +128,35 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const isMessageDeleted = message.isDeleted;
 
-  const isHighlighted = useMemo(() => {
+  const [isHighlighted, setIsHighlighted] = useState(false);
+
+  useEffect(() => {
     const highlightedConversationId = extractOriginFromHash(location.hash);
     const highlightedMessageId = extractMessageIdFromHash(location.hash);
 
+    let shouldHighlight = false;
     if (context === 'thread' && highlightedMessageId) {
-      return (
+      shouldHighlight =
         message.conversationId === highlightedConversationId &&
-        message.messageId === highlightedMessageId
-      );
-    }
-    if (context === 'channel' && highlightedConversationId) {
-      if (conversation === undefined) return false;
-      return conversation.conversationId === highlightedConversationId;
+        message.messageId === highlightedMessageId;
+    } else if (context === 'channel' && highlightedConversationId && conversation !== undefined) {
+      shouldHighlight = conversation.conversationId === highlightedConversationId;
     }
 
-    return false;
-  }, [message.messageId, message.conversationId, location.hash, context]);
+    if (shouldHighlight) {
+      setIsHighlighted(false);
+      requestAnimationFrame(() => setIsHighlighted(true));
+    } else {
+      setIsHighlighted(false);
+    }
+  }, [
+    location.key,
+    location.hash,
+    context,
+    message.conversationId,
+    message.messageId,
+    conversation?.conversationId,
+  ]);
   const [showHoverActions, setShowHoverActions] = useState(false);
   const [showLinkPreview, setShowLinkPreview] = useState(true);
   const [showCanvasPreview, setShowCanvasPreview] = useState(true);

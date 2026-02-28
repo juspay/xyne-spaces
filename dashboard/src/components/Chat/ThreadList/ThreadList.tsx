@@ -42,8 +42,6 @@ const ThreadList = ({
   const { editingMessageId, requestEdit } = useEditContext();
   const location = useLocation();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [hasInitiallyScrolled, setHasInitiallyScrolled] = useState<string | null>(null);
-  const [hasNavigatedToMessage, setHasNavigatedToMessage] = useState(false);
 
   const isEventFromThreadInput = useCallback(
     (event: KeyboardEvent): boolean => isEventFromEmptyInput(event, conversationId),
@@ -110,11 +108,6 @@ const ThreadList = ({
     };
   })();
 
-  // Reset navigation flag when conversation changes
-  useEffect(() => {
-    setHasNavigatedToMessage(false);
-  }, [conversationId]);
-
   /**
    * 1️⃣ On initial load → force scroll to specific message, saved position, or bottom
    *    Priority: message navigation > saved position > bottom (classic chat behavior)
@@ -123,45 +116,29 @@ const ThreadList = ({
     const container = scrollContainerRef.current;
     if (!container || !threadMessages?.length) return;
 
-    // Only scroll on initial load for this channel
-    if (hasInitiallyScrolled !== channelId) {
-      setHasInitiallyScrolled(channelId);
+    const originConversationId = extractOriginFromHash(location.hash);
+    const targetMessageId = extractMessageIdFromHash(location.hash);
 
-      // wait for React to layout before scrolling
-      requestAnimationFrame(() => {
-        // Priority 1: Check for specific message navigation from URL hash
-        const originConversationId = extractOriginFromHash(location.hash);
-        const targetMessageId = extractMessageIdFromHash(location.hash);
-
-        if (originConversationId === conversationId && targetMessageId) {
-          const elementId = `thread-message-${conversationId}-${targetMessageId}`;
-          const targetElement = document.getElementById(elementId);
-
-          if (targetElement) {
-            targetElement.scrollIntoView({ behavior: 'auto', block: 'center' });
-            setHasNavigatedToMessage(true);
-            return;
-          }
-          // If target message not found, fall through to existing logic
+    requestAnimationFrame(() => {
+      // Priority 1: Check for specific message navigation from URL hash
+      if (originConversationId === conversationId && targetMessageId) {
+        const elementId = `thread-message-${conversationId}-${targetMessageId}`;
+        const targetElement = document.getElementById(elementId);
+        if (targetElement) {
+          targetElement.scrollIntoView({ behavior: 'auto', block: 'center' });
+          return;
         }
+      }
 
-        // Priority 2: Use saved scroll position
-        if (initialScrollOffset !== undefined) {
-          container.scrollTop = initialScrollOffset;
-        } else {
-          // Priority 3: Default to bottom (classic chat behavior)
-          container.scrollTop = container.scrollHeight - container.clientHeight;
-        }
-      });
-    }
-  }, [
-    channelId,
-    conversationId,
-    threadMessages?.length,
-    hasInitiallyScrolled,
-    initialScrollOffset,
-    location.hash,
-  ]);
+      // Priority 2: Use saved scroll position
+      if (initialScrollOffset !== undefined) {
+        container.scrollTop = initialScrollOffset;
+      } else {
+        // Priority 3: Default to bottom (classic chat behavior)
+        container.scrollTop = container.scrollHeight - container.clientHeight;
+      }
+    });
+  }, [channelId, conversationId, location.hash, location.key]);
 
   /**
    * 2️⃣ Auto-scroll on new messages
@@ -173,10 +150,6 @@ const ThreadList = ({
     const container = scrollContainerRef.current;
     if (!container || !threadMessages?.length) return;
 
-    if (hasNavigatedToMessage) {
-      return;
-    }
-
     const latestMessage = threadMessages[threadMessages.length - 1];
     const isFromCurrentUser = latestMessage?.senderId === user?.id;
 
@@ -187,18 +160,17 @@ const ThreadList = ({
     if (isFromCurrentUser || currentlyNearBottom) {
       container.scrollTop = container.scrollHeight - container.clientHeight;
     }
-  }, [threadMessages, user?.id, hasNavigatedToMessage]);
+  }, [threadMessages, user?.id]);
 
   /**
-   * 3️⃣ Track scroll position changes for persistence
-   *    Save current scroll position when user scrolls (debounced)
+   * Track scroll position changes for persistence (debounced)
+   *  Only active when onScrollPositionChange is provided
    */
   const debouncedScrollHandler = useCallback(() => {
     const container = scrollContainerRef.current;
-    if (!container || !onScrollPositionChange) return;
+    if (!container || !onScrollPositionChange || !threadMessages?.length) return;
 
     // Reset navigation flag when user manually scrolls
-    setHasNavigatedToMessage(false);
     onScrollPositionChange(container.scrollTop);
   }, [onScrollPositionChange]);
 
