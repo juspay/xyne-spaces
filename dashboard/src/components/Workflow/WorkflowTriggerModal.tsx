@@ -8,8 +8,9 @@ import { createWorkflow } from '../../services/Workflow/workflowService';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useWorkflowTypes, type WorkflowType } from '../../hooks/useWorkflowTypes';
+import { useWorkflowFormPersistence } from '../../hooks/useWorkflowFormPersistence';
 import type { WorkflowTypeSchema } from '../Tickets/types';
-import { Play, X } from 'lucide-react';
+import { Play, X, RotateCcw } from 'lucide-react';
 import {
   validateCustomField,
   updateFormWithTicketData,
@@ -55,6 +56,29 @@ export default function WorkflowTriggerModal({
     mode: 'onChange',
   });
 
+  const { handleSubmit, control, watch, setValue, formState } = form;
+  const workflowType = watch('workflowType');
+  const customFields = watch('customFields');
+
+  // Use persistence hook to save/restore form values - must be defined before mutation
+  const {
+    savedValues,
+    hasSavedValues,
+    save: saveFormValues,
+    clear: clearSavedValues,
+  } = useWorkflowFormPersistence(workflowType);
+
+  // Track which fields have persisted values from localStorage
+  const [persistedFields, setPersistedFields] = useState<Set<string>>(new Set());
+
+  // Helper function to check if a field has a persisted value
+  const isFieldPersisted = useCallback(
+    (fieldName: string): boolean => {
+      return persistedFields.has(fieldName);
+    },
+    [persistedFields],
+  );
+
   const createWorkflowMutation = useMutation({
     mutationFn: (data: TriggerWorkflowFormData) => {
       // Filter out empty values from customFields
@@ -84,13 +108,19 @@ export default function WorkflowTriggerModal({
 
       return createWorkflow(workflowRequest);
     },
-    onSuccess: data => {
+    onSuccess: (response, variables) => {
+      // Save form values to localStorage before closing
+      saveFormValues({
+        customFields: variables.customFields,
+        context: variables.context,
+      });
+
       form.reset();
       setSelectedWorkflow(null);
       setValidationErrors([]);
       onClose();
       if (redirectOnSuccess) {
-        void navigate(`/tickets/${ticketId}/workflow/${data.workflow.id}`);
+        void navigate(`/tickets/${ticketId}/workflow/${response.workflow.id}`);
       }
     },
     onError: error => {
@@ -98,10 +128,6 @@ export default function WorkflowTriggerModal({
       setValidationErrors([`Error: ${errorMessage}`]);
     },
   });
-
-  const { handleSubmit, control, watch, setValue, formState } = form;
-  const workflowType = watch('workflowType');
-  const customFields = watch('customFields');
 
   const onSubmit: SubmitHandler<TriggerWorkflowFormData> = data => {
     setValidationErrors([]);
@@ -182,6 +208,45 @@ export default function WorkflowTriggerModal({
     },
     [workflowTypes, ticketData, form, setValue],
   );
+
+  // Load saved form values when workflow type changes
+  useEffect(() => {
+    if (savedValues && selectedWorkflow?.schema) {
+      const persistedFieldNames = new Set<string>();
+
+      // Restore custom fields from saved values
+      for (const [fieldName, fieldValue] of Object.entries(savedValues.customFields)) {
+        const fieldExists = selectedWorkflow.schema.some(f => f.name === fieldName);
+        if (fieldExists && fieldValue !== undefined && fieldValue !== null && fieldValue !== '') {
+          setValue(`customFields.${fieldName}` as Path<TriggerWorkflowFormData>, fieldValue);
+          persistedFieldNames.add(fieldName);
+        }
+      }
+      // Restore context if saved
+      if (savedValues.context) {
+        setValue('context', savedValues.context);
+        persistedFieldNames.add('context');
+      }
+
+      setPersistedFields(persistedFieldNames);
+    }
+  }, [savedValues, selectedWorkflow, setValue]);
+
+  // Handle reset to defaults
+  const handleResetToDefaults = useCallback(() => {
+    clearSavedValues();
+    setPersistedFields(new Set());
+    // Reset custom fields to empty
+    if (selectedWorkflow?.schema) {
+      const resetCustomFields: Record<string, unknown> = {};
+      for (const field of selectedWorkflow.schema) {
+        resetCustomFields[field.name] = field.defaultValue ?? '';
+      }
+      setValue('customFields', resetCustomFields);
+    }
+    setValue('context', '');
+  }, [clearSavedValues, selectedWorkflow, setValue]);
+
   const handleClose = (): void => {
     // Explicitly reset form to initial values to prevent stale workflow selection
     form.reset({
@@ -237,28 +302,42 @@ export default function WorkflowTriggerModal({
 
     if (selectedWorkflow.schema.length === 0) return null;
 
-    const requiredFields = selectedWorkflow.schema.filter(field => field.required);
-    const optionalFields = selectedWorkflow.schema.filter(field => !field.required);
+    // Fields to show immediately: required fields OR fields with saved values
+    const visibleFields = selectedWorkflow.schema.filter(
+      field => field.required || isFieldPersisted(field.name),
+    );
+
+    // Fields to hide in "Show more": optional fields without saved values
+    const hiddenFields = selectedWorkflow.schema.filter(
+      field => !field.required && !isFieldPersisted(field.name),
+    );
 
     return (
       <div className='space-y-4 mt-4 border-t pt-4 border-gray-200'>
-        {requiredFields.length > 0 && (
+        {visibleFields.length > 0 && (
           <>
-            <h3 className='text-sm font-medium text-gray-700'>Required Parameters</h3>
-            {requiredFields.map(field => renderField(field))}
+            <h3 className='text-sm font-medium text-gray-700'>
+              Required Parameters
+              {hasSavedValues && (
+                <span className='text-xs text-gray-500 font-normal ml-2'>
+                  (includes saved values)
+                </span>
+              )}
+            </h3>
+            {visibleFields.map(field => renderField(field))}
           </>
         )}
 
-        {optionalFields.length > 0 && (
+        {hiddenFields.length > 0 && (
           <>
             {!showOptionalFields ? (
               <Button type='button' variant='secondary' onClick={() => setShowOptionalFields(true)}>
-                Show more fields
+                Show more fields ({hiddenFields.length})
               </Button>
             ) : (
               <>
                 <h3 className='text-sm font-medium text-gray-700 mt-6'>Optional Parameters</h3>
-                {optionalFields.map(field => renderField(field))}
+                {hiddenFields.map(field => renderField(field))}
               </>
             )}
           </>
@@ -507,6 +586,24 @@ export default function WorkflowTriggerModal({
           />
 
           {renderFormFields()}
+
+          {/* Show reset button if there are saved values */}
+          {hasSavedValues && selectedWorkflow && (
+            <div className='flex items-center justify-between py-2'>
+              <span className='text-xs text-gray-500'>Using previously saved values</span>
+              <button
+                type='button'
+                onClick={handleResetToDefaults}
+                className='flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors'
+                data-track-category='Workflows'
+                data-track-name='ResetWorkflowFormDefaults'
+              >
+                <RotateCcw className='w-3 h-3' />
+                Reset to defaults
+              </button>
+            </div>
+          )}
+
           {validationErrors.length > 0 && (
             <div className='p-3 bg-orange-50 border border-orange-200 rounded-md'>
               <p className='text-sm text-orange-600 font-medium'>
