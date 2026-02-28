@@ -843,6 +843,31 @@ const ChannelCommandMenu = ({
       className={`fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full ${isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen'} md:w-full md:max-w-3xl md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000]
  border border-gray-200 z-50'`}
       onKeyDownCapture={e => {
+        // ── Tab / Shift+Tab: cycle filter tabs ──────────────────────────────
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (activeTab === TabType.ALL) {
+            // From ALL: Tab → first tab, Shift+Tab → last tab
+            setActiveTab(e.shiftKey ? tabs[tabs.length - 1]!.id : tabs[0]!.id);
+            return;
+          }
+
+          const idx = tabs.findIndex(t => t.id === activeTab);
+          if (idx === -1) return; // Not found, shouldn't happen
+
+          const next = e.shiftKey ? idx - 1 : idx + 1;
+
+          if (next < 0 || next >= tabs.length) {
+            setActiveTab(TabType.ALL);
+          } else {
+            setActiveTab(tabs[next]!.id);
+          }
+          return;
+        }
+
+        // ── Enter handling ───────────────────────────────────────────────────
         if (e.key !== 'Enter') return;
 
         // Shift+Enter → allow newline in Lexical
@@ -1741,7 +1766,7 @@ const ChannelCommandMenu = ({
 
         {/* Footer */}
         {!isMobile && (
-          <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-between shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
+          <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-end shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
             {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
             <label htmlFor='vespa-toggle' className='text-xs text-gray-600 cursor-pointer'>
