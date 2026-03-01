@@ -249,7 +249,7 @@ echo ""
 update_stage_status "services" "in_progress" "Starting services..."
 
 # Get absolute path to project directory
-PROJECT_DIR="/tmp/xyne-spaces"
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Open infrastructure in a new Terminal window with GUI/TUI enabled
 print_step "Starting infrastructure services in new Terminal window..."
