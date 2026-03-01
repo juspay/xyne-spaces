@@ -162,7 +162,7 @@ const fidoServerWorkflowInputSchema = BaseWorkflowContextSchema.extend({
   repositoryUrl: z.string(),
   maxIterations: z.number().positive().optional(),
   repoBranch: z.string().optional(),
-  baseBranch: z.string().optional(),
+  baseBranch: z.string(),
   buildCommand: z.string().optional(),
   testDetails: z.array(z.object({
     filename: z.string(),

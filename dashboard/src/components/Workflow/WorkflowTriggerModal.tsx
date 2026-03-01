@@ -109,9 +109,11 @@ export default function WorkflowTriggerModal({
       return createWorkflow(workflowRequest);
     },
     onSuccess: (response, variables) => {
-      // Save form values to localStorage before closing
+      // Save form values to localStorage before closing (excluding description)
       saveFormValues({
-        customFields: variables.customFields,
+        customFields: Object.fromEntries(
+          Object.entries(variables.customFields).filter(([key]) => key !== 'description'),
+        ),
         context: variables.context,
       });
 
@@ -338,6 +340,17 @@ export default function WorkflowTriggerModal({
               <>
                 <h3 className='text-sm font-medium text-gray-700 mt-6'>Optional Parameters</h3>
                 {hiddenFields.map(field => renderField(field))}
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  onClick={() => setShowOptionalFields(false)}
+                  className='mt-4'
+                  data-track-category='Workflows'
+                  data-track-name='HideOptionalFields'
+                >
+                  Hide fields
+                </Button>
               </>
             )}
           </>

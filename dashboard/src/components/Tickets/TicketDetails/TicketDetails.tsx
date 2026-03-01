@@ -2054,6 +2054,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         }
                       }}
                       className='text-sm border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+                      data-track-category='Tickets'
+                      data-track-name='StageETAInput'
+                      data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                     />
                   </div>
                 ) : (
@@ -2077,6 +2080,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         setEditingStageETA(true);
                       }
                     }}
+                    data-track-category='Tickets'
+                    data-track-name='EditStageDeadline'
+                    data-track-metadata={JSON.stringify({
+                      ticketId: ticket.id,
+                      stageId: currentStageEntry?.stageId,
+                    })}
                   >
                     <Clock
                       size={14}
