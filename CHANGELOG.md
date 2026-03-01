@@ -1,3 +1,22 @@
+## [1.61.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.60.0...v1.61.0) (2026-03-01)
+
+
+### Features
+
+* add endCallForAll Native ([c110577](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c110577e266231378545ea01badf78dde4405761)), closes [#3656](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3656)
+* Added Title genration support for thread call based on conversation ([8fe29ca](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8fe29ca504ba579cfa2938efdddfd11f8f9fdc52)), closes [#3721](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3721)
+* Implement ticket thread subscription and notification button re ([9654ab9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9654ab98153999ecb3e14ec203a6815731ceb3b3)), closes [#3646](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3646)
+* stage optional ([468c130](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/468c130e02b1f9d22bc009e0d4985fe117a356f1)), closes [#3397](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3397)
+* workflow trigger data persistence ([4cf95b2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4cf95b255e27500b4ef541300c07077292191843)), closes [#3635](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3635)
+
+
+### Bug Fixes
+
+* added minimize option in browser ([17a512d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/17a512d360f6bf0e96d22a6d02a392ce5b471b15)), closes [#3725](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3725)
+* Cmd K tab key navigation ([93292f9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/93292f95fc23d16a6f69438ac0ee06a76f4a7573)), closes [#3640](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3640)
+* Fixed ThreadList navigation to correct origin ([05296f2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/05296f232f8fda6bc867e9cbc196c2f2515a58ff))
+* making baseBranch mandatory ([267ce63](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/267ce636399ce4e05042c98d66c7a7c324034126)), closes [#3758](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3758)
+
 ## [1.60.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.59.0...v1.60.0) (2026-02-27)
 
 
