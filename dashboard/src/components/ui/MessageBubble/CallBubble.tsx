@@ -5,10 +5,10 @@ import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { CallMessageOverlay } from '../../Chat/CallMessageOverlay/CallMessageOverlay';
 import { useGeneratePRD } from '../../../hooks/useGeneratePRD';
-import { useGenerateDetailedSummary } from '../../../hooks/useGenerateDetailedSummary';
 import { MessageMetadata } from './MessageBubble.utils';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
+import { xyneAIActor } from '../../../machines/xyneAIMachine';
 
 type AttachmentType = QueryResultType<
   typeof queries.conversationMessages
@@ -25,6 +25,8 @@ interface CallBubbleProps {
   callId: string;
   isActiveCall: boolean;
   channelId?: string;
+  conversationId?: string;
+  senderName?: string;
   showAvatar?: boolean;
   context?: 'channel' | 'thread';
   attachments?: readonly AttachmentType[];
@@ -83,60 +85,47 @@ export const GeneratePRDButton: React.FC<{
 };
 
 /**
- * Button component for generating detailed summary from call transcript
+ * Button component for chatting with Ask AI about the call transcript
  */
-export const GenerateDetailedSummaryButton: React.FC<{
-  callId: string;
-  messageId: string;
-  isSummaryCanvasCreated?: boolean;
-}> = ({ callId, messageId, isSummaryCanvasCreated }) => {
-  const { generateDetailedSummary, isLoading } = useGenerateDetailedSummary();
-  const [isModalOpen, setIsModalOpen] = useState(false);
+const ChatWithAskAIButton: React.FC<{
+  channelId?: string | undefined;
+  conversationId?: string | undefined;
+  metadata?: MessageMetadata | null | undefined;
+  attachments?: readonly AttachmentType[] | undefined;
+}> = ({ channelId, conversationId, metadata, attachments }) => {
+  const handleClick = (): void => {
+    if (!channelId) return;
 
-  const handleGenerate = async (customPrompt?: string): Promise<void> => {
-    // Close the modal immediately
-    setIsModalOpen(false);
-    // Generate summary - button will show "Generating..." via isLoading state
-    await generateDetailedSummary(callId, messageId, customPrompt);
+    // Get call title from metadata if available
+    const callTitle = (metadata?.['callTitle'] as string) || 'Call Transcript';
+
+    // Get attachment IDs from the call message (transcript)
+    const attachmentIds = attachments?.map(att => att.id) || [];
+
+    // Create thread info for the call transcript pill
+    const threadInfo = {
+      conversationId: conversationId || '',
+      previewText: callTitle,
+      ...(attachmentIds.length > 0 && { attachmentIds }),
+    };
+
+    // Open sidebar with thread info
+    xyneAIActor.send({
+      type: 'OPEN',
+      channelId,
+      threadInfo,
+    });
   };
 
   return (
-    <>
-      <button
-        type='button'
-        onClick={() => setIsModalOpen(true)}
-        disabled={isLoading}
-        className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
-        style={{ color: '#0077FF' }}
-      >
-        {isLoading ? (
-          <>
-            <Loader2 className='w-4 h-4 animate-spin' />
-            <span>Generating...</span>
-          </>
-        ) : (
-          <span>
-            {isSummaryCanvasCreated ? 'Generate Another Summary' : 'Generate Detailed Summary'}
-          </span>
-        )}
-      </button>
-
-      <CreateDocumentModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onGenerate={async prompt => {
-          await handleGenerate(prompt);
-        }}
-        isLoading={isLoading}
-        title='Generate Detailed Summary'
-        description='Choose how you want to generate the detailed summary.'
-        standardOptionLabel='Standard Summary'
-        standardOptionSubtext='Phase-based summary with decisions, action items, and key takeaways.'
-        customOptionLabel='Custom Instructions'
-        customOptionSubtext='Provide specific details or focus areas for the summary.'
-        customInputPlaceholder='E.g., Focus on technical decisions and architecture discussions...'
-      />
-    </>
+    <button
+      type='button'
+      onClick={handleClick}
+      className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all'
+      style={{ color: '#0077FF' }}
+    >
+      <span>Chat with Transcript</span>
+    </button>
   );
 };
 
@@ -150,9 +139,8 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
   callId,
   isActiveCall,
   channelId,
-  showAvatar: _showAvatar = true,
-  context: _context,
-  attachments = [],
+  conversationId,
+  attachments,
 }) => {
   const metadata = message.metadata;
   const [isExpanded, setIsExpanded] = useState(true);
@@ -169,7 +157,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
           )}
 
           {/* Attachments */}
-          {attachments.length > 0 && (
+          {attachments && attachments.length > 0 && (
             <div>
               <div className='flex items-center gap-3 text-xs font-medium'>
                 <div className='flex items-center gap-1'>
@@ -244,7 +232,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
             </div>
           )}
 
-          {/* Generate PRD and Detailed Summary buttons for ended calls with transcript */}
+          {/* Action buttons for ended calls with transcript */}
           {!isActiveCall && message.hasAttachment && (
             <div className='flex flex-wrap items-center gap-2 mt-2'>
               {/* PRD Button - always show to allow generating multiple PRDs */}
@@ -257,11 +245,12 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
               {/* Separator */}
               <span className='text-gray-400'>•</span>
 
-              {/* Detailed Summary Button - always show to allow generating multiple summaries */}
-              <GenerateDetailedSummaryButton
-                callId={callId}
-                messageId={message.messageId}
-                isSummaryCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
+              {/* Chat with Transcript Button */}
+              <ChatWithAskAIButton
+                channelId={channelId}
+                conversationId={conversationId}
+                metadata={metadata}
+                attachments={attachments}
               />
             </div>
           )}

@@ -10,8 +10,9 @@ export type XyneAIContextType = 'chat' | 'ticket' | 'call' | 'general';
 // Thread info interface
 export interface ThreadInfo {
   conversationId: string;
-  senderName: string;
+  senderName?: string;
   previewText: string;
+  attachmentIds?: string[]; // Attachment IDs from the message to fetch from GCS
 }
 
 // Context interface for the XyneAI machine

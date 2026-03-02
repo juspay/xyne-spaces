@@ -26,6 +26,7 @@ import type {
   XyneAIOutput,
   XyneAIStreamChunk,
   AgentRawOutput,
+  AttachmentData,
 } from './types.js';
 
 type InMemoryStreamProvider = ReturnType<typeof Streaming.createInMemoryStreamProvider>;
@@ -169,7 +170,7 @@ export interface XyneAIStreamRequest extends XyneAIRequest {
 export async function* xyneAIStream(
   request: XyneAIStreamRequest
 ): AsyncGenerator<XyneAIStreamChunk, void, unknown> {
-  const { query, sessionId, channelIds, conversationId, userId, currentTimestamp, attachments, onStreamEvent, researchContext } = request;
+  const { query, sessionId, channelIds, conversationId, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds } = request;
 
   const timestamp = currentTimestamp || getCurrentTimestamp();
   const source: 'thread' | 'channel' = conversationId ? 'thread' : 'channel';
@@ -177,12 +178,47 @@ export async function* xyneAIStream(
   const sessionContext: SessionContext = {channelIds, userId };
   const { session, isNewSession } = await getOrCreateSession(sessionId, sessionContext);
 
-  logger.info(`[XyneAI] [${session.sessionId}] Starting query. isNew: ${isNewSession}, source: ${source}, attachments: ${attachments?.length || 0}`);
+  logger.info(`[XyneAI] [${session.sessionId}] Starting query. isNew: ${isNewSession}, source: ${source}, attachments: ${attachments?.length || 0}, messageAttachmentIds: ${messageAttachmentIds?.length || 0}`);
 
   yield { type: 'start', sessionId: session.sessionId, isNewSession };
 
+  // Fetch attachments from GCS by IDs if provided
+  let fetchedAttachments: AttachmentData[] = [];
+  if (messageAttachmentIds && messageAttachmentIds.length > 0) {
+    try {
+      const { aiContextService } = await import('../../services/aiContextService.js');
+      
+      // Fetch all attachments by IDs in parallel
+      const attachmentResults = await Promise.all(
+        messageAttachmentIds.map(async (attachmentId) => {
+          const result = await aiContextService.getAttachmentById(attachmentId);
+          if (result.attachment && result.base64) {
+            return {
+              data: result.base64.base64Content || '',
+              mime_type: result.attachment.mimetype,
+              filename: result.attachment.originalFilename,
+            } as AttachmentData;
+          }
+          return null;
+        })
+      );
+
+      fetchedAttachments = attachmentResults.filter((a): a is AttachmentData => a !== null);
+      logger.info(`[XyneAI] [${session.sessionId}] Fetched ${fetchedAttachments.length} attachments from GCS by IDs`);
+    } catch (error) {
+      logger.error(`[XyneAI] [${session.sessionId}] Failed to fetch attachments by IDs:`, error);
+      // Continue without fetched attachments - don't fail the whole request
+    }
+  }
+
+  // Merge user-provided attachments with fetched attachments
+  const allAttachments: AttachmentData[] = [
+    ...(attachments || []),
+    ...fetchedAttachments,
+  ];
+
   // Store user message with attachments
-  const updatedSessionAfterUser = await sessionStore.addUserMessage(session.sessionId, query, timestamp, attachments);
+  const updatedSessionAfterUser = await sessionStore.addUserMessage(session.sessionId, query, timestamp, allAttachments.length > 0 ? allAttachments : undefined);
   if (!updatedSessionAfterUser) {
     logger.error(`[XyneAI] [${session.sessionId}] Failed to add user message - session not found`);
     yield { type: 'error', error: 'Session not found' };
@@ -193,11 +229,11 @@ export async function* xyneAIStream(
   // Get history BEFORE the current user message (exclude the one we just added)
   const historyMessages = formatHistoryForJAF(updatedSessionAfterUser.history.slice(0, -1));
 
-  // Convert attachments to JAF format
+  // Convert attachments to JAF format (use merged attachments)
   let jafAttachments: Attachment[] = [];
 
   try {
-    jafAttachments = convertAttachmentsToJAF(attachments);
+    jafAttachments = convertAttachmentsToJAF(allAttachments.length > 0 ? allAttachments : undefined);
     
     // Track attachment usage if any attachments were successfully converted
     if (jafAttachments.length > 0) {
@@ -274,7 +310,7 @@ export async function* xyneAIStream(
 
   // Determine which model to use based on attachments
   // Only use vision model for images; documents/files are converted to text by JAF
-  const hasImageAttachment = attachments?.some(att => att.mime_type?.startsWith('image/'));
+  const hasImageAttachment = allAttachments.some(att => att.mime_type?.startsWith('image/'));
 
   const modelName = hasImageAttachment ? VISION_MODEL_NAME : MODEL_NAME;
   const apiKey = LITELLM_API_KEY;

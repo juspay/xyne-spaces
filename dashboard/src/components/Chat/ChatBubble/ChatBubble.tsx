@@ -242,12 +242,31 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const conversationId = conversation?.conversationId || message.conversationId;
     if (!conversationId) return;
 
-    // Create thread info
-    const previewText = typeof message.content === 'string' ? message.content.slice(0, 100) : '';
+    // Extract plain text from message content
+    let previewText = '';
+    const content = message.content;
+
+    if (content && typeof content === 'string') {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(content, 'text/html');
+      const textContent = doc.body.textContent || '';
+      previewText = textContent.trim().substring(0, 100);
+    }
+
+    // Get attachment IDs from the message (if any)
+    const attachmentIds = message.attachments?.map((att: { id: string }) => att.id) || [];
+
+    // If no text content but has attachments, show "Attachment"
+    if (!previewText && attachmentIds.length > 0) {
+      previewText =
+        attachmentIds.length === 1 ? 'Attachment' : `${attachmentIds.length} Attachments`;
+    }
+
     const threadInfo: ThreadInfo = {
       conversationId,
       senderName: sender?.name || 'Unknown',
       previewText,
+      ...(attachmentIds.length > 0 && { attachmentIds }),
     };
 
     // Open XyneAI with thread context and always start a fresh chat
@@ -773,9 +792,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
-              {...(conversation &&
-                context === 'channel' &&
-                !isSystemMessage &&
+              {...(((conversation && (context === 'channel' || isFirstInThread)) ||
+                isCallMessage) &&
+                (!isSystemMessage || isCallMessage) &&
                 !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
             />
@@ -833,9 +852,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
-              {...(conversation &&
-                context === 'channel' &&
-                !isSystemMessage &&
+              {...(((conversation && (context === 'channel' || isFirstInThread)) ||
+                isCallMessage) &&
+                (!isSystemMessage || isCallMessage) &&
                 !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
             />

@@ -93,6 +93,7 @@ const XyneAISidebar = ({
     channelIds: selectedChannelIds,
     conversationId,
     threadConversationId: activeThreadInfo?.conversationId,
+    attachmentIds: activeThreadInfo?.attachmentIds,
     setMessages,
     setConversationId,
     setCurrentTraceId,
