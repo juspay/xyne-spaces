@@ -10,6 +10,7 @@ export type TabType =
   | 'custom'
   | 'git-diff'
   | 'live-preview'
+  | 'live-edits'
   | 'rca-details'
   | 'workflow'
   | 'thread-summary';

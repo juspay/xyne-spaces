@@ -21,8 +21,9 @@ import {
   CombinedWorkflowData,
   StepDetailsResponse,
 } from '../../services/Workflow/workflowGraphService.types';
-import { Loader2, AlertCircle, ArrowLeft, Globe, Table2, GitBranch, Eye } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowLeft, Globe, Table2, GitBranch, Eye, Code } from 'lucide-react';
 import GitDiffPanel from '../../components/Workflows/GitDiffPanel';
+import LiveEditsPanel from '../../components/Workflows/LiveEditsPanel';
 import { RCADetailsPanel, type RCAItem } from '../../components/Workflows/RCADetailsPanel';
 import { workflowScreenMachine } from '../../machines/workflowScreenMachine';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -173,6 +174,14 @@ const WorkflowScreen: React.FC = () => {
         disabled: false,
         disabledTooltip: 'Git diff will be available after workflow completes',
       },
+      {
+        id: 'live-edits',
+        title: 'Live Edits',
+        type: 'live-edits',
+        icon: <Code size={14} />,
+        closable: false,
+        disabled: false,
+      },
       ...(isElectron
         ? [
             {
@@ -187,7 +196,7 @@ const WorkflowScreen: React.FC = () => {
           ]
         : []),
     ],
-    state.context.activeTabId,
+    state.context.activeTabId || 'live-edits',
   ); // Pass persisted activeTabId
 
   // Wrapper to sync tab changes with state machine
@@ -370,6 +379,10 @@ const WorkflowScreen: React.FC = () => {
           return (
             <GitDiffPanel executionId={effectiveSelectedExecutionId} onRefresh={handleRefresh} />
           );
+        case 'live-edits':
+          return combinedStepsData ? (
+            <LiveEditsPanel combinedStepsData={combinedStepsData} />
+          ) : null;
         case 'live-preview':
           return previewInfo ? (
             <LivePreviewPanel
