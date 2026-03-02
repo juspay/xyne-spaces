@@ -1132,20 +1132,8 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
               >
                 {combinedStepsData && (
                   <WorkflowGraphOnly
-                    workflowData={combinedStepsData.workflows.map(workflow => ({
-                      id: workflow.workflowId,
-                      ticketId: '', // Not available in this context
-                      context: null,
-                      status: workflow.status,
-                      workflowName: workflow.workflowName,
-                      metadata: null,
-                      configuration: null,
-                      workflowType: workflow.workflowType,
-                      scheduledAt: null,
-                      createdAt: workflow.createdAt ? new Date(workflow.createdAt).getTime() : 0,
-                      updatedAt: workflow.updatedAt ? new Date(workflow.updatedAt).getTime() : 0,
-                      workflowExecutions: [], // Workflow executions not directly available in this format
-                    }))}
+                    workflowType={combinedStepsData.workflows?.[0]?.workflowType}
+                    workflowId={combinedStepsData.workflows?.[0]?.workflowId}
                     combinedStepsData={combinedStepsData}
                     onNodeSelect={handleGraphNodeClick}
                   />

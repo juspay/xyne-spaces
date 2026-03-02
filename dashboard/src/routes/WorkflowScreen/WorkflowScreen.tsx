@@ -15,7 +15,6 @@ import WorkflowTableView from '../../components/Workflows/WorkflowTableView';
 import LivePreviewPanel from '../../components/Workflows/LivePreviewPanel';
 import { useTickets } from '../../hooks/useTickets';
 import { useWorkflowSubscription } from '../../hooks/useWorkflowSubscription';
-import { queries } from '../../zero/queries';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
   CombinedWorkflowData,
@@ -26,7 +25,6 @@ import GitDiffPanel from '../../components/Workflows/GitDiffPanel';
 import LiveEditsPanel from '../../components/Workflows/LiveEditsPanel';
 import { RCADetailsPanel, type RCAItem } from '../../components/Workflows/RCADetailsPanel';
 import { workflowScreenMachine } from '../../machines/workflowScreenMachine';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
 
 const LAST_WORKFLOW_PATH_KEY = 'last-viewed-workflow-path';
 
@@ -57,10 +55,6 @@ const WorkflowScreen: React.FC = () => {
   const [selectedStep, setSelectedStep] = useState<
     (StepDetailsResponse & { workflowStepIds: string[] }) | null
   >(null);
-
-  const [workflowData, workflowQueryDetails] = useCachedQuery(
-    queries.getWorkflowForTicket({ ticketId: ticketId ? ticketId : 'invalid-ticket-id' }),
-  );
 
   // Fetch combined steps data using React Query
   const {
@@ -339,7 +333,6 @@ const WorkflowScreen: React.FC = () => {
   // Loading state - show loading if workflow data is still loading or if tickets are still loading
   const isLoading =
     (loading && !combinedStepsData) ||
-    (workflowQueryDetails.type === 'unknown' && !workflowData) ||
     (ticketsStillLoading && !ticket) ||
     (!ticket && !ticketNotFound && !ticketId);
 
@@ -394,9 +387,10 @@ const WorkflowScreen: React.FC = () => {
 
         case 'workflow':
         case 'debug':
-          return workflowData && combinedStepsData ? (
+          return combinedStepsData ? (
             <WorkflowGraphOnly
-              workflowData={workflowData}
+              workflowType={combinedStepsData.workflows?.[0]?.workflowType}
+              workflowId={combinedStepsData.workflows?.[0]?.workflowId}
               combinedStepsData={combinedStepsData}
               {...(loading !== undefined && { loading })}
               {...(handleRefresh && { onRefresh: handleRefresh })}
@@ -428,7 +422,6 @@ const WorkflowScreen: React.FC = () => {
     },
     [
       tabs,
-      workflowData,
       combinedStepsData,
       ticket,
       loading,
@@ -515,8 +508,7 @@ const WorkflowScreen: React.FC = () => {
   }
 
   // Error state
-  const workflowQueryError = workflowQueryDetails.type === 'error';
-  const hasError = error || workflowQueryError;
+  const hasError = error;
 
   if (hasError) {
     const errorMessage = error?.message || 'Failed to load workflow data';
