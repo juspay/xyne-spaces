@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-electron",
-  "version": "1.0.25",
+  "version": "1.0.29",
   "description": "Xyne Spaces - Electron Desktop App (Thin Client)",
   "main": "dist/app/main.js",
   "scripts": {
