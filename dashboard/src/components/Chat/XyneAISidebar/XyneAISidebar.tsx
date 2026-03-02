@@ -29,9 +29,14 @@ interface XyneAIConfigResponse {
 interface XyneAISidebarProps {
   channelId: string | null;
   threadInfo?: ThreadInfo | null;
+  startFreshChat?: boolean;
 }
 
-const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElement => {
+const XyneAISidebar = ({
+  channelId,
+  threadInfo,
+  startFreshChat = false,
+}: XyneAISidebarProps): ReactElement => {
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [visibleCharsMap, setVisibleCharsMap] = useState<Record<string, number>>({});
@@ -95,12 +100,41 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
     researchContext: selectedResearchContext,
   });
 
+  // Start fresh chat when startFreshChat flag is set
+  useEffect(() => {
+    if (startFreshChat) {
+      // Reset to fresh state
+      setMessages([]);
+      setConversationId('');
+      setCurrentTraceId(undefined);
+      setInputValue('');
+      setAttachments([]);
+      setSelectedActivities([]);
+      setVisibleCharsMap({});
+      setShowHistorySidebar(false);
+      setShowUserActivityPanel(false);
+
+      // Abort any ongoing requests
+      abortCurrentRequest();
+
+      // Reset the flag in the machine after handling it
+      xyneAIActor.send({
+        type: 'OPEN',
+        ...(channelId && { channelId }),
+        ...(threadInfo && { threadInfo }),
+        startFreshChat: false,
+      });
+    }
+  }, [startFreshChat, channelId, threadInfo, abortCurrentRequest]);
+
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
-  // Load most recent conversation on mount (globally, not per channel)
+  // Load most recent conversation on mount
+  // Thread context: load thread-specific conversation
+  // Channel context: load channel-level conversation (global)
   useEffect(() => {
     // Only load conversations if we have a channelId
     if (!channelId) return;
@@ -108,62 +142,62 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
     const loadMostRecentConversation = async (): Promise<void> => {
       try {
         setIsLoadingConversation(true);
-        // Get all conversations across all channels
-        const allConversations = await xyneAIStorage.getAllConversations();
-        if (allConversations.length === 0) {
+
+        // Get thread conversation ID if in thread context
+        const threadConversationId = activeThreadInfo?.conversationId;
+
+        // Load the most recent conversation for this context
+        const mostRecent = await xyneAIStorage.loadLatestConversation(
+          channelId,
+          threadConversationId,
+        );
+
+        if (!mostRecent) {
           setIsLoadingConversation(false);
           return;
         }
 
-        // Sort by lastUpdated and get the most recent one
-        const mostRecent = allConversations.sort(
-          (a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime(),
-        )[0];
-
-        // Load the most recent conversation
-        if (mostRecent) {
-          // Clear streaming state and mark aborted messages
-          const messagesWithoutStreaming = mostRecent.messages.map(msg => {
-            // Check if this was a bot message that was streaming but got aborted
-            if (
-              msg.type === 'bot' &&
-              msg.isStreaming &&
-              (!msg.content || msg.content.trim().length === 0) &&
-              (!msg.toolOutputs || msg.toolOutputs.length === 0)
-            ) {
-              return {
-                ...msg,
-                isStreaming: false,
-                isAborted: true,
-                content: 'Answer was aborted. Please try asking your question again.',
-              };
-            }
+        // Clear streaming state and mark aborted messages
+        const messagesWithoutStreaming = mostRecent.messages.map(msg => {
+          // Check if this was a bot message that was streaming but got aborted
+          if (
+            msg.type === 'bot' &&
+            msg.isStreaming &&
+            (!msg.content || msg.content.trim().length === 0) &&
+            (!msg.toolOutputs || msg.toolOutputs.length === 0)
+          ) {
             return {
               ...msg,
               isStreaming: false,
+              isAborted: true,
+              content: 'Answer was aborted. Please try asking your question again.',
             };
-          });
-          setMessages(messagesWithoutStreaming);
-          setConversationId(mostRecent.sessionId);
+          }
+          return {
+            ...msg,
+            isStreaming: false,
+          };
+        });
+        setMessages(messagesWithoutStreaming);
+        setConversationId(mostRecent.sessionId);
 
-          // Restore feedback from stored messages
-          const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
-          mostRecent.messages.forEach(msg => {
-            if (msg.feedback === 1) {
-              restoredFeedbackMap[msg.id] = 'LIKE';
-            } else if (msg.feedback === 2) {
-              restoredFeedbackMap[msg.id] = 'DISLIKE';
-            } else {
-              restoredFeedbackMap[msg.id] = null;
-            }
-          });
-          setFeedbackMap(restoredFeedbackMap);
+        // Restore feedback from stored messages
+        const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
+        mostRecent.messages.forEach(msg => {
+          if (msg.feedback === 1) {
+            restoredFeedbackMap[msg.id] = 'LIKE';
+          } else if (msg.feedback === 2) {
+            restoredFeedbackMap[msg.id] = 'DISLIKE';
+          } else {
+            restoredFeedbackMap[msg.id] = null;
+          }
+        });
+        setFeedbackMap(restoredFeedbackMap);
 
-          // Scroll to bottom after loading
-          setTimeout(() => {
-            scrollToBottom();
-          }, 100);
-        }
+        // Scroll to bottom after loading
+        setTimeout(() => {
+          scrollToBottom();
+        }, 100);
       } catch (error) {
         // eslint-disable-next-line no-console
         console.error('[XyneAISidebar] Failed to load most recent conversation:', error);
@@ -173,7 +207,7 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
     };
 
     void loadMostRecentConversation();
-  }, [scrollToBottom]);
+  }, [channelId, activeThreadInfo?.conversationId, scrollToBottom]);
 
   // Load conversations list when history sidebar is opened
   useEffect(() => {
@@ -206,13 +240,21 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
       }
 
       try {
+        const threadConversationId = activeThreadInfo?.conversationId;
         console.log(
           '[XyneAISidebar] Saving conversation with conversationId:',
           conversationId,
+          'threadConversationId:',
+          threadConversationId,
           'messages:',
           messages.length,
         );
-        await xyneAIStorage.saveConversation(channelId, conversationId, messages);
+        await xyneAIStorage.saveConversation(
+          channelId,
+          conversationId,
+          messages,
+          threadConversationId,
+        );
         console.log('[XyneAISidebar] Conversation saved successfully');
       } catch (error) {
         console.error('[XyneAISidebar] Failed to save conversation history:', error);
@@ -220,7 +262,7 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
     };
 
     void saveHistory();
-  }, [messages, channelId, conversationId]);
+  }, [messages, channelId, conversationId, activeThreadInfo?.conversationId]);
 
   // Character reveal animation for streaming messages
   useEffect(() => {
@@ -319,7 +361,11 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
   const handleToggleStar = async (conversation: ConversationHistoryType): Promise<void> => {
     if (!channelId) return; // Can't toggle star without channelId
     try {
-      await xyneAIStorage.toggleStar(channelId, conversation.sessionId);
+      await xyneAIStorage.toggleStar(
+        channelId,
+        conversation.sessionId,
+        conversation.threadConversationId,
+      );
       // Reload conversations to update UI
       const allConversations = await xyneAIStorage.getConversationsForChannel(channelId);
       setConversations(allConversations);
@@ -331,7 +377,11 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
   const handleDeleteConversation = async (conversation: ConversationHistoryType): Promise<void> => {
     if (!channelId) return; // Can't delete conversation without channelId
     try {
-      await xyneAIStorage.deleteConversation(channelId, conversation.sessionId);
+      await xyneAIStorage.deleteConversation(
+        channelId,
+        conversation.sessionId,
+        conversation.threadConversationId,
+      );
       // Reload conversations
       const allConversations = await xyneAIStorage.getConversationsForChannel(channelId);
       setConversations(allConversations);
@@ -355,6 +405,7 @@ const XyneAISidebar = ({ channelId, threadInfo }: XyneAISidebarProps): ReactElem
         conversation.channelId,
         conversation.sessionId,
         newName,
+        conversation.threadConversationId,
       );
 
       // Reload conversations

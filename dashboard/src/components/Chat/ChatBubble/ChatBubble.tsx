@@ -250,11 +250,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       previewText,
     };
 
-    // Open XyneAI with thread context
+    // Open XyneAI with thread context and always start a fresh chat
     xyneAIActor.send({
       type: 'OPEN',
       channelId,
       threadInfo,
+      startFreshChat: true,
     });
   };
 

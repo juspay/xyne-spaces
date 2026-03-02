@@ -139,6 +139,7 @@ const AppRoot = (): ReactElement => {
     state => state.context.browserPanelState,
   );
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
+  const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
   const { isMobile } = usePlatform();
 
   // Get current location to check if we're on onboarding or vscode
@@ -322,7 +323,11 @@ const AppRoot = (): ReactElement => {
                   </PanelResizeHandle>
                   <Panel ref={xyneAIRightPanelRef} defaultSize={35} maxSize={50}>
                     <div className='max-w-[830px] h-full'>
-                      <XyneAISidebar channelId={xyneAIChannelId} threadInfo={xyneAIThreadInfo} />
+                      <XyneAISidebar
+                        channelId={xyneAIChannelId}
+                        threadInfo={xyneAIThreadInfo}
+                        startFreshChat={xyneAIStartFreshChat}
+                      />
                     </div>
                   </Panel>
                 </PanelGroup>
@@ -441,7 +446,11 @@ const AppRoot = (): ReactElement => {
                 title='Xyne AI'
                 description='Ask questions about your channel'
               >
-                <XyneAISidebar channelId={xyneAIChannelId} threadInfo={xyneAIThreadInfo} />
+                <XyneAISidebar
+                  channelId={xyneAIChannelId}
+                  threadInfo={xyneAIThreadInfo}
+                  startFreshChat={xyneAIStartFreshChat}
+                />
               </Drawer>
             )}
           </EditProvider>
