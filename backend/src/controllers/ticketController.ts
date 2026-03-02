@@ -162,9 +162,15 @@ export class TicketController {
         },
       });
 
-      // Add ticket creator as MENTIONED participant (subscribed by default)
-      await db.conversationParticipant.create({
-        data: {
+      // Add/update ticket creator as MENTIONED participant (subscribed by default)
+      await db.conversationParticipant.upsert({
+        where: {
+          conversationId_userId: {
+            conversationId,
+            userId: createdBy,
+          },
+        },
+        create: {
           id: randomUUID(),
           conversationId,
           userId: createdBy,
@@ -172,7 +178,11 @@ export class TicketController {
           isSubscribed: true,
           joinedAt: now,
         },
-      });
+        update: {
+          participationType: 'MENTIONED',
+          isSubscribed: true,
+        },
+});
 
       await this.channelRepository.updateLastActivity(channelId);
 
@@ -389,15 +399,26 @@ export class TicketController {
             data: { ticketId: ticket.id },
           });
 
-          // Add ticket creator as MENTIONED participant (subscribed by default)
-          await tx.conversationParticipant.create({
-            data: {
+
+          // Add/update ticket creator as MENTIONED participant (subscribed by default)
+          await db.conversationParticipant.upsert({
+            where: {
+              conversationId_userId: {
+                conversationId,
+                userId: createdBy,
+              },
+            },
+            create: {
               id: randomUUID(),
               conversationId,
-              userId: finalCreatedBy,
+              userId: createdBy,
               participationType: 'MENTIONED',
               isSubscribed: true,
               joinedAt: new Date(),
+            },
+            update: {
+              participationType: 'MENTIONED',
+              isSubscribed: true,
             },
           });
 
@@ -489,14 +510,24 @@ export class TicketController {
           });
 
           // Add ticket creator as MENTIONED participant (subscribed by default)
-          await tx.conversationParticipant.create({
-            data: {
+          await tx.conversationParticipant.upsert({
+            where: {
+              conversationId_userId: {
+                conversationId,
+                userId: finalCreatedBy,
+              },
+            },
+            create: {
               id: randomUUID(),
               conversationId,
               userId: finalCreatedBy,
               participationType: 'MENTIONED',
               isSubscribed: true,
               joinedAt: new Date(),
+            },
+            update: {
+              participationType: 'MENTIONED',
+              isSubscribed: true,
             },
           });
         }
