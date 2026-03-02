@@ -1,3 +1,28 @@
+## [1.62.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.61.0...v1.62.0) (2026-03-02)
+
+
+### Features
+
+* add crash error handlers in electron app ([cea2959](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cea2959f2a79efbebffea301403868fe5ca34b5f)), closes [#3685](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3685)
+* Add search support for canvas, call transcript ([6253901](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6253901f4c0dfa8902815e4fc09f7c60baba9925)), closes [#3667](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3667)
+* chat with call transcript ([10ed65b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/10ed65bd52b152473e9a979a6c41dd622d05bed7)), closes [#3724](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3724)
+* Grant board edit permissions to project admins ([cd73c78](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cd73c78acecaac3b67a9721ba1c83d5a14b8d65e)), closes [#3653](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3653)
+* relation mode prisma ([ac903e4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ac903e41cb66c582fb5559e104fc1011b4f886e0)), closes [#3767](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3767)
+* test automation refactor ([76730df](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/76730dfb0ae97e711135851ab77cb9d2009eb714)), closes [#3768](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3768)
+* Thread Level Context Retain [XYNE AI] ([f3779f7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f3779f7cde24994c0fa0037743c8885a08bb2d43)), closes [#3693](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3693)
+
+
+### Bug Fixes
+
+* add live edits panel to workflow screen ([4afce43](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4afce438af5f089d797b71cdfc0b8be3d1c38857)), closes [#3746](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3746)
+* add pendingUrls prop to fullscreen browser ([f46dc41](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f46dc413efb988a086c3678e9c430b50d873af76)), closes [#3759](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3759)
+* duplicate constraint violations occurs ([779af11](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/779af1159059cb954d9c72280cc2eb067d138b61)), closes [#3783](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3783)
+* optimize workflow fetch query ([b298f4f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b298f4f03bb30b62256cf6707bbf4b633b789c8c)), closes [#3764](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3764)
+* proactiveNudge auto scroll when staying close to InputBox ([492caab](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/492caab987f5633e5bdc3f0a2f00cfd56c60b01e))
+* TicketType classification ([1283a65](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1283a656112c5d3681de10d043eba3d1d72b11c8)), closes [#3777](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3777)
+* workflow add errors on top, add search functionality, remove code editor from workflow screen and add persistence in workflow filters ([e9dfc03](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e9dfc0329d455b99a68f66b052cb3b7eab236f35)), closes [#3788](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3788)
+* workflow add errors on top, add search functionality, remove code editor from workflow screen and add persistence in workflow filters ([610d1e4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/610d1e470d431628102fa2f702d013b158beb6e6)), closes [#3782](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3782)
+
 ## [1.61.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.60.0...v1.61.0) (2026-03-01)
 
 
