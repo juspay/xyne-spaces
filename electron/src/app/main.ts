@@ -34,12 +34,16 @@ import ElectronEvent from '../services/logger/electron-events';
 import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
 import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
+import { setupGlobalErrorHandlers } from '../services/error-handler';
 
 // Initialize electron-log for main process
 log.initialize();
 log.transports.file.level = 'info';
 log.transports.console.level = 'info';
 log.info('[Main] Electron app starting...');
+
+// Setup global error handlers FIRST to catch any initialization errors
+setupGlobalErrorHandlers();
 
 // Log app opened event
 Logger.info(EnrollmentEvent.APP_OPENED);

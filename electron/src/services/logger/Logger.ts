@@ -14,6 +14,13 @@ import { net, app } from 'electron';
 import si from 'systeminformation';
 import { config } from '../../app/config';
 import { ElectronEventType } from './electron-events';
+import Store from 'electron-store';
+
+// Create logger instance for errors and warnings only
+export const errorLogger = log.create({ logId: 'error' });
+errorLogger.transports.file.fileName = 'errors.log';
+errorLogger.transports.file.level = 'warn'; // Only warn and error
+errorLogger.transports.console.level = false; 
 
 type EventType = EnrollmentEventType | ElectronEventType;
 
@@ -53,9 +60,11 @@ class LoggerService {
   private flushTimer: NodeJS.Timeout | null = null;
   private loggerUrl: string;
   private isEnabled: boolean = true;
+  private store: Store;
 
   constructor() {
-    this.clientSessionId = uuidv4();
+    this.store = new Store();
+    this.clientSessionId = this.getOrCreateClientSessionId();
     this.electronVersion = app.getVersion();
     this.platformName = 
       os.platform() === 'win32' ? 'windows' : 
@@ -72,6 +81,18 @@ class LoggerService {
   enablePostEnrollmentLogging(): void {
     this.loggerUrl = `${config.BACKEND_URL}/godel/events`;
     log.info('[EnrollmentLogger] Switched to post-enrollment endpoint:', this.loggerUrl);
+  }
+
+  /**
+   * Get or create a persistent client session ID
+   */
+  private getOrCreateClientSessionId(): string {
+    let sessionId = this.store.get('clientSessionId') as string | undefined;
+    if (!sessionId) {
+      sessionId = uuidv4();
+      this.store.set('clientSessionId', sessionId);
+    }     
+    return sessionId;
   }
 
   getClientSessionId(): string {
@@ -160,7 +181,17 @@ class LoggerService {
       ...(extraFields || {}),
     };
 
+    // Write to main log (all levels)
     log.info(`[${logType ?? 'EnrollmentLogger'}]`, JSON.stringify(logEntry));
+    
+    // Write to error log file (only warn and error)
+    if (level === LogLevel.WARN || level === LogLevel.ERROR) {
+      errorLogger[level.toLowerCase() as 'warn' | 'error'](
+        `[${logType ?? 'EnrollmentLogger'}]`,
+        JSON.stringify(logEntry)
+      );
+    }
+    
     this.logs.push(logEntry);
 
     // Auto-flush if batch size reached
@@ -195,8 +226,6 @@ class LoggerService {
     this.sendLogsWithRetry(logsToPush)
       .catch((error) => {
         log.error('[Logger] Failed to push logs after all retries:', error);
-        // Re-add logs to queue on failure
-        // this.logs.unshift(...logsToPush);
       })
       .finally(() => {
         this.flushInProgress = false;
