@@ -7,27 +7,13 @@ export class ConversationsACL extends BaseQueryACL<Prisma.ConversationWhereInput
   }
 
   async getWhereClause(): Promise<Prisma.ConversationWhereInput> {
-    // Get channel IDs where user is a participant
-    const participantChannels = await this.prisma.channelParticipant.findMany({
-      where: { userId: this.ctx.userId },
-      select: { channelId: true },
-    })
-
-    const participantChannelIds = participantChannels.map((p) => p.channelId)
-
-    // Get public channel IDs
-    const publicChannels = await this.prisma.channel.findMany({
-      where: { visibility: 'PUBLIC' },
-      select: { id: true },
-    })
-
-    const publicChannelIds = publicChannels.map((c) => c.id)
-
-    // Combine accessible channel IDs
-    const accessibleChannelIds = [...new Set([...participantChannelIds, ...publicChannelIds])]
-
     return {
-      channelId: { in: accessibleChannelIds },
+      channel: {
+        OR: [
+          { visibility: 'PUBLIC' },
+          { participants: { some: { userId: this.ctx.userId } } },
+        ],
+      },
     }
   }
 }

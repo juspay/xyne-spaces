@@ -12,9 +12,10 @@ generator zero {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-  schemas  = ["public", "workflow"]
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  schemas      = ["public", "workflow"]
+  relationMode = "prisma"
 }
 
 
@@ -249,6 +250,7 @@ model Agent {
   agentSteps         AgentStep[] // <-- Required for Prisma validation
 
   @@unique([name, version])
+  @@index([modelId])
   @@map("agents")
   @@schema("public")
 }
@@ -298,6 +300,8 @@ model AgentToolsMapping {
   tool  Tool  @relation(fields: [toolId], references: [id], onDelete: Cascade)
 
   @@unique([agentId, toolId])
+  @@index([agentId])
+  @@index([toolId])
   @@map("agent_tools_mappings")
   @@schema("public")
 }
@@ -331,6 +335,25 @@ model Ticket {
   stageName        String            // Current stage of the ticket
   ticketType       String?           
 
+  // Relations
+  createdByUser      User                   @relation("TicketCreatedBy", fields: [createdBy], references: [id])
+  updatedByUser      User                   @relation("TicketUpdatedBy", fields: [updatedBy], references: [id])
+  assignedToUser     User?                  @relation("TicketAssignedTo", fields: [assignedTo], references: [id])
+  closedByUser       User?                  @relation("TicketClosedBy", fields: [closedBy], references: [id])
+  channel            Channel                @relation("TicketChannel", fields: [channelId], references: [id])
+  project            Project                @relation(fields: [projectId], references: [id])
+  board              Board                  @relation("TicketBoard", fields: [boardId], references: [id])
+  tags               TicketTag[]
+  referencesOut      TicketReferenceMapping[] @relation("SourceTicket")
+  referencesIn       TicketReferenceMapping[] @relation("TargetTicket")
+  entity             TicketEntityMapping[]
+  activities         TicketActivity[]
+  subTicketMappings  TicketSubTicketMapping[]
+  subTickets         SubTicket[]            @relation("SubTicketMappedTicket")
+  workflows          Workflow[]
+  stageEtaEntries    TicketStageEta[]
+  assignments        TicketAssignment[]
+
   @@index([status])
   @@index([assignedTo, status])
   @@index([createdAt])
@@ -343,6 +366,11 @@ model Ticket {
   @@index([merchantId, createdAt])
   @@index([channelId, merchantId])
   @@index([ticketType])
+  @@index([createdBy])
+  @@index([updatedBy])
+  @@index([closedBy])
+  @@index([conversationId])
+  @@index([channelId])
   @@map("tickets")
   @@schema("public")
 }
@@ -360,8 +388,19 @@ model SubTicket {
   stageProgression  String?   // UI display value like '2/7' showing progression
   assignedTo        String?
 
+  // Relations
+  createdByUser    User                     @relation("SubTicketCreatedBy", fields: [createdBy], references: [id])
+  updatedByUser    User                     @relation("SubTicketUpdatedBy", fields: [updatedBy], references: [id])
+  assignedToUser   User?                    @relation("SubTicketAssignedTo", fields: [assignedTo], references: [id])
+  mappedTicket     Ticket?                  @relation("SubTicketMappedTicket", fields: [mappedTicketId], references: [id])
+  ticketMappings   TicketSubTicketMapping[]
+
   @@index([title])
   @@index([mappedTicketId])
+  @@index([createdBy])
+  @@index([updatedBy])
+  @@index([assignedTo])
+  @@index([conversationId])
   @@map("sub_tickets")
   @@schema("public")
 }
@@ -370,6 +409,10 @@ model TicketSubTicketMapping {
   id          String @id @default(cuid())
   ticketId    String // Parent ticket ID
   subTicketId String // Sub ticket ID
+
+  // Relations
+  ticket    Ticket    @relation(fields: [ticketId], references: [id])
+  subTicket SubTicket @relation(fields: [subTicketId], references: [id])
 
   @@index([ticketId])
   @@index([subTicketId])
@@ -384,6 +427,9 @@ model TicketAssignment {
   userResponsibility UserResponsibility // PR_REVIEWER | QA | etc.
   createdAt          DateTime           @default(now())
   createdBy          String             // User who created the assignment
+
+  // Relations
+  ticket Ticket @relation(fields: [ticketId], references: [id])
 
   @@unique([ticketId, userId, userResponsibility]) // Prevent duplicate assignments
   @@index([ticketId])
@@ -400,7 +446,12 @@ model TicketActivity {
   activityType ActivityType // Type of data stored in value (STRING, NUMBER, JSON, OBJECT)
   value        Json         // The value containing field info, old/new values, etc.
 
+  // Relations
+  ticket        Ticket @relation(fields: [ticketId], references: [id])
+  updatedByUser User   @relation(fields: [updatedBy], references: [id])
+
   @@index([ticketId])
+  @@index([updatedBy])
   @@map("ticket_activities")
   @@schema("public")
 }
@@ -411,6 +462,9 @@ model TicketEntityMapping {
   entityType EntityType // MERCHANT or GATEWAY
   entityName String     // merchant_id or gateway_name
 
+  // Relations
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+
   @@index([ticketId])
   @@map("ticket_entity_mappings")
   @@schema("public")
@@ -420,6 +474,9 @@ model TicketTag {
   id       String @id @default(cuid())
   name     String // Tag provided by user
   ticketId String // Ticket reference
+
+  // Relations
+  ticket Ticket @relation(fields: [ticketId], references: [id])
 
   @@index([ticketId])
   @@map("ticket_tags")
@@ -434,6 +491,10 @@ model TicketReferenceMapping {
   createdBy      String
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
+  // Relations
+  sourceTicket Ticket @relation("SourceTicket", fields: [sourceTicketId], references: [id])
+  targetTicket Ticket @relation("TargetTicket", fields: [targetTicketId], references: [id])
+
   @@index([sourceTicketId])
   @@index([targetTicketId])
   @@unique([sourceTicketId, targetTicketId, relationType])
@@ -452,8 +513,13 @@ model TicketStageEta {
   updatedAt         DateTime? @updatedAt
   updatedBy         String?   // User ID (no FK constraint)
 
+  // Relations
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+  stage  Stage  @relation(fields: [stageId], references: [id])
+
   @@index([ticketId])
   @@index([ticketId, stageId])
+  @@index([stageId])
   @@map("ticket_stage_eta")
   @@index([stageLeftAt])
   @@index([stageEta])
@@ -475,7 +541,9 @@ model Workflow {
 
   // Relations
   workflowExecutions WorkflowExecution[]
+  ticket             Ticket?             @relation(fields: [ticketId], references: [id])
 
+  @@index([ticketId])
   @@map("workflows")
   @@schema("public")
 }
@@ -498,12 +566,15 @@ model WorkflowExecution {
 
   // Relations
   workflow                Workflow               @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  parentWorkflowExecution WorkflowExecution?     @relation("WorkflowExecutionParent", fields: [parentWorkflowExecutionId], references: [id])
+  parentWorkflowExecution WorkflowExecution?     @relation("WorkflowExecutionParent", fields: [parentWorkflowExecutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   childWorkflowExecutions WorkflowExecution[]    @relation("WorkflowExecutionParent")
   workflowSteps           WorkflowStep[]
   workflowExecutionLock   WorkflowExecutionLock?
   externalStepResponses   ExternalStepResponse[]
+  pullRequests            PullRequests[]
 
+  @@index([workflowId])
+  @@index([parentWorkflowExecutionId])
   @@map("workflow_executions")
   @@schema("public")
 }
@@ -572,6 +643,7 @@ model WorkflowStep {
   externalStepResponse  ExternalStepResponse?
 
   @@index([stepSubType])
+  @@index([workflowExecutionId])
   @@map("workflow_steps")
   @@schema("workflow")
 }
@@ -634,6 +706,7 @@ model AgentStep {
   // Relations
   agent Agent? @relation(fields: [agentId], references: [id])
 
+  @@index([agentId])
   @@map("agent_steps")
   @@schema("public")
 }
@@ -653,6 +726,7 @@ model ExternalStepResponse {
   workflowExecution WorkflowExecution @relation(fields: [workflowExecutionId], references: [id], onDelete: Cascade)
   workflowStep      WorkflowStep      @relation(fields: [workflowStepId], references: [id], onDelete: Cascade)
 
+  @@index([workflowExecutionId])
   @@map("external_step_responses")
   @@schema("public")
 }
@@ -707,6 +781,7 @@ model ApiKey {
   // Relations
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("api_keys")
   @@schema("public")
 }
@@ -722,7 +797,12 @@ model UserGroup {
   updatedAt   DateTime @updatedAt
 
   // Relations
-  resourceAccess ResourceAccess[]
+  resourceAccess       ResourceAccess[]
+  userGroupMappings    UserGroupMapping[]
+  assignmentStates     UserAssignmentState[]
+  boardComplexityScores BoardComplexityScore[]
+  workloadMappings     UserWorkloadMapping[]
+  expertiseMappings    UserExpertiseMapping[]
 
   @@map("user_groups")
   @@schema("public")
@@ -779,9 +859,27 @@ model User {
   // Relations
   resourceAccess            ResourceAccess[]
   auditLogs                 ACLAuditLog[]
-  sessions             UserSession[]         // User can have multiple sessions (multi-device support)
-  apiKeys              ApiKey[]              // User can have multiple API keys
-  presenceStatus       UserPresence?         // One-to-one relation with presence status
+  sessions                  UserSession[]           // User can have multiple sessions (multi-device support)
+  apiKeys                   ApiKey[]                // User can have multiple API keys
+  presenceStatus            UserPresence?           // One-to-one relation with presence status
+  createdTickets            Ticket[]               @relation("TicketCreatedBy")
+  updatedTickets            Ticket[]               @relation("TicketUpdatedBy")
+  assignedTickets           Ticket[]               @relation("TicketAssignedTo")
+  closedTickets             Ticket[]               @relation("TicketClosedBy")
+  createdSubTickets         SubTicket[]            @relation("SubTicketCreatedBy")
+  updatedSubTickets         SubTicket[]            @relation("SubTicketUpdatedBy")
+  assignedSubTickets        SubTicket[]            @relation("SubTicketAssignedTo")
+  userGroupMappings         UserGroupMapping[]
+  channelParticipations     ChannelParticipant[]   @relation("ChannelParticipantUser")
+  channelUserStatuses       ChannelUserStatus[]    @relation("ChannelUserStatusUser")
+  sentMessages              Message[]              @relation("MessageSender")
+  createdConversations      Conversation[]         @relation("ConversationCreatedBy")
+  createdChannels           Channel[]              @relation("ChannelCreatedBy")
+  ticketActivities          TicketActivity[]
+  conversationParticipations ConversationParticipant[]
+  userAssignmentStates      UserAssignmentState[]  @relation("UserAssignmentStateUser")
+  workloadMappings          UserWorkloadMapping[]  @relation("UserWorkloadUser")
+  expertiseMappings         UserExpertiseMapping[] @relation("UserExpertiseUser")
 
   @@map("users")
   @@schema("public")
@@ -808,7 +906,13 @@ model UserGroupMapping {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
+  // Relations
+  user      User      @relation(fields: [userId], references: [id])
+  userGroup UserGroup @relation(fields: [userGroupId], references: [id])
+
   @@unique([userId, userGroupId])
+  @@index([userId])
+  @@index([userGroupId])
   @@map("user_group_mappings")
   @@schema("public")
 }
@@ -824,8 +928,13 @@ model UserAssignmentState {
   updatedAt             DateTime @updatedAt
   createdBy             String
 
+  // Relations
+  user      User      @relation("UserAssignmentStateUser", fields: [userId], references: [id])
+  userGroup UserGroup @relation(fields: [userGroupId], references: [id])
+
   @@unique([userId, userGroupId])
   @@index([userGroupId])
+  @@index([userId])
   @@map("user_assignment_states")
   @@schema("public")
 }
@@ -841,8 +950,13 @@ model BoardComplexityScore {
   updatedAt       DateTime @updatedAt
   createdBy       String
 
+  // Relations
+  userGroup UserGroup @relation(fields: [userGroupId], references: [id])
+  board     Board     @relation(fields: [boardId], references: [id])
+
   @@unique([userGroupId, boardId])
   @@index([userGroupId])
+  @@index([boardId])
   @@map("board_complexity_scores")
   @@schema("public")
 }
@@ -859,8 +973,15 @@ model UserWorkloadMapping {
   updatedAt   DateTime @updatedAt
   createdBy   String
 
+  // Relations
+  user      User      @relation("UserWorkloadUser", fields: [userId], references: [id])
+  userGroup UserGroup @relation(fields: [userGroupId], references: [id])
+  board     Board     @relation(fields: [boardId], references: [id])
+
   @@unique([userId, userGroupId, boardId])
   @@index([userGroupId])
+  @@index([userId])
+  @@index([boardId])
   @@map("user_workload_mappings")
   @@schema("public")
 }
@@ -878,8 +999,15 @@ model UserExpertiseMapping {
   updatedAt     DateTime @updatedAt
   createdBy     String
 
+  // Relations
+  user      User      @relation("UserExpertiseUser", fields: [userId], references: [id])
+  userGroup UserGroup @relation(fields: [userGroupId], references: [id])
+  board     Board     @relation(fields: [boardId], references: [id])
+
   @@unique([userId, userGroupId, boardId])
   @@index([userGroupId])
+  @@index([userId])
+  @@index([boardId])
   @@map("user_expertise_mappings")
   @@schema("public")
 }
@@ -960,6 +1088,9 @@ model ResourceAccess {
   // Constraints - either groupId or userId must be present, but not both
   @@unique([groupId, resourceId, accessType])
   @@unique([userId, resourceId, accessType])
+  @@index([groupId])
+  @@index([userId])
+  @@index([resourceId])
   @@map("resource_access")
   @@schema("public")
 }
@@ -1038,7 +1169,11 @@ model PullRequests {
   status                  PRStatus
   ticketId                String?   // Ticket reference for prs raised by devs
 
+  // Relations
+  workflowExecution WorkflowExecution? @relation(fields: [workflowExecutionId], references: [id])
+
   @@unique([prId, prUrl])
+  @@index([workflowExecutionId])
   @@index([date])
   @@map("pull_requests")
   @@schema("public")
@@ -1056,6 +1191,9 @@ model Organization {
   updatedAt   DateTime @updatedAt
   metadata    Json?
 
+  // Relations
+  members OrgMember[]
+
   @@map("organizations")
   @@schema("public")
 }
@@ -1067,6 +1205,9 @@ model OrgMember {
   role        OrgRole  // OWNER | ADMIN | MEMBER | VIEWER
   joinedAt    DateTime @default(now())
   invitedBy   String?  // Who invited this user (no FK constraint)
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [orgId])
 
   @@unique([orgId, userId]) // User can only be member once per org
   @@index([orgId]) // Fast org member lookup
@@ -1085,6 +1226,11 @@ model Project {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime? @updatedAt
 
+  // Relations
+  tickets  Ticket[]
+  channels Channel[]
+  boards   Board[]
+
   @@map("projects")
   @@schema("public")
 }
@@ -1092,7 +1238,7 @@ model Project {
 // Board Models
 model Board {
   id          String    @id @default(cuid())
-  name        String    
+  name        String
   boardType   BoardType @default(DEFAULT)
   projectId   String    // Project ID (no FK constraint)
   createdBy   String    // User ID (no FK constraint)
@@ -1101,6 +1247,14 @@ model Board {
   metadata    Json?     // Board configuration including ticketFormConfig
   createdAt   DateTime  @default(now())
   updatedAt   DateTime? @updatedAt
+
+  // Relations
+  project               Project                @relation(fields: [projectId], references: [id])
+  tickets               Ticket[]               @relation("TicketBoard")
+  stages                Stage[]
+  boardComplexityScores BoardComplexityScore[]
+  workloadMappings      UserWorkloadMapping[]
+  expertiseMappings     UserExpertiseMapping[]
 
   @@unique([name, projectId])
   @@index([projectId])
@@ -1120,6 +1274,10 @@ model Stage {
   updatedAt            DateTime?    @updatedAt
   defaultTicketStatus     TicketStatus    @default(IN_PROGRESS)  // Deprecated - use defaultTicketStatusV2
   defaultTicketStatusV2   TicketStatusV2 @default(STARTED)
+
+  // Relations
+  board           Board            @relation(fields: [boardId], references: [id])
+  ticketStageEtas TicketStageEta[]
 
   @@index([boardId])
   @@map("stages")
@@ -1156,6 +1314,17 @@ model Channel {
   isMigrated      Boolean?                @default(false)
   addUserPolicy   ChannelAddUserPolicy?  @default(EVERYONE)
 
+  // Relations
+  conversations      Conversation[]
+  participants       ChannelParticipant[]
+  participantsStatus ChannelUserStatus[]
+  createdByUser      User                 @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
+  project            Project              @relation(fields: [projectId], references: [id])
+  tickets            Ticket[]             @relation("TicketChannel")
+  calls              Call[]
+
+  @@index([projectId])
+  @@index([createdBy])
   @@map("channels")
   @@schema("public")
 }
@@ -1172,6 +1341,10 @@ model ChannelParticipant {
   lastViewedConversationId  String?     // Track last conversation viewed for optimization
   isStarred                 Boolean     @default(false)
   isClosed                  Boolean     @default(false) // Track if user has closed/hidden this DM
+
+  // Relations
+  channel Channel @relation(fields: [channelId], references: [id])
+  user    User    @relation("ChannelParticipantUser", fields: [userId], references: [id])
 
   @@unique([channelId, userId]) // Prevent duplicate participants
   @@index([channelId]) // Fast channel participant lookup
@@ -1192,6 +1365,10 @@ model ChannelUserStatus {
   isClosed                  Boolean     @default(false) // Track if user has closed/hidden this DM
   unreadCount               Int         @default(0) // Track unread count for this channel
   selectedBoardId           String?     // Track user's preferred board for this channel
+
+  // Relations
+  channel Channel @relation(fields: [channelId], references: [id])
+  user    User    @relation("ChannelUserStatusUser", fields: [userId], references: [id])
 
   @@unique([channelId, userId]) // Prevent duplicate participants
   @@index([channelId]) // Fast channel participant lookup
@@ -1217,11 +1394,18 @@ model Conversation {
   callId            String?  
   createdAt         DateTime @default(now())
 
+  // Relations
+  channel         Channel                  @relation(fields: [channelId], references: [id])
+  messages        Message[]
+  createdByUser   User                     @relation("ConversationCreatedBy", fields: [createdBy], references: [id])
+  participants    ConversationParticipant[]
+
   @@index([channelId, lastActivityAt]) // Fast channel conversation lookup
   @@index([channelId]) // Alternative simple index
   @@index([ticketId]) // Fast ticket lookup
   @@index([callId])
   @@index([conversationId, callId])
+  @@index([createdBy])
   @@map("conversations")
   @@schema("public")
 }
@@ -1234,6 +1418,10 @@ model ConversationParticipant {
   participationType ConversationParticipation?    // AUTHOR, MENTIONED, or NULL (manual subscription)
   isSubscribed      Boolean                       @default(true) // Notification subscription status
   joinedAt          DateTime                      @default(now())
+
+  // Relations
+  conversation Conversation @relation(fields: [conversationId], references: [conversationId])
+  user         User         @relation(fields: [userId], references: [id])
 
   @@unique([conversationId, userId]) // One participation record per user per conversation
   @@index([conversationId]) // Fast conversation participant lookup
@@ -1303,11 +1491,16 @@ model Message {
   
   // Relations
   messageSearch  MessageSearch? // One-to-one relation with search index
-  
+  conversation   Conversation   @relation(fields: [conversationId], references: [conversationId])
+  sender         User           @relation("MessageSender", fields: [senderId], references: [id])
+  reactions      Reaction[]
+  reactionCounts ReactionCount[]
+
   @@index([conversationId, createdAt]) // Fast conversation message lookup
   @@index([conversationId]) // Alternative simple index
   @@index([visibleTo]) // Fast visibility filtering
   @@index([conversationId, visibleTo]) // Composite index for visibility queries
+  @@index([senderId])
   @@map("messages")
   @@schema("public")
 }
@@ -1360,6 +1553,9 @@ model Reaction {
   emojiName   String   // Any Unicode emoji: "👍", "❤️", "😄", "🎉", etc.
   createdAt   DateTime @default(now())
 
+  // Relations
+  message Message @relation(fields: [messageId], references: [messageId])
+
   @@unique([messageId, userId, emojiName]) // User can only react once per emoji per message
   @@index([messageId]) // Fast lookup of message reactions
   @@map("reactions")
@@ -1372,6 +1568,9 @@ model ReactionCount {
   emojiName   String   // The emoji being counted
   count       Int      @default(0)
   updatedAt   DateTime @updatedAt
+
+  // Relations
+  message Message @relation(fields: [messageId], references: [messageId])
 
   @@unique([messageId, emojiName]) // One count record per emoji per message
   @@index([messageId]) // Fast lookup of message reaction counts
@@ -1661,6 +1860,10 @@ model Call {
   updatedAt        DateTime    @updatedAt
   metadata         Json?       // LiveKit room config, max participants, etc.
 
+  // Relations
+  channel      Channel           @relation(fields: [channelId], references: [id])
+  participants CallParticipant[]
+
   @@index([externalId]) // Fast lookup by public ID
   @@index([createdByUserId]) // Fast lookup of user's calls
   @@index([organizerId]) // Fast lookup by organizer
@@ -1686,6 +1889,9 @@ model CallParticipant {
   joinedAt     DateTime?           // NULL = not joined yet
   leftAt       DateTime?           // NULL = still in call
   metadata     Json?               // Connection quality, device info, etc.
+
+  // Relations
+  call Call @relation(fields: [callId], references: [id])
 
   @@unique([callId, userId]) // Prevent duplicate participants
   @@index([callId]) // Fast call participant lookup
@@ -1736,6 +1942,9 @@ model Canvas {
 
   // Doc type - Canvas or Quarto
   docType      DocType          @default(Canvas)
+
+  // Relations
+  participants CanvasParticipant[]
   // Quarto Doc fields - when docType is Quarto
   userRepo     String?          // Combined org/repo/branch identifier (for backward compatibility)
   repoId       String?          // Repo ID (no FK constraint) - for editing capability
@@ -1764,6 +1973,9 @@ model CanvasParticipant {
   role      CanvasRole @default(VIEWER) // OWNER | EDITOR | VIEWER
   joinedAt  DateTime   @default(now())
   updatedAt DateTime   @updatedAt
+
+  // Relations
+  canvas Canvas @relation(fields: [canvasId], references: [id])
 
   @@unique([canvasId, userId]) // User can only have one role per canvas
   @@index([canvasId])

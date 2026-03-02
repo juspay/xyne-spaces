@@ -69,8 +69,8 @@ export type UpdateTicketInput = Prisma.TicketUpdateInput;
 // Note: TicketWithWorkflows removed - no FK relation between Ticket and Workflow
 
 export type Workflow = Prisma.WorkflowGetPayload<{}>;
-export type CreateWorkflowInput = Prisma.WorkflowCreateInput;
-export type UpdateWorkflowInput = Prisma.WorkflowUpdateInput;
+export type CreateWorkflowInput = Prisma.WorkflowUncheckedCreateInput;
+export type UpdateWorkflowInput = Prisma.WorkflowUncheckedUpdateInput;
 export type WorkflowWithSteps = Prisma.WorkflowGetPayload<{
   include: {
     workflowExecutions: {
