@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import XyneAIStar from '../../icons/xyne-ai/XyneAIStar';
 import { MessageType } from '@xyne/shared';
@@ -17,6 +17,43 @@ interface ProactiveNudgeListProps {
   nudgeCount?: number;
   className?: string;
 }
+
+interface ScrollElements {
+  nudgeContainer: Element;
+  parentMessageBubble: Element;
+  scrollContainer: Element;
+}
+
+// Helper: Get scroll-related DOM elements for a message
+const getScrollElements = (messageId: string): ScrollElements | null => {
+  const nudgeContainer = document.querySelector(`[data-nudge-container="${messageId}"]`);
+  if (!nudgeContainer) return null;
+
+  const parentMessageBubble = nudgeContainer.closest('[data-component="MessageBubble"]');
+  if (!parentMessageBubble) return null;
+
+  const scrollContainer = parentMessageBubble.closest(
+    '.overflow-y-auto, .overflow-y-scroll, [style*="overflow-y"]',
+  );
+  if (!scrollContainer) return null;
+
+  return { nudgeContainer, parentMessageBubble, scrollContainer };
+};
+
+// Helper: Calculate distance from bottom of viewport
+const getDistanceFromBottom = (elements: ScrollElements): number => {
+  const messageRect = elements.parentMessageBubble.getBoundingClientRect();
+  const containerRect = elements.scrollContainer.getBoundingClientRect();
+  return containerRect.bottom - messageRect.bottom;
+};
+
+// Helper: Smooth scroll to a position
+const smoothScrollTo = (scrollContainer: Element, scrollTop: number): void => {
+  scrollContainer.scrollTo({
+    top: scrollTop,
+    behavior: 'smooth',
+  });
+};
 
 export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
   messageId,
@@ -37,6 +74,24 @@ export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
   const hasNudges = actionableCount > 0;
   const [expanded, setExpanded] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const savedScrollPositionRef = useRef<number | null>(null);
+  const [hasAutoScrolled, setHasAutoScrolled] = useState(false);
+  const shouldScrollOnExpandRef = useRef<boolean>(false);
+
+  // Handler: Save scroll position before expanding
+  const handleToggleExpand = useCallback(() => {
+    if (!expanded) {
+      const elements = getScrollElements(messageId);
+      if (elements) {
+        savedScrollPositionRef.current = elements.scrollContainer.scrollTop;
+
+        // Check if we're near the bottom BEFORE expanding
+        const distanceFromBottom = getDistanceFromBottom(elements);
+        shouldScrollOnExpandRef.current = distanceFromBottom < 150;
+      }
+    }
+    setExpanded(prev => !prev);
+  }, [expanded, messageId]);
 
   const nudgesEnabled = enabled && hasNudges && expanded;
   const [nudgesResult] = useCachedQuery(
@@ -68,6 +123,78 @@ export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
     }
   }, [activeIndex, entries.length]);
 
+  // Auto-scroll when nudge button appears for the first time
+  useEffect(() => {
+    // Reset when nudges disappear
+    if (!hasNudges) {
+      setHasAutoScrolled(false);
+      return;
+    }
+
+    if (hasAutoScrolled) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const elements = getScrollElements(messageId);
+      if (!elements) return;
+
+      const distanceFromBottom = getDistanceFromBottom(elements);
+
+      // If the nudge button is near the bottom (might be hidden), scroll up
+      if (distanceFromBottom < 100) {
+        const currentScroll = elements.scrollContainer.scrollTop;
+        smoothScrollTo(elements.scrollContainer, currentScroll + 80);
+      }
+
+      setHasAutoScrolled(true);
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [hasNudges, hasAutoScrolled, messageId]);
+
+  // Auto-scroll when expanding/collapsing the nudge
+  useEffect(() => {
+    if (!expanded && savedScrollPositionRef.current === null) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const elements = getScrollElements(messageId);
+      if (!elements) return;
+
+      if (expanded) {
+        // Use the pre-calculated flag from BEFORE expansion
+        if (shouldScrollOnExpandRef.current) {
+          const currentScroll = elements.scrollContainer.scrollTop;
+          smoothScrollTo(elements.scrollContainer, currentScroll + 250);
+
+          // Second scroll after content fully renders to adjust for actual height
+          setTimeout(() => {
+            const updatedElements = getScrollElements(messageId);
+            if (updatedElements) {
+              const finalDistance = getDistanceFromBottom(updatedElements);
+
+              // If still too close to bottom, scroll more
+              if (finalDistance < 100) {
+                const additionalScroll = 150 - finalDistance;
+                const currentPos = updatedElements.scrollContainer.scrollTop;
+                smoothScrollTo(updatedElements.scrollContainer, currentPos + additionalScroll);
+              }
+            }
+            shouldScrollOnExpandRef.current = false; // Reset after use
+          }, 300);
+        }
+      } else if (savedScrollPositionRef.current !== null) {
+        // Collapsing - always restore original position
+        smoothScrollTo(elements.scrollContainer, savedScrollPositionRef.current);
+        savedScrollPositionRef.current = null;
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [expanded, messageId]);
+
   if (!enabled || !hasNudges) return null;
 
   const suggestionLabel = actionableCount === 1 ? '1 Suggestion' : `${actionableCount} Suggestions`;
@@ -75,11 +202,15 @@ export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
   const currentNudge = entries[activeIndex];
 
   return (
-    <div className={cn('mt-3 w-full', !isMobile && 'max-w-[640px]', className)}>
+    <div
+      className={cn('mt-3 w-full', !isMobile && 'max-w-[640px]', className)}
+      data-nudge-container={messageId}
+    >
       {/* Collapsed pill trigger */}
       <button
         type='button'
-        onClick={() => setExpanded(prev => !prev)}
+        data-nudge-button={messageId}
+        onClick={handleToggleExpand}
         className={cn(
           'inline-flex items-center gap-1 rounded-[8px] border border-[#e4e6e7] bg-[#f2f2f3]',
           'px-[6px] py-[3px]',
