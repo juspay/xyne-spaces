@@ -22,16 +22,13 @@ import {
 } from '../../services/Workflow/workflowGraphService.types';
 import { convertASTGraphToWorkflowUILight } from '../../services/Workflow/workflowGraphService.utils';
 import { downloadJsonAsCsv, JsonObject } from './utils/convertToCSV';
-import { Workflow, WorkflowStep, WorkflowExecution } from '@xyne/shared';
+import { WorkflowStep } from '@xyne/shared';
 import { apiInstance } from '../../services/clients/apiClient';
 import { RefreshCw, Download, Maximize2, Minimize2 } from 'lucide-react';
 import { useWorkflowControl } from '../../services/Workflow/workflowGraphService';
 import { toast } from 'sonner';
 import { Modal } from '@juspay/blend-design-system';
 
-interface WorkflowWithExecutions extends Workflow {
-  readonly workflowExecutions: readonly WorkflowExecution[];
-}
 interface ExtendedWorkflowNodeData extends WorkflowNodeData {
   originalStatus?: string;
   [key: string]: unknown;
@@ -375,7 +372,8 @@ const GraphInner: React.FC<InnerProps> = ({
 };
 
 interface WorkflowGraphOnlyProps {
-  workflowData: readonly WorkflowWithExecutions[];
+  workflowType?: string | undefined;
+  workflowId?: string | undefined;
   combinedStepsData: CombinedWorkflowData;
   loading?: boolean;
   onRefresh?: () => void;
@@ -384,7 +382,8 @@ interface WorkflowGraphOnlyProps {
 }
 
 export const WorkflowGraphOnly: React.FC<WorkflowGraphOnlyProps> = ({
-  workflowData,
+  workflowType,
+  workflowId,
   combinedStepsData,
   onRefresh,
   onNodeSelect,
@@ -394,7 +393,7 @@ export const WorkflowGraphOnly: React.FC<WorkflowGraphOnlyProps> = ({
     data: astGraph,
     isLoading,
     error,
-  } = useWorkflowGraphData(workflowData[0]?.workflowType ?? undefined, Boolean(combinedStepsData));
+  } = useWorkflowGraphData(workflowType, Boolean(combinedStepsData));
   const { nodes, edges } = useMemo(
     () =>
       astGraph && combinedStepsData
@@ -405,9 +404,9 @@ export const WorkflowGraphOnly: React.FC<WorkflowGraphOnlyProps> = ({
   const exportData = (): void => {
     void downloadJsonAsCsv(
       JSON.parse(JSON.stringify(combinedStepsData)) as JsonObject,
-      `${workflowData[0]?.id}_${new Date().toISOString().split('T')[0]}.csv`,
+      `${workflowId ?? 'workflow'}_${new Date().toISOString().split('T')[0]}.csv`,
       undefined,
-      workflowData[0]?.id,
+      workflowId,
     );
   };
 
