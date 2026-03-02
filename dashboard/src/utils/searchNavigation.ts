@@ -50,7 +50,13 @@ export const navigateToSearchResult = async (
       break;
 
     case 'attachment':
-      navigateToAttachment(result, navigate);
+      if (result.searchContext?.subApp === 'canvas') {
+        navigateToCanvas(result, navigate);
+      } else if (result.searchContext?.subApp === 'transcript') {
+        navigateToTranscript(result, navigate);
+      } else {
+        navigateToAttachment(result, navigate);
+      }
       break;
 
     default:
@@ -199,5 +205,35 @@ export const navigateToAttachment = (
     });
   } else {
     console.warn('[SEARCH-NAVIGATION] Cannot navigate to attachment: missing channel information');
+  }
+};
+
+/**
+ * Navigate to a canvas
+ *
+ * Opens the global canvas view for the selected canvas
+ */
+export const navigateToCanvas = (result: DisplaySearchResult, navigate: NavigateFunction): void => {
+  void navigate(`/chat/canvas/${result.id}`);
+};
+
+/**
+ * Navigate to a transcript
+ *
+ * Navigates to the chat location where the transcript was shared
+ */
+export const navigateToTranscript = (
+  result: DisplaySearchResult,
+  navigate: NavigateFunction,
+): void => {
+  const { channelId, conversationId } = result.searchContext || {};
+
+  if (channelId && conversationId) {
+    void navigate(`/chat/dir/${channelId}/${conversationId}`);
+  } else if (channelId) {
+    void navigate(`/chat/dir/${channelId}`);
+  } else {
+    // Fallback to attachment viewer
+    navigateToAttachment(result, navigate);
   }
 };

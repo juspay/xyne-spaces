@@ -107,7 +107,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       range,       // Time keyword filter (today, yesterday, etc.)
       stage,       // Ticket stage
       assignee,    // Assigned user name
-      filterOnly   // Flag for filter-only search (no query text)
+      filterOnly,  // Flag for filter-only search (no query text)
+      subApp       // Canvas/Transcript sub-app filter
     } = req.query;
 
     const userId = (req as any).user?.id;
@@ -126,7 +127,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       offset: Number(offset),
       limit: Number(limit),
       slack: {},
-      ticket: {}
+      ticket: {},
+      file: {}
     };
     
      if (rankProfile) {
@@ -233,6 +235,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (assignee) {
       options.ticket.assignedTo = (assignee as string).split(',');
+    }
+
+    if (subApp) {
+      options.file.subApp = (subApp as string).split(',');
     }
 
     // Call vespa search

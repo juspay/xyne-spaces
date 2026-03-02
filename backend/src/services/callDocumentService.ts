@@ -17,6 +17,8 @@ import { CanvasRole } from '@prisma/client';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import { getCanvasUrl } from '@/services/canvasService';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
 import type {
   BlockNoteBlock,
   BlockNoteTableBlock,
@@ -743,6 +745,21 @@ export class CallDocumentService {
       });
 
       logger.info(`[CallDocumentService] Created PRD canvas ${canvasId} for call ${callId}`);
+
+      // Queue Vespa indexing for the canvas
+      try {
+        await vespaQueue.addJob({
+          schema: fileSchema,
+          docId: canvasId,
+          jobType: 'feed',
+          userId: createdByUserId,
+          app: SubApp.CANVAS,
+        });
+        logger.info(`[CallDocumentService] Queued Vespa indexing for PRD canvas ${canvasId}`);
+      } catch (vespaError) {
+        logger.error(`[CallDocumentService] Failed to queue Vespa job for PRD canvas ${canvasId}:`, vespaError);
+      }
+
       return viewAccessId;
     } catch (error) {
       logger.error('[CallDocumentService] Failed to create PRD canvas:', error);
@@ -857,6 +874,20 @@ export class CallDocumentService {
         entityType: 'canvases',
         operation: 'insert'
       }).catch(err => logger.error('[CallDocumentService] Canvas side-effect handler error:', err));
+
+      // Queue Vespa indexing for the canvas
+      try {
+        await vespaQueue.addJob({
+          schema: fileSchema,
+          docId: canvasId,
+          jobType: 'feed',
+          userId: createdByUserId,
+          app: SubApp.CANVAS,
+        });
+        logger.info(`[CallDocumentService] Queued Vespa indexing for detailed summary canvas ${canvasId}`);
+      } catch (vespaError) {
+        logger.error(`[CallDocumentService] Failed to queue Vespa job for detailed summary canvas ${canvasId}:`, vespaError);
+      }
 
       return viewAccessId;
     } catch (error) {

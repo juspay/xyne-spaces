@@ -39,7 +39,9 @@ export enum VespaDocType {
 }
 
 export enum SubApp {
-  RCA = "RCA"
+  RCA = "RCA",
+  CANVAS = "CANVAS",
+  TRANSCRIPT = "TRANSCRIPT"
 }
 
 export interface VespaDocument {
@@ -238,6 +240,8 @@ export interface VespaFileDocument extends VespaDocument {
   isPrivate: boolean,
   mimeType: string,
   subApp: string,
+  channelRef?: string;
+  conversationId?: string;
 }
 
 export type VespaSearchResult =
