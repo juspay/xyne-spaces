@@ -7,17 +7,11 @@ export class CallsACL extends BaseQueryACL<Prisma.CallWhereInput> {
   }
 
   async getWhereClause(): Promise<Prisma.CallWhereInput> {
-    const participantCalls = await this.prisma.callParticipant.findMany({
-      where: { userId: this.ctx.userId },
-      select: { callId: true },
-    })
-
-    const participantCallIds = participantCalls.map((p) => p.callId)
-
     return {
       OR: [
         { createdByUserId: this.ctx.userId },
-        { id: { in: participantCallIds } },
+        { participants: { some: { userId: this.ctx.userId } } },
+        { channel: { participants: { some: { userId: this.ctx.userId } } } },
       ],
     }
   }

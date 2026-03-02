@@ -7,44 +7,21 @@ export class MessagesACL extends BaseQueryACL<Prisma.MessageWhereInput> {
   }
 
   async getWhereClause(): Promise<Prisma.MessageWhereInput> {
-    // Get channel IDs where user is a participant
-    const participantChannels = await this.prisma.channelParticipant.findMany({
-      where: { userId: this.ctx.userId },
-      select: { channelId: true },
-    })
-
-    const participantChannelIds = participantChannels.map((p) => p.channelId)
-
-    // Get public channel IDs
-    const publicChannels = await this.prisma.channel.findMany({
-      where: { visibility: 'PUBLIC' },
-      select: { id: true },
-    })
-
-    const publicChannelIds = publicChannels.map((c) => c.id)
-
-    // Combine accessible channel IDs
-    const accessibleChannelIds = [...new Set([...participantChannelIds, ...publicChannelIds])]
-
-    // Get conversation IDs from accessible channels
-    const accessibleConversations = await this.prisma.conversation.findMany({
-      where: { channelId: { in: accessibleChannelIds } },
-      select: { conversationId: true },
-    })
-
-    const accessibleConversationIds = accessibleConversations.map((c) => c.conversationId)
-
     return {
       AND: [
-        // Visibility check
         {
-          OR: [
-            { visibleTo: null },
-            { visibleTo: this.ctx.userId },
-          ],
+          OR: [{ visibleTo: null }, { visibleTo: this.ctx.userId }],
         },
-        // Channel access check via conversation
-        { conversationId: { in: accessibleConversationIds } },
+        {
+          conversation: {
+            channel: {
+              OR: [
+                { visibility: 'PUBLIC' },
+                { participants: { some: { userId: this.ctx.userId } } },
+              ],
+            },
+          },
+        },
       ],
     }
   }
