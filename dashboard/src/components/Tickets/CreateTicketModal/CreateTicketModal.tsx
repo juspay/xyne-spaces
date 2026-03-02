@@ -317,6 +317,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // Title generator hook
   const {
     title: generatedTitle,
+    ticketType: generatedTicketType,
     isGenerating: isTitleGenerating,
     generateFromDescription,
     cancelGeneration,
@@ -643,12 +644,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     };
   }, [isOpen, initialDescription, initialTitle, hasTitleBeenGenerated, isTitleGenerating]);
 
-  // Update form title when generated title is ready
+  // Update form title and ticket type when generated values are ready
   useEffect(() => {
     if (generatedTitle && !form.getFieldValue('title')) {
       form.setFieldValue('title', generatedTitle);
     }
-  }, [form, generatedTitle]);
+    // Only set generated ticket type for non-release boards
+    if (generatedTicketType && !isReleaseBoard(selectedBoard?.boardType)) {
+      form.setFieldValue('ticketType', generatedTicketType);
+    }
+  }, [form, generatedTitle, generatedTicketType, selectedBoard?.boardType]);
 
   // File handling functions
   const handleModalDragOver = (e: DragEvent<HTMLDivElement>): void => {

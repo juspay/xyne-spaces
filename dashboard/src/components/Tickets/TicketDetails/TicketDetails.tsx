@@ -1943,6 +1943,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             }
           />
 
+          {/* Ticket Type */}
+          <TicketKeyValuePair
+            ticketKey='Type'
+            value={
+              <span className='flex items-center gap-2'>
+                {ticket.ticketType || BaseTicketType.Fix}
+              </span>
+            }
+          />
+
           {/* Channel */}
           <TicketKeyValuePair
             ticketKey='Channel'

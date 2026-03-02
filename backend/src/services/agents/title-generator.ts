@@ -23,10 +23,13 @@ import {
 import { config } from '../../config/env.js';
 
 // Import prompts
-import { TITLE_GENERATOR_SYSTEM_PROMPT, buildTitleGeneratorUserPrompt } from './prompts.js';
+import { getTitleGeneratorSystemPrompt, buildTitleGeneratorUserPrompt } from './prompts.js';
 
 // Import utilities
 import { parseAgentOutput } from './utils.js';
+
+// Import shared types
+import { BaseTicketType, type ClassifiableTicketType } from '@xyne/shared';
 
 // ============================================================================
 // Configuration - Loaded from environment variables
@@ -68,6 +71,10 @@ export interface TitleGeneratorInput {
  */
 const TitleGeneratorOutputSchema = z.object({
   title: z.string().min(1).describe('A concise, descriptive title for the ticket'),
+  ticketType: z.nativeEnum(BaseTicketType).refine(
+    (val): val is ClassifiableTicketType => val !== BaseTicketType.Release,
+    { message: 'Release is not a classifiable ticket type' }
+  ).describe('The classified ticket type'),
 });
 
 /**
@@ -93,7 +100,7 @@ export const titleGeneratorAgent: Agent<TitleGeneratorContext, AgentRawOutput> =
   name: 'TitleGenerator',
 
   instructions: (_state: Readonly<RunState<TitleGeneratorContext>>) => {
-    return TITLE_GENERATOR_SYSTEM_PROMPT;
+    return getTitleGeneratorSystemPrompt();
   },
 
   modelConfig: {
@@ -114,9 +121,9 @@ function parseTitleGeneratorOutput(content: string): TitleGeneratorOutput {
   if (title.length > 100) {
     title = title.substring(0, 97) + '...';
   }
-
   return {
     title,
+    ticketType: parsed.ticketType as ClassifiableTicketType,
   };
 }
 
