@@ -9,15 +9,46 @@ const TicketsScreen = (): ReactElement => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [shouldRedirect, setShouldRedirect] = useState(true);
-  const [filters, setFilters] = useState<TicketFilters>({
-    searchQuery: '',
-    statusFilter: [],
-    workflowTypeFilter: [],
-    environmentFilter: [],
-    createdByFilter: [],
-    assignedToFilter: [],
-    dateRangeFilter: null,
+  const [filters, setFilters] = useState<TicketFilters>(() => {
+    const saved = localStorage.getItem('ticket-screen-filters');
+    if (saved) {
+      try {
+        const parsed: unknown = JSON.parse(saved);
+        if (parsed !== null && typeof parsed === 'object' && 'dateRangeFilter' in parsed) {
+          const dateRangeFilter = (parsed as { dateRangeFilter: unknown }).dateRangeFilter;
+          if (
+            dateRangeFilter !== null &&
+            typeof dateRangeFilter === 'object' &&
+            dateRangeFilter !== undefined
+          ) {
+            const dr = dateRangeFilter as Record<string, unknown>;
+            if (typeof dr['startDate'] === 'string') {
+              dr['startDate'] = new Date(dr['startDate']);
+            }
+            if (typeof dr['endDate'] === 'string') {
+              dr['endDate'] = new Date(dr['endDate']);
+            }
+          }
+        }
+        return parsed as TicketFilters;
+      } catch (e) {
+        console.error('Failed to parse filters from local storage', e);
+      }
+    }
+    return {
+      searchQuery: '',
+      statusFilter: [],
+      workflowTypeFilter: [],
+      environmentFilter: [],
+      createdByFilter: [],
+      assignedToFilter: [],
+      dateRangeFilter: null,
+    };
   });
+
+  useEffect(() => {
+    localStorage.setItem('ticket-screen-filters', JSON.stringify(filters));
+  }, [filters]);
 
   useEffect(() => {
     if (searchParams.get('clear') === 'true') {

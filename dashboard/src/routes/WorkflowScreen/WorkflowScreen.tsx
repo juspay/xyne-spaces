@@ -8,7 +8,6 @@ import { WorkflowHeader } from '../../components/Workflows/WorkflowHeader';
 import { WorkflowTabPanel, useWorkflowTabs } from '../../components/Workflows/WorkflowTabPanel';
 import WorkflowTriggerModal from '../../components/Workflow/WorkflowTriggerModal';
 import { WorkflowPreviewPanel } from '../../components/Workflows/WorkflowPreviewPanel';
-import { VSCodePanel } from '../../components/Workflows/VSCodePanel';
 import { isElectronApp } from '../../utils/electronApp';
 import { WorkflowGraphOnly } from '../../components/Workflows/WorkflowGraphOnly';
 import WorkflowTableView from '../../components/Workflows/WorkflowTableView';
@@ -147,18 +146,6 @@ const WorkflowScreen: React.FC = () => {
     closeTab,
   } = useWorkflowTabs(
     [
-      ...(isElectron
-        ? [
-            {
-              id: 'vscode',
-              title: 'Code Viewer',
-              type: 'vscode' as const,
-              icon: <Eye size={14} />,
-              closable: false,
-              disabled: false,
-            },
-          ]
-        : []),
       {
         id: 'git-diff',
         title: 'Final Git Diff',
@@ -358,16 +345,6 @@ const WorkflowScreen: React.FC = () => {
       if (!tab) return null;
 
       switch (tab.type) {
-        case 'vscode':
-          return effectiveSelectedExecutionId ? (
-            <VSCodePanel
-              executionId={effectiveSelectedExecutionId}
-              {...(gitInfo ? { gitInfo } : {})}
-              {...(executionStatus !== undefined && { executionStatus })}
-              isActive={activeTabId === 'vscode'}
-              workflowOutput={workflowOutput}
-            />
-          ) : null;
         case 'git-diff':
           return (
             <GitDiffPanel executionId={effectiveSelectedExecutionId} onRefresh={handleRefresh} />

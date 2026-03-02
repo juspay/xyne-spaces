@@ -17,10 +17,13 @@ import {
   Check,
   Circle,
   AlertCircle,
+  AlertTriangle,
   CheckCircle,
   Clock,
   Route,
   History,
+  Search,
+  MoreVertical,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AgentStepRenderer } from '../AgentStepRenderer/StepRenderer';
@@ -33,9 +36,9 @@ import { useWorkflowControl } from '../../../services/Workflow/workflowGraphServ
 import { toast } from 'sonner';
 import { WorkflowGraphOnly } from '../WorkflowGraphOnly';
 import { createPortal } from 'react-dom';
-import { ThreadMessages } from '../../Chat/ThreadPannel';
 import { ThreadSummary } from '../../Chat/Summary';
 import { MessageSquare } from 'lucide-react';
+import { ErrorsPanel } from './ErrorsPanel';
 
 interface WorkflowChatPanelProps {
   combinedStepsData: CombinedWorkflowData | null;
@@ -59,7 +62,7 @@ interface WorkflowChatPanelProps {
 }
 
 type TabId = 'automation' | 'audit' | 'context' | 'workflow';
-type MainTabId = 'flow' | 'thread' | 'history';
+type MainTabId = 'flow' | 'thread' | 'history' | 'errors';
 
 // Reusable collapsible section
 // const CollapsibleSection: React.FC<{
@@ -102,11 +105,18 @@ type MainTabId = 'flow' | 'thread' | 'history';
 // };
 
 // Step item using AgentStepRenderer
-const StepItem: React.FC<{ step: WorkflowStep; defaultExpanded?: boolean }> = ({
-  step,
-  defaultExpanded = false,
-}) => {
+const StepItem: React.FC<{
+  step: WorkflowStep;
+  defaultExpanded?: boolean;
+  forceExpanded?: boolean;
+}> = ({ step, defaultExpanded = false, forceExpanded = false }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+
+  useEffect(() => {
+    if (forceExpanded) {
+      setIsExpanded(true);
+    }
+  }, [forceExpanded]);
   const stepType = step.stepName?.startsWith('llm_call')
     ? 'llm'
     : step.stepName?.startsWith('tool_')
@@ -130,7 +140,7 @@ const StepItem: React.FC<{ step: WorkflowStep; defaultExpanded?: boolean }> = ({
 
   return (
     <div className='py-2'>
-      <AgentStepRenderer step={step} defaultOpen={false} />
+      <AgentStepRenderer step={step} defaultOpen={forceExpanded || defaultExpanded} />
     </div>
   );
 
@@ -228,6 +238,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [internalIsGraphViewOpen, setInternalIsGraphViewOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // Use external control if provided, otherwise use internal state
   const isGraphViewOpen = externalIsGraphViewOpen ?? internalIsGraphViewOpen;
@@ -524,6 +537,75 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
     return allSteps;
   }, [combinedStepsData, graphNodes, currentNode, selectedNodeStepIds]);
 
+  const errorSteps = useMemo(() => {
+    if (!combinedStepsData?.workflows?.length) return [];
+    
+    // Recursive extraction of errors
+    const errors: { step: WorkflowStep; message: string }[] = [];
+    const processedIds = new Set<string>();
+
+    const processStep = (step: WorkflowStep) => {
+      if (!step || processedIds.has(step.id)) return;
+      processedIds.add(step.id);
+
+      if (step.status === 'failed') {
+        let extractedError = 'Step failed without explicit error message';
+
+        try {
+          // Sometimes step.data is a stringified JSON
+          const dataObj = typeof step.data === 'string' ? JSON.parse(step.data) : step.data;
+
+          if (dataObj?.error?.message) {
+            extractedError = dataObj.error.message;
+          } else if (dataObj?.output?.error) {
+            extractedError = dataObj.output.error;
+          } else if (typeof dataObj?.output === 'string') {
+            extractedError = dataObj.output;
+          } else if (dataObj?.output?.message) {
+            extractedError = dataObj.output.message;
+          }
+        } catch (e) {
+          // If parsing fails, just leave the fallback message
+          console.warn('Failed to parse step error data:', e);
+        }
+
+        errors.push({ step, message: String(extractedError) });
+      }
+
+      if (step.expandedExecutions?.length) {
+        step.expandedExecutions.forEach(exec => {
+          exec.steps.forEach(s => processStep(s));
+        });
+      }
+      
+      if (step.expandedWorkflows?.length) {
+        step.expandedWorkflows.forEach(exec => {
+          exec.steps.forEach(s => processStep(s));
+        });
+      }
+      
+      if (step.expandedSteps?.length) {
+        step.expandedSteps.forEach(s => processStep(s));
+      }
+    };
+
+    combinedStepsData.workflows.forEach(w => w.steps.forEach(s => processStep(s)));
+    return errors;
+  }, [combinedStepsData]);
+
+  const searchedSteps = useMemo((): WorkflowStep[] => {
+    if (!searchQuery.trim()) return filteredSteps;
+    const lowerQuery = searchQuery.toLowerCase();
+    return filteredSteps.filter(step => {
+      try {
+        const stepString = JSON.stringify(step).toLowerCase();
+        return stepString.includes(lowerQuery);
+      } catch (e) {
+        return false;
+      }
+    });
+  }, [filteredSteps, searchQuery]);
+
   const handleSendMessage = async (): Promise<void> => {
     if (!continuationMessage.trim() || !executionId) {
       toast.error('Cannot send', {
@@ -755,6 +837,11 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
             })()}
           </div>
         </div>
+      ) : mainTab === 'errors' ? (
+        <ErrorsPanel 
+          errorSteps={errorSteps} 
+          onClose={() => setMainTab('flow')} 
+        />
       ) : (
         /* Flow Tab Content - Original workflow view */
         <>
@@ -871,32 +958,122 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 </div>
               )}
 
-              {/* History Tab Button */}
+              {/* Errors Toggle Button */}
+              {errorSteps.length > 0 && (
+                <div className='relative flex-shrink-0'>
+                  <button
+                    onClick={() => setMainTab('errors')}
+                    className={`relative flex items-center justify-center text-sm font-medium rounded-lg border transition-all ${
+                      mainTab === 'errors'
+                        ? 'bg-red-50 text-red-600 border-red-200'
+                        : 'bg-white text-red-500 border-red-200 hover:bg-red-50'
+                    }`}
+                    style={{ width: '42px', height: '42px' }}
+                    title='Errors'
+                    data-track-category='Workflows'
+                    data-track-name='ToggleErrorsTab'
+                  >
+                    <AlertTriangle size={18} />
+                    <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white text-[10px] font-bold w-[20px] h-[20px] flex items-center justify-center rounded-full border-2 border-white shadow-sm leading-none">
+                      {errorSteps.length > 99 ? '99+' : errorSteps.length}
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* Search Toggle Button */}
               <button
-                onClick={() => setMainTab('history')}
-                className='flex items-center justify-center text-sm font-medium rounded-lg border bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                onClick={() => {
+                  setIsSearchOpen(!isSearchOpen);
+                  if (isSearchOpen) setSearchQuery('');
+                }}
+                className={`flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors ${
+                  isSearchOpen
+                    ? 'bg-blue-50 text-blue-600 border-blue-200'
+                    : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                }`}
                 style={{ width: '42px', height: '42px' }}
-                title='History'
+                title='Search'
                 data-track-category='Workflows'
-                data-track-name='OpenHistoryTab'
-                data-track-metadata={JSON.stringify({ executionId })}
+                data-track-name='ToggleSearch'
               >
-                <History size={16} />
+                <Search size={16} />
               </button>
 
-              {/* Thread Tab Button - Separate Block */}
-              <button
-                onClick={() => setMainTab('thread')}
-                className='flex items-center justify-center text-sm font-medium rounded-lg border bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
-                style={{ width: '42px', height: '42px' }}
-                title='Thread'
-                data-track-category='Workflows'
-                data-track-name='OpenThreadTab'
-                data-track-metadata={JSON.stringify({ executionId })}
-              >
-                <MessageSquare size={16} />
-              </button>
+              {/* More Actions Menu */}
+              <div className='relative flex-shrink-0'>
+                <button
+                  onClick={() => setIsMenuOpen(!isMenuOpen)}
+                  onBlur={() => setTimeout(() => setIsMenuOpen(false), 200)}
+                  className='flex items-center justify-center text-sm font-medium rounded-lg border bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100 transition-colors'
+                  style={{ width: '42px', height: '42px' }}
+                  title='More Options'
+                  data-track-category='Workflows'
+                  data-track-name='ToggleMoreActions'
+                >
+                  <MoreVertical size={16} />
+                </button>
+
+                {isMenuOpen && (
+                  <div className='absolute right-0 top-full mt-1.5 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50 overflow-hidden'>
+                    <button
+                      onClick={() => {
+                        setMainTab('history');
+                        setIsMenuOpen(false);
+                      }}
+                      className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left transition-colors'
+                      data-track-category='Workflows'
+                      data-track-name='OpenHistoryTab'
+                    >
+                      <History size={16} className='text-gray-400' />
+                      Attempts
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMainTab('thread');
+                        setIsMenuOpen(false);
+                      }}
+                      className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left transition-colors'
+                      data-track-category='Workflows'
+                      data-track-name='OpenThreadTab'
+                    >
+                      <MessageSquare size={16} className='text-gray-400' />
+                      Thread
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
+
+            {/* Search Bar Input */}
+            {isSearchOpen && (
+              <div className='mt-2.5 mb-1 px-1'>
+                <div className='relative flex items-center bg-white border border-gray-200 rounded-lg focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 shadow-sm'>
+                  <Search size={14} className='absolute left-3 text-gray-400' />
+                  <input
+                    type='text'
+                    placeholder='Search in steps, payloads, logs...'
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className='w-full pl-9 pr-24 py-2 text-sm bg-transparent !outline-none border-none rounded-lg text-gray-700 focus:outline-none focus:ring-0 focus:border-transparent'
+                    autoFocus
+                  />
+                  {searchQuery && (
+                    <div className='absolute right-2 flex items-center gap-1.5'>
+                      <span className='text-[10px] text-gray-400 font-medium px-1.5 py-0.5 bg-gray-50 border border-gray-100 rounded flex-shrink-0'>
+                        {searchedSteps.length} result{searchedSteps.length !== 1 ? 's' : ''}
+                      </span>
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className='p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0'
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Legacy filter indicator (when selectedNodeStepIds is used without graphNodes) */}
             {graphNodes.length === 0 && selectedNodeStepIds && selectedNodeStepIds.length > 0 && (
@@ -1001,10 +1178,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 onScroll={handleScroll}
                 className='flex-1 min-h-0 overflow-y-auto space-y-0.5 min-w-0 max-w-full overflow-x-hidden no-scrollbar'
               >
-                {filteredSteps.length === 0 && userMessages.length === 0 ? (
+                {searchedSteps.length === 0 && userMessages.length === 0 ? (
                   <div className='flex flex-col items-center justify-center py-16 text-center'>
                     <div className='w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3'>
-                      {currentNode?.status === 'pending' ? (
+                      {searchQuery ? (
+                        <Search size={24} className='text-gray-300' />
+                      ) : currentNode?.status === 'pending' ? (
                         <Circle size={24} className='text-gray-300' />
                       ) : currentNode?.status === 'running' ? (
                         <Loader2 size={24} className='text-blue-500 animate-spin' />
@@ -1013,13 +1192,15 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       )}
                     </div>
                     <p className='text-gray-600 text-sm font-medium'>
-                      {currentNode?.status === 'pending'
-                        ? 'Waiting to start...'
-                        : currentNode?.status === 'running'
-                          ? 'Running...'
-                          : 'No steps yet'}
+                      {searchQuery
+                        ? 'No steps match your search'
+                        : currentNode?.status === 'pending'
+                          ? 'Waiting to start...'
+                          : currentNode?.status === 'running'
+                            ? 'Running...'
+                            : 'No steps yet'}
                     </p>
-                    {currentNode && (
+                    {currentNode && !searchQuery && (
                       <p className='text-gray-400 text-xs mt-1'>
                         {formatStepName(currentNode.stepName)}
                       </p>
@@ -1027,8 +1208,8 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   </div>
                 ) : (
                   <>
-                    {filteredSteps.map(step => (
-                      <StepItem key={step.id} step={step} />
+                    {searchedSteps.map(step => (
+                      <StepItem key={step.id} step={step} forceExpanded={!!searchQuery.trim()} />
                     ))}
                     {/* Do not show user messages as chat bubbles */}
                   </>
