@@ -31,6 +31,7 @@ export interface XyneAIRequest {
   userInfo?: UserInfo;
   webSearchEnabled?: boolean;  // Enable/disable web search tool
   researchContext?: ResearchContext;
+  messageAttachmentIds?: string[]; // Attachment IDs to fetch from GCS on backend
 }
 
 // ============================================================================

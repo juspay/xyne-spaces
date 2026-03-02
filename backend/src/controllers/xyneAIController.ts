@@ -43,6 +43,7 @@ const XyneAIRequestSchema = z.object({
     mime_type: z.string().min(1, 'MIME type is required'),
     filename: z.string().optional(),
   })).optional(),
+  message_attachment_ids: z.array(z.string().min(1)).optional(), // Attachment IDs to fetch from GCS
 });
 
 // Feedback request validation schema
@@ -76,7 +77,7 @@ export class XyneAIController {
       return;
     }
 
-    const { query, session_id, channel_ids, conversation_id, web_search_enabled, research_context, attachments } = parseResult.data;
+    const { query, session_id, channel_ids, conversation_id, web_search_enabled, research_context, attachments, message_attachment_ids } = parseResult.data;
 
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -132,10 +133,11 @@ export class XyneAIController {
         channelIds: channel_ids,
         conversationId: conversation_id,
         userId,
-        attachments,
+        attachments: attachments,
         userInfo,
         webSearchEnabled: web_search_enabled,
-        researchContext: research_context || undefined,  // Selected product/repository from frontend
+        researchContext: research_context || undefined,
+        messageAttachmentIds: message_attachment_ids,
       };
 
       // Track metrics: context channels count

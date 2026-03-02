@@ -17,6 +17,7 @@ interface UseXyneAIStreamParams {
   channelIds: string[];
   conversationId: string;
   threadConversationId?: string | undefined;
+  attachmentIds?: string[] | undefined; // Attachment IDs to fetch from GCS on backend
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
@@ -37,6 +38,7 @@ export const useXyneAIStream = ({
   channelIds,
   conversationId,
   threadConversationId,
+  attachmentIds,
   setMessages,
   setConversationId,
   setCurrentTraceId,
@@ -127,6 +129,11 @@ export const useXyneAIStream = ({
               ? { type: researchContext.type, name: researchContext.name }
               : null,
             ...(apiAttachments.length > 0 && { attachments: apiAttachments }),
+            ...(attachmentIds &&
+              attachmentIds.length > 0 && {
+                // eslint-disable-next-line @typescript-eslint/naming-convention
+                message_attachment_ids: attachmentIds,
+              }),
           }),
           signal: abortController.signal,
         });
@@ -207,6 +214,7 @@ export const useXyneAIStream = ({
       channelIds,
       conversationId,
       threadConversationId,
+      attachmentIds,
       researchContext,
       setMessages,
       setConversationId,

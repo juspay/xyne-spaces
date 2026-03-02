@@ -645,6 +645,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               callId={metadata.callId}
               isActiveCall={isActiveCall}
               {...(channelId && { channelId })}
+              {...(message.conversationId && { conversationId: message.conversationId })}
+              {...(sender?.name && { senderName: sender.name })}
               showAvatar={showAvatar}
               {...(context && { context })}
               attachments={attachments}
