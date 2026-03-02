@@ -4,6 +4,43 @@ import { zql } from '../../queries';
 import { MutationACLError, TableName } from './types';
 
 /**
+ * Checks if the current user has ADMIN access to the PROJECTS resource (direct or via group).
+ */
+export async function hasProjectAdminAccess(ctx: { userID: string }, tx: Transaction<Schema>): Promise<boolean> {
+  const projectsResource = await tx.run(
+    (zql.resources).where('name', 'LISTPROJECTS').one()
+  );
+  if (!projectsResource) return false;
+
+  // Direct user access
+  const directAccess = await tx.run(
+    (zql.resource_access)
+      .where('userId', ctx.userID)
+      .where('resourceId', projectsResource.id)
+      .where('accessType', AccessType.ADMIN)
+      .one()
+  );
+  if (directAccess) return true;
+
+  // Group-based access
+  const userGroups = await tx.run(
+    (zql.user_group_mappings).where('userId', ctx.userID)
+  );
+  if (userGroups && userGroups.length > 0) {
+    const groupIds = userGroups.map(g => g.userGroupId);
+    const groupAccess = await tx.run(
+      (zql.resource_access)
+        .where('resourceId', projectsResource.id)
+        .where('accessType', AccessType.ADMIN)
+        .where(helpers => helpers.cmp('groupId', 'IN', groupIds))
+        .one()
+    );
+    if (groupAccess) return true;
+  }
+  return false;
+}
+
+/**
  * Checks if the current user has ADMIN access to the USER-GROUPS resource (direct or via group).
  */
 export async function hasUserGroupsAdminAccess(ctx: { userID: string }, tx: Transaction<Schema>): Promise<boolean> {

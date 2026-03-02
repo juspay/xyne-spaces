@@ -6,6 +6,7 @@ import {
 import { Schema } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { hasProjectAdminAccess } from '../core/admin-access';
 
 export class BoardAcl extends BaseACL<'boards'> {
 
@@ -14,6 +15,13 @@ export class BoardAcl extends BaseACL<'boards'> {
         if (!project) {
             throw new MutationACLError('Board insert failed: the specified project does not exist', 'boards');
         }
+
+        // Allow if user has PROJECT ADMIN access
+        const hasAdminAccess = await hasProjectAdminAccess(this.ctx, tx);
+        if (hasAdminAccess) {
+            return;
+        }
+
         const channel = await tx
             .run(
             zql.channels
@@ -31,9 +39,19 @@ export class BoardAcl extends BaseACL<'boards'> {
         if (!board) {
             throw new MutationACLError('Board update failed: board does not exist', 'boards');
         }
-        if (board.createdBy !== this.ctx.userID) {
-            throw new MutationACLError('Board update failed: only the board creator can modify this board', 'boards');
+
+        // Allow if user is the creator
+        if (board.createdBy === this.ctx.userID) {
+            return;
         }
+
+        // Allow if user has PROJECT ADMIN access
+        const hasAdminAccess = await hasProjectAdminAccess(this.ctx, tx);
+        if (hasAdminAccess) {
+            return;
+        }
+
+        throw new MutationACLError('Board update failed: only the board creator or project admin can modify this board', 'boards');
     }
 
     async canDelete(args: DeleteID<TableSchema<'boards'>>, tx: Transaction<Schema>): Promise<void> {
@@ -41,8 +59,18 @@ export class BoardAcl extends BaseACL<'boards'> {
         if (!board) {
             throw new MutationACLError('Board delete failed: board does not exist', 'boards');
         }
-        if (board.createdBy !== this.ctx.userID) {
-            throw new MutationACLError('Board delete failed: only the board creator can delete this board', 'boards');
+
+        // Allow if user is the creator
+        if (board.createdBy === this.ctx.userID) {
+            return;
         }
+
+        // Allow if user has PROJECT ADMIN access
+        const hasAdminAccess = await hasProjectAdminAccess(this.ctx, tx);
+        if (hasAdminAccess) {
+            return;
+        }
+
+        throw new MutationACLError('Board delete failed: only the board creator or project admin can delete this board', 'boards');
     }
 }
