@@ -36,6 +36,7 @@ import { useWorkflowControl } from '../../../services/Workflow/workflowGraphServ
 import { toast } from 'sonner';
 import { WorkflowGraphOnly } from '../WorkflowGraphOnly';
 import { createPortal } from 'react-dom';
+import { ThreadMessages } from '../../Chat/ThreadPannel';
 import { ThreadSummary } from '../../Chat/Summary';
 import { MessageSquare } from 'lucide-react';
 import { ErrorsPanel } from './ErrorsPanel';
@@ -287,7 +288,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
 
     updateGraphPosition();
     window.addEventListener('resize', updateGraphPosition);
-    return () => window.removeEventListener('resize', updateGraphPosition);
+    return (): void => window.removeEventListener('resize', updateGraphPosition);
   }, [isGraphViewOpen]);
 
   // Graph node navigation state
@@ -482,7 +483,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
           hasRestoredScrollRef.current = true;
         }
       }, 100);
-      return () => clearTimeout(timeoutId);
+      return (): void => clearTimeout(timeoutId);
     }
     return undefined;
   }, [initialScrollPosition]);
@@ -539,12 +540,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
 
   const errorSteps = useMemo(() => {
     if (!combinedStepsData?.workflows?.length) return [];
-    
+
     // Recursive extraction of errors
     const errors: { step: WorkflowStep; message: string }[] = [];
     const processedIds = new Set<string>();
 
-    const processStep = (step: WorkflowStep) => {
+    const processStep = (step: WorkflowStep): void => {
       if (!step || processedIds.has(step.id)) return;
       processedIds.add(step.id);
 
@@ -553,20 +554,26 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
 
         try {
           // Sometimes step.data is a stringified JSON
-          const dataObj = typeof step.data === 'string' ? JSON.parse(step.data) : step.data;
+          interface StepDataObj {
+            error?: { message?: string };
+            output?: string | { error?: string; message?: string };
+          }
+          const dataObj =
+            (typeof step.data === 'string'
+              ? (JSON.parse(step.data) as StepDataObj)
+              : (step.data as StepDataObj)) ?? {};
 
-          if (dataObj?.error?.message) {
+          if (dataObj.error?.message) {
             extractedError = dataObj.error.message;
-          } else if (dataObj?.output?.error) {
+          } else if (typeof dataObj.output === 'object' && dataObj.output?.error) {
             extractedError = dataObj.output.error;
-          } else if (typeof dataObj?.output === 'string') {
+          } else if (typeof dataObj.output === 'string') {
             extractedError = dataObj.output;
-          } else if (dataObj?.output?.message) {
+          } else if (typeof dataObj.output === 'object' && dataObj.output?.message) {
             extractedError = dataObj.output.message;
           }
-        } catch (e) {
+        } catch {
           // If parsing fails, just leave the fallback message
-          console.warn('Failed to parse step error data:', e);
         }
 
         errors.push({ step, message: String(extractedError) });
@@ -577,13 +584,13 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
           exec.steps.forEach(s => processStep(s));
         });
       }
-      
+
       if (step.expandedWorkflows?.length) {
         step.expandedWorkflows.forEach(exec => {
           exec.steps.forEach(s => processStep(s));
         });
       }
-      
+
       if (step.expandedSteps?.length) {
         step.expandedSteps.forEach(s => processStep(s));
       }
@@ -600,7 +607,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
       try {
         const stepString = JSON.stringify(step).toLowerCase();
         return stepString.includes(lowerQuery);
-      } catch (e) {
+      } catch {
         return false;
       }
     });
@@ -740,7 +747,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
             </button>
           </div>
           <div className='flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/30'>
-            {(() => {
+            {((): React.ReactNode => {
               const metadata = combinedStepsData?.workflows?.[0]?.executionMetadata || [];
 
               if (metadata.length === 0) {
@@ -838,10 +845,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
           </div>
         </div>
       ) : mainTab === 'errors' ? (
-        <ErrorsPanel 
-          errorSteps={errorSteps} 
-          onClose={() => setMainTab('flow')} 
-        />
+        <ErrorsPanel errorSteps={errorSteps} onClose={() => setMainTab('flow')} />
       ) : (
         /* Flow Tab Content - Original workflow view */
         <>
@@ -963,18 +967,14 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 <div className='relative flex-shrink-0'>
                   <button
                     onClick={() => setMainTab('errors')}
-                    className={`relative flex items-center justify-center text-sm font-medium rounded-lg border transition-all ${
-                      mainTab === 'errors'
-                        ? 'bg-red-50 text-red-600 border-red-200'
-                        : 'bg-white text-red-500 border-red-200 hover:bg-red-50'
-                    }`}
+                    className={`relative flex items-center justify-center text-sm font-medium rounded-lg border transition-all bg-gray-50 text-red-500 hover:bg-red-50`}
                     style={{ width: '42px', height: '42px' }}
                     title='Errors'
                     data-track-category='Workflows'
                     data-track-name='ToggleErrorsTab'
                   >
                     <AlertTriangle size={18} />
-                    <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white text-[10px] font-bold w-[20px] h-[20px] flex items-center justify-center rounded-full border-2 border-white shadow-sm leading-none">
+                    <span className='absolute -top-1.5 -right-1.5 bg-red-600 text-white text-[10px] font-bold w-[20px] h-[20px] flex items-center justify-center rounded-full border-2 border-white shadow-sm leading-none'>
                       {errorSteps.length > 99 ? '99+' : errorSteps.length}
                     </span>
                   </button>
@@ -1050,13 +1050,17 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
               <div className='mt-2.5 mb-1 px-1'>
                 <div className='relative flex items-center bg-white border border-gray-200 rounded-lg focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 shadow-sm'>
                   <Search size={14} className='absolute left-3 text-gray-400' />
+                  {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
                   <input
                     type='text'
                     placeholder='Search in steps, payloads, logs...'
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     className='w-full pl-9 pr-24 py-2 text-sm bg-transparent !outline-none border-none rounded-lg text-gray-700 focus:outline-none focus:ring-0 focus:border-transparent'
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus
+                    data-track-category='Workflows'
+                    data-track-name='SearchInput'
                   />
                   {searchQuery && (
                     <div className='absolute right-2 flex items-center gap-1.5'>
@@ -1066,6 +1070,8 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       <button
                         onClick={() => setSearchQuery('')}
                         className='p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0'
+                        data-track-category='Workflows'
+                        data-track-name='ClearSearch'
                       >
                         <X size={14} />
                       </button>
