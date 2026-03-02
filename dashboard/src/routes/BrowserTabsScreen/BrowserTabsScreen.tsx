@@ -133,6 +133,7 @@ export function BrowserTabsScreen({
 }: BrowserTabsScreenProps = {}): React.ReactElement {
   const tabs = useSelector(browserPanelActor, state => state.context.tabs);
   const activeTabId = useSelector(browserPanelActor, state => state.context.activeTabId);
+  const statePendingUrls = useSelector(browserPanelActor, state => state.context.pendingUrls);
   const [urlInput, setUrlInput] = useState('');
   const webviewRefs = useRef<Record<string, WebviewTag | null>>({});
   const { track } = useActivityTracking();
@@ -140,6 +141,9 @@ export function BrowserTabsScreen({
 
   const activeTab = tabs.find(t => t.id === activeTabId);
   const isPanel = variant === 'panel';
+
+  // Use prop if provided (panel mode), otherwise read from state (fullscreen mode)
+  const pendingUrls = externalPendingUrls ?? statePendingUrls;
 
   // Normalize URL (add https:// if missing)
   const normalizeUrl = (url: string): string => {
@@ -159,11 +163,11 @@ export function BrowserTabsScreen({
     return normalized;
   };
 
-  // Handle pending URLs from external prop (panel mode)
+  // Handle pending URLs (both panel and fullscreen mode)
   useEffect(() => {
-    if (!externalPendingUrls || externalPendingUrls.length === 0 || !isElectronApp()) return;
+    if (!pendingUrls || pendingUrls.length === 0 || !isElectronApp()) return;
 
-    for (const url of externalPendingUrls) {
+    for (const url of pendingUrls) {
       const existingTab = tabs.find(tab => tab.url === url);
       if (existingTab) {
         browserPanelActor.send({ type: 'SWITCH_TAB', tabId: existingTab.id });
@@ -185,10 +189,9 @@ export function BrowserTabsScreen({
       }
     }
 
-    if (isPanel) {
-      browserPanelActor.send({ type: 'OPEN_URLS', urls: [] });
-    }
-  }, [externalPendingUrls, isPanel, tabs]);
+    // Clear pendingUrls after processing (both panel and fullscreen)
+    browserPanelActor.send({ type: 'OPEN_URLS', urls: [] });
+  }, [pendingUrls, isPanel, tabs]);
 
   // Update URL input when active tab changes
   useEffect(() => {
