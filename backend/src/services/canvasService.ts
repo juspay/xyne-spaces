@@ -8,7 +8,8 @@ import type { KnowledgeLearning } from '@/workflows/utils/knowledge-generator';
 import { logger } from '@/utils/logger';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
-
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
 
 /**
  * Get human-readable label for learning type
@@ -243,6 +244,21 @@ export async function createKnowledgeCanvas(
       `[CanvasService] Created knowledge canvas ${canvasId} with ${learnings.length} learnings for execution ${workflowExecutionId}`
     );
 
+    // Queue Vespa indexing job for the canvas
+    try {
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: canvasId,
+        jobType: 'feed',
+        userId: createdByUserId,
+        app: SubApp.CANVAS,
+      });
+      logger.info(`[CanvasService] Queued Vespa indexing for canvas ${canvasId}`);
+    } catch (error) {
+      logger.error(`[CanvasService] Failed to queue Vespa job for canvas ${canvasId}:`, error);
+      // Don't fail the canvas creation if Vespa queueing fails
+    }
+    
     return viewAccessId;
   } catch (error) {
     logger.error('[CanvasService] Failed to create knowledge canvas:', error);
@@ -390,6 +406,20 @@ export async function approveKnowledgeCanvas(
       `[CanvasService] Approved knowledge canvas ${canvasId} - created document ${document.id}`
     );
 
+    // Queue Vespa update for the canvas (metadata changed)
+    try {
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: canvasId,
+        jobType: 'feed', // Re-feed to update the document
+        userId: approvedByUserId,
+        app: SubApp.CANVAS,
+      });
+      logger.info(`[CanvasService] Queued Vespa update for approved canvas ${canvasId}`);
+    } catch (error) {
+      logger.error(`[CanvasService] Failed to queue Vespa update for approved canvas ${canvasId}:`, error);
+    }
+    
     return { success: true, documentIds: [document.id] };
   } catch (error) {
     logger.error('[CanvasService] Failed to approve knowledge canvas:', error);

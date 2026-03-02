@@ -12,7 +12,7 @@ import {
 import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import config from '../config';
-import { YqlBuilder, type SlackFilters, type TicketFilters } from '../utils/YqlBuilder';
+import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters } from '../utils/YqlBuilder';
 import {  
   filterByNativeRank,
 } from '../utils/responseProcessor';
@@ -26,6 +26,7 @@ interface SearchOptions {
   nativeRankThreshold?: number;
   slack?: SlackFilters;
   ticket?: TicketFilters;
+  file?: FileFilters;
   prefixBoostWeight?: number;
 }
 
@@ -76,6 +77,7 @@ export class SearchService {
         nativeRankThreshold = config.nativeRankThreshold,
         slack = {},
         ticket = {},
+        file = {},
         prefixBoostWeight = 0.2,
       } = options;
 
@@ -131,6 +133,7 @@ export class SearchService {
           groupBy,
           slack,
           ticket,
+          file,
           userId,
           useFuzzy
         );

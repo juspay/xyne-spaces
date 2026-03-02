@@ -3,6 +3,8 @@ import { CanvasRole } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { websocketService } from '@/services/websocketService';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
 
 export interface CanvasAuthResult {
   hasAccess: boolean;
@@ -205,6 +207,20 @@ class CanvasAuthService {
         .catch(err => logger.error('Failed to track user activity after auto canvas creation:', err));
 
       logger.info(`Auto-created canvas ${canvasId} for user ${userId}`);
+
+      // Queue Vespa indexing for the canvas
+      try {
+        await vespaQueue.addJob({
+          schema: fileSchema,
+          docId: canvasId,
+          jobType: 'feed',
+          userId,
+          app: SubApp.CANVAS,
+        });
+        logger.info(`[CanvasAuthService] Queued Vespa indexing for canvas ${canvasId}`);
+      } catch (vespaError) {
+        logger.error(`[CanvasAuthService] Failed to queue Vespa job for canvas ${canvasId}:`, vespaError);
+      }
     } catch (error) {
       logger.error('Failed to auto-create canvas', { canvasId, userId, error });
       throw error;

@@ -11,6 +11,8 @@ import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
 import { GCSService } from '../services/gcsService';
 import { type PulseActionItem } from '@/services/pulseService';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
 
 interface TranscriptEntry {
   user: string;
@@ -350,6 +352,20 @@ export class TranscriptService {
       logger.info(
         `[${callId}] attachment_created | attachment_id=${attachment.id}, gcs_url=${gcsUrl}`
       );
+
+      // Queue Vespa indexing for the transcript (using call.id as the identifier)
+      try {
+        await vespaQueue.addJob({
+          schema: fileSchema,
+          docId: call.id,
+          jobType: 'feed',
+          userId: call.createdByUserId,
+          app: SubApp.TRANSCRIPT,
+        });
+        logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
+      } catch (vespaError) {
+        logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+      }
 
       // 11. Save transcript URL to Call record for easier access (used by recordings feature)
       await repositories.calls.update(call.id, {

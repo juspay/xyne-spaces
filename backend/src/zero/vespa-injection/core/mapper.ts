@@ -5,18 +5,24 @@ import type { InsertValue } from '@rocicorp/zero';
 import { ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
 import { VespaJob, VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Conversation, Channel, Message, Project, Ticket, VespaOperationType as VespaOpType } from '@prisma/client';
+import { Conversation, Channel, Message, Project, Ticket, VespaOperationType as VespaOpType, Canvas, Call } from '@prisma/client';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
 import { logger } from '@/utils/logger';
 import { RCAWithRelations, ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { fileSchema } from '@xyne/vespa-ts';
+import { config } from '@/config/env';
+import { TextStrategy } from '../strategies/TextStrategy';
+import { GCSService } from '@/services/gcsService';
+import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 
 type ChannelsSchema = Schema['tables']['channels'];
 type MessagesSchema = Schema['tables']['messages'];
 type ProjectsSchema = Schema['tables']['projects'];
 type TicketsSchema = Schema['tables']['tickets'];
+type CanvasesSchema = Schema['tables']['canvases'];
+type TranscriptsSchema = Schema['tables']['calls'];
 
 const getRef = (schema: VespaSchema, docId: string) => `id:${NAMESPACE}:${schema}::${docId}`
 
@@ -581,6 +587,160 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
   }
 }
 
+export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<VespaFileDocument> => {
+  // Get channel info if channelId exists
+  let channelRef: string | undefined;
+  if (args.channelId) {
+    channelRef = getRef(channelSchema, args.channelId);
+  }
+
+  let chunks: string[] = [];
+
+  // Focus only on manually created canvases (stored in DB as BlockNote JSON)
+  try {
+    const content = (args as any).content;
+
+    if (content) {
+      const markdown = await convertBlockNoteToMarkdown(content);
+      const textStrategy = new TextStrategy();
+      const result = await textStrategy.parse(Buffer.from(markdown), args.id);
+      chunks = result.chunks;
+
+      logger.info(`[Mapper] Extracted ${chunks.length} chunks from canvas ${args.id} using TextStrategy`);
+    } else {
+      logger.warn(`[Mapper] Canvas ${args.id} has no content to index`);
+    }
+  } catch (error) {
+    logger.error(`[Mapper] Failed to extract text from canvas ${args.id}:`, error);
+  }
+
+  // Get canvas participants for permissions
+  const canvasParticipants = await db.canvasParticipant.findMany({
+    where: { canvasId: args.id }
+  });
+  const permissions = canvasParticipants.map(p => p.userId);
+
+  return {
+    docId: args.id,
+    docType: VespaDocType.FILE,
+    fileName: args.title || 'Untitled Canvas',
+    description: `Canvas document${args.channelId ? ' in channel' : ''}`,
+    chunks: chunks,
+    chunks_pos: chunks.map((_, index) => String(index)),
+    image_chunks: [],
+    image_chunks_pos: [],
+    metadata: JSON.stringify({
+      channelId: args.channelId,
+      viewAccessId: args.viewAccessId,
+      editAccessId: args.editAccessId,
+      lastEditedBy: args.lastEditedBy,
+      lastEditedAt: args.lastEditedAt,
+      docType: args.docType,
+      contentIndexed: chunks.length > 0
+    }),
+    createdBy: args.createdBy,
+    createdAt: toTimestamp(args.createdAt),
+    updatedAt: toTimestamp(args.updatedAt),
+    ownerId: args.createdBy,
+    permissions: permissions,
+    urlInternal: '',
+    urlOriginal: '',
+    fileSize: 0,
+    isPrivate: (args as any).visibility === 'PRIVATE',
+    mimeType: 'application/json',
+    subApp: 'canvas',
+    channelRef,
+    conversationId: undefined
+  };
+};
+
+export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promise<VespaFileDocument> => {
+  // Get conversation and channel info from call data
+  let channelRef: string | undefined;
+  let conversationId: string | undefined;
+
+  // Get channel info directly from call's channelId
+  if (args.channelId) {
+    channelRef = getRef(channelSchema, args.channelId);
+  }
+
+  // Find conversation by callId (using externalId)
+  const conversation = await db.conversation.findFirst({
+    where: { callId: args.externalId }
+  });
+  if (conversation) {
+    conversationId = conversation.conversationId;
+  }
+
+  // Fetch transcript content from GCS using the transcript URL
+  let chunks: string[] = [];
+  let fileSize = 0;
+  try {
+    if (args.transcript) {
+      // Extract GCS path from URL (gs://bucket/path or just path)
+      let gcsPath = args.transcript;
+      if (gcsPath.startsWith('gs://')) {
+        const match = gcsPath.match(/^gs:\/\/[^\/]+\/(.+)$/);
+        if (match) {
+          gcsPath = match[1];
+        }
+      }
+
+      // Use transcript bucket for fetching
+      const gcsService = new GCSService(config.gcs.transcriptionBucketName);
+      const buffer = await gcsService.getFileBuffer(gcsPath);
+      fileSize = buffer.length;
+
+      const textStrategy = new TextStrategy();
+      const result = await textStrategy.parse(buffer, args.id);
+      chunks = result.chunks;
+
+      logger.info(`[Mapper] Extracted ${chunks.length} chunks from transcript ${args.id} using TextStrategy`);
+    }
+  } catch (error) {
+    logger.error(`[Mapper] Failed to fetch transcript content for ${args.id}:`, error);
+    // Continue with empty chunks - don't fail the entire operation
+  }
+
+  // Get call participants for permissions using call ID
+  let permissions: string[] = [];
+  const callParticipants = await db.callParticipant.findMany({
+    where: { callId: args.id }
+  });
+  permissions = callParticipants.map(p => p.userId);
+
+  return {
+    docId: args.id,
+    docType: VespaDocType.FILE,
+    fileName: args.title || 'Transcript',
+    description: args.aiSummary || '',
+    chunks: chunks,
+    chunks_pos: chunks.map((_, index) => String(index)),
+    image_chunks: [],
+    image_chunks_pos: [],
+    metadata: JSON.stringify({
+      conversationId: conversationId,
+      callId: args.id,
+      externalId: args.externalId,
+      callType: args.callType,
+      status: args.status,
+      metadata: args.metadata
+    }),
+    createdBy: args.createdByUserId,
+    createdAt: toTimestamp(args.createdAt),
+    updatedAt: toTimestamp(args.updatedAt),
+    ownerId: args.createdByUserId,
+    permissions: permissions,
+    urlInternal: args.transcript || '',
+    urlOriginal: args.transcript || '',
+    fileSize: fileSize,
+    isPrivate: false,
+    mimeType: 'text/plain',
+    subApp: 'transcript',
+    channelRef,
+    conversationId
+  };
+};
 
 export const mapRCA = (args: RCAWithRelations): VespaFileDocument => {
   const chunks: string[] = [];
@@ -643,23 +803,6 @@ export const mapBySchema = async (
     throw new Error(`Unknown schema: ${schemaName}`);
   }
 
-  if (app) {
-    const appSpecificMappers: Record<SubApp, (schema: VespaSchema, args: VespaPayload) => Promise<InsertDocument>> = {
-      [SubApp.RCA]: async (schema, args) => {
-        if (schema !== fileSchema) {
-          throw new Error(`Unknown schema ${schema} for sub-app ${app}`);
-        }
-        return mapRCA(args as RCAWithRelations);
-      }
-    }
-
-    if (appSpecificMappers[app]) {
-      return await appSpecificMappers[app](schemaName, args);
-    } else {
-      throw new Error(`No mapper defined for sub-app ${app}`);
-    }
-  }
-
   if (jobType === 'feed') {
     switch (schemaName) {
       case channelSchema:
@@ -670,6 +813,20 @@ export const mapBySchema = async (
         return mapProject(args as InsertValue<ProjectsSchema>);
       case ticketSchema:
         return mapTicket(args as InsertValue<TicketsSchema>);
+      case fileSchema:
+        if (!app) {
+          throw new Error(`${schemaName}: fileSchema requires 'app' parameter to determine mapper (CANVAS, TRANSCRIPT, or RCA)`);
+        }
+        switch (app) {
+          case SubApp.CANVAS:
+            return mapCanvas(args as InsertValue<CanvasesSchema>);
+          case SubApp.TRANSCRIPT:
+            return mapTranscript(args as InsertValue<TranscriptsSchema>);
+          case SubApp.RCA:
+            return mapRCA(args as RCAWithRelations);
+          default:
+            throw new Error(`No mapper defined for sub-app: ${app}`);
+        }
       default:
         throw new Error(`Unknown schema: ${schemaName}`);
     }
@@ -703,25 +860,7 @@ export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,
   app?: SubApp
-): Promise<Channel | Message | Project | Ticket | RCAWithRelations | null> => {
-  if (app) {
-    const appSpecificFetchers: Record<SubApp, (schema: VespaSchema, docId: string) => Promise<any>> = {
-      [SubApp.RCA]: async (schema, docId) => {
-        if (schema !== fileSchema) {
-          throw new Error(`Unknown schema ${schema} for sub-app ${app}`);
-        }
-
-        const releaseRepository = new ReleaseRepository();
-        return await releaseRepository.getRCAById(docId, { includeImpacts: true, includeCOEs: true });
-      }
-    }
-    if (appSpecificFetchers[app]) {
-      return await appSpecificFetchers[app](schema, docId);
-    } else {
-      throw new Error(`No fetcher defined for sub-app ${app}`);
-    }
-  }
-
+): Promise<Channel | Message | Project | Ticket | RCAWithRelations | Canvas | Call | null> => {
   switch (schema) {
     case channelSchema:
       return await db.channel.findUnique({
@@ -742,6 +881,26 @@ export const fetchDataBySchema = async (
       return await db.ticket.findUnique({
         where: { id: docId }
       });
+
+    case fileSchema:
+      if (!app) {
+        throw new Error(`${schema}: fileSchema requires 'app' parameter to determine fetcher (CANVAS, TRANSCRIPT, or RCA)`);
+      }
+      switch (app) {
+        case SubApp.CANVAS:
+          return await db.canvas.findUnique({
+            where: { id: docId }
+          });
+        case SubApp.TRANSCRIPT:
+          return await db.call.findUnique({
+            where: { id: docId }
+          });
+        case SubApp.RCA:
+          const releaseRepository = new ReleaseRepository();
+          return await releaseRepository.getRCAById(docId, { includeImpacts: true, includeCOEs: true }) as RCAWithRelations;
+        default:
+          throw new Error(`No fetcher defined for sub-app: ${app}`);
+      }
 
     default:
       throw new Error(`Unknown schema: ${schema}`);

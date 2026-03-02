@@ -8,6 +8,8 @@ import { TicketsVespaHandler } from '../tables/tickets-handler';
 import { ChannelsVespaHandler } from '../tables/channels-handler';
 import { ProjectsVespaHandler } from '../tables/projects-handler';
 import { RCAVespaHandler } from '../tables/rca-handler';
+import { CanvasesVespaHandler } from '../tables/canvases-handler';
+import { TranscriptsVespaHandler } from '../tables/transcripts-handler';
 
 /**
  * Factory for getting the appropriate Vespa handler for a given table.
@@ -44,12 +46,19 @@ export class VespaHandlerFactory {
       case "rcas":
         return new RCAVespaHandler(ctx);
 
+      // Canvas tables
+      case 'canvases':
+        return new CanvasesVespaHandler(ctx);
+
+      // Call tables (for transcripts)
+      case 'calls':
+        return new TranscriptsVespaHandler(ctx);
+
       // TODO: Add more handlers as needed
       // case 'users':
       //   return new UsersVespaHandler(ctx);
       // case 'message_attachments':
       //   return new AttachmentsVespaHandler(ctx);
-
       // Default: no Vespa jobs for unhandled tables
       default:
         return new BaseVespaHandler(ctx, table);

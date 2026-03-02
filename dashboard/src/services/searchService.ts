@@ -433,6 +433,10 @@ export class SearchService {
       params['filterOnly'] = filters.filterOnly.toString();
     }
 
+    if (filters.subApp) {
+      params['subApp'] = filters.subApp;
+    }
+
     return params;
   }
 }

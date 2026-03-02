@@ -42,6 +42,15 @@ export interface TicketFilters {
   assignedTo?: string[];        // Filter by assigned user ID - comma-separated
 }
 
+export interface FileFilters {
+  subApp?: string[];
+  docType?: string[];
+  createdBefore?: string;
+  createdAfter?: string;
+  createdOn?: string;
+  createdRange?: string;
+}
+
 export class YqlBuilder {
   constructor() {}
 
@@ -53,6 +62,7 @@ buildYql(
   groupBy: string,
   slackFilters: SlackFilters,
   ticketFilters: TicketFilters,
+  fileFilters: FileFilters,
   userId: string,
   useFuzzy: boolean = false,
 ): string {
@@ -116,7 +126,7 @@ buildYql(
       appConditions.push(this.buildUserConditions());
     }
     if (apps.some(a => a.toLowerCase() === 'file')) {
-      appConditions.push(this.buildFileConditions(userId));
+      appConditions.push(this.buildFileConditions(fileFilters, userId));
     }
      // Combine app conditions
     if (appConditions.length > 0) {
@@ -142,11 +152,52 @@ private buildUserConditions(): string {
    * Build YQL condition for file search
    * Applies to file schemas
    */
-  private buildFileConditions(userId:string): string {
+  private buildFileConditions(filters: FileFilters, userId: string): string {
     // File search
     const conditions: string[] = [];
     conditions.push(`docType contains "file"`);
+
+    // DocType filter
+    if (filters.docType && filters.docType.length > 0) {
+      const docTypes = filters.docType.map(t => `docType contains "${t.trim()}"`).join(' or ');
+      conditions.push(`(${docTypes})`);
+    } else {
+      conditions.push(`docType contains "file"`);
+    }
+
+    // SubApp filter
+    if (filters.subApp && filters.subApp.length > 0) {
+      const subApps = filters.subApp.map(s => `subApp contains "${s.trim()}"`).join(' or ');
+      conditions.push(`(${subApps})`);
+    }
+
+    // Access control
     conditions.push(`(ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false")`);
+
+    // Date filters
+    if (filters.createdBefore) {
+      const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');
+      if (timestamp) conditions.push(`createdAtTimestamp < ${timestamp}`);
+    }
+    if (filters.createdAfter) {
+      const timestamp = parseDateToTimestamp(filters.createdAfter, 'end');
+      if (timestamp) conditions.push(`createdAtTimestamp > ${timestamp}`);
+    }
+    if (filters.createdOn) {
+      const rangeStart = parseDateToTimestamp(filters.createdOn, 'start');
+      const rangeEnd = parseDateToTimestamp(filters.createdOn, 'end');
+      if (rangeStart && rangeEnd) {
+        conditions.push(`(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`);
+      }
+    }
+
+    // Time keyword filter (today, yesterday, this week, last 7 days, etc.)
+    if (filters.createdRange) {
+      const timeRange = parseTimeKeyword(filters.createdRange);
+      if (timeRange) {
+        conditions.push(`(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`);
+      }
+    }
     return conditions.join(' and ');
   }
   /**

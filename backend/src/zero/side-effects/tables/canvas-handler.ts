@@ -7,6 +7,8 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { logger } from '@/utils/logger';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
 
 /**
  * Handler for canvas-related side effects
@@ -114,9 +116,57 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
       }).catch(error => {
         logger.error('[CanvasSideEffectHandler] Failed to create activities or send mention notifications:', error);
       });
+
+      // Queue Vespa indexing job for the canvas
+      try {
+        await vespaQueue.addJob({
+          schema: fileSchema,
+          docId: canvasId,
+          jobType: 'feed',
+          userId: canvas.createdBy,
+          app: SubApp.CANVAS,
+        });
+        logger.info(`[CanvasSideEffectHandler] Queued Vespa indexing for canvas ${canvasId}`);
+      } catch (error) {
+        logger.error(`[CanvasSideEffectHandler] Failed to queue Vespa job for canvas ${canvasId}:`, error);
+        // Don't throw - we don't want to fail the main canvas creation
+      }
     } catch (error) {
       logger.error(`[CanvasSideEffectHandler] Failed to handle canvas insert:`, error);
       // Don't throw - we don't want to fail the main canvas creation
+    }
+  }
+    /**
+   * Handle canvas update events to queue Vespa indexing
+   */
+  async onUpdate(job: SideEffectJobConfig): Promise<void> {
+    const canvasId = job.entityId;
+
+    try {
+      // Get the canvas details to get the creator for Vespa job
+      const canvas = await db.canvas.findUnique({
+        where: { id: canvasId },
+        select: {
+          createdBy: true,
+        },
+      });
+
+      if (!canvas) {
+        logger.warn(`[CanvasSideEffectHandler] Canvas ${canvasId} not found during update`);
+        return;
+      }
+
+      // Queue Vespa indexing job for the canvas
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: canvasId,
+        jobType: 'feed', // Re-feed to update
+        userId: canvas.createdBy,
+        app: SubApp.CANVAS,
+      });
+      logger.info(`[CanvasSideEffectHandler] Queued Vespa indexing for updated canvas ${canvasId}`);
+    } catch (error) {
+      logger.error(`[CanvasSideEffectHandler] Failed to queue Vespa job for updated canvas ${canvasId}:`, error);
     }
   }
 }

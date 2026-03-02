@@ -61,6 +61,7 @@ export interface SearchContext {
   mimeType?: string;
   internalUrl?: string;
   originalUrl?: string;
+  subApp?: string;
 }
 
 export interface PaginatedSearchResults {
@@ -144,6 +145,7 @@ export interface VespaSearchFilters {
 
   // Filter-only mode (no query text, just filters)
   filterOnly?: boolean;
+  subApp?: string;
 }
 
 export interface VespaSearchGroup {

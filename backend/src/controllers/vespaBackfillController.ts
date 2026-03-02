@@ -8,6 +8,8 @@ import {
   channelSchema,
   projectSchema,
   ticketSchema,
+  fileSchema,
+  SubApp,
 } from '@/vespa/src/types';
 import { ChannelType, Prisma } from '@prisma/client';
 
@@ -388,7 +390,176 @@ export class AdminBackfillController {
       logger.info(`  Transformed and queued ${totalQueued} tickets...`);
     }
 
-    logger.info(`✓ Transformed and queued ${totalQueued} tickets for ingestion`);
+      logger.info(`✓ Transformed and queued ${totalQueued} tickets for ingestion`);
+      return totalQueued;
+  }
+
+  /**
+   * Backfill canvases to Vespa - Transform-at-queue-time approach
+   * Only backfills canvases updated within the specified time range
+   * If no timeframe is provided, backfills all canvases
+   */
+  private static async backfillCanvases(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: any = {};
+
+    // Build where clause based on provided timeframe
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          updatedAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      // No timeframe provided - get all canvases
+      timeRange = "all canvases (no timeframe limit)";
+      whereClause = {}; // No time filter
+    }
+
+    logger.info(`🔄 Backfilling canvases ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching canvases batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const canvases = await db.canvas.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' },
+        select: { id: true } // Only select ID initially
+      });
+
+      if (canvases.length === 0) {
+        logger.debug('[Backfill] No more canvases found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${canvases.length} canvases. Transforming and queueing...`);
+
+      // Transform and queue each canvas
+      for (const canvasRef of canvases) {
+        try {
+          // Queue only the ID - worker will handle the processing
+          await vespaQueue.addJob({
+            schema: fileSchema,
+            jobType: 'feed',
+            docId: canvasRef.id,
+            userId: undefined, // backfill jobs don't have a specific user
+            app: SubApp.CANVAS,
+          });
+          totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to transform canvas ${canvasRef.id}:`, error);
+          // Continue with other canvases
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Transformed and queued ${totalQueued} canvases...`);
+    }
+
+    logger.info(`✓ Transformed and queued ${totalQueued} canvases for ingestion`);
+    return totalQueued;
+  }
+
+  /**
+   * Backfill transcripts to Vespa - Transform-at-queue-time approach
+   * Only backfills calls with transcripts updated within the specified time range
+   * If no timeframe is provided, backfills all calls with transcripts
+   */
+  private static async backfillTranscripts(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: any = {
+      transcript: {
+        not: null,
+      },
+    };
+
+    // Build where clause based on provided timeframe
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          ...whereClause,
+          updatedAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          ...whereClause,
+          updatedAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      // No timeframe provided - get all calls with transcripts
+      timeRange = "all calls with transcripts (no timeframe limit)";
+    }
+
+    logger.info(`🔄 Backfilling transcripts ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching calls with transcripts batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const calls = await db.call.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' },
+        select: { id: true } // Only select ID initially
+      });
+
+      if (calls.length === 0) {
+        logger.debug('[Backfill] No more calls with transcripts found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${calls.length} calls with transcripts. Transforming and queueing...`);
+
+      // Transform and queue each call with transcript
+      for (const callRef of calls) {
+        try {
+          // Queue only the ID - worker will handle the processing
+          await vespaQueue.addJob({
+            schema: fileSchema,
+            jobType: 'feed',
+            docId: callRef.id,
+            userId: undefined, // backfill jobs don't have a specific user
+            app: SubApp.TRANSCRIPT,
+          });
+          totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to transform transcript ${callRef.id}:`, error);
+          // Continue with other transcripts
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Transformed and queued ${totalQueued} transcripts...`);
+    }
+
+    logger.info(`✓ Transformed and queued ${totalQueued} transcripts for ingestion`);
     return totalQueued;
   }
 
@@ -411,7 +582,7 @@ export class AdminBackfillController {
       // Determine which schemas to backfill
       const requestedSchemas = schemasParam
         ? schemasParam.split(',').map(s => s.trim().toLowerCase())
-        : ['messages', 'channels', 'tickets', 'projects'];
+        : ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts'];
 
       // Parse fromTimestamp if provided, otherwise start from the beginning
       let fromTime: Date | null = null;
@@ -435,7 +606,7 @@ export class AdminBackfillController {
         logger.info(`📅 No fromTimestamp provided - will backfill from the beginning`);
       }
 
-      const validSchemas = ['messages', 'channels', 'tickets', 'projects'];
+      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts'];
       const schemasToBackfill = requestedSchemas.filter(s => validSchemas.includes(s));
 
       if (schemasToBackfill.length === 0) {
@@ -575,6 +746,14 @@ export class AdminBackfillController {
 
       if (schemasToBackfill.includes('tickets')) {
         stats.tickets = await AdminBackfillController.backfillTickets(cutoffTime, fromTime, filters);
+      }
+
+      if (schemasToBackfill.includes('canvases')) {
+        stats.canvases = await AdminBackfillController.backfillCanvases(cutoffTime, fromTime);
+      }
+
+      if (schemasToBackfill.includes('transcripts')) {
+        stats.transcripts = await AdminBackfillController.backfillTranscripts(cutoffTime, fromTime);
       }
 
       const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);

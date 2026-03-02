@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { Command } from 'cmdk';
-import { Hash, User, MessageCircle, Ticket, Paperclip, Eye } from 'lucide-react';
+import { Hash, User, MessageCircle, Ticket, Paperclip, Eye, FileText, Mic } from 'lucide-react';
 import { DisplaySearchResult } from '../../../types/search';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import UserAvatar from '../../UserAvatar/UserAvatar';
@@ -13,7 +13,8 @@ interface SearchResultItemProps {
   onPreview?: (result: DisplaySearchResult) => void;
 }
 
-const getResultIcon = (type: string): ReactElement => {
+const getResultIcon = (result: DisplaySearchResult): ReactElement => {
+  const { type, searchContext } = result;
   switch (type) {
     case 'user':
       return <User size={16} className='text-gray-500' />;
@@ -24,6 +25,12 @@ const getResultIcon = (type: string): ReactElement => {
     case 'ticket':
       return <Ticket size={16} className='text-gray-500' />;
     case 'attachment':
+      if (searchContext?.subApp === 'canvas') {
+        return <FileText size={16} className='text-gray-500' />;
+      }
+      if (searchContext?.subApp === 'transcript') {
+        return <Mic size={16} className='text-gray-500' />;
+      }
       return <Paperclip size={16} className='text-gray-500' />;
     default:
       return <MessageCircle size={16} className='text-gray-500' />;
@@ -78,7 +85,7 @@ const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps
           className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
         >
           <div className='flex items-center gap-1.5'>
-            {result.avatar ? <UserAvatar userId={result.avatar} /> : getResultIcon(result.type)}
+            {result.avatar ? <UserAvatar userId={result.avatar} /> : getResultIcon(result)}
             <div className='flex-1 min-w-0'>
               <div className='flex items-center gap-1.5 text-xs'>
                 <span className='font-semibold text-gray-900 truncate'>
@@ -110,7 +117,7 @@ const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps
           className='flex flex-col gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
         >
           <div className='flex items-center gap-2'>
-            {getResultIcon(result.type)}
+            {getResultIcon(result)}
             <div className='flex-1 min-w-0'>
               <div className='font-semibold text-xs text-gray-800 truncate'>
                 <RenderMessageWithHTML message={result.title} />
@@ -133,7 +140,7 @@ const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps
           onSelect={() => void onSelect(result)}
           className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
         >
-          {getResultIcon(result.type)}
+          {getResultIcon(result)}
           <div className='flex-1 min-w-0'>
             <div className='font-semibold text-xs text-gray-800 truncate'>
               {' '}
@@ -170,7 +177,7 @@ const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps
           onSelect={() => void onSelect(result)}
           className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
         >
-          {getResultIcon(result.type)}
+          {getResultIcon(result)}
           <div className='flex-1 min-w-0'>
             <div className='font-semibold text-xs text-gray-800 truncate'>{result.title}</div>
             <div className='text-[11px] text-gray-500'>{result.subtitle}</div>

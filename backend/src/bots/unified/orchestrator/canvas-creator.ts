@@ -8,6 +8,8 @@ import { getCanvasUrl } from '@/services/canvasService';
 import { DatabaseClient } from '@/database/client';
 import type { BotEvent } from '../types/index.js';
 import {logger} from '@/utils/logger';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
 
 
 const prisma = DatabaseClient.getInstance();
@@ -117,6 +119,20 @@ export async function createCanvasWithGeniusBlock(
     const canvasUrl = getCanvasUrl(viewAccessId);
     
     logger.info(`[CanvasCreator] Created canvas ${canvasId} with Genius block for ${botId} query`);
+    
+    // Queue Vespa indexing for the canvas
+    try {
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: canvasId,
+        jobType: 'feed',
+        userId,
+        app: SubApp.CANVAS,
+      });
+      logger.info(`[CanvasCreator] Queued Vespa indexing for canvas ${canvasId}`);
+    } catch (vespaError) {
+      logger.error(`[CanvasCreator] Failed to queue Vespa job for canvas ${canvasId}:`, vespaError);
+    }
     
     return { canvasId, viewAccessId, canvasUrl };
 }
@@ -314,6 +330,20 @@ export async function processStreamAndCreateCanvas(
                 } as BotEvent;
 
                 logger.info(`[CanvasCreator] Created canvas ${newCanvasId} for long response (length: ${fullResponse.length})`);
+
+                // Queue Vespa indexing for the canvas
+                try {
+                  await vespaQueue.addJob({
+                    schema: fileSchema,
+                    docId: newCanvasId,
+                    jobType: 'feed',
+                    userId,
+                    app: SubApp.CANVAS,
+                  });
+                  logger.info(`[CanvasCreator] Queued Vespa indexing for long response canvas ${newCanvasId}`);
+                } catch (vespaError) {
+                  logger.error(`[CanvasCreator] Failed to queue Vespa job for long response canvas ${newCanvasId}:`, vespaError);
+                }
             } catch (error) {
                 logger.error('[CanvasCreator] Failed to create/update canvas:', error);
                 // If canvas update fails and from DM, yield the response as fallback
