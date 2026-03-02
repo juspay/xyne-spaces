@@ -23,6 +23,8 @@ export interface XyneAIContext {
   channelId: string | null;
   // Thread context
   threadInfo: ThreadInfo | null;
+  // Flag to indicate a fresh chat should be started
+  startFreshChat: boolean;
 }
 
 // Event types for XyneAI machine
@@ -33,6 +35,7 @@ export type XyneAIEvent =
       contextId?: string;
       channelId?: string;
       threadInfo?: ThreadInfo | null;
+      startFreshChat?: boolean;
     }
   | { type: 'CLOSE' }
   | { type: 'SET_CONTEXT'; contextType: XyneAIContextType; contextId: string }
@@ -79,6 +82,7 @@ export const xyneAIMachine = setup({
           contextId,
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
           threadInfo: event.threadInfo ?? null,
+          startFreshChat: event.startFreshChat ?? false,
         };
       }
       return { xyneAIState: 'open' as XyneAIState };
@@ -95,6 +99,7 @@ export const xyneAIMachine = setup({
           contextId,
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
           threadInfo: event.threadInfo ?? null,
+          startFreshChat: event.startFreshChat ?? false,
         };
       }
       return {};
@@ -105,6 +110,7 @@ export const xyneAIMachine = setup({
       contextId: null,
       channelId: null,
       threadInfo: null,
+      startFreshChat: false,
     }),
     setContext: assign(({ event }) => {
       if (event.type === 'SET_CONTEXT') {
@@ -134,6 +140,7 @@ export const xyneAIMachine = setup({
     contextId: null,
     channelId: null,
     threadInfo: null,
+    startFreshChat: false,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',

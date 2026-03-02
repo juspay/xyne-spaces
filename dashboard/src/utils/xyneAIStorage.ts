@@ -30,9 +30,10 @@ export interface StoredMessage {
 }
 
 export interface ConversationHistory {
-  id: string; // Unique ID for this conversation (channelId + sessionId)
+  id: string; // Unique ID for this conversation (channelId + sessionId + threadConversationId)
   channelId: string;
   sessionId: string;
+  threadConversationId?: string; // Thread-specific context (conversationId from thread)
   title: string; // Auto-generated title from first user message
   messages: StoredMessage[];
   createdAt: Date;
@@ -100,13 +101,17 @@ class XyneAIStorage {
     channelId: string,
     sessionId: string,
     messages: StoredMessage[],
+    threadConversationId?: string,
   ): Promise<void> {
     try {
       const db = await this.openDB();
       const transaction = db.transaction([STORE_NAME], 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
 
-      const conversationId = `${channelId}_${sessionId}`;
+      // Include threadConversationId in the key if it exists
+      const conversationId = threadConversationId
+        ? `${channelId}_${threadConversationId}_${sessionId}`
+        : `${channelId}_${sessionId}`;
 
       // Check if conversation already exists
       const existingRequest = store.get(conversationId);
@@ -119,6 +124,7 @@ class XyneAIStorage {
             id: conversationId,
             channelId,
             sessionId,
+            ...(threadConversationId && { threadConversationId }),
             title: existing?.title || this.generateTitle(messages),
             messages,
             createdAt: existing?.createdAt || new Date(),
@@ -153,12 +159,15 @@ class XyneAIStorage {
   async loadConversation(
     channelId: string,
     sessionId: string,
+    threadConversationId?: string,
   ): Promise<ConversationHistory | null> {
     try {
       const db = await this.openDB();
       const transaction = db.transaction([STORE_NAME], 'readonly');
       const store = transaction.objectStore(STORE_NAME);
-      const conversationId = `${channelId}_${sessionId}`;
+      const conversationId = threadConversationId
+        ? `${channelId}_${threadConversationId}_${sessionId}`
+        : `${channelId}_${sessionId}`;
       const request = store.get(conversationId);
 
       return new Promise((resolve, reject) => {
@@ -187,14 +196,33 @@ class XyneAIStorage {
 
   /**
    * Load the most recent conversation for a channel
+   * If threadConversationId is provided, load the most recent for that thread
+   * Otherwise, load the most recent channel-level conversation (no thread context)
    */
-  async loadLatestConversation(channelId: string): Promise<ConversationHistory | null> {
+  async loadLatestConversation(
+    channelId: string,
+    threadConversationId?: string,
+  ): Promise<ConversationHistory | null> {
     try {
       const conversations = await this.getConversationsForChannel(channelId);
       if (conversations.length === 0) return null;
 
+      // Filter conversations based on thread context
+      const filteredConversations = conversations.filter(conv => {
+        if (threadConversationId) {
+          // For thread context, only return conversations with matching threadConversationId
+          return conv.threadConversationId === threadConversationId;
+        }
+        // For channel context, only return conversations without threadConversationId
+        return !conv.threadConversationId;
+      });
+
+      if (filteredConversations.length === 0) return null;
+
       // Return the most recently updated conversation
-      return conversations.sort((a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime())[0]!;
+      return filteredConversations.sort(
+        (a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime(),
+      )[0]!;
     } catch (error) {
       console.error('[XyneAIStorage] Failed to load latest conversation:', error);
       return null;
@@ -235,12 +263,18 @@ class XyneAIStorage {
     }
   }
 
-  async deleteConversation(channelId: string, sessionId: string): Promise<void> {
+  async deleteConversation(
+    channelId: string,
+    sessionId: string,
+    threadConversationId?: string,
+  ): Promise<void> {
     try {
       const db = await this.openDB();
       const transaction = db.transaction([STORE_NAME], 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
-      const conversationId = `${channelId}_${sessionId}`;
+      const conversationId = threadConversationId
+        ? `${channelId}_${threadConversationId}_${sessionId}`
+        : `${channelId}_${sessionId}`;
       store.delete(conversationId);
 
       return new Promise((resolve, reject) => {
@@ -257,9 +291,13 @@ class XyneAIStorage {
     }
   }
 
-  async toggleStar(channelId: string, sessionId: string): Promise<void> {
+  async toggleStar(
+    channelId: string,
+    sessionId: string,
+    threadConversationId?: string,
+  ): Promise<void> {
     try {
-      const conversation = await this.loadConversation(channelId, sessionId);
+      const conversation = await this.loadConversation(channelId, sessionId, threadConversationId);
       if (!conversation) return;
 
       const db = await this.openDB();
@@ -283,9 +321,14 @@ class XyneAIStorage {
     }
   }
 
-  async renameConversation(channelId: string, sessionId: string, newTitle: string): Promise<void> {
+  async renameConversation(
+    channelId: string,
+    sessionId: string,
+    newTitle: string,
+    threadConversationId?: string,
+  ): Promise<void> {
     try {
-      const conversation = await this.loadConversation(channelId, sessionId);
+      const conversation = await this.loadConversation(channelId, sessionId, threadConversationId);
       if (!conversation) return;
 
       const db = await this.openDB();
@@ -359,7 +402,7 @@ class XyneAIStorage {
     try {
       const conversations = await this.getConversationsForChannel(channelId);
       const deletePromises = conversations.map(conv =>
-        this.deleteConversation(conv.channelId, conv.sessionId),
+        this.deleteConversation(conv.channelId, conv.sessionId, conv.threadConversationId),
       );
       await Promise.all(deletePromises);
     } catch (error) {
