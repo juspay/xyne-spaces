@@ -44,6 +44,7 @@ export async function generateTitleFromDescription(req: Request, res: Response):
 
     res.json({
       title: result.title,
+      ticketType: result.ticketType,
     });
   } catch (_) {
     res.status(500).json({

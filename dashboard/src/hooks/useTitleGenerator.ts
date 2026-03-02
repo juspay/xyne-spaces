@@ -4,6 +4,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { generateTitle } from '../services/titleGeneratorService';
+import { type ClassifiableTicketType } from '@xyne/shared';
 
 export interface UseTitleGeneratorOptions {
   maxLength?: number;
@@ -12,6 +13,7 @@ export interface UseTitleGeneratorOptions {
 
 export interface UseTitleGeneratorReturn {
   title: string;
+  ticketType: ClassifiableTicketType | null;
   isGenerating: boolean;
   error: Error | null;
   generateFromDescription: (description: string) => Promise<void>;
@@ -26,6 +28,7 @@ export function useTitleGenerator(options: UseTitleGeneratorOptions = {}): UseTi
   const { maxLength = 100, onError } = options;
 
   const [title, setTitle] = useState<string>('');
+  const [ticketType, setTicketType] = useState<ClassifiableTicketType | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -60,7 +63,7 @@ export function useTitleGenerator(options: UseTitleGeneratorOptions = {}): UseTi
       setError(null);
 
       try {
-        const generatedTitle = await generateTitle(
+        const result = await generateTitle(
           {
             description: description.trim(),
             maxLength,
@@ -68,9 +71,10 @@ export function useTitleGenerator(options: UseTitleGeneratorOptions = {}): UseTi
           abortController.signal,
         );
 
-        // Only set title if request wasn't aborted
+        // Only set values if request wasn't aborted
         if (!abortController.signal.aborted) {
-          setTitle(generatedTitle);
+          setTitle(result.title);
+          setTicketType(result.ticketType);
         }
       } catch (err) {
         // Don't show error if request was aborted
@@ -94,12 +98,14 @@ export function useTitleGenerator(options: UseTitleGeneratorOptions = {}): UseTi
   const reset = useCallback(() => {
     cancelGeneration();
     setTitle('');
+    setTicketType(null);
     setError(null);
     setIsGenerating(false);
   }, [cancelGeneration]);
 
   return {
     title,
+    ticketType,
     isGenerating,
     error,
     generateFromDescription,
