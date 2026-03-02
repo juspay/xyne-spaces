@@ -17,6 +17,24 @@ NC='\033[0m' # No Color
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AUTOMATION_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+PROMPTS_DIR="$SCRIPT_DIR/prompts"
+
+# Load prompt template and substitute variables
+# Usage: load_prompt <template_file> [var1=value1] [var2=value2] ...
+load_prompt() {
+    local template="$1"
+    shift
+    local content=$(cat "$template" 2>/dev/null || echo "")
+
+    # Substitute variables
+    for var in "$@"; do
+        local key="${var%%=*}"
+        local value="${var#*=}"
+        content="${content//\{\{$key\}\}/$value}"
+    done
+
+    echo "$content"
+}
 
 # Returns the next available NN prefix for files matching a glob pattern in a directory
 # Usage: next_prefix=$(get_next_prefix "/path/to/dir" "*.feature")
@@ -281,64 +299,12 @@ for INPUT_FILE in "$@"; do
         E2E_STRUCTURE="${E2E_STRUCTURE}\n"
     done
 
-    # Create LLM prompt for folder placement analysis
+    # Create LLM prompt for folder placement analysis using template
     FOLDER_ANALYSIS_PROMPT=$(mktemp)
-    cat > "$FOLDER_ANALYSIS_PROMPT" << 'FOLDER_ANALYSIS_EOF'
-You are a test organization expert. Analyze the Playwright spec file and existing test structure to recommend WHERE to place the converted BDD test files.
-
-## Task:
-1. Identify what feature/functionality the Playwright test covers
-2. Check if any existing folder already contains similar scenarios
-3. Calculate similarity percentage for each matching folder
-4. Recommend the best folder OR suggest a new folder name
-
-## Existing e2e folder structure:
-```
-FOLDER_ANALYSIS_EOF
-
-    echo -e "$E2E_STRUCTURE" >> "$FOLDER_ANALYSIS_PROMPT"
-    
-    cat >> "$FOLDER_ANALYSIS_PROMPT" << 'FOLDER_ANALYSIS_EOF2'
-```
-
-## Playwright spec file:
-```typescript
-FOLDER_ANALYSIS_EOF2
-
-    cat "$ABSOLUTE_PATH" >> "$FOLDER_ANALYSIS_PROMPT"
-    
-    cat >> "$FOLDER_ANALYSIS_PROMPT" << 'FOLDER_ANALYSIS_EOF3'
-```
-
-## Output Format (MUST follow exactly):
-```json
-{
-  "analysis": "Brief description of what this test does",
-  "matches": [
-    {
-      "folder": "folder_name",
-      "similarity_percentage": 85,
-      "reason": "Why this folder matches",
-      "matching_scenarios": ["scenario 1", "scenario 2"]
-    }
-  ],
-  "recommendation": {
-    "action": "use_existing | create_new",
-    "folder_name": "recommended_folder_name",
-    "new_folder_suggestion": "suggested-new-name (if action is create_new)",
-    "rationale": "Why this recommendation"
-  }
-}
-```
-
-**Rules:**
-- similarity_percentage: 0-100, based on test names, selectors (testids), URLs, and actions
-- 80-100%: Very similar, likely same feature
-- 50-79%: Related feature area
-- 0-49%: Different feature
-- If no folder has >50% similarity, recommend creating a new folder
-- new_folder_suggestion should be kebab-case, lowercase, descriptive
-FOLDER_ANALYSIS_EOF3
+    load_prompt "$PROMPTS_DIR/folder-analysis.md" \
+        "E2E_STRUCTURE=$E2E_STRUCTURE" \
+        "PLAYWRIGHT_CONTENT=$(cat "$ABSOLUTE_PATH")" \
+        > "$FOLDER_ANALYSIS_PROMPT"
 
     echo -e "${CYAN}Asking LLM to analyze folder placement...${NC}"
     
@@ -390,22 +356,40 @@ FOLDER_ANALYSIS_EOF3
     echo ""
 
     # ============================================================
-    # STEP 2: Ask user for decision
+    # STEP 2: Ask user for decision with auto-select countdown
     # ============================================================
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${YELLOW}The LLM identified the above-mentioned folders and files as having similarities.${NC}"
     echo -e "${YELLOW}What would you like to do?${NC}"
     echo -e "  ${CYAN}1)${NC} Skip conversion (keep existing tests)"
-    echo -e "  ${CYAN}2)${NC} Use LLM's recommended folder"
+    echo -e "  ${CYAN}2)${NC} Use LLM's recommended folder ${GREEN}(auto-select in 20s)${NC}"
     echo -e "  ${CYAN}3)${NC} Choose a different existing folder"
     echo -e "  ${CYAN}4)${NC} Create a new folder with custom name"
     echo ""
-    echo -n -e "${YELLOW}Choose [1/2/3/4]: ${NC}"
-    read -r USER_DECISION
-    
-    # Trim whitespace
-    USER_DECISION=$(echo "$USER_DECISION" | tr -d '[:space:]')
-    
+
+    # Simple countdown with read timeout
+    USER_DECISION=""
+    echo ""
+    echo -e "${YELLOW}Type your choice (1-4) and press Enter (auto-selects option 2 in 20s):${NC}"
+
+    # Read with 20 second timeout
+    if IFS= read -r -t 20 USER_DECISION; then
+        USER_DECISION=$(echo "$USER_DECISION" | tr -d '[:space:]' | head -c 1)
+    fi
+
+    # Clear line and show result
+    printf "\r\033[K"
+
+    # If no user input, auto-select option 2 (LLM recommended folder)
+    if [ -z "$USER_DECISION" ]; then
+        USER_DECISION="2"
+        echo -e "${GREEN}✓ Auto-selected: Use LLM's recommended folder${NC}"
+    else
+        echo -e "${GREEN}✓ Selected option: ${USER_DECISION}${NC}"
+    fi
+
+    echo ""
+
     if [ "$USER_DECISION" = "1" ]; then
         echo -e "${CYAN}Skipping conversion for: $INPUT_FILE${NC}"
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
@@ -465,18 +449,67 @@ FOLDER_ANALYSIS_EOF3
             fi
         else
             echo ""
-            echo -n -e "${YELLOW}Select folder number: ${NC}"
-            read -r FOLDER_NUM
-            FOLDER_NUM=$(echo "$FOLDER_NUM" | tr -d '[:space:]')
-            
-            if [ "$FOLDER_NUM" -ge 1 ] && [ "$FOLDER_NUM" -lt "$folder_idx" ]; then
-                OUTPUT_FOLDER="${FOLDER_OPTIONS[$FOLDER_NUM]}"
-                OUTPUT_FOLDER_ABS="$E2E_DIR/$OUTPUT_FOLDER"
-                echo -e "${GREEN}✓ Selected folder:${NC} ${CYAN}tests/03_e2e/${OUTPUT_FOLDER}${NC}"
-            else
-                echo -e "${RED}Invalid selection. Exiting.${NC}"
-                exit 1
+
+            # Find the LLM recommended folder index for auto-selection
+            RECOMMENDED_IDX=""
+            for i in "${!FOLDER_OPTIONS[@]}"; do
+                if [ "${FOLDER_SIMILARITIES[$i]}" = "recommended" ]; then
+                    RECOMMENDED_IDX="$i"
+                    break
+                fi
+            done
+
+            # If no explicit recommended found, use the last added folder
+            if [ -z "$RECOMMENDED_IDX" ] && [ ${#FOLDER_OPTIONS[@]} -gt 0 ]; then
+                RECOMMENDED_IDX="${!FOLDER_OPTIONS[@]}"
+                RECOMMENDED_IDX="${RECOMMENDED_IDX##* }"
             fi
+            # Simple countdown with read timeout
+            FOLDER_NUM=""
+            echo ""
+            if [ -n "$RECOMMENDED_IDX" ]; then
+                echo -e "${YELLOW}Type folder number and press Enter (auto-selects ${RECOMMENDED_IDX} in 20s):${NC}"
+            else
+                echo -e "${YELLOW}Type folder number and press Enter (auto-selects in 20s):${NC}"
+            fi
+
+            # Loop until valid selection or timeout
+            while true; do
+                # Read with 20 second timeout
+                if IFS= read -r -t 20 FOLDER_NUM; then
+                    FOLDER_NUM=$(echo "$FOLDER_NUM" | tr -d '[:space:]' | head -c 2)
+                fi
+
+                # If no user input, auto-select LLM recommended folder
+                if [ -z "$FOLDER_NUM" ] && [ -n "$RECOMMENDED_IDX" ]; then
+                    FOLDER_NUM="$RECOMMENDED_IDX"
+                    echo -e "${GREEN}✓ Auto-selected folder:${NC} ${CYAN}${FOLDER_OPTIONS[$FOLDER_NUM]}${NC} ${GREEN}(LLM recommended)${NC}"
+                    break
+                elif [ -z "$FOLDER_NUM" ]; then
+                    # Fallback to first option if no recommended found
+                    FOLDER_NUM="${!FOLDER_OPTIONS[@]}"
+                    FOLDER_NUM="${FOLDER_NUM%% *}"
+                    echo -e "${GREEN}✓ Auto-selected folder:${NC} ${CYAN}${FOLDER_OPTIONS[$FOLDER_NUM]}${NC}"
+                    break
+                elif [ "$FOLDER_NUM" -ge 1 ] && [ "$FOLDER_NUM" -lt "$folder_idx" ] 2>/dev/null; then
+                    echo -e "${GREEN}✓ Selected folder:${NC} ${CYAN}${FOLDER_OPTIONS[$FOLDER_NUM]}${NC}"
+                    break
+                else
+                    echo -e "${RED}Invalid selection. Please try again.${NC}"
+                    echo ""
+                    # Show valid options again
+                    for i in "${!FOLDER_OPTIONS[@]}"; do
+                        echo -e "  ${CYAN}${i})${NC} ${FOLDER_OPTIONS[$i]} ${YELLOW}(${FOLDER_SIMILARITIES[$i]})${NC}"
+                    done
+                    echo ""
+                    echo -e "${YELLOW}Type folder number and press Enter:${NC}"
+                    FOLDER_NUM=""
+                fi
+            done
+
+            OUTPUT_FOLDER="${FOLDER_OPTIONS[$FOLDER_NUM]}"
+            OUTPUT_FOLDER_ABS="$E2E_DIR/$OUTPUT_FOLDER"
+            echo -e "${GREEN}✓ Final folder:${NC} ${CYAN}tests/03_e2e/${OUTPUT_FOLDER}${NC}"
         fi
     elif [ "$USER_DECISION" = "3" ]; then
         echo ""
@@ -590,69 +623,24 @@ FOLDER_ANALYSIS_EOF3
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
         echo "" >&2
 
-        # Create LLM prompt for scenario similarity analysis
+        # Create LLM prompt for scenario similarity analysis using template
         SCENARIO_ANALYSIS_PROMPT=$(mktemp)
-        cat > "$SCENARIO_ANALYSIS_PROMPT" << 'SCENARIO_ANALYSIS_EOF'
-You are a test coverage expert. Compare the Playwright spec file against existing Cucumber scenarios to calculate coverage percentage.
 
-## Task:
-1. Identify all test cases in the Playwright spec file
-2. For each test case, check if it's already covered in existing scenarios
-3. Calculate percentage of coverage (0-100%)
-4. List which scenarios are covered and which are new
-
-## Playwright spec file:
-```typescript
-SCENARIO_ANALYSIS_EOF
-
-        cat "$ABSOLUTE_PATH" >> "$SCENARIO_ANALYSIS_PROMPT"
-        
-        cat >> "$SCENARIO_ANALYSIS_PROMPT" << 'SCENARIO_ANALYSIS_EOF2'
-```
-
-## Existing Cucumber scenarios in this folder:
-SCENARIO_ANALYSIS_EOF2
-
+        # Build existing features content
+        EXISTING_FEATURES_CONTENT=""
         for ef in "${EXISTING_FEATURE_FILES[@]}"; do
-            echo "" >> "$SCENARIO_ANALYSIS_PROMPT"
-            echo "### $(basename "$ef")" >> "$SCENARIO_ANALYSIS_PROMPT"
-            echo '```gherkin' >> "$SCENARIO_ANALYSIS_PROMPT"
-            cat "$ef" >> "$SCENARIO_ANALYSIS_PROMPT"
-            echo '```' >> "$SCENARIO_ANALYSIS_PROMPT"
+            EXISTING_FEATURES_CONTENT="${EXISTING_FEATURES_CONTENT}
+
+### $(basename "$ef")
+\`\`\`gherkin
+$(cat "$ef")
+\`\`\`"
         done
-        
-        cat >> "$SCENARIO_ANALYSIS_PROMPT" << 'SCENARIO_ANALYSIS_EOF3'
 
-## Output Format (MUST follow exactly):
-```json
-{
-  "coverage_percentage": 75,
-  "analysis": "Brief summary of coverage",
-  "covered_scenarios": [
-    {
-      "playwright_test": "test name from spec",
-      "covered_by": "existing scenario name",
-      "confidence": "high | medium | low"
-    }
-  ],
-  "new_scenarios": [
-    {
-      "playwright_test": "test name from spec",
-      "reason": "why it's not covered"
-    }
-  ],
-  "recommendation": "skip | update | regenerate_all"
-}
-```
-
-**Rules:**
-- coverage_percentage: 0-100, based on how many test cases are already covered
-- confidence: high (exact match), medium (similar), low (partial match)
-- recommendation:
-  - skip: 100% coverage, all tests already exist
-  - update: 1-99% coverage, add missing scenarios to existing files
-  - regenerate_all: 0% coverage or scenarios are very different
-SCENARIO_ANALYSIS_EOF3
+        load_prompt "$PROMPTS_DIR/scenario-analysis.md" \
+            "PLAYWRIGHT_CONTENT=$(cat "$ABSOLUTE_PATH")" \
+            "EXISTING_FEATURE_FILES=$EXISTING_FEATURES_CONTENT" \
+            > "$SCENARIO_ANALYSIS_PROMPT"
 
         echo -e "${CYAN}Asking LLM to analyze scenario coverage...${NC}" >&2
         
@@ -752,1007 +740,11 @@ SCENARIO_ANALYSIS_EOF3
 
     echo ""
 
-    # Create prompt file using heredoc to avoid shell interpretation issues
+    # Create prompt file using template
     TEMP_PROMPT_FILE=$(mktemp)
-    cat > "$TEMP_PROMPT_FILE" << 'PROMPT_EOF'
-You are a test automation expert. Convert the following Playwright test into Cucumber BDD format for the xyne-automation framework.
-
-**CRITICAL: ALWAYS OUTPUT CODE BLOCKS.** The automation script parses your output for code blocks. If you do not output code blocks, the pipeline will fail. Never say "the test already exists" or "no new files needed" — always generate and output the complete files.
-
-## RULES:
-
-### Rule 1 — Feature File Completeness & Faithfulness
-- The .feature file MUST include EVERY step from the Playwright test, in exact order.
-- NEVER skip, merge, or deduplicate steps that look similar. If the Playwright test clicks 3 different buttons, the feature file must have 3 separate click steps.
-- **CRITICAL — 1:1 Mapping**: Each Playwright action (click, fill, goto, waitFor, etc.) MUST map to exactly ONE step in the feature file. Do NOT:
-  - Invent actions that do not exist in the spec file (e.g., do NOT add a "create" click when the spec clicks "Cancel")
-  - Replace one action with a different action (e.g., do NOT replace `getByRole('button', { name: 'Cancel' }).click()` with a click on a different button)
-  - Skip actions from the spec file
-  - Reorder actions from the spec file
-  - **Revert selectors**: If the spec uses `getByTestId('dm-message-input')`, you MUST output `I click on "[data-testid='dm-message-input']"` — do NOT convert it back to a role/text/label selector like `I click the textbox with name "Message (optional)"`. The spec file is the single source of truth.
-- **Verify**: After generating, mentally walk through the spec file line by line and confirm every action has a matching step in the same order. If the spec says `.click()` on element X, the feature file MUST click on element X — not element Y.
-- Use the EXACT step phrases from the QUICK REFERENCE list (provided below) character-for-character. Do NOT rephrase, reorder words, or add/remove words.
-- String parameters (browser names, selectors, etc.) MUST be in double "quotes" in the .feature file.
-
-### Rule 2 — Steps File: No Duplicates (GLOBAL scope)
-- Your .steps.ts file must NOT contain ANY step definition whose pattern already exists ANYWHERE in the project — this includes shared step files (common.steps.ts, browser.steps.ts, e2e-common.steps.ts) AND step files in OTHER e2e test folders.
-- Cucumber loads ALL step files globally. A step defined in `05_tickets/steps/01_test.steps.ts` is visible to tests in `07_call/`. Redefining the same step pattern causes "Multiple step definitions match" errors that break the ENTIRE test suite.
-- BEFORE writing any step definition, check the EXISTING SHARED STEP DEFINITIONS section in the prompt (provided dynamically). If the pattern is there, DO NOT define it.
-- If a step you need is already defined, just USE it in your .feature file — do NOT redefine it.
-
-**USER REFERENCE RESOLUTION — Required for all steps with text input**:
-
-When creating ANY step that accepts text which may contain `user:xxx-browser.xxx` patterns (like typing, clicking on text, assertions), you MUST include the resolution logic:
-
-```typescript
-// Always include this resolution logic for text parameters
-const resolvedText = text.replace(
-  /user:([^.,\s]+)\.([^,\s]+)/g,
-  (match, browserSession, field) => {
-    for (const [, userData] of this.userData) {
-      if (userData.browserSession === browserSession) {
-        return userData[field as keyof typeof userData] as string;
-      }
-    }
-    throw new Error(`No user found logged in browser session "\${browserSession}"`);
-  }
-);
-// Then use resolvedText instead of text
-```
-
-**Example steps that need user resolution**:
-- `I type {string} on the element {string}` — Resolve text before filling
-- `I type {string} using keyboard` — Resolve text before typing
-- `I click on text {string}` — Resolve text before clicking
-- `I should see {string} in the element {string}` — Resolve text before assertion
-- Any step that uses `user:xxx-browser.xxx` pattern in the feature file
-
-### Rule 3 — Steps File: Define All New Steps
-- For EVERY step phrase in the .feature file that is NOT in the QUICK REFERENCE list, you MUST generate a matching step definition in the .steps.ts file.
-- The step definition string must match the feature file step phrase EXACTLY, character for character.
-- The step definition body MUST use the equivalent Playwright API method. For example, if the spec calls `.keyboard.press(...)`, your step definition must call `this.page.keyboard.press(...)`. If the spec calls `.locator(...).press(...)`, your step must call `this.page.locator(selector).press(...)`. Always use `this.page` (from CustomWorld) — never `page` directly.
-- This applies to ALL Playwright actions: keyboard, mouse, drag-and-drop, hover, focus, selectOption, check, uncheck, dblclick, scroll, file upload, etc. Whatever Playwright method the spec uses, your step definition must use the same method via `this.page`.
-- Even if all steps exist in shared files, you MUST still output a .steps.ts file (it can be minimal with just imports).
-
-### Rule 4 — Faithful Selector Conversion (NEVER invent data-testid)
-**Convert selectors EXACTLY as they appear in the spec file. NEVER invent or fabricate selectors.**
-**NEVER reverse-engineer a getByTestId() back to its original role/text/label form.**
-
-| Playwright spec uses | Convert to (feature file) |
-|---|---|
-| `page.getByTestId('foo')` | `I click on "[data-testid='foo']"` |
-| `page.getByTestId('foo').fill('val')` | `I type "val" on the element "[data-testid='foo']"` |
-| `page.getByTestId('foo').click()` then `page.getByTestId('foo').fill('val')` | TWO steps: `I click on "[data-testid='foo']"` AND `I type "val" on the element "[data-testid='foo']"` |
-| `page.getByText('some text')` | `I click on text "some text"` |
-| `page.getByRole('button', { name: 'Cancel' })` | `I click the button with text "Cancel"` |
-| `page.getByRole('paragraph')` | Use an existing shared step or create a new one |
-| `page.click('text="some text"')` | `I click on text "some text"` |
-| `page.fill('selector', 'value')` | `I type "value" on the element "selector"` |
-| `page.keyboard.press('<key>')` | `I press the "<key>" key` |
-| `page.keyboard.type('<text>')` | `I type "<text>" using keyboard` |
-| `page.locator('sel').press('<key>')` | `I press the "<key>" key on the element "sel"` |
-| `page.waitForSelector('sel')` | `I wait for "sel" to be visible` |
-| `expect(locator).toBeVisible()` | `I wait for "sel" to be visible` |
-| `page.waitForURL('**/path')` | `I wait for the URL to contain "/path"` |
-| **User search pattern** (DM creation, add member) | **Use search-first-then-select pattern** |
-| `page.fill('#search', 'email')` then `page.getByText('Name').click()` | `I type "user:target-browser.email" on the element "#search"` AND `I click on text "user:target-browser.name" in the element "[data-testid='user-search-results']"` |
-| **Search trigger pattern** (click to open, then type) | **Use keyboard typing after click** |
-| `page.getByTestId('search-trigger').click()` then `page.keyboard.type('text')` | `I click on "[data-testid='search-trigger']"` AND `I type "text" using keyboard` |
-| **User name in getByText** (person's name) | **Use dynamic user reference** |
-| `page.getByText('John Doe')` or `page.getByText('Naveen Yallattikar')` | `I click on text "user:<target-browser>.name"` (NEVER hardcode names!) |
-| **User email in fill** | **Use dynamic user reference** |
-| `page.fill('#search', 'john@example.com')` | `I type "user:<target-browser>.email" on the element "#search"` (NEVER hardcode emails!) |
-| **Global keyboard shortcut** (ControlOrMeta+k, Escape) | **Use `body` element** |
-| `page.getByTestId('message-input').press('ControlOrMeta+k')` | `I press the "ControlOrMeta+k" key on the element "body"` (global shortcuts use body!) |
-
-**CRITICAL — Global Keyboard Shortcuts**: Shortcuts like `ControlOrMeta+k` are global and should be pressed on `body`, not on specific elements:
-- ❌ `And I press the "ControlOrMeta+k" key on the element "[data-testid='message-input']"` → WRONG (element may not exist)
-- ✅ `And I press the "ControlOrMeta+k" key on the element "body"` → CORRECT (global shortcut)
-
-**CRITICAL — User Name/Email Detection**: If `getByText()`, `fill()`, or `type()` contains what looks like a person's name (e.g., "John Doe", "Naveen Yallattikar", "Admin User") or an email address, you MUST convert it to a dynamic user reference:
-- ❌ `And I click on text "Naveen Yallattikar"` → WRONG (hardcoded)
-- ✅ `And I click on text "user:admin-browser.name"` → CORRECT (dynamic)
-- ❌ `And I type "john@example.com" on the element "#search"` → WRONG (hardcoded)
-- ✅ `And I type "user:user2-browser.email" on the element "#search"` → CORRECT (dynamic)
-
-**CRITICAL — Non-Input Elements (Lexical Editor, Rich Text, etc.)**:
-Some elements look like inputs but are actually `<div>` containers for rich text editors (Lexical, Quill). The `.fill()` method will FAIL on these with error "Element is not an <input>, <textarea>, <select>".
-
-**Known Non-Input TestIDs (convert to keyboard typing)**:
-| TestID | Element Type | Correct Conversion |
-|---|---|---|
-| `search-textbox` | `<div data-lexical-search-input>` | `I type "text" using keyboard` |
-| `user-search-input` | `<input>` | `I type "text" on the element "[data-testid='user-search-input']"` ✅ WORKS |
-
-**Known Working Input TestIDs (use normal fill conversion)**:
-| TestID | Element Type | Correct Conversion |
-|---|---|---|
-| `user-search-input` | Works as input | `I type "text" on the element "[data-testid='user-search-input']"` ✅ |
-| `channel-name-input` | Works as input | `I type "text" on the element "[data-testid='channel-name-input']"` ✅ |
-| `dm-message-input` | Works as input | `I type "text" on the element "[data-testid='dm-message-input']"` ✅ |
-
-**Special Case - TipTap Editor (message-input)**:
-The `message-input` is a TipTap/ProseMirror rich text editor. It has `role="textbox"` and works with `.fill()` in most cases:
-```gherkin
-And I type "Hello" on the element "[data-testid='message-input']"
-```
-If `.fill()` fails, the test can click first then type:
-```gherkin
-And I click on "[data-testid='message-input']"
-And I type "Hello" using keyboard
-```
-
-**RULE: When you see `search-textbox` in the spec, ALWAYS convert to keyboard typing**:
-```typescript
-// Playwright spec
-await page.getByTestId('search-textbox').fill('test');
-```
-**CORRECT conversion**:
-```gherkin
-And I type "test" using keyboard
-```
-**WRONG conversion**:
-```gherkin
-And I type "test" on the element "[data-testid='search-textbox']"  # FAILS - it's a <div>!
-```
-
-**CRITICAL — Text to TestID Conversion Patterns**:
-
-Many elements have dynamic testids based on their text content. Learn the **patterns**, not hardcoded values:
-
-**Pattern 1: Status Suggestions** - TestID: `status-suggestion-{normalized-text}`
-- TestID format: `status-suggestion-{text-lowercase-with-hyphens}`
-- Conversion rule: Remove emoji → lowercase → replace spaces with hyphens → prefix `status-suggestion-`
-- Example: `getByText('📅 Some Status')` → `[data-testid='status-suggestion-some-status']`
-
-**Pattern 2: Theme Options** - TestID: `theme-{id}`
-- TestID format: `theme-{theme-id}`
-- Conversion rule: Use the theme's internal ID (lowercase, underscores allowed)
-- Example: `getByText('Some Theme')` → `[data-testid='theme-some-theme']`
-
-**Pattern 3: Tab Buttons** - TestID: `tab-{id}`
-- TestID format: `tab-{tab-id}`
-- Example: `getByText('SomeTab')` in tab context → `[data-testid='tab-sometab']`
-
-**Pattern 4: Dynamic Titles**:
-- DM titles like "Message John Doe" or "John, Jane + 2 others" are dynamic
-- NEVER use getByText for these - use testids or verify related elements instead
-
-**Pattern 5: User Display Names with "(you)" suffix**:
-- Current user's name may appear as "John Doe (you)"
-- NEVER match this text - use testids or `user:<browser>.name` reference
-
-**General Rule for Emoji Text**:
-- Emoji may cause encoding/matching issues with `getByText()`
-- Always prefer testid over text when emoji is involved
-- Convert text to testid using the patterns above
-| `page.getByText('Midnight').click()` | `I click on "[data-testid='theme-midnight']"` |
-
-**CRITICAL — User "(you)" Suffix Pattern**:
-When displaying the current user, the UI appends "(you)" to their name. NEVER match this text directly:
-- ❌ `And I click on text "John Doe (you)"` - WRONG
-- ✅ Use the testid or role selector instead, or use `user:<browser>.name` without the suffix
-
-**CRITICAL — Dynamic Conversation Titles**:
-DM conversation titles are dynamic (e.g., "Message John Doe" or "John, Jane + 2 others"). NEVER use getByText for these:
-- ❌ `And I should see "Message John Doe"` - WRONG (dynamic)
-- ✅ Use testids like `[data-testid='dm-header']` or verify message input is visible instead
-
-**CRITICAL — Search Input Pattern**: When a Playwright test clicks on a search trigger/container (like `search-input-content`, `search-trigger`, etc.) and then types, do NOT use `I type on the element` with a container selector. Use keyboard typing instead:
-- ✅ CORRECT: `I click on "[data-testid='search-trigger']"` AND `I type "search-term" using keyboard`
-- ❌ WRONG: `I click on "[data-testid='search-trigger']"` AND `I type "search-term" on the element "[data-testid='search-textbox']"` (search-textbox is a `<div>` container, not an input)
-
-**CRITICAL**: `getByTestId('dm-message-input')` → `I click on "[data-testid='dm-message-input']"` — NEVER convert this to `I click the textbox with name "Message (optional)"` or any other role/text step. The testid IS the selector.
-
-**NEVER** do this:
-- ❌ `getByTestId('dm-message-input')` → `I click the textbox with name "Message (optional)"` (WRONG — reverting testid to role selector)
-- ❌ `getByText('John')` → `I click on "[data-testid='john-btn']"` (WRONG — inventing testid that doesn't exist in spec)
-- ❌ Clicking search trigger then using `I type on the element` with guessed selector (WRONG — often guesses a container, not input)
-- ✅ `getByTestId('dm-message-input')` → `I click on "[data-testid='dm-message-input']"` (CORRECT)
-- ✅ `getByTestId('dm-message-input').fill('hello')` → `I type "hello" on the element "[data-testid='dm-message-input']"` (CORRECT)
-- ✅ `getByText('hello')` → `I click on text "hello"` (CORRECT — faithful conversion)
-- ✅ `getByRole('button', { name: 'Save' })` → `I click the button with text "Save"` (CORRECT — faithful conversion)
-- ✅ `page.keyboard.type('text')` → `I type "text" using keyboard` (CORRECT — for search triggers that open input)
-
-### Rule 5 — TypeScript & Null Checks
-- Every step using `this.page` must include: `if (!this.page) throw new Error('Browser not initialized');`
-- Inside `.catch()`, `.then()`, or callbacks, re-add the null check before using `this.page`.
-- The .steps.ts file MUST compile with zero TypeScript errors.
-- Use Playwright APIs correctly. Prefer `this.page.locator('selector').click()` over waitForSelector chains.
-- Do NOT access properties that do not exist on Config, CustomWorld, Page, or Locator types.
-
-### Rule 5b — Search Input Patterns (CRITICAL)
-**Many modern apps use search triggers that open inputs dynamically. When converting such patterns, use keyboard typing instead of guessing input selectors.**
-
-**Problem**: After clicking a search trigger (like `search-input-content`, `search-trigger`, etc.), the LLM often guesses a selector like `search-textbox` which is actually a `<span>` container, not an `<input>` element. This causes `fill()` to fail.
-
-**Recognize these patterns in the Playwright spec**:
-```typescript
-// Pattern 1: Click then keyboard.type
-await page.getByTestId('search-trigger').click();
-await page.keyboard.type('search-term');
-
-// Pattern 2: Click container then type
-await page.locator('.search-container').click();
-await page.keyboard.type('search-term');
-
-// Pattern 3: Click to open modal/input
-await page.click('[data-testid="search-input-content"]');
-await page.keyboard.type('test');
-```
-
-**Correct conversion**:
-```gherkin
-And I click on "[data-testid='search-trigger']"
-And I type "search-term" using keyboard
-```
-
-**WRONG conversion** (what to avoid):
-```gherkin
-# WRONG - search-textbox is a span container, not an input
-And I click on "[data-testid='search-trigger']"
-And I type "search-term" on the element "[data-testid='search-textbox']"
-```
-
-**Key rules for search inputs**:
-1. **If spec uses `page.keyboard.type()` after a click** → Use `I type "..." using keyboard`
-2. **If spec uses `.fill()` on a specific selector** → Use `I type "..." on the element "..."`
-3. **If spec clicks a trigger/container and then types** → Use keyboard typing, do NOT invent an input selector
-4. **Common search trigger selectors**: `search-trigger`, `search-input-content`, `search-box`, `.search-container`, `[data-testid="search"]`
-
-**Examples**:
-
-| Playwright Spec | Correct Feature File |
-|---|---|
-| `page.getByTestId('search-trigger').click(); page.keyboard.type('test')` | `I click on "[data-testid='search-trigger']"` AND `I type "test" using keyboard` |
-| `page.locator('#search').fill('query')` | `I type "query" on the element "#search"` |
-| `page.click('.search-box'); page.keyboard.type('test')` | `I click on ".search-box"` AND `I type "test" using keyboard` |
-
-### Rule 6 — Dynamic Data (No Hardcoding)
-- Use `this.config.dashboard.baseUrl` instead of hardcoded URLs.
-- Use `this.config.backend.baseUrl` for backend URLs.
-- Use `this.config.timeout` for timeouts.
-- Use `this.userData.set()` / `this.userData.get()` to store/retrieve data between steps (with proper null checks).
-- Do NOT invent properties like `this.config.testData`.
-- Hardcoded values ARE allowed in Scenario Outline Examples tables.
-- **CRITICAL — Dynamic user references**: NEVER hardcode user names, emails, or IDs in feature files. Instead use the `user:<browser>.name`, `user:<browser>.email`, or `user:<browser>.id` syntax which resolves dynamically at runtime:
-  ```gherkin
-  And I type "user:user2-browser.email" on the element "[data-testid='user-search-input']"
-  And I click on text "user:user2-browser.name" in the element "[data-testid='user-search-results']"
-  And I type "user:user1-browser.id" on the element "[data-testid='channel-name-input']"
-  ```
-  Available browser references: admin-browser, user1-browser, user2-browser, user3-browser
-  Available properties: .name, .email, .id
-- **CRITICAL — Dynamic selectors**: If a Playwright test references an element by a user-specific string (e.g., `img[name=Naveen Y'']`, `text='John Doe'`, a specific email, a channel name derived from a username), do NOT hardcode that string in the .feature file. Instead:
-  - Use the `user:<browser>.name` syntax if the name refers to a known test user
-  - Or create a step that dynamically finds the element without relying on a specific name (e.g., "I click on the user avatar" which finds the logged-in user's avatar automatically).
-  - In the step definition, resolve dynamic values using `this.userData.get()` or by querying the page for the current user's info.
-
-**FORBIDDEN — NEVER HARDCODE USER NAMES, EMAILS, OR IDS:**
-- ❌ `And I click on text "Naveen Yallattikar"` (WRONG — hardcoded name)
-- ❌ `And I type "john@example.com" on the element "#search"` (WRONG — hardcoded email)
-- ❌ `And I should see "Jane Doe" in the element ".user-list"` (WRONG — hardcoded name)
-- ❌ `And I click on text "Admin User"` (WRONG — hardcoded name)
-
-**CORRECT — ALWAYS USE DYNAMIC USER REFERENCES:**
-- ✅ `And I click on text "user:admin-browser.name"` (CORRECT)
-- ✅ `And I type "user:user2-browser.email" on the element "#search"` (CORRECT)
-- ✅ `And I should see "user:user1-browser.name" in the element ".user-list"` (CORRECT)
-- ✅ `And I click on text "user:user3-browser.name"` (CORRECT)
-
-**Rule of thumb**: If the text you're clicking on, typing, or asserting looks like a person's name, email address, or user ID — it MUST use the `user:<browser>.*` syntax. The only exception is arbitrary message content or generic labels (like "Hello!", "Save", "Cancel", etc.).
-
-**How to determine which browser reference to use**:
-1. If the current browser context is "admin-browser" and clicking on own name → `user:admin-browser.name`
-2. If user1 is searching for user2 → `user:user2-browser.email` for search, `user:user2-browser.name` for click
-3. If verifying from another user's perspective → use that user's browser reference
-
-### Rule 7 — Structure & Naming (CRITICAL — Browser Reuse & Multi-User Interaction Detection)
-
-**FIRST: Analyze the Playwright spec file to determine the number of users involved:**
-
-1. **Single-user test** — Use "admin-browser" for ALL actions:
-   - Spec uses only `page` variable throughout (no `page1`, `page2`, `browser1`, `browser2`)
-   - Spec tests individual features (create channel, send message, edit profile, etc.)
-   - No verification from another user's perspective
-   - Example: `test.describe('Channel Creation', () => { test('create channel', async ({ page }) => { ... }) })`
-
-2. **Multi-user test** — Use appropriate browsers and switch context:
-   - Spec has multiple page instances: `page1`, `page2`, `browser1`, `browser2`, or uses `browser.newContext()`
-   - Spec verifies actions from multiple user perspectives (e.g., user1 sends message, user2 receives it)
-   - Spec involves DM creation, channel member addition, notifications, etc.
-   - Example: `test('user1 sends DM to user2', async ({ browser }) => { const user1 = await browser.newContext(); const user2 = await browser.newContext(); ... })`
-
-**BROWSER ASSIGNMENT RULES:**
-
-- **Single-user test**: Use ONLY "admin-browser" for all steps
-  ```gherkin
-  Background:
-    Given using browser "admin-browser"
-  ```
-
-- **Multi-user test**: Map spec users to available browsers based on role/context:
-  - First user/actor → "admin-browser" (if admin-like actions) or "user1-browser"
-  - Second user → "user2-browser"
-  - Third user → "user3-browser"
-  - Switch context with `Given using browser "xxx-browser"` when actions change between users
-
-**HOW TO DETECT MULTI-USER INTERACTIONS IN THE SPEC:**
-
-Look for these patterns in the Playwright spec:
-
-| Spec Pattern | Indicates Multi-User | Browser Assignment |
-|---|---|---|
-| `const user1 = await browser.newContext()` | YES | user1-browser |
-| `const user2 = await browser.newContext()` | YES | user2-browser |
-| `page1.click(...)`, `page2.click(...)` | YES | admin-browser, user2-browser |
-| `browser1.newPage()`, `browser2.newPage()` | YES | admin-browser, user2-browser |
-| `await page.getByText('User2').click()` in DM flow | YES | user2-browser is the target |
-| `test('user1 creates channel and adds user2'...)` | YES | user1-browser (creator), user2-browser (added member) |
-| `expect(page2.locator(...)).toBeVisible()` | YES | Verify from user2's perspective |
-| Only `page` variable used throughout | NO | Use admin-browser only |
-| `test.use({ storageState: 'user1.json' })` | YES | Map to user1-browser |
-
-**MULTI-USER CONVERSION EXAMPLES:**
-
-Example 1 - DM Creation (user1 creates DM with user2, both verify):
-```typescript
-// Playwright spec
-const user1 = await browser.newContext({ storageState: 'user1.json' });
-const user2 = await browser.newContext({ storageState: 'user2.json' });
-const user1Page = await user1.newPage();
-const user2Page = await user2.newPage();
-
-await user1Page.goto('/chat');
-await user1Page.getByTestId('create-new-dm').click();
-await user1Page.getByTestId('search-input').fill('user2@example.com');
-await user1Page.getByText('User Two').click();
-await user1Page.getByTestId('message-input').fill('Hello!');
-await user1Page.getByTestId('send-button').click();
-
-// Verify user2 received the message
-await user2Page.goto('/chat');
-await user2Page.getByText('Hello!').isVisible();
-```
-
-Convert to:
-```gherkin
-@e2e @dm-flow
-Feature: Direct Message Between Users
-
-  Scenario: User1 creates DM with User2 and sends a message
-    Given using browser "user1-browser"
-    When I open the Xyne-Space at "/chat"
-    And I click on "[data-testid='create-new-dm']"
-    And I type "user:user2-browser.email" on the element "[data-testid='search-input']"
-    And I click on text "user:user2-browser.name" in the element "[data-testid='search-results']"
-    And I type "Hello!" on the element "[data-testid='message-input']"
-    And I click on "[data-testid='send-button']"
-    And I store the current path as "user1-user2-dm"
-
-    # Switch to user2 to verify message received
-    Given using browser "user2-browser"
-    When I open the Xyne-Space at "user1-user2-dm"
-    Then I should see "Hello!" in the element "[data-testid='message-list']"
-```
-
-Example 2 - Single User Test (only admin involved):
-```typescript
-// Playwright spec - single page instance
-test('create public channel', async ({ page }) => {
-  await page.goto('/chat');
-  await page.getByTestId('create-channel').click();
-  await page.getByTestId('channel-name').fill('Test Channel');
-  await page.getByTestId('submit').click();
-});
-```
-
-Convert to:
-```gherkin
-@e2e @channel-create
-Feature: Channel Creation
-
-  Background:
-    Given using browser "admin-browser"
-
-  Scenario: Create a public channel
-    When I open the Xyne-Space at "/chat"
-    And I click on "[data-testid='create-channel']"
-    And I type "user:admin-browser.id" on the element "[data-testid='channel-name']"
-    And I click on "[data-testid='submit']"
-```
-
-**KEY PRINCIPLES:**
-1. **Analyze the spec FIRST** — Count distinct page/browser instances before writing any steps
-2. **Single page = single browser** → Use "admin-browser" for everything
-3. **Multiple pages/users = multiple browsers** → Map each to admin/user1/user2/user3
-4. **Switch context explicitly** with `Given using browser "xxx-browser"` when the action changes between users
-5. **Store paths for sharing** — Use `I store the current path as` so other users can navigate to the same resource
-
-**NEVER create new browser windows or contexts.** The e2e setup phase already creates and logs in browsers: "admin-browser", "user1-browser", "user2-browser", "user3-browser". These are fully authenticated and ready to use.
-- **ALWAYS reuse existing browsers from setup.** Just switch to them:
-  ```gherkin
-  Given using browser "admin-browser"
-  ```
-  Do NOT use `Given a browser "..." with viewport ...` — that creates a NEW browser window and loses the authenticated session.
-- **Use `Background:` section** to set the browser context shared across all scenarios:
-  ```gherkin
-  Background:
-    Given using browser "admin-browser"
-    When I open the Xyne-Space at "admin-channel-1"
-    And I wait for "[data-testid='chat-list-loading']" to disappear
-  ```
-- **Dynamic user references** — NEVER hardcode user names, emails, or IDs. Use the `user:<browser>.name`, `user:<browser>.email`, or `user:<browser>.id` syntax:
-  ```gherkin
-  And I type "user:user2-browser.email" on the element "[data-testid='user-search-input']"
-  And I click on text "user:user2-browser.name" in the element "[data-testid='user-search-results']"
-  And I type "user:user1-browser.id" on the element "[data-testid='channel-name-input']"
-  And I should see "user:user1-browser.id" in the element "[data-testid='channel-list']"
-  ```
-  This resolves dynamically at runtime to the actual user name/email/id for that browser session.
-- **Stored paths** — Use stored path aliases (e.g., "admin-channel-1", "user1-user2-dm", "group-chat-1") with `I open the Xyne-Space at` for navigation to previously visited pages. These are stored during setup or earlier scenarios using `I store the current path as`.
-- **Keep feature files compact** — Use `Scenario Outline` with `Examples` tables when the same flow is repeated for multiple users/data. Split into multiple focused `Scenario` blocks only when the flows are genuinely different.
-- Include appropriate @tags at the top of the feature file. Use tags that support both:
-  - Running as part of the full e2e flow: `@e2e @feature-name`
-  - Running standalone: `@feature-specific-tag` (e.g., `@ticket-create`, `@dm-send`)
-- Match existing import style, folder layout, and naming patterns.
-- Do not use number prefixes for folders or files — the automation script assigns them.
-
-### Rule 7b — E2E Flow Compatibility
-- Generated tests MUST work in TWO modes:
-  1. **Full e2e flow** (`@e2e` tag): Runs after setup scenarios that create browsers and log in users. Browsers are already initialized.
-  2. **Standalone** (feature-specific tag): Requires only the setup scenarios to have run. Do NOT depend on other feature files' side effects unless explicitly using stored paths.
-- NEVER assume a fresh/blank state. The e2e setup creates channels, users, and browser sessions that persist across all scenarios.
-- If the Playwright test does `page.goto('/some-path')`, convert it to `When I open the Xyne-Space at "/some-path"` — the step automatically prepends the base URL.
-
-### Rule 13 — Generic & Reusable Test Design (CRITICAL)
-The generated Cucumber tests MUST be generic, data-driven, and environment-independent. They should work across any test environment with any set of test users. Follow these principles:
-
-**A) NEVER hardcode user-specific data.** Replace ALL hardcoded values with dynamic references:
-| Hardcoded (WRONG) | Dynamic (CORRECT) |
-|---|---|
-| `"john@example.com"` | `"user:user2-browser.email"` |
-| `"John Doe"` | `"user:user2-browser.name"` |
-| `"test-channel-123"` | `"user:user1-browser.id"` (for user-specific resource names) |
-| `"/chat/ch_abc123"` | Use stored path alias instead |
-| `"Naveen-Y"` | `"user:admin-browser.id"` |
-
-**B) Distinguish Between Channel Search and User Search**:
-The spec may search for channels OR users. Context matters:
-
-| Pattern | Context | Correct Conversion |
-|---|---|---|
-| `fill('channel-name')` then click in `[aria-label='Suggestions']` | Channel search | Select first result (channels already exist from e2e) |
-| `fill('email@domain')` then click in user results | User search | Use `user:xxx-browser.email` |
-| After clicking `tab-channels` | Channel context | Navigate to stored path OR select first result |
-| After clicking `create-new-dm` | User context | Search for another user (NOT yourself) |
-
-**CRITICAL — Channel Search Flow (Use Stored Channel Path)**:
-Channels are already created in e2e setup. Navigate directly using stored paths instead of searching:
-
-```typescript
-// Spec searches for a channel
-await page.getByTestId('tab-channels').click();
-await page.getByRole('paragraph').click();
-await page.getByTestId('search-textbox').fill('test-on-local');
-await page.getByLabel('Suggestions').getByText('test-on-local').click();
-await page.getByTestId('join-channel-btn').click();
-```
-
-**CORRECT conversion** (navigate to stored channel path):
-```gherkin
-# Option 1: Navigate directly to the stored channel path (PREFERRED)
-When I open the Xyne-Space at "user1-channel-1"
-And I wait for "[data-testid='chat-list-loading']" to disappear
-```
-
-**CORRECT conversion** (if search is required by the spec):
-```gherkin
-# Option 2: Use command palette and select first result
-And I press the "ControlOrMeta+k" key on the element "body"
-And I click on "[data-testid='tab-channels']"
-And I click on "[aria-label='Suggestions'] button:first-child"    # Select first available channel
-```
-
-**WRONG conversion**:
-```gherkin
-And I type "test" using keyboard                      # WRONG - hardcoded generic name!
-And I type "user:user1-browser.id" using keyboard     # WRONG - channels aren't named by user ID!
-And I click on text "user:user1-browser.name"         # WRONG - user.name is for users, not channels!
-```
-
-**CRITICAL — Search Result Selection (Use TestID-based Selection)**:
-Search results can vary each time. When selecting from search results, prefer testid-based selection or first-child:
-
-| Search Context | Suggestion Selector Pattern |
-|---|---|
-| Channel search results | `[aria-label='Suggestions'] button:first-child` (select first) |
-| User search results | `[data-testid='user-search-results'] button:first-child` or by user reference |
-| Generic suggestions | Click first available result |
-
-**When selecting from search suggestions**:
-```gherkin
-# Channel search - select first result (channels already exist from e2e)
-And I click on "[aria-label='Suggestions'] button:first-child"
-
-# User search - select by user reference (you're selecting a specific person)
-And I click on text "user:user2-browser.name" in the element "[data-testid='user-search-results']"
-```
-
-**NEVER hardcode search terms** like "test", "test-channel", etc.:
-- For channels: Navigate to stored path (`user1-channel-1`) OR select first result
-- For users: Use `user:<TARGET-browser>.email` or `user:<TARGET-browser>.name`
-
-**C) Use Existing E2E Resources — NEVER Create New Prerequisites**:
-
-The e2e setup creates resources. Your generated tests MUST use these existing resources:
-
-**Browser Sessions (created by @setup)**:
-| Browser | User |
-|---|---|
-| `admin-browser` | Admin user |
-| `user1-browser` | User 1 |
-| `user2-browser` | User 2 |
-| `user3-browser` | User 3 |
-
-**Existing Resources (already created by e2e flow)**:
-| Resource | Stored Path | Created By | Named As | Tag |
-|---|---|---|---|---|
-| Channel | `user1-channel-1` | user1-browser | `user:user1-browser.id` | `@channel-create` |
-| DM | `user1-user2-dm` | user1-browser | — | `@dm-create` |
-| Group Chat | `group-chat-1` | user1-browser | — | `@group-chat-create` |
-
-**CRITICAL — Resource Creator vs Resource Finder**:
-
-When searching for a resource, use the STORED PATH or CHANNEL ID from e2e setup:
-
-| Scenario | Current Browser | What to Search For | Why |
-|---|---|---|---|
-| Admin joins user1's channel | admin-browser | Navigate to `user1-channel-1` | Channel was created by user1 in e2e |
-| Admin views user1's DM | admin-browser | Navigate to `user1-user2-dm` | DM was created by user1 in e2e |
-| User2 joins user1's channel | user2-browser | Navigate to `user1-channel-1` | Channel was created by user1 in e2e |
-| User1 views own channel | user1-browser | Navigate to `user1-channel-1` | Direct navigation to stored path |
-
-**Example — Admin joins user1's channel (direct navigation)**:
-```gherkin
-# Admin wants to view/join user1's channel - navigate directly using stored path
-Given using browser "admin-browser"
-When I open the Xyne-Space at "user1-channel-1"
-And I wait for "[data-testid='chat-list-loading']" to disappear
-```
-
-**Example — Searching for a channel (if needed)**:
-```gherkin
-# If you need to search via command palette, the search finds channels by their stored ID
-Given using browser "admin-browser"
-And I press the "ControlOrMeta+k" key on the element "body"
-And I click on "[data-testid='tab-channels']"
-# Search finds the channel - select first result
-And I click on "[aria-label='Suggestions'] button:first-child"
-```
-
-**WRONG — Using user ID to search for channels**:
-```gherkin
-# WRONG - channels are NOT named by user ID!
-And I type "user:user1-browser.id" using keyboard    # WRONG - channel isn't named by user ID!
-
-# WRONG - hardcoded channel name
-And I type "test" using keyboard                      # WRONG - channel isn't named "test"!
-
-# WRONG - using user.name for channel search
-And I type "user:user1-browser.name" using keyboard   # WRONG - channels aren't named by user name!
-```
-
-**Rule**: Before using any resource reference, ask yourself:
-1. Was this resource created in e2e setup? → Use the stored path (`user1-channel-1`, `user1-user2-dm`, `group-chat-1`)
-2. If navigating directly → Use `When I open the Xyne-Space at "<stored-path>"`
-3. If searching via command palette → Select the first result (channels are already created)
-4. If searching for a user → Use `user:<TARGET-browser>.email` or `user:<TARGET-browser>.name`
-
-**When spec navigates to a chat**:
-```gherkin
-# CORRECT - use stored path (works for any browser)
-When I open the Xyne-Space at "user1-channel-1"
-And I wait for "[data-testid='chat-list-loading']" to disappear
-```
-
-**When spec navigates to a channel**:
-```gherkin
-# Navigate directly to stored channel path (PREFERRED)
-When I open the Xyne-Space at "user1-channel-1"
-And I wait for "[data-testid='chat-list-loading']" to disappear
-```
-
-**When spec must search for a channel via command palette**:
-```gherkin
-# Use command palette and select first available channel
-And I press the "ControlOrMeta+k" key on the element "body"
-And I click on "[data-testid='tab-channels']"
-And I click on "[aria-label='Suggestions'] button:first-child"
-```
-
-**Rule**: NEVER create new prerequisite scenarios. Use existing resources from e2e setup.
-
-**D) Scenario Dependencies — Store Paths for Subsequent Scenarios**:
-When multiple scenarios in the same feature depend on each other:
-1. **First scenario stores the path** after creating/joining a resource
-2. **Subsequent scenarios use the stored path** to navigate
-
-```gherkin
-Scenario: Join a channel
-  And I click on "[data-testid='join-channel-btn']"
-  And I wait for "[data-testid='chat-list-loading']" to disappear
-  And I store the current path as "joined-channel"  # STORE IT!
-
-Scenario: Edit the channel
-  When I open the Xyne-Space at "joined-channel"  # USE IT!
-  And I wait for "[data-testid='chat-list-loading']" to disappear
-```
-
-**E) Store and reuse dynamically generated paths.** When a Playwright test creates a resource (channel, ticket, DM, etc.) and then navigates to it:
-  1. After creation, add: `And I store the current path as "<alias>"`
-  2. For subsequent navigation to that resource, use: `When I open the Xyne-Space at "<alias>"`
-  
-  Example — Playwright spec creates a channel then interacts with it:
-  ```
-  Spec: page.click('[data-testid="create-channel-button"]')
-  Spec: // page is now at /chat/ch_xyz789
-  Spec: page.click('[data-testid="channel-info-trigger"]')
-  ```
-  Convert to:
-  ```gherkin
-  And I click on "[data-testid='create-channel-button']"
-  And I store the current path as "user1-channel-1"
-  And I click on "[data-testid='channel-info-trigger']"
-  ```
-  Later scenarios can navigate back:
-  ```gherkin
-  When I open the Xyne-Space at "user1-channel-1"
-  ```
-
-**C) Global Keyboard Shortcuts — Use `body` Element**:
-
-Global keyboard shortcuts (like `ControlOrMeta+k` for search/command palette) should be pressed on `body`, NOT on specific elements like `message-input`.
-
-| Shortcut | Purpose | Correct Element |
-|---|---|---|
-| `ControlOrMeta+k` | Open search/command palette | `body` |
-| `Escape` | Close modal/dropdown | `body` |
-| `Enter` | Submit form | The form element or `body` |
-
-**Example**:
-```typescript
-// Playwright spec
-await page.getByTestId('message-input').press('ControlOrMeta+k');
-```
-
-**WRONG conversion** (message-input doesn't exist on channel list page):
-```gherkin
-And I press the "ControlOrMeta+k" key on the element "[data-testid='message-input']"
-```
-
-**CORRECT conversion** (global shortcut uses body):
-```gherkin
-And I press the "ControlOrMeta+k" key on the element "body"
-```
-
-**D) Wait for Page Elements After Navigation**:
-
-After navigating to a page, wait for critical elements before interacting:
-
-```gherkin
-When I open the Xyne-Space at "/chat"
-And I wait for "[data-testid='chat-list-loading']" to disappear
-# Now safe to interact with elements
-```
-
-**E) Use Scenario Outline for repetitive multi-user flows.** If the Playwright test repeats the same action for multiple users, convert it into a Scenario Outline with an Examples table using dynamic user references:
-  ```gherkin
-  Scenario Outline: Add users to channel
-    Given using browser "user1-browser"
-    And I type "<email>" on the element "[data-testid='user-search-input']"
-    And I click on text "<name>" in the element "[data-testid='user-search-results']"
-    And I click on "[data-testid='add-people-submit']"
-    Examples:
-      | email                    | name                    |
-      | user:user2-browser.email | user:user2-browser.name |
-      | user:user3-browser.email | user:user3-browser.name |
-  ```
-
-**D) Use Scenario Outline for multi-browser verification.** If the spec checks that multiple users see the same result:
-  ```gherkin
-  Scenario Outline: Users can see the channel after being added
-    Given using browser "<browser>"
-    When I open the Xyne-Space at "/chat"
-    Then I should see "user:user1-browser.id" in the element "[data-testid='channel-list']"
-    Examples:
-      | browser       |
-      | user2-browser |
-      | user3-browser |
-  ```
-
-**E) Name stored paths descriptively using the browser/user context:**
-  - `"user1-channel-1"` — channel created by user1
-  - `"admin-ticket-1"` — ticket created by admin
-  - `"user1-user2-dm"` — DM between user1 and user2
-  - `"group-chat-1"` — group chat
-
-**F) Detect implicit resource creation.** If the Playwright spec does a click that results in a page redirect (URL changes after creating a resource), add a `store the current path` step even if the original spec doesn't explicitly store it. This makes the test reusable for subsequent scenarios.
-
-**G) Use Existing E2E Resources — NEVER Create New Prerequisites.**
-
-The e2e setup already creates all necessary resources. Your tests should USE these existing resources, not create new ones:
-
-  Example — Playwright spec searches for a hardcoded channel:
-  ```
-  Spec: page.fill('[data-testid="search-textbox"]', 'test-on-local')
-  Spec: page.click('text=test-on-local')
-  ```
-  WRONG conversion (hardcoded, will fail):
-  ```gherkin
-  And I type "test-on-local" on the element "[data-testid='search-textbox']"
-  And I click on text "test-on-local"
-  ```
-  CORRECT conversion (use existing channel from e2e setup):
-  ```gherkin
-  # Navigate directly to the stored channel path
-  When I open the Xyne-Space at "user1-channel-1"
-  And I wait for "[data-testid='chat-list-loading']" to disappear
-  ```
-
-  The same principle applies to ALL resources:
-  - **Searching for a user** → use `user:<browser>.name` or `user:<browser>.email`
-  - **Accessing a channel** → navigate to stored path (`user1-channel-1`)
-  - **Accessing a DM** → navigate to stored path (`user1-user2-dm`)
-  - **Accessing a group chat** → navigate to stored path (`group-chat-1`)
-  - **Sending a DM to a user** → use `user:<browser>.name` to find the user, not a hardcoded name
-
-**CRITICAL — When Searching for Users, ALWAYS Select SOMEONE ELSE (Not Yourself):**
-- If admin-browser is searching → select `user:user1-browser.name` or `user:user2-browser.name` (NOT `user:admin-browser.name`)
-- If user1-browser is searching → select `user:user2-browser.name` or `user:admin-browser.name` (NOT `user:user1-browser.name`)
-- If user2-browser is searching → select `user:user1-browser.name` or `user:admin-browser.name` (NOT `user:user2-browser.name`)
-
-**Why?** When you create a DM or add someone to a channel, you are selecting ANOTHER person, not yourself. You never send a DM to yourself or add yourself to a channel.
-
-**Example — admin-browser creates DM with user2:**
-- ❌ WRONG: `I type "user:admin-browser.email" on the element "#search"` AND `I click on text "user:admin-browser.name"` (you don't DM yourself)
-- ✅ CORRECT: `I type "user:user2-browser.email" on the element "#search"` AND `I click on text "user:user2-browser.name"` (you DM someone else)
-
-**Example — user1-browser wants to join an existing channel:**
-- ❌ WRONG: `I type "test" using keyboard` (hardcoded channel name)
-- ✅ CORRECT: `When I open the Xyne-Space at "admin-channel-1"` (navigate to stored path)
-- ✅ CORRECT: `And I click on "[aria-label='Suggestions'] button:first-child"` (select first available channel)
-
-  **NOTE — Hardcoded text IS allowed** for arbitrary content that does not identify a user or resource:
-  - ✅ Message content: `I type "hello" on the element "[data-testid='message-input']"`
-  - ✅ Descriptions: `I type "A test project description" on the element "[data-testid='description-input']"`
-  - ✅ Assertions on sent messages: `I should see "Hello from user1!" in the element "[data-testid='virtuoso-item-list']"`
-  - ✅ Generic search terms: `I type "test" on the element "[data-testid='search-textbox']"`
-  - ❌ User names/emails/IDs: MUST use `user:<browser>.*` syntax
-  - ❌ Resource names derived from users: MUST use `user:<browser>.id` or similar
-
-**H) Split multi-concern specs into focused scenarios.** If a Playwright spec does create → search → join → edit → leave all in one test, split it into separate scenarios that share state via stored paths:
-  ```gherkin
-  Scenario: Create channel
-    ...create and store path...
-
-  Scenario: Search and join channel
-    ...use stored path or dynamic name to find it...
-
-  Scenario: Edit channel description
-    ...navigate to stored path, edit...
-
-  Scenario: Leave channel
-    ...navigate to stored path, leave...
-  ```
-  This makes each scenario independently debuggable and rerunnable.
-
-### Rule 8 — Proper Cucumber Feature File Format
-- The feature file MUST start with a `Feature:` keyword followed by a descriptive name.
-- Each scenario MUST use `Scenario:` or `Scenario Outline:` keyword.
-- Steps MUST use `Given`, `When`, `Then`, `And`, or `But` keywords properly.
-- The feature file MUST be syntactically valid Gherkin — no free-text paragraphs, no missing keywords, no broken indentation.
-- Each step MUST be on its own line with proper 4-space or 2-space indentation under the Scenario.
-- Use `Background:` for common setup steps shared across scenarios in the same feature file.
-- If the Playwright test has multiple `test()` blocks, create separate `Scenario:` blocks for each.
-- Add a blank line between scenarios for readability.
-- Tags (e.g., `@smoke`, `@e2e`) go on the line BEFORE the Feature or Scenario they apply to.
-
-### Rule 10 — Handling Existing Scenarios (Incremental Addition)
-- If the output folder already contains .feature and .steps.ts files (provided below as "EXISTING CUCUMBER FILES"), you MUST:
-  1. READ all existing scenarios carefully.
-  2. ONLY generate scenarios for Playwright test() blocks that are NOT already covered by an existing scenario.
-  3. Use the NEXT available number prefix for your new files (e.g., if 01_login.feature exists, your new file should be 02_<name>.feature).
-  4. DO NOT duplicate, overwrite, or regenerate any existing scenario.
-  5. If you define new step definitions, make sure they do NOT conflict with steps already defined in existing steps files in that folder.
-  6. If ALL test() blocks from the Playwright file are already covered, output the files anyway with just the uncovered scenarios (even if minimal).
-- When multiple feature files exist in a folder, each covers different scenarios — do NOT merge them into one file.
-
-### Rule 11 — Keyboard Commands & Key Presses
-- **NEVER skip or ignore keyboard actions** from the Playwright spec — they are often critical for form submissions, dropdown navigation, closing modals, opening command palettes, etc.
-- Convert ALL keyboard actions using these generic patterns:
-
-| Playwright pattern | Cucumber step pattern |
-|---|---|
-| `page.keyboard.press('<key>')` | `I press the "<key>" key` |
-| `page.keyboard.type('<text>')` | `I type "<text>" using keyboard` |
-| `page.locator('<sel>').press('<key>')` | `I press the "<key>" key on the element "<sel>"` |
-| `page.keyboard.down('<key>')` | `I hold the "<key>" key` |
-| `page.keyboard.up('<key>')` | `I release the "<key>" key` |
-| `page.getByTestId('<id>').press('<key>')` | `I press the "<key>" key on the element "[data-testid='<id>']"` |
-
-- The `<key>` value must be copied EXACTLY from the Playwright spec (e.g., "Enter", "Escape", "Tab", "ArrowDown", "Control+a", "ControlOrMeta+k", "Meta+Shift+p", etc.) — do NOT rename or translate key names.
-- **CRITICAL — Step definitions are REQUIRED**: For EVERY keyboard/action step you use in the .feature file, you MUST check the QUICK REFERENCE list. If the step pattern is NOT already defined, you MUST add the step definition in your .steps.ts file using the EXACT same Playwright API from the spec. Examples:
-  - Spec: `await page.keyboard.press("ControlOrMeta+k");`
-    Feature: `And I press the "ControlOrMeta+k" key`
-    Steps file must define: `When('I press the {string} key', ...)` calling `this.page.keyboard.press(key)`
-  - Spec: `await page.getByTestId('message-input').press('ControlOrMeta+k');`
-    Feature: `And I press the "ControlOrMeta+k" key on the element "[data-testid='message-input']"`
-    Steps file must define: `When('I press the {string} key on the element {string}', ...)` calling `this.page.locator(selector).press(key)`
-  - Spec: `await page.locator('#search').press('Enter');`
-    Feature: `And I press the "Enter" key on the element "#search"`
-    Steps file must define the same locator.press pattern
-- Playwright-specific key abstractions like "ControlOrMeta" MUST be passed through exactly as-is — they are resolved by Playwright at runtime (Control on Linux/Windows, Meta on macOS). Do NOT translate them to "Control" or "Meta".
-- This rule applies equally to ALL Playwright actions that don't have a matching step in QUICK REFERENCE — not just keyboard. If the spec uses ANY Playwright API (drag, hover, focus, selectOption, check, uncheck, dblclick, etc.) that maps to a step not in QUICK REFERENCE, you MUST define that step in your .steps.ts file with the correct Playwright implementation.
-
-### Rule 12 — Wait Steps & Timing
-- Playwright specs often have explicit waits: `page.waitForURL(...)`, `page.waitForSelector(...)`, `page.waitForTimeout(...)`, `locator.waitFor()`, `expect(locator).toBeVisible()`, etc.
-- **NEVER skip wait calls** — they exist because the UI needs time to load/navigate. Skipping them causes the NEXT step to timeout.
-- Convert waits using these patterns:
-
-| Playwright pattern | Cucumber step pattern |
-|---|---|
-| `page.waitForSelector('sel')` or `locator.waitFor()` | `I wait for "sel" to be visible` |
-| `page.waitForSelector('sel', { state: 'hidden' })` | `I wait for "sel" to disappear` |
-| `expect(locator).toBeVisible()` | `I wait for "sel" to be visible` |
-| `page.waitForURL('**/path')` | `I wait for the URL to contain "/path"` |
-| `page.waitForTimeout(N)` | `I wait for N milliseconds` |
-| `page.waitForLoadState('networkidle')` | `I wait for the page to finish loading` |
-
-- **CRITICAL — Implicit waits**: When a Playwright spec navigates (e.g., clicks a button that loads a new page) and then immediately interacts with an element on the new page, you MUST add a wait step between the navigation and the interaction. Look for patterns like:
-  - Click → waitForURL → interact with new page element
-  - Click → waitForSelector → interact with element
-  - goto → waitForLoadState → interact
-  If the spec has these wait calls, convert them. If the spec DOESN'T have explicit waits but does navigate-then-interact, add `I wait for "selector" to be visible` before the interaction step.
-- **Element readiness for keyboard actions**: Before pressing keys on an element (`.press()`, `.type()`), the element must be visible AND focused. If the spec has `element.click()` followed by `element.press('key')`, keep BOTH steps — the click focuses the element.
-- Check the QUICK REFERENCE list for available wait and keyboard step patterns before creating new ones. If a matching step already exists in shared files, do NOT redefine it.
-
-### Rule 9 — User Search & Selection Patterns (CRITICAL for DMs, Channel Member Addition, etc.)
-**When converting Playwright tests that involve searching for and selecting users (DM creation, adding members to channels, etc.), you MUST use the search-first-then-select-first-result pattern.**
-
-**Problem to avoid**: The LLM incorrectly converts `page.getByText('UserName').click()` to clicking on the current user's name, when the actual intent is to select a searched-for user from search results.
-
-**CRITICAL — Incomplete Spec Detection**: Many Playwright specs are incomplete and skip the search step. You MUST detect these incomplete patterns and INJECT the missing search step:
-
-| Incomplete Spec Pattern (NO search) | Complete Conversion (WITH search) |
-|---|---|
-| `getByTestId('create-new-dm').click()` then `getByText('UserName').click()` | ADD search step! See example below |
-| `getByTestId('add-member').click()` then `getByText('UserName').click()` | ADD search step! See example below |
-
-**Example — Incomplete Spec (Missing Search)**:
-```typescript
-// Playwright spec is INCOMPLETE - no search step!
-await page.getByTestId('create-new-dm').click();
-await page.getByText('Naveen Yallattikar').click();  // Directly clicks user without searching!
-await page.getByTestId('message-input').fill('hello');
-```
-
-**CORRECT conversion (inject missing search step)**:
-```gherkin
-Given using browser "admin-browser"
-When I click on "[data-testid='create-new-dm']"
-And I type "user:user2-browser.email" on the element "[data-testid='user-search-input']"    # INJECTED!
-And I click on text "user:user2-browser.name" in the element "[data-testid='user-search-results']"
-And I type "hello" on the element "[data-testid='message-input']"
-```
-
-**WRONG conversion (faithful to incomplete spec, will FAIL)**:
-```gherkin
-# WRONG - no search step, user not visible on page!
-When I click on "[data-testid='create-new-dm']"
-And I click on text "user:user2-browser.name"    # FAILS - user not visible yet!
-```
-
-**Correct conversion pattern for user search flows**:
-1. **First**: Type the search term (email or name) into the search input
-2. **Then**: Click on the first available result in the search results container
-3. **ALWAYS use the correct user reference** (user2-browser when user1 is searching, user1-browser when user2 is searching, etc.)
-
-**Key rules for user search flows**:
-1. **Identify the browser/user context**: Who is performing the action? (admin-browser, user1-browser, user2-browser, etc.)
-2. **Determine who they are searching for**: Look at the spec's test data, test name, or comments to identify the target user
-3. **Use the correct user reference**: If user1 is creating a DM, they search for user2 → use `user:user2-browser.email` and `user:user2-browser.name`
-4. **Always use search-first-then-select-first-result pattern**:
-   - Type search term → `And I type "user:target-browser.email" on the element "[data-testid='user-search-input']"`
-   - Select first result → `And I click on text "user:target-browser.name" in the element "[data-testid='user-search-results']"`
-5. **INJECT missing search steps**: If the spec jumps from a "create" action to clicking a user name, ADD the search step
-
-**Common user search patterns to recognize**:
-- DM creation: `create-new-dm` → search input → click on user name
-- Add member to channel: search input → click on user → add button
-- Search users in sidebar: search input → click on result
-- Mention autocomplete: type @ → search → click on user
-
-**Selector patterns for user search**:
-- Search input: `[data-testid='user-search-input']`, `[data-testid='search-input']`, `input[type='search']`
-- Search results container: `[data-testid='user-search-results']`, `[data-testid='search-results']`, `.user-list`, `.results-container`
-
-**If the spec uses a hardcoded name/email in `getByText()` or `fill()`**:
-- Replace with the correct dynamic user reference based on context
-- Example: `page.getByText('John Doe').click()` → `And I click on text "user:user2-browser.name" in the element "[data-testid='user-search-results']"`
-- Example: `page.fill('#search', 'jane@example.com')` → `And I type "user:user3-browser.email" on the element "#search"`
-
-**Rule of thumb**: Whenever you see a pattern like:
-1. Click something that opens a search (DM button, add member button, etc.)
-2. Fill a search input with a user identifier
-3. Click on a user name/email
-4. Continue with the action (send message, add to channel, etc.)
-
-Convert it to the search-first-then-select-first-result pattern with the correct dynamic user reference.
-
-### Rule 9b — Electron/Desktop Elements
-- For Electron desktop app elements (native menus, title bars, system dialogs, tray icons, notifications):
-  - Use Playwright Electron APIs (e.g., `electronApp.evaluate()`)
-  - Use role-based selectors (e.g., `role=button[name="Close"]`)
-  - Use accessibility labels or native element queries
-- NEVER apply `data-testid` to elements that are part of the Electron shell, OS-level dialogs, or native menus.
-
-## Step Definition Template:
-```typescript
-When('exact step phrase from feature file', async function (this: CustomWorld, param1: string) {
-  if (!this.page) throw new Error('Browser not initialized');
-  // Implementation here
-  uiLogger.info(`[Context] Executed step: ${param1}`);
-});
-```
-
-## OUTPUT FORMAT (MUST FOLLOW EXACTLY):
-
-You MUST output BOTH files with complete content inside fenced code blocks.
-
-**CRITICAL — EVERY feature file MUST start with a browser context step.** The VERY FIRST step in the Background (or the first Scenario if no Background) MUST be:
-```gherkin
-Given using browser "admin-browser"
-```
-WITHOUT this, the test has NO browser and will fail immediately. If multiple users are needed, switch browsers mid-scenario with additional `Given using browser "userN-browser"` steps.
-
-**ABSOLUTELY FORBIDDEN**: Do NOT use `Given a browser "..." with viewport ...` — this creates a NEW unauthenticated browser and the test WILL FAIL. The browsers are already created and logged in by the e2e setup. You MUST use `Given using browser "admin-browser"` to switch to the existing authenticated browser.
-
-Example feature file structure (FOLLOW THIS EXACTLY):
-```gherkin
-@e2e @feature-name
-Feature: My Feature
-
-  Background:
-    Given using browser "admin-browser"
-
-  Scenario: Do something
-    When I open the Xyne-Space at "/some-path"
-    And I click on "[data-testid='some-button']"
-```
-
-## File: tests/03_e2e/FOLDER_NAME/NN_<file_name>.feature
-```gherkin
-<full feature file content>
-```
-
-## File: tests/03_e2e/FOLDER_NAME/steps/NN_<file_name>.steps.ts
-```typescript
-<full steps file content>
-```
-
-**CRITICAL — Output Folder**:
-PROMPT_EOF
-
-    # Inject the actual output folder path into the prompt
-    echo "" >> "$TEMP_PROMPT_FILE"
-    echo "## TARGET OUTPUT FOLDER (USE THIS EXACT PATH — DO NOT CHANGE):" >> "$TEMP_PROMPT_FILE"
-    echo "" >> "$TEMP_PROMPT_FILE"
-    echo "Output folder: tests/03_e2e/${OUTPUT_FOLDER}" >> "$TEMP_PROMPT_FILE"
-    echo "" >> "$TEMP_PROMPT_FILE"
-    echo "Your files MUST be:" >> "$TEMP_PROMPT_FILE"
-    echo "  - Feature: tests/03_e2e/${OUTPUT_FOLDER}/NN_<name>.feature" >> "$TEMP_PROMPT_FILE"
-    echo "  - Steps:   tests/03_e2e/${OUTPUT_FOLDER}/steps/NN_<name>.steps.ts" >> "$TEMP_PROMPT_FILE"
+    load_prompt "$PROMPTS_DIR/conversion.md" \
+        "OUTPUT_FOLDER=tests/03_e2e/${OUTPUT_FOLDER}" \
+        > "$TEMP_PROMPT_FILE"
     echo "" >> "$TEMP_PROMPT_FILE"
     echo "Do NOT use any other folder path. The folder '${OUTPUT_FOLDER}' already exists and is the correct location for this test." >> "$TEMP_PROMPT_FILE"
     echo "" >> "$TEMP_PROMPT_FILE"
@@ -2495,69 +1487,13 @@ MINIMAL_STEPS_EOF
         fi
         echo ""
 
-        # Ask user which command to run
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${YELLOW}Do you want to run any of these commands now?${NC}"
+        # Show available run commands (user can run them manually)
         echo ""
+        echo -e "${CYAN}Run the test with:${NC}"
         if [ -n "$FEATURE_TAG" ]; then
-            echo -e "  ${CYAN}1)${NC} Run with prerequisites"
-            echo -e "  ${CYAN}2)${NC} Run feature only (prerequisites already done)"
-            echo -e "  ${CYAN}3)${NC} Run full e2e suite"
-            echo -e "  ${CYAN}4)${NC} Skip - don't run now"
+            echo -e "  ${GREEN}$CMD_WITH_PREREQ${NC}"
         else
-            echo -e "  ${CYAN}1)${NC} Run with prerequisites"
-            echo -e "  ${CYAN}2)${NC} Run full e2e suite"
-            echo -e "  ${CYAN}3)${NC} Skip - don't run now"
-        fi
-        echo ""
-        echo -n -e "${YELLOW}Choose [1/2/3/4 or 1/2/3]: ${NC}"
-        read -r RUN_CHOICE < /dev/tty
-        RUN_CHOICE=$(echo "$RUN_CHOICE" | tr -d '[:space:]')
-
-        echo ""
-        if [ -n "$FEATURE_TAG" ]; then
-            case "$RUN_CHOICE" in
-                1)
-                    echo -e "${GREEN}Running: $CMD_WITH_PREREQ${NC}"
-                    echo ""
-                    cd "$AUTOMATION_DIR" && eval "$CMD_WITH_PREREQ"
-                    ;;
-                2)
-                    echo -e "${GREEN}Running: $CMD_FEATURE_ONLY${NC}"
-                    echo ""
-                    cd "$AUTOMATION_DIR" && eval "$CMD_FEATURE_ONLY"
-                    ;;
-                3)
-                    echo -e "${GREEN}Running: $CMD_FULL_E2E${NC}"
-                    echo ""
-                    cd "$AUTOMATION_DIR" && eval "$CMD_FULL_E2E"
-                    ;;
-                4|"")
-                    echo -e "${CYAN}Skipping test execution. You can run the commands manually later.${NC}"
-                    ;;
-                *)
-                    echo -e "${CYAN}Skipping test execution. You can run the commands manually later.${NC}"
-                    ;;
-            esac
-        else
-            case "$RUN_CHOICE" in
-                1)
-                    echo -e "${GREEN}Running: $CMD_WITH_PREREQ${NC}"
-                    echo ""
-                    cd "$AUTOMATION_DIR" && eval "$CMD_WITH_PREREQ"
-                    ;;
-                2)
-                    echo -e "${GREEN}Running: $CMD_FULL_E2E${NC}"
-                    echo ""
-                    cd "$AUTOMATION_DIR" && eval "$CMD_FULL_E2E"
-                    ;;
-                3|"")
-                    echo -e "${CYAN}Skipping test execution. You can run the commands manually later.${NC}"
-                    ;;
-                *)
-                    echo -e "${CYAN}Skipping test execution. You can run the commands manually later.${NC}"
-                    ;;
-            esac
+            echo -e "  ${GREEN}$CMD_WITH_PREREQ${NC}"
         fi
         echo ""
 
