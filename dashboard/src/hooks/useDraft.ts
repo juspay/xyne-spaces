@@ -73,9 +73,12 @@ export function useDraft(channelId: string, conversationId: string | null) {
   );
 
   return useMemo(() => {
-    return draftFromDB && draftFromLocal && draftFromDB.updatedAt > draftFromLocal.updatedAt
-      ? draftFromDB.content
-      : draftFromLocal?.html;
+    if (draftFromDB && draftFromLocal) {
+      return draftFromDB.updatedAt > draftFromLocal.updatedAt
+        ? draftFromDB.content
+        : draftFromLocal.html;
+    }
+    return draftFromDB?.content ?? draftFromLocal?.html;
   }, [draftFromLocal, draftFromDB]);
 }
 export function useDraftAttachments() {
@@ -208,6 +211,7 @@ export function useDraftAttachments() {
         }));
       } catch (error) {
         console.error('Failed to upload files:', error);
+        removeDroppedFiles(attachmentIds);
         throw error;
       }
     },
@@ -222,6 +226,19 @@ export function useDraftAttachments() {
 
       // Remove from local state
       delete filesMapRef[attachmentId];
+    },
+    [zero],
+  );
+
+  const removeDroppedFiles = useCallback(
+    (attachmentIds: string[]) => {
+      if (attachmentIds.length === 0) return;
+
+      zero.mutate(mutators.messageAttachment.deleteMany({ attachmentIds }));
+
+      attachmentIds.forEach(id => {
+        delete filesMapRef[id];
+      });
     },
     [zero],
   );
@@ -309,9 +326,16 @@ export function useDraftAttachments() {
     () => ({
       addDroppedFiles,
       removeDroppedFile,
+      removeDroppedFiles,
       clearDroppedFiles,
       getDroppedFilesForEntity,
     }),
-    [addDroppedFiles, removeDroppedFile, clearDroppedFiles, getDroppedFilesForEntity],
+    [
+      addDroppedFiles,
+      removeDroppedFile,
+      removeDroppedFiles,
+      clearDroppedFiles,
+      getDroppedFilesForEntity,
+    ],
   );
 }
