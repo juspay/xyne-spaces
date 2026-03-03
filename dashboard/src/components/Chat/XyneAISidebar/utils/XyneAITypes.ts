@@ -35,6 +35,17 @@ export interface SummarizerOutput {
   keyPoints: SummarizerKeyPoint[];
 }
 
+export interface UserTag {
+  name: string;
+  userId: string;
+}
+
+export interface Participant {
+  id: string;
+  name: string;
+  email: string;
+  picture: string;
+}
 export interface MessageAttachment {
   filename: string;
   mimeType: string;
@@ -66,4 +77,6 @@ export interface Message {
   traceId?: string; // Langfuse trace ID for feedback
   feedback?: 0 | 1 | 2; // 0 = no feedback, 1 = like, 2 = dislike
   attachments?: MessageAttachment[]; // Attachments sent with the message
+  userTags?: Record<string, UserTag>; // Tag -> {name, userId} for user mentions
+  participants?: Participant[]; // List of participants for Summarizer responses
 }
