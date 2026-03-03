@@ -1,7 +1,7 @@
 import { X } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useUsers } from '../../../hooks/useUsers';
-import { useQuery } from '../../../hooks/useQuery';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
@@ -34,7 +34,9 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const { initiateCall } = useCallJoinOrInitiate();
   const { user: currentUser } = useAuth();
   const channel = useChannel(channelId);
-  const [channelParticipants] = useQuery(queries.channelParticipants({ channelId }));
+  const [channelParticipants] = useCachedQuery(queries.channelParticipants({ channelId }), {
+    enabled: isOpen,
+  });
   const allUsers = useUsers();
 
   const channelParticipantUserIds = useMemo(() => {
