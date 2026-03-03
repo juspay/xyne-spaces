@@ -62,12 +62,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
       <div
         className={`w-full ${isDocument ? 'h-[220px] min-w-[75vw]' : !isMedia ? 'h-[256px] min-w-[256px] aspect-square' : ''}`}
       >
-        <MessageAttachment
-          attachment={attachment}
-          allAttachments={attachments}
-          currentAttachmentIndex={0}
-          isInGrid
-        />
+        <MessageAttachment attachment={attachment} allAttachments={attachments} isInGrid />
       </div>
     );
   }
@@ -76,14 +71,9 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
   if (attachments.length === 2) {
     return (
       <div className='grid grid-cols-2 row-span-2 gap-1'>
-        {attachments.map((attachment, index) => (
+        {attachments.map(attachment => (
           <div key={attachment.id} className='h-full min-h-[256px]'>
-            <MessageAttachment
-              attachment={attachment}
-              allAttachments={attachments}
-              currentAttachmentIndex={index}
-              isInGrid
-            />
+            <MessageAttachment attachment={attachment} allAttachments={attachments} isInGrid />
           </div>
         ))}
       </div>
@@ -94,14 +84,9 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
   if (attachments.length === 3) {
     return (
       <div className='grid grid-cols-2 first:*:row-span-2 first:*:w-full gap-1 overflow-hidden'>
-        {attachments.map((attachment, index) => (
+        {attachments.map(attachment => (
           <div key={attachment.id} className={`h-full aspect-square`}>
-            <MessageAttachment
-              attachment={attachment}
-              allAttachments={attachments}
-              currentAttachmentIndex={index}
-              isInGrid
-            />
+            <MessageAttachment attachment={attachment} allAttachments={attachments} isInGrid />
           </div>
         ))}
       </div>
@@ -118,12 +103,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
       <div className='grid grid-cols-2 gap-1'>
         {visibleAttachments.map((attachment, index) => (
           <div key={attachment.id} className='relative aspect-square'>
-            <MessageAttachment
-              attachment={attachment}
-              allAttachments={attachments}
-              currentAttachmentIndex={index}
-              isInGrid
-            />
+            <MessageAttachment attachment={attachment} allAttachments={attachments} isInGrid />
             {hasMore && index === 3 && (
               <button
                 type='button'
@@ -163,14 +143,9 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
               </button>
             </div>
             <div className='flex-1 overflow-y-auto divide-y'>
-              {attachments.map((att, index) => (
+              {attachments.map(att => (
                 <div key={att.id} className='p-2'>
-                  <MessageAttachment
-                    attachment={att}
-                    allAttachments={attachments}
-                    currentAttachmentIndex={index}
-                    fullSize
-                  />
+                  <MessageAttachment attachment={att} allAttachments={attachments} fullSize />
                 </div>
               ))}
             </div>

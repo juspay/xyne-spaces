@@ -79,6 +79,7 @@ import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts';
 import DocsScreen from './DocsScreen/DocsScreen';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
+import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
@@ -433,6 +434,7 @@ const AppRoot = (): ReactElement => {
             <RecordingOverlay />
             <NotificationHandler />
             <BrowserPanelHandler />
+            <AttachmentGalleryModal />
             <GlobalCommandMenu />
             <ShortcutsHelpModal
               isOpen={isShortcutsModalOpen}
@@ -832,6 +834,7 @@ export const router = createBrowserRouter([
                 <div className='h-full bg-white'>
                   <Outlet />
                 </div>
+                <AttachmentGalleryModal />
               </EditProvider>
             </InitialStateLoader>
           </ZeroProvider>

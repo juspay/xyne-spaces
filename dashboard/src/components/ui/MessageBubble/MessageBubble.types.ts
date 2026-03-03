@@ -8,6 +8,7 @@ import {
   ConversationParticipant,
 } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
+import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 
 export interface ThreadInfo {
   preview: string;
@@ -50,4 +51,5 @@ export interface MessageBubbleProps {
   threadInfo?: ThreadInfo;
   channelScopeType?: ChannelScopeType | undefined;
   isFirstInThread?: boolean;
+  allThreadAttachments?: AttachmentRef[];
 }

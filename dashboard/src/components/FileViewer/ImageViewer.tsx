@@ -9,7 +9,7 @@ import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useScope, useShortcutById } from '../../shortcuts';
 
-const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName }) => {
+const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestures }) => {
   const [imageUrl, setImageUrl] = useState<string>('');
   const [rotation, setRotation] = useState(0);
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -152,6 +152,46 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName }) => {
         <div className='text-center text-gray-300'>
           <p className='text-lg font-semibold mb-2 text-white'>Failed to load image</p>
           <p className='text-sm text-gray-400'>The image could not be displayed</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (disableGestures) {
+    return (
+      <div className='h-full w-full relative' style={{ touchAction: 'pan-x' }}>
+        <div className='absolute inset-0 overflow-hidden'>
+          <div
+            className='absolute inset-0 scale-110'
+            style={{
+              backgroundImage: imageUrl ? `url(${imageUrl})` : 'none',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              filter: 'blur(32px)',
+              opacity: 0.7,
+            }}
+          />
+          <div className='absolute inset-0 bg-black/30' />
+        </div>
+        <div className='relative z-10 h-full w-full flex items-center justify-center'>
+          {!imageLoaded && (
+            <div className='absolute inset-0 flex items-center justify-center z-10'>
+              <div className='text-gray-300 bg-black/60 px-4 py-2 rounded backdrop-blur-sm'>
+                Loading image...
+              </div>
+            </div>
+          )}
+          {imageUrl && !imageError && (
+            <img
+              ref={imageRef}
+              src={imageUrl}
+              alt={fileName}
+              onLoad={handleImageLoad}
+              onError={handleImageError}
+              className='select-none max-h-screen max-w-full h-auto w-auto object-contain origin-center'
+              style={{ transform: `rotate(${rotation}deg)` }}
+            />
+          )}
         </div>
       </div>
     );
