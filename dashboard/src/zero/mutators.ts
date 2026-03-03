@@ -2922,6 +2922,7 @@ export const mutators = defineMutators({
       z.object({
         boardId: z.string(),
         name: z.string().optional(),
+        description: z.string().optional(),
         projectId: z.string().optional(),
         boardType: z.nativeEnum(BoardType).optional(),
         metadata: z.any().optional(),
@@ -2949,6 +2950,7 @@ export const mutators = defineMutators({
         args: {
           boardId,
           name,
+          description,
           projectId,
           metadata,
           stages,
@@ -2984,6 +2986,7 @@ export const mutators = defineMutators({
         await tx.mutate.boards.update({
           id: boardId,
           ...(name !== undefined && { name }),
+          ...(description !== undefined && { description }),
           ...(projectId !== undefined && { projectId }),
           ...(boardType !== undefined && { boardType }),
           ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),

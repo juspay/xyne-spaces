@@ -11,6 +11,7 @@ export interface CreateStageInput {
 
 export interface CreateBoardInput {
   name: string;
+  description?: string;
   projectId: string;
   createdBy: string;
   boardType?: BoardType;
@@ -70,6 +71,7 @@ export class BoardRepository {
       const board = await tx.board.create({
         data: {
           name: data.name,
+          description: data.description,
           projectId: data.projectId,
           createdBy: data.createdBy,
           boardType: data.boardType || BoardType.DEFAULT,

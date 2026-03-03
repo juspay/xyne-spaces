@@ -70,6 +70,7 @@ const ProjectDetailScreen = (): ReactElement => {
     boardId: string,
     data: {
       name?: string;
+      description?: string;
       projectId?: string;
       metadata?: ReadonlyJSONValue;
       stages?: Array<{
@@ -157,6 +158,7 @@ const ProjectDetailScreen = (): ReactElement => {
       mutators.board.update({
         boardId,
         ...(data.name !== undefined && { name: data.name }),
+        ...(data.description !== undefined && { description: data.description }),
         ...(data.projectId !== undefined && { projectId: data.projectId }),
         ...(data.metadata !== undefined && { metadata: data.metadata }),
         ...(data.stages !== undefined && { stages: data.stages }),

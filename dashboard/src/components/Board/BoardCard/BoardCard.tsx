@@ -11,6 +11,7 @@ export interface StageWithApprovers extends Stage {
 export interface BoardWithStages {
   readonly id: string;
   readonly name: string;
+  readonly description?: string | null;
   readonly boardType: BoardType;
   readonly projectId: string;
   readonly createdBy: string;
@@ -38,6 +39,9 @@ export const BoardCard = ({ board, onEdit, onDelete }: BoardCardProps): ReactEle
       <div className='mb-4'>
         <h3 className='text-lg font-semibold text-gray-900 mb-2'>{board.name}</h3>
         <p className='text-sm text-gray-500'>Project ID: {board.projectId}</p>
+        {board.description && (
+          <p className='text-sm text-gray-600 mt-2 line-clamp-2'>{board.description}</p>
+        )}
       </div>
 
       {hasStages && (

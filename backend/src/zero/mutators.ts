@@ -4727,6 +4727,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         z.object({
           boardId: z.string(),
           name: z.string().optional(),
+          description: z.string().optional(),
           projectId: z.string().optional(),
           boardType: z.nativeEnum(BoardType).optional(),
           metadata: z.any().optional(),
@@ -4747,7 +4748,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           stageIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({ tx, args: { boardId, name, projectId, boardType, metadata, stages, timestamp, stageIds = {} } }) => {
+        async ({ tx, args: { boardId, name, description, projectId, boardType, metadata, stages, timestamp, stageIds = {} } }) => {
           // Validate board exists
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
@@ -4774,6 +4775,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.boards.update({
             id: boardId,
             ...(name !== undefined && { name }),
+            ...(description !== undefined && { description }),
             ...(projectId !== undefined && { projectId }),
             ...(boardType !== undefined && { boardType }),
             ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),

@@ -99,6 +99,9 @@ export const BoardForm = ({
   const [boardType, setBoardType] = useState<BoardType>(board?.boardType || BoardType.DEFAULT);
   const [selectedFormIds, setSelectedFormIds] = useState<Set<string>>(new Set());
 
+  // Initialize description from board
+  const [description, setDescription] = useState<string>(board?.description || '');
+
   // Initialize ticket form config from board metadata
   const boardMetadata = board?.metadata as BoardMetadata | null;
   const initialConfig: Required<TicketFormConfig> = {
@@ -421,6 +424,7 @@ export const BoardForm = ({
           // Edit mode - only send changed fields
           const updateData: {
             name?: string;
+            description?: string;
             projectId?: string;
             boardType?: BoardType;
             metadata?: ReadonlyJSONValue;
@@ -464,6 +468,13 @@ export const BoardForm = ({
             isAllowedToTransfer: isAllowedToTransfer,
             hasStagesWithApproval: stages.some(s => s.approverIds.length > 0),
           } as ReadonlyJSONValue;
+
+          // Include description if changed
+          const trimmedDescription = description.trim();
+          const currentDescription = (board.description || '').trim();
+          if (trimmedDescription !== currentDescription) {
+            updateData.description = trimmedDescription;
+          }
 
           // Always include stages for update
           updateData.stages = stages.map(stage => ({
@@ -527,6 +538,7 @@ export const BoardForm = ({
 
           await onSubmit({
             name: name.trim(),
+            description: description.trim(),
             projectId,
             boardType,
             stages: stages.map(stage => ({
@@ -587,6 +599,23 @@ export const BoardForm = ({
           selected={boardType}
           onSelect={selected => setBoardType(selected as BoardType)}
           disabled={isLoading}
+        />
+      </div>
+
+      <div>
+        <label htmlFor='board-description' className='block text-sm font-medium text-gray-700 mb-1'>
+          Description
+        </label>
+        <textarea
+          id='board-description'
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder='Enter board description (optional)'
+          disabled={isLoading}
+          rows={3}
+          className='w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed resize-none'
+          data-track-category='Board_Form'
+          data-track-name='Enter_Description'
         />
       </div>
 
