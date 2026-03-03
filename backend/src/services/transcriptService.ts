@@ -90,7 +90,9 @@ You are analyzing a call transcript to identify actionable work items that shoul
 CRITICAL RULES:
 - Output ONLY valid JSON
 - Generate 1-25 actionable ticket suggestions based on the call content
-- Each suggestion must be a concrete task mentioned or implied in the call
+- Don't create small tickets for every minor work item. Instead, group related work items or tasks assigned to the same person into a single ticket when it makes sense.
+- Do NOT force all work into a single ticket. Create separate tickets for fundamentally different, unrelated tasks.
+- Each suggestion must be a concrete task (or cohesive group of related tasks) mentioned or implied in the call
 - Extract assignee names ONLY if explicitly mentioned in the transcript (e.g., "John will handle this")
 - Use "unassigned" if no specific person is mentioned
 - Prioritize based on urgency indicators in the call
