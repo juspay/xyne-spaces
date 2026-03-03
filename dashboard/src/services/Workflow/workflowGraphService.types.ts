@@ -128,6 +128,20 @@ export interface CombinedWorkflowData {
         url: string;
       };
     };
+    metadata?: {
+      createdFrom?: string;
+      originalRequest?: {
+        title?: string;
+        description?: string;
+        workflowType?: string;
+        executorType?: string;
+        ticketId?: string;
+        conversationId?: string;
+        xyneId?: string;
+        [key: string]: unknown;
+      };
+      [key: string]: unknown;
+    } | null;
   }>;
 }
 

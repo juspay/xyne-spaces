@@ -4,7 +4,8 @@ import {
   WorkflowStep,
 } from '../../services/Workflow/workflowGraphService.types';
 import { AgentStepRenderer } from './AgentStepRenderer/StepRenderer';
-import { Bot, Code } from 'lucide-react';
+import { Code, FileX2 } from 'lucide-react';
+import { CodeGenerationLoader } from './CodeGenerationLoader/CodeGenerationLoader';
 
 interface LiveEditsPanelProps {
   combinedStepsData: CombinedWorkflowData | null;
@@ -23,7 +24,6 @@ const LiveEditsPanel: React.FC<LiveEditsPanelProps> = ({ combinedStepsData }) =>
         if (
           stepName.startsWith('tool_edit') ||
           stepName.startsWith('tool_multiedit') ||
-          stepName.startsWith('tool_bash') ||
           stepName.startsWith('tool_write')
         ) {
           steps.push(step);
@@ -36,7 +36,6 @@ const LiveEditsPanel: React.FC<LiveEditsPanelProps> = ({ combinedStepsData }) =>
               if (
                 childName.startsWith('tool_edit') ||
                 childName.startsWith('tool_multiedit') ||
-                childName.startsWith('tool_bash') ||
                 childName.startsWith('tool_write')
               ) {
                 steps.push(childStep);
@@ -60,15 +59,25 @@ const LiveEditsPanel: React.FC<LiveEditsPanelProps> = ({ combinedStepsData }) =>
     }
   }, [editSteps.length]);
 
+  const status = combinedStepsData?.workflows?.[0]?.status?.toUpperCase();
+  const isTerminated = status === 'SUCCESS' || status === 'FAILURE';
+
   if (editSteps.length === 0) {
+    if (!isTerminated) {
+      return (
+        <div className='h-full flex items-center justify-center'>
+          <CodeGenerationLoader />
+        </div>
+      );
+    }
+
     return (
       <div className='h-full flex items-center justify-center bg-gray-50'>
-        <div className='text-center'>
-          <Bot className='w-12 h-12 text-gray-400 mx-auto mb-4' />
-          <p className='text-gray-600 font-medium'>No Live Edits Yet</p>
-          <p className='text-sm text-gray-500 mt-2 max-w-sm'>
-            Live file modifications will appear here once the agent starts editing files.
-          </p>
+        <div className='text-center px-6'>
+          <div className='w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4'>
+            <FileX2 className='w-7 h-7 text-gray-400' />
+          </div>
+          <p className='text-gray-700 font-medium text-sm'>It seems there are no edits!</p>
         </div>
       </div>
     );

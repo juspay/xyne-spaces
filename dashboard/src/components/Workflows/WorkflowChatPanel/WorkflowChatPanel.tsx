@@ -853,7 +853,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
             <div className='flex items-center gap-2.5'>
               {/* Step Navigation Header */}
               {graphNodes.length > 0 ? (
-                <div className='flex items-center gap-2.5 px-2.5 py-2 bg-gray-50 rounded-lg border border-gray-200 flex-1'>
+                <div className='flex items-center gap-2.5 px-2.5 py-2 bg-gray-50 rounded-lg border border-gray-200 flex-1 min-w-0 overflow-hidden'>
                   {/* Prev Button */}
                   <button
                     onClick={handlePrevNode}
@@ -962,25 +962,6 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 </div>
               )}
 
-              {/* Errors Toggle Button */}
-              {errorSteps.length > 0 && (
-                <div className='relative flex-shrink-0'>
-                  <button
-                    onClick={() => setMainTab('errors')}
-                    className={`relative flex items-center justify-center text-sm font-medium rounded-lg border transition-all bg-gray-50 text-red-500 hover:bg-red-50`}
-                    style={{ width: '42px', height: '42px' }}
-                    title='Errors'
-                    data-track-category='Workflows'
-                    data-track-name='ToggleErrorsTab'
-                  >
-                    <AlertTriangle size={18} />
-                    <span className='absolute -top-1.5 -right-1.5 bg-red-600 text-white text-[10px] font-bold w-[20px] h-[20px] flex items-center justify-center rounded-full border-2 border-white shadow-sm leading-none'>
-                      {errorSteps.length > 99 ? '99+' : errorSteps.length}
-                    </span>
-                  </button>
-                </div>
-              )}
-
               {/* Search Toggle Button */}
               <button
                 onClick={() => {
@@ -998,6 +979,18 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 data-track-name='ToggleSearch'
               >
                 <Search size={16} />
+              </button>
+
+              {/* Thread Button */}
+              <button
+                onClick={() => setMainTab('thread')}
+                className='flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                style={{ width: '42px', height: '42px' }}
+                title='Thread'
+                data-track-category='Workflows'
+                data-track-name='OpenThreadTab'
+              >
+                <MessageSquare size={16} />
               </button>
 
               {/* More Actions Menu */}
@@ -1028,18 +1021,23 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       <History size={16} className='text-gray-400' />
                       Attempts
                     </button>
-                    <button
-                      onClick={() => {
-                        setMainTab('thread');
-                        setIsMenuOpen(false);
-                      }}
-                      className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left transition-colors'
-                      data-track-category='Workflows'
-                      data-track-name='OpenThreadTab'
-                    >
-                      <MessageSquare size={16} className='text-gray-400' />
-                      Thread
-                    </button>
+                    {errorSteps.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setMainTab('errors');
+                          setIsMenuOpen(false);
+                        }}
+                        className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left transition-colors'
+                        data-track-category='Workflows'
+                        data-track-name='OpenErrorsTab'
+                      >
+                        <AlertTriangle size={16} className='text-red-400' />
+                        Errors
+                        <span className='ml-auto bg-red-100 text-red-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full'>
+                          {errorSteps.length > 99 ? '99+' : errorSteps.length}
+                        </span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1141,39 +1139,44 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     }`}
                     dangerouslySetInnerHTML={{
                       // eslint-disable-next-line @typescript-eslint/naming-convention
-                      __html: DOMPurify.sanitize(ticketDescription || '', {
-                        ALLOWED_TAGS: [
-                          'p',
-                          'br',
-                          'b',
-                          'strong',
-                          'i',
-                          'em',
-                          'a',
-                          'div',
-                          'span',
-                          'ul',
-                          'ol',
-                          'li',
-                          'h1',
-                          'h2',
-                          'h3',
-                          'h4',
-                          'h5',
-                          'h6',
-                          'blockquote',
-                          'code',
-                          'pre',
-                          'table',
-                          'thead',
-                          'tbody',
-                          'tr',
-                          'td',
-                          'th',
-                        ],
-                        ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'style'],
-                        ALLOW_DATA_ATTR: false,
-                      }).replace(/\n/g, '<br>'),
+                      __html: DOMPurify.sanitize(
+                        combinedStepsData?.workflows?.[0]?.metadata?.originalRequest?.description ??
+                          ticketDescription ??
+                          '',
+                        {
+                          ALLOWED_TAGS: [
+                            'p',
+                            'br',
+                            'b',
+                            'strong',
+                            'i',
+                            'em',
+                            'a',
+                            'div',
+                            'span',
+                            'ul',
+                            'ol',
+                            'li',
+                            'h1',
+                            'h2',
+                            'h3',
+                            'h4',
+                            'h5',
+                            'h6',
+                            'blockquote',
+                            'code',
+                            'pre',
+                            'table',
+                            'thead',
+                            'tbody',
+                            'tr',
+                            'td',
+                            'th',
+                          ],
+                          ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'style'],
+                          ALLOW_DATA_ATTR: false,
+                        },
+                      ).replace(/\n/g, '<br>'),
                     }}
                   />
                 </button>

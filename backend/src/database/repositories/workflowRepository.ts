@@ -215,6 +215,7 @@ export class WorkflowRepository {
             workflowName: true,
             workflowType: true,
             ticketId: true,
+            metadata: true,
           }
         }
       }
@@ -320,6 +321,7 @@ export class WorkflowRepository {
         executionMetadata: executionMetadata,
         // Git info for diff view (only available if baseCommitHash exists)
         gitInfo: gitInfoFromOutput,
+        metadata: execution.workflow.metadata ? JSON.parse(execution.workflow.metadata) : null,
       }]
     };
   }
@@ -763,7 +765,8 @@ export class WorkflowRepository {
         // Metadata for ALL executions
         executionMetadata: executionMetadata,
         // Git info for diff view (only available if baseCommitHash exists)
-        gitInfo: gitInfoFromOutput
+        gitInfo: gitInfoFromOutput,
+        metadata: workflow.metadata ? JSON.parse(workflow.metadata) : null,
       });
     }
 
