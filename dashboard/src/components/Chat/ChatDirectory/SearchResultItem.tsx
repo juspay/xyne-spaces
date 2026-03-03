@@ -1,6 +1,16 @@
 import { ReactElement } from 'react';
 import { Command } from 'cmdk';
-import { Hash, User, MessageCircle, Ticket, Paperclip, Eye, FileText, Mic } from 'lucide-react';
+import {
+  Hash,
+  User,
+  MessageCircle,
+  Ticket,
+  Paperclip,
+  Eye,
+  FileText,
+  Mic,
+  Check,
+} from 'lucide-react';
 import { DisplaySearchResult } from '../../../types/search';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import UserAvatar from '../../UserAvatar/UserAvatar';
@@ -9,8 +19,9 @@ import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRen
 
 interface SearchResultItemProps {
   result: DisplaySearchResult;
-  onSelect: (result: DisplaySearchResult) => Promise<void>;
+  onSelect: (result: DisplaySearchResult) => Promise<void> | void;
   onPreview?: (result: DisplaySearchResult) => void;
+  isSelected?: boolean;
 }
 
 const getResultIcon = (result: DisplaySearchResult): ReactElement => {
@@ -53,7 +64,18 @@ const utcToIst = (utcString?: string): string => {
   });
 };
 
-const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps): ReactElement => {
+const SelectedBadge = (): ReactElement => (
+  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
+    <Check size={10} />
+  </span>
+);
+
+const SearchResultItem = ({
+  result,
+  onSelect,
+  onPreview,
+  isSelected = false,
+}: SearchResultItemProps): ReactElement => {
   switch (result.type) {
     case 'user':
       return (
@@ -68,6 +90,7 @@ const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps
             <div className='font-semibold text-xs text-gray-800 truncate'>{result.title}</div>
             <div className='text-[11px] text-gray-500'>{result.subtitle}</div>
           </div>
+          {isSelected && <SelectedBadge />}
         </Command.Item>
       );
 
@@ -100,6 +123,7 @@ const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps
                 </span>
               </div>
             </div>
+            {isSelected && <SelectedBadge />}
           </div>
           <div className='pl-6 text-xs text-gray-700'>
             <SearchSnippetRenderer message={result.context || ''} wordLimit={40} />
@@ -128,6 +152,7 @@ const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps
                 </div>
               )}
             </div>
+            {isSelected && <SelectedBadge />}
           </div>
         </Command.Item>
       );
@@ -151,7 +176,8 @@ const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps
               <RenderMessageWithHTML message={result.subtitle} />
             </div>
           </div>
-          {onPreview && result.searchContext?.internalUrl && (
+          {isSelected && <SelectedBadge />}
+          {!isSelected && onPreview && result.searchContext?.internalUrl && (
             <button
               onClick={e => {
                 e.stopPropagation();
@@ -182,6 +208,7 @@ const SearchResultItem = ({ result, onSelect, onPreview }: SearchResultItemProps
             <div className='font-semibold text-xs text-gray-800 truncate'>{result.title}</div>
             <div className='text-[11px] text-gray-500'>{result.subtitle}</div>
           </div>
+          {isSelected && <SelectedBadge />}
         </Command.Item>
       );
   }

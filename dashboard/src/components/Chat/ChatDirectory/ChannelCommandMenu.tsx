@@ -18,6 +18,7 @@ import {
   MoveDown,
   Search,
   X,
+  Check,
 } from 'lucide-react';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -35,6 +36,11 @@ import Avatar from '../../ui/Avatar/Avatar';
 import Badge from '../../ui/Badge';
 import { DisplaySearchResult } from '../../../types/search';
 import { TabType, MentionType, ChannelCommandMenuProps } from './ChannelCommandMenu.types';
+import ThreadContextPanel from '../ThreadContextPanel/ThreadContextPanel';
+import {
+  buildContextItemFromResult,
+  buildContextItemFromChannel,
+} from '../ThreadContextPanel/contextItem.utils';
 import { ChannelCategory } from './ChatDirectory.types';
 import { navigateToSearchResult } from '../../../utils/searchNavigation';
 import { useAllChannels } from '../../../hooks/useChannels';
@@ -85,13 +91,15 @@ const ChannelCommandItem = ({
   search,
   onSelect,
   getChannelIcon,
+  isSelected = false,
 }: {
   channel: Channel;
   currentUserID: string;
   unreadCount: number;
   search: string;
-  onSelect: () => void;
+  onSelect: (displayName: string) => void;
   getChannelIcon: (channel: Channel) => ReactElement;
+  isSelected?: boolean;
 }): ReactElement | null => {
   const { displayName } = useChannelDisplayName(channel, currentUserID);
   const { isMobile } = usePlatform();
@@ -108,7 +116,7 @@ const ChannelCommandItem = ({
     <Command.Item
       key={channel.id}
       value={`channel-${channel.id}-${displayName}`}
-      onSelect={onSelect}
+      onSelect={() => onSelect(displayName)}
       className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'hover:bg-gray-100 aria-selected:bg-gray-100'}`}
       style={{ WebkitTapHighlightColor: 'transparent' }}
     >
@@ -118,10 +126,16 @@ const ChannelCommandItem = ({
       <span className='flex-1 min-w-0 text-left text-xs font-medium text-gray-800 truncate'>
         {displayName}
       </span>
-      {unreadCount > 0 && (
-        <Badge variant='success' className='font-mono shrink-0 text-[10px] px-1.5 py-0'>
-          {unreadCount}
-        </Badge>
+      {isSelected ? (
+        <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
+          <Check size={10} />
+        </span>
+      ) : (
+        unreadCount > 0 && (
+          <Badge variant='success' className='font-mono shrink-0 text-[10px] px-1.5 py-0'>
+            {unreadCount}
+          </Badge>
+        )
       )}
     </Command.Item>
   );
@@ -135,6 +149,10 @@ const ChannelCommandMenu = ({
   unreadCounts,
   open,
   onOpenChange,
+  contextSelectionMode = false,
+  contextItems = [],
+  onContextItemToggle,
+  onContextSelectionConfirm,
 }: ChannelCommandMenuProps): ReactElement => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
@@ -142,12 +160,16 @@ const ChannelCommandMenu = ({
 
   useScope('command', open);
 
-  useShortcutById('global.search', () => {
-    onOpenChange(!open);
-    if (!open && !searchSessionId) {
-      onOpen('keyboard_shortcut');
-    }
-  });
+  useShortcutById(
+    'global.search',
+    () => {
+      onOpenChange(!open);
+      if (!open && !searchSessionId) {
+        onOpen('keyboard_shortcut');
+      }
+    },
+    { enabled: !contextSelectionMode },
+  );
 
   useShortcutById(
     'command.close',
@@ -705,7 +727,16 @@ const ChannelCommandMenu = ({
     });
   };
 
-  const handleChannelSelect = (channel: Channel, rankPosition?: number): void => {
+  const handleChannelSelect = (
+    channel: Channel,
+    displayName: string,
+    rankPosition?: number,
+  ): void => {
+    if (contextSelectionMode && onContextItemToggle) {
+      onContextItemToggle(buildContextItemFromChannel(channel, displayName));
+      return;
+    }
+
     const route = `/chat/dir/${channel.id}`;
 
     // Track click on channel if metrics available
@@ -724,6 +755,11 @@ const ChannelCommandMenu = ({
     result: DisplaySearchResult,
     rankPosition: number,
   ): Promise<void> => {
+    if (contextSelectionMode && onContextItemToggle) {
+      onContextItemToggle(buildContextItemFromResult(result));
+      return;
+    }
+
     // Track click on search result
     if (searchText.trim()) {
       onResultClick(result, rankPosition, result.searchContext?.channelId);
@@ -840,8 +876,12 @@ const ChannelCommandMenu = ({
       ref={commandRef}
       onOpenChange={onOpenChange}
       shouldFilter={false}
-      className={`fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full ${isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen'} md:w-full md:max-w-3xl md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000]
- border border-gray-200 z-50'`}
+      className={cn(
+        'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
+        isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
+        contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
+        'md:w-full md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-gray-200 z-50',
+      )}
       onKeyDownCapture={e => {
         // ── Tab / Shift+Tab: cycle filter tabs ──────────────────────────────
         if (e.key === 'Tab') {
@@ -1046,602 +1086,324 @@ const ChannelCommandMenu = ({
         )}
       </div>
 
-      {/* Tabs, Results, Footer Container - modal overlays everything below search input */}
-      <div
-        className='relative flex-1 flex flex-col min-h-0'
-        role='presentation'
-        data-track-category='CHANNEL_SEARCH'
-        data-track-name='ClickSearchResultsArea'
-        data-track-metadata={JSON.stringify({ hasResults })}
-        onClick={() => {
-          // Blur input when clicking anywhere in this container
-          if (inputRef.current) {
-            inputRef.current.blur();
-          }
-        }}
-        onKeyDown={e => {
-          // Blur input when pressing Enter or Space in this container
-          if ((e.key === 'Enter' || e.key === ' ') && inputRef.current) {
-            inputRef.current.blur();
-          }
-        }}
-      >
-        {/* Tabs - hidden when bot is selected */}
-        {!selectedBot && !showBotsSuggestions && (
-          <div className={`overflow-x-auto no-scrollbar p-2 ${isMobile ? 'mx-1' : 'ml-4'}`}>
-            <Tabs.Root value={activeTab}>
-              <Tabs.List className='flex items-center justify-start gap-[6px]'>
-                {tabs.map(tab => (
-                  <Tabs.Trigger asChild key={tab.id} value={tab.id}>
-                    <button
-                      onClick={e => {
-                        if (activeTab === tab.id) {
-                          setActiveTab(TabType.ALL);
-                        } else {
-                          setActiveTab(tab.id);
-                        }
-                        // Blur input when clicking tabs
-                        if (inputRef.current) {
-                          inputRef.current.blur();
-                        }
-                        e.currentTarget.scrollIntoView({
-                          behavior: 'smooth',
-                          block: 'nearest',
-                          inline: 'center',
-                        });
-                      }}
-                      className={cn(
-                        'flex items-center justify-center gap-1.5 px-2 text-[13px] py-[2px] max-h-6 whitespace-nowrap transition-colors cursor-pointer rounded-[10px] border',
-                        activeTab === tab.id
-                          ? 'border-[#6276BE] text-[#FFF] bg-[#6276BE]'
-                          : 'border-[#E4E6E7] text-[#000] hover:text-gray-900',
-                        isMobile && 'text-[14px] w-fit h-[37px] px-3',
-                      )}
-                      data-track-category='CHANNEL_SEARCH'
-                      data-track-name='SELECT_SEARCH_TAB'
-                      data-track-metadata={JSON.stringify({ tab: tab.id })}
-                    >
-                      {tab.icon}
-                      {tab.label}
-                    </button>
-                  </Tabs.Trigger>
-                ))}
-              </Tabs.List>
-            </Tabs.Root>
-          </div>
-        )}
-
-        {/* Results */}
-        <Command.List
-          className='flex-1 overflow-y-auto md:max-h-[550px] p-2 ml-2'
-          ref={el => {
-            if (el) {
-              setScrollContainer(el);
+      {/* Body: results panel + optional context panel side-by-side */}
+      <div className='flex flex-1 min-h-0 overflow-hidden'>
+        {/* Tabs, Results, Footer Container - modal overlays everything below search input */}
+        <div
+          className='relative flex-1 flex flex-col min-h-0'
+          role='presentation'
+          data-track-category='CHANNEL_SEARCH'
+          data-track-name='ClickSearchResultsArea'
+          data-track-metadata={JSON.stringify({ hasResults })}
+          onClick={() => {
+            // Blur input when clicking anywhere in this container
+            if (inputRef.current) {
+              inputRef.current.blur();
+            }
+          }}
+          onKeyDown={e => {
+            // Blur input when pressing Enter or Space in this container
+            if ((e.key === 'Enter' || e.key === ' ') && inputRef.current) {
+              inputRef.current.blur();
             }
           }}
         >
-          {/* Bot Chat Mode */}
-          {selectedBot ? (
-            <div className='p-4'>
-              {/* Bot description */}
-              <p className='text-xs text-gray-500 mb-4'>{selectedBot.description}</p>
-
-              {/* Bot response area */}
-              {(botChatState.status === 'success' || botChatState.status === 'loading') && (
-                <div className='bg-gray-50 rounded-lg p-3 mb-4 border border-gray-200'>
-                  <div className='flex items-start gap-2'>
-                    <Bot size={16} className='text-blue-600 mt-0.5 flex-shrink-0' />
-                    <div className='flex-1 min-w-0'>
-                      {botChatState.status === 'success' && botChatState.response && (
-                        <p className='text-sm whitespace-pre-wrap break-words'>
-                          {botChatState.response}
-                        </p>
-                      )}
-                      {botChatState.status === 'loading' && (
-                        <span className='animate-pulse'>▊</span>
-                      )}
-                      {/* Render tool outputs */}
-                      {botChatState.status === 'success' && botChatState.toolOutputs.length > 0 && (
-                        <div className='mt-3 space-y-2 max-h-48 overflow-y-auto'>
-                          {botChatState.toolOutputs.map(toolOutput => (
-                            <div key={toolOutput.id} className='w-full overflow-hidden'>
-                              {toolOutput.description && (
-                                <div className='text-sm text-gray-600 mb-2'>
-                                  {toolOutput.description}
-                                </div>
-                              )}
-                              <ToolOutputRenderer
-                                toolOutput={toolOutput}
-                                className={
-                                  toolOutput.singleStat ? '' : 'border border-gray-200 rounded-lg'
-                                }
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Error message */}
-              {botChatState.status === 'error' && (
-                <div className='bg-red-50 text-red-600 rounded-lg p-3 mb-4 text-sm'>
-                  {botChatState.message}
-                </div>
-              )}
-
-              {/* Continue in DM button */}
-              {botChatState.status === 'success' && (
-                <button
-                  onClick={() => void handleContinueInDM()}
-                  className='flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline'
-                  data-track-category='CHANNEL_SEARCH'
-                  data-track-name='CONTINUE_BOT_IN_DM'
-                  data-track-metadata={JSON.stringify({ botId: selectedBot?.id })}
-                >
-                  <span>Continue in DM</span>
-                  <ArrowRight size={14} />
-                </button>
-              )}
-
-              {/* Hint when no query entered yet */}
-              {botChatState.status === 'idle' && !search.trim() && (
-                <p className='text-sm text-gray-400 text-center py-4'>
-                  Type your question and press Enter
-                </p>
-              )}
+          {/* Tabs - hidden when bot is selected */}
+          {!selectedBot && !showBotsSuggestions && (
+            <div className={`overflow-x-auto no-scrollbar p-2 ${isMobile ? 'mx-1' : 'ml-4'}`}>
+              <Tabs.Root value={activeTab}>
+                <Tabs.List className='flex items-center justify-start gap-[6px]'>
+                  {tabs.map(tab => (
+                    <Tabs.Trigger asChild key={tab.id} value={tab.id}>
+                      <button
+                        onClick={e => {
+                          if (activeTab === tab.id) {
+                            setActiveTab(TabType.ALL);
+                          } else {
+                            setActiveTab(tab.id);
+                          }
+                          // Blur input when clicking tabs
+                          if (inputRef.current) {
+                            inputRef.current.blur();
+                          }
+                          e.currentTarget.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'nearest',
+                            inline: 'center',
+                          });
+                        }}
+                        className={cn(
+                          'flex items-center justify-center gap-1.5 px-2 text-[13px] py-[2px] max-h-6 whitespace-nowrap transition-colors cursor-pointer rounded-[10px] border',
+                          activeTab === tab.id
+                            ? 'border-[#6276BE] text-[#FFF] bg-[#6276BE]'
+                            : 'border-[#E4E6E7] text-[#000] hover:text-gray-900',
+                          isMobile && 'text-[14px] w-fit h-[37px] px-3',
+                        )}
+                        data-track-category='CHANNEL_SEARCH'
+                        data-track-name='SELECT_SEARCH_TAB'
+                        data-track-metadata={JSON.stringify({ tab: tab.id })}
+                      >
+                        {tab.icon}
+                        {tab.label}
+                      </button>
+                    </Tabs.Trigger>
+                  ))}
+                </Tabs.List>
+              </Tabs.Root>
             </div>
-          ) : showBotsSuggestions ? (
-            /* Show bot suggestions when typing @ */
-            <>
-              <Command.Group
-                heading='Bots'
-                className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-              >
-                {filteredBots.map(bot => (
-                  <Command.Item
-                    key={bot.id}
-                    value={`@${bot.name}`}
-                    onSelect={() => handleBotSelect(bot)}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-sm cursor-pointer ${!isMobile && 'hover:bg-gray-100 aria-selected:bg-gray-100'}`}
-                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                  >
-                    <div className='flex items-center justify-center h-8 w-8 rounded-full bg-blue-100 flex-shrink-0'>
-                      <Bot size={16} className='text-blue-600' />
-                    </div>
-                    <div className='flex-1 min-w-0'>
-                      <span className='text-sm font-medium text-gray-800 block'>{bot.name}</span>
-                      <span className='text-xs text-gray-500 truncate block'>
-                        {bot.description}
-                      </span>
-                    </div>
-                  </Command.Item>
-                ))}
-              </Command.Group>
-              {filteredBots.length === 0 && (
-                <Command.Empty className='py-6 text-center text-sm text-gray-500'>
-                  No bots found.
-                </Command.Empty>
-              )}
-            </>
-          ) : (
-            /* Normal search mode */
-            <>
-              {/* Mention Suggestions - Show when mention search is active */}
-              {mentionSearchType && (
-                <>
-                  {mentionSearchType === MentionType.USER && availableUsers.length > 0 && (
-                    <Command.Group
-                      heading='Users'
-                      className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                    >
-                      {availableUsers.map((user, index) => (
-                        <Command.Item
-                          key={user.id}
-                          value={`mention-user-${user.id}`}
-                          onSelect={() => {
-                            handleMentionSelect({
-                              id: user.id,
-                              name: user.name,
-                              type: MentionType.USER,
-                              ...(user.email ? { email: user.email } : {}),
-                            });
-                          }}
-                          onMouseEnter={() => {
-                            if (setSelectedMentionIndex) {
-                              setSelectedMentionIndex(index);
-                            }
-                          }}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                            index === selectedMentionIndex ? 'bg-gray-100' : ''
-                          } ${!isMobile && 'hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98]'}`}
-                          style={{ WebkitTapHighlightColor: 'transparent' }}
-                        >
-                          <Avatar userId={user.id} size='sm' />
-                          <div className='flex-1 min-w-0'>
-                            <div className='font-semibold text-xs text-gray-800 truncate'>
-                              {user.name}
-                            </div>
-                            {user.email && (
-                              <div className='text-[11px] text-gray-500 truncate'>{user.email}</div>
-                            )}
-                          </div>
-                        </Command.Item>
-                      ))}
-                    </Command.Group>
-                  )}
-                  {mentionSearchType === MentionType.CHANNEL && availableChannels.length > 0 && (
-                    <Command.Group
-                      heading='Channels'
-                      className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                    >
-                      {availableChannels.map((channel, index) => (
-                        <Command.Item
-                          key={channel.id}
-                          value={`mention-channel-${channel.id}`}
-                          onSelect={() => {
-                            handleMentionSelect({
-                              id: channel.id,
-                              name: channel.name,
-                              type: MentionType.CHANNEL,
-                            });
-                          }}
-                          onMouseEnter={() => {
-                            if (setSelectedMentionIndex) {
-                              setSelectedMentionIndex(index);
-                            }
-                          }}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                            index === selectedMentionIndex ? 'bg-gray-100' : ''
-                          } ${!isMobile && 'hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98]'}`}
-                          style={{ WebkitTapHighlightColor: 'transparent' }}
-                        >
-                          <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
-                            <Hash size={16} className='text-gray-600' />
-                          </div>
-                          <div className='flex-1 min-w-0'>
-                            <div className='font-semibold text-xs text-gray-800 truncate'>
-                              {channel.name}
-                            </div>
-                          </div>
-                        </Command.Item>
-                      ))}
-                    </Command.Group>
-                  )}
-                  {mentionSearchType === MentionType.USER &&
-                    availableUsers.length === 0 &&
-                    mentionSearchQuery && (
-                      <Command.Empty className='py-6 text-center text-xs text-gray-500'>
-                        No users found for &quot;{mentionSearchQuery}&quot;
-                      </Command.Empty>
-                    )}
-                  {mentionSearchType === MentionType.CHANNEL &&
-                    availableChannels.length === 0 &&
-                    mentionSearchQuery && (
-                      <Command.Empty className='py-6 text-center text-xs text-gray-500'>
-                        No channels found for &quot;{mentionSearchQuery}&quot;
-                      </Command.Empty>
-                    )}
-                </>
-              )}
+          )}
 
-              {showEmptyState && !mentionSearchType && (
-                <Command.Empty className='py-6 text-center text-xs text-gray-500'>
-                  No results found for &quot;{search}&quot;
-                </Command.Empty>
-              )}
+          {/* Results */}
+          <Command.List
+            className='flex-1 overflow-y-auto md:max-h-[550px] p-2 ml-2'
+            ref={el => {
+              if (el) {
+                setScrollContainer(el);
+              }
+            }}
+          >
+            {/* Bot Chat Mode */}
+            {selectedBot ? (
+              <div className='p-4'>
+                {/* Bot description */}
+                <p className='text-xs text-gray-500 mb-4'>{selectedBot.description}</p>
 
-              {error && <div className='p-3 text-xs text-red-600'>{error}</div>}
-
-              {!showEmptyState && !error && !mentionSearchType && (
-                <>
-                  {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
-                  {searchText.trim() ? (
-                    <>
-                      {/* 0. Starred (from local channels) - shown very first */}
-                      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-                        groupedChannels['starred'] &&
-                        groupedChannels['starred'].length > 0 && (
-                          <div className='mb-4'>
-                            {(() => {
-                              const items = groupedChannels['starred'];
-                              const category = ChannelCategory.STARRED;
-                              const isExpanded = expandedCategories.has(category);
-                              const hasMore = items.length > DISPLAY_LIMIT;
-                              const displayItems =
-                                !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-                              const hiddenCount = items.length - DISPLAY_LIMIT;
-
-                              return (
-                                <Command.Group
-                                  heading={getCategoryLabel(category)}
-                                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                >
-                                  {displayItems.map(({ channel }, index) => {
-                                    const unreadCount = unreadCounts[channel.id] ?? 0;
-                                    return (
-                                      <ChannelCommandItem
-                                        key={channel.id}
-                                        channel={channel}
-                                        currentUserID={currentUserID}
-                                        unreadCount={unreadCount}
-                                        search={search}
-                                        onSelect={() => handleChannelSelect(channel, index + 1)}
-                                        getChannelIcon={getChannelIcon}
-                                      />
-                                    );
-                                  })}
-                                  {hasMore && (
-                                    <button
-                                      onClick={() => toggleCategoryExpansion(category)}
-                                      className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
-                                      data-track-category='CHANNEL_SEARCH'
-                                      data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
-                                      data-track-metadata={JSON.stringify({
-                                        category: category as string,
-                                        isExpanded,
-                                      })}
-                                    >
-                                      {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                                    </button>
-                                  )}
-                                </Command.Group>
-                              );
-                            })()}
-                          </div>
+                {/* Bot response area */}
+                {(botChatState.status === 'success' || botChatState.status === 'loading') && (
+                  <div className='bg-gray-50 rounded-lg p-3 mb-4 border border-gray-200'>
+                    <div className='flex items-start gap-2'>
+                      <Bot size={16} className='text-blue-600 mt-0.5 flex-shrink-0' />
+                      <div className='flex-1 min-w-0'>
+                        {botChatState.status === 'success' && botChatState.response && (
+                          <p className='text-sm whitespace-pre-wrap break-words'>
+                            {botChatState.response}
+                          </p>
                         )}
-
-                      {/* 1. Users (from local) - shown first when searching, real-time updates */}
-                      {(activeTab === TabType.ALL || activeTab === TabType.USERS) &&
-                        filteredLocalUsers.length > 0 && (
-                          <div className='mb-4'>
-                            {(() => {
-                              // Map of DM User IDs for fast lookup (to prioritize active DMs)
-                              const dmUserIdSet = new Set<string>();
-                              groupedChannels['direct-messages']?.forEach(({ channel }) => {
-                                if (isOneToOneDMChannel(channel.scopeType)) {
-                                  const participants = parseDMParticipantIds(channel);
-                                  const otherUserId = participants.find(id => id !== currentUserID);
-                                  if (otherUserId) dmUserIdSet.add(otherUserId);
-                                }
-                              });
-
-                              // Convert local users to DisplaySearchResult format
-                              const userItems: DisplaySearchResult[] = filteredLocalUsers.map(
-                                user => ({
-                                  id: user.id,
-                                  type: 'user' as const,
-                                  title: user.name,
-                                  subtitle: user.email || '',
-                                  relevanceScore: 1,
-                                  metadata: {},
-                                }),
-                              );
-
-                              // Prioritize users with active DMs
-                              const usersWithDM = userItems.filter(item =>
-                                dmUserIdSet.has(item.id),
-                              );
-                              const usersNoDM = userItems.filter(item => !dmUserIdSet.has(item.id));
-                              const allItems = [...usersWithDM, ...usersNoDM];
-
-                              const totalItemsCount = allItems.length;
-                              const displayCount = totalItemsCount;
-
-                              const isExpanded = expandedCategories.has('user');
-                              const hasMore = totalItemsCount > DISPLAY_LIMIT;
-
-                              const displayItems =
-                                !isExpanded && hasMore
-                                  ? allItems.slice(0, DISPLAY_LIMIT)
-                                  : allItems;
-
-                              const hiddenCount = totalItemsCount - DISPLAY_LIMIT;
-
-                              return (
-                                <Command.Group
-                                  heading={`${getGroupLabel('user')} (${displayCount})`}
-                                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                >
-                                  {displayItems.map((item, index) => (
-                                    <SearchResultItem
-                                      key={item.id}
-                                      result={item}
-                                      onSelect={res => handleBackendResultSelect(res, index + 1)}
-                                    />
-                                  ))}
-                                  {hasMore && (
-                                    <button
-                                      onClick={() => toggleCategoryExpansion('user')}
-                                      className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
-                                      style={{
-                                        WebkitTapHighlightColor: 'transparent',
-                                        userSelect: 'none',
-                                      }}
-                                      data-track-category='CHANNEL_SEARCH'
-                                      data-track-name='TOGGLE_CATEGORY_EXPANSION'
-                                      data-track-metadata={JSON.stringify({
-                                        category: 'user',
-                                        isExpanded,
-                                      })}
-                                    >
-                                      {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                                    </button>
-                                  )}
-                                </Command.Group>
-                              );
-                            })()}
-                          </div>
+                        {botChatState.status === 'loading' && (
+                          <span className='animate-pulse'>▊</span>
                         )}
-
-                      {/* 2. Group DMs (from local channels) - only show group DMs in search results, 1:1 DMs are in Users section */}
-                      {(() => {
-                        const groupDMs =
-                          groupedChannels['direct-messages']?.filter(({ channel }) =>
-                            isGroupDMChannel(channel.scopeType),
-                          ) || [];
-                        return (
-                          (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-                          groupDMs.length > 0 && (
-                            <div className='mb-4'>
-                              <Command.Group
-                                heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
-                                className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                              >
-                                {groupDMs.map(({ channel }, index) => {
-                                  const unreadCount = unreadCounts[channel.id] ?? 0;
-                                  return (
-                                    <ChannelCommandItem
-                                      key={channel.id}
-                                      channel={channel}
-                                      currentUserID={currentUserID}
-                                      unreadCount={unreadCount}
-                                      search={search}
-                                      onSelect={() => handleChannelSelect(channel, index + 1)}
-                                      getChannelIcon={getChannelIcon}
-                                    />
-                                  );
-                                })}
-                              </Command.Group>
-                            </div>
-                          )
-                        );
-                      })()}
-
-                      {/* 3. Channels (from local channels) */}
-                      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-                        groupedChannels['channels'] &&
-                        groupedChannels['channels'].length > 0 && (
-                          <div className='mb-4'>
-                            {(() => {
-                              const items = groupedChannels['channels'];
-                              const category = ChannelCategory.CHANNELS;
-                              const isExpanded = expandedCategories.has(category);
-                              const hasMore = items.length > DISPLAY_LIMIT;
-                              const displayItems =
-                                !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-                              const hiddenCount = items.length - DISPLAY_LIMIT;
-
-                              return (
-                                <Command.Group
-                                  heading={getCategoryLabel(category)}
-                                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                >
-                                  {displayItems.map(({ channel }, index) => {
-                                    const unreadCount = unreadCounts[channel.id] ?? 0;
-                                    return (
-                                      <ChannelCommandItem
-                                        key={channel.id}
-                                        channel={channel}
-                                        currentUserID={currentUserID}
-                                        unreadCount={unreadCount}
-                                        search={search}
-                                        onSelect={() => handleChannelSelect(channel, index + 1)}
-                                        getChannelIcon={getChannelIcon}
-                                      />
-                                    );
-                                  })}
-                                  {hasMore && (
-                                    <button
-                                      onClick={() => toggleCategoryExpansion(category)}
-                                      className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
-                                      style={{
-                                        WebkitTapHighlightColor: 'transparent',
-                                        userSelect: 'none',
-                                      }}
-                                      data-track-category='CHANNEL_SEARCH'
-                                      data-track-name='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
-                                      data-track-metadata={JSON.stringify({
-                                        category: category as string,
-                                        isExpanded,
-                                      })}
-                                    >
-                                      {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                                    </button>
+                        {/* Render tool outputs */}
+                        {botChatState.status === 'success' &&
+                          botChatState.toolOutputs.length > 0 && (
+                            <div className='mt-3 space-y-2 max-h-48 overflow-y-auto'>
+                              {botChatState.toolOutputs.map(toolOutput => (
+                                <div key={toolOutput.id} className='w-full overflow-hidden'>
+                                  {toolOutput.description && (
+                                    <div className='text-sm text-gray-600 mb-2'>
+                                      {toolOutput.description}
+                                    </div>
                                   )}
-                                </Command.Group>
-                              );
-                            })()}
-                          </div>
-                        )}
-
-                      {/* 4. Messages, Tickets, and Attachments (from backend) */}
-                      {backendResults.length > 0 && (
-                        <>
-                          {['conversation', 'ticket', 'attachment']
-                            .filter(type => {
-                              if (activeTab === TabType.ALL) return true;
-                              if (activeTab === TabType.MESSAGES && type === 'conversation')
-                                return true;
-                              if (activeTab === TabType.TICKETS && type === 'ticket') return true;
-                              if (activeTab === TabType.ATTACHMENTS && type === 'attachment')
-                                return true;
-                              return false;
-                            })
-                            .map(type => {
-                              const items = groupedBackendResults[type];
-                              if (!items || items.length === 0) return null;
-
-                              const displayCount =
-                                useVespaSearch && activeTab !== TabType.ALL
-                                  ? paginationState[activeTab].cumulativeCount
-                                  : items.length;
-
-                              return (
-                                <div key={type} className='mb-4'>
-                                  <Command.Group
-                                    heading={`${getGroupLabel(type)} (${displayCount})`}
-                                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                  >
-                                    {items.map((result, index) => (
-                                      <SearchResultItem
-                                        key={result.id}
-                                        result={result}
-                                        onSelect={res => handleBackendResultSelect(res, index + 1)}
-                                        onPreview={handleFilePreview}
-                                      />
-                                    ))}
-                                  </Command.Group>
+                                  <ToolOutputRenderer
+                                    toolOutput={toolOutput}
+                                    className={
+                                      toolOutput.singleStat
+                                        ? ''
+                                        : 'border border-gray-200 rounded-lg'
+                                    }
+                                  />
                                 </div>
-                              );
-                            })}
-
-                          {/* Infinite scroll trigger and loading indicator */}
-                          {paginationState[activeTab].hasMore && (
-                            <div ref={loadMoreRef} className='py-4 flex justify-center'>
-                              {isLoadingMore && (
-                                <div className='flex items-center gap-2 text-xs text-gray-500'>
-                                  <Loader2 className='h-4 w-4 animate-spin' />
-                                  <span>Loading more results...</span>
-                                </div>
-                              )}
+                              ))}
                             </div>
                           )}
-                        </>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      {/* Local Channels Results */}
-                      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-                        filteredLocalChannels.length > 0 && (
-                          <>
-                            {Object.entries(groupedChannels).map(([category, items]) => {
-                              const isExpanded = expandedCategories.has(category);
-                              const shouldLimit = !search.trim();
-                              const hasMore = items.length > DISPLAY_LIMIT;
-                              const displayItems =
-                                shouldLimit && !isExpanded && hasMore
-                                  ? items.slice(0, DISPLAY_LIMIT)
-                                  : items;
-                              const hiddenCount = items.length - DISPLAY_LIMIT;
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-                              return (
-                                <div key={category} className='mb-4'>
+                {/* Error message */}
+                {botChatState.status === 'error' && (
+                  <div className='bg-red-50 text-red-600 rounded-lg p-3 mb-4 text-sm'>
+                    {botChatState.message}
+                  </div>
+                )}
+
+                {/* Continue in DM button */}
+                {botChatState.status === 'success' && (
+                  <button
+                    onClick={() => void handleContinueInDM()}
+                    className='flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline'
+                    data-track-category='CHANNEL_SEARCH'
+                    data-track-name='CONTINUE_BOT_IN_DM'
+                    data-track-metadata={JSON.stringify({ botId: selectedBot?.id })}
+                  >
+                    <span>Continue in DM</span>
+                    <ArrowRight size={14} />
+                  </button>
+                )}
+
+                {/* Hint when no query entered yet */}
+                {botChatState.status === 'idle' && !search.trim() && (
+                  <p className='text-sm text-gray-400 text-center py-4'>
+                    Type your question and press Enter
+                  </p>
+                )}
+              </div>
+            ) : showBotsSuggestions ? (
+              /* Show bot suggestions when typing @ */
+              <>
+                <Command.Group
+                  heading='Bots'
+                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                >
+                  {filteredBots.map(bot => (
+                    <Command.Item
+                      key={bot.id}
+                      value={`@${bot.name}`}
+                      onSelect={() => handleBotSelect(bot)}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-sm cursor-pointer ${!isMobile && 'hover:bg-gray-100 aria-selected:bg-gray-100'}`}
+                      style={{ WebkitTapHighlightColor: 'transparent' }}
+                    >
+                      <div className='flex items-center justify-center h-8 w-8 rounded-full bg-blue-100 flex-shrink-0'>
+                        <Bot size={16} className='text-blue-600' />
+                      </div>
+                      <div className='flex-1 min-w-0'>
+                        <span className='text-sm font-medium text-gray-800 block'>{bot.name}</span>
+                        <span className='text-xs text-gray-500 truncate block'>
+                          {bot.description}
+                        </span>
+                      </div>
+                    </Command.Item>
+                  ))}
+                </Command.Group>
+                {filteredBots.length === 0 && (
+                  <Command.Empty className='py-6 text-center text-sm text-gray-500'>
+                    No bots found.
+                  </Command.Empty>
+                )}
+              </>
+            ) : (
+              /* Normal search mode */
+              <>
+                {/* Mention Suggestions - Show when mention search is active */}
+                {mentionSearchType && (
+                  <>
+                    {mentionSearchType === MentionType.USER && availableUsers.length > 0 && (
+                      <Command.Group
+                        heading='Users'
+                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                      >
+                        {availableUsers.map((user, index) => (
+                          <Command.Item
+                            key={user.id}
+                            value={`mention-user-${user.id}`}
+                            onSelect={() => {
+                              handleMentionSelect({
+                                id: user.id,
+                                name: user.name,
+                                type: MentionType.USER,
+                                ...(user.email ? { email: user.email } : {}),
+                              });
+                            }}
+                            onMouseEnter={() => {
+                              if (setSelectedMentionIndex) {
+                                setSelectedMentionIndex(index);
+                              }
+                            }}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                              index === selectedMentionIndex ? 'bg-gray-100' : ''
+                            } ${!isMobile && 'hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98]'}`}
+                            style={{ WebkitTapHighlightColor: 'transparent' }}
+                          >
+                            <Avatar userId={user.id} size='sm' />
+                            <div className='flex-1 min-w-0'>
+                              <div className='font-semibold text-xs text-gray-800 truncate'>
+                                {user.name}
+                              </div>
+                              {user.email && (
+                                <div className='text-[11px] text-gray-500 truncate'>
+                                  {user.email}
+                                </div>
+                              )}
+                            </div>
+                          </Command.Item>
+                        ))}
+                      </Command.Group>
+                    )}
+                    {mentionSearchType === MentionType.CHANNEL && availableChannels.length > 0 && (
+                      <Command.Group
+                        heading='Channels'
+                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                      >
+                        {availableChannels.map((channel, index) => (
+                          <Command.Item
+                            key={channel.id}
+                            value={`mention-channel-${channel.id}`}
+                            onSelect={() => {
+                              handleMentionSelect({
+                                id: channel.id,
+                                name: channel.name,
+                                type: MentionType.CHANNEL,
+                              });
+                            }}
+                            onMouseEnter={() => {
+                              if (setSelectedMentionIndex) {
+                                setSelectedMentionIndex(index);
+                              }
+                            }}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                              index === selectedMentionIndex ? 'bg-gray-100' : ''
+                            } ${!isMobile && 'hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98]'}`}
+                            style={{ WebkitTapHighlightColor: 'transparent' }}
+                          >
+                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
+                              <Hash size={16} className='text-gray-600' />
+                            </div>
+                            <div className='flex-1 min-w-0'>
+                              <div className='font-semibold text-xs text-gray-800 truncate'>
+                                {channel.name}
+                              </div>
+                            </div>
+                          </Command.Item>
+                        ))}
+                      </Command.Group>
+                    )}
+                    {mentionSearchType === MentionType.USER &&
+                      availableUsers.length === 0 &&
+                      mentionSearchQuery && (
+                        <Command.Empty className='py-6 text-center text-xs text-gray-500'>
+                          No users found for &quot;{mentionSearchQuery}&quot;
+                        </Command.Empty>
+                      )}
+                    {mentionSearchType === MentionType.CHANNEL &&
+                      availableChannels.length === 0 &&
+                      mentionSearchQuery && (
+                        <Command.Empty className='py-6 text-center text-xs text-gray-500'>
+                          No channels found for &quot;{mentionSearchQuery}&quot;
+                        </Command.Empty>
+                      )}
+                  </>
+                )}
+
+                {showEmptyState && !mentionSearchType && (
+                  <Command.Empty className='py-6 text-center text-xs text-gray-500'>
+                    No results found for &quot;{search}&quot;
+                  </Command.Empty>
+                )}
+
+                {error && <div className='p-3 text-xs text-red-600'>{error}</div>}
+
+                {!showEmptyState && !error && !mentionSearchType && (
+                  <>
+                    {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
+                    {searchText.trim() ? (
+                      <>
+                        {/* 0. Starred (from local channels) - shown very first */}
+                        {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                          groupedChannels['starred'] &&
+                          groupedChannels['starred'].length > 0 && (
+                            <div className='mb-4'>
+                              {(() => {
+                                const items = groupedChannels['starred'];
+                                const category = ChannelCategory.STARRED;
+                                const isExpanded = expandedCategories.has(category);
+                                const hasMore = items.length > DISPLAY_LIMIT;
+                                const displayItems =
+                                  !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+                                const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                                return (
                                   <Command.Group
-                                    heading={getCategoryLabel(category as ChannelCategory)}
+                                    heading={getCategoryLabel(category)}
                                     className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                                   >
                                     {displayItems.map(({ channel }, index) => {
@@ -1653,12 +1415,204 @@ const ChannelCommandMenu = ({
                                           currentUserID={currentUserID}
                                           unreadCount={unreadCount}
                                           search={search}
-                                          onSelect={() => handleChannelSelect(channel, index + 1)}
+                                          onSelect={displayName =>
+                                            handleChannelSelect(channel, displayName, index + 1)
+                                          }
                                           getChannelIcon={getChannelIcon}
+                                          isSelected={contextItems.some(
+                                            c => c.id === `channel-${channel.id}`,
+                                          )}
                                         />
                                       );
                                     })}
-                                    {shouldLimit && hasMore && (
+                                    {hasMore && (
+                                      <button
+                                        onClick={() => toggleCategoryExpansion(category)}
+                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                        data-track-category='CHANNEL_SEARCH'
+                                        data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
+                                        data-track-metadata={JSON.stringify({
+                                          category: category as string,
+                                          isExpanded,
+                                        })}
+                                      >
+                                        {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                      </button>
+                                    )}
+                                  </Command.Group>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                        {/* 1. Users (from local) - shown first when searching, real-time updates */}
+                        {(activeTab === TabType.ALL || activeTab === TabType.USERS) &&
+                          filteredLocalUsers.length > 0 && (
+                            <div className='mb-4'>
+                              {(() => {
+                                // Map of DM User IDs for fast lookup (to prioritize active DMs)
+                                const dmUserIdSet = new Set<string>();
+                                groupedChannels['direct-messages']?.forEach(({ channel }) => {
+                                  if (isOneToOneDMChannel(channel.scopeType)) {
+                                    const participants = parseDMParticipantIds(channel);
+                                    const otherUserId = participants.find(
+                                      id => id !== currentUserID,
+                                    );
+                                    if (otherUserId) dmUserIdSet.add(otherUserId);
+                                  }
+                                });
+
+                                // Convert local users to DisplaySearchResult format
+                                const userItems: DisplaySearchResult[] = filteredLocalUsers.map(
+                                  user => ({
+                                    id: user.id,
+                                    type: 'user' as const,
+                                    title: user.name,
+                                    subtitle: user.email || '',
+                                    relevanceScore: 1,
+                                    metadata: {},
+                                  }),
+                                );
+
+                                // Prioritize users with active DMs
+                                const usersWithDM = userItems.filter(item =>
+                                  dmUserIdSet.has(item.id),
+                                );
+                                const usersNoDM = userItems.filter(
+                                  item => !dmUserIdSet.has(item.id),
+                                );
+                                const allItems = [...usersWithDM, ...usersNoDM];
+
+                                const totalItemsCount = allItems.length;
+                                const displayCount = totalItemsCount;
+
+                                const isExpanded = expandedCategories.has('user');
+                                const hasMore = totalItemsCount > DISPLAY_LIMIT;
+
+                                const displayItems =
+                                  !isExpanded && hasMore
+                                    ? allItems.slice(0, DISPLAY_LIMIT)
+                                    : allItems;
+
+                                const hiddenCount = totalItemsCount - DISPLAY_LIMIT;
+
+                                return (
+                                  <Command.Group
+                                    heading={`${getGroupLabel('user')} (${displayCount})`}
+                                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                  >
+                                    {displayItems.map((item, index) => (
+                                      <SearchResultItem
+                                        key={item.id}
+                                        result={item}
+                                        onSelect={res => handleBackendResultSelect(res, index + 1)}
+                                        isSelected={contextItems.some(
+                                          c => c.id === `${item.type}-${item.id}`,
+                                        )}
+                                      />
+                                    ))}
+                                    {hasMore && (
+                                      <button
+                                        onClick={() => toggleCategoryExpansion('user')}
+                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                        style={{
+                                          WebkitTapHighlightColor: 'transparent',
+                                          userSelect: 'none',
+                                        }}
+                                        data-track-category='CHANNEL_SEARCH'
+                                        data-track-name='TOGGLE_CATEGORY_EXPANSION'
+                                        data-track-metadata={JSON.stringify({
+                                          category: 'user',
+                                          isExpanded,
+                                        })}
+                                      >
+                                        {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                      </button>
+                                    )}
+                                  </Command.Group>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                        {/* 2. Group DMs (from local channels) - only show group DMs in search results, 1:1 DMs are in Users section */}
+                        {(() => {
+                          const groupDMs =
+                            groupedChannels['direct-messages']?.filter(({ channel }) =>
+                              isGroupDMChannel(channel.scopeType),
+                            ) || [];
+                          return (
+                            (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                            groupDMs.length > 0 && (
+                              <div className='mb-4'>
+                                <Command.Group
+                                  heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
+                                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                >
+                                  {groupDMs.map(({ channel }, index) => {
+                                    const unreadCount = unreadCounts[channel.id] ?? 0;
+                                    return (
+                                      <ChannelCommandItem
+                                        key={channel.id}
+                                        channel={channel}
+                                        currentUserID={currentUserID}
+                                        unreadCount={unreadCount}
+                                        search={search}
+                                        onSelect={displayName =>
+                                          handleChannelSelect(channel, displayName, index + 1)
+                                        }
+                                        getChannelIcon={getChannelIcon}
+                                        isSelected={contextItems.some(
+                                          c => c.id === `channel-${channel.id}`,
+                                        )}
+                                      />
+                                    );
+                                  })}
+                                </Command.Group>
+                              </div>
+                            )
+                          );
+                        })()}
+
+                        {/* 3. Channels (from local channels) */}
+                        {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                          groupedChannels['channels'] &&
+                          groupedChannels['channels'].length > 0 && (
+                            <div className='mb-4'>
+                              {(() => {
+                                const items = groupedChannels['channels'];
+                                const category = ChannelCategory.CHANNELS;
+                                const isExpanded = expandedCategories.has(category);
+                                const hasMore = items.length > DISPLAY_LIMIT;
+                                const displayItems =
+                                  !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+                                const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                                return (
+                                  <Command.Group
+                                    heading={getCategoryLabel(category)}
+                                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                  >
+                                    {displayItems.map(({ channel }, index) => {
+                                      const unreadCount = unreadCounts[channel.id] ?? 0;
+                                      return (
+                                        <ChannelCommandItem
+                                          key={channel.id}
+                                          channel={channel}
+                                          currentUserID={currentUserID}
+                                          unreadCount={unreadCount}
+                                          search={search}
+                                          onSelect={displayName =>
+                                            handleChannelSelect(channel, displayName, index + 1)
+                                          }
+                                          getChannelIcon={getChannelIcon}
+                                          isSelected={contextItems.some(
+                                            c => c.id === `channel-${channel.id}`,
+                                          )}
+                                        />
+                                      );
+                                    })}
+                                    {hasMore && (
                                       <button
                                         onClick={() => toggleCategoryExpansion(category)}
                                         className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
@@ -1667,9 +1621,9 @@ const ChannelCommandMenu = ({
                                           userSelect: 'none',
                                         }}
                                         data-track-category='CHANNEL_SEARCH'
-                                        data-track-name='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+                                        data-track-name='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
                                         data-track-metadata={JSON.stringify({
-                                          category: category,
+                                          category: category as string,
                                           isExpanded,
                                         })}
                                       >
@@ -1677,102 +1631,232 @@ const ChannelCommandMenu = ({
                                       </button>
                                     )}
                                   </Command.Group>
-                                </div>
-                              );
-                            })}
-                          </>
-                        )}
-
-                      {/* Backend Search Results */}
-                      {activeTab !== TabType.CHANNELS && backendResults.length > 0 && (
-                        <>
-                          {Object.entries(groupedBackendResults)
-                            .sort(([typeA], [typeB]) => {
-                              // Prioritize 'user' type to render first
-                              if (typeA === 'user') return -1;
-                              if (typeB === 'user') return 1;
-                              return 0;
-                            })
-                            .map(([type, items]) => {
-                              let displayCount: number;
-                              if (activeTab === TabType.ALL) {
-                                displayCount = items.length;
-                              } else if (useVespaSearch) {
-                                // For Vespa on individual tabs, use cumulative count
-                                displayCount = paginationState[activeTab].cumulativeCount;
-                              } else {
-                                // For PG search, use items length
-                                displayCount = items.length;
-                              }
-                              // Apply limiting only to users
-                              const isUserType = type === 'user';
-                              const isExpanded = expandedCategories.has(type);
-                              const hasMore = items.length > DISPLAY_LIMIT;
-                              const displayItems =
-                                isUserType && !isExpanded && hasMore
-                                  ? items.slice(0, DISPLAY_LIMIT)
-                                  : items;
-                              const hiddenCount = items.length - DISPLAY_LIMIT;
-
-                              return (
-                                <div key={type} className='mb-4'>
-                                  <Command.Group
-                                    heading={`${getGroupLabel(type)} (${displayCount})`}
-                                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                  >
-                                    {displayItems.map((result, index) => (
-                                      <SearchResultItem
-                                        key={result.id}
-                                        result={result}
-                                        onSelect={res => handleBackendResultSelect(res, index + 1)}
-                                        onPreview={handleFilePreview}
-                                      />
-                                    ))}
-                                    {isUserType && hasMore && (
-                                      <button
-                                        onClick={() => toggleCategoryExpansion(type)}
-                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
-                                        style={{
-                                          WebkitTapHighlightColor: 'transparent',
-                                          userSelect: 'none',
-                                        }}
-                                        data-track-category='CHANNEL_SEARCH'
-                                        data-track-name='TOGGLE_BACKEND_USER_EXPANSION'
-                                        data-track-metadata={JSON.stringify({ type, isExpanded })}
-                                      >
-                                        {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                                      </button>
-                                    )}
-                                  </Command.Group>
-                                </div>
-                              );
-                            })}
-
-                          {/* Infinite scroll trigger and loading indicator */}
-                          {paginationState[activeTab].hasMore && (
-                            <div ref={loadMoreRef} className='py-4 flex justify-center'>
-                              {isLoadingMore && (
-                                <div className='flex items-center gap-2 text-xs text-gray-500'>
-                                  <Loader2 className='h-4 w-4 animate-spin' />
-                                  <span>Loading more results...</span>
-                                </div>
-                              )}
+                                );
+                              })()}
                             </div>
                           )}
-                        </>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </Command.List>
 
-        {/* Footer */}
-        {!isMobile && (
-          <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-end shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
-            {/* Vespa Search toggle - commented out, using Vespa as default
+                        {/* 4. Messages, Tickets, and Attachments (from backend) */}
+                        {backendResults.length > 0 && (
+                          <>
+                            {['conversation', 'ticket', 'attachment']
+                              .filter(type => {
+                                if (activeTab === TabType.ALL) return true;
+                                if (activeTab === TabType.MESSAGES && type === 'conversation')
+                                  return true;
+                                if (activeTab === TabType.TICKETS && type === 'ticket') return true;
+                                if (activeTab === TabType.ATTACHMENTS && type === 'attachment')
+                                  return true;
+                                return false;
+                              })
+                              .map(type => {
+                                const items = groupedBackendResults[type];
+                                if (!items || items.length === 0) return null;
+
+                                const displayCount =
+                                  useVespaSearch && activeTab !== TabType.ALL
+                                    ? paginationState[activeTab].cumulativeCount
+                                    : items.length;
+
+                                return (
+                                  <div key={type} className='mb-4'>
+                                    <Command.Group
+                                      heading={`${getGroupLabel(type)} (${displayCount})`}
+                                      className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                    >
+                                      {items.map((result, index) => (
+                                        <SearchResultItem
+                                          key={result.id}
+                                          result={result}
+                                          onSelect={res =>
+                                            handleBackendResultSelect(res, index + 1)
+                                          }
+                                          onPreview={handleFilePreview}
+                                          isSelected={contextItems.some(
+                                            c => c.id === `${result.type}-${result.id}`,
+                                          )}
+                                        />
+                                      ))}
+                                    </Command.Group>
+                                  </div>
+                                );
+                              })}
+
+                            {/* Infinite scroll trigger and loading indicator */}
+                            {paginationState[activeTab].hasMore && (
+                              <div ref={loadMoreRef} className='py-4 flex justify-center'>
+                                {isLoadingMore && (
+                                  <div className='flex items-center gap-2 text-xs text-gray-500'>
+                                    <Loader2 className='h-4 w-4 animate-spin' />
+                                    <span>Loading more results...</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {/* Local Channels Results */}
+                        {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                          filteredLocalChannels.length > 0 && (
+                            <>
+                              {Object.entries(groupedChannels).map(([category, items]) => {
+                                const isExpanded = expandedCategories.has(category);
+                                const shouldLimit = !search.trim();
+                                const hasMore = items.length > DISPLAY_LIMIT;
+                                const displayItems =
+                                  shouldLimit && !isExpanded && hasMore
+                                    ? items.slice(0, DISPLAY_LIMIT)
+                                    : items;
+                                const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                                return (
+                                  <div key={category} className='mb-4'>
+                                    <Command.Group
+                                      heading={getCategoryLabel(category as ChannelCategory)}
+                                      className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                    >
+                                      {displayItems.map(({ channel }, index) => {
+                                        const unreadCount = unreadCounts[channel.id] ?? 0;
+                                        return (
+                                          <ChannelCommandItem
+                                            key={channel.id}
+                                            channel={channel}
+                                            currentUserID={currentUserID}
+                                            unreadCount={unreadCount}
+                                            search={search}
+                                            onSelect={displayName =>
+                                              handleChannelSelect(channel, displayName, index + 1)
+                                            }
+                                            getChannelIcon={getChannelIcon}
+                                            isSelected={contextItems.some(
+                                              c => c.id === `channel-${channel.id}`,
+                                            )}
+                                          />
+                                        );
+                                      })}
+                                      {shouldLimit && hasMore && (
+                                        <button
+                                          onClick={() => toggleCategoryExpansion(category)}
+                                          className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                          style={{
+                                            WebkitTapHighlightColor: 'transparent',
+                                            userSelect: 'none',
+                                          }}
+                                          data-track-category='CHANNEL_SEARCH'
+                                          data-track-name='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+                                          data-track-metadata={JSON.stringify({
+                                            category: category,
+                                            isExpanded,
+                                          })}
+                                        >
+                                          {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                        </button>
+                                      )}
+                                    </Command.Group>
+                                  </div>
+                                );
+                              })}
+                            </>
+                          )}
+
+                        {/* Backend Search Results */}
+                        {activeTab !== TabType.CHANNELS && backendResults.length > 0 && (
+                          <>
+                            {Object.entries(groupedBackendResults)
+                              .sort(([typeA], [typeB]) => {
+                                // Prioritize 'user' type to render first
+                                if (typeA === 'user') return -1;
+                                if (typeB === 'user') return 1;
+                                return 0;
+                              })
+                              .map(([type, items]) => {
+                                let displayCount: number;
+                                if (activeTab === TabType.ALL) {
+                                  displayCount = items.length;
+                                } else if (useVespaSearch) {
+                                  // For Vespa on individual tabs, use cumulative count
+                                  displayCount = paginationState[activeTab].cumulativeCount;
+                                } else {
+                                  // For PG search, use items length
+                                  displayCount = items.length;
+                                }
+                                // Apply limiting only to users
+                                const isUserType = type === 'user';
+                                const isExpanded = expandedCategories.has(type);
+                                const hasMore = items.length > DISPLAY_LIMIT;
+                                const displayItems =
+                                  isUserType && !isExpanded && hasMore
+                                    ? items.slice(0, DISPLAY_LIMIT)
+                                    : items;
+                                const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                                return (
+                                  <div key={type} className='mb-4'>
+                                    <Command.Group
+                                      heading={`${getGroupLabel(type)} (${displayCount})`}
+                                      className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                    >
+                                      {displayItems.map((result, index) => (
+                                        <SearchResultItem
+                                          key={result.id}
+                                          result={result}
+                                          onSelect={res =>
+                                            handleBackendResultSelect(res, index + 1)
+                                          }
+                                          onPreview={handleFilePreview}
+                                          isSelected={contextItems.some(
+                                            c => c.id === `${result.type}-${result.id}`,
+                                          )}
+                                        />
+                                      ))}
+                                      {isUserType && hasMore && (
+                                        <button
+                                          onClick={() => toggleCategoryExpansion(type)}
+                                          className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                          style={{
+                                            WebkitTapHighlightColor: 'transparent',
+                                            userSelect: 'none',
+                                          }}
+                                          data-track-category='CHANNEL_SEARCH'
+                                          data-track-name='TOGGLE_BACKEND_USER_EXPANSION'
+                                          data-track-metadata={JSON.stringify({ type, isExpanded })}
+                                        >
+                                          {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                        </button>
+                                      )}
+                                    </Command.Group>
+                                  </div>
+                                );
+                              })}
+
+                            {/* Infinite scroll trigger and loading indicator */}
+                            {paginationState[activeTab].hasMore && (
+                              <div ref={loadMoreRef} className='py-4 flex justify-center'>
+                                {isLoadingMore && (
+                                  <div className='flex items-center gap-2 text-xs text-gray-500'>
+                                    <Loader2 className='h-4 w-4 animate-spin' />
+                                    <span>Loading more results...</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </Command.List>
+
+          {/* Footer */}
+          {!isMobile && (
+            <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-end shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
+              {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
             <label htmlFor='vespa-toggle' className='text-xs text-gray-600 cursor-pointer'>
               Vespa Search
@@ -1787,41 +1871,55 @@ const ChannelCommandMenu = ({
             </Switch.Root>
           </div>
           */}
-            <div className='flex items-center gap-6'>
-              <span className='flex gap-[10px] items-center'>
-                <span>Open</span>
-                <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
-                  <CornerDownLeft size={10} />
-                </span>
-              </span>
-              {/* <span className='text-gray-300'>|</span> */}
-              <span className='flex gap-[10px] items-center'>
-                <span>Navigate </span>
-                <span className='flex gap-1'>
+              <div className='flex items-center gap-6'>
+                <span className='flex gap-[10px] items-center'>
+                  <span>Open</span>
                   <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
-                    <MoveUp size={12} />
-                  </span>
-                  <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
-                    <MoveDown size={12} />
+                    <CornerDownLeft size={10} />
                   </span>
                 </span>
-              </span>
+                {/* <span className='text-gray-300'>|</span> */}
+                <span className='flex gap-[10px] items-center'>
+                  <span>Navigate </span>
+                  <span className='flex gap-1'>
+                    <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
+                      <MoveUp size={12} />
+                    </span>
+                    <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
+                      <MoveDown size={12} />
+                    </span>
+                  </span>
+                </span>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Summary Modal Overlay - covers both results and footer */}
-        <SearchSummaryModal
-          isOpen={showSummaryModal}
-          onClose={handleCloseSummary}
-          state={summaryState}
-          searchQuery={searchText}
-          rawContent={summaryRawContent}
-          summary={summaryData.summary}
-          keypoints={summaryData.keypoints}
-          error={summaryError}
-        />
+          {/* Summary Modal Overlay - covers both results and footer */}
+          <SearchSummaryModal
+            isOpen={showSummaryModal}
+            onClose={handleCloseSummary}
+            state={summaryState}
+            searchQuery={searchText}
+            rawContent={summaryRawContent}
+            summary={summaryData.summary}
+            keypoints={summaryData.keypoints}
+            error={summaryError}
+          />
+        </div>
+
+        {/* Context Panel - shown on right side in context selection mode */}
+        {contextSelectionMode && (
+          <ThreadContextPanel
+            items={contextItems}
+            onRemove={id => {
+              const item = contextItems.find(c => c.id === id);
+              if (item && onContextItemToggle) onContextItemToggle(item);
+            }}
+            onConfirm={() => onContextSelectionConfirm?.()}
+          />
+        )}
       </div>
+      {/* end body flex row */}
 
       {/* File Preview Modal */}
       {previewFile && (

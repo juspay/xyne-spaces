@@ -20,6 +20,7 @@ import {
   ExternalLink,
   ArrowLeft,
   ClipboardCheck,
+  Link2,
   Headphones,
 } from 'lucide-react';
 import { ChatInput } from './ChatInput';
@@ -48,6 +49,8 @@ import { mixpanelService } from '../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../services/Analytics/mixpanel.types';
 import { useScope } from '../../shortcuts';
 import { SHAREABLE_ORIGIN } from '../../config';
+import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
+import type { ContextItem } from './ThreadContextPanel/ThreadContextPanel.types';
 import { isElectronApp, isStandaloneWindow, standaloneNavigate } from '../../utils/electronApp';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
@@ -185,6 +188,42 @@ export const ThreadMessages = ({
 
   // Create ticket modal state
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
+
+  // Context selection state
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+  const [contextItems, setContextItems] = useState<ContextItem[]>([]);
+
+  const handleContextItemToggle = (item: ContextItem): void => {
+    setContextItems(prev =>
+      prev.some(c => c.id === item.id) ? prev.filter(c => c.id !== item.id) : [...prev, item],
+    );
+  };
+
+  const buildContextMessage = (): string => {
+    const typeLabels: Record<string, string> = {
+      channel: 'Channels',
+      conversation: 'Messages',
+      ticket: 'Tickets',
+      attachment: 'Attachments',
+      user: 'Users',
+    };
+
+    const groups = new Map<string, ContextItem[]>();
+    for (const item of contextItems) {
+      const list = groups.get(item.type) ?? [];
+      list.push(item);
+      groups.set(item.type, list);
+    }
+
+    const lines = ['<strong>Relevant Contexts:</strong>'];
+    for (const [type, items] of groups) {
+      const label = typeLabels[type] ?? type;
+      const links = items.map(item => `<a href="${item.url}">${item.title}</a>`).join(', ');
+      lines.push(`${label}: ${links}`);
+    }
+
+    return lines.join('<br>');
+  };
   // Call participants modal state
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
 
@@ -311,6 +350,23 @@ export const ThreadMessages = ({
     const metadata = conversation.metadata as { ticketId?: string };
     return metadata.ticketId !== undefined;
   }, [conversation]);
+
+  const handleContextConfirm = (): void => {
+    if (contextItems.length === 0 || !derivedConversationId) return;
+    const content = buildContextMessage();
+    void zero.mutate(
+      mutators.messages.send({
+        conversationId: derivedConversationId,
+        content,
+        type: MessageType.USER,
+        showInChannel: false,
+        timestamp: Date.now(),
+        messageId: uuidv4(),
+      }),
+    );
+    setContextItems([]);
+    setIsContextMenuOpen(false);
+  };
 
   const hasActiveCallForConversation = useMemo(() => {
     return !!conversation?.callId;
@@ -868,6 +924,22 @@ export const ThreadMessages = ({
                 </Button>
               </Tooltip>
             )}
+            {!isMobile && (
+              <Tooltip content='Add context to thread'>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  onClick={() => setIsContextMenuOpen(true)}
+                  aria-label='Add context to thread'
+                  data-track-category='THREAD_PANEL'
+                  data-track-name='OPEN_CONTEXT_MENU'
+                  data-track-metadata={JSON.stringify({ conversationId: derivedConversationId })}
+                >
+                  <Link2 size={18} />
+                </Button>
+              </Tooltip>
+            )}
             {!isStandaloneWindow() && (
               <Tooltip content='Ask AI Conversation'>
                 <Button
@@ -1205,6 +1277,25 @@ export const ThreadMessages = ({
                         </div>
                       </Tooltip>
                     )}
+                    {/* Add Context Button */}
+                    {!isMobile && (
+                      <Tooltip content='Add context to thread'>
+                        <Button
+                          variant='ghost'
+                          size='sm'
+                          className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                          onClick={() => setIsContextMenuOpen(true)}
+                          aria-label='Add context to thread'
+                          data-track-category='THREAD_PANEL'
+                          data-track-name='OPEN_CONTEXT_MENU'
+                          data-track-metadata={JSON.stringify({
+                            conversationId: derivedConversationId,
+                          })}
+                        >
+                          <Link2 size={18} />
+                        </Button>
+                      </Tooltip>
+                    )}
                     {/* Ask AI Button */}
                     {!isStandaloneWindow() && (
                       <Tooltip content='Ask AI Conversation'>
@@ -1269,6 +1360,25 @@ export const ThreadMessages = ({
                   {/* Action Buttons */}
                   {!underTicketView && (
                     <div className='flex items-center gap-2'>
+                      {/* Add Context Button */}
+                      {!isMobile && (
+                        <Tooltip content='Add context to thread'>
+                          <Button
+                            variant='ghost'
+                            size='sm'
+                            className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                            onClick={() => setIsContextMenuOpen(true)}
+                            aria-label='Add context to thread'
+                            data-track-category='THREAD_PANEL'
+                            data-track-name='OPEN_CONTEXT_MENU'
+                            data-track-metadata={JSON.stringify({
+                              conversationId: derivedConversationId,
+                            })}
+                          >
+                            <Link2 size={18} />
+                          </Button>
+                        </Tooltip>
+                      )}
                       {/* Ask AI Button */}
                       {!isStandaloneWindow() && (
                         <Tooltip content='Ask AI Conversation'>
@@ -1411,6 +1521,18 @@ export const ThreadMessages = ({
           )}
         </>
       )}
+      {/* Context Search Menu */}
+      {setIsContextMenuOpen && (
+        <GlobalCommandMenu
+          open={isContextMenuOpen}
+          onOpenChange={setIsContextMenuOpen}
+          contextSelectionMode
+          contextItems={contextItems}
+          onContextItemToggle={handleContextItemToggle}
+          onContextSelectionConfirm={handleContextConfirm}
+        />
+      )}
+
       {/* Workflow Trigger Modal */}
       {(isTicketThread || ticketId) && (
         <WorkflowTriggerModal
