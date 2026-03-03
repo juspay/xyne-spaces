@@ -28,6 +28,7 @@ import { DragAndDropOverlay } from './DragAndDropOverlay';
 import { ConversationSubscription } from './ConversationSubscription';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { insertDateSeparatorsForThreadMessages } from '../../utils/chatUtils';
+import { QueryResultType } from '@rocicorp/zero';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../utils/classNames';
 import JoinChannel from './JoinChannel/JoinChannel';
@@ -46,7 +47,6 @@ import { mixpanelService } from '../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../services/Analytics/mixpanel.types';
 import { useScope } from '../../shortcuts';
 import { SHAREABLE_ORIGIN } from '../../config';
-
 import { isElectronApp, isStandaloneWindow, standaloneNavigate } from '../../utils/electronApp';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
@@ -69,7 +69,9 @@ interface ThreadMessagesProps {
   showHeader?: boolean;
   underTicketView?: boolean;
   simpleView?: boolean;
+  hideHeader?: boolean;
   onSummaryClick?: () => void;
+  threadMessages?: QueryResultType<typeof queries.conversationMessages>;
 }
 
 export const ThreadMessages = ({
@@ -80,6 +82,8 @@ export const ThreadMessages = ({
   showHeader = false,
   underTicketView = false,
   simpleView = false,
+  hideHeader = false,
+  threadMessages: propThreadMessages,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -149,14 +153,19 @@ export const ThreadMessages = ({
     }
   }, [conversationId, channelId, ticket]);
 
-  const [messages, messagesDetails] = useCachedQuery(
+  // Query thread messages (disabled if pre-fetched messages provided)
+  const [queriedMessages, queryDetails] = useCachedQuery(
     queries.conversationMessages({
       conversationId: derivedConversationId,
     }),
     {
-      enabled: !!derivedConversationId && !!derivedChannelId,
+      enabled: !!derivedConversationId && !!derivedChannelId && !propThreadMessages,
     },
   );
+
+  // Use pre-fetched messages if provided, otherwise use queried
+  const messages = propThreadMessages ?? queriedMessages;
+  const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
 
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
@@ -1064,7 +1073,7 @@ export const ThreadMessages = ({
         /* Regular Thread or Simple View */
         <>
           {/* Header with tabs for simpleView, or simple header for regular view */}
-          {!isThreadsRoute && (
+          {!hideHeader && !isThreadsRoute && (
             <div
               className={cn(
                 'p-4 flex items-center gap-2 self-stretch bg-white border-b border-gray-200 h-14',

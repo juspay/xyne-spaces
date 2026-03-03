@@ -1,4 +1,4 @@
-import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { queries } from '../../../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
 import { useAuthContext } from '../../../providers/AuthProvider';
@@ -14,6 +14,7 @@ import { useEditContext } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { ChevronRight, ChevronUp } from 'lucide-react';
+import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 
 type ThreadListProps = {
   channelId: string;
@@ -47,6 +48,29 @@ const ThreadList = ({
     (event: KeyboardEvent): boolean => isEventFromEmptyInput(event, conversationId),
     [conversationId],
   );
+
+  // Pre-compute all thread attachments for gallery navigation
+  const allThreadAttachments: AttachmentRef[] = useMemo(() => {
+    if (!threadMessages) return [];
+
+    const result = threadMessages.flatMap(msg => {
+      if (!msg.hasAttachment || !msg.attachments?.length) return [];
+
+      return msg.attachments.map(att => ({
+        attachmentId: att.id,
+        fileName: att.originalFilename,
+        fileUrl: `/attachments/${att.id}/download`,
+        mimeType: att.mimetype,
+        fileSize: att.size,
+        thumbnailUrl: att.thumbnailUrl,
+        conversationId: msg.conversationId,
+        channelId: channelId,
+        replyCount: conversation?.replyCount ?? 0,
+      }));
+    });
+
+    return result;
+  }, [threadMessages, channelId]);
 
   const handleEditLastMessage = useCallback(() => {
     const result = findLastEditableMessage(threadMessages, user?.id, msg => msg);
@@ -251,6 +275,7 @@ const ThreadList = ({
                   isFirstInThread={messageIndex === 0}
                   isTicketThread={isTicketThread}
                   channelScopeType={channelScopeType}
+                  allThreadAttachments={allThreadAttachments}
                   {...(conversation && { conversation })}
                 />
               </div>
@@ -303,6 +328,7 @@ const ThreadList = ({
                 isFirstInThread={index === 0}
                 isTicketThread={isTicketThread}
                 channelScopeType={channelScopeType}
+                allThreadAttachments={allThreadAttachments}
                 {...(conversation && { conversation })}
               />
             </div>

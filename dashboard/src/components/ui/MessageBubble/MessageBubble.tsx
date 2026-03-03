@@ -55,6 +55,7 @@ import { hasMessageContent } from '../../../utils/chatUtils';
 import { ProactiveNudgeList } from '../../Chat/Nudges/ProactiveNudgeList';
 import MobileReactionDrawer from './MobileReactionDrawer';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
+import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -65,6 +66,10 @@ interface AttachmentsBlockProps {
   attachments: readonly AttachmentType[];
   isMobile: boolean;
   className?: string;
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
+  allThreadAttachments?: AttachmentRef[];
 }
 
 /**
@@ -79,6 +84,10 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   attachments,
   isMobile,
   className = '',
+  conversationId,
+  channelId,
+  replyCount,
+  allThreadAttachments,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -127,12 +136,15 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
           {/* Videos first - each in separate row */}
           {attachments
             .filter(attachment => attachment.mimetype.startsWith('video/'))
-            .map((attachment, index) => (
+            .map(attachment => (
               <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
                 <MessageAttachment
                   attachment={attachment}
                   allAttachments={attachments}
-                  currentAttachmentIndex={index}
+                  {...(conversationId && { conversationId })}
+                  {...(channelId && { channelId })}
+                  {...(replyCount !== undefined && { replyCount })}
+                  {...(allThreadAttachments && { allThreadAttachments })}
                 />
               </div>
             ))}
@@ -145,17 +157,12 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             >
               {attachments
                 .filter(attachment => !attachment.mimetype.startsWith('video/'))
-                .map((attachment, index) => {
+                .map(attachment => {
                   const isImageOrText =
                     attachment.mimetype.startsWith('image/') ||
                     attachment.mimetype === 'text/plain';
                   const hasDocumentPreview = !isImageOrText && !!attachment.thumbnailUrl;
                   // Calculate the actual index in the full attachments array
-                  const videoCount = attachments.filter(att =>
-                    att.mimetype.startsWith('video/'),
-                  ).length;
-                  const actualIndex = videoCount + index;
-
                   return (
                     <div
                       key={attachment.id}
@@ -164,7 +171,10 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                       <MessageAttachment
                         attachment={attachment}
                         allAttachments={attachments}
-                        currentAttachmentIndex={actualIndex}
+                        {...(conversationId && { conversationId })}
+                        {...(channelId && { channelId })}
+                        {...(replyCount !== undefined && { replyCount })}
+                        {...(allThreadAttachments && { allThreadAttachments })}
                       />
                     </div>
                   );
@@ -271,6 +281,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   threadInfo,
   channelScopeType,
   isFirstInThread = false,
+  allThreadAttachments,
 }) => {
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
@@ -783,6 +794,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           attachments={attachments}
                           isMobile={isMobile}
                           className='mt-2'
+                          {...(message.conversationId && {
+                            conversationId: message.conversationId,
+                          })}
+                          {...(channelId && { channelId })}
+                          {...(conversation?.replyCount !== undefined && {
+                            replyCount: conversation.replyCount,
+                          })}
+                          {...(allThreadAttachments && { allThreadAttachments })}
                         />
                       </>
                     )}
@@ -848,9 +867,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               {!isForwardedMessage && (
                 <>
                   {isMobile ? (
-                    <MobileAttachmentsGrid attachments={attachments} />
+                    <MobileAttachmentsGrid
+                      attachments={attachments}
+                      {...(message.conversationId && { conversationId: message.conversationId })}
+                      {...(channelId && { channelId })}
+                    />
                   ) : (
-                    <AttachmentsBlock attachments={attachments} isMobile={isMobile} />
+                    <AttachmentsBlock
+                      attachments={attachments}
+                      isMobile={isMobile}
+                      {...(message.conversationId && { conversationId: message.conversationId })}
+                      {...(channelId && { channelId })}
+                      {...(conversation?.replyCount !== undefined && {
+                        replyCount: conversation.replyCount,
+                      })}
+                      {...(allThreadAttachments && { allThreadAttachments })}
+                    />
                   )}
                 </>
               )}

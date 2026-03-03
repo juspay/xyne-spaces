@@ -126,6 +126,23 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
     return () => window.removeEventListener('resize', handler);
   }, [send]);
 
+  /* --------------------------- Container resize handling --------------------------- */
+
+  useEffect((): (() => void) => {
+    const container = containerRef.current;
+    if (!container) return () => {};
+
+    const resizeObserver = new ResizeObserver(() => {
+      send({ type: 'RESIZE' });
+    });
+
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [send]);
+
   /* --------------------------- Early return AFTER hooks --------------------------- */
 
   if (!source) {
@@ -156,10 +173,13 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
   const isLoading = state.matches('loading') || state.matches('calculatingScale');
 
   return (
-    <div className={`relative min-h-screen bg-gray-100 dark:bg-[#1E1E1E]`}>
+    <div
+      data-pdf-container
+      className={`relative w-full h-full flex flex-col bg-gray-100 dark:bg-[#1E1E1E]`}
+    >
       {/* Navigation Controls */}
       {numPages && (
-        <div className='sticky top-0 bg-white dark:bg-[#1E1E1E] shadow-md z-10 p-4 pt-[65px] border-b border-gray-200 dark:border-gray-700 w-full'>
+        <div className='sticky top-0 bg-white dark:bg-[#1E1E1E] shadow-md z-10 p-4 pt-[65px] border-b border-gray-200 dark:border-gray-700 w-full flex-shrink-0'>
           <div className='flex items-center justify-center'>
             <div className='flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg px-4 py-2 shadow-sm'>
               {/* Previous Page Button */}
@@ -243,7 +263,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
       )}
 
       {/* PDF + Virtualized Pages */}
-      <div ref={containerRef} className='overflow-auto' style={{ height: 'calc(100vh - 80px)' }}>
+      <div ref={containerRef} className='overflow-auto flex-1'>
         <Document file={source} loading={null} error={null}>
           <div
             style={{

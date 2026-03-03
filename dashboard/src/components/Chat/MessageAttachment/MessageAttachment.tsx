@@ -23,7 +23,7 @@ import {
 } from './utils';
 import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
-import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
+import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import TxtViewer from '../../FileViewer/TxtViewer';
 import VideoViewer from '../../FileViewer/VideoViewer';
 import { QueryResultType } from '@rocicorp/zero';
@@ -37,15 +37,24 @@ import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
 import { cn } from '../../../utils/classNames';
+import { useSelector } from '@xstate/react';
+import {
+  attachmentViewerActor,
+  AttachmentViewerState,
+} from '../../../machines/attachmentViewerMachine';
 
 interface MessageAttachmentProps {
   attachment: QueryResultType<typeof queries.conversationMessages>[number]['attachments'][number];
   compact?: boolean;
   isLoading?: boolean;
   allAttachments?: QueryResultType<typeof queries.conversationMessages>[number]['attachments'];
-  currentAttachmentIndex?: number;
   isInGrid?: boolean | undefined;
   fullSize?: boolean;
+  // Thread context props
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
+  allThreadAttachments?: AttachmentRef[];
 }
 
 //to check the who can delete and delete the attachment
@@ -408,12 +417,14 @@ const InlineTextFile: React.FC<{
   attachmentId: string;
   fileName: string;
   metadata?: Record<string, unknown>;
-}> = ({ attachmentId, fileName, metadata }) => {
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
+}> = ({ attachmentId, fileName, metadata, conversationId, channelId, replyCount }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const windowWidth = useWindowWidth();
 
   const formatFileName = (fileName: string) => {
@@ -479,53 +490,52 @@ const InlineTextFile: React.FC<{
   }
 
   // For large files, show a button to open in TxtViewer modal
+  const openLargeTextFile = () => {
+    const attachment: AttachmentRef = {
+      attachmentId,
+      fileName,
+      fileUrl: `/attachments/${attachmentId}/download`,
+      mimeType: 'text/plain',
+      fileSize: fileData.size,
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+    };
+    attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
+  };
+
   if (isLargeFile) {
     return (
-      <>
-        <div className='w-full max-w-2xl'>
-          <div className='flex items-center gap-2'>
-            <button
-              type='button'
-              onClick={() => setIsModalOpen(true)}
-              className='flex items-center gap-2 p-2 rounded-md transition-colors duration-150 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200'
-              data-track-category='MESSAGE'
-              data-track-name='OPEN_TEXT_FILE'
-              data-track-metadata={JSON.stringify({ fileName, attachmentId })}
-            >
-              <FileText className='h-4 w-4' />
-              <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
-              <span className='ml-1 text-xs text-gray-500'>(click to view)</span>
-            </button>
-            <button
-              type='button'
-              onClick={e => {
-                e.stopPropagation();
-                void downloadAttachment(attachmentId, fileName);
-              }}
-              className='p-2 hover:bg-gray-100 rounded-lg transition-colors'
-              title='Download file'
-              data-track-category='MESSAGE'
-              data-track-name='DOWNLOAD_TEXT_FILE'
-              data-track-metadata={JSON.stringify({ fileName, attachmentId })}
-            >
-              <Download className='h-4 w-4 text-gray-600' />
-            </button>
-          </div>
+      <div className='w-full max-w-2xl'>
+        <div className='flex items-center gap-2'>
+          <button
+            type='button'
+            onClick={openLargeTextFile}
+            className='flex items-center gap-2 p-2 rounded-md transition-colors duration-150 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200'
+            data-track-category='MESSAGE'
+            data-track-name='OPEN_TEXT_FILE'
+            data-track-metadata={JSON.stringify({ fileName, attachmentId })}
+          >
+            <FileText className='h-4 w-4' />
+            <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
+            <span className='ml-1 text-xs text-gray-500'>(click to view)</span>
+          </button>
+          <button
+            type='button'
+            onClick={e => {
+              e.stopPropagation();
+              void downloadAttachment(attachmentId, fileName);
+            }}
+            className='p-2 hover:bg-gray-100 rounded-lg transition-colors'
+            title='Download file'
+            data-track-category='MESSAGE'
+            data-track-name='DOWNLOAD_TEXT_FILE'
+            data-track-metadata={JSON.stringify({ fileName, attachmentId })}
+          >
+            <Download className='h-4 w-4 text-gray-600' />
+          </button>
         </div>
-
-        {/* TxtViewer Modal for large files */}
-        <div data-prevent-drawer='true' onTouchStart={e => e.stopPropagation()}>
-          <FilePreviewModal
-            isOpen={isModalOpen}
-            onClose={() => setIsModalOpen(false)}
-            fileName={fileName}
-            fileUrl={`/attachments/${attachmentId}/download`}
-            mimeType='text/plain'
-            fileSize={fileData.size}
-            attachmentId={attachmentId}
-          />
-        </div>
-      </>
+      </div>
     );
   }
 
@@ -586,6 +596,9 @@ const InlineVideoPlayer: React.FC<{
   height?: number | undefined;
   width?: number | undefined;
   isInGrid?: boolean | undefined;
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
 }> = ({
   attachmentId,
   fileName,
@@ -596,30 +609,40 @@ const InlineVideoPlayer: React.FC<{
   thumbnailUrl,
   fileSize,
   isInGrid,
+  conversationId,
+  channelId,
+  replyCount,
 }) => {
   const [hasClickedPlay, setHasClickedPlay] = useState(false);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailError, setThumbnailError] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const { isMobile } = usePlatform();
   const [loading, setLoading] = useState(true);
-  const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const { canDelete, handleDelete } = useAttachmentDelete(attachmentId, fileName, uploadedBy);
 
-  const toggleModal = () => {
-    // Exit fullscreen if active before toggling modal
+  const openModal = () => {
+    // Exit fullscreen if active before opening modal
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {
         // Silently handle fullscreen exit errors
       });
     }
     // Capture current video time before opening modal
-    if (videoRef.current && !isModalOpen) {
-      setCurrentTime(videoRef.current.currentTime);
-    }
-    setIsModalOpen(prev => !prev);
+    const currentTime = videoRef.current?.currentTime;
+    const attachment: AttachmentRef = {
+      attachmentId,
+      fileName,
+      fileUrl: '', // Not used for videos
+      mimeType,
+      fileSize,
+      ...(currentTime !== undefined && { initialTime: currentTime }),
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+    };
+    attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
   };
 
   const dimensions = useMemo(() => {
@@ -752,7 +775,7 @@ const InlineVideoPlayer: React.FC<{
                 <button
                   onClick={() => {
                     if (isMobile) {
-                      setIsModalOpen(true);
+                      openModal();
                     } else {
                       setHasClickedPlay(true);
                     }
@@ -772,7 +795,7 @@ const InlineVideoPlayer: React.FC<{
               {!isMobile && (
                 <div className='absolute bottom-4 right-3 opacity-0 group-hover:opacity-100 transition-opacity'>
                   <button
-                    onClick={toggleModal}
+                    onClick={openModal}
                     className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
                     title='Expand video'
                     aria-label='Expand video'
@@ -793,28 +816,12 @@ const InlineVideoPlayer: React.FC<{
               fileName={fileName}
               width={dimensions.width}
               height={dimensions.height}
-              onExpand={toggleModal}
+              onExpand={openModal}
               menuContent={inlineMenuContent}
               ref={videoRef}
             />
           )}
         </div>
-      </div>
-
-      {/* File Preview Modal for mobile - Opens fullscreen video player with streaming */}
-      {/* data-prevent-drawer prevents parent drawer from intercepting touch gestures */}
-      {/* onTouchStart stops event bubbling to parent components */}
-      <div data-prevent-drawer='true' onTouchStart={e => e.stopPropagation()}>
-        <FilePreviewModal
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          fileName={fileName}
-          fileUrl='' // Not used for videos - VideoViewer constructs URL from attachmentId
-          mimeType={mimeType}
-          fileSize={fileSize}
-          attachmentId={attachmentId}
-          initialTime={currentTime}
-        />
       </div>
     </>
   );
@@ -827,13 +834,18 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
   attachment,
   compact,
   allAttachments,
-  currentAttachmentIndex,
   isInGrid,
   fullSize,
+  conversationId,
+  channelId,
+  replyCount,
+  allThreadAttachments,
 }) => {
   const { isMobile } = usePlatform();
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(currentAttachmentIndex ?? 0);
+  const isOpen = useSelector(
+    attachmentViewerActor,
+    (s: AttachmentViewerState) => s.value !== 'closed',
+  );
 
   const { canDelete, handleDelete } = useAttachmentDelete(
     attachment.id,
@@ -846,26 +858,47 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
   const isVideo = isVideoFile(attachment.mimetype);
 
   const handleCardClick = (): void => {
-    setCurrentIndex(currentAttachmentIndex ?? 0);
-    setIsPreviewOpen(true);
-  };
+    // Use thread attachments if available, otherwise build from message attachments
+    const attachments: AttachmentRef[] =
+      allThreadAttachments ||
+      (allAttachments || [attachment]).map(att => {
+        const ref: AttachmentRef = {
+          attachmentId: att.id,
+          fileName: att.originalFilename,
+          fileUrl: `/attachments/${att.id}/download`,
+          mimeType: att.mimetype,
+          fileSize: att.size,
+          thumbnailUrl: att.thumbnailUrl,
+        };
+        if (conversationId) ref.conversationId = conversationId;
+        if (channelId) ref.channelId = channelId;
+        if (replyCount !== undefined) ref.replyCount = replyCount;
+        return ref;
+      });
 
-  // Build files array for stack navigation if multiple attachments exist
-  const filesForNavigation = useMemo(() => {
-    if (!allAttachments || allAttachments.length <= 1) return undefined;
+    // Find starting index based on the attachment's position in the array
+    // Try multiple matching strategies to ensure we find the correct attachment
+    let startIndex = attachments.findIndex(att => att.attachmentId === attachment.id);
 
-    return allAttachments.map(att => ({
-      fileName: att.originalFilename,
-      fileUrl: `/attachments/${att.id}/download`,
-      mimeType: att.mimetype,
-      fileSize: att.size,
-      attachmentId: att.id,
-      thumbnailUrl: att.thumbnailUrl,
-    }));
-  }, [allAttachments]);
+    // If not found by ID, try matching by fileName and fileSize as fallback
+    if (startIndex === -1) {
+      startIndex = attachments.findIndex(
+        att =>
+          att.fileName === attachment.originalFilename &&
+          att.fileSize === attachment.size &&
+          att.mimeType === attachment.mimetype,
+      );
+    }
 
-  const handleNavigate = (newIndex: number): void => {
-    setCurrentIndex(newIndex);
+    // Fallback to 0 if attachment not found in the array
+    const safeStartIndex = startIndex === -1 ? 0 : startIndex;
+
+    // Use UPDATE if viewer is already open, otherwise OPEN
+    attachmentViewerActor.send({
+      type: isOpen ? 'UPDATE' : 'OPEN',
+      attachments,
+      startIndex: safeStartIndex,
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
@@ -883,6 +916,9 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         attachmentId={attachment.id}
         fileName={attachment.originalFilename}
         {...(metadata && { metadata })}
+        {...(conversationId && { conversationId })}
+        {...(channelId && { channelId })}
+        {...(replyCount !== undefined && { replyCount })}
       />
     );
   }
@@ -900,6 +936,9 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         height={attachment.height ?? undefined}
         width={attachment.width ?? undefined}
         isInGrid={isInGrid}
+        {...(conversationId && { conversationId })}
+        {...(channelId && { channelId })}
+        {...(replyCount !== undefined && { replyCount })}
       />
     );
   }
@@ -965,24 +1004,6 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
 
         {/* Hover overlay for better UX feedback */}
         <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition-all duration-200 pointer-events-none' />
-      </div>
-
-      {/* File Preview Modal */}
-      <div data-prevent-drawer='true'>
-        <FilePreviewModal
-          isOpen={isPreviewOpen}
-          onClose={() => setIsPreviewOpen(false)}
-          fileName={attachment.originalFilename}
-          fileUrl={`/attachments/${attachment.id}/download`}
-          mimeType={attachment.mimetype}
-          fileSize={attachment.size}
-          attachmentId={attachment.id}
-          {...(filesForNavigation && {
-            files: filesForNavigation,
-            currentIndex: currentIndex,
-            onNavigate: handleNavigate,
-          })}
-        />
       </div>
     </>
   );

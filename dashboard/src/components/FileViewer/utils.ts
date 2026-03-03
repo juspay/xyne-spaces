@@ -16,6 +16,7 @@ export interface BaseViewerProps {
   height?: number;
   initialTime?: number;
   onExpand?: () => void;
+  disableGestures?: boolean;
 }
 
 export interface FileTypeConfig<P = BaseViewerProps> {

@@ -62,6 +62,7 @@ import { ForwardMessageForm } from '../ForwardMessageModal/ForwardMessageModal';
 import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
 import DOMPurify from 'dompurify';
 import { CallParticipantsSelectionModal } from '../../Call/CallParticipantsSelectionModal';
+import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 
 export interface ThreadData {
   replyCount: number;
@@ -85,6 +86,7 @@ interface ChatBubbleProps {
   isFirstInThread?: boolean;
   isTicketThread?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
+  allThreadAttachments?: AttachmentRef[];
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -102,6 +104,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isFirstInThread = false,
   isTicketThread = false,
   onEmojiPickerOpenChange,
+  allThreadAttachments,
 }) => {
   const { user } = useAuthContext();
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
@@ -728,6 +731,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             context={context}
             channelScopeType={channelScopeType}
             isFirstInThread={isFirstInThread}
+            {...(allThreadAttachments && { allThreadAttachments })}
             {...(conversation && { conversation: conversation })}
             {...(isShowInChannel &&
               parentMessage &&
