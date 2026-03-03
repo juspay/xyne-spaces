@@ -1074,7 +1074,7 @@ const ChannelCommandMenu = ({
                 {tabs.map(tab => (
                   <Tabs.Trigger asChild key={tab.id} value={tab.id}>
                     <button
-                      onClick={() => {
+                      onClick={e => {
                         if (activeTab === tab.id) {
                           setActiveTab(TabType.ALL);
                         } else {
@@ -1084,6 +1084,11 @@ const ChannelCommandMenu = ({
                         if (inputRef.current) {
                           inputRef.current.blur();
                         }
+                        e.currentTarget.scrollIntoView({
+                          behavior: 'smooth',
+                          block: 'nearest',
+                          inline: 'center',
+                        });
                       }}
                       className={cn(
                         'flex items-center justify-center gap-1.5 px-2 text-[13px] py-[2px] max-h-6 whitespace-nowrap transition-colors cursor-pointer rounded-[10px] border',
