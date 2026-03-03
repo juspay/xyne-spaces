@@ -363,6 +363,7 @@ export class BitbucketService {
       author: {
         displayName: pr.author.user.displayName,
         id: pr.author.user.id,
+        emailAddress: pr.author.user.emailAddress,
       },
     };
   }
