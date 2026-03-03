@@ -134,6 +134,7 @@ export const Event = {
   ZERO_RUN_ERROR: 'zero_run_error',
   ZERO_RUN_COMPLETE: 'zero_run_complete',
   ZERO_RUN_CALLED: 'zero_run_called',
+  KANBAN_ENTITY_LOADED: 'kanban_entity_loaded',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

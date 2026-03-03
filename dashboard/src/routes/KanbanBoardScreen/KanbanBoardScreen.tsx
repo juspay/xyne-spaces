@@ -1,6 +1,9 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { logger, Event } from '../../utils/logger';
+import { mixpanelService } from '../../services/Analytics/mixpanelService';
+import { EVENTS } from '../../services/Analytics/mixpanel.types';
 import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -117,6 +120,45 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const canCreateTicket = useCanCreateTicket(); // Check ticket permissions
   const zero = useZero();
   const isDraggingRef = useRef(false);
+
+  // ── Latency instrumentation ──────────────────────────────────────────
+  const mountTimeRef = useRef(performance.now());
+  const latencySessionKeyRef = useRef('');
+  const entityTimingsRef = useRef<Record<string, boolean>>({
+    boards: false,
+    allProjectTickets: false,
+    tags: false,
+    formEntityValues: false,
+    filteredTickets: false,
+  });
+
+  const logEntityTiming = (entityName: string): void => {
+    // Lazy reset: when context changes, reset timings without a useEffect
+    const sessionKey = `${viewMode}-${channelId}-${effectiveProjectId}`;
+    if (latencySessionKeyRef.current !== sessionKey) {
+      latencySessionKeyRef.current = sessionKey;
+      mountTimeRef.current = performance.now();
+      entityTimingsRef.current = {
+        boards: false,
+        allProjectTickets: false,
+        tags: false,
+        formEntityValues: false,
+        filteredTickets: false,
+      };
+    }
+    const ref = entityTimingsRef.current;
+    if (ref[entityName]) return;
+    ref[entityName] = true;
+    const elapsed = performance.now() - mountTimeRef.current;
+    const ctx = { viewMode, channelId, projectId: effectiveProjectId };
+    logger.info(Event.KANBAN_ENTITY_LOADED, { entity: entityName, latency: elapsed, ...ctx });
+    mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
+      type: `kanban_${entityName}`,
+      timeTakenMs: elapsed,
+      ...ctx,
+    });
+  };
+  // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
   const [groupBy, setGroupBy] = useState<GroupByType>('none');
@@ -347,7 +389,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
 
   // Fetch board details (only when boardId is present)
-  const [ticketsForAll] = useCachedQuery(queries.allTickets());
+  const [ticketsForAll, ticketsDetails] = useCachedQuery(queries.allTickets());
 
   // Determine effective project ID
   const effectiveProjectId = projectIdParam || channel?.projectId || ticketsForAll?.[0]?.projectId;
@@ -374,11 +416,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const isMyTicketsView =
     viewMode === 'my-tickets' || viewMode === 'user-tickets' || viewMode === 'group-tickets';
 
-  const [allBoardsGlobal] = useCachedQuery(queries.getAllBoards(), {
+  const [allBoardsGlobal, allBoardsGlobalDetails] = useCachedQuery(queries.getAllBoards(), {
     enabled: isMyTicketsView,
   });
 
-  const [allBoardsProject] = useCachedQuery(
+  const [allBoardsProject, allBoardsProjectDetails] = useCachedQuery(
     queries.boardsByProject({ projectId: effectiveProjectId || '' }),
     {
       enabled: !isMyTicketsView && !!effectiveProjectId,
@@ -386,6 +428,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
 
   const allBoards = isMyTicketsView ? allBoardsGlobal : allBoardsProject;
+  const boardsDetails = isMyTicketsView ? allBoardsGlobalDetails : allBoardsProjectDetails;
+  if (boardsDetails.type === 'complete') logEntityTiming('boards');
 
   // Create memo of form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
   const groupByFormFields = useMemo(
@@ -653,6 +697,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     filterByUserId,
     filterByGroupId,
   ]);
+  if (ticketsDetails.type === 'complete') logEntityTiming('allProjectTickets');
 
   // Calculate available priorities, users, and user groups from ALL project tickets (not filtered)
   // Return undefined if tickets haven't loaded yet to prevent filtering out all options
@@ -737,12 +782,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [viewMode, filters.boards, availableBoards, filters, setFilters]);
 
-  const [allTags] = useCachedQuery(queries.getAllTicketTags());
+  const [allTags, allTagsDetails] = useCachedQuery(queries.getAllTicketTags());
   const allUsers = useUsers();
   const allUserGroups = useUserGroups();
 
   // Fetch all form entity values (cached and used across all boards)
-  const [allFormEntityValues] = useCachedQuery(queries.getAllFormEntityValues());
+  const [allFormEntityValues, allFormEntityValuesDetails] = useCachedQuery(
+    queries.getAllFormEntityValues(),
+  );
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId)
   const stageFormMap = useMemo(() => {
@@ -760,6 +807,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const tagsByTicketId = useMemo(() => {
     return createTagsByTicketIdMap(allTags);
   }, [allTags]);
+  if (allTagsDetails.type === 'complete') logEntityTiming('tags');
 
   // Create map of form entity values by ticket ID and field info by field ID
   const { formValuesByTicketId, formFieldsById } = useMemo(() => {
@@ -785,6 +833,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     return { formValuesByTicketId: valuesMap, formFieldsById: fieldsMap };
   }, [allFormEntityValues]);
+  if (allFormEntityValuesDetails.type === 'complete') logEntityTiming('formEntityValues');
 
   // Filter tickets based on view mode and filters
   const filteredTickets = useMemo(() => {
@@ -836,6 +885,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       tickets = tickets.filter(ticket => ticket.statusV2 !== TicketStatusV2.CANCELLED);
     }
 
+    // Latency: log when filtered tickets are first computed with data
+    if (
+      ticketsDetails.type === 'complete' &&
+      boardsDetails.type === 'complete' &&
+      allTagsDetails.type === 'complete' &&
+      allFormEntityValuesDetails.type === 'complete'
+    )
+      logEntityTiming('filteredTickets');
     return tickets;
   }, [
     allProjectTickets,
