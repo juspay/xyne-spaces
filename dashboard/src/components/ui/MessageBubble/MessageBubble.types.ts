@@ -52,4 +52,5 @@ export interface MessageBubbleProps {
   channelScopeType?: ChannelScopeType | undefined;
   isFirstInThread?: boolean;
   allThreadAttachments?: AttachmentRef[];
+  workflowNumber?: number | undefined;
 }

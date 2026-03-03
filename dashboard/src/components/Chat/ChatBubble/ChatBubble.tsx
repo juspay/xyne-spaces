@@ -87,6 +87,7 @@ interface ChatBubbleProps {
   isTicketThread?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
+  workflowNumber?: number | undefined;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -105,6 +106,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isTicketThread = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
+  workflowNumber,
 }) => {
   const { user } = useAuthContext();
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
@@ -732,6 +734,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             channelScopeType={channelScopeType}
             isFirstInThread={isFirstInThread}
             {...(allThreadAttachments && { allThreadAttachments })}
+            workflowNumber={workflowNumber}
             {...(conversation && { conversation: conversation })}
             {...(isShowInChannel &&
               parentMessage &&

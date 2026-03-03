@@ -1,4 +1,4 @@
-import { Copy, ExternalLink, CircleCheck, CircleDashed, GitBranch, RefreshCw } from 'lucide-react';
+import { Copy, ExternalLink, CircleCheck, GitBranch, RefreshCw, X } from 'lucide-react';
 import {
   formatStepName,
   getExecutionTimeDisplay,
@@ -12,6 +12,8 @@ import { rerunWorkflowFromStart } from '../../../services/Workflow/workflowServi
 import { calculateExecutionTime } from '../../Workflows/utils/utils';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button/Button';
+import { cn } from '../../../utils/classNames';
+import Tooltip from '../../ui/Tooltip';
 
 interface WorkflowBubbleProps {
   workflowName: string | undefined;
@@ -19,6 +21,7 @@ interface WorkflowBubbleProps {
   createdAt: number;
   ticketId: string | undefined;
   metadata: MessageMetadata;
+  workflowNumber?: number | undefined;
 }
 
 export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
@@ -27,9 +30,15 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
   createdAt,
   ticketId,
   metadata,
+  workflowNumber,
 }) => {
   const navigate = useNavigate();
   const [isRerunning, setIsRerunning] = useState(false);
+  const [showAllSteps, setShowAllSteps] = useState(false);
+
+  const totalSteps =
+    (metadata?.completedSteps?.length || 0) + (metadata?.pendingSteps?.length || 0);
+  const hasMoreSteps = totalSteps > 3;
 
   // Get latest execution for this workflow
   const [workflows] = useCachedQuery(queries.getWorkflowForTicket({ ticketId: ticketId || '' }), {
@@ -88,10 +97,19 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
   };
 
   return (
-    <div className='flex flex-col bg-[#FAFAFA] border border-[#F0F0F0] p-3 gap-3 rounded-xl'>
-      <div className='flex justify-between items-center gap-2'>
-        <div className='flex items-center gap-2'>
-          <span className='font-[15px] text-gray-800'>{workflowName}</span>
+    <div className='flex flex-col bg-[#FAFAFA] border border-[#F0F0F0] p-3 gap-3 rounded-xl transition-all duration-200 hover:shadow-md'>
+      <div className='flex justify-between items-center gap-2 min-w-0'>
+        <div className='flex items-center gap-2 min-w-0 flex-1'>
+          {workflowNumber !== undefined && (
+            <span className='inline-flex items-center justify-center flex-shrink-0 min-w-[28px] h-6 px-2 bg-blue-100 text-blue-700 text-xs font-bold rounded-full border border-blue-200'>
+              #{workflowNumber}
+            </span>
+          )}
+          <Tooltip content={workflowName || ''}>
+            <span className='font-[15px] text-gray-800 truncate block max-w-[200px] sm:max-w-[300px] md:max-w-[400px]'>
+              {workflowName}
+            </span>
+          </Tooltip>
           {workflowName && (
             <button
               onClick={() => {
@@ -133,9 +151,35 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
             cursor={'pointer'}
             onClick={e => {
               e.stopPropagation();
-              const workflowUrl = metadata?.workflowId
+              const params = new URLSearchParams();
+              if (metadata?.executorType) {
+                params.append('executorType', metadata.executorType);
+              }
+              if (metadata?.['model']) {
+                const modelValue = metadata['model'];
+                if (typeof modelValue === 'string') {
+                  params.append('model', modelValue);
+                } else if (typeof modelValue === 'object' && modelValue !== null) {
+                  params.append('model', JSON.stringify(modelValue));
+                } else if (
+                  typeof modelValue === 'number' ||
+                  typeof modelValue === 'boolean' ||
+                  typeof modelValue === 'bigint'
+                ) {
+                  params.append('model', String(modelValue));
+                } else {
+                  // Skip other types (symbol, function, etc.)
+                  params.append('model', '');
+                }
+              }
+              if (metadata?.useQuestioningMode) {
+                params.append('useQuestioningMode', String(metadata.useQuestioningMode));
+              }
+              const queryString = params.toString();
+              const baseUrl = metadata?.workflowId
                 ? `/tickets/${ticketId}/workflow/${metadata.workflowId}`
                 : `/tickets/${ticketId}/workflow`;
+              const workflowUrl = queryString ? `${baseUrl}?${queryString}` : baseUrl;
               void navigate(workflowUrl);
             }}
             color='#788187'
@@ -146,8 +190,20 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
           />
         </div>
       </div>
-      <div className='flex items-center gap-2 text-[#788187] font-medium text-[13px]'>
-        <span>{getExecutionTimeDisplay(displayMetadataForTime, new Date(createdAt))}</span>
+      <div className='flex flex-wrap items-center gap-2'>
+        <span className='text-[#788187] font-medium text-[13px]'>
+          {getExecutionTimeDisplay(displayMetadataForTime, new Date(createdAt))}
+        </span>
+        <span
+          className={cn(
+            'text-xs font-medium px-2 py-0.5 rounded-full',
+            displayStatus === 'SUCCESS' && 'bg-green-100 text-green-700',
+            displayStatus === 'FAILURE' && 'bg-red-100 text-red-700',
+            displayStatus === 'PENDING' && 'bg-gray-100 text-gray-600',
+          )}
+        >
+          {displayStatus}
+        </span>
       </div>
       {metadata?.gitInfo && (
         <div className='bg-white border border-gray-200 rounded-xl p-4 flex flex-col gap-2'>
@@ -200,31 +256,93 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
         <div className='bg-white border border-gray-200 rounded-xl p-4 space-y-2'>
           <h4 className='text-[13px] font-semibold text-gray-700 mb-3'>Workflow Activity</h4>
 
-          {metadata.completedSteps && metadata.completedSteps.length > 0 && (
-            <div className='flex flex-col gap-2'>
-              {metadata.completedSteps.map(step => (
-                <div key={step.stepName} className='flex items-center gap-2'>
-                  <CircleCheck size={14} />
-                  <span className='text-sm font-medium'>
-                    {formatStepName(step.stepName)} Completed
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className='flex flex-col gap-2 transition-all duration-200'>
+            {metadata.completedSteps && metadata.completedSteps.length > 0 && (
+              <div className='flex flex-col gap-2'>
+                {metadata.completedSteps.map((step, index) => (
+                  <div
+                    key={step.stepName}
+                    className={cn(
+                      'flex items-center gap-2',
+                      !showAllSteps && index > 0 && 'hidden',
+                    )}
+                  >
+                    {step.status === 'FAILED' ? (
+                      <X size={14} className='text-red-600 flex-shrink-0' />
+                    ) : step.status === 'COMPLETED' ? (
+                      <CircleCheck size={14} className='text-green-600 flex-shrink-0' />
+                    ) : (
+                      <span className='text-gray-700 flex-shrink-0' />
+                    )}
+                    <span className='text-sm font-medium text-gray-700'>
+                      {formatStepName(step.stepName)}
+                      {step.status === 'FAILED' && ' Failed'}
+                      {step.status === 'COMPLETED' && ' Completed'}
+                      {step.status === 'IN_PROGRESS' && ' is Running'}
+                      {step.status === 'PENDING' && ' Pending'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
-          {filteredPending.length > 0 && (
-            <div className='flex flex-col gap-2'>
-              {filteredPending.map(step => (
-                <div key={step.stepName} className='flex items-center gap-2'>
-                  <CircleDashed size={14} className='animate-spin' />
-                  <span className='text-sm font-medium'>
-                    {formatStepName(step.stepName)} is Running
-                  </span>
-                </div>
-              ))}
-            </div>
+            {filteredPending.length > 0 && (
+              <div className='flex flex-col gap-2'>
+                {filteredPending.map((step, index) => (
+                  <div
+                    key={step.stepName}
+                    className={cn(
+                      'flex items-center gap-2',
+                      !showAllSteps && index > 0 && 'hidden',
+                    )}
+                  >
+                    {step.status === 'FAILED' ? (
+                      <X size={14} className='text-red-600 flex-shrink-0' />
+                    ) : (
+                      <span className='text-gray-700 flex-shrink-0' />
+                    )}
+                    <span className='text-sm font-medium text-gray-700'>
+                      {formatStepName(step.stepName)}{' '}
+                      {step.status === 'FAILED'
+                        ? 'Failed'
+                        : step.status === 'IN_PROGRESS'
+                          ? 'is Running'
+                          : 'Pending'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {!showAllSteps && hasMoreSteps && (
+            <button
+              className='text-xs font-semibold cursor-pointer text-gray-600 hover:text-gray-900 underline py-1'
+              onClick={() => setShowAllSteps(true)}
+              data-track-category='WORKFLOW_BUBBLE'
+              data-track-name='READ_MORE_STEPS'
+            >
+              Read More
+            </button>
           )}
+          {showAllSteps && (
+            <button
+              className='text-xs font-semibold cursor-pointer text-gray-600 hover:text-gray-900 underline py-1'
+              onClick={() => setShowAllSteps(false)}
+              data-track-category='WORKFLOW_BUBBLE'
+              data-track-name='VIEW_LESS_STEPS'
+            >
+              View Less
+            </button>
+          )}
+        </div>
+      )}
+      {metadata?.createdBy && (
+        <div className='flex items-center gap-2 text-xs text-gray-500 border-t border-gray-100 pt-2 mt-1'>
+          <span className='font-medium'>Ran by:</span>
+          <span className='bg-gray-100 px-2 py-0.5 rounded text-gray-700'>
+            {metadata.createdBy}
+          </span>
         </div>
       )}
     </div>

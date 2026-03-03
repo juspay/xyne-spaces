@@ -28,6 +28,10 @@ export interface MessageMetadata {
     status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
   }>;
   rerunStartTime?: string;
+  executorType?: string;
+  useQuestioningMode?: boolean;
+  description?: string;
+  createdBy?: string;
   gitInfo?: {
     branch?: string;
     repoUrl?: string;

@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { useMachine } from '@xstate/react';
@@ -29,6 +29,7 @@ const LAST_WORKFLOW_PATH_KEY = 'last-viewed-workflow-path';
 
 const WorkflowScreen: React.FC = () => {
   const { ticketId, workflowId } = useParams<{ ticketId: string; workflowId?: string }>();
+  const [searchParams] = useSearchParams();
   const { tickets, isLoading: ticketsLoading } = useTickets();
   const ticket = useMemo(() => tickets.find(t => t.id === ticketId), [tickets, ticketId]);
 
@@ -113,6 +114,30 @@ const WorkflowScreen: React.FC = () => {
   const gitInfo = useMemo(() => {
     return combinedStepsData?.workflows?.[0]?.gitInfo;
   }, [combinedStepsData]);
+
+  // Extract PR link from gitInfo
+  const prLink = useMemo(() => {
+    return combinedStepsData?.workflows?.[0]?.gitInfo?.pr_link;
+  }, [combinedStepsData]);
+
+  // Extract executor type, questioning mode, and model from URL params (passed from WorkflowBubble) or workflow data
+  const executorType = useMemo(() => {
+    const urlExecutorType = searchParams.get('executorType');
+    return urlExecutorType ?? combinedStepsData?.workflows?.[0]?.executorType;
+  }, [searchParams, combinedStepsData]);
+
+  const useQuestioningMode = useMemo(() => {
+    const urlUseQuestioningMode = searchParams.get('useQuestioningMode');
+    if (urlUseQuestioningMode !== null) {
+      return urlUseQuestioningMode === 'true';
+    }
+    return combinedStepsData?.workflows?.[0]?.useQuestioningMode;
+  }, [searchParams, combinedStepsData]);
+
+  const model = useMemo(() => {
+    const urlModel = searchParams.get('model');
+    return urlModel ?? combinedStepsData?.workflows?.[0]?.model;
+  }, [searchParams, combinedStepsData]);
 
   // Check if preview tab should be enabled
   const previewInfo = useMemo(() => {
@@ -569,6 +594,10 @@ const WorkflowScreen: React.FC = () => {
         gitBranch={gitInfo?.branch}
         workflowType={workflowType}
         onTriggerWorkflow={() => setIsWorkflowModalOpen(true)}
+        executorType={executorType}
+        useQuestioningMode={useQuestioningMode}
+        model={model}
+        prLink={prLink}
       />
 
       {ticket && (
