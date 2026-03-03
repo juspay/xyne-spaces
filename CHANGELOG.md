@@ -1,3 +1,10 @@
+## [1.63.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.62.0...v1.63.0) (2026-03-03)
+
+
+### Features
+
+* sandbox support for electron app ([2063c7d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2063c7d7d20f7b2b3dcea75e57b71130f4a60cd5)), closes [#3766](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3766)
+
 ## [1.62.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.61.0...v1.62.0) (2026-03-02)
 
 
