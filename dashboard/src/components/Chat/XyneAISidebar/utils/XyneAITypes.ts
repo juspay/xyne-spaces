@@ -52,6 +52,14 @@ export interface MessageAttachment {
   data: string; // base64 data
 }
 
+// Selection context from canvas
+export interface SelectionContext {
+  canvasViewAccessId: string;
+  selectedText: string;
+  canvasTitle?: string;
+  preview: string; // Truncated preview for display
+}
+
 export interface Message {
   id: string;
   type: 'user' | 'bot';
@@ -79,4 +87,5 @@ export interface Message {
   attachments?: MessageAttachment[]; // Attachments sent with the message
   userTags?: Record<string, UserTag>; // Tag -> {name, userId} for user mentions
   participants?: Participant[]; // List of participants for Summarizer responses
+  selectionContexts?: SelectionContext[]; // Canvas selection contexts
 }

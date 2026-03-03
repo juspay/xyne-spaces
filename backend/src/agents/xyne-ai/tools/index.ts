@@ -68,6 +68,9 @@ import { createGeniusTool, getGeniusTool } from './genius.js';
 import { createXyneRcaTool, getXyneRcaTool } from './xyne_rca.js';
 import { createWebSearchTool, getWebSearchTool } from './web_search.js';
 import { createResearchAgentTool, getResearchAgentTool } from './research_agent.js';
+import { createCreateCanvasTool, getCreateCanvasTool } from './create_canvas.js';
+import { createReadCanvasTool, getReadCanvasTool } from './read_canvas.js';
+import { createEditCanvasTool, getEditCanvasTool } from './edit_canvas.js';
 
 import type { XyneAIAgentContext } from './types.js';
 
@@ -102,6 +105,15 @@ export { createWebSearchTool, getWebSearchTool };
 // Research Agent
 export { createResearchAgentTool, getResearchAgentTool };
 
+// Create Canvas
+export { createCreateCanvasTool, getCreateCanvasTool };
+
+// Read Canvas
+export { createReadCanvasTool, getReadCanvasTool };
+
+// Edit Canvas
+export { createEditCanvasTool, getEditCanvasTool };
+
 // ============================================================================
 // Get All Tools
 // ============================================================================
@@ -133,6 +145,9 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createGeniusTool(),
     createXyneRcaTool(),
     createResearchAgentTool(),
+    createCreateCanvasTool(),
+    createReadCanvasTool(),
+    createEditCanvasTool(),
   ];
 
   // Add web search tool if runtime flag is true

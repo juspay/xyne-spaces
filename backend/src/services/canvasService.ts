@@ -10,6 +10,23 @@ import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
+// Y-Sweet XML fragment name used by the frontend collaborative editor
+export const YSWEET_XML_FRAGMENT = 'document-store';
+
+
+/**
+ * Convert markdown to BlockNote JSON format
+ */
+export async function convertMarkdownToBlockNote(markdown: string): Promise<BlockNoteBlock[]> {
+  try {
+    const editor = ServerBlockNoteEditor.create();
+    const parsed = await editor.tryParseMarkdownToBlocks(markdown);
+    return parsed as BlockNoteBlock[];
+  } catch (error) {
+    logger.error('[CanvasService] Error converting markdown to BlockNote:', error);
+    return [];
+  }
+}
 
 /**
  * Get human-readable label for learning type

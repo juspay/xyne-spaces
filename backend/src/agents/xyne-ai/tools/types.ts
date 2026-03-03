@@ -3,6 +3,7 @@
  */
 
 import { Streaming } from '@xynehq/jaf';
+import type { SelectionContext } from '../types.js';
 
 // Re-export types from JAF Streaming module
 export type StreamProvider = Streaming.StreamProvider;
@@ -68,6 +69,10 @@ export interface XyneAIAgentContext {
   productNameToId?: Map<string, string>;  // Product name→ID mapping (for tool validation)
   repositoryNameToId?: Map<string, string>;
   customInstruction?: string;
+  // Canvas context
+  canvasViewAccessId?: string;  // viewAccessId of the canvas when Ask AI is triggered from canvas
+  selectionContexts?: SelectionContext[];  // Selected text contexts from canvases
+  createCanvasEnabled?: boolean;  // Flag to add create canvas instruction to prompt
 }
 
 // ============================================================================
@@ -157,6 +162,7 @@ export interface ToolEntity {
   ticketStatus?: string;  // For tickets
   hasTranscript?: boolean;  // For calls
   base64Data?: string;  // For image attachments (data URI)
+  canvasViewIds?: string[];  // Array of canvas viewAccessIds found in message content
 }
 
 /**
@@ -225,6 +231,9 @@ export interface ToolDescriptions {
   field_value_discovery: string;
   web_search: string;
   research_agent: string;
+  create_canvas: string;
+  read_canvas: string;
+  edit_canvas: string;
 }
 
 // ============================================================================

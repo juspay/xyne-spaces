@@ -139,6 +139,7 @@ const AppRoot = (): ReactElement => {
     browserPanelActor,
     state => state.context.browserPanelState,
   );
+  const xyneAICanvasInfo = useSelector(xyneAIActor, state => state.context.canvasInfo);
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
   const { isMobile } = usePlatform();
@@ -328,6 +329,7 @@ const AppRoot = (): ReactElement => {
                         channelId={xyneAIChannelId}
                         threadInfo={xyneAIThreadInfo}
                         startFreshChat={xyneAIStartFreshChat}
+                        canvasInfo={xyneAICanvasInfo}
                       />
                     </div>
                   </Panel>
@@ -452,6 +454,7 @@ const AppRoot = (): ReactElement => {
                   channelId={xyneAIChannelId}
                   threadInfo={xyneAIThreadInfo}
                   startFreshChat={xyneAIStartFreshChat}
+                  canvasInfo={xyneAICanvasInfo}
                 />
               </Drawer>
             )}

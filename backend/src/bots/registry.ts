@@ -29,6 +29,9 @@ import '@/bots/implementations/docs-publisher/docs-publisher.js';
 // Xyne Automatic Bot - system bot for posting automated messages like call summaries
 import '@/bots/implementations/xyne-automatic/xyne-automatic.js';
 
+// Ask AI Bot - system bot for AI-generated content and canvases
+import '@/bots/implementations/ask-ai/ask-ai.js';
+
 import {logger} from '@/utils/logger';
 
 // Bitbucket Bot - system bot for Bitbucket webhook events

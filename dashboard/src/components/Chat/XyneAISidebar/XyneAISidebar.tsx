@@ -19,7 +19,14 @@ import { XyneAIHeader } from './components/XyneAIHeader';
 import { UserActivityPanel } from './components/UserActivityPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
+import {
+  xyneAIActor,
+  type ThreadInfo,
+  type CanvasInfo,
+  type XyneAIContext,
+  type SelectionInfo,
+  flattenCanvasContexts,
+} from '../../../machines/xyneAIMachine';
 import type { ResearchContext } from '../../../hooks/useResearchAgent';
 
 interface XyneAIConfigResponse {
@@ -30,11 +37,13 @@ interface XyneAISidebarProps {
   channelId: string | null;
   threadInfo?: ThreadInfo | null;
   startFreshChat?: boolean;
+  canvasInfo?: CanvasInfo | null;
 }
 
 const XyneAISidebar = ({
   channelId,
   threadInfo,
+  canvasInfo,
   startFreshChat = false,
 }: XyneAISidebarProps): ReactElement => {
   const [inputValue, setInputValue] = useState('');
@@ -49,12 +58,14 @@ const XyneAISidebar = ({
   const [isLoadingConversation, setIsLoadingConversation] = useState(true);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
   const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
     null,
   );
   const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [selectedActivities, setSelectedActivities] = useState<UserActivity[]>([]);
+  const [activeSelectionInfos, setActiveSelectionInfos] = useState<SelectionInfo[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -63,6 +74,63 @@ const XyneAISidebar = ({
   useEffect(() => {
     setActiveThreadInfo(threadInfo ?? null);
   }, [threadInfo]);
+
+  // Track processed selection keys to avoid duplicates
+  const processedSelectionKeysRef = useRef<Set<string>>(new Set());
+
+  // Sync processedSelectionKeysRef with activeSelectionInfos to handle removals
+  useEffect(() => {
+    // Build the current set of active selection keys
+    const activeKeys = new Set(activeSelectionInfos.map(s => `${s.canvasViewAccessId}-${s.text}`));
+    // Remove keys from processedSelectionKeysRef that are no longer active
+    // This allows re-adding the same selection if user removed it and selects again
+    processedSelectionKeysRef.current = activeKeys;
+  }, [activeSelectionInfos]);
+
+  // Subscribe to xyneAIActor to receive canvasContexts
+  useEffect(() => {
+    // Function to process canvas contexts and extract selections
+    const processCanvasContexts = (context: XyneAIContext): void => {
+      // Flatten canvas contexts to get all selections
+      const allSelections = flattenCanvasContexts(context.canvasContexts);
+
+      if (allSelections.length > 0) {
+        // Find new selections that haven't been processed
+        const newSelections: SelectionInfo[] = [];
+
+        for (const selection of allSelections) {
+          const selectionKey = `${selection.canvasViewAccessId}-${selection.text}`;
+
+          if (!processedSelectionKeysRef.current.has(selectionKey)) {
+            processedSelectionKeysRef.current.add(selectionKey);
+            newSelections.push(selection);
+          }
+        }
+
+        // Add new selections to existing ones
+        if (newSelections.length > 0) {
+          setActiveSelectionInfos(prev => [...prev, ...newSelections]);
+        }
+      }
+    };
+
+    // Check current state immediately (for cases where sidebar opens after the event)
+    const currentSnapshot = xyneAIActor.getSnapshot();
+    if (currentSnapshot) {
+      processCanvasContexts(currentSnapshot.context);
+    }
+
+    // Subscribe to future changes
+    const subscription = xyneAIActor.subscribe(snapshot => {
+      processCanvasContexts(snapshot.context);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      // Clear processed selection keys on unmount to prevent memory leak
+      processedSelectionKeysRef.current.clear();
+    };
+  }, []);
 
   const channel = useChannel(channelId || '');
 
@@ -94,11 +162,13 @@ const XyneAISidebar = ({
     conversationId,
     threadConversationId: activeThreadInfo?.conversationId,
     attachmentIds: activeThreadInfo?.attachmentIds,
+    canvasViewAccessId: canvasInfo?.viewAccessId ?? null,
     setMessages,
     setConversationId,
     setCurrentTraceId,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
     researchContext: selectedResearchContext,
+    createCanvasEnabled,
   });
 
   // Start fresh chat when startFreshChat flag is set
@@ -137,8 +207,11 @@ const XyneAISidebar = ({
   // Thread context: load thread-specific conversation
   // Channel context: load channel-level conversation (global)
   useEffect(() => {
-    // Only load conversations if we have a channelId
-    if (!channelId) return;
+    // If no channelId, skip loading and set loading to false immediately
+    if (!channelId) {
+      setIsLoadingConversation(false);
+      return;
+    }
 
     const loadMostRecentConversation = async (): Promise<void> => {
       try {
@@ -425,9 +498,13 @@ const XyneAISidebar = ({
     setInputValue('');
     setAttachments([]);
     setSelectedActivities([]);
+    setActiveSelectionInfos([]);
     setVisibleCharsMap({});
     setShowHistorySidebar(false);
     setShowUserActivityPanel(false);
+
+    // Clear processed selection keys to prevent memory leak
+    processedSelectionKeysRef.current.clear();
 
     // Abort any ongoing requests
     abortCurrentRequest();
@@ -596,11 +673,17 @@ const XyneAISidebar = ({
   };
 
   const handleSubmit = useCallback(async (): Promise<void> => {
-    if (!inputValue.trim() && selectedActivities.length === 0) return;
+    // Allow submission if there's input, activities, OR selection contexts
+    if (!inputValue.trim() && selectedActivities.length === 0 && activeSelectionInfos.length === 0)
+      return;
     let query = inputValue;
+
     if (selectedActivities.length > 0) {
       query = query + formatActivitiesAsText(selectedActivities);
     }
+
+    // Note: Selection text is NOT appended to query here - it's handled internally in useXyneAIStream
+    // The user message will show original query + selectionContexts as visual cards
 
     const currentAttachments = attachments;
 
@@ -611,17 +694,36 @@ const XyneAISidebar = ({
       data: att.data,
     }));
 
+    // Build selection contexts for UI display and internal formatting
+    const selectionContexts =
+      activeSelectionInfos.length > 0
+        ? activeSelectionInfos.map(selection => ({
+            canvasViewAccessId: selection.canvasViewAccessId,
+            selectedText: selection.text,
+            preview: selection.preview,
+            ...(selection.canvasTitle && { canvasTitle: selection.canvasTitle }),
+          }))
+        : undefined;
+
     setInputValue('');
     setAttachments([]);
     setSelectedActivities([]);
+    // Note: Don't clear selection infos - they persist for follow-up questions
 
     // Scroll immediately after clearing input, before query is submitted
     setTimeout(() => {
       scrollToBottom();
     }, 50);
 
-    await submitQuery(query, messageAttachments);
-  }, [inputValue, attachments, selectedActivities, submitQuery, scrollToBottom]);
+    await submitQuery(query, messageAttachments, selectionContexts);
+  }, [
+    inputValue,
+    attachments,
+    selectedActivities,
+    activeSelectionInfos,
+    submitQuery,
+    scrollToBottom,
+  ]);
 
   return (
     <div
@@ -707,12 +809,15 @@ const XyneAISidebar = ({
             scopeType={scopeType}
             showChannelTag={true}
             threadInfo={activeThreadInfo}
+            canvasInfo={canvasInfo}
+            selectionInfos={activeSelectionInfos}
             inputValue={inputValue}
             onInputChange={setInputValue}
             onSubmit={() => void handleSubmit()}
             onSelectedChannelsChange={setSelectedChannelIds}
             onResearchContextChange={setSelectedResearchContext}
             onThreadInfoChange={setActiveThreadInfo}
+            onSelectionInfosChange={setActiveSelectionInfos}
             onAttachmentsChange={setAttachments}
             selectedActivities={selectedActivities}
             onActivitiesChange={setSelectedActivities}
@@ -721,6 +826,8 @@ const XyneAISidebar = ({
             webSearchEnabled={webSearchEnabled}
             webSearchAccessible={webSearchAccessible}
             onWebSearchToggle={() => setWebSearchEnabled(!webSearchEnabled)}
+            createCanvasEnabled={createCanvasEnabled}
+            onCreateCanvasToggle={() => setCreateCanvasEnabled(!createCanvasEnabled)}
           />
         </>
       )}

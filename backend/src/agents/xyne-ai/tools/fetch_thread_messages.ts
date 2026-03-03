@@ -19,6 +19,9 @@ import { type Tool } from '@xynehq/jaf';
 import { db } from '../../../database/client.js';
 import { logger } from '../../../utils/logger.js';
 import { aiContextService } from '../../../services/aiContextService.js';
+import { getCanvasByViewAccessId } from '../../../services/canvasService.js';
+import { readFromYSweet } from '../../../utils/ysweetUtils.js';
+import { convertBlockNoteToMarkdown } from '../../../services/canvasService.js';
 import type {
   XyneAIAgentContext,
   ToolEntity,
@@ -33,6 +36,7 @@ import {
   transformMessageToEntity,
   transformAttachmentToEntity,
   transformTicketToEntity,
+  toIST,
 } from './helpers.js';
 
 // ============================================================================
@@ -154,6 +158,63 @@ async function fetchThreadMessagesImpl(
     );
 
     // ============================================================================
+    // Fetch canvases from canvasViewIds found in message content
+    // ============================================================================
+
+    // Collect all unique canvasViewIds from message entities
+    const allCanvasViewIds = new Set<string>();
+    messageEntities.forEach(msg => {
+      if (msg.canvasViewIds && msg.canvasViewIds.length > 0) {
+        msg.canvasViewIds.forEach(id => allCanvasViewIds.add(id));
+      }
+    });
+
+    // Fetch canvases by viewAccessId and convert to markdown
+    const canvasEntities: ToolEntity[] = [];
+    if (allCanvasViewIds.size > 0) {
+      logger.info(`[Tool] [${sessionId}] fetch_thread_messages: Fetching ${allCanvasViewIds.size} canvases from message content`);
+
+      const canvasViewIdArray = Array.from(allCanvasViewIds);
+      const canvasResults = await Promise.all(
+        canvasViewIdArray.map(viewAccessId => getCanvasByViewAccessId(viewAccessId))
+      );
+
+      for (let i = 0; i < canvasResults.length; i++) {
+        const canvas = canvasResults[i];
+        if (!canvas) continue;
+
+        try {
+          // Read content from Y-Sweet (not postgres)
+          const blocks = await readFromYSweet(canvas.id);
+          // Convert BlockNote blocks to Markdown
+          const markdownContent = await convertBlockNoteToMarkdown(blocks);
+          // i need only first 1000 characters of markdown content to avoid hitting token limits in the agent
+          const truncatedContent = markdownContent.slice(0, 1000);
+
+          // Get canvas creator info
+          const canvasCreator = userMap.get(canvas.createdBy);
+
+          canvasEntities.push({
+            entityType: 'canvas',
+            entityId: canvas.id,
+            entityIndex: 0, // Will be re-indexed later
+            content: `Canvas: ${canvas.title}\n\n${truncatedContent}`,
+            authorName: canvasCreator?.name || canvasCreator?.email || 'Unknown User',
+            authorId: canvas.createdBy,
+            timestamp: toIST(canvas.createdAt),
+            channelId,
+            channelName,
+            canvasId: canvas.id,
+          });
+        } catch (error) {
+          logger.warn(`[Tool] [${sessionId}] Failed to convert canvas ${canvas.id} to markdown:`, error);
+        }
+      }
+
+      logger.info(`[Tool] [${sessionId}] fetch_thread_messages: Converted ${canvasEntities.length} canvases to markdown`);
+    }
+
+    // ============================================================================
     // Merge and sort all entities chronologically
     // ============================================================================
 
@@ -161,6 +222,7 @@ async function fetchThreadMessagesImpl(
       ...messageEntities,
       ...attachmentEntities,
       ...ticketEntities,
+      ...canvasEntities,
     ];
 
     // Sort chronologically by timestamp (newest first)
@@ -179,7 +241,7 @@ async function fetchThreadMessagesImpl(
     logger.info(
       `[Tool] [${sessionId}] fetch_thread_messages: Found ${limitedEntities.length} total entities ` +
       `(${messageEntities.length} messages, ${attachmentEntities.length} attachments, ` +
-      `${ticketEntities.length} tickets) for conversation ${conversationId}`
+      `${ticketEntities.length} tickets, ${canvasEntities.length} canvases) for conversation ${conversationId}`
     );
 
     return {
@@ -190,7 +252,7 @@ async function fetchThreadMessagesImpl(
         messageCount: messageEntities.length,
         attachmentCount: attachmentEntities.length,
         callCount: 0,  // Calls are channel-level, not thread-level
-        canvasCount: 0,  // Canvases are channel-level, not thread-level
+        canvasCount: canvasEntities.length,
         ticketCount: ticketEntities.length,
       },
     };

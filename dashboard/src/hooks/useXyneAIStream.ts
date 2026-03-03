@@ -8,6 +8,7 @@ import type {
   SummarizerOutput,
   Participant,
   UserTag,
+  SelectionContext,
 } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import {
   parseStreamingContent,
@@ -37,11 +38,13 @@ interface UseXyneAIStreamParams {
   conversationId: string;
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined; // Attachment IDs to fetch from GCS on backend
+  canvasViewAccessId?: string | null;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
   webSearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
+  createCanvasEnabled?: boolean;
 }
 
 // Helper function to clear status message from a message object
@@ -53,16 +56,34 @@ const clearStatusMessage = <T extends { statusMessage?: string }>(
   return rest;
 };
 
+// Canvas creation instruction appended when createCanvasEnabled is true
+const CANVAS_CREATION_INSTRUCTION = `
+<mandatory_final_step>
+You MUST perform these steps after completing your analysis:
+
+1. Call the <tool>create_canvas</tool> tool with:
+   - title: A descriptive title for the document
+   - markdown: Your complete response formatted in markdown with proper headings, sections, and structure
+
+2. After the tool returns, you MUST include the canvas URL from the tool output in your response.
+   The tool will return: "Canvas created successfully! Title: ... URL: https://spaces.xyne.juspay.net/chat/canvas/..."
+   Extract and display this URL so the user can click on it.
+
+This is MANDATORY - the user requires the output in a canvas document with a clickable link.
+</mandatory_final_step>`;
+
 export const useXyneAIStream = ({
   channelIds,
   conversationId,
   threadConversationId,
   attachmentIds,
+  canvasViewAccessId,
   setMessages,
   setConversationId,
   setCurrentTraceId,
   webSearchEnabled = false,
   researchContext,
+  createCanvasEnabled = false,
 }: UseXyneAIStreamParams) => {
   const abortControllerRef = useRef<AbortController | null>(null);
   const participantsRef = useRef<Participant[]>([]);
@@ -79,16 +100,47 @@ export const useXyneAIStream = ({
   }, []);
 
   const submitQuery = useCallback(
-    async (query: string, attachments: MessageAttachment[] = []): Promise<void> => {
-      if (!query.trim()) return;
+    async (
+      query: string,
+      attachments: MessageAttachment[] = [],
+      selectionContexts?: SelectionContext[],
+    ): Promise<void> => {
+      // Allow empty query if there are selection contexts
+      if (!query.trim() && (!selectionContexts || selectionContexts.length === 0)) return;
 
-      // Add user message
+      // Build internal query with selection context format
+      // Format: from canvas(canvas_view_access_id) ```selected_text```
+      let internalQuery = query;
+      if (selectionContexts && selectionContexts.length > 0) {
+        const selectionFormatted = selectionContexts
+          .map(
+            ctx =>
+              `\n\nfrom canvas(${ctx.canvasViewAccessId})\n\`\`\`\n${ctx.selectedText}\n\`\`\``,
+          )
+          .join('');
+        internalQuery = query + selectionFormatted;
+      }
+
+      // Append canvas context hint for better accuracy when Ask AI is triggered from a canvas
+      if (canvasViewAccessId) {
+        const canvasContextHint = `\n\ncanvas view_access_id: ${canvasViewAccessId}`;
+        internalQuery = internalQuery + canvasContextHint;
+      }
+
+      // Append hidden canvas instruction when create canvas is enabled
+      // This forces the LLM to create a canvas with the output at the end
+      if (createCanvasEnabled) {
+        internalQuery = internalQuery + '\n\n' + CANVAS_CREATION_INSTRUCTION;
+      }
+
+      // Add user message (original query without internal formatting, but with selectionContexts for UI)
       const userMessage: Message = {
         id: `user-${Date.now()}`,
         type: 'user',
         content: query,
         timestamp: new Date(),
         ...(attachments.length > 0 && { attachments }),
+        ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),
       };
 
       setMessages(prev => [...prev, userMessage]);
@@ -139,7 +191,7 @@ export const useXyneAIStream = ({
           },
           credentials: 'include',
           body: JSON.stringify({
-            query,
+            query: internalQuery,
             // eslint-disable-next-line @typescript-eslint/naming-convention
             channel_ids: channelIds,
             // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -152,6 +204,8 @@ export const useXyneAIStream = ({
             research_context: researchContext
               ? { type: researchContext.type, name: researchContext.name }
               : null,
+            // eslint-disable-next-line @typescript-eslint/naming-convention
+            ...(canvasViewAccessId && { canvas_view_access_id: canvasViewAccessId }),
             ...(apiAttachments.length > 0 && { attachments: apiAttachments }),
             ...(attachmentIds &&
               attachmentIds.length > 0 && {
@@ -240,11 +294,13 @@ export const useXyneAIStream = ({
       conversationId,
       threadConversationId,
       attachmentIds,
+      canvasViewAccessId,
       researchContext,
       setMessages,
       setConversationId,
       setCurrentTraceId,
       webSearchEnabled,
+      createCanvasEnabled,
     ],
   );
 

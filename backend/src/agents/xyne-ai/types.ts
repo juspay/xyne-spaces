@@ -20,11 +20,23 @@ export interface AttachmentData {
   filename?: string;
 }
 
+/**
+ * Selection context from canvas - selected text with canvas reference
+ */
+export interface SelectionContext {
+  canvasViewAccessId: string;
+  selectedText: string;
+  canvasTitle?: string;
+}
+
 export interface XyneAIRequest {
   query: string;
   sessionId?: string;
   channelIds: string[];
   conversationId?: string;
+  canvasViewAccessId?: string;  // Canvas context when Ask AI is triggered from canvas
+  selectionContexts?: SelectionContext[];  // Selected text contexts from canvases
+  createCanvasEnabled?: boolean;  // Enable create canvas instruction in prompt
   userId: string;
   currentTimestamp?: string | null;
   attachments?: AttachmentData[];
