@@ -58,7 +58,7 @@ export class DraftAttachmentController {
 
       // Ensure we have matching number of attachment IDs
       if (attachmentIdsArray.length !== files.length) {
-        res.status(400).json({ 
+        res.status(400).json({
           error: 'attachmentIds length must match files length',
           expected: files.length,
           received: attachmentIdsArray.length
@@ -112,8 +112,24 @@ export class DraftAttachmentController {
         },
       });
 
-      // Use existing draft ID if found, otherwise use the passed draftMessageId
       const finalDraftMessageId = existingDraft?.id || draftMessageId;
+      if (!existingDraft) {
+        const now = new Date();
+        await this.db.draftMessage.upsert({
+          where: { id: draftMessageId },
+          update: {}, // already exists — leave all fields alone
+          create: {
+            id: draftMessageId,
+            channelId,
+            conversationId: conversationId || null,
+            userId,
+            content: '',
+            hasAttachment: true,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      }
 
       logger.info(`Uploading ${files.length} draft attachments using fileUploadService`);
 
@@ -221,11 +237,6 @@ export class DraftAttachmentController {
 
     } catch (error) {
       logger.error('Error uploading draft attachments:', error);
-      this.db.messageAttachment.deleteMany({
-        where: {
-          id: { in: attachmentIdsArray }
-        }
-      })
       res.status(500).json({
         error: 'Failed to upload attachments',
         message: error instanceof Error ? error.message : 'Unknown error'

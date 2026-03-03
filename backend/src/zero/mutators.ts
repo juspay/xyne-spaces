@@ -3067,6 +3067,35 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         },
       ),
+      deleteMany: defineMutator(
+        z.object({ attachmentIds: z.array(z.string()) }),
+        async ({ tx, args: { attachmentIds } }) => {
+          for (const attachmentId of attachmentIds) {
+            const attachment = await tx.run(zql.message_attachments.where('id', attachmentId).one());
+            if (!attachment) continue;
+  
+            await tx.mutate.message_attachments.delete({ id: attachment.id });
+  
+            const remainingAttachments = await tx.run(
+              zql.message_attachments.where('entityId', attachment.entityId),
+            );
+  
+            if (remainingAttachments.length === 0) {
+              if (attachment.entityType !== AttachmentEntityType.DRAFT) {
+                await tx.mutate.messages.update({
+                  messageId: attachment.entityId,
+                  hasAttachment: false,
+                });
+              } else {
+                await tx.mutate.draft_messages.update({
+                  id: attachment.entityId,
+                  hasAttachment: false,
+                });
+              }
+            }
+          }
+        },
+      ),
     },
     calls: {
       initiate: defineMutator(
