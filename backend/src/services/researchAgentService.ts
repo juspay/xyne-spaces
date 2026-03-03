@@ -67,6 +67,7 @@ class ResearchAgentService {
    */
   private getHeaders(): Record<string, string> {
     const pomeriumCookie = process.env.RESEARCH_AGENT_POMERIUM_COOKIE;
+    const pomeriumJwt = process.env.RESEARCH_AGENT_POMERIUM_JWT;
     const bearerToken = process.env.RESEARCH_AGENT_BEARER_TOKEN;
 
     if (pomeriumCookie) {
@@ -82,6 +83,10 @@ class ResearchAgentService {
 
       if (bearerToken) {
         headers['Authorization'] = `Bearer ${bearerToken}`;
+      }
+
+      if (pomeriumJwt) {
+        headers['x-pomerium-jwt-assertion'] = pomeriumJwt;
       }
 
       return headers;
@@ -245,6 +250,7 @@ class ResearchAgentService {
     options?: {
       systemPrompt?: string;
       maxTurns?: number;
+      branch?: string;
       onEvent?: StreamEventCallback;
       signal?: AbortSignal;
     }
@@ -263,6 +269,8 @@ class ResearchAgentService {
       system_prompt: options?.systemPrompt || '',
       max_turns: options?.maxTurns || 20,
       session_id: sessionId,
+      model_name: process.env.RESEARCH_AGENT_MODEL_NAME || 'private-large',
+      branch: options?.branch || process.env.RESEARCH_AGENT_BRANCH || 'main'
     };
 
     const response = await fetch(`${this.baseUrl}/api/chat/sessions/${sessionId}/stream`, {
@@ -288,7 +296,7 @@ class ResearchAgentService {
     let buffer = '';
     let finalResponse = '';
     let currentEventType = 'data';
-
+    
     try {
       while (true) {
         const { done, value } = await reader.read();

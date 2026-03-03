@@ -16,6 +16,7 @@ import { geniusInvestigationWorkflow } from './investigation-workflow/geniusInve
 import { geniusQueryWorkflow } from './genius-query-workflow/geniusQueryWorkflow'
 import { stageApprovalWorkflow } from './stageApprovalWorkflow'
 import { networkDocumentWorkflow } from './network-document-workflow/networkDocumentWorkflow'
+import { integrityDebugWorkflow } from './integrity-debug-workflow/integrityDebugWorkflow'
 import { WorkflowType } from '../types/workflow-enums'
 import {logger} from '@/utils/logger';
 
@@ -38,6 +39,7 @@ export const WORKFLOW_DEFINITIONS = {
   [WorkflowType.GENIUS_QUERY_WORKFLOW]: geniusQueryWorkflow,
   [WorkflowType.STAGE_APPROVAL_WORKFLOW]: stageApprovalWorkflow,
   [WorkflowType.NETWORK_DOCUMENT_PROCESSING]: networkDocumentWorkflow,
+  [WorkflowType.INTEGRITY_DEBUG_WORKFLOW]: integrityDebugWorkflow,
 } as const
 
 export function registerAllWorkflows(): void {
@@ -60,6 +62,7 @@ export function registerAllWorkflows(): void {
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.GENIUS_QUERY_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.STAGE_APPROVAL_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.NETWORK_DOCUMENT_PROCESSING])
+  workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.INTEGRITY_DEBUG_WORKFLOW])
 }
 
 export { workflowRegistry } from '../registry/workflowRegistry'

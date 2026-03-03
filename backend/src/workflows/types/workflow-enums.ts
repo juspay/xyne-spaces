@@ -18,6 +18,7 @@ export enum WorkflowType {
   STAGE_APPROVAL_WORKFLOW = 'STAGE_APPROVAL_WORKFLOW',
   GENIUS_QUERY_WORKFLOW = 'GENIUS_QUERY_WORKFLOW',
   NETWORK_DOCUMENT_PROCESSING = 'NETWORK_DOCUMENT_PROCESSING',
+  INTEGRITY_DEBUG_WORKFLOW = 'INTEGRITY_DEBUG_WORKFLOW',
 }
 
 export enum WorkflowExecutionStatus {
@@ -465,6 +466,18 @@ export interface NetworkDocumentContext extends BaseWorkflowContext {
   [key: string]: any
 }
 
+export interface IntegrityDebugContext extends BaseWorkflowContext {
+  csvData: string // CSV content with headers: order_id,merchant_id,failure_reason,gateway,flow (deprecated)
+  sessions: Array<{
+    orderId: string
+    merchantId: string
+    failureReason: string
+    gateway: string
+    flow: 'WEBHOOK' | 'REDIRECTION' | 'SYNC'
+  }>
+  orderIds?: string[] // Array of all order IDs to analyze
+}
+
 // Union type for all workflow contexts
 export type WorkflowContext = any
 
@@ -554,6 +567,7 @@ export function getWorkflowTypeDisplayName(workflowType: WorkflowType): string {
     [WorkflowType.GENIUS_QUERY_WORKFLOW]: 'Genius Query Workflow',
     [WorkflowType.STAGE_APPROVAL_WORKFLOW]: 'Stage Approval Workflow',
     [WorkflowType.NETWORK_DOCUMENT_PROCESSING]: 'Network Document Processing',
+    [WorkflowType.INTEGRITY_DEBUG_WORKFLOW]: 'Integrity Debug Workflow',
   };
   return displayNames[workflowType]
 }
