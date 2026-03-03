@@ -282,6 +282,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   channelScopeType,
   isFirstInThread = false,
   allThreadAttachments,
+  workflowNumber,
 }) => {
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
@@ -362,6 +363,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         threadInfo={threadInfo}
         channelScopeType={channelScopeType}
         isFirstInThread={isFirstInThread}
+        workflowNumber={workflowNumber}
       />
     );
   }
@@ -861,6 +863,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   createdAt={message.createdAt}
                   ticketId={metadata.ticketId}
                   metadata={metadata}
+                  workflowNumber={workflowNumber}
                 />
               )}
 

@@ -461,6 +461,19 @@ export const ThreadMessages = ({
       .sort((a, b) => b.createdAt - a.createdAt);
   }, [messages]);
 
+  // Create workflow number map for messages in threadlist
+  const workflowNumberMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (workflowMessages.length <= 1) return map;
+
+    // Sort by createdAt ascending (oldest first) to assign numbers
+    const sortedWorkflows = [...workflowMessages].sort((a, b) => a.createdAt - b.createdAt);
+    sortedWorkflows.forEach((msg, index) => {
+      map.set(msg.messageId, index + 1); // 1-indexed
+    });
+    return map;
+  }, [workflowMessages]);
+
   const latestWorkflowStatus = useMemo(() => {
     if (workflowMessages.length === 0) return null;
     const metadata = workflowMessages[0]?.metadata as MessageMetadata | null;
@@ -774,6 +787,7 @@ export const ThreadMessages = ({
               isTicketThread={false}
               channelScopeType={channel?.scopeType}
               conversation={conversation}
+              workflowNumberMap={workflowNumberMap}
             />
 
             {/* ChatInput at the bottom - only show if user is a member */}
@@ -807,7 +821,7 @@ export const ThreadMessages = ({
               </div>
             ) : (
               <div className='space-y-3'>
-                {workflowMessages.map(msg => {
+                {[...workflowMessages].reverse().map((msg, index) => {
                   const metadata = msg.metadata as MessageMetadata;
 
                   if (!metadata?.workflowName || !metadata?.ticketId) {
@@ -822,6 +836,7 @@ export const ThreadMessages = ({
                       createdAt={msg.createdAt}
                       ticketId={metadata.ticketId}
                       metadata={metadata}
+                      workflowNumber={workflowMessages.length > 1 ? index + 1 : undefined}
                     />
                   );
                 })}
@@ -1133,6 +1148,7 @@ export const ThreadMessages = ({
               isTicketThread={true}
               channelScopeType={channel?.scopeType}
               conversation={conversation}
+              workflowNumberMap={workflowNumberMap}
             />
 
             {/* ChatInput at the bottom - only show if user is a member */}
@@ -1208,7 +1224,7 @@ export const ThreadMessages = ({
               </div>
             ) : (
               <div className='space-y-3'>
-                {workflowMessages.map(msg => {
+                {[...workflowMessages].reverse().map((msg, index) => {
                   const metadata = msg.metadata as MessageMetadata;
 
                   if (!metadata?.workflowName || !metadata?.ticketId) {
@@ -1223,6 +1239,7 @@ export const ThreadMessages = ({
                       createdAt={msg.createdAt}
                       ticketId={metadata.ticketId}
                       metadata={metadata}
+                      workflowNumber={workflowMessages.length > 1 ? index + 1 : undefined}
                     />
                   );
                 })}
@@ -1516,6 +1533,7 @@ export const ThreadMessages = ({
             isTicketThread={false}
             channelScopeType={channel?.scopeType}
             conversation={conversation}
+            workflowNumberMap={workflowNumberMap}
           />
 
           {/* ChatInput at the bottom - only show if user is a member */}

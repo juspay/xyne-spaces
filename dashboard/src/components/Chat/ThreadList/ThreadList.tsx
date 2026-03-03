@@ -26,6 +26,7 @@ type ThreadListProps = {
   messagesWithSeparators?: ThreadListItemWithSeparator[] | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   conversation?: ConversationWithTicket | undefined;
+  workflowNumberMap?: Map<string, number>;
 };
 
 const ThreadList = ({
@@ -38,6 +39,7 @@ const ThreadList = ({
   messagesWithSeparators,
   channelScopeType,
   conversation,
+  workflowNumberMap,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
   const { editingMessageId, requestEdit } = useEditContext();
@@ -276,6 +278,7 @@ const ThreadList = ({
                   isTicketThread={isTicketThread}
                   channelScopeType={channelScopeType}
                   allThreadAttachments={allThreadAttachments}
+                  workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
                   {...(conversation && { conversation })}
                 />
               </div>
@@ -329,6 +332,7 @@ const ThreadList = ({
                 isTicketThread={isTicketThread}
                 channelScopeType={channelScopeType}
                 allThreadAttachments={allThreadAttachments}
+                workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
                 {...(conversation && { conversation })}
               />
             </div>

@@ -46,6 +46,7 @@ export interface MobileMessageMyBubbleProps {
     | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   isFirstInThread?: boolean;
+  workflowNumber?: number | undefined;
 }
 
 /**
@@ -69,6 +70,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   threadInfo,
   channelScopeType,
   isFirstInThread = false,
+  workflowNumber,
 }) => {
   const { toggleReaction } = useReactions();
   const reactions = message.reactions || [];
@@ -267,6 +269,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                 createdAt={message.createdAt}
                 ticketId={metadata.ticketId}
                 metadata={metadata}
+                workflowNumber={workflowNumber}
               />
             )}
 

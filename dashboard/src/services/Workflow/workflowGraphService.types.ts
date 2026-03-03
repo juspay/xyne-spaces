@@ -142,6 +142,9 @@ export interface CombinedWorkflowData {
       };
       [key: string]: unknown;
     } | null;
+    executorType?: string;
+    useQuestioningMode?: boolean;
+    model?: string;
   }>;
 }
 

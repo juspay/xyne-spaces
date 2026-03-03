@@ -322,6 +322,10 @@ export class WorkflowController {
             workflowType: workflowTypeValue,
             ticketId: ticketId,
             xyneId: ticketId,
+            executorType: executorType || appConfig.workflow.defaultExecutor,
+            useQuestioningMode: customFields.useQuestioningMode ?? false,
+            model: customFields.model || appConfig.workflow.defaultModelName,
+            createdBy: req.user?.name || req.user?.id || 'system',
           };
 
           await prisma.message.create({

@@ -65,6 +65,10 @@ export interface WorkflowHeaderProps {
   gitBranch?: string | undefined;
   workflowType?: string | undefined;
   onTriggerWorkflow?: () => void;
+  executorType?: string | undefined;
+  useQuestioningMode?: boolean | undefined;
+  model?: string | undefined;
+  prLink?: string | undefined;
 }
 
 type StatusConfig = { bg: string; text: string; dot: string; label: string };
@@ -124,16 +128,19 @@ const getStatusConfig = (status?: string): StatusConfig => {
   );
 };
 
-const MenuItem: React.FC<{
-  onClick: () => void;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ onClick, icon, children }) => (
+const MenuItem: React.FC<
+  {
+    onClick: () => void;
+    icon: React.ReactNode;
+    children: React.ReactNode;
+  } & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'>
+> = ({ onClick, icon, children, ...rest }) => (
   <button
     onClick={onClick}
     className='w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
     data-track-category='Workflows'
     data-track-name='SelectMenuItem'
+    {...rest}
   >
     {icon}
     {children}
@@ -154,14 +161,20 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   gitBranch,
   workflowType,
   onTriggerWorkflow,
+  executorType,
+  useQuestioningMode,
+  model,
+  prLink,
 }) => {
   const navigate = useNavigate();
   // const [showDesc, setShowDesc] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showJenkinsPanel, setShowJenkinsPanel] = useState(false);
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [isTriggering, setIsTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const jenkinsPanelRef = useRef<HTMLDivElement>(null);
+  const statusDropdownRef = useRef<HTMLDivElement>(null);
 
   const { cancelExecution, isCanceling } = useWorkflowControl();
 
@@ -203,8 +216,10 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
 
   const closeMenu = useCallback(() => setShowMenu(false), []);
   const closeJenkinsPanel = useCallback(() => setShowJenkinsPanel(false), []);
+  const closeStatusDropdown = useCallback(() => setShowStatusDropdown(false), []);
   useClickOutside(menuRef, closeMenu, showMenu);
   useClickOutside(jenkinsPanelRef, closeJenkinsPanel, showJenkinsPanel);
+  useClickOutside(statusDropdownRef, closeStatusDropdown, showStatusDropdown);
 
   const status = executionStatus?.toLowerCase() || '';
   const isRunning = ['running', 'in_progress'].includes(status);
@@ -240,15 +255,62 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           {executionStatus && (
             <>
               <ChevronRight size={14} className='text-gray-300 flex-shrink-0' />
-              <div
-                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md ${statusConfig.bg}`}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot} ${isRunning ? 'animate-pulse' : ''}`}
-                />
-                <span className={`text-xs font-medium ${statusConfig.text}`}>
-                  {statusConfig.label}
-                </span>
+              <div className='relative' ref={statusDropdownRef}>
+                <button
+                  onClick={() => setShowStatusDropdown(!showStatusDropdown)}
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md ${statusConfig.bg} cursor-pointer hover:opacity-80 transition-opacity`}
+                  data-track-category='Workflows'
+                  data-track-name='ToggleStatusDropdown'
+                  data-track-metadata={JSON.stringify({ executionStatus, ticketId: ticket.id })}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot} ${isRunning ? 'animate-pulse' : ''}`}
+                  />
+                  <span className={`text-xs font-medium ${statusConfig.text}`}>
+                    {statusConfig.label}
+                  </span>
+                  <ChevronDown size={12} className={statusConfig.text} />
+                </button>
+                {showStatusDropdown && (
+                  <div className='absolute left-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-50'>
+                    {executorType && (
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
+                        <span className='font-medium text-gray-900'>Executor: {executorType}</span>
+                      </div>
+                    )}
+                    {model && (
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
+                        <span className='font-medium text-gray-900'>Model: {model}</span>
+                      </div>
+                    )}
+                    {prLink && (
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
+                        <a
+                          href={prLink}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          className='font-medium text-gray-900 hover:underline'
+                          onClick={e => e.stopPropagation()}
+                          data-track-category='Workflows'
+                          data-track-name='OpenPullRequestLink'
+                          data-track-metadata={JSON.stringify({ prLink, ticketId: ticket.id })}
+                        >
+                          Link to Pull Request
+                        </a>
+                      </div>
+                    )}
+                    {useQuestioningMode && (
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
+                        <span className='font-medium text-gray-900'>Questioning Enabled</span>
+                      </div>
+                    )}
+                    {!executorType && !model && !prLink && !useQuestioningMode && (
+                      <div className='px-3 py-2 text-sm text-gray-500'>
+                        No additional metadata available
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           )}
