@@ -4,15 +4,35 @@ import { useAllChannels, useUserChannelStatuses } from '../../hooks/useChannels'
 import { groupChannelsByScope } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
+import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
 
-const GlobalCommandMenu = (): ReactElement | null => {
+interface GlobalCommandMenuProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  contextSelectionMode?: boolean;
+  contextItems?: ContextItem[];
+  onContextItemToggle?: (item: ContextItem) => void;
+  onContextSelectionConfirm?: () => void;
+}
+
+const GlobalCommandMenu = ({
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  contextSelectionMode,
+  contextItems,
+  onContextItemToggle,
+  onContextSelectionConfirm,
+}: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
-  const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
 
   // Get unread counts for all channels
   const unreadCounts = useAllUnreadCount();
+
+  const open = controlledOpen ?? internalOpen;
+  const onOpenChange = controlledOnOpenChange ?? setInternalOpen;
 
   // Group channels by scope type
   const { starred, channels, directMessages } = useMemo(() => {
@@ -42,8 +62,12 @@ const GlobalCommandMenu = (): ReactElement | null => {
       directMessages={directMessages}
       currentUserID={context.userID}
       unreadCounts={unreadCounts}
-      open={isCommandMenuOpen}
-      onOpenChange={setIsCommandMenuOpen}
+      open={open}
+      onOpenChange={onOpenChange}
+      {...(contextSelectionMode !== undefined ? { contextSelectionMode } : {})}
+      {...(contextItems !== undefined ? { contextItems } : {})}
+      {...(onContextItemToggle !== undefined ? { onContextItemToggle } : {})}
+      {...(onContextSelectionConfirm !== undefined ? { onContextSelectionConfirm } : {})}
     />
   );
 };
