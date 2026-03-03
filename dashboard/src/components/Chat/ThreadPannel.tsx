@@ -1445,24 +1445,40 @@ export const ThreadMessages = ({
                       )}
 
                       {/* Create Ticket Button */}
-                      {channel?.projectId && !hasTicketInMessages && (
-                        <Button
-                          variant='ghost'
-                          className='px-3 py-1.5 text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors duration-200 flex items-center gap-2'
-                          onClick={handleCreateTicket}
-                          title='Create ticket'
-                          data-testid='thread-create-ticket-button'
-                          data-track-category='THREAD_PANEL'
-                          data-track-name='CREATE_TICKET_FROM_THREAD'
-                          data-track-metadata={JSON.stringify({
-                            channelId: channel?.id,
-                            projectId: channel?.projectId,
-                          })}
-                        >
-                          <Ticket size={18} />
-                          <span className='text-sm font-medium'>Create Ticket</span>
-                        </Button>
-                      )}
+                      {channel?.projectId &&
+                        !hasTicketInMessages &&
+                        (() => {
+                          const buttonContent = (
+                            <Button
+                              variant='ghost'
+                              className={cn(
+                                isMobile
+                                  ? 'p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                                  : 'px-3 py-1.5 text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors duration-200 flex items-center gap-2 rounded-lg',
+                              )}
+                              size='sm'
+                              onClick={handleCreateTicket}
+                              data-testid='thread-create-ticket-button'
+                              data-track-category='THREAD_PANEL'
+                              data-track-name='CREATE_TICKET_FROM_THREAD'
+                              data-track-metadata={JSON.stringify({
+                                channelId: channel?.id,
+                                projectId: channel?.projectId,
+                              })}
+                            >
+                              <Ticket size={isMobile ? 20 : 18} />
+                              {!isMobile && (
+                                <span className='text-sm font-medium'>Create Ticket</span>
+                              )}
+                            </Button>
+                          );
+
+                          return isMobile ? (
+                            <Tooltip content='Create ticket'>{buttonContent}</Tooltip>
+                          ) : (
+                            buttonContent
+                          );
+                        })()}
 
                       {/* Close Button */}
                       {onClose ? (
