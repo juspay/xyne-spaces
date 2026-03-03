@@ -91,7 +91,7 @@ export const ConversationHistory = ({
   };
 
   return (
-    <div className='flex-1 overflow-hidden flex flex-col bg-white h-full'>
+    <div className='flex-1 overflow-hidden flex flex-col bg-white h-full rounded-xl'>
       {/* Header */}
       <div className='p-4 flex items-center justify-between gap-2 self-stretch border-gray-200 flex-shrink-0'>
         {isSearchExpanded ? (

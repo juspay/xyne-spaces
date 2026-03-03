@@ -224,7 +224,7 @@ export const UserActivityPanel = ({
   const selectedCount = selectedIds.size;
 
   return (
-    <div className='flex-1 overflow-hidden flex flex-col bg-white h-full'>
+    <div className='flex-1 overflow-hidden flex flex-col bg-white h-full rounded-xl'>
       {/* Header */}
       <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-b border-gray-200 flex-shrink-0'>
         <div className='flex items-center gap-2'>
