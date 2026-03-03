@@ -1,3 +1,19 @@
+## [1.65.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.64.0...v1.65.0) (2026-03-03)
+
+
+### Features
+
+* added entity wise logs in kanban board screen for analysis ([6d037c6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6d037c6bd3f7b27aade1aff67675ea9eb5c946b1)), closes [#3807](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3807)
+
+
+### Bug Fixes
+
+* :Mentions PR author in release canvas ([03e2a02](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/03e2a026363919134a417f20aeb2ee5a480bacf2)), closes [#3829](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3829)
+* alot of workflow changes, live edits show main, error dropdown, fix the description ([bfa0798](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bfa07988b816fd409deb6223f293474011715716))
+* custom emoticons on user profile ([f57570c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f57570c35914024332a2c69aa28a6b65b7609f42)), closes [#3513](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3513)
+* mtls cert, endpoint change for sandbox ([61dd16d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/61dd16d45e51f32f88a6bcacd5750e4307896406)), closes [#3811](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3811)
+* Workflow UI changes ([d6821ce](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d6821ce1b152947a76d039f1c05a9cf1589a7114)), closes [#3790](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3790)
+
 ## [1.64.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.63.0...v1.64.0) (2026-03-03)
 
 
