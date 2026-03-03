@@ -1,5 +1,14 @@
 import { ReactElement, useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { isSandBox, isProd } from '../../config';
+
+// Derive the deep link protocol for the running flavor based on hostname,
+// matching the DEEP_LINK_PROTOCOL values in the electron config.
+const DEEP_LINK_PROTOCOL = isProd
+  ? 'xyne-spaces'
+  : isSandBox
+    ? 'xyne-spaces-sandbox'
+    : 'xyne-spaces-dev';
 
 const LaunchScreen = (): ReactElement => {
   const [searchParams] = useSearchParams();
@@ -11,7 +20,7 @@ const LaunchScreen = (): ReactElement => {
   const path = searchParams.get('path'); // e.g. /chat/channel/123
 
   // Construct the deep link URL
-  let deepLink = 'xyne-spaces://';
+  let deepLink = `${DEEP_LINK_PROTOCOL}://`;
   let targetPath = '';
 
   if (code && state) {

@@ -85,8 +85,8 @@ window.addEventListener('unhandledrejection', event => {
 });
 
 // Register Service Worker for docs preview and push notifications
-// Note: Service Workers are not supported on custom protocols like xyne-spaces://
-const isCustomProtocol = window.location.protocol === 'xyne-spaces://.';
+// Note: Service Workers are not supported on custom protocols (xyne-spaces://, xyne-spaces-dev://, etc.)
+const isCustomProtocol = window.location.protocol.startsWith('xyne-spaces');
 if ('serviceWorker' in navigator && !isCustomProtocol) {
   window.addEventListener('load', () => {
     navigator.serviceWorker

@@ -103,6 +103,13 @@ async function initializeApp(): Promise<void> {
     app.setName(config.APP_NAME);
   }
 
+  // Isolate userData per flavor so each has its own single-instance lock,
+  // session storage, and electron-store data. Prod keeps the original path
+  if (config.USER_DATA_SUFFIX) {
+    const currentUserData = app.getPath('userData');
+    app.setPath('userData', `${currentUserData}${config.USER_DATA_SUFFIX}`);
+  }
+
   // Register deep links BEFORE app is ready
   const gotTheLock = setupDeepLinks(createMainWindow);
   if (!gotTheLock) {

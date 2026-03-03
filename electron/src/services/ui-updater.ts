@@ -522,7 +522,7 @@ async function applyAndReload(mainWindow: BrowserWindow, releaseConfig: ReleaseC
       log.error('[UIUpdater] Error clearing cache:', error);
     }
     
-    const bundledUrl = 'xyne-spaces://./';
+    const bundledUrl = `${config.DEEP_LINK_PROTOCOL}://./`;
     void mainWindow.loadURL(bundledUrl);
   }
 }
