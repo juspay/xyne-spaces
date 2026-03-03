@@ -220,8 +220,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 options={inviteUserOptions.filter(opt => !selectedParticipants.includes(opt.value))}
                 selectedValues={selectedParticipants}
                 onMultiSelect={setSelectedParticipants}
-                placeholder='Search users in this channel...'
-                searchPlaceholder='Search users in this channel...'
+                placeholder='Select participants'
+                searchPlaceholder='Select participants'
                 onSearchChange={setSearchQuery}
                 variant='inline'
                 width='100%'

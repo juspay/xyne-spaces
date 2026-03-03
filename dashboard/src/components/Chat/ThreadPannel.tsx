@@ -20,6 +20,7 @@ import {
   ExternalLink,
   ArrowLeft,
   ClipboardCheck,
+  Headphones,
 } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
@@ -57,6 +58,7 @@ import { useDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { useUser } from '../../hooks/useUsers';
+import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectionModal';
 
 type TabType = 'thread' | 'details' | 'files' | 'workflows' | 'rca';
 type UnderTicketTabType = 'replies' | 'workflows' | 'rca';
@@ -183,6 +185,8 @@ export const ThreadMessages = ({
 
   // Create ticket modal state
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
+  // Call participants modal state
+  const [showParticipantsModal, setShowParticipantsModal] = useState(false);
 
   // Navigation for thread summary
   const navigate = useNavigate();
@@ -307,6 +311,10 @@ export const ThreadMessages = ({
     const metadata = conversation.metadata as { ticketId?: string };
     return metadata.ticketId !== undefined;
   }, [conversation]);
+
+  const hasActiveCallForConversation = useMemo(() => {
+    return !!conversation?.callId;
+  }, [conversation?.callId]);
 
   // Create thread info for XyneAI context
   const initialMessage = conversation?.initialMessage;
@@ -443,6 +451,10 @@ export const ThreadMessages = ({
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
+  };
+
+  const handleInitiateCall = (): void => {
+    setShowParticipantsModal(true);
   };
 
   const handleTicketCreated = (): void => {
@@ -641,18 +653,54 @@ export const ThreadMessages = ({
                     </Tabs.Trigger>
                   )}
                 </div>
-                {/* Subscription Button */}
-                {derivedConversationId && (
-                  <Tooltip content='Toggle notification subscription'>
-                    <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
-                      <ConversationSubscription
-                        conversationId={derivedConversationId}
-                        variant='icon-only'
-                        className='flex items-center justify-center'
-                      />
-                    </div>
-                  </Tooltip>
-                )}
+                <div className='flex items-center gap-2'>
+                  {/* Subscription Button */}
+                  {derivedConversationId && (
+                    <Tooltip content='Toggle notification subscription'>
+                      <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                        <ConversationSubscription
+                          conversationId={derivedConversationId}
+                          variant='icon-only'
+                          className='flex items-center justify-center'
+                        />
+                      </div>
+                    </Tooltip>
+                  )}
+                  {/* Initiate Call Button */}
+                  {derivedConversationId && (
+                    <Tooltip
+                      content={
+                        hasActiveCallForConversation
+                          ? 'Call already in progress'
+                          : 'Start thread call'
+                      }
+                    >
+                      <span className='inline-flex cursor-pointer'>
+                        <Button
+                          variant='ghost'
+                          className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                          size='sm'
+                          onClick={handleInitiateCall}
+                          disabled={hasActiveCallForConversation}
+                          title={
+                            hasActiveCallForConversation
+                              ? 'Call already in progress'
+                              : 'Start thread call'
+                          }
+                          data-testid='thread-initiate-call-button'
+                          data-track-category='THREAD_PANEL'
+                          data-track-name='INITIATE_CALL_FROM_THREAD'
+                          data-track-metadata={JSON.stringify({
+                            channelId: channel?.id,
+                            conversationId: derivedConversationId,
+                          })}
+                        >
+                          <Headphones size={20} />
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  )}
+                </div>
               </Tabs.List>
             </div>
           </div>
@@ -742,6 +790,15 @@ export const ThreadMessages = ({
             </Tabs.Content>
           )}
         </Tabs.Root>
+        {/* Call Participants Selection Modal */}
+        {derivedConversationId && (
+          <CallParticipantsSelectionModal
+            isOpen={showParticipantsModal}
+            onClose={() => setShowParticipantsModal(false)}
+            channelId={derivedChannelId}
+            conversationId={derivedConversationId}
+          />
+        )}
       </div>
     );
   }
@@ -863,6 +920,38 @@ export const ThreadMessages = ({
                 <LinkIcon size={20} />
               </Button>
             </Tooltip>
+            {/* Initiate Call Button */}
+            {derivedConversationId && (
+              <Tooltip
+                content={
+                  hasActiveCallForConversation ? 'Call already in progress' : 'Start thread call'
+                }
+              >
+                <span className='inline-flex cursor-pointer'>
+                  <Button
+                    variant='ghost'
+                    className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                    size='sm'
+                    onClick={handleInitiateCall}
+                    disabled={hasActiveCallForConversation}
+                    title={
+                      hasActiveCallForConversation
+                        ? 'Call already in progress'
+                        : 'Start thread call'
+                    }
+                    data-testid='thread-initiate-call-button'
+                    data-track-category='THREAD_PANEL'
+                    data-track-name='INITIATE_CALL_FROM_THREAD'
+                    data-track-metadata={JSON.stringify({
+                      channelId: channel?.id,
+                      conversationId: derivedConversationId,
+                    })}
+                  >
+                    <Headphones size={20} />
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
             <Tooltip content='Close'>
               <Button
                 onClick={handleCloseTicketDetailsThread}
@@ -1212,6 +1301,39 @@ export const ThreadMessages = ({
                         </Tooltip>
                       )}
 
+                      {/* Initiate Call Button */}
+                      {derivedConversationId && (
+                        <Tooltip
+                          content={
+                            hasActiveCallForConversation ? 'Call already in progress' : 'Start call'
+                          }
+                        >
+                          <span className='inline-flex cursor-pointer'>
+                            <Button
+                              variant='ghost'
+                              className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                              size='sm'
+                              onClick={handleInitiateCall}
+                              disabled={hasActiveCallForConversation}
+                              title={
+                                hasActiveCallForConversation
+                                  ? 'Call already in progress'
+                                  : 'Start call'
+                              }
+                              data-testid='thread-initiate-call-button'
+                              data-track-category='THREAD_PANEL'
+                              data-track-name='INITIATE_CALL_FROM_THREAD'
+                              data-track-metadata={JSON.stringify({
+                                channelId: channel?.id,
+                                conversationId: derivedConversationId,
+                              })}
+                            >
+                              <Headphones size={20} />
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      )}
+
                       {/* Create Ticket Button */}
                       {channel?.projectId && !hasTicketInMessages && (
                         <Button
@@ -1308,6 +1430,16 @@ export const ThreadMessages = ({
           isModalOpen={isCreateTicketModalOpen}
           onModalOpenChange={setIsCreateTicketModalOpen}
           onTicketCreated={handleTicketCreated}
+        />
+      )}
+
+      {/* Call Participants Selection Modal */}
+      {derivedConversationId && (
+        <CallParticipantsSelectionModal
+          isOpen={showParticipantsModal}
+          onClose={() => setShowParticipantsModal(false)}
+          channelId={derivedChannelId}
+          conversationId={derivedConversationId}
         />
       )}
     </div>
