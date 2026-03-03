@@ -6,6 +6,7 @@ import { keychain } from '../keychain';
 import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
+import { config } from '../app/config';
 
 export async function setupMTLS() {
     log.info('[mTLS] setupMTLS called - registering event handlers');
@@ -16,7 +17,8 @@ export async function setupMTLS() {
         log.info(`[mTLS] certificate-error event fired for ${_url}: ${error}`);
         if (error === 'net::ERR_CERT_AUTHORITY_INVALID') {
             try {
-                const caPath = path.join(app.getAppPath(), 'certs', 'ca.cert');
+                const caCertName = config.USER_DATA_SUFFIX === '-sandbox' ? 'ca.sbx.cert' : 'ca.cert';
+                const caPath = path.join(app.getAppPath(), 'certs', caCertName);
 
                 if (fs.existsSync(caPath)) {
                     const caContent = fs.readFileSync(caPath);
@@ -80,7 +82,8 @@ export async function setupMTLS() {
     // Try to install Root CA if it exists
 
     try {
-        const caPath = path.join(app.getAppPath(), 'certs', 'ca.cert');
+        const caCertName = config.USER_DATA_SUFFIX === '-sandbox' ? 'ca.sbx.cert' : 'ca.cert';
+        const caPath = path.join(app.getAppPath(), 'certs', caCertName);
 
         if (fs.existsSync(caPath)) {
             const caContent = fs.readFileSync(caPath, 'utf8');

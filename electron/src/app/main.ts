@@ -36,6 +36,10 @@ import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
 
+if (process.platform === 'darwin') {
+  app.setName(config.APP_NAME);
+}
+
 // Initialize electron-log for main process
 log.initialize();
 log.transports.file.level = 'info';
@@ -99,10 +103,6 @@ app.on('before-quit', async () => {
 
 
 async function initializeApp(): Promise<void> {
-  if (process.platform === 'darwin') {
-    app.setName(config.APP_NAME);
-  }
-
   // Isolate userData per flavor so each has its own single-instance lock,
   // session storage, and electron-store data. Prod keeps the original path
   if (config.USER_DATA_SUFFIX) {
