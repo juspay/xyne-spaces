@@ -750,6 +750,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               showEditAction={canEditMessage}
               messageId={message.messageId}
               conversationId={conversation?.conversationId || message.conversationId}
+              {...(conversation?.initialMessageId && {
+                initialMessageId: conversation.initialMessageId,
+              })}
               reactions={isMessageDeleted ? [] : (message.reactions ?? [])}
               onCopyLink={onCopyLink}
               {...(!isMessageDeleted &&
@@ -810,6 +813,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               onOpenChange={handleActionsDrawerOpenChange}
               messageId={message.messageId}
               conversationId={conversation?.conversationId || message.conversationId}
+              {...(conversation?.initialMessageId && {
+                initialMessageId: conversation.initialMessageId,
+              })}
               reactions={isMessageDeleted ? [] : (message.reactions ?? [])}
               showEditAction={canEditMessage}
               isBookmarked={isBookmarked}

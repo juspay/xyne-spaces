@@ -37,6 +37,7 @@ interface HoverActionsToolbarProps {
   isVisible: boolean;
   messageId: string;
   conversationId?: string;
+  initialMessageId?: string;
   showEditAction?: boolean;
   reactions?: readonly ReactionWithUser[];
   onReplyInThread?: (e?: React.MouseEvent) => void;
@@ -63,6 +64,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   isVisible,
   messageId,
   conversationId,
+  initialMessageId,
   showEditAction = false,
   reactions = [],
   onReplyInThread,
@@ -169,7 +171,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
       )}
 
       {/* Initiate Call */}
-      {onInitiateCall && (
+      {onInitiateCall && messageId === initialMessageId && (
         <Tooltip content={isCallDisabled ? 'Call already in progress' : 'Start call'} side='top'>
           <span className='inline-flex cursor-pointer'>
             <Button

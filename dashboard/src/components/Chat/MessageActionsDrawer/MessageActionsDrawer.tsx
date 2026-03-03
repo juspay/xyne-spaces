@@ -37,6 +37,7 @@ export interface MessageActionsDrawerProps {
   onOpenChange: (open: boolean) => void;
   messageId: string;
   conversationId?: string;
+  initialMessageId?: string;
   showEditAction?: boolean;
   reactions?: readonly ReactionWithUser[];
   onReplyInThread?: (e?: React.MouseEvent) => void;
@@ -63,6 +64,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   onOpenChange,
   messageId,
   conversationId,
+  initialMessageId,
   showEditAction = false,
   reactions = [],
   onReplyInThread,
@@ -198,7 +200,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
         )}
 
         {/* Initiate Call */}
-        {onInitiateCall && (
+        {onInitiateCall && messageId === initialMessageId && (
           <ActionButton
             icon={<Headphones className='w-5 h-5' />}
             label={isCallDisabled ? 'Call already in progress' : 'Start Call'}
