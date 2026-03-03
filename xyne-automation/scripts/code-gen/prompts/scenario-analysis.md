@@ -5,7 +5,11 @@ Compare the Playwright test content against existing Cucumber feature files to d
 ## Playwright Test Content:
 
 ```typescript
-{{PLAYWRIGHT_CONTENT}}
+{
+  {
+    PLAYWRIGHT_CONTENT;
+  }
+}
 ```
 
 ## Existing Feature Files:
@@ -38,6 +42,7 @@ Test Case 2: ...
 ```
 
 Summary:
+
 - Total test cases in Playwright file: X
 - Already covered: Y
 - Partially covered: Z

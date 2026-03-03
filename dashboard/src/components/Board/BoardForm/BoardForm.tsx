@@ -699,6 +699,7 @@ export const BoardForm = ({
                           disabled={isLoading}
                           className='w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer'
                           title='Toggle ETA'
+                          data-testid={`stage-eta-toggle-${index}`}
                           data-track-category='Board_Form'
                           data-track-name='Toggle_Stage_ETA'
                           data-track-metadata={JSON.stringify({

@@ -19,3 +19,16 @@ Feature: Project Creation E2E Flow
     Given using browser "admin-browser"
     When I open the Xyne-Space at "/listprojects"
     Then I should see "user:admin-browser.name - Project" in the element "body"
+
+  @project-create @configure-board-eta
+  Scenario: Admin enables ETA for all board stages
+    Given using browser "admin-browser"
+    When I open the Xyne-Space at "/listprojects"
+    And I click on text "user:admin-browser.name - Project" in the element "[data-testid^='project-card-']"
+    And I wait for 2 seconds
+    And I click on "[data-testid='edit-board-button']"
+    And I click on "[data-testid='stage-eta-toggle-0']"
+    And I click on "[data-testid='stage-eta-toggle-1']"
+    And I click on "[data-testid='stage-eta-toggle-2']"
+    And I click the button with text "Update Board"
+    Then I should see "user:admin-browser.name - Project" in the element "body"

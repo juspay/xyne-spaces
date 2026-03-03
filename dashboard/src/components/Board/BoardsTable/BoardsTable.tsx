@@ -80,6 +80,7 @@ export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): Rea
                     <Button
                       variant='secondary'
                       onClick={() => onEdit(board)}
+                      data-testid='edit-board-button'
                       data-track-category='Board'
                       data-track-name='Edit_Board_Table'
                       data-track-metadata={JSON.stringify({
