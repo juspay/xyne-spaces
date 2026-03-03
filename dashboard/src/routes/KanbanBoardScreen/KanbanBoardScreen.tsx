@@ -76,8 +76,7 @@ import { useUserGroups } from '../../hooks/useUserGroup';
 import { stateMachineActor } from '../../machines/stateMachine';
 import { Dialog } from '../../components/ui/Dialog';
 import Button from '../../components/ui/Button';
-/* eslint-disable local-rules/no-rocicorp-use-zero */
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../hooks/useZero';
 
 interface BoardKanbanScreenProps {
   viewMode?: 'my-tickets' | `user-tickets` | 'group-tickets';

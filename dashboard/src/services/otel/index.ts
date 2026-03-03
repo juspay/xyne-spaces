@@ -10,6 +10,8 @@ export {
   zeroMutationOperations,
   zeroQueryLatency,
   zeroQueryOperations,
+  zeroRunLatency,
+  zeroRunOperations,
 } from './zeroMetrics';
 
 export {

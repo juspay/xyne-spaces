@@ -165,3 +165,35 @@ export const zeroMutationLatency: Histogram = new Proxy({} as Histogram, {
     return _zeroMutationLatency[prop as keyof Histogram];
   },
 });
+
+let _zeroRunOperations: Counter | null = null;
+let _zeroRunLatency: Histogram | null = null;
+
+export const zeroRunOperations: Counter = new Proxy({} as Counter, {
+  get(_target, prop) {
+    if (!_zeroRunOperations) {
+      _zeroRunOperations = getMeter().createCounter('zero_run_operations', {
+        description: 'Total number of Zero run operations with stage (start, success, error)',
+        unit: '1',
+      });
+    }
+    return _zeroRunOperations[prop as keyof Counter];
+  },
+});
+
+export const zeroRunLatency: Histogram = new Proxy({} as Histogram, {
+  get(_target, prop) {
+    if (!_zeroRunLatency) {
+      _zeroRunLatency = getMeter().createHistogram('zero_run_latency', {
+        description: 'Latency of Zero run operations in milliseconds',
+        unit: 'ms',
+        advice: {
+          explicitBucketBoundaries: [
+            10, 25, 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600,
+          ],
+        },
+      });
+    }
+    return _zeroRunLatency[prop as keyof Histogram];
+  },
+});

@@ -131,6 +131,9 @@ export const Event = {
   RECORDING_STARTED: 'recording_started',
   RECORDING_STOPPED: 'recording_stopped',
   RECORDING_ERROR: 'recording_error',
+  ZERO_RUN_ERROR: 'zero_run_error',
+  ZERO_RUN_COMPLETE: 'zero_run_complete',
+  ZERO_RUN_CALLED: 'zero_run_called',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

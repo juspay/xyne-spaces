@@ -3,7 +3,7 @@ import { Select } from '@base-ui/react/select';
 import { Check, ChevronDown, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 import { Channel, ChannelAddUserPolicy, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
-import { useZero } from '@rocicorp/zero/react'; // eslint-disable-line local-rules/no-rocicorp-use-zero
+import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { useClipboard } from '../../../hooks/useClipboard';
