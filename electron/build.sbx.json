@@ -27,7 +27,7 @@
     "hardenedRuntime": false,
     "target": [
       {
-        "target": "default",
+        "target": "pkg",
         "arch": [
           "universal"
         ]
