@@ -5,12 +5,12 @@
   "main": "dist/app/main.js",
   "scripts": {
     "dev": "tsc && cross-env NODE_ENV=development electron .",
-    "dev:win": "tsc && cross-env NODE_ENV=development electron .",
     "dev:bundled": "tsc && cross-env NODE_ENV=development USE_BUNDLED_UI=true electron .",
     "dev:fresh": "npm run clear-ui-data && npm run dev:bundled",
     "dev:watch": "concurrently \"tsc -w\" \"cross-env NODE_ENV=development nodemon --watch dist --watch ../dashboard --exec electron .\"",
-    "prebuild": "cd ../dashboard && cross-env NODE_OPTIONS=--max-old-space-size=16384 npm run build",
-    "build": "tsc && npm run copy-ui && electron-builder",
+    "build:dashboard": "cd ../dashboard && cross-env NODE_OPTIONS=--max-old-space-size=16384 npm run build",
+    "build": "tsc && electron-builder --config build.prod.json",
+    "build:sandbox": "tsc && electron-builder --config build.sbx.json",
     "copy-ui": "rimraf ui-active && cpy \"../dashboard/dist/**\" ui-active",
     "clear-ui-data": "rimraf ~/Library/Application\\ Support/xyne-spaces-electron/ui-data/",
     "typecheck": "tsc --noEmit",
@@ -64,52 +64,5 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=8.0.0"
-  },
-  "build": {
-    "appId": "com.xyne.spaces",
-    "productName": "Xyne Spaces",
-    "directories": {
-      "output": "release"
-    },
-    "protocols": [
-      {
-        "name": "Xyne Spaces",
-        "schemes": [
-          "xyne-spaces"
-        ]
-      }
-    ],
-    "files": [
-      "dist",
-      "assets",
-      "certs",
-      "ui-active"
-    ],
-    "mac": {
-      "icon": "assets/images/xyne.png",
-      "category": "public.app-category.productivity",
-      "hardenedRuntime": false,
-      "target": [
-        {
-          "target": "default",
-          "arch": [
-            "universal"
-          ]
-        }
-      ],
-      "extendInfo": {
-        "NSMicrophoneUsageDescription": "Xyne Spaces needs access to your microphone for audio calls and meetings",
-        "NSCameraUsageDescription": "Xyne Spaces needs access to your camera for video calls and meetings",
-        "NSScreenCaptureUsageDescription": "Xyne Spaces needs access to screen recording for screen sharing in meetings"
-      }
-    },
-    "win": {
-      "icon": "assets/images/xyne.png",
-      "signAndEditExecutable": false
-    },
-    "linux": {
-      "icon": "assets/images/xyne.ico",
-      "category": "Utility"
-    }
   }
 }

@@ -1,0 +1,50 @@
+{
+  "appId": "com.xyne.spaces.sandbox",
+  "extraMetadata": {
+    "APP_ENV": "sandbox"
+  },
+  "productName": "Xyne Spaces Sandbox",
+  "directories": {
+    "output": "release/sandbox"
+  },
+  "protocols": [
+    {
+      "name": "Xyne Spaces Sandbox",
+      "schemes": [
+        "xyne-spaces-sandbox"
+      ]
+    }
+  ],
+  "files": [
+    "dist",
+    "assets",
+    "certs",
+    "ui-active"
+  ],
+  "mac": {
+    "icon": "assets/images/xyne.png",
+    "category": "public.app-category.productivity",
+    "hardenedRuntime": false,
+    "target": [
+      {
+        "target": "default",
+        "arch": [
+          "universal"
+        ]
+      }
+    ],
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "Xyne Spaces needs access to your microphone for audio calls and meetings",
+      "NSCameraUsageDescription": "Xyne Spaces needs access to your camera for video calls and meetings",
+      "NSScreenCaptureUsageDescription": "Xyne Spaces needs access to screen recording for screen sharing in meetings"
+    }
+  },
+  "win": {
+    "icon": "assets/images/xyne.png",
+    "signAndEditExecutable": false
+  },
+  "linux": {
+    "icon": "assets/images/xyne.ico",
+    "category": "Utility"
+  }
+}

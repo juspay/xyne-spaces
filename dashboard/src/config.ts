@@ -1,4 +1,5 @@
-const isElectronBundled = window.location.protocol === 'xyne-spaces:';
+// Covers xyne-spaces:, xyne-spaces-dev:, xyne-spaces-sandbox:
+const isElectronBundled = window.location.protocol.startsWith('xyne-spaces');
 
 const hostname = window.location.hostname;
 const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';

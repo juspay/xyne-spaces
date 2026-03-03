@@ -2,6 +2,8 @@
  * Application configuration constants
  */
 
+const { APP_ENV } = require('../../package.json');
+
 export interface CodeServerConfig {
   version: string;
   defaultPort: number;
@@ -22,6 +24,7 @@ export interface AppConfig {
   UNPROTECTED_URL: string;
   FRONTEND_URL: string;
   DEEP_LINK_PROTOCOL: string;
+  USER_DATA_SUFFIX: string;         // Appended to userData dir to isolate flavors
   APP_NAME: string;
   window: {
     width: number;
@@ -48,7 +51,8 @@ const devConfig: AppConfig = {
   MTLS_IDENTITY_NAME: 'Web Simulation Client',
   UNPROTECTED_URL: 'http://localhost:4001',
   FRONTEND_URL: 'http://localhost:5173',
-  DEEP_LINK_PROTOCOL: 'xyne-spaces',
+  DEEP_LINK_PROTOCOL: 'xyne-spaces-dev',
+  USER_DATA_SUFFIX: '-dev',
   APP_NAME: 'Xyne Spaces DEV',
   window: {
     width: 1200,
@@ -86,13 +90,14 @@ const prodConfig: AppConfig = {
   UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
   FRONTEND_URL: 'https://app.spaces.xyne.juspay.net',
   DEEP_LINK_PROTOCOL: 'xyne-spaces',
+  USER_DATA_SUFFIX: '',             // Empty — prod keeps original path, no migration needed
   APP_NAME: 'Xyne Spaces',
   window: {
     width: 1200,
     height: 800,
     title: 'Xyne Spaces',
   },
-  enableMtls: true,
+  enableMtls: false,
   useBundledUI: false,
   sendLogs: true,
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
@@ -115,7 +120,47 @@ const prodConfig: AppConfig = {
   }
 };
 
-const baseConfig: AppConfig = process.env.NODE_ENV === 'development' ? devConfig : prodConfig;
+const sandboxConfig: AppConfig = {
+  BACKEND_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
+  MTLS_BACKEND_URL: 'https://auth.spaces.xyne.juspay.net',
+  MTLS_FRONTEND_URL: 'https://auth.spaces.xyne.juspay.net',
+  MTLS_IDENTITY_NAME: 'Web Simulation Client',
+  UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
+  FRONTEND_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
+  DEEP_LINK_PROTOCOL: 'xyne-spaces-sandbox',
+  USER_DATA_SUFFIX: '-sandbox',
+  APP_NAME: 'Xyne Spaces',
+  window: {
+    width: 1200,
+    height: 800,
+    title: 'Xyne Spaces',
+  },
+  enableMtls: false,
+  useBundledUI: false,
+  sendLogs: true,
+  RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
+  UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
+  uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
+  codeServer: {
+    version: '4.107.0',
+    defaultPort: 7080,
+    portRangeStart: 7080,
+    portRangeEnd: 7280,
+    dataDir: 'code-server-data',
+    binaryDir: 'code-server',
+    authType: 'none',
+    useLocalSettings: true,
+    xyneSpacesDir: 'xyne-spaces',
+  },
+  agentInteract: {
+    endpoint: "/api/query",
+    method: "POST"
+  }
+};
+
+
+const baseConfig: AppConfig = process.env.NODE_ENV === 'development' ? devConfig
+  : (APP_ENV === 'sandbox' ? sandboxConfig : prodConfig);
 
 export const config: AppConfig = {
   ...baseConfig,

@@ -3,12 +3,13 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { getActiveUIPath } from './ui-updater';
 import log from 'electron-log/main';
+import { config } from '../app/config';
 
 /**
- * Custom protocol scheme for serving bundled UI
- * Uses xyne-spaces:// scheme to serve files from the bundled dashboard
+ * Custom protocol scheme for serving bundled UI.
+ * Uses the flavor-specific deep link scheme so dev/sandbox/prod don't conflict.
  */
-export const CUSTOM_PROTOCOL_SCHEME = 'xyne-spaces';
+export const CUSTOM_PROTOCOL_SCHEME = config.DEEP_LINK_PROTOCOL;
 
 // MIME type mapping for common file extensions
 const MIME_TYPES: Record<string, string> = {
