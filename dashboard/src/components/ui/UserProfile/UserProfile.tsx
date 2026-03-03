@@ -18,6 +18,7 @@ import { Button } from '../Button/Button';
 import { UpdateStatusModal } from '../../AppSidebar/UpdateStatusModal';
 import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
 import { cn } from '../../../utils/classNames';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { queries } from '../../../zero/queries';
 import { useUsers, useUser } from '../../../hooks/useUsers';
 import { formatRelativeTimeProfile, formatAge } from '../../../utils/dateUtils';
@@ -333,7 +334,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           {hasStatus && !isOwnProfile && (
             <div className='mt-2'>
               <div className='flex items-center gap-2 text-sm text-gray-700'>
-                <span className='text-base'>{statusEmoji}</span>
+                <span className='text-base'>{renderEmoji(statusEmoji || '')}</span>
                 <span>{statusContent}</span>
               </div>
               {statusExpiryAt && (
