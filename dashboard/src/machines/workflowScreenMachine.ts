@@ -122,7 +122,7 @@ export const workflowScreenMachine = setup({
     initializeFromStorage: assign(({ event, context }) => {
       if (event.type !== 'INIT') return context;
 
-      const defaultActiveTabId = event.defaultActiveTabId || 'git-diff';
+      const defaultActiveTabId = event.defaultActiveTabId || 'live-edits';
       const stored = loadFromStorage(event.ticketId, defaultActiveTabId);
 
       return {
@@ -183,7 +183,7 @@ export const workflowScreenMachine = setup({
       return {
         ...context,
         selectedExecutionId: null,
-        activeTabId: 'git-diff',
+        activeTabId: 'live-edits',
         isGraphViewOpen: false,
         selectedNodeStepIds: [],
         selectedFilePath: null,
@@ -197,7 +197,7 @@ export const workflowScreenMachine = setup({
   context: {
     ticketId: '',
     selectedExecutionId: null,
-    activeTabId: 'git-diff',
+    activeTabId: 'live-edits',
     isGraphViewOpen: false,
     selectedNodeStepIds: [],
     selectedFilePath: null,
