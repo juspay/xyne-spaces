@@ -12,7 +12,7 @@ keys:
   devkey: devsecret
 
 logging:
-  level: debug
+  level: warn
   sample: false
 
 room:
@@ -27,4 +27,4 @@ turn:
 webhook:
   api_key: devkey
   urls:
-    - http://host.containers.internal:3001/api/livekit/webhook
+    - http://backend:3001/api/livekit/webhook

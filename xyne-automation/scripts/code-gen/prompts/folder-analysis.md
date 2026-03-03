@@ -9,7 +9,11 @@ Analyze the existing e2e test structure and recommend the best folder for this n
 ## Playwright Test Content:
 
 ```typescript
-{{PLAYWRIGHT_CONTENT}}
+{
+  {
+    PLAYWRIGHT_CONTENT;
+  }
+}
 ```
 
 ## Instructions:
