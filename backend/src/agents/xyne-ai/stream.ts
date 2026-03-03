@@ -203,7 +203,7 @@ export interface XyneAIStreamRequest extends XyneAIRequest {
 export async function* xyneAIStream(
   request: XyneAIStreamRequest
 ): AsyncGenerator<XyneAIStreamChunk, void, unknown> {
-  const { query, sessionId, channelIds, conversationId, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds } = request;
+  const { query, sessionId, channelIds, conversationId, canvasViewAccessId, selectionContexts, createCanvasEnabled, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds } = request;
 
   const timestamp = currentTimestamp || getCurrentTimestamp();
   const source: 'thread' | 'channel' = conversationId ? 'thread' : 'channel';
@@ -321,6 +321,9 @@ export async function* xyneAIStream(
   const agentContext = {
     channelIds,
     conversationId,
+    canvasViewAccessId,
+    selectionContexts,
+    createCanvasEnabled,
     userId,
     sessionId: session.sessionId,
     source,

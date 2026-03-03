@@ -2,6 +2,7 @@ import { ReactElement, useState } from 'react';
 import { Globe } from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import {
   SingleStat,
@@ -24,6 +25,7 @@ import type {
   MessageAttachment,
   UserTag,
   Participant,
+  SelectionContext,
 } from '../utils/XyneAITypes';
 
 // ============================================================================
@@ -261,6 +263,36 @@ const AttachmentPreview = ({ attachment }: { attachment: MessageAttachment }): R
   );
 };
 
+// Selection context preview component
+const SelectionContextPreview = ({
+  selection,
+  onClick,
+}: {
+  selection: SelectionContext;
+  onClick?: () => void;
+}): ReactElement => {
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      className='flex items-center gap-2 p-2 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors w-full text-left'
+      title={`From canvas: ${selection.canvasTitle || 'Untitled'}`}
+      data-track-category='XyneAI'
+      data-track-name='SELECTION_CONTEXT_CLICK'
+    >
+      <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-blue-100 rounded'>
+        <FileDocumentIcon color='#3B82F6' size={20} />
+      </div>
+      <div className='flex flex-col overflow-hidden flex-1'>
+        <span className="text-xs text-blue-600 font-['Inter'] font-medium truncate">
+          From canvas: {selection.canvasTitle || 'Untitled'}
+        </span>
+        <span className="text-sm text-blue-700 font-['Inter'] truncate">{selection.preview}</span>
+      </div>
+    </button>
+  );
+};
+
 export const MessageItem = ({
   message,
   visibleChars,
@@ -270,6 +302,12 @@ export const MessageItem = ({
   feedbackValue,
 }: MessageItemProps): ReactElement => {
   const [copied, setCopied] = useState(false);
+  const navigate = useNavigate();
+
+  // Handle clicking selection context to navigate to canvas
+  const handleSelectionContextClick = (canvasViewAccessId: string): void => {
+    void navigate(`/chat/canvas/${canvasViewAccessId}`);
+  };
 
   // Calculate display content for bot messages
   const displayContent =
@@ -369,6 +407,18 @@ export const MessageItem = ({
             >
               {message.type === 'user' ? (
                 <>
+                  {/* Selection context previews */}
+                  {message.selectionContexts && message.selectionContexts.length > 0 && (
+                    <div className='mb-3 space-y-2'>
+                      {message.selectionContexts.map((selection, index) => (
+                        <SelectionContextPreview
+                          key={index}
+                          selection={selection}
+                          onClick={() => handleSelectionContextClick(selection.canvasViewAccessId)}
+                        />
+                      ))}
+                    </div>
+                  )}
                   {/* Attachment previews */}
                   {message.attachments && message.attachments.length > 0 && (
                     <div className='mb-3 space-y-2'>

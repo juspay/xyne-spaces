@@ -113,6 +113,68 @@ THREAD CONTEXT - {{thread_context}}
 - **DO NOT** use for business metrics, analytics, GMV, revenue, or KPIs (use <tool>genius</tool> instead).
 - **DO NOT** use for code implementation questions (use <tool>research_agent</tool> instead).
 - This tool is specifically for LOG ANALYSIS and ERROR INVESTIGATION only.
+
+8. <tool>create_canvas</tool>
+**Usage:** Create a canvas document from markdown content.
+**Description:** Creates a shareable canvas document from markdown-formatted text.
+**Parameters:**
+- markdown: (required) The markdown content to convert to canvas
+- title: (required) The title for the canvas
+**Examples:**
+- create_canvas({markdown: "# My Document\\n\\nContent here.", title: "My Document"})
+- create_canvas({markdown: "## Meeting Notes\\n\\n- Item 1\\n- Item 2", title: "Meeting Notes"})
+**Constraints:** Use this when user wants to create a document. Returns a shareable URL.
+
+9. <tool>read_canvas</tool>
+**Usage:** Read and retrieve content from canvas documents.
+**Description:** Reads a canvas document by its viewAccessId and returns the full content as markdown.
+**Parameters:**
+- canvas_view_access_id: (optional) The viewAccessId from the canvas URL. If not provided, uses the implicit canvas context.
+**How to Get viewAccessId (Priority Order):**
+  **Priority 0 (HIGHEST): From request context - IMPLICIT**
+  - If Ask AI was triggered from a canvas, the canvas_view_access_id is automatically available
+  - Call read_canvas({}) without parameters to read the current canvas
+  - Example: User clicks "Ask AI" on a canvas and asks "see this canvas" → Just call read_canvas()
+  
+  **Priority 1: From user's message**
+  - Look for canvas URLs with pattern /chat/canvas/{viewAccessId}
+  
+  **Priority 2: From conversation history**
+  - Check previous messages for shared canvas links
+  
+  **Priority 3: From thread messages**
+  - Use <tool>fetch_thread_messages</tool> if in thread context
+  
+  **Priority 4: Ask user**
+  - Only if no canvas link found anywhere
+**Examples:**
+- User on canvas page asks: "see this canvas"
+  → Canvas context is implicit → read_canvas() without parameters
+- User shares: "What's in this canvas https://spaces.xyne.juspay.net/chat/canvas/abc123-def456?"
+  → Extract "abc123-def456" and call read_canvas({canvas_view_access_id: "abc123-def456"})
+
+10. <tool>edit_canvas</tool>
+**Usage:** Edit and update existing canvas documents.
+**Description:** Edits an existing canvas by replacing its content.
+**Parameters:**
+- canvasViewId: (optional) The viewAccessId of the canvas to edit. If not provided, uses the implicit canvas context.
+- content: (required) The new content in markdown format (will replace existing content)
+- title: (optional) New title for the canvas
+**CRITICAL WORKFLOW: ALWAYS call <tool>read_canvas</tool> FIRST before calling <tool>edit_canvas</tool>**
+  1. If Ask AI was triggered from a canvas, canvasViewId is implicit - call read_canvas() without parameters
+  2. Otherwise, extract the canvasViewId from the user's message or context
+  3. Call <tool>read_canvas</tool> to retrieve the current content
+  4. Review the current content
+  5. Call <tool>edit_canvas</tool> with the updated content
+**Examples:**
+- User on canvas page asks: "Update this canvas with new information"
+  → Step 1: read_canvas() (implicit context)
+  → Step 2: edit_canvas({content: "# Updated\\n\\nNew content", title: "Updated Title"}) (canvasViewId not needed)
+- User: "Update the canvas with new information" (with canvas link in message)
+  → Step 1: read_canvas({canvas_view_access_id: "abc123-def456"})
+  → Step 2: edit_canvas({canvasViewId: "abc123-def456", content: "# Updated\\n\\nNew content", title: "Updated Title"})
+**Access Control:** User must be the creator or have OWNER/EDITOR permissions. If access denied, tool returns error.
+**Constraints:** MUST call <tool>read_canvas</tool> before <tool>edit_canvas</tool> without fail.
 </tools_definition>
 
 <behavior_guidelines>
@@ -215,6 +277,13 @@ You must respond with valid JSON containing these keys:
   "keypoints": [],
   "citations": {}
 }
+
+### Case F: Edit Canvas Workflow
+**User:** "Update the canvas with new meeting notes"
+**Step 1:** read_canvas({canvas_view_access_id: "abc123-def456"})
+**Step 2:** review current content from read_canvas response
+**Step 3:** edit_canvas({canvasViewId: "abc123-def456", content: "# Meeting Notes\\n\\n- Updated item 1\\n- Updated item 2", title: "Updated Meeting Notes"})
+**Response:** Confirmation that canvas was updated
 
 {{fetch_thread_messages_few_shot_example}}
 </few_shot_examples>
@@ -661,6 +730,109 @@ Rules:
 `;
 
 /**
+ * Fallback description for create_canvas tool
+ */
+const CREATE_CANVAS_FALLBACK = `Create a canvas document from markdown content.
+
+Use this tool when the user wants to:
+- Create a document from markdown text
+- Generate a canvas with formatted content
+- Save structured content as a shareable canvas
+
+**Parameters:**
+- markdown: (required) The markdown content to convert to canvas
+- title: (required) The title for the canvas
+
+**Examples:**
+- create_canvas({markdown: "# My Document\\n\\nThis is content.", title: "My Document"})
+- create_canvas({markdown: "## Notes\\n\\n- Item 1\\n- Item 2", title: "Meeting Notes"})
+
+The tool returns the canvas URL that can be shared with others.`;
+
+/**
+ * Fallback description for read_canvas tool
+ */
+const READ_CANVAS_FALLBACK = `Read a canvas document by its viewAccessId and return the full content as markdown.
+
+Use this tool when:
+- User shares a canvas link and asks about its content
+- User asks to read or view a specific canvas
+- User wants to know what's in a canvas mentioned in the conversation
+
+**Parameters:**
+- canvas_view_access_id: (optional) The viewAccessId from the canvas URL. If not provided, uses the canvas context from where Ask AI was triggered.
+
+**How to get the viewAccessId (TRY IN THIS ORDER):**
+
+**Priority 0: From request context (IMPLICIT - HIGHEST PRIORITY)**
+- If Ask AI was triggered from within a canvas, the canvas_view_access_id is automatically available in the request context
+- You can call read_canvas() WITHOUT any parameters and it will use this context
+- Example: User clicks "Ask AI" while viewing a canvas and asks "see this canvas" → Just call read_canvas({}) or read_canvas() without parameters
+
+**Priority 1: From user's current query/message**
+- Look for canvas URLs in the user's message
+- Pattern: /chat/canvas/{viewAccessId}
+- Example: For URL /chat/canvas/abc123-def456, extract "abc123-def456"
+
+**Priority 2: From session's conversation history**
+- Check previous messages in the current conversation/session
+- Look for any canvas links that were shared earlier
+
+**Priority 3: From thread messages (if thread context is available)**
+- If in thread context, use <tool>fetch_thread_messages</tool> to get thread content
+- Look for canvas links in the thread messages
+- Extract viewAccessId from any /chat/canvas/{viewAccessId} patterns
+
+**Priority 4 (ABSOLUTE FALLBACK): Ask the user**
+- Only if you cannot find any canvas link from above sources, ask: "Could you share the canvas link or ID you'd like me to read?"
+
+**Examples:**
+- User clicks "Ask AI" on a canvas and asks: "see this canvas"
+  → Canvas context is implicit (Priority 0) → read_canvas({}) or just call without canvas_view_access_id parameter
+
+- User: "What's in this canvas https://spaces.xyne.juspay.net/chat/canvas/abc123-def456?"
+  → Extract "abc123-def456" from the message (Priority 1) → read_canvas({canvas_view_access_id: "abc123-def456"})
+
+- User: "Read the canvas I shared earlier"
+  → Check conversation history (Priority 2) → if not found, check thread via fetch_thread_messages (Priority 3) → extract viewAccessId → call tool
+
+- User: "Show me the canvas content"
+  → Check all sources in order → if not found anywhere, ask user (Priority 4)
+
+**IMPORTANT:** When Ask AI is triggered from a canvas page, the canvas context is automatically available. Call this tool without parameters to read the current canvas.
+
+The tool returns the canvas title and full content converted to markdown format.`;
+
+/**
+ * Fallback description for edit_canvas tool
+ */
+const EDIT_CANVAS_FALLBACK = `Edit an existing canvas by replacing its content.
+
+Use this tool when the user wants to:
+- Update an existing canvas with new content
+- Modify the content of a canvas they have edit access to
+- Change the title of a canvas
+
+**IMPORTANT: Access Control**
+The user must have edit access to the canvas. Edit access is granted if the user:
+- Is the creator of the canvas
+- Is an OWNER or EDITOR participant
+- Has the edit access link
+
+If the user doesn't have edit access, the tool will return an error message.
+
+**Parameters:**
+- canvasViewId: (required) The viewAccessId of the canvas to edit
+- content: (required) The new content in markdown format (will replace existing content)
+- title: (optional) New title for the canvas
+
+**Examples:**
+- edit_canvas({canvasViewId: "abc-123-def", content: "# Updated Content\\n\\nNew text here.", title: "Updated Title"})
+- edit_canvas({canvasViewId: "abc-123-def", content: "## New Section\\n\\n- Item 1\\n- Item 2"})
+
+The tool returns the updated canvas URL.`;
+
+/**
  * Fallback prompt for nudge extractor
  */
 const NUDGE_EXTRACTOR_FALLBACK = `You are the "Xyne Spaces Proactive Nudge Extractor".
@@ -802,6 +974,9 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'field_value_discovery': FIELD_VALUE_DISCOVERY_FALLBACK,
   'web_search': WEB_SEARCH_FALLBACK,
   'research_agent': RESEARCH_AGENT_FALLBACK,
+  'create_canvas': CREATE_CANVAS_FALLBACK,
+  'read_canvas': READ_CANVAS_FALLBACK,
+  'edit_canvas': EDIT_CANVAS_FALLBACK,
   'ticket_description_cleaner': TICKET_DESCRIPTION_CLEANER_FALLBACK,
   'cluster_theme_single': CLUSTER_THEME_SINGLE_FALLBACK,
   'meta_theme_single': META_THEME_SINGLE_FALLBACK,

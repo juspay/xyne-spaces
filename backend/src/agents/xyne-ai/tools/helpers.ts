@@ -34,7 +34,7 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, researchAgent] = await Promise.all([
+  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, researchAgent, createCanvas, readCanvas, editCanvas] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_MESSAGES),
@@ -44,6 +44,9 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     getPromptFromLangfuse(PROMPT_NAMES.FIELD_VALUE_DISCOVERY),
     getPromptFromLangfuse(PROMPT_NAMES.WEB_SEARCH),
     getPromptFromLangfuse(PROMPT_NAMES.RESEARCH_AGENT),
+    getPromptFromLangfuse(PROMPT_NAMES.CREATE_CANVAS),
+    getPromptFromLangfuse(PROMPT_NAMES.READ_CANVAS),
+    getPromptFromLangfuse(PROMPT_NAMES.EDIT_CANVAS),
   ]);
   
   const descriptions = {
@@ -56,6 +59,9 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     field_value_discovery: fieldValueDiscovery || 'Discover field values from data sources.',
     web_search: webSearch || 'Perform a web search to find current information from the internet.',
     research_agent: researchAgent || 'Query the Research Agent for codebase analysis and technical investigation.',
+    create_canvas: createCanvas || 'Create a canvas from markdown content.',
+    read_canvas: readCanvas || 'Read a canvas by its viewAccessId and return the content as markdown.',
+    edit_canvas: editCanvas || 'Edit an existing canvas by replacing its content.',
   };
   
   return descriptions;
@@ -111,6 +117,20 @@ export function getISTTimestampForGenius(): string {
 // ============================================================================
 // String Helpers
 // ============================================================================
+
+/**
+ * Extract canvas viewAccessIds from message content
+ * Matches patterns like /chat/canvas/{viewAccessId}
+ */
+export function extractCanvasViewIds(content: string): string[] {
+  const regex = /\/chat\/canvas\/([a-zA-Z0-9-]+)/g;
+  const matches: string[] = [];
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    matches.push(match[1]);
+  }
+  return matches;
+}
 
 /**
  * Strip HTML tags from content
@@ -681,6 +701,10 @@ export function transformMessageToEntity(
   userMap: Map<string, { name: string | null; email: string | null }>
 ): ToolEntity {
   const user = userMap.get(message.senderId);
+  
+  // Extract canvas viewAccessIds from message content
+  const canvasViewIds = extractCanvasViewIds(message.content);
+  
   return {
     entityType: 'message',
     entityId: message.messageId,
@@ -694,6 +718,7 @@ export function transformMessageToEntity(
     conversationId: message.conversationId,
     messageId: message.messageId,
     hasAttachment: message.hasAttachment,
+    ...(canvasViewIds.length > 0 && { canvasViewIds }),
   };
 }
 

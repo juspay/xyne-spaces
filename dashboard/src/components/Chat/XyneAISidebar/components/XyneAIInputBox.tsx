@@ -1,6 +1,17 @@
 import type { ReactElement } from 'react';
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { ArrowUp, X, Plus, FileText, Lock, Globe, Code2, Package, Search } from 'lucide-react';
+import {
+  ArrowUp,
+  X,
+  Plus,
+  FileText,
+  Lock,
+  Globe,
+  Code2,
+  Package,
+  Search,
+  File,
+} from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -14,7 +25,7 @@ import { MentionSelector } from '../../../ui/Selectors';
 import type { MentionResult } from '../../../ui/Selectors/Selectors.types';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { useResearchOptions, type ResearchContext } from '../../../../hooks/useResearchAgent';
-import type { ThreadInfo } from '../../../../machines/xyneAIMachine';
+import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 
@@ -32,12 +43,15 @@ interface XyneAIInputBoxProps {
   scopeType?: string;
   showChannelTag?: boolean;
   threadInfo?: ThreadInfo | null | undefined;
+  canvasInfo?: CanvasInfo | null | undefined;
+  selectionInfos?: SelectionInfo[];
   inputValue: string;
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onSelectedChannelsChange?: (channelIds: string[]) => void;
   onResearchContextChange?: (context: ResearchContext | null) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
+  onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
   onAttachmentsChange?: (attachments: Attachment[]) => void;
   selectedActivities?: UserActivity[];
   onActivitiesChange?: (activities: UserActivity[]) => void;
@@ -46,6 +60,8 @@ interface XyneAIInputBoxProps {
   webSearchEnabled?: boolean;
   webSearchAccessible?: boolean;
   onWebSearchToggle?: () => void;
+  createCanvasEnabled?: boolean;
+  onCreateCanvasToggle?: () => void;
 }
 
 interface SelectedChannel {
@@ -70,12 +86,15 @@ export const XyneAIInputBox = ({
   channelName,
   scopeType,
   threadInfo,
+  canvasInfo,
+  selectionInfos = [],
   inputValue,
   onInputChange,
   onSubmit,
   onSelectedChannelsChange,
   onResearchContextChange,
   onThreadInfoChange,
+  onSelectionInfosChange,
   onAttachmentsChange,
   selectedActivities = [],
   onActivitiesChange,
@@ -84,6 +103,8 @@ export const XyneAIInputBox = ({
   webSearchEnabled = false,
   webSearchAccessible = false,
   onWebSearchToggle,
+  createCanvasEnabled = false,
+  onCreateCanvasToggle,
 }: XyneAIInputBoxProps): ReactElement => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const researchDropdownRef = useRef<HTMLDivElement>(null);
@@ -148,16 +169,109 @@ export const XyneAIInputBox = ({
   // Thread info state - track if user has removed it
   const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
 
+  // Canvas info state - track if user has removed it
+  const [activeCanvasInfo, setActiveCanvasInfo] = useState<CanvasInfo | null>(canvasInfo ?? null);
+
+  // Selection infos state (multiple selections)
+  const [activeSelectionInfos, setActiveSelectionInfos] = useState<SelectionInfo[]>(
+    selectionInfos ?? [],
+  );
+
   // Update activeThreadInfo when threadInfo prop changes
   useEffect(() => {
     setActiveThreadInfo(threadInfo ?? null);
   }, [threadInfo]);
+
+  // Update activeCanvasInfo when canvasInfo prop changes
+  useEffect(() => {
+    setActiveCanvasInfo(canvasInfo ?? null);
+  }, [canvasInfo]);
+
+  // Update activeSelectionInfos when selectionInfos prop changes
+  useEffect(() => {
+    setActiveSelectionInfos(selectionInfos ?? []);
+  }, [selectionInfos]);
 
   // Handle removing thread info
   const handleRemoveThreadInfo = (e: React.MouseEvent): void => {
     e.stopPropagation(); // Prevent triggering the pill click
     setActiveThreadInfo(null);
     onThreadInfoChange?.(null);
+  };
+
+  // Handle removing canvas info - cascades to remove all its selections
+  const handleRemoveCanvasInfo = (e: React.MouseEvent): void => {
+    e.stopPropagation(); // Prevent triggering the pill click
+    const viewAccessId = activeCanvasInfo?.viewAccessId;
+
+    // Clear canvas info
+    setActiveCanvasInfo(null);
+
+    if (viewAccessId) {
+      // Cascade: remove all selections for this canvas
+      setActiveSelectionInfos(prev => {
+        const newSelections = prev.filter(s => s.canvasViewAccessId !== viewAccessId);
+        onSelectionInfosChange?.(newSelections);
+        return newSelections;
+      });
+
+      // Send event to machine
+      xyneAIActor.send({
+        type: 'REMOVE_CANVAS_CONTEXT',
+        viewAccessId,
+      });
+    }
+  };
+
+  // Handle removing a specific selection info
+  const handleRemoveSelectionInfo = (index: number): void => {
+    const selection = activeSelectionInfos[index];
+    if (!selection) return;
+
+    // Calculate the selection index relative to this canvas BEFORE modifying state
+    // Use reference comparison for exact match to avoid issues with duplicate text
+    const selectionIndex = activeSelectionInfos
+      .filter(s => s.canvasViewAccessId === selection.canvasViewAccessId)
+      .findIndex(s => s === selection);
+
+    // Sync removal to the machine BEFORE state update
+    xyneAIActor.send({
+      type: 'REMOVE_SELECTION',
+      viewAccessId: selection.canvasViewAccessId,
+      selectionIndex,
+    });
+
+    setActiveSelectionInfos(prev => {
+      const newSelections = prev.filter((_, i) => i !== index);
+      onSelectionInfosChange?.(newSelections);
+      return newSelections;
+    });
+  };
+
+  // Handle clicking selection pill to navigate
+  const handleSelectionPillClick = (selection: SelectionInfo): void => {
+    if (!selection?.canvasViewAccessId) return;
+
+    // Navigate to the canvas
+    void navigate(`/chat/canvas/${selection.canvasViewAccessId}`);
+
+    // Close XyneAI modal on mobile after navigation
+    if (isMobile) {
+      xyneAIActor.send({ type: 'CLOSE' });
+    }
+  };
+
+  // Handle clicking canvas pill to navigate
+  const handleCanvasPillClick = (): void => {
+    if (!activeCanvasInfo) return;
+
+    // Navigate to the canvas
+    void navigate(`/chat/canvas/${activeCanvasInfo.viewAccessId}`);
+
+    // Close XyneAI modal on mobile after navigation
+    if (isMobile) {
+      xyneAIActor.send({ type: 'CLOSE' });
+    }
   };
 
   // Handle clicking thread pill to navigate
@@ -786,6 +900,77 @@ export const XyneAIInputBox = ({
             </div>
           )}
 
+          {/* Canvas Context Pill */}
+          {activeCanvasInfo && (
+            <div
+              className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+            >
+              <button
+                type='button'
+                onClick={handleCanvasPillClick}
+                className='flex items-center gap-1 cursor-pointer hover:bg-gray-50 transition-colors bg-transparent border-0 p-0'
+                aria-label={`Navigate to canvas: ${activeCanvasInfo.title || 'Untitled Canvas'}`}
+                data-track-category='XYNE_AI'
+                data-track-name='ClickCanvasContextPill'
+                data-track-metadata={JSON.stringify({ canvasId: activeCanvasInfo.viewAccessId })}
+              >
+                <FileText className='w-3.5 h-3.5 text-gray-600' />
+                <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
+                  {activeCanvasInfo.title || 'Untitled Canvas'}
+                </span>
+              </button>
+              <button
+                type='button'
+                onClick={handleRemoveCanvasInfo}
+                className='hover:bg-gray-200 rounded p-0.5 transition-colors flex-shrink-0'
+                aria-label='Remove canvas context'
+                data-track-category='XYNE_AI'
+                data-track-name='RemoveCanvasContext'
+                data-track-metadata={JSON.stringify({ canvasId: activeCanvasInfo.viewAccessId })}
+              >
+                <X className='w-3 h-3' />
+              </button>
+            </div>
+          )}
+
+          {/* Selection Context Pills (multiple) */}
+          {activeSelectionInfos.map((selection, index) => (
+            <div
+              key={`${selection.canvasViewAccessId}-${index}`}
+              className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-blue-200 bg-blue-50 flex-shrink-0`}
+            >
+              <button
+                type='button'
+                onClick={() => handleSelectionPillClick(selection)}
+                className='flex items-center gap-1 cursor-pointer hover:bg-blue-100 transition-colors bg-transparent border-0 p-0'
+                aria-label={`Navigate to canvas with selection: ${selection.preview}`}
+                data-track-category='XYNE_AI'
+                data-track-name='ClickSelectionContextPill'
+                data-track-metadata={JSON.stringify({
+                  canvasId: selection.canvasViewAccessId,
+                })}
+              >
+                <FileText className='w-3.5 h-3.5 text-blue-600' />
+                <span className="text-blue-700 font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[150px] truncate">
+                  {selection.preview}
+                </span>
+              </button>
+              <button
+                type='button'
+                onClick={() => handleRemoveSelectionInfo(index)}
+                className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                aria-label='Remove selection context'
+                data-track-category='XYNE_AI'
+                data-track-name='RemoveSelectionContext'
+                data-track-metadata={JSON.stringify({
+                  canvasId: selection.canvasViewAccessId,
+                })}
+              >
+                <X className='w-3 h-3 text-blue-600' />
+              </button>
+            </div>
+          ))}
+
           {/* Channel Pills */}
           {selectedChannels.map(channel => (
             <div
@@ -968,6 +1153,29 @@ export const XyneAIInputBox = ({
                 data-track-metadata={JSON.stringify({ enabled: webSearchEnabled })}
               >
                 <Globe className='w-4 h-4' />
+              </button>
+            )}
+
+            {/* Divider line */}
+            {onCreateCanvasToggle && <div className='h-4 w-px bg-gray-300' />}
+
+            {/* Create Canvas Toggle Button */}
+            {onCreateCanvasToggle && (
+              <button
+                type='button'
+                onClick={onCreateCanvasToggle}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  createCanvasEnabled
+                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+                    : 'hover:bg-gray-100 text-gray-600'
+                }`}
+                aria-label={createCanvasEnabled ? 'Disable create canvas' : 'Create canvas'}
+                title={createCanvasEnabled ? 'Create canvas enabled' : 'Create canvas'}
+                data-track-category='XyneAI'
+                data-track-name='TOGGLE_CREATE_CANVAS'
+                data-track-metadata={JSON.stringify({ enabled: createCanvasEnabled })}
+              >
+                <File className='w-4 h-4' />
               </button>
             )}
           </div>
