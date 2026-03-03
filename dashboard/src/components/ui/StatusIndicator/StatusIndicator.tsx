@@ -2,6 +2,7 @@ import React from 'react';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
 import { cn } from '../../../utils/classNames';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 
 export type StatusIndicatorSize = 'sm' | 'md' | 'lg';
 
@@ -48,7 +49,7 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
       )}
       title={showOnHover ? undefined : `${statusContent}`}
     >
-      <span className='leading-none'>{statusEmoji}</span>
+      <span className='leading-none'>{renderEmoji(statusEmoji)}</span>
     </div>
   );
 
@@ -69,8 +70,8 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
             className='z-50 bg-gray-900 text-white px-3 py-2 rounded-lg shadow-lg max-w-48'
           >
             <div className='text-sm text-center'>
-              <div className='font-medium text-white break-words'>
-                {statusEmoji} {statusContent}
+              <div className='font-medium text-white break-words flex items-center justify-center gap-1'>
+                {renderEmoji(statusEmoji)} {statusContent}
               </div>
               {statusExpiryAt && (
                 <div className='text-xs text-gray-300 mt-1'>

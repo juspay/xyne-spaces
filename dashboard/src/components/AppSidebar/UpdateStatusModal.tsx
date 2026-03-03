@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import * as Select from '@radix-ui/react-select';
-import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
+import EmojiPicker, { EmojiStyle, Theme, EmojiClickData } from 'emoji-picker-react';
 import { Check, ChevronDown, SmilePlus, X } from 'lucide-react';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button/Button';
@@ -10,6 +10,8 @@ import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { DEFAULT_STATUS_EMOJI, EXPIRY_OPTIONS, calculateExpiryTime } from '../../utils/statusUtils';
 import { v4 as uuidv4 } from 'uuid';
+import { useCustomEmojis } from '../../hooks/useCustomEmojis';
+import { renderEmoji } from '../../utils/customEmojiUtils';
 
 // Hardcoded status suggestions
 const STATUS_SUGGESTIONS = [
@@ -66,6 +68,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
   currentStatus,
 }) => {
   const zero = useZero();
+  const { data: customEmojis } = useCustomEmojis();
   const [statusText, setStatusText] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState<string | undefined>(undefined);
   const [isEmojiAutoAssigned, setIsEmojiAutoAssigned] = useState(false);
@@ -124,8 +127,20 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
     }
   }, [expiryOption, customDate]);
 
-  const handleEmojiSelect = (emojiData: { emoji: string }): void => {
-    setSelectedEmoji(emojiData.emoji);
+  const handleEmojiSelect = (emojiData: EmojiClickData): void => {
+    // For custom emojis, store as custom:{emojiId}:{name} format
+    // For native emojis, store the emoji character directly
+    let emojiValue: string;
+    if (emojiData.isCustom) {
+      // Custom emoji: emojiData.emoji contains the ID, names[0] contains the name
+      const emojiId = emojiData.emoji;
+      const name = emojiData.names[0] || emojiId;
+      emojiValue = `custom:${emojiId}:${name}`;
+    } else {
+      // Native emoji: use the emoji character
+      emojiValue = emojiData.emoji;
+    }
+    setSelectedEmoji(emojiValue);
     setIsEmojiAutoAssigned(false); // User manually selected emoji
     setEmojiPickerOpen(false);
   };
@@ -253,7 +268,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 <Popover.Trigger asChild>
                   <button className='absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600'>
                     {selectedEmoji ? (
-                      <span className='text-lg'>{selectedEmoji}</span>
+                      <span className='text-lg'>{renderEmoji(selectedEmoji)}</span>
                     ) : (
                       <SmilePlus className='size-4' />
                     )}
@@ -275,6 +290,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         theme={Theme.LIGHT}
                         lazyLoadEmojis={true}
                         searchPlaceHolder='Search emoji...'
+                        customEmojis={customEmojis || []}
                       />
                     </div>
                   </Popover.Content>
@@ -311,7 +327,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         expiry: status.expiry,
                       })}
                     >
-                      <span className='text-lg'>{status.emoji}</span>
+                      <span className='text-lg'>{renderEmoji(status.emoji)}</span>
                       <span className='text-sm text-gray-900'>{status.text}</span>
                       <span className='text-xs text-gray-500'>-</span>
                       <span className='text-xs text-gray-500'>
@@ -365,7 +381,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 <Popover.Trigger asChild>
                   <button className='flex-shrink-0 text-gray-400 hover:text-gray-600'>
                     {selectedEmoji ? (
-                      <span className='text-lg'>{selectedEmoji}</span>
+                      <span className='text-lg'>{renderEmoji(selectedEmoji)}</span>
                     ) : (
                       <SmilePlus className='size-5' />
                     )}
@@ -387,6 +403,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         theme={Theme.LIGHT}
                         lazyLoadEmojis={true}
                         searchPlaceHolder='Search emoji...'
+                        customEmojis={customEmojis || []}
                       />
                     </div>
                   </Popover.Content>

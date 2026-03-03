@@ -46,6 +46,7 @@ import Avatar from '../../ui/Avatar/Avatar';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import { Virtuoso } from 'react-virtuoso';
 import { isStatusExpired } from '../../../utils/statusUtils';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 import Popover from '../../ui/Popover';
 import { useNavigate } from 'react-router-dom';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -510,7 +511,7 @@ const ParticipantListItem = ({
                 delayDuration={500}
               >
                 <span className='text-lg leading-none flex items-center justify-center'>
-                  {user?.presenceStatus?.statusEmoji}
+                  {renderEmoji(user?.presenceStatus?.statusEmoji || '')}
                 </span>
               </Tooltip>
             )}
