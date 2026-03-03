@@ -1,3 +1,28 @@
+## [1.64.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.63.0...v1.64.0) (2026-03-03)
+
+
+### Features
+
+* add context to thread via global search ([cf454d2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cf454d2201730f2dbee1cbd7ba08f553e6c67cb6)), closes [#3820](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3820)
+* add integrity debug workflow with research agent integrations ([5c4edc1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5c4edc101a011a268016b711e71b5b14e98664ae)), closes [#3655](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3655)
+* add ui  for board description ([9b5dc41](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9b5dc417dce4e7ffd8ece1b1ec0a965725028218)), closes [#3815](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3815)
+* added an interactable thread panel ([c7ea584](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c7ea584a17644ec8a9392a3f73c7944b9841edb8)), closes [#3527](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3527)
+* added wrapper for zero.run() ([a18d6cd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a18d6cdae80ac5f00f841afbe2681c7a70f41426)), closes [#3623](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3623)
+* full canvas support from xyne ai ([3c5dde6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3c5dde618592d77f2c6fa7a57378d8167a1e4820)), closes [#3819](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3819)
+* Tagging feature in Xyne AI output ([e083005](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e083005180c441ed0e8af28ba4c42dc1a4466662)), closes [#3164](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3164)
+
+
+### Bug Fixes
+
+* changes for command menu tab filter fix ([d05f7c9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d05f7c949085e59b2bf6330ec90b428514bbe805)), closes [#3318](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3318)
+* delete attachments on upload failed ([0dc676a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0dc676ab1282f95082df7f07bd5290163c43cf02)), closes [#3606](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3606)
+* Fixed channelParticipant query getting called constantly in chatBubble ([8cc073a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8cc073a30aa5ac011fad9e5caad17f1aab87c710))
+* Fixed Create ticket button in mobile view ([d790e8d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d790e8d43b8f017d9f3e8c71b4d925f8bd98351e))
+* fixed the border ([1204567](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1204567fbdf5e7fc03d1c4d5d36daf16bfd84126))
+* fixed ticket automation ([e6ed1b2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e6ed1b22761d0a5f66d08942288a706adf9ec525))
+* modified the ticket suggestions prompt to create broader tickets based on task-similarity or assignee. ([9db3084](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9db30842243be05c77878268e472f6490b2b00bf)), closes [#3668](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3668)
+* Thread call ui fix ([ec0292f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ec0292f543931e1f4fb61e839e024aa960e2d1bb)), closes [#3799](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3799)
+
 ## [1.63.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.62.0...v1.63.0) (2026-03-03)
 
 
