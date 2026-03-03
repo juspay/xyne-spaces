@@ -404,6 +404,7 @@ export interface PullRequestInfo {
   author: {
     displayName: string;
     id: number;
+    emailAddress?: string;
   };
 }
 

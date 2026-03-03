@@ -5,6 +5,10 @@ import { logger } from '@/utils/logger';
 import { CommitAnalysisResult } from "@/services/commitAnalysisService";
 import { AffectedApplicationInfo } from "@/services/release/core";
 import { config } from '@/config/env';
+import { UserRepository } from "@/database/repositories/users";
+import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -41,13 +45,11 @@ export async function createCommitAnalysisCanvas(
       year: 'numeric',
       month: 'short',
       day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
     });
     const finalTitle = `📦 Release Analysis: ${metadata.workspace}/${metadata.repoSlug} - ${dateStr}`;
 
     // Format analysis to BlockNote content
-    const content = formatCommitAnalysisToBlockNote(
+    const { blocks: content, mentionedUserIds } = await formatCommitAnalysisToBlockNote(
       results,
       affectedApplications,
       envChanges,
@@ -83,6 +85,7 @@ export async function createCommitAnalysisCanvas(
           affectedApplicationCount: metadata.affectedApplicationCount,
           migrationCount: metadata.migrationCount,
           envChangeCount: metadata.envChangeCount,
+          mentionedUserIds,
           ...(metadata.projectId && { projectId: metadata.projectId }),
           ...(metadata.conversationId && { conversationId: metadata.conversationId }),
         },
@@ -105,6 +108,29 @@ export async function createCommitAnalysisCanvas(
       `[CanvasService] Created commit analysis canvas ${canvasId} with ${results.length} commits for ${metadata.workspace}/${metadata.repoSlug}`
     );
 
+    // Manually call canvas handler for activities and notifications
+    // (Canvas is created via Prisma, not Zero mutator, so handler won't auto-trigger)
+    const canvasHandler = new CanvasSideEffectHandler({ userID: createdByUserId });
+    canvasHandler.onInsert({
+      entityId: canvasId,
+      entityType: 'canvases',
+      operation: 'insert'
+    }).catch(err => logger.error('[CanvasService] Canvas side-effect handler error:', err));
+
+    // Queue Vespa indexing for the canvas
+    try {
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: canvasId,
+        jobType: 'feed',
+        userId: createdByUserId,
+        app: SubApp.CANVAS,
+      });
+      logger.info(`[CanvasService] Queued Vespa indexing for commit analysis canvas ${canvasId}`);
+    } catch (vespaError) {
+      logger.error(`[CanvasService] Failed to queue Vespa job for commit analysis canvas ${canvasId}:`, vespaError);
+    }
+
     return viewAccessId;
   } catch (error) {
     logger.error('[CanvasService] Failed to create commit analysis canvas:', error);
@@ -112,10 +138,10 @@ export async function createCommitAnalysisCanvas(
   }
 }
 
-function formatCommitAnalysisToBlockNote(
+async function formatCommitAnalysisToBlockNote(
   results: Array<{
     commitId: string;
-    pullRequest: { id: number; title: string; url: string; author: { displayName: string } } | null;
+    pullRequest: { id: number; title: string; url: string; author: { displayName: string; emailAddress?: string } } | null;
     ticket: { id: string; xyneId: string; title: string; status: string } | null;
     filePaths: string[];
   }>,
@@ -131,8 +157,40 @@ function formatCommitAnalysisToBlockNote(
   migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
   metadata: CommitAnalysisCanvasMetadata,
   title: string
-): BlockNoteBlock[] {
+): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   const blocks: BlockNoteBlock[] = [];
+  const mentionedUserIds: string[] = [];
+
+  const userLookupCache = new Map<string, { userId: string; username: string; userEmail: string; userPicture: string } | null>();
+  const userRepository = new UserRepository();
+
+  const lookupUserByEmail = async (email: string | undefined): Promise<{ userId: string; username: string; userEmail: string; userPicture: string } | null> => {
+    if (!email) return null;
+
+    // Check cache first
+    if (userLookupCache.has(email)) {
+      return userLookupCache.get(email)!;
+    }
+
+    try {
+      const user = await userRepository.findByEmail(email);
+      if (user) {
+        const userData = {
+          userId: user.id,
+          username: user.name,
+          userEmail: user.email,
+          userPicture: user.picture || '',
+        };
+        userLookupCache.set(email, userData);
+        return userData;
+      }
+    } catch (error) {
+      logger.warn(`[CanvasService] Failed to lookup user by email ${email}:`, error);
+    }
+
+    userLookupCache.set(email, null);
+    return null;
+  };
   const totalCommits = results.length;
   const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
   const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
@@ -197,7 +255,7 @@ function formatCommitAnalysisToBlockNote(
       if (app.mappedTicketId && metadata.channelId) {
         const ticketUrl = `${config.slackFrontendUrl}/chat/${metadata.channelId}?tab=tickets&ticketId=${app.mappedTicketId}&conversationId=${metadata.conversationId || ''}`;
         content.push({ type: 'text', text: ' - ', styles: {} });
-        content.push({ type: 'link', href: ticketUrl, content: [{ type: 'text', text: 'Ticket →', styles: {} }] });
+        content.push({ type: 'link', href: ticketUrl, content: [{ type: 'text', text: 'Ticket', styles: {} }] });
       }
 
       blocks.push({
@@ -349,14 +407,33 @@ function formatCommitAnalysisToBlockNote(
       ],
     });
 
-    // Author
+    // Author - with mention if user found
+    const authorUser = await lookupUserByEmail(pr.author.emailAddress);
+    const authorContent: BlockNoteInlineContent[] = [
+      { type: 'text', text: 'Author: ', styles: { bold: true } },
+    ];
+
+    if (authorUser) {
+      authorContent.push({
+        type: 'mention',
+        props: {
+          userId: authorUser.userId,
+          username: authorUser.username,
+          userEmail: authorUser.userEmail,
+          userPicture: authorUser.userPicture,
+        },
+      });
+      // Track mentioned user for notifications
+      mentionedUserIds.push(authorUser.userId);
+    } else {
+      // display username if not found
+      authorContent.push({ type: 'text', text: pr.author.displayName, styles: {} });
+    }
+
     blocks.push({
       id: uuidv4(),
       type: 'paragraph',
-      content: [
-        { type: 'text', text: 'Author: ', styles: { bold: true } },
-        { type: 'text', text: pr.author.displayName, styles: {} },
-      ],
+      content: authorContent,
     });
 
     // Ticket info if present
@@ -455,5 +532,5 @@ function formatCommitAnalysisToBlockNote(
     });
   }
 
-  return blocks;
+  return { blocks, mentionedUserIds };
 }
