@@ -21,6 +21,7 @@ export interface BoardStageData {
 
 export interface CreateBoardFormData {
   name: string;
+  description?: string;
   projectId: string;
   boardType: BoardType;
   stages: BoardStageData[];
@@ -28,6 +29,7 @@ export interface CreateBoardFormData {
 
 export interface UpdateBoardFormData {
   name?: string;
+  description?: string;
   projectId?: string;
   boardType?: BoardType;
   metadata?: ReadonlyJSONValue;

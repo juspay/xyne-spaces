@@ -732,6 +732,7 @@ export const boardTable = table('boards')
   .columns({
     id: string(),
     name: string(),
+    description: string().optional(),
     boardType: enumeration<BoardType>(),
     projectId: string(),
     createdBy: string(),

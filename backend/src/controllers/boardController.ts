@@ -15,7 +15,7 @@ export class BoardController {
 
   createBoard = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, projectId, stages, boardType } = req.body;
+      const { name, description, projectId, stages, boardType } = req.body;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -68,6 +68,7 @@ export class BoardController {
 
       const board = await this.boardRepository.createWithStages({
         name: name.trim(),
+        description: description?.trim(),
         projectId: projectId.trim(),
         createdBy: userId,
         stages: stages && stages.length > 0 ? stages : undefined,
@@ -80,6 +81,7 @@ export class BoardController {
         board: {
           id: board.id,
           name: board.name,
+          description: board.description,
           boardType: board.boardType,
           projectId: board.projectId,
           createdBy: board.createdBy,
