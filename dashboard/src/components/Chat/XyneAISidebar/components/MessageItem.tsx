@@ -1,5 +1,6 @@
 import { ReactElement, useState } from 'react';
 import { Globe } from 'lucide-react';
+import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -11,6 +12,9 @@ import {
   type ToolOutput as GeniusToolOutput,
 } from 'cosmic-ai-genius';
 import { Tooltip } from '../../../ui/Tooltip';
+import { UserHoverWrapper } from '../../../ui/UserMentionPopover/UserMentionPopover';
+import { useAuth } from '../../../../hooks/useAuth';
+import { useUser } from '../../../../hooks/useUsers';
 import FileDocumentIcon from '../../../icons/FileDocumentIcon';
 import type {
   Message,
@@ -18,7 +22,125 @@ import type {
   StreamingParsedContent,
   SummarizerKeyPoint,
   MessageAttachment,
+  UserTag,
+  Participant,
 } from '../utils/XyneAITypes';
+
+// ============================================================================
+// User Tag Component and Utilities
+// ============================================================================
+
+// Memoized UserTag Component to prevent unnecessary re-renders
+const UserTagComponent = React.memo(({ userTag }: { userTag: UserTag }) => {
+  const { user: currentUser } = useAuth();
+  const isCurrentUser = currentUser?.id === userTag.userId;
+  const displayName = userTag.name;
+  const mentionDisplay = `${displayName}`;
+
+  const className = isCurrentUser
+    ? 'mention-text !bg-[#fef3c7] !text-[#1264a3] cursor-pointer hover:underline'
+    : 'mention-text cursor-pointer hover:underline';
+
+  console.log('[UserTagComponent] Rendering:', {
+    userTag,
+    userId: userTag.userId,
+    hasUserId: !!userTag.userId,
+  });
+
+  return userTag.userId ? (
+    <UserHoverWrapper userId={userTag.userId}>
+      <span className={className}>{mentionDisplay}</span>
+    </UserHoverWrapper>
+  ) : (
+    <span className={className}>{mentionDisplay}</span>
+  );
+});
+
+UserTagComponent.displayName = 'UserTagComponent';
+
+/**
+ * Process a string to replace user tags with UserTag components
+ * Works in real-time during streaming by converting <Name> to @Name format
+ */
+const processStringForUserTags = (
+  str: string,
+  userTags?: Record<string, UserTag>,
+): React.ReactNode[] => {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  // Updated regex to match any content inside < > (e.g., <Pradeep J>, <Prajwal Prasad>)
+  const tagRegex = /<([^>]+)>/g;
+  while ((match = tagRegex.exec(str)) !== null) {
+    const fullTag = match[0];
+    const startIndex = match.index;
+
+    if (startIndex > lastIndex) {
+      parts.push(str.slice(lastIndex, startIndex));
+    }
+
+    const userTag = userTags?.[fullTag];
+    if (userTag) {
+      // Full userTag available - render with hover
+      parts.push(<UserTagComponent key={fullTag} userTag={userTag} />);
+    } else {
+      // No userTag yet (during streaming) - render as @Name without hover
+      const name = fullTag.slice(1, -1); // Remove < and >
+      const mentionDisplay = `${name}`;
+      parts.push(
+        <span key={fullTag} className='mention-text cursor-pointer hover:underline text-blue-600'>
+          {mentionDisplay}
+        </span>,
+      );
+    }
+
+    lastIndex = tagRegex.lastIndex;
+  }
+
+  if (lastIndex < str.length) {
+    parts.push(str.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : [str];
+};
+
+/**
+ * Process React node recursively to replace user tags
+ */
+const processNodeForUserTags = (
+  node: React.ReactNode,
+  userTags?: Record<string, UserTag>,
+): React.ReactNode => {
+  if (typeof node === 'string') {
+    const parts = processStringForUserTags(node, userTags);
+    return parts.length === 1 ? parts[0] : parts;
+  }
+
+  if (Array.isArray(node)) {
+    return node.map((child: React.ReactNode, idx) => (
+      <React.Fragment key={`user-tag-${idx}`}>
+        {processNodeForUserTags(child, userTags)}
+      </React.Fragment>
+    ));
+  }
+
+  if (React.isValidElement(node)) {
+    const element = node as React.ReactElement<{
+      children?: React.ReactNode;
+    }>;
+
+    const children = element.props.children;
+
+    const processedChildren =
+      children !== undefined
+        ? processNodeForUserTags(children as React.ReactNode, userTags)
+        : undefined;
+
+    return React.cloneElement(element, { children: processedChildren });
+  }
+
+  return node;
+};
 
 // Sanitize text to prevent XSS attacks
 const sanitizeText = (text: string): string => {
@@ -29,6 +151,19 @@ const sanitizeText = (text: string): string => {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#x27;')
     .replace(/\//g, '&#x2F;');
+};
+/**
+ * Process a string to replace user tags with actual user names for copying
+ * Returns plain text with user names instead of <Full Name> tags
+ */
+const processTextForCopy = (str: string, userTags?: Record<string, UserTag>): string => {
+  if (!userTags || Object.keys(userTags).length === 0) return str;
+
+  // Updated regex to match any content inside < > (e.g., <Pradeep J>, <Prajwal Prasad>)
+  return str.replace(/<([^>]+)>/g, match => {
+    const userTag = userTags[match];
+    return userTag ? userTag.name : match;
+  });
 };
 
 // Interfaces for component props
@@ -162,7 +297,13 @@ export const MessageItem = ({
       // Add key points from parsed content
       if (message.parsedContent && message.parsedContent.keypoints.length > 0) {
         textToCopy += '\n\nKey Points:\n';
-        textToCopy += message.parsedContent.keypoints.map(point => `• ${point}`).join('\n');
+        textToCopy += message.parsedContent.keypoints
+          .map(point => {
+            // Remove markdown bold markers (**text**) and replace user tags
+            const cleanedPoint = point.replace(/\*\*([^*]+)\*\*/g, '$1');
+            return `• ${processTextForCopy(cleanedPoint, message.userTags)}`;
+          })
+          .join('\n');
       }
     }
 
@@ -324,6 +465,10 @@ const MessageContent = ({
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
+            p: ({ children }) => {
+              const processed = processNodeForUserTags(children, message.userTags);
+              return <span>{processed}</span>;
+            },
             a: ({ href, children, ...props }) => {
               // Check if URL is external
               const isExternal = (() => {
@@ -494,6 +639,10 @@ const SummarizerContent = ({
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
+              p: ({ children }) => {
+                const processed = processNodeForUserTags(children, message.userTags);
+                return <span>{processed}</span>;
+              },
               a: ({ href, children, ...props }) => {
                 // Check if URL is external
                 const isExternal = (() => {
@@ -543,7 +692,10 @@ const SummarizerContent = ({
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
-                    p: ({ children }) => <span>{children}</span>,
+                    p: ({ children }) => {
+                      const processed = processNodeForUserTags(children, message.userTags);
+                      return <span>{processed}</span>;
+                    },
                     a: ({ href, children, ...props }) => {
                       // Check if URL is external
                       const isExternal = (() => {
@@ -633,7 +785,10 @@ const GeniusKeyPoints = ({
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
-                  p: ({ children }) => <span>{children}</span>,
+                  p: ({ children }) => {
+                    const processed = processNodeForUserTags(children, message.userTags);
+                    return <span>{processed}</span>;
+                  },
                   a: ({ href, children, ...props }) => {
                     // Check if URL is external
                     const isExternal = (() => {
@@ -692,6 +847,93 @@ const GeniusKeyPoints = ({
   </div>
 );
 
+// Avatar component that uses the useUser hook properly
+const ParticipantAvatar: React.FC<{ participant: Participant }> = ({ participant }) => {
+  const user = useUser(participant.id);
+  const avatarSrc = user?.picture || '';
+  const initials =
+    participant.name
+      ?.split(' ')
+      .map(n => n[0])
+      .join('') || '?';
+
+  return (
+    <div className='w-6 h-6 rounded-lg overflow-hidden ring-2 ring-white flex-shrink-0 bg-gray-200 flex items-center justify-center'>
+      {avatarSrc ? (
+        <img src={avatarSrc} alt={participant.name} className='w-full h-full object-cover' />
+      ) : (
+        <span className='text-xs font-medium text-gray-600'>{initials}</span>
+      )}
+    </div>
+  );
+};
+
+// Simple Participants Avatars component - inline in MessageItem
+const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
+  participants,
+}: {
+  participants: Participant[];
+}) => {
+  console.log('[ParticipantsAvatars] Rendering:', { participants, count: participants?.length });
+
+  // Deduplicate participants by ID
+  const uniqueParticipants = React.useMemo(() => {
+    const seen = new Set<string>();
+    return participants.filter(p => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+  }, [participants]);
+
+  console.log('[ParticipantsAvatars] Unique participants:', {
+    uniqueParticipants,
+    count: uniqueParticipants.length,
+  });
+
+  // Get top 3 unique participants
+  const top3 = uniqueParticipants.slice(0, 3);
+  const remaining = uniqueParticipants.length - 3;
+
+  // Join all unique participant names with commas, limit to 20 users
+  const MAX_USERS_TO_SHOW = 20;
+  let displayNames: string;
+  if (uniqueParticipants.length <= MAX_USERS_TO_SHOW) {
+    displayNames = uniqueParticipants.map(p => p.name).join(', ');
+  } else {
+    const first20 = uniqueParticipants.slice(0, MAX_USERS_TO_SHOW);
+    const remainingCount = uniqueParticipants.length - MAX_USERS_TO_SHOW;
+    displayNames = `${first20.map(p => p.name).join(', ')} and ${remainingCount} others`;
+  }
+
+  // Dropdown content
+  const dropdownContent = (
+    <div className='bg-black rounded-lg shadow-xl py-2 px-3 w-64 z-[99999]'>
+      <div className='text-sm text-white break-words'>{displayNames}</div>
+    </div>
+  );
+
+  return (
+    <Tooltip content={dropdownContent} side='top' align='start' delayDuration={200} sideOffset={4}>
+      <div
+        className='flex items-center -space-x-1.5 cursor-pointer hover:opacity-80'
+        title={`${uniqueParticipants.length} participant${uniqueParticipants.length > 1 ? 's' : ''}`}
+      >
+        {top3.map(p => (
+          <ParticipantAvatar key={p.id} participant={p} />
+        ))}
+        {remaining > 0 && (
+          <div
+            className='w-6 h-6 rounded-lg bg-gray-100 ring-2 ring-white flex items-center justify-center text-xs font-medium text-gray-600 flex-shrink-0'
+            title={`${remaining} more participant${remaining > 1 ? 's' : ''}`}
+          >
+            +{remaining}
+          </div>
+        )}
+      </div>
+    </Tooltip>
+  );
+};
 // Message action buttons
 const MessageActions = ({
   message,
@@ -798,6 +1040,12 @@ const MessageActions = ({
           </defs>
         </svg>
       </button>
+      {/* Participants avatars - shown for Summarizer messages */}
+      {(message.agentType === 'summarizer' || message.agentType === 'genius') &&
+        message.participants &&
+        message.participants.length > 0 && (
+          <ParticipantsAvatars participants={message.participants} />
+        )}
     </div>
 
     {/* Web Search Icon */}

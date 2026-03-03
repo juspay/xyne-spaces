@@ -1,9 +1,13 @@
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef, useEffect, RefObject } from 'react';
 import { BASE_URL } from '../services/clients/apiClient';
 import { parsePartialSummarizerJSON } from '../utils/partialJsonParser';
 import type {
   Message,
   MessageAttachment,
+  SummarizerKeyPoint,
+  SummarizerOutput,
+  Participant,
+  UserTag,
 } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import {
   parseStreamingContent,
@@ -12,6 +16,21 @@ import {
 import { generateToolInputStatus } from '../components/Chat/XyneAISidebar/utils/toolInputStatus';
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import type { ResearchContext } from '@xyne/shared';
+
+/**
+ * Convert userTags to participants format
+ * Transforms {tag: {name, userId}} to [{id, name, email, picture}]
+ */
+function convertUserTagsToParticipants(userTags?: Record<string, UserTag>): Participant[] {
+  if (!userTags || Object.keys(userTags).length === 0) return [];
+
+  return Object.values(userTags).map(userTag => ({
+    id: userTag.userId,
+    name: userTag.name,
+    email: '', // Not available from userTags
+    picture: '', // Will be handled by ParticipantsDropdown's getAvatarUrl helper
+  }));
+}
 
 interface UseXyneAIStreamParams {
   channelIds: string[];
@@ -46,6 +65,7 @@ export const useXyneAIStream = ({
   researchContext,
 }: UseXyneAIStreamParams) => {
   const abortControllerRef = useRef<AbortController | null>(null);
+  const participantsRef = useRef<Participant[]>([]);
 
   // Cleanup effect to abort ongoing requests on unmount
   useEffect(() => {
@@ -87,7 +107,11 @@ export const useXyneAIStream = ({
         conversationIdMapping: {},
         channelIdMapping: {},
         statusMessage: 'Thinking',
+        participants: [],
       };
+
+      // Reset refs
+      participantsRef.current = [];
 
       setMessages(prev => [...prev, botMessage]);
 
@@ -179,6 +203,7 @@ export const useXyneAIStream = ({
                   setMessages,
                   setConversationId,
                   setCurrentTraceId,
+                  participantsRef,
                 );
 
                 // Update rawContent if there's new content
@@ -260,6 +285,7 @@ function processStreamEvent(
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
   setConversationId: React.Dispatch<React.SetStateAction<string>>,
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>,
+  participantsRef?: RefObject<Participant[]>,
 ): void {
   switch (data['type']) {
     case 'start':
@@ -279,6 +305,15 @@ function processStreamEvent(
             msg.id === botMessageId && msg.type === 'bot'
               ? { ...msg, traceId: data['traceId'] as string }
               : msg,
+          ),
+        );
+      }
+      // Capture participants from start event
+      if (data['participants'] && Array.isArray(data['participants']) && participantsRef) {
+        participantsRef.current = data['participants'] as Participant[];
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === botMessageId ? { ...msg, participants: participantsRef.current } : msg,
           ),
         );
       }
@@ -383,6 +418,7 @@ function processStreamEvent(
         toolOutputs,
         setMessages,
         setConversationId,
+        participantsRef,
       );
       break;
 
@@ -568,6 +604,7 @@ function handleCompletionEvent(
   toolOutputs: GeniusToolOutput[],
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
   setConversationId: React.Dispatch<React.SetStateAction<string>>,
+  participantsRef?: React.RefObject<Participant[]>,
 ): void {
   if (data['sessionId'] && typeof data['sessionId'] === 'string') {
     console.log(
@@ -577,29 +614,95 @@ function handleCompletionEvent(
     setConversationId(data['sessionId']);
   }
 
-  // Check if this is a Summarizer response
-  if (data['output'] && typeof data['output'] === 'object') {
-    const output = data['output'] as Record<string, unknown>;
-    if ('keyPoints' in output && Array.isArray(output['keyPoints'])) {
-      // Summarizer complete event - preserve traceId
-      setMessages(prev =>
-        prev.map(msg => {
-          if (msg.id !== botMessageId) return msg;
-          const { traceId } = msg; // Preserve traceId
-          const updatedMsg: Message = {
-            ...msg,
-            content: (output['summary'] as string) || '',
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
-            summarizerOutput: output as any,
-            isStreaming: false,
-            agentType: 'summarizer',
-          };
-          if (traceId) updatedMsg.traceId = traceId;
-          return updatedMsg;
-        }),
-      );
-      return;
+  const userTags = extractUserTags(data);
+
+  // Extract participants from data (root level or nested in output)
+  if (participantsRef) {
+    const participants = extractParticipants(data);
+    if (participants && participants.length > 0) {
+      participantsRef.current = participants;
+    } else {
+      // If no participants array, try to convert from userTags
+      if (userTags && Object.keys(userTags).length > 0) {
+        participantsRef.current = convertUserTagsToParticipants(userTags);
+      }
     }
+  }
+
+  // Check if this is a Summarizer response (both nested and at root level)
+  const output = 'keyPoints' in data ? data : (data['output'] as Record<string, unknown> | null);
+
+  if (output && 'keyPoints' in output && Array.isArray(output['keyPoints'])) {
+    const summary = (output['summary'] as string) || '';
+    const keyPoints = (output['keyPoints'] as unknown[]) || [];
+    // Convert keyPoints to SummarizerOutput format if needed
+    let summarizerOutput: SummarizerOutput;
+    // Check if keyPoints are already in the correct format (with point and citation)
+    if (
+      keyPoints.length > 0 &&
+      typeof keyPoints[0] === 'object' &&
+      keyPoints[0] !== null &&
+      'point' in keyPoints[0]
+    ) {
+      // Already in correct format
+      summarizerOutput = {
+        summary,
+        keyPoints: keyPoints as SummarizerKeyPoint[],
+      };
+    } else {
+      // Convert from string array to SummarizerKeyPoint format
+      summarizerOutput = {
+        summary,
+        keyPoints: keyPoints.map((kp: unknown) => ({
+          point: typeof kp === 'string' ? kp : JSON.stringify(kp),
+        })),
+      };
+    }
+
+    setMessages(prev =>
+      prev.map(msg => {
+        if (msg.id !== botMessageId) return msg;
+        const { traceId } = msg; // Preserve traceId
+        const updatedMsg: Message = {
+          ...msg,
+          content: summary,
+          summarizerOutput,
+          isStreaming: false,
+          agentType: 'summarizer' as const,
+          ...(userTags && { userTags }),
+          ...(participantsRef &&
+            participantsRef.current.length > 0 && { participants: participantsRef.current }),
+        };
+        if (traceId) updatedMsg.traceId = traceId;
+        return updatedMsg;
+      }),
+    );
+    return;
+  }
+
+  // Fallback: Check for legacy summarizer output format
+  const summarizerOutput = extractSummarizerOutput(data);
+
+  if (summarizerOutput) {
+    // Summarizer complete event - preserve traceId
+    setMessages(prev =>
+      prev.map(msg => {
+        if (msg.id !== botMessageId) return msg;
+        const { traceId } = msg; // Preserve traceId
+        const updatedMsg: Message = {
+          ...msg,
+          content: (summarizerOutput['summary'] as string) || '',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+          summarizerOutput: summarizerOutput as any,
+          isStreaming: false,
+          agentType: 'summarizer' as const,
+          ...(userTags && { userTags }),
+        };
+        if (traceId) updatedMsg.traceId = traceId;
+        return updatedMsg;
+      }),
+    );
+    return;
   }
 
   // Genius response - use the streamed content as final content - preserve traceId
@@ -617,9 +720,36 @@ function handleCompletionEvent(
         parsedContent: finalParsed,
         ...(!msg.agentType && { agentType: 'genius' as const }),
         ...(toolOutputs.length > 0 && { toolOutputs }),
+        ...(userTags && { userTags }),
       };
       if (traceId) updatedMsg.traceId = traceId;
       return updatedMsg;
     }),
   );
 }
+// Generic helper to extract a value from root level or nested in output object
+function extractNestedValue<T>(data: Record<string, unknown>, key: string): T | undefined {
+  return (data[key] ?? (data['output'] as Record<string, unknown> | undefined)?.[key]) as
+    | T
+    | undefined;
+}
+
+// Extract userTags from data (root level or nested in output)
+const extractUserTags = (
+  data: Record<string, unknown>,
+): Record<string, { name: string; userId: string }> | undefined =>
+  extractNestedValue<Record<string, { name: string; userId: string }>>(data, 'userTags');
+
+// Extract participants from data (root level or nested in output)
+const extractParticipants = (data: Record<string, unknown>): Participant[] | undefined => {
+  const participants = extractNestedValue<unknown>(data, 'participants');
+  return Array.isArray(participants) ? (participants as Participant[]) : undefined;
+};
+
+// Extract summarizer output from data (checks both root and nested in output)
+const extractSummarizerOutput = (
+  data: Record<string, unknown>,
+): Record<string, unknown> | undefined => {
+  const obj = 'keyPoints' in data ? data : (data['output'] as Record<string, unknown> | undefined);
+  return obj && 'keyPoints' in obj && Array.isArray(obj['keyPoints']) ? obj : undefined;
+};

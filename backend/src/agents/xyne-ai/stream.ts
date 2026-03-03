@@ -7,6 +7,7 @@ import { Streaming } from '@xynehq/jaf';
 
 import { logger } from '../../utils/logger.js';
 import { config } from '../../config/env.js';
+import { db } from '../../database/client.js';
 
 import {
   sessionStore,
@@ -27,6 +28,7 @@ import type {
   XyneAIStreamChunk,
   AgentRawOutput,
   AttachmentData,
+  UserTag,
 } from './types.js';
 
 type InMemoryStreamProvider = ReturnType<typeof Streaming.createInMemoryStreamProvider>;
@@ -71,13 +73,39 @@ function getCurrentTimestamp(): string {
 // ============================================================================
 
 /**
- * Convert raw output to XyneAIOutput with enhanced entity metadata
+ * Fetch user IDs by names in a single DB query
+ * If user not found, returns empty userId (name still displayed)
  */
-function convertRawToOutput(
+async function enrichUserTags(
+  userTags: Record<string, string> | undefined
+): Promise<Record<string, UserTag> | undefined> {
+  if (!userTags || Object.keys(userTags).length === 0) return undefined;
+
+  const uniqueNames = [...new Set(Object.values(userTags))];
+
+  const users = await db.user.findMany({
+    where: { name: { in: uniqueNames } },
+    select: { id: true, name: true },
+  });
+
+  const userMap = new Map(users.map(u => [u.name, u.id]));
+
+  return Object.fromEntries(
+    Object.entries(userTags).map(([tag, name]) => [
+      tag,
+      { name, userId: userMap.get(name) || '' } as UserTag,
+    ])
+  );
+}
+
+/**
+ * Convert raw output to XyneAIOutput
+ */
+async function convertRawToOutput(
   raw: AgentRawOutput,
   mappings?: EnhancedCitationMappings,
   defaultChannelId?: string
-): XyneAIOutput {
+): Promise<XyneAIOutput> {
   const keypointsData = raw.keypoints;
   let points: string[] = [];
   
@@ -127,21 +155,26 @@ function convertRawToOutput(
       },
     };
   });
+  const userTagsToEnrich = raw.userTags;
+  logger.info('[XyneAI] [convertRawToOutput] userTags from raw output:', JSON.stringify(userTagsToEnrich));
   
+  const enrichedUserTags = await enrichUserTags(userTagsToEnrich);
+  logger.info('[XyneAI] [convertRawToOutput] enriched userTags:', JSON.stringify(enrichedUserTags));
   return {
     summary: raw.summary || '',
     keyPoints,
+    userTags: enrichedUserTags,
   };
 }
 
 /**
  * Parse LLM string output to XyneAIOutput with enhanced mappings
  */
-function parseStringOutput(
+async function parseStringOutput(
   content: string,
   mappings?: EnhancedCitationMappings,
   channelId?: string
-): XyneAIOutput {
+): Promise<XyneAIOutput> {
   let jsonContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   
   const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);
@@ -413,7 +446,7 @@ export async function* xyneAIStream(
             let parsedOutput: XyneAIOutput;
             
             try {
-              parsedOutput = parseStringOutput(responseText, mappings, channelIds[0]);
+              parsedOutput = await parseStringOutput(responseText, mappings, channelIds[0]);
             } catch (parseError) {
               logger.warn(`[XyneAI] [${session.sessionId}] Failed to parse output, using fallback`);
               parsedOutput = {
@@ -433,6 +466,7 @@ export async function* xyneAIStream(
               sessionId: session.sessionId,
               messageId: result?.messageId,
               output: parsedOutput,
+              userTags: parsedOutput.userTags,
             };
           } else if (event.data.outcome.status === 'error') {
             const errTag = event.data.outcome.error._tag;

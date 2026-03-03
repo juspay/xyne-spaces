@@ -53,9 +53,15 @@ export interface KeyPointWithCitation {
   citation: Citation;
 }
 
+export interface UserTag {
+  name: string;
+  userId: string;
+}
+
 export interface XyneAIOutput {
   summary: string;
   keyPoints: KeyPointWithCitation[];
+  userTags?: Record<string, UserTag>; // Tag -> {name, userId}
 }
 
 // ============================================================================
@@ -84,6 +90,7 @@ export interface AgentRawOutput {
   summary: string;
   keypoints: string | string[];
   citations?: Record<number, string>;  // {keypointNum: "prefixedRef"} e.g., {1: "A2", 2: "B1"}
+  userTags?: Record<string, string>;  // {tag: username} e.g., {"<Mohan Kumar>": "Mohan Kumar", "<Ram>": "Ram"}
 }
 
 // ============================================================================
