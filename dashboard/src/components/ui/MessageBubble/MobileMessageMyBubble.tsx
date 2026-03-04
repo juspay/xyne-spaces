@@ -21,7 +21,7 @@ import { ChannelScopeType } from '@xyne/shared';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { PostedInLink } from './PostedInLink';
 import { hasMessageContent } from '../../../utils/chatUtils';
-import { ProactiveNudgeList } from '../../Chat/Nudges/ProactiveNudgeList';
+import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
@@ -282,7 +282,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
           </div>
 
           {!contentOnly && (
-            <ProactiveNudgeList
+            <SurfaceNudgeList
               messageId={message.messageId}
               channelId={channelId}
               contentOnly={contentOnly}

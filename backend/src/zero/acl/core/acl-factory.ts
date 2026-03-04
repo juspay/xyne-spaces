@@ -44,6 +44,8 @@ import { StagePRStatusMappingsACL } from '../tables/stage-pr-status-mappings-acl
 import { ResourcesACL } from '../tables/resources-acl';
 import { ResourceAccessACL } from '../tables/resource-access-acl';
 import { ProactiveNudgesACL } from '../tables/proactive-nudges-acl';
+import { SurfaceNudgesACL } from '../tables/surface-nudges-acl';
+import { SurfaceLinksACL } from '../tables/surface-links-acl';
 
 export class ACLFactory {
   /**
@@ -104,6 +106,8 @@ export class ACLFactory {
         return new ProjectAcl(ctx);
       case 'proactive_nudges':
         return new ProactiveNudgesACL(ctx);
+      case 'surface_nudges':
+        return new SurfaceNudgesACL(ctx);
       case 'pull_requests':
         return new PullRequestsACL(ctx);
       case 'reaction_counts':
@@ -162,6 +166,8 @@ export class ACLFactory {
         return new NoAcl<'impacts'>(ctx);
       case 'coes':
         return new NoAcl<'coes'>(ctx);
+      case 'surface_links':
+        return new SurfaceLinksACL(ctx);
       default:
         return new NoAcl<any>(ctx);
     }

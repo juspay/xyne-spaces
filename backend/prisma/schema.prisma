@@ -1710,7 +1710,23 @@ enum NudgeType {
   @@schema("public")
 }
 
-// The actual output shown to users
+enum NudgeKind {
+  CREATE_TICKET_FROM_MESSAGE
+  FIND_RELATED_TICKET_FROM_MESSAGE
+  FIND_RELATED_MESSAGE_FROM_MESSAGE
+  LINK_PASTE_TO_SURFACE
+  FORWARD_MESSAGE_LINK
+  DELETE_MESSAGE_CLEANUP
+  @@schema("public")
+}
+
+enum NudgeState {
+  ACTIVE
+  DISMISSED
+  ACTED_ON
+  @@schema("public")
+}
+
 model ProactiveNudge {
   id                      String             @id @default(cuid())
   messageId               String
@@ -1732,6 +1748,27 @@ model ProactiveNudge {
   @@unique([messageId])
   @@index([state])
   @@map("proactive_nudges")
+  @@schema("public")
+}
+
+model SurfaceNudge {
+  id          String            @id @default(cuid())
+  nudgeKind   NudgeKind
+  sourceId    String
+  title       String
+  description String            @db.Text
+  priority    String?           @default("medium")
+  actions     Json?
+  state       NudgeState        @default(ACTIVE)
+  visibleTo   String?
+  projectId   String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([sourceId, state])
+  @@index([projectId, state])
+  @@index([createdAt])
+  @@map("surface_nudges")
   @@schema("public")
 }
 
@@ -2530,7 +2567,7 @@ enum SEVERITY {
 // Root cause analysis for issues
 model RCA {
   id                    String     @id @default(cuid())
-  title                 String  
+  title                 String
   ticketId              String     // Ticket ID
   ownerId               String     // User ID (no FK constraint)
   summary               String?
@@ -2608,5 +2645,45 @@ model ReleaseAttribution {
   @@index([releaseApplicationId])
   @@index([rootCauseTicketId])
   @@map("release_attributions")
+  @@schema("public")
+}
+
+// ============================================================================
+// SURFACE NUDGE FRAMEWORK
+// ============================================================================
+
+enum SurfaceAreaType {
+  MESSAGE
+  TICKET
+  CANVAS
+  CALL
+  CONVERSATION
+  @@schema("public")
+}
+
+enum SurfaceLinkKind {
+  RELATES_TO
+  @@schema("public")
+}
+
+model SurfaceLink {
+  id          String          @id @default(cuid())
+
+  sourceType  SurfaceAreaType
+  sourceId    String
+
+  targetType  SurfaceAreaType
+  targetId    String
+
+  linkKind    SurfaceLinkKind
+  createdBy   String
+  projectId   String
+  createdAt   DateTime        @default(now())
+
+  @@unique([sourceType, sourceId, targetType, targetId, linkKind])
+  @@index([sourceType, sourceId])
+  @@index([targetType, targetId])
+  @@index([projectId])
+  @@map("surface_links")
   @@schema("public")
 }

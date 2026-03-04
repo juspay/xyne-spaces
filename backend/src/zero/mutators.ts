@@ -35,6 +35,9 @@ import {
   AttributionConfidence,
   BaseTicketType,
   LinkVisibility,
+  NudgeState,
+  SurfaceAreaType,
+  SurfaceLinkKind,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationController } from "@/controllers/conversationController";
@@ -48,6 +51,7 @@ import { convert } from 'html-to-text';
 import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
+import { nudgeRegistry } from '@/nudges/registry';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
@@ -5696,48 +5700,77 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       dismiss: defineMutator(
         z.object({
           nudgeId: z.string(),
+          timestamp: z.number(),
         }),
-        async ({ tx, args: { nudgeId } }) => {
-          const nudge = await tx.run(zql.proactive_nudges.where('id', nudgeId).one());
+        async ({ tx, ctx, args: { nudgeId, timestamp } }) => {
+          const nudge = await tx.run(zql.surface_nudges.where('id', nudgeId).one());
           if (!nudge) {
             throw new Error('Nudge not found');
           }
 
-          if (nudge.state !== 'ACTIVE') {
+          if (nudge.state !== NudgeState.ACTIVE) {
             return;
           }
 
-          await tx.mutate.proactive_nudges.update({
+          await tx.mutate.surface_nudges.update({
             id: nudgeId,
-            state: 'DISMISSED',
+            state: NudgeState.DISMISSED,
+            updatedAt: timestamp,
           });
 
-          const message = await tx.run(zql.messages.where('messageId', nudge.messageId).one());
-          if (!message) {
-            return;
+          // Recalculate nudgeCount on the source message (if it exists)
+          const message = await tx.run(zql.messages.where('messageId', nudge.sourceId).one());
+          if (message) {
+            const activeNudges = await tx.run(
+              zql.surface_nudges
+                .where('sourceId', nudge.sourceId)
+                .where('state', NudgeState.ACTIVE),
+            );
+            await tx.mutate.messages.update({
+              messageId: message.messageId,
+              nudgeCount: activeNudges.length,
+            });
           }
 
-          const activeNudges = await tx.run(
-            zql.proactive_nudges.where('messageId', nudge.messageId).where('state', 'ACTIVE')
-          );
-          await tx.mutate.messages.update({
-            messageId: message.messageId,
-            nudgeCount: activeNudges.length,
-          });
+          // Emit UserActivityEvent for feedback loop
+          try {
+            const { db } = await import('@/database/client');
+            await db.userActivityEvent.create({
+              data: {
+                userId: ctx.userID,
+                sessionId: 'system',
+                eventCategory: 'NUDGE',
+                eventName: 'NUDGE_DISMISSED',
+                url: '',
+                triggerType: 'SYSTEM',
+                platform: 'WEB',
+                timestamp: new Date(timestamp),
+                contextMetadata: {
+                  nudgeId,
+                  nudgeKind: nudge.nudgeKind,
+                  sourceId: nudge.sourceId,
+                  projectId: nudge.projectId,
+                },
+              },
+            });
+          } catch (err) {
+            logger.warn('[Nudges.dismiss] Failed to emit activity event', { nudgeId, error: err });
+          }
         },
       ),
       act: defineMutator(
         z.object({
           nudgeId: z.string(),
           actionResult: z.any().optional(),
+          timestamp: z.number(),
         }),
-        async ({ tx, args: { nudgeId, actionResult } }) => {
-          const nudge = await tx.run(zql.proactive_nudges.where('id', nudgeId).one());
+        async ({ tx, ctx, args: { nudgeId, actionResult, timestamp } }) => {
+          const nudge = await tx.run(zql.surface_nudges.where('id', nudgeId).one());
           if (!nudge) {
             throw new Error('Nudge not found');
           }
 
-          if (nudge.state !== 'ACTIVE') {
+          if (nudge.state !== NudgeState.ACTIVE) {
             return;
           }
 
@@ -5746,11 +5779,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ? (nudge.actions as Record<string, unknown>)
               : {};
 
-          await tx.mutate.proactive_nudges.update(
+          await tx.mutate.surface_nudges.update(
             actionResult
               ? {
                   id: nudgeId,
-                  state: 'ACTED_ON',
+                  state: NudgeState.ACTED_ON,
+                  updatedAt: timestamp,
                   actions: {
                     ...existingActions,
                     actionResult: actionResult as ReadonlyJSONValue,
@@ -5758,22 +5792,52 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 }
               : {
                   id: nudgeId,
-                  state: 'ACTED_ON',
-                }
+                  state: NudgeState.ACTED_ON,
+                  updatedAt: timestamp,
+                },
           );
 
-          const message = await tx.run(zql.messages.where('messageId', nudge.messageId).one());
-          if (!message) {
-            return;
+          // Recalculate nudgeCount on the source message (if it exists)
+          const message = await tx.run(zql.messages.where('messageId', nudge.sourceId).one());
+          if (message) {
+            const activeNudges = await tx.run(
+              zql.surface_nudges
+                .where('sourceId', nudge.sourceId)
+                .where('state', NudgeState.ACTIVE),
+            );
+            await tx.mutate.messages.update({
+              messageId: message.messageId,
+              nudgeCount: activeNudges.length,
+            });
           }
 
-          const activeNudges = await tx.run(
-            zql.proactive_nudges.where('messageId', nudge.messageId).where('state', 'ACTIVE')
-          );
-          await tx.mutate.messages.update({
-            messageId: message.messageId,
-            nudgeCount: activeNudges.length,
-          });
+          // Create surface_links row when action result has target info
+          if (actionResult && typeof actionResult === 'object' && !Array.isArray(actionResult)) {
+            const result = actionResult as Record<string, unknown>;
+            const resultData = result.result as Record<string, unknown> | undefined;
+
+            if (resultData) {
+              const definition = nudgeRegistry.getByKind(nudge.nudgeKind);
+              if (definition) {
+                const entityId = typeof resultData.entityId === 'string' ? resultData.entityId : undefined;
+
+                if (entityId) {
+                  const linkId = `sl_${nudgeId}_${timestamp}`;
+                  await tx.mutate.surface_links.insert({
+                    id: linkId,
+                    sourceType: definition.direction.from as SurfaceAreaType,
+                    sourceId: nudge.sourceId,
+                    targetType: definition.direction.to as SurfaceAreaType,
+                    targetId: entityId,
+                    linkKind: SurfaceLinkKind.RELATES_TO,
+                    createdBy: ctx.userID,
+                    projectId: nudge.projectId,
+                    createdAt: timestamp,
+                  });
+                }
+              }
+            }
+          }
         },
       ),
     },

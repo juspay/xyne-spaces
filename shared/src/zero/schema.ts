@@ -425,6 +425,37 @@ export enum FormEntityType {
 }
 
 // @ts-ignore TS1294
+export enum SurfaceAreaType {
+  MESSAGE = 'MESSAGE',
+  TICKET = 'TICKET',
+  CANVAS = 'CANVAS',
+  CALL = 'CALL',
+  CONVERSATION = 'CONVERSATION',
+}
+
+// @ts-ignore TS1294
+export enum SurfaceLinkKind {
+  RELATES_TO = 'RELATES_TO',
+}
+
+// @ts-ignore TS1294
+export enum NudgeKind {
+  CREATE_TICKET_FROM_MESSAGE = 'CREATE_TICKET_FROM_MESSAGE',
+  FIND_RELATED_TICKET_FROM_MESSAGE = 'FIND_RELATED_TICKET_FROM_MESSAGE',
+  FIND_RELATED_MESSAGE_FROM_MESSAGE = 'FIND_RELATED_MESSAGE_FROM_MESSAGE',
+  LINK_PASTE_TO_SURFACE = 'LINK_PASTE_TO_SURFACE',
+  FORWARD_MESSAGE_LINK = 'FORWARD_MESSAGE_LINK',
+  DELETE_MESSAGE_CLEANUP = 'DELETE_MESSAGE_CLEANUP',
+}
+
+// @ts-ignore TS1294
+export enum NudgeState {
+  ACTIVE = 'ACTIVE',
+  DISMISSED = 'DISMISSED',
+  ACTED_ON = 'ACTED_ON',
+}
+
+// @ts-ignore TS1294
 export enum LookupType {
   TICKET_TYPE = 'TICKET_TYPE',
   COE_ACTION_TYPE = 'COE_ACTION_TYPE',
@@ -1237,6 +1268,23 @@ export const proactiveNudgeTable = table('proactive_nudges')
   })
   .primaryKey('id');
 
+export const surfaceNudgeTable = table('surface_nudges')
+  .columns({
+    id: string(),
+    nudgeKind: enumeration<NudgeKind>(),
+    sourceId: string(),
+    title: string(),
+    description: string(),
+    priority: string().optional(),
+    actions: json().optional(),
+    state: enumeration<NudgeState>(),
+    visibleTo: string().optional(),
+    projectId: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const callTable = table('calls')
   .columns({
     id: string(),
@@ -1644,6 +1692,21 @@ export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
     updatedAt: number(),
   })
   .primaryKey('id');
+
+export const surfaceLinkTable = table('surface_links')
+  .columns({
+    id: string(),
+    sourceType: enumeration<SurfaceAreaType>(),
+    sourceId: string(),
+    targetType: enumeration<SurfaceAreaType>(),
+    targetId: string(),
+    linkKind: enumeration<SurfaceLinkKind>(),
+    createdBy: string(),
+    projectId: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 // Define relationships
 
 export const merchantTable = table('merchants')
@@ -2555,6 +2618,22 @@ export const proactiveNudgeTableRelationships = relationships(proactiveNudgeTabl
   }),
 }));
 
+export const surfaceNudgeTableRelationships = relationships(surfaceNudgeTable, ({ one }) => ({
+  sourceMessage: one({
+    sourceField: ['sourceId'],
+    destField: ['messageId'],
+    destSchema: messageTable,
+  }),
+}));
+
+export const surfaceLinkTableRelationships = relationships(surfaceLinkTable, ({ one }) => ({
+  sourceMessage: one({
+    sourceField: ['sourceId'],
+    destField: ['messageId'],
+    destSchema: messageTable,
+  }),
+}));
+
 export const callTableRelationships = relationships(callTable, ({ one, many }) => ({
   createdByUser: one({
     sourceField: ['createdByUserId'],
@@ -2962,6 +3041,7 @@ export const schema = createSchema({
     notificationTable,
     notificationPreferenceTable,
     proactiveNudgeTable,
+    surfaceNudgeTable,
     callTable,
     callParticipantTable,
     canvasTable,
@@ -2993,6 +3073,8 @@ export const schema = createSchema({
     impactTable,
     coeTable,
     releaseAttributionTable,
+    // Surface Nudge Framework
+    surfaceLinkTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -3035,6 +3117,7 @@ export const schema = createSchema({
     reactionTableRelationships,
     activityTableRelationships,
     proactiveNudgeTableRelationships,
+    surfaceNudgeTableRelationships,
     callTableRelationships,
     callParticipantTableRelationships,
     canvasTableRelationships,
@@ -3067,6 +3150,8 @@ export const schema = createSchema({
     impactTableRelationships,
     coeTableRelationships,
     releaseAttributionTableRelationships,
+    // Surface Nudge Framework
+    surfaceLinkTableRelationships,
   ],
 });
 
@@ -3118,6 +3203,7 @@ export type Activity = Row<typeof schema.tables.activities>;
 export type Notification = Row<typeof schema.tables.notifications>;
 export type NotificationPreference = Row<typeof schema.tables.notification_preferences>;
 export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
+export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;
 export type Call = Row<typeof schema.tables.calls>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type ConversationParticipant = Row<typeof schema.tables.conversation_participants>;
@@ -3151,6 +3237,9 @@ export type RCA = Row<typeof schema.tables.rcas>;
 export type Impact = Row<typeof schema.tables.impacts>;
 export type COE = Row<typeof schema.tables.coes>;
 export type ReleaseAttribution = Row<typeof schema.tables.release_attributions>;
+
+// Surface Framework Types
+export type SurfaceLink = Row<typeof schema.tables.surface_links>;
 
 export type Context = {
   userID: string;

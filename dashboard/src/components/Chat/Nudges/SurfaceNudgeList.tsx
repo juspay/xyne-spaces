@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import XyneAIStar from '../../icons/xyne-ai/XyneAIStar';
 import { MessageType } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { ProactiveNudgeCard } from './ProactiveNudgeCard';
+import { SurfaceNudgeCard } from './SurfaceNudgeCard';
 
-interface ProactiveNudgeListProps {
+interface SurfaceNudgeListProps {
   messageId: string;
   channelId?: string | undefined;
   contentOnly?: boolean | undefined;
@@ -55,7 +55,7 @@ const smoothScrollTo = (scrollContainer: Element, scrollTop: number): void => {
   });
 };
 
-export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
+export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
   messageId,
   channelId,
   contentOnly,
@@ -94,10 +94,19 @@ export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
   }, [expanded, messageId]);
 
   const nudgesEnabled = enabled && hasNudges && expanded;
-  const [nudgesResult] = useCachedQuery(
-    queries.messageNudges({ messageId, states: ['ACTIVE', 'ACTED_ON'] }),
+  const [nudgesResult, nudgesDetails] = useCachedQuery(
+    queries.entityNudges({
+      sourceId: messageId,
+      states: ['ACTIVE', 'ACTED_ON'],
+    }),
     nudgesEnabled ? { enabled: nudgesEnabled } : false,
   );
+  const isLoading = nudgesEnabled && nudgesDetails.type === 'unknown';
+  const hasFetched = useRef(false);
+  if (nudgesDetails.type === 'complete') {
+    hasFetched.current = true;
+  }
+
   const nudges = useMemo(() => nudgesResult ?? [], [nudgesResult]);
 
   const entries = useMemo(() => {
@@ -115,6 +124,13 @@ export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
       setExpanded(false);
     }
   }, [expanded, hasNudges]);
+
+  // Auto-collapse when all nudges are resolved after initial fetch
+  useEffect(() => {
+    if (expanded && hasFetched.current && entries.length === 0) {
+      setExpanded(false);
+    }
+  }, [expanded, entries.length]);
 
   // Clamp activeIndex if entries shrink
   useEffect(() => {
@@ -229,10 +245,22 @@ export const ProactiveNudgeList: React.FC<ProactiveNudgeListProps> = ({
         />
       </button>
 
-      {/* Expanded: single card + carousel pagination */}
+      {/* Expanded content */}
+      {expanded && isLoading && (
+        <div className='mt-2 flex items-center justify-center py-4'>
+          <Loader2 className='h-4 w-4 animate-spin text-[#9aa0a5]' />
+        </div>
+      )}
+
+      {expanded && !isLoading && entries.length === 0 && hasFetched.current && (
+        <div className='mt-2 flex items-center justify-center py-3'>
+          <span className='text-xs text-[#9aa0a5]'>No suggestions</span>
+        </div>
+      )}
+
       {expanded && currentNudge && (
         <div className='mt-2'>
-          <ProactiveNudgeCard
+          <SurfaceNudgeCard
             nudge={currentNudge}
             channelId={channelId}
             onActionCompleted={() => {

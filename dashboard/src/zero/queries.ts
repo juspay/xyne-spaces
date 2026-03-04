@@ -20,6 +20,7 @@ import {
   DocType,
   schema,
   LinkVisibility,
+  NudgeState,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -80,8 +81,9 @@ export const queries = defineQueries({
       states: z.array(z.string()).optional(),
     }),
     ({ ctx, args: { messageId, states } }) => {
-      const effectiveStates = states && states.length > 0 ? states : ['ACTIVE'];
-      let query = zql.proactive_nudges.where('messageId', messageId);
+      const effectiveStates =
+        states && states.length > 0 ? states.map(s => s as NudgeState) : [NudgeState.ACTIVE];
+      let query = zql.surface_nudges.where('sourceId', messageId);
       if (effectiveStates.length === 1) {
         const singleState = effectiveStates[0];
         if (singleState) {
@@ -93,8 +95,13 @@ export const queries = defineQueries({
         );
       }
 
+      // Filter by nudge-level visibleTo
+      query = query.where(helpers =>
+        helpers.or(helpers.cmp('visibleTo', 'IS', null), helpers.cmp('visibleTo', '=', ctx.userID)),
+      );
+
       return query
-        .whereExists('message', m =>
+        .whereExists('sourceMessage', m =>
           m
             .where(helpers =>
               helpers.or(
@@ -1307,6 +1314,32 @@ export const queries = defineQueries({
     z.object({ ticketId: z.string() }),
     ({ args: { ticketId } }) => {
       return zql.ticket_stage_requests.where('ticketId', ticketId).orderBy('createdAt', 'desc');
+    },
+  ),
+
+  entityNudges: defineQuery(
+    z.object({
+      sourceId: z.string(),
+      states: z.array(z.string()).optional(),
+    }),
+    ({ ctx, args: { sourceId, states } }) => {
+      const effectiveStates =
+        states && states.length > 0 ? states.map(s => s as NudgeState) : [NudgeState.ACTIVE];
+
+      let query = zql.surface_nudges
+        .where('sourceId', sourceId)
+        .where(h => h.or(h.cmp('visibleTo', 'IS', null), h.cmp('visibleTo', '=', ctx.userID)));
+
+      if (effectiveStates.length === 1) {
+        const singleState = effectiveStates[0];
+        if (singleState) {
+          query = query.where('state', singleState);
+        }
+      } else {
+        query = query.where(h => h.or(...effectiveStates.map(v => h.cmp('state', '=', v))));
+      }
+
+      return query.orderBy('createdAt', 'asc');
     },
   ),
 });

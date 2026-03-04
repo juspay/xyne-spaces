@@ -52,7 +52,7 @@ import { TicketSuggestions } from './TicketSuggestions';
 import { PulseTickets } from './PulseTickets';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { hasMessageContent } from '../../../utils/chatUtils';
-import { ProactiveNudgeList } from '../../Chat/Nudges/ProactiveNudgeList';
+import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
 import MobileReactionDrawer from './MobileReactionDrawer';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
@@ -890,7 +890,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </>
               )}
               {!contentOnly && (
-                <ProactiveNudgeList
+                <SurfaceNudgeList
                   messageId={message.messageId}
                   channelId={channelId}
                   contentOnly={contentOnly}

@@ -49,14 +49,6 @@ const EvidenceSpanValueSchema = z
     return JSON.stringify(value);
   });
 
-const LookupRequestsSchema = z
-  .object({
-    ticket_search_query: z.string().optional(),
-    kb_lookup_query: z.string().optional(),
-    kb_route_query: z.string().optional(),
-  })
-  .strict();
-
 export const SuggestedActionSchema = z.object({
   label: z.string(),
   action_type: z.enum([
@@ -79,10 +71,7 @@ const NudgeSchema = z.object({
   title: z.string(),
   description: z.string(),
   evidence_spans: EvidenceSpanValueSchema,
-  lookup_requests: LookupRequestsSchema.optional(),
   suggested_actions: z.array(SuggestedActionSchema).optional(),
-  clarification_needed: z.boolean().optional(),
-  clarification_questions: z.array(z.string()).optional(),
 });
 
 const NudgeOutputSchema = z.object({
