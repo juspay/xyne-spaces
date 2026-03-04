@@ -1,3 +1,10 @@
+## [1.66.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.65.0...v1.66.0) (2026-03-04)
+
+
+### Features
+
+* add nudge framework with evaluation engine, definitions, and schema ([e21125c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e21125cbebdaf0d49f747bf7ce0cc41ad0722679)), closes [#3729](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3729)
+
 ## [1.65.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.64.0...v1.65.0) (2026-03-03)
 
 
