@@ -19,6 +19,7 @@ import {
   AttachmentEntityType,
   ChannelType,
   ActivityClassification, LinkVisibility,
+  NudgeState,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -63,48 +64,6 @@ export const queries = defineQueries({
     }
   ),
 
-  messageNudges: defineQuery(
-    z.object({
-      messageId: z.string(),
-      states: z.array(z.string()).optional(),
-    }),
-    ({ ctx, args: { messageId, states } }) => {
-      const effectiveStates = states && states.length > 0 ? states : ['ACTIVE'];
-      let query = zql.proactive_nudges.where('messageId', messageId);
-      if (effectiveStates.length === 1) {
-        const singleState = effectiveStates[0];
-        if (singleState) {
-          query = query.where('state', singleState);
-        }
-      } else if (effectiveStates.length > 1) {
-        query = query.where(helpers =>
-          helpers.or(...effectiveStates.map(value => helpers.cmp('state', '=', value)))
-        );
-      }
-
-      return query
-        .whereExists('message', (m) =>
-          m
-            .where(({ or, cmp }) =>
-              or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
-            )
-            .whereExists('conversation', (c) =>
-              c.whereExists('channel', (ch) =>
-                ch.where((helpers) =>
-                  helpers.or(
-                    helpers.cmp('visibility', ChannelVisibility.PUBLIC),
-                    helpers.and(
-                      helpers.cmp('visibility', ChannelVisibility.PRIVATE),
-                      helpers.exists('participants', (p) => p.where('userId', ctx.userID))
-                    )
-                  )
-                )
-              )
-            )
-        )
-        .orderBy('createdAt', 'asc');
-    }
-  ),
   getConversationById: defineQuery(
     z.object({ conversationId: z.string() }),
     ({ ctx, args: { conversationId } }) => {
@@ -1372,6 +1331,85 @@ export const queries = defineQueries({
     z.object({ ticketId: z.string() }),
     ({ args: { ticketId } }) => {
       return zql.ticket_stage_requests.where('ticketId', ticketId).orderBy('createdAt', 'desc');
+    },
+  ),
+
+  messageNudges: defineQuery(
+    z.object({
+      messageId: z.string(),
+      states: z.array(z.string()).optional(),
+    }),
+    ({ ctx, args: { messageId, states } }) => {
+      const effectiveStates =
+        states && states.length > 0 ? states.map(s => s as NudgeState) : [NudgeState.ACTIVE];
+      let query = zql.surface_nudges.where('sourceId', messageId);
+      if (effectiveStates.length === 1) {
+        const singleState = effectiveStates[0];
+        if (singleState) {
+          query = query.where('state', singleState);
+        }
+      } else if (effectiveStates.length > 1) {
+        query = query.where(helpers =>
+          helpers.or(...effectiveStates.map(value => helpers.cmp('state', '=', value))),
+        );
+      }
+
+      // Filter by nudge-level visibleTo
+      query = query.where(helpers =>
+        helpers.or(helpers.cmp('visibleTo', 'IS', null), helpers.cmp('visibleTo', '=', ctx.userID)),
+      );
+
+      return query
+        .whereExists('sourceMessage', m =>
+          m
+            .where(helpers =>
+              helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', '=', ctx.userID),
+              ),
+            )
+            .whereExists('conversation', c =>
+              c.whereExists('channel', ch =>
+                ch.where(helpers =>
+                  helpers.or(
+                    helpers.cmp('visibility', ChannelVisibility.PUBLIC),
+                    helpers.and(
+                      helpers.cmp('visibility', ChannelVisibility.PRIVATE),
+                      helpers.exists('participants', p => p.where('userId', ctx.userID)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        )
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
+  entityNudges: defineQuery(
+    z.object({
+      sourceId: z.string(),
+      states: z.array(z.string()).optional(),
+    }),
+    ({ ctx, args: { sourceId, states } }) => {
+      const effectiveStates = states && states.length > 0
+        ? states.map(s => s as NudgeState)
+        : [NudgeState.ACTIVE];
+
+      let query = zql.surface_nudges
+        .where('sourceId', sourceId)
+        .where(h => h.or(h.cmp('visibleTo', 'IS', null), h.cmp('visibleTo', '=', ctx.userID)));
+
+      if (effectiveStates.length === 1) {
+        const singleState = effectiveStates[0];
+        if (singleState) {
+          query = query.where('state', singleState);
+        }
+      } else {
+        query = query.where(h => h.or(...effectiveStates.map(v => h.cmp('state', '=', v))));
+      }
+
+      return query.orderBy('createdAt', 'asc');
     },
   ),
 });

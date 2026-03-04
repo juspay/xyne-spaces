@@ -14,10 +14,10 @@ import {
   extractSpecialMentions,
 } from '@/utils/mentionUtils';
 import { createDirectMessageActivities } from '@/utils/messageActivityUtils';
-import { ticketNudgeService } from '@/services/ticketNudgeService';
-import { proactiveNudgeWorker } from '@/workers/proactiveNudgeWorker';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
+import { activityTrackingService } from '@/services/activityTrackingService';
+import { Platform } from '@xyne/shared';
 
 const LARGE_GROUP_DM_THRESHOLD = 8;
 
@@ -63,8 +63,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
-    const isParentMessage = conversation.initialMessageId === messageId;
-
     const { senderId, content, conversationId } = message;
     const { channelId } = conversation;
 
@@ -108,21 +106,64 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const specialMentions = extractSpecialMentions(content);
     const mentionType = specialMentions.hasChannel ? '@channel' : specialMentions.hasHere ? '@here' : undefined;
 
-    if (channel?.projectId && !isDMChannel && isParentMessage) {
-      void proactiveNudgeWorker
-        .enqueue({
+    if (channel?.projectId && !isDMChannel) {
+      // Emit a synthetic MESSAGE/SENT activity event.
+      // This flows through activityTrackingService -> nudge framework.
+      // Fires for both parent messages and replies to enable link-paste detection.
+      void activityTrackingService.saveActivityEvent({
+        user_id: senderId,
+        session_id: `side-effect-${messageId}`,
+        event_category: 'MESSAGE',
+        event_name: 'SENT',
+        url: '',
+        trigger_type: 'SYSTEM',
+        platform: Platform.WEB,
+        timestamp: Date.now(),
+        context_metadata: {
           messageId,
           conversationId,
           channelId,
           projectId: channel.projectId,
           senderId,
-        })
-        .catch(error => {
-          logger.error('[ProactiveNudge] Failed to enqueue nudge job', {
-            messageId,
-            error: error instanceof Error ? error.message : String(error),
+        },
+      });
+
+      // Emit MESSAGE.FORWARDED for forwarded messages
+      if (message.msgType === 'FORWARDED') {
+        let originalMessageId: string | undefined;
+        try {
+          const { parseForwardedMessageXml } = await import('@xyne/shared');
+          const parsed = parseForwardedMessageXml(message.content || '');
+          originalMessageId = parsed?.originalMessageId;
+        } catch {
+          // Fallback: try regex extraction
+          const idMatch = (message.content || '').match(
+            /<OriginalMessageId>([^<]+)<\/OriginalMessageId>/,
+          );
+          originalMessageId = idMatch?.[1];
+        }
+
+        if (originalMessageId) {
+          void activityTrackingService.saveActivityEvent({
+            user_id: senderId,
+            session_id: `side-effect-${messageId}`,
+            event_category: 'MESSAGE',
+            event_name: 'FORWARDED',
+            url: '',
+            trigger_type: 'SYSTEM',
+            platform: Platform.WEB,
+            timestamp: Date.now(),
+            context_metadata: {
+              messageId,
+              originalMessageId,
+              conversationId,
+              channelId,
+              projectId: channel.projectId,
+              senderId,
+            },
           });
-        });
+        }
+      }
     }
 
     if (isDMChannel) {
@@ -144,17 +185,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         mentionType
       );
       return;
-    }
-
-    if (channel?.projectId && isParentMessage) {
-      void ticketNudgeService.handleMessage({
-        channelId,
-        conversationId,
-        messageId,
-        senderId,
-        content,
-        projectId: channel.projectId,
-      });
     }
 
     const mentionedUsers = await extractAllUsersForNotification(content, channelId);
@@ -449,6 +479,48 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
   async onDelete(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId } = job;
+
+    // Emit MESSAGE.DELETED to trigger cleanup of surface links and nudges.
+    // We need conversation/channel/project context; fetch what's still available.
+    try {
+      const conversation = await db.conversation.findFirst({
+        where: {
+          OR: [{ initialMessageId: messageId }],
+        },
+        select: { conversationId: true, channelId: true },
+      });
+
+      const channelId = conversation?.channelId;
+      const channel = channelId
+        ? await db.channel.findUnique({
+            where: { id: channelId },
+            select: { projectId: true },
+          })
+        : null;
+
+      void activityTrackingService.saveActivityEvent({
+        user_id: this.ctx.userID,
+        session_id: `side-effect-delete-${messageId}`,
+        event_category: 'MESSAGE',
+        event_name: 'DELETED',
+        url: '',
+        trigger_type: 'SYSTEM',
+        platform: Platform.WEB,
+        timestamp: Date.now(),
+        context_metadata: {
+          messageId,
+          conversationId: conversation?.conversationId,
+          channelId,
+          projectId: channel?.projectId,
+        },
+      });
+    } catch (error) {
+      logger.warn('[MessagesSideEffectHandler] Failed to emit MESSAGE.DELETED event', {
+        messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     const reactions = await db.reaction.findMany({
       where: { messageId },
       select: { reactionId: true },

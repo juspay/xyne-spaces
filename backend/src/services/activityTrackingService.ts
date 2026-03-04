@@ -1,6 +1,7 @@
 import { ActivityEventRepository, CreateActivityEventInput } from '@/database/repositories/activityEventRepository';
 import { logger } from '@/utils/logger';
 import { ActivityEventPayload } from '@xyne/shared';
+import { triggerNudgesFromActivity } from '@/services/nudges/nudgeTriggerService';
 
 export type { ActivityEventPayload };
 
@@ -27,6 +28,26 @@ class ActivityTrackingService {
       };
 
       await this.repository.create(createInput);
+
+      // Trigger nudge evaluation for this activity event (fire-and-forget)
+      void triggerNudgesFromActivity({
+        userId: payload.user_id,
+        sessionId: payload.session_id,
+        eventCategory: payload.event_category,
+        eventName: payload.event_name,
+        eventLabel: payload.event_label,
+        url: payload.url,
+        triggerType: payload.trigger_type,
+        contextMetadata: payload.context_metadata,
+        platform: payload.platform,
+        timestamp: payload.timestamp,
+      }).catch((err) => {
+        logger.warn('[ACTIVITY-TRACKING] Nudge trigger failed (non-blocking)', {
+          error: err instanceof Error ? err.message : err,
+          eventCategory: payload.event_category,
+          eventName: payload.event_name,
+        });
+      });
     } catch (error) {
       logger.error(`[ACTIVITY-TRACKING] Failed to save activity event`, {
         error: error instanceof Error ? error.message : error,
