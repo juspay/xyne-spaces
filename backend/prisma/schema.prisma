@@ -1617,6 +1617,14 @@ model Activity {
   isRead          Boolean  @default(false)
   createdAt       DateTime @default(now())
 
+
+  @@index([userId, createdAt, id]) // for userActivitiesPaginated
+  @@index([userId, actorAction, createdAt, id]) // for userActivitiesPaginated
+  @@index([userId, classification, createdAt, id]) // for userActivitiesPaginated
+  @@index([userId, actorAction, classification, createdAt, id]) // for userActivitiesPaginated
+  @@index([userId, actorAction, isRead]) // for userMissedCalls
+  @@index([userId, isRead, createdAt]) // for userUnreadActivities
+  @@index([userId, isRead, actionSource]) // for userUnreadThreadActivities
   @@index([userId, createdAt]) // Fast lookup of user activities sorted by time
   @@index([userId, classification, createdAt]) // Fast lookup for classification tabs
   @@index([classification, classificationJobType, createdAt])
