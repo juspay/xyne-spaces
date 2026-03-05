@@ -507,11 +507,15 @@ export const queries = defineQueries({
       let query = zql.activities;
 
       if (types.length > 0) {
-        query = query.where('actorAction', 'IN', types);
+        query = query.where(helpers =>
+          helpers.or(...types.map(type => helpers.cmp('actorAction', '=', type))),
+        );
       }
 
       if (classification && classification.length > 0) {
-        query = query.where('classification', 'IN', classification);
+        query = query.where(helpers =>
+          helpers.or(...classification.map(c => helpers.cmp('classification', '=', c))),
+        );
       }
 
       query = query.orderBy('createdAt', 'desc').orderBy('id', 'desc');
