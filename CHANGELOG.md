@@ -1,3 +1,18 @@
+## [1.68.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.67.1...v1.68.0) (2026-03-05)
+
+
+### Features
+
+* added indexes on activities and refactored userActivitiesPaginated ([96c283a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/96c283a6c8acb65ec9736c404567fd082d20640e)), closes [#3789](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3789)
+* Xyne Workflow with Creator and Reviewer Loop for every steps ([bf8fbd6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bf8fbd61b1cef1441905252821f5445e590ae9f3)), closes [#3798](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3798)
+
+
+### Bug Fixes
+
+* dark boardChangeEtaFixUpdated ([f9cff63](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f9cff636cad15269d678d97179f59eb6be19a384)), closes [#3841](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3841)
+* file-permissions-filter-fix ([7fa7938](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7fa7938744dd6c476c7b2b1a3fde28331299dfda)), closes [#3860](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3860)
+* transcript-navigation-fix ([b6b1c2d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b6b1c2df6eb7d8ec55a2e17349b75aa969ede824)), closes [#3871](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3871)
+
 ## [1.67.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.67.0...v1.67.1) (2026-03-05)
 
 
