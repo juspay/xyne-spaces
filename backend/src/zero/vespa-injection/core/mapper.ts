@@ -620,11 +620,15 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<Vesp
   });
   const permissions = canvasParticipants.map(p => p.userId);
 
+  const channel = args.channelId ? (await db.channel.findUnique({
+    where: { id: args.channelId }
+  })) : undefined;
+
   return {
     docId: args.id,
     docType: VespaDocType.FILE,
     fileName: args.title || 'Untitled Canvas',
-    description: `Canvas document${args.channelId ? ' in channel' : ''}`,
+    description: `Canvas document${channel?.name ? ' in channel : ' + channel.name : ''}`,
     chunks: chunks,
     chunks_pos: chunks.map((_, index) => String(index)),
     image_chunks: [],
@@ -670,6 +674,10 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promi
   });
   if (conversation) {
     conversationId = conversation.conversationId;
+  }
+  else { 
+    const callMetadata = args.metadata as { conversationId?: string } | null;
+    conversationId = callMetadata?.conversationId;
   }
 
   // Fetch transcript content from GCS using the transcript URL

@@ -355,20 +355,6 @@ export class TranscriptService {
         `[${callId}] attachment_created | attachment_id=${attachment.id}, gcs_url=${gcsUrl}`
       );
 
-      // Queue Vespa indexing for the transcript (using call.id as the identifier)
-      try {
-        await vespaQueue.addJob({
-          schema: fileSchema,
-          docId: call.id,
-          jobType: 'feed',
-          userId: call.createdByUserId,
-          app: SubApp.TRANSCRIPT,
-        });
-        logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
-      } catch (vespaError) {
-        logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
-      }
-
       // 11. Save transcript URL to Call record for easier access (used by recordings feature)
       await repositories.calls.update(call.id, {
         transcript: gcsUrl,
@@ -1336,6 +1322,20 @@ Output ONLY the processed transcript, nothing else.`;
       } else {
         logger.warn(`[${callId}] ai_summary_skipped | reason=generation_failed`);
       }
+    // Queue Vespa indexing for the transcript (using call.id as the identifier)
+      try {
+        await vespaQueue.addJob({
+          schema: fileSchema,
+          docId: call.id,
+          jobType: 'feed',
+          userId: call.createdByUserId,
+          app: SubApp.TRANSCRIPT,
+        });
+        logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
+      } catch (vespaError) {
+        logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+      }
+
     } catch (error) {
       logger.error(`[${callId}] process_call_with_summary_failed | error=${error}`);
       // Don't re-throw - the transcript was already processed successfully
