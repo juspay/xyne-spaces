@@ -177,21 +177,27 @@ const SearchResultItem = ({
             </div>
           </div>
           {isSelected && <SelectedBadge />}
-          {!isSelected && onPreview && result.searchContext?.internalUrl && (
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                onPreview(result);
-              }}
-              className='p-1.5 text-gray-500 hover:text-black-700 hover:bg-gray-200 rounded transition-colors'
-              title='Preview file'
-              data-track-category='GLOBAL_SEARCH'
-              data-track-name='PREVIEW_SEARCH_RESULT'
-              data-track-metadata={JSON.stringify({ resultId: result.id, resultType: result.type })}
-            >
-              <Eye size={14} />
-            </button>
-          )}
+          {!isSelected &&
+            onPreview &&
+            result.searchContext?.internalUrl &&
+            result.searchContext?.subApp !== 'transcript' && (
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  onPreview(result);
+                }}
+                className='p-1.5 text-gray-500 hover:text-black-700 hover:bg-gray-200 rounded transition-colors'
+                title='Preview file'
+                data-track-category='GLOBAL_SEARCH'
+                data-track-name='PREVIEW_SEARCH_RESULT'
+                data-track-metadata={JSON.stringify({
+                  resultId: result.id,
+                  resultType: result.type,
+                })}
+              >
+                <Eye size={14} />
+              </button>
+            )}
         </Command.Item>
       );
 
