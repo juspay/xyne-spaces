@@ -23,6 +23,7 @@ import { ExecutionMetadata } from '../../../services/Workflow/workflowGraphServi
 import { useWorkflowControl } from '../../../services/Workflow/workflowGraphService';
 import { JenkinsBuildPanel } from '../JenkinsBuildPanel/JenkinsBuildPanel';
 import { jenkinsService } from '../../../services/Jenkins';
+import { useUser } from '../../../hooks/useUsers';
 
 const useClickOutside = (
   ref: RefObject<HTMLElement | null>,
@@ -69,6 +70,7 @@ export interface WorkflowHeaderProps {
   useQuestioningMode?: boolean | undefined;
   model?: string | undefined;
   prLink?: string | undefined;
+  createdBy?: string | undefined;
 }
 
 type StatusConfig = { bg: string; text: string; dot: string; label: string };
@@ -165,6 +167,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   useQuestioningMode,
   model,
   prLink,
+  createdBy,
 }) => {
   const navigate = useNavigate();
   // const [showDesc, setShowDesc] = useState(false);
@@ -177,6 +180,8 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   const statusDropdownRef = useRef<HTMLDivElement>(null);
 
   const { cancelExecution, isCanceling } = useWorkflowControl();
+
+  const createdByUser = useUser(createdBy ?? '');
 
   const handleCancelWorkflow = (): void => {
     if (!executionId) return;
@@ -304,11 +309,22 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                         <span className='font-medium text-gray-900'>Questioning Enabled</span>
                       </div>
                     )}
-                    {!executorType && !model && !prLink && !useQuestioningMode && (
-                      <div className='px-3 py-2 text-sm text-gray-500'>
-                        No additional metadata available
+                    {createdByUser?.id && (
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
+                        <span className='font-medium text-gray-900'>
+                          Created By: {createdByUser.name || createdByUser.email || 'Unknown'}
+                        </span>
                       </div>
                     )}
+                    {!executorType &&
+                      !model &&
+                      !prLink &&
+                      !useQuestioningMode &&
+                      !createdByUser?.id && (
+                        <div className='px-3 py-2 text-sm text-gray-500'>
+                          No additional metadata available
+                        </div>
+                      )}
                   </div>
                 )}
               </div>

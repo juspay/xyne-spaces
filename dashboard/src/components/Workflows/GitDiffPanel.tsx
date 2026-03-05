@@ -283,7 +283,6 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
             <div className='flex items-center justify-center h-full'>
               <div className='text-center'>
                 <AlertCircle className='w-12 h-12 text-red-500 mx-auto mb-4' />
-                <p className='text-gray-600'>Failed to load git diff</p>
                 <p className='text-sm text-gray-500 mt-2'>
                   {error instanceof Error ? error.message : 'Unknown error'}
                 </p>

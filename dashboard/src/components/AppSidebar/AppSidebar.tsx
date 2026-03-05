@@ -28,7 +28,6 @@ import {
   Bell,
   MessageCircle,
   LifeBuoy,
-  Code2,
   Clipboard,
   ClipboardCheck,
   PieChart,
@@ -115,11 +114,11 @@ const navigationItems = [
     label: 'Support',
     icon: <LifeBuoy size={16} color='var(--app-sidebar-active-foreground)' />,
   },
-  {
-    path: '/vscode',
-    label: 'VS Code',
-    icon: <Code2 size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
+  // {
+  //   path: '/vscode',
+  //   label: 'VS Code',
+  //   icon: <Code2 size={16} color='var(--app-sidebar-active-foreground)' />,
+  // },
   {
     path: '/browser',
     label: 'Browser',
@@ -259,7 +258,7 @@ const AppSidebar = (): ReactElement => {
         }
       }
 
-      if (item.path === '/vscode' && !isElectronApp()) return false;
+      // if (item.path === '/vscode' && !isElectronApp()) return false;
       if (item.path === '/browser' && !isElectronApp()) return false;
       return hasAccess;
     });

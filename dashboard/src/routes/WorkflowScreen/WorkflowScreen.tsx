@@ -12,7 +12,8 @@ import { isElectronApp } from '../../utils/electronApp';
 import { WorkflowGraphOnly } from '../../components/Workflows/WorkflowGraphOnly';
 import WorkflowTableView from '../../components/Workflows/WorkflowTableView';
 import LivePreviewPanel from '../../components/Workflows/LivePreviewPanel';
-import { useTickets } from '../../hooks/useTickets';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import { useWorkflowSubscription } from '../../hooks/useWorkflowSubscription';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
@@ -24,14 +25,19 @@ import GitDiffPanel from '../../components/Workflows/GitDiffPanel';
 import LiveEditsPanel from '../../components/Workflows/LiveEditsPanel';
 import { RCADetailsPanel, type RCAItem } from '../../components/Workflows/RCADetailsPanel';
 import { workflowScreenMachine } from '../../machines/workflowScreenMachine';
+import { VSCodePanel } from '../../components/Workflows/VSCodePanel';
 
 const LAST_WORKFLOW_PATH_KEY = 'last-viewed-workflow-path';
 
 const WorkflowScreen: React.FC = () => {
   const { ticketId, workflowId } = useParams<{ ticketId: string; workflowId?: string }>();
   const [searchParams] = useSearchParams();
-  const { tickets, isLoading: ticketsLoading } = useTickets();
-  const ticket = useMemo(() => tickets.find(t => t.id === ticketId), [tickets, ticketId]);
+  const [ticketData, ticketQueryDetails] = useCachedQuery(
+    queries.ticketById({ ticketId: ticketId ?? '' }),
+    { enabled: !!ticketId },
+  );
+  const ticket = ticketData ?? undefined;
+  const ticketsLoading = ticketQueryDetails.type === 'unknown';
 
   const isElectron = useMemo(() => isElectronApp(), []);
 
@@ -139,6 +145,10 @@ const WorkflowScreen: React.FC = () => {
     return urlModel ?? combinedStepsData?.workflows?.[0]?.model;
   }, [searchParams, combinedStepsData]);
 
+  const createdBy = useMemo(() => {
+    return combinedStepsData?.workflows?.[0]?.createdBy ?? undefined;
+  }, [combinedStepsData]);
+
   // Check if preview tab should be enabled
   const previewInfo = useMemo(() => {
     return gitInfo?.preview;
@@ -171,6 +181,18 @@ const WorkflowScreen: React.FC = () => {
     closeTab,
   } = useWorkflowTabs(
     [
+      ...(isElectron
+        ? [
+            {
+              id: 'vscode',
+              title: 'Code Viewer',
+              type: 'vscode' as const,
+              icon: <Eye size={14} />,
+              closable: false,
+              disabled: false,
+            },
+          ]
+        : []),
       {
         id: 'git-diff',
         title: 'Final Git Diff',
@@ -370,6 +392,16 @@ const WorkflowScreen: React.FC = () => {
       if (!tab) return null;
 
       switch (tab.type) {
+        case 'vscode':
+          return effectiveSelectedExecutionId ? (
+            <VSCodePanel
+              executionId={effectiveSelectedExecutionId}
+              {...(gitInfo ? { gitInfo } : {})}
+              {...(executionStatus !== undefined && { executionStatus })}
+              isActive={activeTabId === 'vscode'}
+              workflowOutput={workflowOutput}
+            />
+          ) : null;
         case 'git-diff':
           return (
             <GitDiffPanel executionId={effectiveSelectedExecutionId} onRefresh={handleRefresh} />
@@ -530,6 +562,7 @@ const WorkflowScreen: React.FC = () => {
             gitBranch={gitInfo?.branch}
             workflowType={workflowType}
             onTriggerWorkflow={() => setIsWorkflowModalOpen(true)}
+            createdBy={createdBy}
           />
         )}
         <div className='flex-1 flex items-center justify-center'>
@@ -598,6 +631,7 @@ const WorkflowScreen: React.FC = () => {
         useQuestioningMode={useQuestioningMode}
         model={model}
         prLink={prLink}
+        createdBy={createdBy}
       />
 
       {ticket && (

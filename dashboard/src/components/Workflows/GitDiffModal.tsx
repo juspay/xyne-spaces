@@ -189,7 +189,6 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
                   <div className='text-red-500 mb-4'>
                     <X className='w-12 h-12 mx-auto' />
                   </div>
-                  <p className='text-gray-600'>Failed to load git diff</p>
                   <p className='text-sm text-gray-500 mt-2'>
                     {error instanceof Error ? error.message : 'Unknown error'}
                   </p>
