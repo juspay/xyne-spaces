@@ -1,5 +1,6 @@
 import type { Channel } from '@xyne/shared';
 import type { DisplaySearchResult } from '../../../types/search';
+import { htmlToPlainText } from '../../../utils/sanitizer';
 import type { ContextItem } from './ThreadContextPanel.types';
 
 /** Build a URL for a search result (mirrors searchNavigation.ts logic without navigating) */
@@ -27,6 +28,7 @@ export const buildContextItemUrl = (result: DisplaySearchResult): string => {
       return `/chat/dir/${channelId}/${conversationId}/${ticketId}?selectedTab=details`;
     }
     case 'attachment': {
+      if (result.searchContext?.internalUrl) return result.searchContext.internalUrl;
       if (result.searchContext?.originalUrl) return result.searchContext.originalUrl;
       if (result.searchContext?.channelId) return `/chat/dir/${result.searchContext.channelId}`;
       return '#';
@@ -36,10 +38,20 @@ export const buildContextItemUrl = (result: DisplaySearchResult): string => {
   }
 };
 
+/** Derive a human-readable title for a search result */
+const buildContextItemTitle = (result: DisplaySearchResult): string => {
+  if (result.type === 'conversation') {
+    const { senderName, channelTitle } = result.searchContext || {};
+    if (channelTitle) return `Message in #${channelTitle}`;
+    if (senderName) return `Message from ${senderName}`;
+  }
+  return htmlToPlainText(result.title);
+};
+
 /** Build a ContextItem from a backend search result */
 export const buildContextItemFromResult = (result: DisplaySearchResult): ContextItem => ({
   id: `${result.type}-${result.id}`,
-  title: result.title,
+  title: buildContextItemTitle(result),
   type: result.type,
   url: buildContextItemUrl(result),
   searchResult: result,

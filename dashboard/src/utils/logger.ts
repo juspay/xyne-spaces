@@ -134,6 +134,8 @@ export const Event = {
   ZERO_RUN_ERROR: 'zero_run_error',
   ZERO_RUN_COMPLETE: 'zero_run_complete',
   ZERO_RUN_CALLED: 'zero_run_called',
+  THREAD_CONTEXT_BUTTON_CLICKED: 'thread_context_button_clicked',
+  THREAD_CONTEXT_SUBMITTED: 'thread_context_submitted',
   KANBAN_ENTITY_LOADED: 'kanban_entity_loaded',
 } as const;
 

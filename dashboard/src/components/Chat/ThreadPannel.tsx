@@ -60,7 +60,7 @@ import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { useDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
-import { useUser } from '../../hooks/useUsers';
+import { useSelf, useUser } from '../../hooks/useUsers';
 import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectionModal';
 
 type TabType = 'thread' | 'details' | 'files' | 'workflows' | 'rca';
@@ -102,6 +102,8 @@ export const ThreadMessages = ({
 
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
+
+  const currentUser = useSelf();
 
   const channelId = propChannelId || paramChannelId;
   const conversationId = propConversationId || paramConversationId;
@@ -193,6 +195,14 @@ export const ThreadMessages = ({
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
   const [contextItems, setContextItems] = useState<ContextItem[]>([]);
 
+  const handleAddContextClick = (): void => {
+    logger.info(Event.THREAD_CONTEXT_BUTTON_CLICKED, {
+      conversationId: derivedConversationId,
+      userId: currentUser?.id,
+    });
+    setIsContextMenuOpen(true);
+  };
+
   const handleContextItemToggle = (item: ContextItem): void => {
     setContextItems(prev =>
       prev.some(c => c.id === item.id) ? prev.filter(c => c.id !== item.id) : [...prev, item],
@@ -215,14 +225,18 @@ export const ThreadMessages = ({
       groups.set(item.type, list);
     }
 
-    const lines = ['<strong>Relevant Contexts:</strong>'];
+    const parts: string[] = ['<strong>Relevant Contexts:</strong>'];
     for (const [type, items] of groups) {
       const label = typeLabels[type] ?? type;
-      const links = items.map(item => `<a href="${item.url}">${item.title}</a>`).join(', ');
-      lines.push(`${label}: ${links}`);
+      const links = items
+        .map(
+          (item, i) => `&nbsp;&nbsp;&nbsp;&nbsp;${i + 1}. <a href="${item.url}">${item.title}</a>`,
+        )
+        .join('<br>');
+      parts.push(`<strong>${label}:</strong><br>${links}`);
     }
 
-    return lines.join('<br>');
+    return parts.join('<br>');
   };
   // Call participants modal state
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
@@ -354,6 +368,12 @@ export const ThreadMessages = ({
   const handleContextConfirm = (): void => {
     if (contextItems.length === 0 || !derivedConversationId) return;
     const content = buildContextMessage();
+    logger.info(Event.THREAD_CONTEXT_SUBMITTED, {
+      conversationId: derivedConversationId,
+      itemCount: contextItems.length,
+      types: [...new Set(contextItems.map(i => i.type))],
+      userId: currentUser?.id,
+    });
     void zero.mutate(
       mutators.messages.send({
         conversationId: derivedConversationId,
@@ -945,7 +965,7 @@ export const ThreadMessages = ({
                   variant='ghost'
                   size='sm'
                   className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
-                  onClick={() => setIsContextMenuOpen(true)}
+                  onClick={handleAddContextClick}
                   aria-label='Add context to thread'
                   data-track-category='THREAD_PANEL'
                   data-track-name='OPEN_CONTEXT_MENU'
@@ -1301,7 +1321,7 @@ export const ThreadMessages = ({
                           variant='ghost'
                           size='sm'
                           className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
-                          onClick={() => setIsContextMenuOpen(true)}
+                          onClick={handleAddContextClick}
                           aria-label='Add context to thread'
                           data-track-category='THREAD_PANEL'
                           data-track-name='OPEN_CONTEXT_MENU'
@@ -1384,7 +1404,7 @@ export const ThreadMessages = ({
                             variant='ghost'
                             size='sm'
                             className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
-                            onClick={() => setIsContextMenuOpen(true)}
+                            onClick={handleAddContextClick}
                             aria-label='Add context to thread'
                             data-track-category='THREAD_PANEL'
                             data-track-name='OPEN_CONTEXT_MENU'
