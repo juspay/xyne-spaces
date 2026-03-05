@@ -1,3 +1,15 @@
+## [1.67.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.66.0...v1.67.0) (2026-03-05)
+
+
+### Features
+
+* add logger to add context button in threadd ([6787445](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/67874455349088815de207813f0e1c5daf74dc4f)), closes [#3843](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3843)
+
+
+### Bug Fixes
+
+* : ask ai configs to cac ([be83f0c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/be83f0cbc8a98c9d635d6bce2d11e510dba7cfaa)), closes [#3837](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3837)
+
 ## [1.66.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.65.0...v1.66.0) (2026-03-04)
 
 
