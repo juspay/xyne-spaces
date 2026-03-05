@@ -1,3 +1,10 @@
+## [1.68.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.68.0...v1.68.1) (2026-03-05)
+
+
+### Bug Fixes
+
+* Show rejected tickets under boards and handling escape sequence ([b74ef64](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b74ef646337a929e7a53e8e7b411b6af0deeb5b8)), closes [#3600](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3600)
+
 ## [1.68.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.67.1...v1.68.0) (2026-03-05)
 
 
