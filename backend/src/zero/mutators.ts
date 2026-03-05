@@ -3695,11 +3695,102 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const oldAssignedTo = ticket.assignedTo;
           const oldBoardId = ticket.boardId;
 
+          
+          // Handle board transfer
+          if (params.boardId !== undefined && params.boardId !== oldBoardId) {
+            const now = Date.now();
+
+            // 1. Fetch all stages of the new board
+            const newBoardStages = await tx.run(
+              zql.stages
+                .where('boardId', params.boardId)
+                .orderBy('sequenceNumber', 'asc')
+            );
+
+            if (newBoardStages.length === 0) {
+              throw new Error(`No stages found for board ${params.boardId}`);
+            }
+
+            const firstStage = newBoardStages[0];
+
+            // 2. Calculate total ETA from new board's stages (same logic as ticket creation)
+            const totalEtaHours = newBoardStages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
+            const newTicketEta = totalEtaHours > 0 
+              ? calculateETADeadline(new Date(now), totalEtaHours).getTime() 
+              : null;
+
+            // 3. Update ticket with first stage and new ETA
+            await tx.mutate.tickets.update({
+              id: params.id,
+              stageName: firstStage.name,
+              ...(firstStage.defaultTicketStatusV2 && { 
+                statusV2: firstStage.defaultTicketStatusV2 
+              }),
+              ...(newTicketEta && { eta: newTicketEta }),
+              updatedAt: now,
+              updatedBy: authData.sub
+            });
+
+            // 4. Delete ALL old ticket_stage_eta entries
+            const oldStageEtaEntries = await tx.run(
+              zql.ticket_stage_eta.where('ticketId', params.id)
+            );
+
+            for (const entry of oldStageEtaEntries) {
+              await tx.mutate.ticket_stage_eta.delete({ id: entry.id });
+            }
+
+            // 5. Create new stage ETA entry for first stage (if it has ETA)
+            if (firstStage.eta !== null) {
+              const stageEtaDeadline = calculateETADeadline(new Date(now), firstStage.eta).getTime();
+              const newEntryId = uuidv4();
+              
+              await tx.mutate.ticket_stage_eta.insert({
+                id: newEntryId,
+                ticketId: params.id,
+                stageId: firstStage.id,
+                stageEnteredAt: now,
+                stageLeftAt: null,
+                stageEta: stageEtaDeadline,
+                createdAt: now,
+                updatedBy: authData.sub
+              });
+            }
+            if(ticket.userGroupId){
+              // Fire and forget - retrigger autoassignment for the new board
+              asyncTasks.push(async () => {
+                try {
+                  logger.info(`[MUTATOR-TICKET-UPDATE] Board changed from ${oldBoardId} to ${params.boardId}, retriggering autoassignment for userGroupId: ${ticket.userGroupId}`);
+
+                  const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId, params.boardId!);
+
+                  if (assignmentResult.assignedUserId) {
+                    logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
+
+                    // Update the ticket with the auto-assigned user using tx.mutate
+                    await tx.mutate.tickets.update({
+                      id: params.id,
+                      assignedTo: assignmentResult.assignedUserId,
+                      updatedAt: Date.now(),
+                      updatedBy: authData.sub,
+                    });
+
+                    // Sync workload for new assigned user with new board
+                    const newBoardId = params.boardId!;
+                    await syncUserWorkloadMapping(tx, assignmentResult.assignedUserId, { userGroupId: ticket.userGroupId, boardId: newBoardId }, authData.sub);
+                  }
+                } catch (error) {
+                  console.error(`[MUTATOR-TICKET-UPDATE] Failed to retrigger autoassignment for board change:`, error);
+                }
+              });
+            }
+          }
+
           // StatusV2 pause/unpause handling:
           // - Always track status change timestamp in statusUpdatedAt
           // - When leaving PAUSED (and ETA isn't explicitly set), push ETA forward by effective paused working duration.
           // - When ETA is manually changed while PAUSED, reset statusUpdatedAt to restart the pause timer
-          if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2) {
+          if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2 && params.boardId === undefined) {
             updateData.statusUpdatedAt = params.updatedAt;
 
             const isLeavingPaused =
@@ -3919,36 +4010,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             for (const userId of usersToSync) {
               await syncUserWorkloadMapping(tx, userId, ticket, authData.sub);
             }
-          }
-
-          // Handle board change - retrigger autoassignment
-          if (params.boardId !== undefined && params.boardId !== oldBoardId && ticket.userGroupId) {
-            // Fire and forget - retrigger autoassignment for the new board
-            asyncTasks.push(async () => {
-              try {
-                logger.info(`[MUTATOR-TICKET-UPDATE] Board changed from ${oldBoardId} to ${params.boardId}, retriggering autoassignment for userGroupId: ${ticket.userGroupId}`);
-
-                const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId, params.boardId!);
-
-                if (assignmentResult.assignedUserId) {
-                  logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
-
-                  // Update the ticket with the auto-assigned user using tx.mutate
-                  await tx.mutate.tickets.update({
-                    id: params.id,
-                    assignedTo: assignmentResult.assignedUserId,
-                    updatedAt: Date.now(),
-                    updatedBy: authData.sub,
-                  });
-
-                  // Sync workload for new assigned user with new board
-                  const newBoardId = params.boardId!;
-                  await syncUserWorkloadMapping(tx, assignmentResult.assignedUserId, { userGroupId: ticket.userGroupId, boardId: newBoardId }, authData.sub);
-                }
-              } catch (error) {
-                console.error(`[MUTATOR-TICKET-UPDATE] Failed to retrigger autoassignment for board change:`, error);
-              }
-            });
           }
 
           // Auto-assign ticket when userGroupId changes
