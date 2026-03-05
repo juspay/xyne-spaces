@@ -1,3 +1,10 @@
+## [1.67.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.67.0...v1.67.1) (2026-03-05)
+
+
+### Bug Fixes
+
+* Fix mobile profile access from chat bubbles ([3069721](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/306972159beb971f3a3811e5e64f5dff556fb966))
+
 ## [1.67.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.66.0...v1.67.0) (2026-03-05)
 
 
