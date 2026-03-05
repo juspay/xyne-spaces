@@ -540,13 +540,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 }}
                 aria-label={`View ${sender?.name || 'user'} profile`}
               >
-                <UserHoverWrapper userId={sender.id}>
+                {isMobile ? (
                   <UserAvatar
                     userId={sender.id}
                     size={AvatarSize.REGULAR}
                     showActiveStatus={false}
                   />
-                </UserHoverWrapper>
+                ) : (
+                  <UserHoverWrapper userId={sender.id}>
+                    <UserAvatar
+                      userId={sender.id}
+                      size={AvatarSize.REGULAR}
+                      showActiveStatus={false}
+                    />
+                  </UserHoverWrapper>
+                )}
               </div>
             ) : (
               <div
@@ -596,16 +604,27 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               ) : isTicketNudge ? (
                 <h3 className='text-sm font-medium text-[#1D1E1F]'>System</h3>
               ) : sender ? (
-                <UserHoverWrapper userId={sender.id}>
+                isMobile ? (
                   <Button
                     variant='ghost'
                     onClick={() => handleUserClick(sender.id)}
-                    className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-[#1D1E1F] hover:underline p-0 h-auto min-w-0`}
+                    className={`text-[15px] leading-tight font-semibold tracking-tight text-[#1D1E1F] hover:underline p-0 h-auto min-w-0`}
                     aria-label={`View ${sender?.name || 'user'} profile`}
                   >
                     {sender.name}
                   </Button>
-                </UserHoverWrapper>
+                ) : (
+                  <UserHoverWrapper userId={sender.id}>
+                    <Button
+                      variant='ghost'
+                      onClick={() => handleUserClick(sender.id)}
+                      className={`text-sm font-medium text-[#1D1E1F] hover:underline p-0 h-auto min-w-0`}
+                      aria-label={`View ${sender?.name || 'user'} profile`}
+                    >
+                      {sender.name}
+                    </Button>
+                  </UserHoverWrapper>
+                )
               ) : (
                 <h3 className='text-sm font-medium text-[#1D1E1F] cursor-pointer hover:underline'>
                   {'User'}
