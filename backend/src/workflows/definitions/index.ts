@@ -7,6 +7,7 @@ import { bugWorkflowEvalInnerStepsExperimental } from './bugWorkflowEvalInnerSte
 import { featureImplementationWorkflow } from './featureImplementationWorkflow'
 import { featurePlanningWorkflow } from './featurePlanningWorkflow'
 import { xyneSpacesFeatureImplementationWorkflow } from './xyne-spaces-workflows'
+import { xyneSpacesPlanReviewLoopWorkflow } from './plan-review-loop'
 import { fidoServerWorkflow } from './fido-workflow/fidoWorkflow'
 import { connectorMigrationWorkflow } from './connectorMigration'
 import { coderWorkflow } from './coder-workflow/coderWorkflow'
@@ -30,6 +31,7 @@ export const WORKFLOW_DEFINITIONS = {
   [WorkflowType.FEATURE_IMPLEMENTATION]: featureImplementationWorkflow,
   [WorkflowType.FEATURE_PLANNING]: featurePlanningWorkflow,
   [WorkflowType.XYNE_SPACES_FEATURE_IMPLEMENTATION]: xyneSpacesFeatureImplementationWorkflow,
+  [WorkflowType.XYNE_SPACES_PLAN_REVIEW_LOOP]: xyneSpacesPlanReviewLoopWorkflow,
   [WorkflowType.FIDO_SERVER_WORKFLOW]: fidoServerWorkflow,
   [WorkflowType.CONNECTOR_MIGRATION]: connectorMigrationWorkflow,
   [WorkflowType.CODER_WORKFLOW]: coderWorkflow,
@@ -53,6 +55,7 @@ export function registerAllWorkflows(): void {
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.FEATURE_IMPLEMENTATION])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.FEATURE_PLANNING])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.XYNE_SPACES_FEATURE_IMPLEMENTATION])
+  workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.XYNE_SPACES_PLAN_REVIEW_LOOP])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.FIDO_SERVER_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.CONNECTOR_MIGRATION])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.CODER_WORKFLOW])

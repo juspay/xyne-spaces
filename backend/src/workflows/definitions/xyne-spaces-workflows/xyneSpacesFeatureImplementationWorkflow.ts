@@ -50,7 +50,7 @@ import {
   getValidationConfig,
   loadRootGuidelines,
 } from './utils';
-import { runDeterministicValidation } from './validation-helpers';
+import { runDeterministicValidation } from '../validation-helpers';
 import {logger} from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 
@@ -67,6 +67,7 @@ export interface XyneSpacesFeatureContext extends BaseWorkflowContext {
   imageAttachments?: ImageAttachment[];
   executorType?: ExecutorType;
   useQuestioningMode?: boolean;
+  taskType?: 'feature' | 'bug' | 'refactor' | 'performance' | 'security' | 'documentation';
 }
 
 export interface XyneSpacesFeatureOutput {
@@ -199,6 +200,7 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         projectGuidelines,
         context.executorType,
         questioningMode,
+        context.taskType,
         coAuthor
       )
     );
@@ -236,6 +238,7 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
         projectGuidelines,
         context.executorType,
         false,
+        context.taskType,
         coAuthor
       )
     );
@@ -261,9 +264,9 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
     if (!validationPassed) {
       logger.warn('Validation failed with errors, starting agentic error fixing...');
 
-      const validationErrors = deterministicResult.errorLines.length > 0 
-        ? deterministicResult.errorLines.join('\n')
-        : deterministicResult.validationOutput.stderr || deterministicResult.validationOutput.stdout || '';
+      const validationErrors = deterministicResult.errorLines?.length
+        ? deterministicResult.errorLines!.join('\n')
+        : deterministicResult.validationOutput?.stderr || deterministicResult.validationOutput?.stdout || '';
 
       const validationConfig = getValidationConfig(
         validationErrors,
