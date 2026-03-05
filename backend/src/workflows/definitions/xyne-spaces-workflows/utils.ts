@@ -245,7 +245,7 @@ export const loadRootGuidelines = async (repoPath: string): Promise<string> => {
   
   try {
     const content = await fs.readFile(agentsPath, 'utf-8')
-    console.log('[loadRootGuidelines] ✓ Successfully loaded AGENTS.md')
+    logger.info('[loadRootGuidelines] ✓ Successfully loaded AGENTS.md')
     return `\n\n# AGENTS.md - Project Guidelines\n\n${content}`
   } catch (error) {
     logger.error('[loadRootGuidelines] Error details:', error)
@@ -258,6 +258,22 @@ export const loadRootGuidelines = async (repoPath: string): Promise<string> => {
  */
 export const SYSTEM_PROMPTS = {
   PLANNER: `You are a senior fullstack architect creating comprehensive implementation plans for the Xyne Spaces platform.
+
+## STEP 0: UNDERSTAND CONTEXT (MANDATORY FIRST STEP)
+
+Before creating any plan, you MUST:
+
+1. **Read existing code** to understand patterns:
+   - Read existing implementations of similar features
+   - Understand helper functions, utilities, and shared code
+   - Note coding patterns, naming conventions, and folder structure
+
+2. **Understand the architecture**:
+   - Check existing component structure and naming conventions
+   - Identify state management patterns in use
+   - Note the folder structure for similar features
+
+3. **Only then** proceed with plan creation
 
 Your role is to:
 1. **Analyze the requirement** and understand what needs to be built
@@ -274,10 +290,10 @@ The implementation plan should include:
 
 **Frontend Plan (if applicable):**
 - Components to create/modify (following folder structure guidelines)
-- State management approach (Zero, React Query, XState, or useState)
-- UI components from Juspay Blend to use
-- Form handling with Tanstack Form + Zod
-- Styling with Tailwind CSS
+- State management approach (Zero for real-time sync, XState for state machines, React Query for server state)
+- Form handling with Tanstack React Form
+- Styling with Tailwind CSS + CVA for component variants
+- UI components: Radix UI primitives, custom wrappers in components/ui/
 - Files to create/modify with exact paths
 
 **Backend Plan (if applicable):**
@@ -310,7 +326,22 @@ The next agent (implementer) only receives your final text output - NOT your too
 Do NOT just say "Done!" or "Plan complete" - OUTPUT THE FULL PLAN TEXT.
 
 CRITICAL: You MUST follow the guidelines provided. Reference specific sections from the guidelines in your plan.
-Use plain text for your plan, NOT the plan_mode_response tool.`,
+Use plain text for your plan, NOT the plan_mode_response tool.
+
+## IF YOU RECEIVED REVIEW FEEDBACK
+
+If this is a retry after receiving reviewer feedback, you MUST:
+1. First respond to EACH reviewer observation with ACCEPT/REJECT/PARTIAL and justification
+2. Then provide the updated plan
+
+**Your response must include:**
+\`\`\`markdown
+## Review Feedback Response
+
+| # | Reviewer Observation | Your Response | Justification |
+|---|---------------------|---------------|---------------|
+| 1 | [Issue from reviewer] | ACCEPT/REJECT/PARTIAL | [Your reason] |
+\`\`\``,
 
   IMPLEMENTER: `You are a senior fullstack engineer implementing features for the Xyne Spaces platform.
 
@@ -326,7 +357,7 @@ Implementation requirements:
 - Use PascalCase for component files (ComponentName.tsx, ComponentName.types.ts)
 - Add data-id attributes to main container divs (kebab-case)
 - Use correct state management (Zero/React Query/XState/useState per guidelines)
-- Use Juspay Blend components, Tailwind for styling
+- Use Radix UI primitives, custom wrappers in components/ui/, Tailwind for styling
 - Add JSDoc for exported components
 - Export via index.ts files
 - **NEVER use \`any\` type** - Always use proper TypeScript types
@@ -473,11 +504,14 @@ export const getPlanningConfig = (
   guidelines?: string,
   executorType?: ExecutorType,
   useQuestioningMode?: boolean,
+  taskType?: string,
   coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-planner',
   SYSTEM_PROMPTS.PLANNER,
   `You are creating an implementation plan for the Xyne Spaces platform.
+
+# Task Type: ${taskType || 'feature'}
 
 # Project Guidelines
 
@@ -494,10 +528,9 @@ ${guidelines}
 
 Create a comprehensive implementation plan that:
 1. Analyzes the feature requirements
-2. It will be a frontend change always
-3. Specifies exact files to create/modify with correct paths
-4. Don't spend too much time on minor details. Generic plan is fine.
-5. DO NOT include test case and test files creation in the plan unless explicitly requested
+2. Specifies exact files to create/modify with correct paths
+3. Don't spend too much time on minor details. Generic plan is fine.
+4. DO NOT include test case and test files creation in the plan unless explicitly requested
 
 # CRITICAL INSTRUCTIONS FOR BACKGROUND TASKS
 
@@ -563,11 +596,14 @@ export const getImplementationConfig = (
   guidelines?: string,
   executorType?: ExecutorType,
   useQuestioningMode?: boolean,
+  taskType?: string,
   coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-implementer',
   SYSTEM_PROMPTS.IMPLEMENTER,
   `You are implementing a feature for the Xyne Spaces platform.
+
+# Task Type: ${taskType || 'feature'}
 
 # Project Guidelines
 
