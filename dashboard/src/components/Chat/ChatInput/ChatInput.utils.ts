@@ -93,7 +93,7 @@ const convertPlainTextMentionsToSpans = (htmlContent: string, users: MentionResu
 export const processMessageForSending = (htmlContent: string, users?: MentionResult[]): string => {
   const sanitized = sanitizeHtmlContent(htmlContent);
 
-  let processed = sanitized.replace(/\\(\w+)/g, '$1');
+  let processed = sanitized;
   processed = processed.replace(/\u200B(<span[^>]*data-mention[^>]*>.*?<\/span>)\u200B/g, '$1');
   processed = processed.replace(/\u200B@[^\u200B<]+\u200B/g, '@$1');
 

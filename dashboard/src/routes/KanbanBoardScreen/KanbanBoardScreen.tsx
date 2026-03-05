@@ -870,21 +870,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       tickets = tickets.filter(ticket => isStageEtaOverdue(ticket));
     }
 
-    // Hide Rejected tickets when viewing stage view across all contexts
-    const isStageView =
-      // Channel stage view
-      (channelId && viewMode === 'project' && channelViewType === 'stage') ||
-      // Board view (always stage view)
-      viewMode === 'board' ||
-      // Single board filtered (stage view)
-      !!filteredSingleBoardId ||
-      // My-tickets board/stage view
-      viewMode === 'my-tickets';
-
-    if (isStageView) {
-      tickets = tickets.filter(ticket => ticket.statusV2 !== TicketStatusV2.CANCELLED);
-    }
-
     // Latency: log when filtered tickets are first computed with data
     if (
       ticketsDetails.type === 'complete' &&
