@@ -1098,19 +1098,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const confirmBoardChange = (): void => {
     if (!pendingBoardChange || !ticket) return;
 
-    const newBoard = boards?.find(b => b.id === pendingBoardChange);
-    const firstStage = newBoard?.stages?.[0];
-
     zero.mutate(mutators.ticketStageRequest.deleteByTicketId({ ticketId: ticket.id }));
 
     void zero.mutate(
       mutators.ticket.update({
         id: ticket.id,
         boardId: pendingBoardChange,
-        stageName: firstStage?.name,
-        ...(firstStage?.defaultTicketStatusV2 && {
-          statusV2: firstStage.defaultTicketStatusV2,
-        }),
         updatedAt: Date.now(),
       }),
     );
