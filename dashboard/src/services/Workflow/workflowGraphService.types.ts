@@ -145,6 +145,7 @@ export interface CombinedWorkflowData {
     executorType?: string;
     useQuestioningMode?: boolean;
     model?: string;
+    createdBy?: string | null;
   }>;
 }
 

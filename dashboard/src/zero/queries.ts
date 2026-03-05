@@ -315,6 +315,7 @@ export const queries = defineQueries({
       .where('id', ticketId)
       .related('project')
       .related('tags')
+      .related('assignments')
       .related('referencesOut', ref => ref.related('targetTicket'))
       .related('referencesIn', ref => ref.related('sourceTicket'))
       .related('entity')

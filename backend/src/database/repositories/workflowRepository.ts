@@ -316,6 +316,7 @@ export class WorkflowRepository {
         sourceStepsId: execution.sourceStepsId,
         createdAt: execution.createdAt,
         updatedAt: execution.updatedAt,
+        createdBy: execution.createdBy,
         output: executionState.output ? JSON.parse(executionState.output) : null,
         steps: processedSteps,
         executionMetadata: executionMetadata,
@@ -342,6 +343,7 @@ export class WorkflowRepository {
             createdAt: true,
             updatedAt: true,
             workflowId: true,
+            createdBy: true,
             workflowSteps: {
               select: {
                 id: true,
@@ -427,6 +429,7 @@ export class WorkflowRepository {
             createdAt: true,
             updatedAt: true,
             workflowId: true,
+            createdBy: true,
             workflowSteps: {
               select: {
                 id: true,
@@ -760,6 +763,7 @@ export class WorkflowRepository {
         tag: latestExecution.tag,
         createdAt: latestExecution.createdAt,
         updatedAt: latestExecution.updatedAt,
+        createdBy: latestExecution.createdBy,
         steps: latestSteps,
         output: latestExecution.output ? JSON.parse(latestExecution.output) : null,
         // Metadata for ALL executions

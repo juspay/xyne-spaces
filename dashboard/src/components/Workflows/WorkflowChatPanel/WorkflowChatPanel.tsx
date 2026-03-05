@@ -5,7 +5,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import DOMPurify from 'dompurify';
 import {
-  Send,
+  // Send,
   Loader2,
   ChevronDown,
   ChevronRight,
@@ -33,7 +33,7 @@ import {
   WorkflowStep,
 } from '../../../services/Workflow/workflowGraphService.types';
 import { useWorkflowControl } from '../../../services/Workflow/workflowGraphService';
-import { toast } from 'sonner';
+// import { toast } from 'sonner'; // unused until continuation input is re-enabled
 import { WorkflowGraphOnly } from '../WorkflowGraphOnly';
 import { createPortal } from 'react-dom';
 import { ThreadMessages } from '../../Chat/ThreadPannel';
@@ -231,11 +231,11 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [continuationMessage, setContinuationMessage] = useState('');
+  // const [continuationMessage, setContinuationMessage] = useState(''); // unused until continuation input is re-enabled
   const [activeTab, setActiveTab] = useState<TabId>('automation');
   const [mainTab, setMainTab] = useState<MainTabId>('flow');
   const [showThreadSummary, setShowThreadSummary] = useState(false);
-  const [userMessages, setUserMessages] = useState<UserMessage[]>([]);
+  const [userMessages] = useState<UserMessage[]>([]); // setUserMessages unused until continuation input is re-enabled
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [internalIsGraphViewOpen, setInternalIsGraphViewOpen] = useState(false);
@@ -259,7 +259,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
     height: 0,
   });
   const headerRef = useRef<HTMLDivElement>(null);
-  const { continueAgenticStepAsync, isContinuing, resetContinue } = useWorkflowControl();
+  useWorkflowControl();
 
   useEffect(() => {
     const updateGraphPosition = (): void => {
@@ -613,74 +613,74 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
     });
   }, [filteredSteps, searchQuery]);
 
-  const handleSendMessage = async (): Promise<void> => {
-    if (!continuationMessage.trim() || !executionId) {
-      toast.error('Cannot send', {
-        description: 'Please provide a message',
-        duration: 3000,
-      });
-      return;
-    }
+  // const handleSendMessage = async (): Promise<void> => {
+  //   if (!continuationMessage.trim() || !executionId) {
+  //     toast.error('Cannot send', {
+  //       description: 'Please provide a message',
+  //       duration: 3000,
+  //     });
+  //     return;
+  //   }
 
-    // Use continue API for completed/failed steps
-    // Find agent INPUT steps from the parent workflow steps (not expanded child steps)
-    // We need to look in the original combinedStepsData workflows
-    let lastAgentInputStep: WorkflowStep | null = null;
+  //   // Use continue API for completed/failed steps
+  //   // Find agent INPUT steps from the parent workflow steps (not expanded child steps)
+  //   // We need to look in the original combinedStepsData workflows
+  //   let lastAgentInputStep: WorkflowStep | null = null;
 
-    if (combinedStepsData?.workflows?.length) {
-      for (const workflow of combinedStepsData.workflows) {
-        for (const step of workflow.steps) {
-          // Look for agent steps that are INPUT type
-          if (step.stepExecutorType?.toLowerCase() === 'agent' && step.type === 'input') {
-            lastAgentInputStep = step;
-          }
-        }
-      }
-    }
+  //   if (combinedStepsData?.workflows?.length) {
+  //     for (const workflow of combinedStepsData.workflows) {
+  //       for (const step of workflow.steps) {
+  //         // Look for agent steps that are INPUT type
+  //         if (step.stepExecutorType?.toLowerCase() === 'agent' && step.type === 'input') {
+  //           lastAgentInputStep = step;
+  //         }
+  //       }
+  //     }
+  //   }
 
-    if (!lastAgentInputStep) {
-      toast.error('Cannot send', {
-        description: 'No agent checkpoint found to continue',
-        duration: 3000,
-      });
-      return;
-    }
+  //   if (!lastAgentInputStep) {
+  //     toast.error('Cannot send', {
+  //       description: 'No agent checkpoint found to continue',
+  //       duration: 3000,
+  //     });
+  //     return;
+  //   }
 
-    // Add user message to display in chat
-    const userMessage: UserMessage = {
-      id: `user-msg-${Date.now()}`,
-      text: continuationMessage.trim(),
-      timestamp: new Date(),
-    };
-    setUserMessages(prev => [...prev, userMessage]);
+  //   // Add user message to display in chat
+  //   const userMessage: UserMessage = {
+  //     id: `user-msg-${Date.now()}`,
+  //     text: continuationMessage.trim(),
+  //     timestamp: new Date(),
+  //   };
+  //   setUserMessages(prev => [...prev, userMessage]);
 
-    resetContinue();
-    const targetExecutionId = lastAgentInputStep.workflowExecutionId || executionId;
-    if (!targetExecutionId) {
-      toast.error('Error', { description: 'No execution ID available', duration: 3000 });
-      return;
-    }
+  //   resetContinue();
+  //   const targetExecutionId = lastAgentInputStep.workflowExecutionId || executionId;
+  //   if (!targetExecutionId) {
+  //     toast.error('Error', { description: 'No execution ID available', duration: 3000 });
+  //     return;
+  //   }
 
-    try {
-      const result = await continueAgenticStepAsync({
-        executionId: targetExecutionId,
-        stepId: lastAgentInputStep.id,
-        message: continuationMessage.trim(),
-      });
-      setContinuationMessage('');
-      toast.info('Sent', { description: 'Agent processing...', duration: 3000 });
+  //   try {
+  //     const result = await continueAgenticStepAsync({
+  //       executionId: targetExecutionId,
+  //       stepId: lastAgentInputStep.id,
+  //       message: continuationMessage.trim(),
+  //     });
+  //     setContinuationMessage('');
+  //     toast.info('Sent', { description: 'Agent processing...', duration: 3000 });
 
-      // Switch to the new rerun execution
-      if (result.rerunExecutionId && onExecutionChange) {
-        onExecutionChange(result.rerunExecutionId);
-      }
-    } catch (error: unknown) {
-      toast.error('Failed to continue', {
-        description: error instanceof Error ? error.message : 'Unknown error',
-        duration: 4000,
-      });
-    }
-  };
+  //     // Switch to the new rerun execution
+  //     if (result.rerunExecutionId && onExecutionChange) {
+  //       onExecutionChange(result.rerunExecutionId);
+  //     }
+  //   } catch (error: unknown) {
+  //     toast.error('Failed to continue', {
+  //       description: error instanceof Error ? error.message : 'Unknown error',
+  //       duration: 4000,
+  //     });
+  //   }
+  // };
 
   const tabs = [{ id: 'automation' as TabId, label: 'Automation', icon: <Sparkles size={12} /> }];
 
@@ -694,9 +694,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
       .join(' ');
   };
 
-  const isAgentInputStep = filteredSteps.some(
-    step => step.stepExecutorType?.toLowerCase() === 'agent',
-  );
+  // const isAgentInputStep = filteredSteps.some(
+  //   step => step.stepExecutorType?.toLowerCase() === 'agent',
+  // );
 
   return (
     <div className='h-full flex flex-col bg-white overflow-hidden min-w-0'>
@@ -1245,7 +1245,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   {formatStepName(currentNode.stepName)} is running...
                 </span>
               </div>
-            ) : isAgentInputStep &&
+            ) : /* isAgentInputStep && 
               (currentNode?.status === 'completed' || currentNode?.status === 'failed') ? (
               // Completed/Failed state - allow sending new message
               <div className='relative rounded-lg border bg-gray-50 border-gray-200 focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100'>
@@ -1297,7 +1297,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   </button>
                 </div>
               </div>
-            ) : !currentNode ? (
+            ) : */ !currentNode ? (
               <div className='flex items-center justify-center gap-2 py-3 px-4 bg-gray-50 rounded-lg border border-gray-200'>
                 <Circle size={16} className='text-gray-300' />
                 <span className='text-sm text-gray-500'>No step selected</span>
