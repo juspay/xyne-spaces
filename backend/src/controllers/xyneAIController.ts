@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { xyneAIStream, type XyneAIStreamRequest, type UserInfo } from '@/agents/xyne-ai';
+import { xyneAIStream, type XyneAIStreamRequest, type UserInfo, XyneAIConfig } from '@/agents/xyne-ai';
 import { getOtelTraceId } from '@xynehq/jaf';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -37,7 +37,7 @@ const SelectionContextSchema = z.object({
 // Request validation schema
 // Note: channel_ids can be empty [] - agent will ask user to specify channel if needed
 const XyneAIRequestSchema = z.object({
-  query: z.string().min(1, 'Query cannot be empty').max(50000, 'Query too long'),
+  query: z.string().min(1, 'Query cannot be empty'),
   session_id: z.preprocess(emptyToUndefined, z.string().uuid().optional()),
   channel_ids: z.array(z.string().min(1)).default([]), // Allow empty array - agent handles clarification
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
@@ -137,6 +137,9 @@ export class XyneAIController {
 
       logger.info(`[XyneAI] User context prepared for agent (userId: ${userInfo.userId})`);
 
+      // Fetch CAC config with user email context (logging is done inside XyneAIConfig.fetch)
+      const xyneAIConfig = await XyneAIConfig.fetch({ email: userInfo.userEmail });
+
       // Transform selection_contexts from snake_case to camelCase
       const transformedSelectionContexts = selection_contexts?.map(ctx => ({
         canvasViewAccessId: ctx.canvas_view_access_id,
@@ -158,6 +161,7 @@ export class XyneAIController {
         webSearchEnabled: web_search_enabled,
         researchContext: research_context || undefined,
         messageAttachmentIds: message_attachment_ids,
+        xyneAIConfig,  // Pass CAC config to stream
       };
 
       // Track metrics: context channels count

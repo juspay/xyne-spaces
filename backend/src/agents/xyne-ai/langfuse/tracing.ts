@@ -10,16 +10,11 @@ import {
 } from '@xynehq/jaf';
 import { logger } from '../../../utils/logger.js';
 import { getLangfuseConfig } from './config.js';
+import type { XyneAIConfig } from '../config.js';
 
 // ============================================================================
-// TRACING TOGGLE - Set to true to enable tracing with content masking
+// CONTENT MASKING PLACEHOLDERS
 // ============================================================================
-const TRACING_ENABLED = true;
-
-// ============================================================================
-// CONTENT MASKING CONFIGURATION
-// ============================================================================
-const MASKING_ENABLED = true;
 const MASKED_OUTPUT_PLACEHOLDER = '[MASKED - Agent Output]';
 const MASKED_TOOL_OUTPUT_PLACEHOLDER = '[MASKED - Tool Output]';
 
@@ -34,53 +29,59 @@ function getTraceCollector(): TraceCollector {
   return traceCollector;
 }
 
-function maskMessage(message: Message): { role: 'user' | 'assistant' | 'tool'; content: string } {
-  const role = message.role || 'assistant';
-  const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
-  
-  if (!MASKING_ENABLED) {
-    return { role, content };
-  }
-  
-  if (role === 'user') {
-    return { role, content };
-  }
-  
-  return {
-    role,
-    content: role === 'tool' ? MASKED_TOOL_OUTPUT_PLACEHOLDER : MASKED_OUTPUT_PLACEHOLDER,
+function createMaskMessage(maskingEnabled: boolean) {
+  return function maskMessage(message: Message): { role: 'user' | 'assistant' | 'tool'; content: string } {
+    const role = message.role || 'assistant';
+    const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+    
+    if (!maskingEnabled) {
+      return { role, content };
+    }
+    
+    if (role === 'user') {
+      return { role, content };
+    }
+    
+    return {
+      role,
+      content: role === 'tool' ? MASKED_TOOL_OUTPUT_PLACEHOLDER : MASKED_OUTPUT_PLACEHOLDER,
+    };
   };
 }
 
-/**
- * Mask an array of messages - just calls maskMessage for each
- */
-function maskMessages(messages: readonly Message[]): readonly { role: 'user' | 'assistant' | 'tool'; content: string }[] {
-  return messages.map(maskMessage);
+function createMaskMessages(maskingEnabled: boolean) {
+  const maskMessage = createMaskMessage(maskingEnabled);
+  return function maskMessages(messages: readonly Message[]): readonly { role: 'user' | 'assistant' | 'tool'; content: string }[] {
+    return messages.map(maskMessage);
+  };
 }
 
-function maskToolOutput(result: unknown): string {
-  if (!MASKING_ENABLED) {
-    return typeof result === 'string' ? result : JSON.stringify(result);
-  }
-  return MASKED_TOOL_OUTPUT_PLACEHOLDER;
+function createMaskToolOutput(maskingEnabled: boolean) {
+  return function maskToolOutput(result: unknown): string {
+    if (!maskingEnabled) {
+      return typeof result === 'string' ? result : JSON.stringify(result);
+    }
+    return MASKED_TOOL_OUTPUT_PLACEHOLDER;
+  };
 }
 
-function maskOutcomeOutput(outcome: unknown): unknown {
-  if (!MASKING_ENABLED) {
-    return outcome;
-  }
-  
-  const outcomeObj = outcome as { status?: string; output?: unknown; error?: unknown };
-  
-  if (outcomeObj.status === 'completed' && outcomeObj.output !== undefined) {
-    return {
-      ...outcomeObj,
-      output: MASKED_OUTPUT_PLACEHOLDER,
-    };
-  }
-  
-  return outcomeObj;
+function createMaskOutcomeOutput(maskingEnabled: boolean) {
+  return function maskOutcomeOutput(outcome: unknown): unknown {
+    if (!maskingEnabled) {
+      return outcome;
+    }
+    
+    const outcomeObj = outcome as { status?: string; output?: unknown; error?: unknown };
+    
+    if (outcomeObj.status === 'completed' && outcomeObj.output !== undefined) {
+      return {
+        ...outcomeObj,
+        output: MASKED_OUTPUT_PLACEHOLDER,
+      };
+    }
+    
+    return outcomeObj;
+  };
 }
 
 // ============================================================================
@@ -88,11 +89,6 @@ function maskOutcomeOutput(outcome: unknown): unknown {
 // ============================================================================
 
 export function initializeLangfuseTracing(): void {
-  if (!TRACING_ENABLED) {
-    logger.info('[Langfuse] Tracing is disabled via TRACING_ENABLED flag.');
-    return;
-  }
-  
   if (isInitialized) {
     logger.debug('[Langfuse] Already initialized');
     return;
@@ -113,22 +109,33 @@ export function initializeLangfuseTracing(): void {
   }
 }
 
-export function createOnEventHandler(): (event: TraceEvent) => void {
-  if (!TRACING_ENABLED) {
+/**
+ * Create an event handler for Langfuse tracing
+ * @param xyneAIConfig - CAC config with tracingEnabled and maskingEnabled flags
+ */
+export function createOnEventHandler(xyneAIConfig: XyneAIConfig): (event: TraceEvent) => void {
+  // Check if tracing is enabled via CAC config
+  if (!xyneAIConfig.tracingEnabled) {
     return () => {};
   }
   
-  const config = getLangfuseConfig();
+  const langfuseConfig = getLangfuseConfig();
   
-  if (!config.enabled) {
+  if (!langfuseConfig.enabled) {
     return () => {};
   }
   
   const collector = getTraceCollector();
   
+  // Create masking functions based on CAC config
+  const maskMessage = createMaskMessage(xyneAIConfig.maskingEnabled);
+  const maskMessages = createMaskMessages(xyneAIConfig.maskingEnabled);
+  const maskToolOutput = createMaskToolOutput(xyneAIConfig.maskingEnabled);
+  const maskOutcomeOutput = createMaskOutcomeOutput(xyneAIConfig.maskingEnabled);
+  
   return (event: TraceEvent) => {
     try {
-      handleEventWithEnrichment(event, collector);
+      handleEventWithEnrichment(event, collector, maskMessage, maskMessages, maskToolOutput, maskOutcomeOutput);
     } catch (error) {
       logger.error('[Langfuse] Error handling event:', error);
     }
@@ -147,7 +154,14 @@ const SKIP_EVENTS = new Set([
 /**
  * Handle event with session/user enrichment and content masking
  */
-function handleEventWithEnrichment(event: TraceEvent, collector: TraceCollector): void {
+function handleEventWithEnrichment(
+  event: TraceEvent,
+  collector: TraceCollector,
+  maskMessage: (message: Message) => { role: 'user' | 'assistant' | 'tool'; content: string },
+  maskMessages: (messages: readonly Message[]) => readonly { role: 'user' | 'assistant' | 'tool'; content: string }[],
+  maskToolOutput: (result: unknown) => string,
+  maskOutcomeOutput: (outcome: unknown) => unknown
+): void {
   if (SKIP_EVENTS.has(event.type)) {
     return;
   }
