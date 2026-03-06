@@ -112,7 +112,9 @@ export default function WorkflowTriggerModal({
       // Save form values to localStorage before closing (excluding description)
       saveFormValues({
         customFields: Object.fromEntries(
-          Object.entries(variables.customFields).filter(([key]) => key !== 'description'),
+          Object.entries(variables.customFields).filter(
+            ([key]) => key !== 'description' && key !== 'title',
+          ),
         ),
         context: variables.context,
       });
