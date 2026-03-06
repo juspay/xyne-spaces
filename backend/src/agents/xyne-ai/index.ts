@@ -37,7 +37,7 @@ export { createAgentRunner } from './agent.js';
 export { xyneAIStream, type XyneAIStreamRequest } from './stream.js';
 
 // Config exports (CAC - Context Aware Configuration)
-export { XyneAIConfig } from './config.js';
+export { AgentsConfig } from '../config.js';
 
 // Type exports
 export type {

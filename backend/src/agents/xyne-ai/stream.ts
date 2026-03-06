@@ -19,7 +19,7 @@ import {
 import { getAndClearSessionMappings, type EnhancedCitationMappings, type StreamProvider, type StreamEventCallback } from './tools/index.js';
 import { createOnEventHandler } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
-import { XyneAIConfig } from './config.js';
+import { AgentsConfig } from '../config.js';
 import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
 import { askAIAttachmentUsedTotal } from '@/services/otel';
 
@@ -199,16 +199,16 @@ async function parseStringOutput(
 
 export interface XyneAIStreamRequest extends XyneAIRequest {
   onStreamEvent?: StreamEventCallback;
-  xyneAIConfig?: XyneAIConfig;  // CAC config fetched in controller
+  agentsConfig?: AgentsConfig;  // CAC config fetched in controller
 }
 
 export async function* xyneAIStream(
   request: XyneAIStreamRequest
 ): AsyncGenerator<XyneAIStreamChunk, void, unknown> {
-  const { query, sessionId, channelIds, conversationId, canvasViewAccessId, selectionContexts, createCanvasEnabled, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds, xyneAIConfig } = request;
+  const { query, sessionId, channelIds, conversationId, canvasViewAccessId, selectionContexts, createCanvasEnabled, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds, agentsConfig } = request;
 
   // Use provided config or fetch defaults
-  const cacConfig = xyneAIConfig ?? XyneAIConfig.defaults();
+  const cacConfig = agentsConfig ?? AgentsConfig.defaults();
 
   const timestamp = currentTimestamp || getCurrentTimestamp();
   const source: 'thread' | 'channel' = conversationId ? 'thread' : 'channel';
@@ -352,10 +352,10 @@ export async function* xyneAIStream(
   const hasImageAttachment = allAttachments.some(att => att.mime_type?.startsWith('image/'));
 
   // Use model names from CAC config
-  const modelName = hasImageAttachment ? cacConfig.visionModelName : cacConfig.modelName;
+  const modelName = hasImageAttachment ? cacConfig.xyneAiVisionModelName : cacConfig.xyneAiModelName;
   const apiKey = LITELLM_API_KEY;
 
-  logger.info(`[XyneAI] [${session.sessionId}] Using model: ${modelName} (hasImageAttachment: ${hasImageAttachment}, tracingEnabled: ${cacConfig.tracingEnabled}, maskingEnabled: ${cacConfig.maskingEnabled})`);
+  logger.info(`[XyneAI] [${session.sessionId}] Using model: ${modelName} (hasImageAttachment: ${hasImageAttachment}, tracingEnabled: ${cacConfig.xyneAiTracingEnabled}, maskingEnabled: ${cacConfig.xyneAiMaskingEnabled})`);
 
   const onEventHandler = createOnEventHandler(cacConfig);
   const runStream = await createAgentRunner(source, agentContext, messages, modelName, apiKey, onEventHandler);

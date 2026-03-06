@@ -10,7 +10,7 @@ import {
 } from '@xynehq/jaf';
 import { logger } from '../../../utils/logger.js';
 import { getLangfuseConfig } from './config.js';
-import type { XyneAIConfig } from '../config.js';
+import type { AgentsConfig } from '../../config.js';
 
 // ============================================================================
 // CONTENT MASKING PLACEHOLDERS
@@ -111,11 +111,11 @@ export function initializeLangfuseTracing(): void {
 
 /**
  * Create an event handler for Langfuse tracing
- * @param xyneAIConfig - CAC config with tracingEnabled and maskingEnabled flags
+ * @param agentsConfig - CAC config with tracingEnabled and maskingEnabled flags
  */
-export function createOnEventHandler(xyneAIConfig: XyneAIConfig): (event: TraceEvent) => void {
+export function createOnEventHandler(agentsConfig: AgentsConfig): (event: TraceEvent) => void {
   // Check if tracing is enabled via CAC config
-  if (!xyneAIConfig.tracingEnabled) {
+  if (!agentsConfig.xyneAiTracingEnabled) {
     return () => {};
   }
   
@@ -128,10 +128,10 @@ export function createOnEventHandler(xyneAIConfig: XyneAIConfig): (event: TraceE
   const collector = getTraceCollector();
   
   // Create masking functions based on CAC config
-  const maskMessage = createMaskMessage(xyneAIConfig.maskingEnabled);
-  const maskMessages = createMaskMessages(xyneAIConfig.maskingEnabled);
-  const maskToolOutput = createMaskToolOutput(xyneAIConfig.maskingEnabled);
-  const maskOutcomeOutput = createMaskOutcomeOutput(xyneAIConfig.maskingEnabled);
+  const maskMessage = createMaskMessage(agentsConfig.xyneAiMaskingEnabled);
+  const maskMessages = createMaskMessages(agentsConfig.xyneAiMaskingEnabled);
+  const maskToolOutput = createMaskToolOutput(agentsConfig.xyneAiMaskingEnabled);
+  const maskOutcomeOutput = createMaskOutcomeOutput(agentsConfig.xyneAiMaskingEnabled);
   
   return (event: TraceEvent) => {
     try {

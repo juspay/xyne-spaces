@@ -15,10 +15,10 @@ import {
 } from '@xynehq/jaf';
 import { config } from '../../config/env.js';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { AgentsConfig } from '../config.js';
 
 const LITELLM_BASE_URL = config.litellm.baseUrl;
 const LITELLM_API_KEY = config.litellm.apiKey;
-const DEFAULT_MODEL = 'gemini-3-flash-preview';
 const MAX_TITLE_LENGTH = 500;
 const MAX_DESCRIPTION_LENGTH = 4000;
 const MAX_BOARD_DESCRIPTION_LENGTH = 1000;
@@ -166,6 +166,7 @@ export async function analyzeTicketBoard(
   input: TicketBoardInput,
   context: TicketBoardContext,
   onEvent?: (event: TraceEvent) => void,
+  agentsConfig?: AgentsConfig,
 ): Promise<TicketBoardOutput> {
   if (!input.candidates || input.candidates.length === 0) {
     return {
@@ -174,6 +175,10 @@ export async function analyzeTicketBoard(
     };
   }
 
+  // Use model name from CAC config if provided, otherwise fetch or use default
+  const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
+  const modelName = cacConfig.ticketBoardModelName;
+
   const modelProvider = createModelProvider();
   const prompt = buildPrompt(input);
 
@@ -181,7 +186,7 @@ export async function analyzeTicketBoard(
     agentRegistry: ticketBoardAgentRegistry,
     modelProvider: modelProvider as RunConfig<TicketBoardContext>['modelProvider'],
     maxTurns: 2,
-    modelOverride: DEFAULT_MODEL,
+    modelOverride: modelName,
     onEvent,
   };
 
