@@ -13,7 +13,7 @@ import { AuthData, createMutators } from './mutators';
 import { queries } from './queries';
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
-import { zeroMutationLatency, zeroMutationOperations, zeroQueryLatency, zeroQueryOperations } from '@/services/otel/push/zeroMetrics';
+import { zeroMutationLatency, zeroMutationOperations, zeroQueryLatency, zeroQueryOperations } from '@/services/otel';
 import {
   createVespaJobsAccumulator,
   VespaJobsAccumulator,

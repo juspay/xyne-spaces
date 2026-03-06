@@ -5,7 +5,13 @@ import { getOtelTraceId } from '@xynehq/jaf';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
-import { metrics } from '@/services/otel/pull/metrics';
+import {
+  askAIQueriesTotal,
+  askAIQueryDuration,
+  askAIContextChannels,
+  askAIFeedbackTotal,
+  webSearchEnabledTotal
+} from '@/services/otel';
 import { researchAgentService } from '@/services/researchAgentService';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
@@ -165,11 +171,11 @@ export class XyneAIController {
       };
 
       // Track metrics: context channels count
-      metrics.askAIContextChannels.observe(channel_ids.length);
+      askAIContextChannels.record(channel_ids.length);
 
       // Track web search query if enabled
       if (web_search_enabled) {
-        metrics.webSearchEnabledTotal.inc();
+        webSearchEnabledTotal.add(1);
       }
 
       const startTime = Date.now();
@@ -183,8 +189,8 @@ export class XyneAIController {
       } finally {
         try {
           const duration = Date.now() - startTime;
-          metrics.askAIQueryDuration.labels(status).observe(duration);
-          metrics.askAIQueriesTotal.labels(status).inc();
+          askAIQueryDuration.record(duration, { status });
+          askAIQueriesTotal.add(1, { status });
         } catch (metricsError) {
           logger.error('[XyneAI] Error recording metrics:', metricsError);
         }
@@ -275,7 +281,7 @@ export class XyneAIController {
       }
 
       // Track feedback metric
-      metrics.askAIFeedbackTotal.labels(value).inc();
+      askAIFeedbackTotal.add(1, { value });
 
       logger.info(`[XyneAI] Feedback submitted successfully for traceId: ${otelTraceId}`);
       res.json({ success: true });

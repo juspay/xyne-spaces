@@ -1,6 +1,6 @@
 # Metrics & Observability
 
-This document explains how monitoring and observability works in the Xyne backend using **Prometheus metrics**, **VictoriaMetrics**, and **Grafana**.
+This document explains how monitoring and observability works in the Xyne backend using **OpenTelemetry push metrics**, **VictoriaMetrics**, and **Grafana**.
 
 ---
 
@@ -8,15 +8,31 @@ This document explains how monitoring and observability works in the Xyne backen
 
 Our monitoring stack consists of:
 
-1. **Backend API** - Exposes metrics at `/metrics` endpoint
-2. **VictoriaMetrics** - Scrapes and stores metrics data (Prometheus-compatible)
-3. **Grafana** - Visualizes metrics in dashboards
+1. **Backend API** - Pushes metrics via OpenTelemetry SDK
+2. **OTLP Collector** - Receives and forwards metrics
+3. **VictoriaMetrics** - Stores metrics data (Prometheus-compatible)
+4. **Grafana** - Visualizes metrics in dashboards
 
 ```
-┌─────────────┐     scrapes      ┌──────────────────┐     queries     ┌─────────┐
-│   Backend   │ ────────────────> │ VictoriaMetrics  │ ───────────────>│ Grafana │
-│ /metrics    │   every 15s      │   (Storage)      │                 │ (Viz)   │
-└─────────────┘                  └──────────────────┘                 └─────────┘
+┌─────────────┐     push OTLP      ┌─────────────────┐
+│   Backend   │ ─────────────────> │ OTLP Collector  │
+│             │   (periodic)       │   :4318         │
+└─────────────┘                    └────────┬────────┘
+                                            │
+                    ┌───────────────────────┘
+                    │  remote_write
+                    ▼
+         ┌────────────────────┐
+         │ VictoriaMetrics    │
+         │ :8428              │
+         └────────┬───────────┘
+                  │
+                  │ queries
+                  ▼
+         ┌────────────────────┐
+         │   Grafana          │
+         │   :3333            │
+         └────────────────────┘
 ```
 
 ---
@@ -26,11 +42,12 @@ Our monitoring stack consists of:
 ### 1. Start Services
 
 ```bash
-# Start all services including VictoriaMetrics and Grafana
+# Start all services including VictoriaMetrics, OTLP Collector, and Grafana
 npm run services
 ```
 
 This starts:
+- **OTLP Collector** on http://localhost:4318
 - **VictoriaMetrics** on http://localhost:8428
 - **Grafana** on http://localhost:3333
 
@@ -41,7 +58,7 @@ cd backend
 npm run dev
 ```
 
-Backend exposes metrics at: http://localhost:3001/metrics
+Backend automatically pushes metrics to the OTLP collector.
 
 ### 3. Access Grafana
 
@@ -64,18 +81,34 @@ These are collected automatically by the `metricsMiddleware` for every API reque
 | `http_requests_total` | Counter | Total HTTP requests | method, route, status_code |
 | `http_request_duration_ms` | Histogram | Request latency distribution | method, route, status_code |
 | `http_request_errors_total` | Counter | Total HTTP errors (4xx/5xx) | method, route, status_code, error_type |
-| `http_active_connections` | Gauge | Current active connections | - |
-| `db_query_duration_ms` | Histogram | Database query latency | query_type, table  |  --> <!-- NOTE: To be enabled when DB metric collection is implemented -->
+| `http_active_connections` | UpDownCounter | Current active connections | - |
+| `db_query_duration_ms` | Histogram | Database query latency | query_type, table |
 
-### System Metrics (Automatic)
+### Notification Metrics
 
-Default Node.js metrics collected by `prom-client`:
+| Metric Name | Type | Description | Labels |
+|------------|------|-------------|--------|
+| `notification_job_created_total` | Counter | Total notification jobs created | platform, message_type |
+| `notification_jobs_waiting` | UpDownCounter | Jobs currently waiting in queue | platform, message_type |
+| `notification_job_status_total` | Counter | Jobs by status | status, platform, message_type, error_type |
+| `notification_job_duration_ms` | Histogram | Job processing duration | platform, message_type, status |
+| `notification_job_queue_time_ms` | Histogram | Time spent in queue | platform, message_type |
+| `notification_jobs_expected_total` | Counter | Expected notification jobs | platform, message_type |
+| `call_jobs_total` | Counter | Call jobs by status | platform, status |
 
-- `xyne_backend_process_cpu_user_seconds_total` - CPU usage
-- `xyne_backend_process_resident_memory_bytes` - Memory usage
-- `xyne_backend_nodejs_heap_size_used_bytes` - Heap memory
-- `xyne_backend_nodejs_eventloop_lag_seconds` - Event loop lag
-- And many more...
+### Ask AI Metrics
+
+| Metric Name | Type | Description | Labels |
+|------------|------|-------------|--------|
+| `ask_ai_queries_total` | Counter | Total Ask AI queries | status |
+| `ask_ai_query_duration` | Histogram | Query duration in ms | status |
+| `ask_ai_context_channels_count` | Histogram | Channels used as context | - |
+| `ask_ai_feedback_total` | Counter | Feedback submissions | value |
+| `web_search_enabled_total` | Counter | Queries with web search enabled | - |
+| `web_search_tool_used_total` | Counter | Times web search tool used | - |
+| `ask_ai_attachment_used_total` | Counter | Times attachments used | - |
+| `ask_ai_genius_used_total` | Counter | Times Genius tool used | - |
+| `ask_ai_research_agent_used_total` | Counter | Times Research Agent used | - |
 
 ---
 
@@ -89,23 +122,34 @@ The `metricsMiddleware` in `backend/src/middleware/metricsMiddleware.ts` interce
 // Automatically tracks:
 - Request start/end time (latency)
 - HTTP method, route, status code
-- Active connections (inc/dec)
+- Active connections (up/down counter)
 - Errors (4xx/5xx)
 ```
 
-### 2. Metrics Storage
+### 2. Metrics Push
 
-VictoriaMetrics scrapes the `/metrics` endpoint every **15 seconds**:
+The OpenTelemetry SDK periodically pushes metrics to the OTLP collector (default every 60s):
 
-```yaml
-# scrape.yml configuration
-scrape_interval: 15s
-targets: ['host.docker.internal:3001']
+```typescript
+// Configuration in src/services/otel/telemetry.ts
+const metricReader = new PeriodicExportingMetricReader({
+  exporter: metricExporter,
+  exportIntervalMillis: 60000, // 60 seconds
+});
 ```
+
+Environment variables:
+- `OTEL_BASE_URL` - OTLP collector URL (default: `http://localhost:4318`)
+- `OTEL_SERVICE_NAME` - Service name (default: `backend`)
+- `OTEL_EXPORT_INTERVAL_MS` - Export interval (default: `60000`)
+
+### 3. Metrics Storage
+
+The OTLP collector forwards metrics to VictoriaMetrics via Prometheus remote write.
 
 Metrics are stored for **12 months** (configurable in `docker-compose.dev.yml`).
 
-### 3. Metrics Visualization
+### 4. Metrics Visualization
 
 Grafana queries VictoriaMetrics and displays:
 - **Request Rate** - Requests per second by route
@@ -121,51 +165,77 @@ You can add your own metrics for business logic like "messages created", "files 
 
 ### Step 1: Define the Metric
 
-In `backend/src/middleware/metricsMiddleware.ts`, add your custom metric:
+Create a new metric file or add to an existing one in `backend/src/services/otel/`:
 
 ```typescript
+// Example: backend/src/services/otel/businessMetrics.ts
+import { metrics } from '@opentelemetry/api';
+import type { Counter, Histogram, UpDownCounter } from '@opentelemetry/api';
+import { config } from '@/config/env';
+
+function getMeter() {
+  return metrics.getMeter(config.otel.serviceName);
+}
+
 // Example: Track messages created
-const messagesCreatedCounter = new client.Counter({
-  name: 'messages_created_total',
-  help: 'Total number of messages created',
-  labelNames: ['message_type', 'conversation_type'],
-  registers: [register],
+let _messagesCreated: Counter | null = null;
+export const messagesCreated: Counter = new Proxy({} as Counter, {
+  get(_target, prop) {
+    if (!_messagesCreated) {
+      _messagesCreated = getMeter().createCounter('messages_created_total', {
+        description: 'Total number of messages created',
+        unit: '1',
+      });
+    }
+    return _messagesCreated[prop as keyof Counter];
+  },
 });
 
 // Example: Track file upload size
-const fileUploadSizeHistogram = new client.Histogram({
-  name: 'file_upload_size_bytes',
-  help: 'Distribution of uploaded file sizes',
-  labelNames: ['file_type'],
-  buckets: [1024, 10240, 102400, 1024000, 10240000, 52428800], // 1KB to 50MB
-  registers: [register],
+let _fileUploadSize: Histogram | null = null;
+export const fileUploadSize: Histogram = new Proxy({} as Histogram, {
+  get(_target, prop) {
+    if (!_fileUploadSize) {
+      _fileUploadSize = getMeter().createHistogram('file_upload_size_bytes', {
+        description: 'Distribution of uploaded file sizes',
+        unit: 'bytes',
+        advice: {
+          explicitBucketBoundaries: [1024, 10240, 102400, 1024000, 10240000, 52428800],
+        },
+      });
+    }
+    return _fileUploadSize[prop as keyof Histogram];
+  },
 });
 
 // Example: Track active calls
-const activeCallsGauge = new client.Gauge({
-  name: 'active_calls_count',
-  help: 'Number of active calls right now',
-  registers: [register],
+let _activeCalls: UpDownCounter | null = null;
+export const activeCalls: UpDownCounter = new Proxy({} as UpDownCounter, {
+  get(_target, prop) {
+    if (!_activeCalls) {
+      _activeCalls = getMeter().createUpDownCounter('active_calls_count', {
+        description: 'Number of active calls right now',
+        unit: '1',
+      });
+    }
+    return _activeCalls[prop as keyof UpDownCounter];
+  },
 });
 ```
 
-### Step 2: Export the Metric
+### Step 2: Export from Index
 
-Add it to the `metrics` export:
+Add exports to `backend/src/services/otel/index.ts`:
 
 ```typescript
-export const metrics = {
-  httpRequestDuration,
-  httpRequestTotal,
-  httpRequestErrors,
-  activeConnections,
-  dbQueryDuration,
-  
-  // Add your custom metrics here
-  messagesCreatedCounter,
-  fileUploadSizeHistogram,
-  activeCallsGauge,
-};
+export * from './telemetry';
+export * from './callMetrics';
+export * from './zeroMetrics';
+export * from './httpMetrics';
+export * from './dbMetrics';
+export * from './notificationMetrics';
+export * from './aiMetrics';
+export * from './businessMetrics'; // Add this
 ```
 
 ### Step 3: Use in Business Logic
@@ -174,7 +244,7 @@ Import and use the metric in your service/controller:
 
 ```typescript
 // In MessageService.ts
-import { metrics } from '../middleware/metricsMiddleware';
+import { messagesCreated } from '@/services/otel';
 
 async createMessage(data: CreateMessageDto) {
   // ... business logic to save message
@@ -182,7 +252,7 @@ async createMessage(data: CreateMessageDto) {
   const message = await this.messageRepository.save(data);
   
   // Increment the counter with labels
-  metrics.messagesCreatedCounter.inc({
+  messagesCreated.add(1, {
     message_type: data.attachments?.length > 0 ? 'attachment' : 'text',
     conversation_type: data.isGroupChat ? 'group' : 'direct',
   });
@@ -193,16 +263,13 @@ async createMessage(data: CreateMessageDto) {
 
 ```typescript
 // In StorageService.ts
-import { metrics } from '../middleware/metricsMiddleware';
+import { fileUploadSize } from '@/services/otel';
 
 async uploadFile(file: Buffer, metadata: FileMetadata) {
   // ... upload logic
   
   // Record file size distribution
-  metrics.fileUploadSizeHistogram.observe(
-    { file_type: metadata.mimeType },
-    file.length
-  );
+  fileUploadSize.record(file.length, { file_type: metadata.mimeType });
   
   return uploadedUrl;
 }
@@ -210,38 +277,32 @@ async uploadFile(file: Buffer, metadata: FileMetadata) {
 
 ```typescript
 // In CallService.ts
-import { metrics } from '../middleware/metricsMiddleware';
+import { activeCalls } from '@/services/otel';
 
 async startCall(callId: string) {
   // ... start call logic
   
   // Increment active calls
-  metrics.activeCallsGauge.inc();
+  activeCalls.add(1);
 }
 
 async endCall(callId: string) {
   // ... end call logic
   
   // Decrement active calls
-  metrics.activeCallsGauge.dec();
+  activeCalls.add(-1);
 }
 ```
 
 ### Step 4: Verify Metrics
 
 1. Trigger the business logic (create a message, upload a file, etc.)
-2. Check the metrics endpoint: http://localhost:3001/metrics
-3. Search for your metric name (e.g., `messages_created_total`)
-4. You should see output like:
-
-```prometheus
-# HELP messages_created_total Total number of messages created
-# TYPE messages_created_total counter
-messages_created_total{message_type="text",conversation_type="direct"} 145
-messages_created_total{message_type="text",conversation_type="group"} 89
-messages_created_total{message_type="attachment",conversation_type="direct"} 34
-messages_created_total{message_type="attachment",conversation_type="group"} 21
-```
+2. Wait for the next export interval (default 60 seconds)
+3. Check VictoriaMetrics directly:
+   ```bash
+   curl "http://localhost:8428/api/v1/query?query=messages_created_total"
+   ```
+4. Or check Grafana dashboards
 
 ### Step 5: Create Grafana Dashboard Panel
 
@@ -250,7 +311,7 @@ messages_created_total{message_type="attachment",conversation_type="group"} 21
 3. Use queries like:
    - `rate(messages_created_total[5m])` - Messages per second
    - `sum by (message_type) (messages_created_total)` - Total by type
-   - `histogram_quantile(0.95, file_upload_size_bytes)` - P95 file size
+   - `histogram_quantile(0.95, rate(file_upload_size_bytes_bucket[5m]))` - P95 file size
    - `active_calls_count` - Current active calls
 
 ---
@@ -260,33 +321,32 @@ messages_created_total{message_type="attachment",conversation_type="group"} 21
 ### Counter
 - **Always increases** (never decreases)
 - Use for: Total counts (requests, messages, errors)
-- Methods: `.inc(labels, value)`
+- Methods: `.add(value, attributes)`
 
 ```typescript
-messagesCreatedCounter.inc(); // Increment by 1
-messagesCreatedCounter.inc({ type: 'text' }, 5); // Increment by 5
+messagesCreated.add(1); // Increment by 1
+messagesCreated.add(5, { type: 'text' }); // Increment by 5 with labels
 ```
 
-### Gauge
+### UpDownCounter
 - **Can go up and down**
 - Use for: Current state (active connections, queue size, online users)
-- Methods: `.inc()`, `.dec()`, `.set(value)`
+- Methods: `.add(value, attributes)`
 
 ```typescript
-activeConnectionsGauge.inc(); // +1
-activeConnectionsGauge.dec(); // -1
-activeConnectionsGauge.set(42); // Set to specific value
+activeCalls.add(1);  // +1
+activeCalls.add(-1); // -1
 ```
 
 ### Histogram
 - **Records distribution of values** in buckets
 - Automatically calculates sum, count, and percentiles
 - Use for: Latency, file sizes, durations
-- Methods: `.observe(labels, value)`
+- Methods: `.record(value, attributes)`
 
 ```typescript
-requestDurationHistogram.observe({ route: '/api/messages' }, 145); // 145ms
-fileSizeHistogram.observe({ type: 'image' }, 2048576); // 2MB in bytes
+requestDuration.record(145, { route: '/api/messages' }); // 145ms
+fileSizeHistogram.record(2048576, { type: 'image' }); // 2MB in bytes
 ```
 
 ---
@@ -299,16 +359,16 @@ fileSizeHistogram.observe({ type: 'image' }, 2048576); // 2MB in bytes
 **Good:**
 ```typescript
 // Limited label values (low cardinality)
-.inc({ message_type: 'text' }) // Only 2-3 types: text, image, video
-.inc({ status: 'success' })    // Only 2 values: success, failure
+.add(1, { message_type: 'text' }) // Only 2-3 types: text, image, video
+.add(1, { status: 'success' })    // Only 2 values: success, failure
 ```
 
 **Bad:**
 ```typescript
 // High cardinality - creates millions of time series!
-.inc({ user_id: '12345' })     // ❌ Thousands of users
-.inc({ message_id: 'abc123' }) // ❌ Millions of messages
-.inc({ timestamp: Date.now() }) // ❌ Infinite values
+.add(1, { user_id: '12345' })     // ❌ Thousands of users
+.add(1, { message_id: 'abc123' }) // ❌ Millions of messages
+.add(1, { timestamp: Date.now() }) // ❌ Infinite values
 ```
 
 ### 2. Error Handling
@@ -316,7 +376,7 @@ Always wrap metrics in try/catch to avoid breaking your app:
 
 ```typescript
 try {
-  metrics.messagesCreatedCounter.inc({ type: 'text' });
+  messagesCreated.add(1, { type: 'text' });
 } catch (error) {
   logger.error('Failed to record metric:', error);
   // Continue with business logic
@@ -330,18 +390,18 @@ For accurate duration measurements:
 const start = Date.now();
 await someOperation();
 const duration = Date.now() - start;
-metrics.operationDuration.observe({ operation: 'db_query' }, duration);
+operationDuration.record(duration, { operation: 'db_query' });
 ```
 
 ### 4. Use Meaningful Names
 - Use snake_case for metric names
 - Add `_total` suffix for counters
-- Add `_seconds` or `_bytes` for units
+- Add `_seconds` or `_bytes` or `_ms` for units
 - Keep names descriptive but concise
 
 ```typescript
 ✅ messages_created_total
-✅ http_request_duration_seconds
+✅ http_request_duration_ms
 ✅ file_upload_size_bytes
 ❌ msgCnt
 ❌ duration
@@ -354,17 +414,15 @@ metrics.operationDuration.observe({ operation: 'db_query' }, duration);
 
 ### Metrics not appearing in Grafana?
 
-1. **Check backend is running:**
+1. **Check OTLP collector is running:**
    ```bash
-   curl http://localhost:3001/metrics
+   curl http://localhost:4318
    ```
-   Should return Prometheus-formatted metrics.
 
-2. **Check VictoriaMetrics is scraping:**
+2. **Check VictoriaMetrics is receiving data:**
    ```bash
-   curl http://localhost:8428/api/v1/targets
+   curl "http://localhost:8428/api/v1/label/__name__/values"
    ```
-   Should show backend target as `UP`.
 
 3. **Check Grafana datasource:**
    - Go to Configuration → Data Sources
@@ -374,7 +432,7 @@ metrics.operationDuration.observe({ operation: 'db_query' }, duration);
 ### Metrics showing 0 or no data?
 
 - **Trigger the event** - Metrics only appear after the code path executes
-- **Wait 15 seconds** - VictoriaMetrics scrapes every 15 seconds
+- **Wait for export** - Default export interval is 60 seconds
 - **Check labels** - Ensure labels in code match labels in Grafana query
 
 ### High memory usage?
@@ -387,11 +445,11 @@ metrics.operationDuration.observe({ operation: 'db_query' }, duration);
 
 ## 📚 Resources
 
-- [Prometheus Metric Types](https://prometheus.io/docs/concepts/metric_types/)
-- [Prometheus Best Practices](https://prometheus.io/docs/practices/naming/)
+- [OpenTelemetry Metrics](https://opentelemetry.io/docs/concepts/signals/metrics/)
+- [OpenTelemetry Best Practices](https://opentelemetry.io/docs/concepts/semantic-conventions/)
 - [VictoriaMetrics Documentation](https://docs.victoriametrics.com/)
 - [Grafana Dashboards](https://grafana.com/docs/grafana/latest/dashboards/)
-- [prom-client Library](https://github.com/siimon/prom-client)
+- [OTLP Specification](https://opentelemetry.io/docs/specs/otlp/)
 
 ---
 
@@ -399,24 +457,27 @@ metrics.operationDuration.observe({ operation: 'db_query' }, duration);
 
 When deploying to production:
 
-1. **Secure the `/metrics` endpoint:**
-   - Add IP whitelist for VictoriaMetrics scraper
-   - Or use HTTP basic auth
+1. **Configure OTLP Collector:**
+   - Update `otel-collector-config.yaml` with production endpoints
+   - Configure batch processing and retry policies
    
-2. **Update `scrape.yml`:**
-   - Replace `host.docker.internal:3001` with production backend URL
-   
-3. **Deploy VictoriaMetrics separately:**
+2. **Deploy VictoriaMetrics separately:**
    - Use a dedicated server or managed service
    - Configure firewall rules
+   - Set up proper retention policies
    
-4. **Connect to existing Grafana:**
+3. **Connect to existing Grafana:**
    - Add VictoriaMetrics as a datasource
    - Import the dashboard JSON from `docker/grafana/provisioning/dashboards/`
 
-5. **Set up alerting:**
+4. **Set up alerting:**
    - Create Grafana alerts for high error rates, slow responses, etc.
    - Configure notification channels (Slack, email, PagerDuty)
+
+5. **Monitor the exporter:**
+   - Watch for export failures in logs
+   - Set up alerts for missed exports
+   - Monitor OTLP collector health
 
 ---
 

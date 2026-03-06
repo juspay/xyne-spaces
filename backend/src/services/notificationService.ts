@@ -15,7 +15,7 @@ import { notificationService as realTimeNotificationService } from '@/notificati
 import { ticketService } from './ticketService';
 import { AI_STAGES } from '@/workflows/types/workflow-enums';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
-import { metrics } from '@/services/otel/pull/metrics';
+import {  notificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
 
 const prisma = DatabaseClient.getInstance();
@@ -764,7 +764,7 @@ class NotificationService {
 
     const recipientIds = userIds.filter(id => id !== senderId);
 
-    metrics.notificationJobsExpected.inc({ platform: 'desktop', message_type: 'channel' }, recipientIds.length);
+    notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
 
     await Promise.allSettled(
       recipientIds.map(userId =>
@@ -824,7 +824,7 @@ class NotificationService {
       return;
     }
 
-    metrics.notificationJobsExpected.inc({ platform: 'desktop', message_type: 'channel' }, recipientIds.length);
+    notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
 
     // Mirror message mentions: "You were mentioned in #channelName" when canvas is in a channel
     const title = channelName
@@ -887,7 +887,7 @@ class NotificationService {
   ): Promise<void> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
-    metrics.notificationJobsExpected.inc({ platform: 'desktop', message_type: 'channel' }, recipientIds.length);
+    notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
 
     await Promise.allSettled(
       recipientIds.map(userId =>
@@ -923,7 +923,7 @@ class NotificationService {
   ): Promise<void> {
     if (recipientIds.length === 0) return;
 
-    metrics.notificationJobsExpected.inc({ platform: 'desktop', message_type: 'dm' }, recipientIds.length);
+    notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'dm' });
 
     await Promise.allSettled(
       recipientIds.map(recipientId =>

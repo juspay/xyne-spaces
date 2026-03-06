@@ -1,7 +1,7 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
-import { config } from '../../../config/env';
+import { config } from '../../config/env';
 import { logger } from '@/utils/logger';
 
 let sdk: NodeSDK | null = null;

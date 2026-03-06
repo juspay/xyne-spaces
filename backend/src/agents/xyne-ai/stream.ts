@@ -21,7 +21,7 @@ import { createOnEventHandler } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
 import { XyneAIConfig } from './config.js';
 import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
-import { metrics } from '../../services/otel/pull/metrics.js';
+import { askAIAttachmentUsedTotal } from '@/services/otel';
 
 import type {
   XyneAIRequest,
@@ -276,7 +276,7 @@ export async function* xyneAIStream(
     // Track attachment usage if any attachments were successfully converted
     if (jafAttachments.length > 0) {
       try {
-        metrics.askAIAttachmentUsedTotal.inc();
+        askAIAttachmentUsedTotal.add(1);
       } catch (metricsError) {
         logger.error('[XyneAI] Error recording attachment metrics:', metricsError);
       }
