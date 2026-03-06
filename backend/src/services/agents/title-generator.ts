@@ -31,6 +31,9 @@ import { parseAgentOutput } from './utils.js';
 // Import shared types
 import { BaseTicketType, type ClassifiableTicketType } from '@xyne/shared';
 
+// Import agents config
+import { AgentsConfig } from '../../agents/config.js';
+
 // ============================================================================
 // Configuration - Loaded from environment variables
 // ============================================================================
@@ -160,24 +163,30 @@ export const agentRegistry = new Map<string, Agent<TitleGeneratorContext, any>>(
  * @param input - The description and options
  * @param context - The execution context
  * @param onEvent - Optional event handler for tracing
+ * @param agentsConfig - Optional agents config with model name from CAC
  * @returns The generated title
  */
 export async function generateTitle(
   input: TitleGeneratorInput,
   context: TitleGeneratorContext,
-  onEvent?: (event: TraceEvent) => void
+  onEvent?: (event: TraceEvent) => void,
+  agentsConfig?: AgentsConfig
 ): Promise<TitleGeneratorOutput> {
+  // Use model name from CAC config if provided, otherwise fetch or use default
+  const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
+  const modelName = cacConfig.titleGeneratorModelName;
+
   const modelProvider = createModelProvider();
 
   // Format description for the agent using prompt template
   const formattedPrompt = buildTitleGeneratorUserPrompt(input.description, input.maxLength);
 
   // Create the run configuration
-  const config: RunConfig<TitleGeneratorContext> = {
+  const runConfig: RunConfig<TitleGeneratorContext> = {
     agentRegistry,
     modelProvider,
     maxTurns: 2,
-    modelOverride: 'gemini-3-flash-preview',
+    modelOverride: modelName,
     onEvent,
   };
 
@@ -197,7 +206,7 @@ export async function generateTitle(
   };
 
   // Execute the agent
-  const result = await run(initialState, config);
+  const result = await run(initialState, runConfig);
 
   // Handle the result
   if (result.outcome.status === 'completed') {

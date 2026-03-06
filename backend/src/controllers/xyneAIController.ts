@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { xyneAIStream, type XyneAIStreamRequest, type UserInfo, XyneAIConfig } from '@/agents/xyne-ai';
+import { xyneAIStream, type XyneAIStreamRequest, type UserInfo, AgentsConfig } from '@/agents/xyne-ai';
 import { getOtelTraceId } from '@xynehq/jaf';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -143,8 +143,8 @@ export class XyneAIController {
 
       logger.info(`[XyneAI] User context prepared for agent (userId: ${userInfo.userId})`);
 
-      // Fetch CAC config with user email context (logging is done inside XyneAIConfig.fetch)
-      const xyneAIConfig = await XyneAIConfig.fetch({ email: userInfo.userEmail });
+      // Fetch CAC config with user email context (logging is done inside AgentsConfig.fetch)
+      const agentsConfig = await AgentsConfig.fetch({ email: userInfo.userEmail });
 
       // Transform selection_contexts from snake_case to camelCase
       const transformedSelectionContexts = selection_contexts?.map(ctx => ({
@@ -167,7 +167,7 @@ export class XyneAIController {
         webSearchEnabled: web_search_enabled,
         researchContext: research_context || undefined,
         messageAttachmentIds: message_attachment_ids,
-        xyneAIConfig,  // Pass CAC config to stream
+        agentsConfig,  // Pass CAC config to stream
       };
 
       // Track metrics: context channels count
