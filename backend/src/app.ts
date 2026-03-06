@@ -63,7 +63,6 @@ import boardRoutes from '@/routes/boards';
 import searchRoutes from '@/routes/search';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
-import { metricsEndpoint } from '@/services/otel/pull/metrics';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
@@ -196,8 +195,6 @@ export class App {
 
     // Commit analysis routes (auth and ACL required)
     this.app.use('/api/commits/analyze', authMiddleware.authenticate, commitAnalysisRoutes);
-
-    this.app.get('/metrics', metricsEndpoint);
 
     this.app.use('/api/health', healthRoutes);
     this.app.use('/api/email', emailRoutes);

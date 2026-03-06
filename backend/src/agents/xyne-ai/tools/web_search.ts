@@ -10,7 +10,7 @@ import { logger } from '../../../utils/logger.js';
 import { redisService } from '../../../services/redisService.js';
 import type { XyneAIAgentContext, EnhancedCitationMappings } from './types.js';
 import { getDescription, appendEnhancedSessionMappings, getNextPrefix } from './helpers.js';
-import { metrics } from '../../../services/otel/pull/metrics.js';
+import { webSearchToolUsedTotal } from '@/services/otel';
 
 // ============================================================================
 // Rate Limiting Constants
@@ -173,7 +173,7 @@ export function createWebSearchTool(): Tool<{ query: string }, XyneAIAgentContex
 
                 // Track web search tool usage
                 try {
-                    metrics.webSearchToolUsedTotal.inc();
+                    webSearchToolUsedTotal.add(1);
                 } catch (metricsError) {
                     logger.error('[Tool] web_search: Error recording metrics:', metricsError);
                 }

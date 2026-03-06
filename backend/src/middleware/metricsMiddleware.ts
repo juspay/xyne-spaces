@@ -1,12 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
 
 import { logger } from '../utils/logger';
-import { metrics } from '@/services/otel/pull/metrics';
+import {
+  httpRequestDuration,
+  httpRequestTotal,
+  httpRequestErrors,
+  activeConnections
+} from '@/services/otel';
 
 
 export const metricsMiddleware = (req: Request, res: Response, next: NextFunction) => {
   
-  metrics.activeConnections.inc();
+  activeConnections.add(1);
 
   const start = Date.now();
 
@@ -32,33 +37,37 @@ export const metricsMiddleware = (req: Request, res: Response, next: NextFunctio
     const statusCode = res.statusCode.toString();
 
   
-    metrics.httpRequestDuration
-      .labels(method, route, statusCode)
-      .observe(duration);
+    httpRequestDuration.record(duration, {
+      method,
+      route,
+      status_code: statusCode
+    });
 
 
-    metrics.httpRequestTotal
-      .labels(method, route, statusCode)
-      .inc();
+    httpRequestTotal.add(1, {
+      method,
+      route,
+      status_code: statusCode
+    });
 
 
     if (res.statusCode >= 400) {
       const errorType = res.statusCode >= 500 ? 'server_error' : 'client_error';
-      metrics.httpRequestErrors
-        .labels(method, route, statusCode, errorType)
-        .inc();
+      httpRequestErrors.add(1, {
+        method,
+        route,
+        status_code: statusCode,
+        error_type: errorType
+      });
     }
-
- 
-  
-
 
     if (duration > 1000) {
       logger.warn(`Slow request: ${method} ${route} took ${duration}ms`);
     }
   });
+
   res.on('close', () => {
-   metrics.activeConnections.dec();
+   activeConnections.add(-1);
  });
 
   next();
