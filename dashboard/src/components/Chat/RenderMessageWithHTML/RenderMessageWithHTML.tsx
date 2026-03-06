@@ -328,6 +328,105 @@ const addTokenizedNodes = (
   });
 };
 
+type TableElementResult = {
+  props: Record<string, unknown>;
+  wrapper?: JSX.Element;
+};
+
+type TableElementHandler = (
+  el: HTMLElement,
+  props: Record<string, unknown>,
+  children: React.ReactNode[],
+  idx: number,
+  keyPrefix: string,
+) => TableElementResult | null;
+
+const handleTableElement = (
+  el: HTMLElement,
+  props: Record<string, unknown>,
+  children: React.ReactNode[],
+  idx: number,
+  keyPrefix: string,
+): TableElementResult | null => {
+  const tag = el.tagName.toLowerCase();
+
+  const tableHandlers: Record<string, TableElementHandler> = {
+    table: (_el, props, children, idx, keyPrefix) => {
+      const { key: _key, ...restProps } = props;
+      const existingClass = (restProps['className'] as string) || '';
+      const tableProps = {
+        ...restProps,
+        className: cn('border border-gray-300 border-collapse w-full my-2', existingClass),
+      };
+      return {
+        props: tableProps,
+        wrapper: (
+          <div key={`${keyPrefix}-table-wrapper-${idx}`} className='overflow-x-auto'>
+            <table {...(tableProps as React.TableHTMLAttributes<HTMLTableElement>)}>
+              {children}
+            </table>
+          </div>
+        ),
+      };
+    },
+    thead: (_el, props) => {
+      const existingClass = (props['className'] as string) || '';
+      return { props: { ...props, className: cn('bg-gray-50', existingClass) } };
+    },
+    td: (el, props) => {
+      const existingClass = (props['className'] as string) || '';
+      const newProps: Record<string, unknown> = {
+        ...props,
+        className: cn('border border-gray-300 px-3 py-2 text-left', existingClass),
+      };
+      const colspan = el.getAttribute('colspan');
+      const rowspan = el.getAttribute('rowspan');
+      if (colspan) {
+        const col = parseInt(colspan, 10);
+        if (!isNaN(col)) newProps['colSpan'] = col;
+      }
+      if (rowspan) {
+        const row = parseInt(rowspan, 10);
+        if (!isNaN(row)) newProps['rowSpan'] = row;
+      }
+      return { props: newProps };
+    },
+    th: (el, props) => {
+      const existingClass = (props['className'] as string) || '';
+      const newProps: Record<string, unknown> = {
+        ...props,
+        className: cn(
+          'border border-gray-300 px-3 py-2 text-left font-semibold bg-gray-50',
+          existingClass,
+        ),
+      };
+      const colspan = el.getAttribute('colspan');
+      const rowspan = el.getAttribute('rowspan');
+      if (colspan) {
+        const col = parseInt(colspan, 10);
+        if (!isNaN(col)) newProps['colSpan'] = col;
+      }
+      if (rowspan) {
+        const row = parseInt(rowspan, 10);
+        if (!isNaN(row)) newProps['rowSpan'] = row;
+      }
+      return { props: newProps };
+    },
+    tr: (_el, props) => {
+      const existingClass = (props['className'] as string) || '';
+      return {
+        props: {
+          ...props,
+          className: cn('border-b border-gray-200 last:border-b-0', existingClass),
+        },
+      };
+    },
+  };
+
+  const handler = tableHandlers[tag];
+  return handler ? handler(el, props, children, idx, keyPrefix) : null;
+};
+
 const parseNode = (
   node: Node,
   keyPrefix: string,
@@ -607,7 +706,7 @@ const parseNode = (
     return <React.Fragment key={`${keyPrefix}-fragment-${idx}`}>{children}</React.Fragment>;
   }
 
-  const props: Record<string, unknown> = { key: `${keyPrefix}-${tag}-${idx}` };
+  let props: Record<string, unknown> = { key: `${keyPrefix}-${tag}-${idx}` };
 
   const className = el.getAttribute('class');
   if (className) {
@@ -742,6 +841,14 @@ const parseNode = (
     if (disabled !== null) {
       (props as { disabled: boolean }).disabled = true;
     }
+  }
+
+  const tableResult = handleTableElement(el, props, children, idx, keyPrefix);
+  if (tableResult) {
+    if (tableResult.wrapper) {
+      return tableResult.wrapper;
+    }
+    props = tableResult.props;
   }
 
   return React.createElement(tag, props, ...children);

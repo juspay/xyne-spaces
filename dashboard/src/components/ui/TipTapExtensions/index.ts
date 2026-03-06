@@ -12,3 +12,11 @@ export type {
 } from './ChannelMentionExtension';
 
 export { MentionNodeView } from './MentionNodeView';
+
+export {
+  TableExtension,
+  TableRowExtension,
+  TableCellExtension,
+  TableHeaderExtension,
+  TableExtensions,
+} from './TableExtension';
