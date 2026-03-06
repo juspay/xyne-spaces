@@ -23,8 +23,6 @@ export const ZeroConnectionFailureModal = (): ReactElement => {
   return (
     <div
       className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm'
-      onClick={e => e.stopPropagation()}
-      onKeyDown={e => e.stopPropagation()}
       role='presentation'
     >
       <div
@@ -68,6 +66,8 @@ export const ZeroConnectionFailureModal = (): ReactElement => {
         <button
           onClick={handleRefresh}
           className='w-full py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-all duration-200 bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg'
+          data-track-category='ZERO_CONNECTION'
+          data-track-name='RELOAD_APP_ON_CONNECTION_FAILURE'
         >
           <RefreshCw className='w-5 h-5' strokeWidth={2.5} />
           <span>{isElectron ? 'Reload App' : 'Refresh Connection'}</span>
