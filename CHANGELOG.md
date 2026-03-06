@@ -1,3 +1,22 @@
+## [1.70.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.69.0...v1.70.0) (2026-03-06)
+
+
+### Features
+
+* added popup and manual reconnection button to improve UX ([7749a47](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7749a476971813efbb9c9d99546eb82b396c0710)), closes [#3239](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3239)
+* Fetch Internal links content using Ask AI ([17567dd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/17567dd97cbdd3c2b283d8348d0d767f2771575d)), closes [#3867](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3867)
+* Preserve table formatting when pasting into chat ([7fcc1d9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7fcc1d930979320a4a7e0829ce04de6140f4cdf2)), closes [#3627](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3627)
+* Workflow Agents Chat ([713c63a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/713c63a258c6cd2e6c10e4b7fbde07f5b03ff845)), closes [#3886](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3886)
+
+
+### Bug Fixes
+
+* adding tracking metadata in zeroConnectionModal and refresh button ([f4ae974](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f4ae974aa9315c7418b3812568acf9d850adf3b4)), closes [#3914](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3914)
+* changed accessibility level ([b20d308](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b20d308ab72cd795b67f661bb20c0adc4aa7866b)), closes [#3894](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3894)
+* migrate agent configs to CAC ([14c1165](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/14c116530c42d34ceeec4e7b796fbc06fa60db49)), closes [#3896](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3896)
+* migrate backend metrics from pull to push method 3 ([5e94406](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5e944067422fa95576abba095d8bc92ac3f73915)), closes [#3885](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3885)
+* sustain ask ai chat on channel switch ([bbce2df](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bbce2df1cddf9569463058221fe02fcda60d7617)), closes [#3904](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3904)
+
 ## [1.69.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.68.1...v1.69.0) (2026-03-06)
 
 
