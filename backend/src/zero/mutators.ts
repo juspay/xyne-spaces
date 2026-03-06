@@ -5769,7 +5769,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Nudge not found');
           }
 
-          if (nudge.state !== NudgeState.ACTIVE) {
+          if (nudge.state !== NudgeState.ACTIVE && nudge.state !== NudgeState.ACTED_ON) {
             return;
           }
 

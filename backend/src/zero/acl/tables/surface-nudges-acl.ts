@@ -9,6 +9,7 @@ const allowedUpdateFields = new Set([
   'id',
   'state',
   'actions',
+  'updatedAt',
 ]);
 
 export class SurfaceNudgesACL extends BaseACL<'surface_nudges'> {

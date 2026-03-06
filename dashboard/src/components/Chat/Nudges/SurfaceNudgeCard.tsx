@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { ChevronRight, Eye } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
@@ -71,35 +71,9 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
   );
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isActing, setIsActing] = useState(false);
-  const autoDismissedRef = useRef<Set<string>>(new Set());
-
   useEffect(() => {
     setLocalActionResult(persistedActionResult);
   }, [persistedActionResult]);
-
-  // Auto-dismiss CREATE_TICKET nudges after ticket creation
-  useEffect(() => {
-    if (!localActionResult) return;
-    if (nudge.state !== NudgeState.ACTED_ON) return;
-    if (autoDismissedRef.current.has(nudge.id)) return;
-
-    const actionType =
-      (localActionResult['actionType'] as string | undefined) ||
-      (localActionResult['action_type'] as string | undefined);
-    if (actionType !== 'CREATE_TICKET_FROM_MESSAGE') return;
-
-    autoDismissedRef.current.add(nudge.id);
-    const timeout = setTimeout(() => {
-      void zero.mutate(
-        mutators.nudges.dismiss({
-          nudgeId: nudge.id,
-          timestamp: Date.now(),
-        }),
-      );
-    }, 4000);
-
-    return () => clearTimeout(timeout);
-  }, [localActionResult, nudge.id, nudge.state, zero]);
 
   const isActionable = nudge.state === NudgeState.ACTIVE;
   const isCreateTicket = nudge.nudgeKind === NudgeKind.CREATE_TICKET_FROM_MESSAGE;
@@ -194,6 +168,10 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       typeof actionsPayload.data['channelId'] === 'string'
         ? actionsPayload.data['channelId']
         : channelId;
+    const conversationId =
+      typeof actionsPayload.data['conversationId'] === 'string'
+        ? actionsPayload.data['conversationId']
+        : undefined;
 
     if (!ticketId || !targetChannelId) {
       toast.error('Missing ticket context');
@@ -206,6 +184,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       result: {
         entityId: ticketId,
         channelId: targetChannelId,
+        ...(conversationId ? { conversationId } : {}),
       },
     };
 
@@ -218,7 +197,9 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       }),
     );
 
-    const route = `${baseRoute}/${targetChannelId}?tab=tickets&ticketId=${ticketId}`;
+    const route = `${baseRoute}/${targetChannelId}?tab=tickets&ticketId=${ticketId}${
+      conversationId ? `&conversationId=${conversationId}` : ''
+    }`;
     standaloneNavigate(navigate, route);
     toast.success('Opened related ticket');
     onActionCompleted?.();
@@ -263,9 +244,9 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       }),
     );
 
-    const route = `${baseRoute}/${targetChannelId}${
-      conversationId ? `?conversationId=${conversationId}&messageId=${relatedMessageId}` : ''
-    }`;
+    const route = conversationId
+      ? `${baseRoute}/${targetChannelId}/${conversationId}${relatedMessageId ? `?messageId=${relatedMessageId}` : ''}`
+      : `${baseRoute}/${targetChannelId}`;
     standaloneNavigate(navigate, route);
     toast.success('Opened related message');
     onActionCompleted?.();
@@ -440,6 +421,15 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
                 timestamp: Date.now(),
               }),
             );
+            // Auto-dismiss after ticket creation
+            setTimeout(() => {
+              void zero.mutate(
+                mutators.nudges.dismiss({
+                  nudgeId: nudge.id,
+                  timestamp: Date.now(),
+                }),
+              );
+            }, 3000);
             toast.success('Ticket created');
             onActionCompleted?.();
           }}

@@ -107,7 +107,19 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
     hasFetched.current = true;
   }
 
-  const nudges = useMemo(() => nudgesResult ?? [], [nudgesResult]);
+  const nudges = useMemo(() => {
+    const raw = nudgesResult ?? [];
+    const kindOrder: Record<string, number> = {
+      FIND_RELATED_MESSAGE_FROM_MESSAGE: 0,
+      FIND_RELATED_TICKET_FROM_MESSAGE: 1,
+      CREATE_TICKET_FROM_MESSAGE: 2,
+    };
+    return [...raw].sort((a, b) => {
+      const ka = kindOrder[a.nudgeKind] ?? 99;
+      const kb = kindOrder[b.nudgeKind] ?? 99;
+      return ka - kb;
+    });
+  }, [nudgesResult]);
 
   const entries = useMemo(() => {
     if (!enabled || !hasNudges || !expanded || nudges.length === 0) return [];
@@ -261,6 +273,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
       {expanded && currentNudge && (
         <div className='mt-2'>
           <SurfaceNudgeCard
+            key={currentNudge.id}
             nudge={currentNudge}
             channelId={channelId}
             onActionCompleted={() => {

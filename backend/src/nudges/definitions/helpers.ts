@@ -1,6 +1,19 @@
 import { MessageType } from '@prisma/client';
 import type { SurfaceAreaType } from '@prisma/client';
+import { z } from 'zod';
+import {
+  makeLiteLLMProvider,
+  generateRunId,
+  generateTraceId,
+  run,
+  type Agent,
+  type RunConfig,
+  type RunState,
+} from '@xynehq/jaf';
 import { db } from '@/database/client';
+import { config } from '@/config/env';
+import { logger } from '@/utils/logger';
+import { parseAgentOutput } from '@/services/agents/utils';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { extractUrls } from '@/utils/urlUtils';
 import { ENTITY_URL_PATTERNS, HASH_ENTITY_PATTERNS } from '../entityUrlPatterns';
@@ -143,6 +156,163 @@ export async function buildMessageNudgeContext(
     activityContext,
     message: payload,
   };
+}
+
+// --- LLM agent runner with retry-on-malformed-JSON ---
+
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_MODEL = 'glm-flash-experimental';
+
+export interface RunNudgeAgentOptions {
+  /** Display name for the agent (used in logs and registry). */
+  agentName: string;
+  /** System prompt for the agent. */
+  systemPrompt: string;
+  /** User input payload — will be JSON-stringified. */
+  input: Record<string, unknown>;
+  /** Zod schema to validate the LLM output. */
+  schema: z.ZodSchema;
+  /** Model override (default: glm-flash-experimental). */
+  model?: string;
+  /** Max retry attempts after the initial call (default: 2). */
+  maxRetries?: number;
+  /** Temperature for generation (default: 0.1). */
+  temperature?: number;
+}
+
+function extractLastAssistantMessage(finalState: RunState<unknown>): string | null {
+  for (let i = finalState.messages.length - 1; i >= 0; i--) {
+    const msg = finalState.messages[i];
+    if (msg && typeof msg === 'object' && 'role' in msg && msg.role === 'assistant') {
+      const content = 'content' in msg ? msg.content : undefined;
+      if (typeof content === 'string') return content;
+    }
+  }
+  return null;
+}
+
+/**
+ * Runs a JAF agent with automatic retry on malformed JSON output.
+ *
+ * On parse failure the malformed assistant response is appended to the
+ * conversation and a correction prompt is sent, giving the LLM a chance
+ * to fix its output without losing context.
+ */
+export async function runNudgeAgent<T>(opts: RunNudgeAgentOptions): Promise<T> {
+  const {
+    agentName,
+    systemPrompt,
+    input,
+    schema,
+    model = DEFAULT_MODEL,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    temperature = 0.1,
+  } = opts;
+
+  const provider = makeLiteLLMProvider(config.litellm.baseUrl, config.litellm.apiKey);
+
+  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
+    { role: 'user', content: JSON.stringify(input, null, 2) },
+  ];
+
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const agent: Agent<Record<string, never>, T> = {
+      name: agentName,
+      instructions: () => systemPrompt,
+      modelConfig: { temperature },
+    };
+
+    const initialState: RunState<Record<string, never>> = {
+      runId: generateRunId(),
+      traceId: generateTraceId(),
+      messages: [...messages],
+      currentAgentName: agentName,
+      context: {},
+      turnCount: 0,
+    };
+
+    const runConfig: RunConfig<Record<string, never>> = {
+      agentRegistry: new Map([[agentName, agent]]),
+      modelProvider: provider as RunConfig<Record<string, never>>['modelProvider'],
+      maxTurns: 2,
+      modelOverride: model,
+    };
+
+    try {
+      const result = await run(initialState, runConfig);
+      const rawOutput = extractLastAssistantMessage(result.finalState);
+
+      if (result.outcome.status === 'completed') {
+        try {
+          const output = result.outcome.output;
+          if (typeof output === 'string') {
+            return parseAgentOutput(output, schema);
+          }
+          return schema.parse(output);
+        } catch (parseError) {
+          lastError = parseError instanceof Error ? parseError : new Error(String(parseError));
+
+          logger.warn(`[${agentName}] Parse failed, retrying with correction`, {
+            attempt: attempt + 1,
+            maxRetries,
+            error: lastError.message,
+          });
+
+          if (attempt < maxRetries && rawOutput) {
+            messages.push({ role: 'assistant', content: rawOutput });
+            messages.push({
+              role: 'user',
+              content: `Your previous response was not valid JSON. Error: ${lastError.message}. Please respond with ONLY a valid JSON object matching the required schema. No markdown, no commentary, no code fences.`,
+            });
+          }
+          continue;
+        }
+      }
+
+      if (result.outcome.status === 'error') {
+        lastError = new Error(`${agentName} failed: ${result.outcome.error._tag}`);
+
+        if (attempt < maxRetries && rawOutput) {
+          messages.push({ role: 'assistant', content: rawOutput });
+          messages.push({
+            role: 'user',
+            content: `Your previous response caused an error. Please respond with ONLY a valid JSON object matching the required schema. No markdown, no commentary, no code fences.`,
+          });
+        }
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      logger.warn(`[${agentName}] Run failed`, {
+        attempt: attempt + 1,
+        maxRetries,
+        error: lastError.message,
+      });
+    }
+  }
+
+  throw lastError ?? new Error(`${agentName} failed after retries.`);
+}
+
+// --- Channel ID resolution ---
+
+/**
+ * Resolves the channelId for a message by looking up its conversation.
+ * Returns empty string if resolution fails.
+ */
+export async function resolveChannelIdForMessage(messageId: string): Promise<string> {
+  try {
+    const msg = await db.message.findUnique({
+      where: { messageId },
+      select: { conversation: { select: { channelId: true } } },
+    });
+    return msg?.conversation?.channelId ?? '';
+  } catch {
+    logger.warn('[resolveChannelIdForMessage] Failed to resolve channelId', { messageId });
+    return '';
+  }
 }
 
 // --- URL parsing helpers for implicit nudge definitions ---
