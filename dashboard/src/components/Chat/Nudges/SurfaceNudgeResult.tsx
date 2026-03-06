@@ -108,9 +108,9 @@ export const SurfaceNudgeResult: React.FC<SurfaceNudgeResultProps> = ({
           onClick={() =>
             standaloneNavigate(
               navigate,
-              `${baseRoute}/${targetChannelId}${
-                conversationId ? `?conversationId=${conversationId}&messageId=${entityId}` : ''
-              }`,
+              conversationId
+                ? `${baseRoute}/${targetChannelId}/${conversationId}${entityId ? `?messageId=${entityId}` : ''}`
+                : `${baseRoute}/${targetChannelId}`,
             )
           }
         >

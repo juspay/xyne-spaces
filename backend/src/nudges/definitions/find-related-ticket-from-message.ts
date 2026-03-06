@@ -8,14 +8,15 @@ import {
   type Agent,
   type RunConfig,
   type RunState,
+  type Tool,
 } from '@xynehq/jaf';
 import { DatabaseClient, db } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { parseAgentOutput } from '@/services/agents/utils';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { vespaService } from '@/services/vespaSearch';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
+import { parseAgentOutput } from '@/services/agents/utils';
 import type {
   NudgeDefinition,
   MessageNudgePayload,
@@ -27,56 +28,114 @@ import { isEligibleMessage, buildMessageNudgeContext } from './helpers';
 const prisma = DatabaseClient.getInstance();
 
 const VESPA_CANDIDATE_LIMIT = 10;
-const MIN_LLM_CONFIDENCE = 0.45;
-const MIN_TICKET_RELEVANCE = 0.3;
 const RELATED_TICKET_PROMPT_NAME = 'nudge_find_related_ticket_from_message';
 const RELATED_TICKET_PROMPT_LABEL = 'production';
 const RELATED_TICKET_MODEL = 'glm-flash-experimental';
 
-const RelatedTicketLookupSchema = z.object({
-  shouldSuggest: z.boolean(),
-  lookupQuery: z.string().optional().nullable(),
-  confidence: z.number().min(0).max(1).optional(),
-  reason: z.string().optional(),
+// --- Output schema for the agent's final answer ---
+
+const RelatedTicketResultSchema = z.object({
+  hasRelatedTicket: z.boolean(),
+  ticketId: z.string().optional().nullable(),
+  title: z.string().optional().nullable(),
+  reason: z.string(),
+  matchingEvidence: z.string().optional().nullable(),
 });
 
-type RelatedTicketLookupOutput = z.infer<typeof RelatedTicketLookupSchema>;
+type RelatedTicketResultOutput = z.infer<typeof RelatedTicketResultSchema>;
 
-type RelatedTicketLookupContext = {
-  messageId: string;
-  channelId: string;
-  projectId: string;
+// --- Ticket search tool ---
+
+type SearchTicketsArgs = {
+  query: string;
 };
 
-type RelatedTicketCandidate = {
-  id: string;
-  title: string;
-  description: string;
-  relevance: number;
-  channelId?: string;
-  status?: string;
+type NudgeToolContext = {
+  senderId: string;
 };
+
+function createSearchTicketsTool(): Tool<SearchTicketsArgs, NudgeToolContext> {
+  return {
+    schema: {
+      name: 'search_tickets',
+      description:
+        'Search for existing tickets that might be related to the current message. ' +
+        'Pass a concise search query capturing the core issue (e.g. "mobile login failure"). ' +
+        'Returns a list of tickets with their ID, title, status, and description.',
+      parameters: z.object({
+        query: z.string().describe('Concise search query to find related tickets'),
+      }),
+    },
+    execute: async (args, context) => {
+      try {
+        const vespaResults = await vespaService.searchService.searchVespa(
+          args.query,
+          context.senderId,
+          ['ticket'],
+          { offset: 0, limit: VESPA_CANDIDATE_LIMIT },
+        );
+
+        const hits = vespaResults.root.children || [];
+        const transformedResults = await transformVespaResults(hits, prisma);
+
+        const tickets = transformedResults
+          .filter((r) => r.type === 'ticket')
+          .map((r) => ({
+            ticketId: r.id,
+            title: r.title,
+            status: r.searchContext?.ticketStatus || r.metadata.status || 'UNKNOWN',
+            description: (r.context || '').slice(0, 200),
+            relevance: r.relevanceScore,
+            channelId: r.searchContext?.channelId || '',
+          }));
+
+        logger.info('[FIND_RELATED_TICKET] search_tickets tool result', {
+          query: args.query,
+          hitCount: tickets.length,
+        });
+
+        if (tickets.length === 0) {
+          return 'No tickets found matching the query.';
+        }
+
+        return JSON.stringify(tickets, null, 2);
+      } catch (error) {
+        logger.warn('[FIND_RELATED_TICKET] search_tickets tool error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return `Error searching tickets: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      }
+    },
+  };
+}
+
+// --- Prompt ---
 
 const RELATED_TICKET_FALLBACK_PROMPT = `
-You are a nudge planner for FIND_RELATED_TICKET_FROM_MESSAGE.
+You are an agent that finds existing tickets related to a user's message.
 
-Task:
-Given a message, thread context, project tags, and recent user activity context:
-1) Decide if we should suggest opening an existing related ticket.
-2) If yes, produce a short dynamic lookup query optimized for ticket search.
+You have a tool called "search_tickets" that searches the ticket database.
 
-Return STRICT JSON only:
+Steps:
+1) Read the message and decide if it describes a problem, bug, feature request, or task that could have an existing ticket.
+2) If yes, call search_tickets with a concise query capturing the core issue.
+3) Examine the returned tickets. Determine if any are genuinely related to the message (same topic/issue, not just shared keywords).
+4) Return your final answer as STRICT JSON (no markdown, no code fences):
+
 {
-  "shouldSuggest": boolean,
-  "lookupQuery": string | null,
-  "confidence": number,
-  "reason": string
+  "hasRelatedTicket": boolean,
+  "ticketId": string | null,
+  "title": string | null,
+  "reason": string,
+  "matchingEvidence": string | null
 }
 
 Rules:
-- If uncertain, return shouldSuggest=false.
-- lookupQuery must be concise, plain text, and specific to the issue.
-- confidence must be between 0 and 1.
+- If the message is purely social/conversational, skip the tool call and return hasRelatedTicket=false.
+- You may call search_tickets multiple times with different queries if the first search is not specific enough.
+- Only set hasRelatedTicket=true if a ticket clearly matches the same topic or issue.
+- matchingEvidence should be a SHORT quote or paraphrase from the ticket that shows why it's related (under 100 chars).
+- Do NOT pick tickets that are merely about the same general area but address a different specific issue.
 - No markdown, no code fences, no extra keys.
 `.trim();
 
@@ -97,31 +156,60 @@ async function resolveRelatedTicketPrompt(): Promise<string> {
   return RELATED_TICKET_FALLBACK_PROMPT;
 }
 
-async function runRelatedTicketPlanner(
-  input: Record<string, unknown>,
-  context: RelatedTicketLookupContext,
-): Promise<RelatedTicketLookupOutput> {
+// --- Agent runner ---
+
+function extractLastAssistantText(finalState: RunState<unknown>): string | null {
+  for (let i = finalState.messages.length - 1; i >= 0; i--) {
+    const msg = finalState.messages[i];
+    if (msg && typeof msg === 'object' && 'role' in msg && msg.role === 'assistant') {
+      const content = 'content' in msg ? msg.content : undefined;
+      if (typeof content === 'string' && !('tool_calls' in msg && (msg as any).tool_calls?.length)) {
+        return content;
+      }
+    }
+  }
+  return null;
+}
+
+async function runRelatedTicketAgent(
+  context: MessageNudgeEvaluationContext,
+): Promise<RelatedTicketResultOutput> {
   const systemPrompt = await resolveRelatedTicketPrompt();
-  const agent: Agent<RelatedTicketLookupContext, RelatedTicketLookupOutput> = {
-    name: 'FindRelatedTicketFromMessagePlanner',
+  const provider = makeLiteLLMProvider(config.litellm.baseUrl, config.litellm.apiKey);
+
+  const userInput = {
+    message: {
+      id: context.message.messageId,
+      text: context.message.messageText,
+      channel_id: context.message.channelId,
+    },
+    recent_thread_messages: context.threadMessages.slice(-5).map((m) => ({
+      text: m.content,
+    })),
+  };
+
+  const tools = [createSearchTicketsTool()];
+
+  const agent: Agent<NudgeToolContext, RelatedTicketResultOutput> = {
+    name: 'FindRelatedTicketAgent',
     instructions: () => systemPrompt,
+    tools,
     modelConfig: { temperature: 0.1 },
   };
 
-  const provider = makeLiteLLMProvider(config.litellm.baseUrl, config.litellm.apiKey);
-  const initialState: RunState<RelatedTicketLookupContext> = {
+  const initialState: RunState<NudgeToolContext> = {
     runId: generateRunId(),
     traceId: generateTraceId(),
-    messages: [{ role: 'user', content: JSON.stringify(input, null, 2) }],
-    currentAgentName: 'FindRelatedTicketFromMessagePlanner',
-    context,
+    messages: [{ role: 'user', content: JSON.stringify(userInput, null, 2) }],
+    currentAgentName: 'FindRelatedTicketAgent',
+    context: { senderId: context.message.senderId },
     turnCount: 0,
   };
 
-  const runConfig: RunConfig<RelatedTicketLookupContext> = {
-    agentRegistry: new Map([['FindRelatedTicketFromMessagePlanner', agent]]),
-    modelProvider: provider as RunConfig<RelatedTicketLookupContext>['modelProvider'],
-    maxTurns: 2,
+  const runConfig: RunConfig<NudgeToolContext> = {
+    agentRegistry: new Map([['FindRelatedTicketAgent', agent]]),
+    modelProvider: provider as RunConfig<NudgeToolContext>['modelProvider'],
+    maxTurns: 6,
     modelOverride: RELATED_TICKET_MODEL,
   };
 
@@ -130,17 +218,28 @@ async function runRelatedTicketPlanner(
   if (result.outcome.status === 'completed') {
     const output = result.outcome.output;
     if (typeof output === 'string') {
-      return parseAgentOutput(output, RelatedTicketLookupSchema);
+      return parseAgentOutput(output, RelatedTicketResultSchema);
     }
-    return RelatedTicketLookupSchema.parse(output);
+    return RelatedTicketResultSchema.parse(output);
   }
 
-  if (result.outcome.status === 'error') {
-    throw new Error(`Related ticket planner failed: ${result.outcome.error._tag}`);
+  // Fallback: try to extract from last assistant message
+  const rawText = extractLastAssistantText(result.finalState);
+  if (rawText) {
+    try {
+      return parseAgentOutput(rawText, RelatedTicketResultSchema);
+    } catch {
+      // fall through
+    }
   }
 
-  throw new Error('Related ticket planner interrupted.');
+  logger.warn('[FIND_RELATED_TICKET] Agent did not produce valid output', {
+    status: result.outcome.status,
+  });
+  return { hasRelatedTicket: false, reason: 'Agent failed to produce output' };
 }
+
+// --- Status helpers ---
 
 function normalizeStatus(status?: string): string | null {
   if (!status) return null;
@@ -159,6 +258,8 @@ function isClosedLikeStatus(status?: string | null): boolean {
     normalized === 'CLOSED'
   );
 }
+
+// --- Nudge definition ---
 
 export const findRelatedTicketFromMessage: NudgeDefinition<
   MessageNudgePayload,
@@ -188,84 +289,46 @@ export const findRelatedTicketFromMessage: NudgeDefinition<
     context: MessageNudgeEvaluationContext,
     _payload: MessageNudgePayload,
   ): Promise<NudgeCandidate[]> {
-    const planningInput = {
-      current_message: {
-        id: context.message.messageId,
-        text: context.message.messageText,
-        channel_id: context.message.channelId,
-        conversation_id: context.message.conversationId,
-      },
-      recent_thread_messages: context.threadMessages.slice(-8).map((m) => ({
-        id: m.messageId,
-        text: m.content,
-      })),
-      existing_project_tags: context.projectTags.slice(0, 40),
-      activity_context: {
-        prompt_hints: context.activityContext.promptHints,
-        top_entities: context.activityContext.topEntities.slice(0, 10),
-      },
-    };
+    const agentResult = await runRelatedTicketAgent(context);
 
-    const plan = await runRelatedTicketPlanner(planningInput, {
-      messageId: context.message.messageId,
-      channelId: context.message.channelId,
-      projectId: context.message.projectId,
+    logger.info('[FIND_RELATED_TICKET_FROM_MESSAGE] Agent result', {
+      hasRelatedTicket: agentResult.hasRelatedTicket,
+      ticketId: agentResult.ticketId,
+      reason: agentResult.reason,
     });
 
-    if (!plan.shouldSuggest) return [];
-    if ((plan.confidence ?? 0) < MIN_LLM_CONFIDENCE) return [];
+    if (!agentResult.hasRelatedTicket || !agentResult.ticketId) return [];
 
-    const lookupQuery = (plan.lookupQuery ?? '').trim();
-    if (!lookupQuery) return [];
-
-    const vespaResults = await vespaService.searchService.searchVespa(
-      lookupQuery,
-      context.message.senderId,
-      ['ticket'],
-      {
-        offset: 0,
-        limit: VESPA_CANDIDATE_LIMIT,
-        ticket: {
-          projectId: [context.message.projectId],
-        },
+    // Look up the ticket to get channelId and status
+    const ticket = await db.ticket.findUnique({
+      where: { id: agentResult.ticketId },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        status: true,
+        statusV2: true,
+        channelId: true,
+        conversationId: true,
       },
-    );
+    });
 
-    const transformedResults = await transformVespaResults(vespaResults.root.children || [], prisma);
-
-    const ticketCandidates: RelatedTicketCandidate[] = transformedResults
-      .filter((result) => result.type === 'ticket')
-      .map((result) => ({
-        id: result.id,
-        title: result.title,
-        description: result.context || '',
-        relevance: result.relevanceScore,
-        channelId: result.searchContext?.channelId,
-        status: result.searchContext?.ticketStatus || result.metadata.status,
-      }));
-
-    if (ticketCandidates.length === 0) return [];
-
-    ticketCandidates.sort((a, b) => b.relevance - a.relevance);
-    const topCandidate = ticketCandidates[0];
-    if (!topCandidate) return [];
+    if (!ticket) {
+      logger.warn('[FIND_RELATED_TICKET] Ticket not found in DB', { ticketId: agentResult.ticketId });
+      return [];
+    }
 
     return [
       {
-        title: `Related ticket: ${topCandidate.title || 'Existing ticket found'}`,
-        description:
-          plan.reason ||
-          topCandidate.description ||
-          'A related ticket was found for this message context.',
+        title: `Related ticket: ${agentResult.title || ticket.title || 'Existing ticket found'}`,
+        description: agentResult.reason || 'A related ticket was found for this message.',
         actions: {
           actionType: 'OPEN_TICKET',
-          entityId: topCandidate.id,
-          channelId: topCandidate.channelId,
-          ticketStatus: topCandidate.status,
-          lookupQuery,
-          llmConfidence: plan.confidence,
-          relevance: topCandidate.relevance,
-          evidence: `Match confidence ${Math.round((topCandidate.relevance ?? 0) * 100)}%`,
+          entityId: ticket.id,
+          channelId: ticket.channelId,
+          conversationId: ticket.conversationId,
+          ticketStatus: ticket.statusV2 || ticket.status,
+          evidence: agentResult.matchingEvidence || agentResult.reason,
         },
       },
     ];
@@ -286,11 +349,6 @@ export const findRelatedTicketFromMessage: NudgeDefinition<
 
       const entityId = typeof actions.entityId === 'string' ? actions.entityId : undefined;
       if (!entityId) continue;
-
-      const relevance = typeof actions.relevance === 'number' ? actions.relevance : 0;
-      if (relevance < MIN_TICKET_RELEVANCE) {
-        continue;
-      }
 
       const actionStatus = typeof actions.ticketStatus === 'string' ? actions.ticketStatus : undefined;
       if (isClosedLikeStatus(actionStatus)) {

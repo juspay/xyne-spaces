@@ -2,6 +2,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { userActivityService } from '@/services/userActivityService';
+import { superpositionClient } from '@/services/superpositionClient';
 import type { UserActivityEvent, Platform } from '@prisma/client';
 import { nudgeRegistry } from './registry';
 import { activityContextResolver } from './services/activityContextResolver';
@@ -87,6 +88,15 @@ export class NudgeEvaluationEngine {
       return;
     }
 
+    // 4b. Filter by superposition config (skip disabled nudge kinds)
+    const enabledDefinitions = await this.filterByConfig(passedDefinitions);
+    if (enabledDefinitions.length === 0) {
+      logger.info('[NudgeEngine] All nudge definitions disabled by config', {
+        disabledKinds: passedDefinitions.map((d) => d.kind),
+      });
+      return;
+    }
+
     // 5. Build shared activity context (once per trigger)
     let activityContext: ActivityContextOutput;
     try {
@@ -130,9 +140,9 @@ export class NudgeEvaluationEngine {
       };
     }
 
-    // 6. Run evaluate() in parallel for all passed definitions
+    // 6. Run evaluate() in parallel for all enabled definitions
     const evaluationResults = await Promise.allSettled(
-      passedDefinitions.map(async (def) => {
+      enabledDefinitions.map(async (def) => {
         const startedAt = Date.now();
         try {
           const context = await def.buildContext(effectivePayload, activityContext, {
@@ -333,6 +343,42 @@ export class NudgeEvaluationEngine {
     if (!metadata) return null;
     const value = metadata[key];
     return typeof value === 'string' && value.trim().length > 0 ? value : null;
+  }
+
+  /**
+   * Check superposition config to filter out disabled nudge kinds.
+   * Flag key format: `nudge_<kind_lowercase>_enabled` (e.g. `nudge_create_ticket_from_message_enabled`).
+   * Defaults to true (enabled) if the flag is not configured or superposition is unavailable.
+   * Uses a single resolveAllConfigDetails() call to batch-fetch all flags.
+   */
+  private async filterByConfig(
+    definitions: NudgeDefinition<any>[],
+  ): Promise<NudgeDefinition<any>[]> {
+    try {
+      const allConfigs = await superpositionClient.resolveAllConfigDetails();
+
+      return definitions.filter((def) => {
+        const flagKey = `nudge_${def.kind.toLowerCase()}_enabled`;
+        const flagValue = allConfigs[flagKey]?.value;
+
+        // If the flag isn't configured at all, default to enabled
+        if (flagValue === undefined) return true;
+
+        const enabled = flagValue === true || flagValue === 'true';
+        if (!enabled) {
+          logger.info('[NudgeEngine] Nudge kind disabled by config', {
+            nudgeKind: def.kind,
+            flagKey,
+          });
+        }
+        return enabled;
+      });
+    } catch (error) {
+      logger.warn('[NudgeEngine] Superposition config check failed, all nudges enabled by default', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return definitions;
+    }
   }
 
   private async fetchActivityHistory(userId: string): Promise<ActivityHistoryWindow> {
