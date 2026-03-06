@@ -234,6 +234,7 @@ export interface ToolDescriptions {
   create_canvas: string;
   read_canvas: string;
   edit_canvas: string;
+  fetch_link_content: string;
 }
 
 // ============================================================================
