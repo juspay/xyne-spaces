@@ -48,6 +48,14 @@ const extractLastMessageContent = (result: ConversationResult): string => {
 // PROMPT TEMPLATES
 // =============================================================================
 /**
+ * Helper to build getCommitMessage function for repoInfo
+ */
+const buildGetCommitMessage = (preCommit?: string) =>
+  preCommit
+    ? (defaultMsg: string) => `${preCommit} | ${defaultMsg}`
+    : undefined
+
+/**
  * Creates agent configuration for enhanced requirement analysis
  */
 const getEnhancedRequirementAnalysisConfig = (
@@ -55,7 +63,8 @@ const getEnhancedRequirementAnalysisConfig = (
   repoBranch?: string,
   baseBranch?: string,
   description?: string,
-  type?: FidoWorkType
+  type?: FidoWorkType,
+  getCommitMessage?: (defaultMsg: string) => string
 ): { agentName: string; config: AgenticCheckpointConfig } => {
   // Use dynamic workflow description or fallback to default
   const finalDescription = description;
@@ -69,7 +78,8 @@ const getEnhancedRequirementAnalysisConfig = (
       repoInfo: {
         repoUrl: repositoryUrl,
         repoBranch,
-        baseBranch
+        baseBranch,
+        getCommitMessage
       },
     }
   }
@@ -81,7 +91,8 @@ const
 getFileRemovalConfig = (
   repositoryUrl: string,
   repoBranch?: string,
-  baseBranch?: string
+  baseBranch?: string,
+  getCommitMessage?: (defaultMsg: string) => string
 ): { agentName: string; config: AgenticCheckpointConfig } => {
   return {
     agentName: 'feature-implementation-engineer',
@@ -92,7 +103,8 @@ getFileRemovalConfig = (
       repoInfo: {
         repoUrl: repositoryUrl,
         repoBranch,
-        baseBranch
+        baseBranch,
+        getCommitMessage
       }
     }
   }
@@ -110,6 +122,7 @@ const getConformanceImplementationConfig = (
   _codeReviewFeedback?: string | null,
   agentConfigVersions?: any,
   type?: FidoWorkType,
+  getCommitMessage?: (defaultMsg: string) => string,
 ) => {
   // Single unified prompt that includes feature Conformance feedback when available
   const prompt = `
@@ -149,7 +162,8 @@ logger.info('Generated Implementation Prompt->:',prompt);
       repoInfo: {
         repoUrl: repositoryUrl,
         repoBranch,
-        baseBranch
+        baseBranch,
+        getCommitMessage
       },
       agentConfigVersions
     }
@@ -163,6 +177,7 @@ const fidoServerWorkflowInputSchema = BaseWorkflowContextSchema.extend({
   maxIterations: z.number().positive().optional(),
   repoBranch: z.string().optional(),
   baseBranch: z.string(),
+  preCommit: z.string().optional(),
   buildCommand: z.string().optional(),
   testDetails: z.array(z.object({
     filename: z.string(),
@@ -170,6 +185,7 @@ const fidoServerWorkflowInputSchema = BaseWorkflowContextSchema.extend({
     parameters: z.array(z.string())
   })).optional(),
   description: z.string(),
+  instructions: z.string().optional(),
   ispoller: z.boolean().default(false),
   connectorName: z.string().optional(),
   connectorBaseUrl: z.string().optional(),
@@ -183,6 +199,8 @@ const FidoServerWorkflowContextMapper = (payload: z.infer<typeof fidoServerWorkf
   repoBranch: payload.repoBranch,
   baseBranch: payload.baseBranch,
   description: payload.description,
+  instructions: payload.instructions,
+  preCommit: payload.preCommit,
   buildCommand: payload.buildCommand,
   testDetails: payload.testDetails,
   ispoller: payload.ispoller,
@@ -211,11 +229,13 @@ export const fidoServerWorkflow: WorkflowDefinition<
       repoBranch,
       baseBranch,
       description,
+      preCommit,
       buildCommand,
       testDetails,
       ispoller,
       type,
       connectorName,
+      instructions,
       connectorBaseUrl,
       custom,
       maxIterations = 10,
@@ -251,6 +271,9 @@ export const fidoServerWorkflow: WorkflowDefinition<
     console.log('Workflow input parameters:', { custom })
     console.log('Parsed workflow parameters:', { repositoryUrl, repoBranch, baseBranch, description, buildCommand, testDetails, ispoller, type, connectorName, connectorBaseUrl })
 
+    // Build commit message function if preCommit is provided
+    const getCommitMessage = buildGetCommitMessage(preCommit)
+    description= description + (instructions ? `\n\nAdditional Instructions:\n${instructions}` : '');
     // Validate required fields
     if (!repositoryUrl) {
       throw new Error('Repository URL is required for Enhanced FIDO Server Workflow')
@@ -298,7 +321,7 @@ export const fidoServerWorkflow: WorkflowDefinition<
     console.log('featurevalidationtype:', testDetails?.map((td: any) => td.filename))
     console.log(' Starting requirement analysis phase...',description)
     console.log('featurevalidationtype:', testDetails?.map((td: any) => td.filename))
-    const requirementConfig = getEnhancedRequirementAnalysisConfig(repositoryUrl, repoBranch, baseBranch, description,type)
+    const requirementConfig = getEnhancedRequirementAnalysisConfig(repositoryUrl, repoBranch, baseBranch, description, type, getCommitMessage)
     const requirementResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(
       FidoEnhancedWorkflowStepsEnum.REQUIREMENT_ANALYSIS,
       requirementConfig.agentName,
@@ -333,6 +356,10 @@ export const fidoServerWorkflow: WorkflowDefinition<
           gitInfo.branch,
           baseBranch,
           conformanceResult,
+          undefined,
+          undefined,
+          type,
+          getCommitMessage
         )
         const implementationResult: AgenticCheckpointResult = await scopedEngine.createAgenticCheckpoint(
           FidoEnhancedWorkflowStepsEnum.CODE_IMPLEMENTATION,
@@ -409,7 +436,7 @@ export const fidoServerWorkflow: WorkflowDefinition<
     )
     if(type === FidoWorkType.DEEP){
       logger.info('Removing generated-requirement-analysis.xml if it exists...');
-      const removeFileConfig = getFileRemovalConfig(repositoryUrl, gitInfo.branch,baseBranch);
+      const removeFileConfig = getFileRemovalConfig(repositoryUrl, gitInfo.branch, baseBranch, getCommitMessage);
       await workflow.createAgenticCheckpoint(
         FidoEnhancedWorkflowStepsEnum.POST_IMPLEMENTATION,
         removeFileConfig.agentName,
