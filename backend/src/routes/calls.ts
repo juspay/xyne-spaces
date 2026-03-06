@@ -39,6 +39,11 @@ router.post('/:callId/end-for-all', callController.endCallForAll);
 
 // Pulse actionable proxy (keeps Pulse credentials server-side)
 router.post('/:callId/pulse-actionable', callController.createPulseActionable);
+// Mute all participants endpoint
+router.post('/:callId/mute-all', callController.muteAllParticipants);
+
+// Mute individual participant endpoint (host only)
+router.post('/:callId/mute-participant', callController.muteParticipant);
 
 export default router;
 

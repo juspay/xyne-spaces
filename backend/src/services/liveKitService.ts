@@ -68,7 +68,14 @@ export class LiveKitService {
       throw error;
     }
   }
-
+  async muteTrack(roomName: string, identity: string, trackSid: string, muted: boolean): Promise<void> {
+    try {
+      await this.roomService.mutePublishedTrack(roomName, identity, trackSid, muted);
+    } catch (error) {
+      logger.error(`[${roomName}] mute_track_failed | identity=${identity}, track_sid=${trackSid}, error=${error}`);
+      throw error;
+    }
+  }
   async generateAccessToken(options: LiveKitTokenOptions): Promise<string> {
     try {
       const at = new AccessToken(this.apiKey, this.apiSecret, {

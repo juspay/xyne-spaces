@@ -10,6 +10,7 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import z from 'zod';
+import { TrackSource } from 'livekit-server-sdk';
 
 export class CallController {
   /**
@@ -1069,6 +1070,176 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to end call for all:', error);
       res.status(500).json({ success: false, error: 'Failed to end call for everyone' });
+    }
+  };
+
+  /**
+   * Helper method to mute microphones for specified participants
+   * @param roomName - The LiveKit room name (callId)
+   * @param identities - Array of participant identities to mute
+   * @returns Number of tracks muted
+   */
+  private async muteParticipantMicrophones(roomName: string, identities: string[]): Promise<number> {
+    const participants = await livekitService.listParticipants(roomName);
+    const identitySet = new Set(identities);
+
+    let mutedCount = 0;
+    for (const participant of participants) {
+      if (!identitySet.has(participant.identity)) {
+        logger.info(
+          `[CallController] muteParticipantMicrophones SKIPPING participant | roomName=${roomName}, identity=${participant.identity}, name=${participant.name} not in identitySet`,
+        );
+        continue;
+      }
+
+
+      for (const track of participant.tracks || []) {
+        if (track.source === TrackSource.MICROPHONE && !track.muted) {
+          logger.info(`[CallController] muteParticipantMicrophones MUTING track | roomName=${roomName}, identity=${participant.identity}, trackSid=${track.sid}`);
+          await livekitService.muteTrack(roomName, participant.identity, track.sid, true);
+          mutedCount++;
+        }
+      }
+    }
+
+    return mutedCount;
+  }
+
+  // POST /api/calls/:callId/mute-all
+  muteAllParticipants = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const userName = req.user?.name;
+    const userEmail = req.user?.email;
+    const { callId } = req.params;
+
+    logger.info(`[CallController] mute-all request received | callId=${callId}, requestingUserId=${userId}, requestingUserName=${userName}, requestingUserEmail=${userEmail}`);
+
+    if (!userId) {
+      logger.warn(`[CallController] mute-all unauthorized | callId=${callId}`);
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      // 1. Validate call exists
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        logger.warn(`[CallController] mute-all call not found | callId=${callId}`);
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      logger.info(`[CallController] mute-all call found | callId=${callId}, createdByUserId=${call.createdByUserId}`);
+
+      // 2. Host-only check
+      if (call.createdByUserId !== userId) {
+        logger.warn(`[CallController] mute-all not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+        res.status(403).json({
+          success: false,
+          error: 'Only the call host can mute all participants',
+        });
+        return;
+      }
+
+      // 3. Get LiveKit participants and collect identities to mute (exclude host & agents)
+      const participants = await livekitService.listParticipants(callId);
+      const identitiesToMute = participants
+        .filter(p => p.identity !== userId && !p.identity.startsWith('agent-'))
+        .map(p => p.identity);
+
+      logger.info(`[CallController] mute-all identities to mute | callId=${callId}, count=${identitiesToMute.length}, identities=${identitiesToMute.join(', ')}`);
+
+      // 4. Mute all collected participants
+      const mutedCount = await this.muteParticipantMicrophones(callId, identitiesToMute);
+
+      logger.info(`[CallController] mute-all completed | callId=${callId}, mutedCount=${mutedCount}`);
+
+      res.json({ success: true, mutedCount });
+    } catch (error) {
+      logger.error(`[CallController] mute-all failed | callId=${callId}, error=`, error);
+      res.status(500).json({ success: false, error: 'Failed to mute participants' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/mute-participant
+   * Mute a specific participant's microphone (host only)
+   */
+  muteParticipant = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const userName = req.user?.name;
+    const userEmail = req.user?.email;
+    const { callId } = req.params;
+    const { participantUserId } = req.body;
+
+    logger.info(`[CallController] mute-participant request received | callId=${callId}, targetUserId=${participantUserId}, requestingUserId=${userId}, requestingUserName=${userName}, requestingUserEmail=${userEmail}`);
+
+    if (!userId) {
+      logger.warn(`[CallController] mute-participant unauthorized | callId=${callId}`);
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!participantUserId) {
+      logger.warn(`[CallController] mute-participant missing participantUserId | callId=${callId}`);
+      res.status(400).json({ success: false, error: 'participantUserId is required' });
+      return;
+    }
+
+    try {
+      // 1. Validate call exists
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        logger.warn(`[CallController] mute-participant call not found | callId=${callId}`);
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      logger.info(`[CallController] mute-participant call found | callId=${callId}, createdByUserId=${call.createdByUserId}`);
+
+      // 2. Host-only check
+      if (call.createdByUserId !== userId) {
+        logger.warn(`[CallController] mute-participant not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+        res.status(403).json({
+          success: false,
+          error: 'Only the call host can mute participants',
+        });
+        return;
+      }
+
+      // 3. Prevent host from muting themselves
+      if (participantUserId === userId) {
+        logger.warn(`[CallController] mute-participant cannot mute self | callId=${callId}, userId=${userId}`);
+        res.status(400).json({
+          success: false,
+          error: 'Cannot mute yourself',
+        });
+        return;
+      }
+
+      // 4. Prevent muting agents
+      if (participantUserId.startsWith('agent-')) {
+        logger.warn(`[CallController] mute-participant cannot mute agent | callId=${callId}, targetUserId=${participantUserId}`);
+        res.status(400).json({
+          success: false,
+          error: 'Cannot mute agents',
+        });
+        return;
+      }
+
+      // 5. Mute the participant's microphone
+      const mutedCount = await this.muteParticipantMicrophones(callId, [participantUserId]);
+
+      if (mutedCount === 0) {
+        logger.info(`[CallController] mute-participant no audio track to mute | callId=${callId}, targetUserId=${participantUserId}`);
+      }
+
+      logger.info(`[CallController] mute-participant completed | callId=${callId}, targetUserId=${participantUserId}, mutedCount=${mutedCount}`);
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error(`[CallController] mute-participant failed | callId=${callId}, targetUserId=${participantUserId}, error=`, error);
+      res.status(500).json({ success: false, error: 'Failed to mute participant' });
     }
   };
 

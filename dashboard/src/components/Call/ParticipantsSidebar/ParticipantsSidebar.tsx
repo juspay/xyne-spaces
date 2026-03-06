@@ -1,11 +1,26 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useSelector } from '@xstate/react';
-import { X, UserPlus, Users, ChevronUp, ChevronDown } from 'lucide-react';
-import { roomActor } from '../../../machines/roomMachine';
+import { X, UserPlus, Users, ChevronUp, ChevronDown, MicOff, Mic } from 'lucide-react';
+import { useIsSpeaking } from '@livekit/components-react';
+import type { Participant } from 'livekit-client';
+import { roomActor, type ParticipantInfo } from '../../../machines/roomMachine';
 import { useUser } from '../../../hooks/useUsers';
+import { useAuth } from '../../../hooks/useAuth';
 import { InvitationResponse } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { InviteToCallModal } from '../CallModals/InviteToCallModal';
+import { callService } from '../../../services/Call/callService';
+
+// Speaking indicator component (animated bars like Google Meet)
+function SpeakingIndicator(): React.ReactElement {
+  return (
+    <div className='flex items-center gap-[2px] h-4'>
+      <span className='w-[3px] h-2 bg-green-500 rounded-full animate-[speaking_0.5s_ease-in-out_infinite]' />
+      <span className='w-[3px] h-3 bg-green-500 rounded-full animate-[speaking_0.5s_ease-in-out_infinite_0.1s]' />
+      <span className='w-[3px] h-2 bg-green-500 rounded-full animate-[speaking_0.5s_ease-in-out_infinite_0.2s]' />
+    </div>
+  );
+}
 
 interface ParticipantsSidebarProps {
   callId: string;
@@ -27,6 +42,7 @@ interface CallParticipant {
 
 interface ActiveCall {
   externalId: string;
+  createdByUserId?: string;
   participants?: CallParticipant[];
 }
 
@@ -37,6 +53,10 @@ export function ParticipantsSidebar({
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [isAttendeesExpanded, setIsAttendeesExpanded] = useState(true);
   const [isAlsoInvitedExpanded, setIsAlsoInvitedExpanded] = useState(true);
+  const [isMuting, setIsMuting] = useState(false);
+  const [mutingParticipantId, setMutingParticipantId] = useState<string | null>(null);
+
+  const { user } = useAuth();
 
   // Get active calls and find current call
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
@@ -45,8 +65,54 @@ export function ParticipantsSidebar({
     [activeCalls, callId],
   );
 
+  // Get LiveKit participants from room state (for speaking detection)
+  const livekitParticipants = useSelector(roomActor, state => state.context.participants);
+
+  // Create a map of userId -> LiveKit participant for quick lookup
+  const livekitParticipantMap = useMemo(() => {
+    const map = new Map<string, ParticipantInfo>();
+    livekitParticipants.forEach(p => {
+      map.set(p.identity, p);
+    });
+    return map;
+  }, [livekitParticipants]);
+
+  // Check if current user is the host
+  const isHost = currentCall?.createdByUserId === user?.id;
+
   // Get participants from the call
   const participants = currentCall?.participants || [];
+
+  // Handle mute all participants
+  const handleMuteAll = useCallback(async () => {
+    if (isMuting) return;
+
+    setIsMuting(true);
+    try {
+      await callService.muteAllParticipants(callId);
+    } catch (error) {
+      console.error('[ParticipantsSidebar] Failed to mute all participants:', error);
+    } finally {
+      setIsMuting(false);
+    }
+  }, [callId, isMuting]);
+
+  // Handle mute individual participant
+  const handleMuteParticipant = useCallback(
+    async (participantUserId: string) => {
+      if (mutingParticipantId) return;
+
+      setMutingParticipantId(participantUserId);
+      try {
+        await callService.muteParticipant(callId, participantUserId);
+      } catch (error) {
+        console.error('[ParticipantsSidebar] Failed to mute participant:', error);
+      } finally {
+        setMutingParticipantId(null);
+      }
+    },
+    [callId, mutingParticipantId],
+  );
 
   // Split participants into Contributors (ACCEPTED and still in call) and Also Invited (others or left)
   const { contributors, alsoInvited } = useMemo(() => {
@@ -65,15 +131,41 @@ export function ParticipantsSidebar({
     return { contributors, alsoInvited };
   }, [participants]);
 
+  // Inner component for speaking detection (needs to be separate to use hooks conditionally)
+  const SpeakingStatus = ({
+    livekitParticipant,
+  }: {
+    livekitParticipant: Participant | undefined;
+  }): React.ReactElement | null => {
+    const isSpeaking = useIsSpeaking(livekitParticipant);
+    if (!isSpeaking) return null;
+    return <SpeakingIndicator />;
+  };
+
   // ParticipantItem component that uses useUser hook internally
   const ParticipantItem = ({
     participant,
+    showMuteButton = false,
+    currentUserId,
   }: {
     participant: CallParticipant;
+    showMuteButton?: boolean;
+    currentUserId?: string | null;
   }): React.ReactElement => {
     const { response, userId } = participant;
-    const user = useUser(userId);
+    const participantUser = useUser(userId);
     const isInCall = response === InvitationResponse.ACCEPTED;
+    const isMutingThis = mutingParticipantId === userId;
+
+    // Get LiveKit participant for speaking detection and mute status
+    const livekitParticipant = livekitParticipantMap.get(userId);
+    const livekitParticipantObj = livekitParticipant?.participant;
+    const isMicrophoneEnabled = livekitParticipant?.isMicrophoneEnabled ?? true;
+
+    // Determine if mute button should be shown for this participant
+    // Show only if: host, participant is in call, not the current user (self), not an agent
+    const canMute =
+      showMuteButton && isInCall && userId !== currentUserId && !userId.startsWith('agent-');
 
     return (
       <div className='flex items-center gap-3 py-2 px-3 hover:bg-gray-100 rounded-lg transition-colors'>
@@ -85,7 +177,7 @@ export function ParticipantsSidebar({
         </div>
         <div className='flex-1 min-w-0'>
           <p className='text-sm font-medium text-foreground truncate'>
-            {user?.name || 'Unknown User'}
+            {participantUser?.name || 'Unknown User'}
           </p>
           {response === InvitationResponse.LEFT && (
             <p className='text-xs text-muted-foreground'>Left the call</p>
@@ -97,6 +189,44 @@ export function ParticipantsSidebar({
             <p className='text-xs text-red-500'>Declined</p>
           )}
         </div>
+        {/* Speaking indicator - only show when mic is enabled */}
+        {isInCall && livekitParticipantObj && isMicrophoneEnabled && (
+          <SpeakingStatus livekitParticipant={livekitParticipantObj} />
+        )}
+        {/* Mute status indicator (for non-host or when participant is muted) */}
+        {isInCall && !isMicrophoneEnabled && !canMute && (
+          <div className='p-1.5 text-red-500' title='Muted'>
+            <MicOff size={16} />
+          </div>
+        )}
+        {/* Mute/Unmute button - always visible for host */}
+        {canMute && (
+          <button
+            onClick={() => void handleMuteParticipant(userId)}
+            disabled={isMutingThis || !isMicrophoneEnabled}
+            className={`p-1.5 rounded-md transition-colors disabled:cursor-not-allowed ${
+              !isMicrophoneEnabled
+                ? 'text-red-500 bg-red-50'
+                : 'hover:bg-gray-200 text-muted-foreground hover:text-foreground'
+            }`}
+            data-track-category='CALLS'
+            data-track-name='MUTE_PARTICIPANT'
+            data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
+            title={
+              !isMicrophoneEnabled
+                ? `${participantUser?.name || 'Participant'} is muted`
+                : `Mute ${participantUser?.name || 'participant'}`
+            }
+          >
+            {isMutingThis ? (
+              <div className='w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
+            ) : !isMicrophoneEnabled ? (
+              <MicOff size={16} />
+            ) : (
+              <Mic size={16} />
+            )}
+          </button>
+        )}
       </div>
     );
   };
@@ -141,6 +271,21 @@ export function ParticipantsSidebar({
             <h2 className='text-lg font-semibold'>Participants</h2>
           </div>
           <div className='flex items-center gap-2'>
+            {isHost && contributors.length > 1 && (
+              <button
+                onClick={() => void handleMuteAll()}
+                disabled={isMuting}
+                className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white hover:bg-gray-100 text-black border border-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                title='Mute all participants'
+                data-testid='mute-all-button'
+                data-track-category='CALLS'
+                data-track-name='MUTE_ALL_PARTICIPANTS'
+                data-track-metadata={JSON.stringify({ callId })}
+              >
+                <MicOff size={16} />
+                <span className='text-sm font-medium'>{isMuting ? 'Muting...' : 'Mute All'}</span>
+              </button>
+            )}
             <button
               onClick={() => setShowInviteModal(true)}
               className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white hover:bg-gray-100 text-black border border-gray-300 transition-colors'
@@ -182,7 +327,12 @@ export function ParticipantsSidebar({
               {isAttendeesExpanded && (
                 <div className='border-t border-border'>
                   {contributors.map(participant => (
-                    <ParticipantItem key={participant.id} participant={participant} />
+                    <ParticipantItem
+                      key={participant.id}
+                      participant={participant}
+                      showMuteButton={isHost}
+                      currentUserId={user?.id ?? null}
+                    />
                   ))}
                 </div>
               )}
@@ -204,7 +354,11 @@ export function ParticipantsSidebar({
               {isAlsoInvitedExpanded && (
                 <div className='border-t border-border'>
                   {alsoInvited.map(participant => (
-                    <ParticipantItem key={participant.id} participant={participant} />
+                    <ParticipantItem
+                      key={participant.id}
+                      participant={participant}
+                      currentUserId={user?.id ?? null}
+                    />
                   ))}
                 </div>
               )}

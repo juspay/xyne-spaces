@@ -190,6 +190,66 @@ export class CallService {
       throw error;
     }
   }
+  /**
+   * Mute all participants (host only)
+   * Mutes the audio tracks of all participants except the host
+   */
+  async muteAllParticipants(callId: string): Promise<{ mutedCount: number }> {
+    try {
+      const response = await apiInstance.post<{ success: boolean; mutedCount: number }>(
+        `/calls/${callId}/mute-all`,
+      );
+
+      if (!response.data.success) {
+        throw new Error('Failed to mute all participants');
+      }
+
+      return { mutedCount: response.data.mutedCount };
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Mute a specific participant (host only)
+   * Mutes the audio tracks of a specific participant
+   */
+  async muteParticipant(callId: string, participantUserId: string): Promise<{ success: boolean }> {
+    try {
+      const response = await apiInstance.post<{ success: boolean }>(
+        `/calls/${callId}/mute-participant`,
+        { participantUserId },
+      );
+
+      if (!response.data.success) {
+        throw new Error('Failed to mute participant');
+      }
+
+      return { success: true };
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
 
   /**
    * Download call transcript
