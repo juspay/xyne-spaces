@@ -162,8 +162,25 @@ export function buildStep4LogCollectionPrompt(
   requiredFields: any,
   flow: string
 ): string {
+  // Handle empty or null requiredFields
+  if (!requiredFields || Object.keys(requiredFields).length === 0) {
+    throw new Error('Required fields are empty or not provided');
+  }
+
   const fieldsList = Object.entries(requiredFields)
-    .map(([table, fields]) => `From ${table}:\n${(fields as string[]).map(f => `  - ${f}`).join('\n')}`)
+    .filter(([_table, fields]) => fields && (Array.isArray(fields) || typeof fields === 'object'))
+    .map(([table, fields]) => {
+      // Handle both array and object fields
+      if (Array.isArray(fields)) {
+        return `From ${table}:\n${fields.map(f => `  - ${f}`).join('\n')}`;
+      } else if (typeof fields === 'object' && fields !== null) {
+        // Handle nested objects (like verification_metadata)
+        const fieldNames = Object.keys(fields as Record<string, any>);
+        if (fieldNames.length === 0) return `From ${table}:\n  (No specific fields)`;
+        return `From ${table}:\n${fieldNames.map(f => `  - ${f}`).join('\n')}`;
+      }
+      return `From ${table}:\n  - ${String(fields)}`;
+    })
     .join('\n\n');
 
   const webhookSyncInstruction = flow === 'WEBHOOK' ? `
@@ -290,12 +307,32 @@ Look at the integrity check failure logs and error messages to determine WHICH f
 - Is it complaining about txnId? → Transaction ID verification failed
 - Don't assume - use the actual failure reason from logs
 
-**STEP 2: Determine if it's gateway issue or our issue**
+**STEP 2: Examine complete gateway response and determine if it's gateway issue or our issue**
+
+**2a. Check the COMPLETE gateway response:**
+- Look at ALL fields in gateway_response, not just what we currently verify
+- Identify if there are OTHER fields we could use for integrity (orderId, merchantTxnId, email, etc.)
+- Check if gateway provides additional checksums or validation fields we're not using
+- Document all potential verification opportunities, even if not currently failing
+
+**2b. Determine if it's gateway issue or our issue:**
 Compare what we sent vs what gateway returned FOR THE SPECIFIC FIELD THAT FAILED:
-- Only check the field that actually failed (from Step 1)
-- Don't waste time checking fields that passed
-- If gateway returned wrong data for that field → Gateway issue → Escalate
-- If gateway returned correct data but our verification failed → Our issue → Debug our code
+
+**For AMOUNT failures specifically:**
+- **CRITICAL**: Compare outgoing_gateway_request.amount (what WE sent) vs gateway_response.amount (what THEY returned)
+- **If they DON'T match**: Gateway returned different amount than we sent → Gateway issue → Escalate to PG
+  - Example: We sent 39900, gateway returned 39800 → PG issue
+  - Set is_our_issue=false
+- **If they MATCH**: Gateway correctly echoed back what we sent → Our verification logic is wrong → Fix our code
+  - Example: We sent 39900, gateway returned 39900, but our integrity check compares against 399 → Our bug
+  - Set is_our_issue=true
+  - Root cause: We're not using same amount logic in verification as we used in initiation
+  - Fix: Update verification to use correct Money framework logic, multiplier, base vs total amount
+
+**For OTHER field failures (currency, txnId, hash):**
+- Compare outgoing_request vs gateway_response for that specific field
+- If they don't match → Gateway issue → Escalate
+- If they match but verification fails → Our code issue → Debug our verification logic
 
 Our DB values are NEVER wrong - they are contextually correct.
 
