@@ -1,3 +1,10 @@
+## [1.71.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.70.0...v1.71.0) (2026-03-06)
+
+
+### Features
+
+* mute-participant ([308cfb3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/308cfb33da17ddc75eee7f019d9345e400b38cc3)), closes [#3857](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3857)
+
 ## [1.70.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.69.0...v1.70.0) (2026-03-06)
 
 
