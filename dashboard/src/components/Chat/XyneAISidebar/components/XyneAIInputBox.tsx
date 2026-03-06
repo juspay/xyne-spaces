@@ -15,6 +15,7 @@ import {
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
+import LinkExtension from '@tiptap/extension-link';
 import { toast } from 'sonner';
 import { ChannelScopeType } from '@xyne/shared';
 import { StopIcon } from './StopIcon';
@@ -307,6 +308,15 @@ export const XyneAIInputBox = ({
       }),
       Placeholder.configure({
         placeholder: 'Ask Xyne AI',
+      }),
+      LinkExtension.extend({
+        inclusive: false,
+      }).configure({
+        openOnClick: false,
+        HTMLAttributes: {
+          class: 'text-blue-600 hover:text-blue-700 underline cursor-text',
+          rel: 'noopener noreferrer',
+        },
       }),
       ChannelMentionExtension,
     ],

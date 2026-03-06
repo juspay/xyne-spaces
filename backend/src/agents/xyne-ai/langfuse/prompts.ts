@@ -150,6 +150,7 @@ export const PROMPT_NAMES = {
   XYNE_AI_SYSTEM: 'xyne-ai',
   FETCH_CHANNEL_MESSAGES: 'fetch_channel_messages',
   FETCH_THREAD_MESSAGES: 'fetch_thread_messages',
+  FETCH_LINK_CONTENT: 'fetch_link_content',
   SEARCH_RELEVANT_MESSAGES: 'search_relevant_messages',
   SEARCH_RELEVANT_TICKETS: 'search_relevant_tickets',
   GENIUS: 'genius_as_tool',

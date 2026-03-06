@@ -427,9 +427,52 @@ export const MessageItem = ({
                       ))}
                     </div>
                   )}
-                  <p className="text-sm font-['Inter'] whitespace-pre-wrap break-words  font-[450]  tracking-[0] md:leading-relaxed">
-                    {displayContent}
-                  </p>
+                  <div className="text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({ children }) => <span>{children}</span>,
+                        a: ({ href, children, ...props }) => {
+                          // Check if URL is external
+                          const isExternal = (() => {
+                            if (!href) return false;
+                            try {
+                              const urlObj = new URL(href, window.location.origin);
+                              return urlObj.origin !== window.location.origin;
+                            } catch {
+                              return true;
+                            }
+                          })();
+
+                          if (isExternal) {
+                            return (
+                              <a
+                                href={href}
+                                target='_blank'
+                                rel='noopener noreferrer'
+                                className='text-blue-600 hover:text-blue-700 underline'
+                                {...props}
+                              >
+                                {children}
+                              </a>
+                            );
+                          }
+
+                          return (
+                            <a
+                              href={href}
+                              className='text-blue-600 hover:text-blue-700 underline'
+                              {...props}
+                            >
+                              {children}
+                            </a>
+                          );
+                        },
+                      }}
+                    >
+                      {displayContent}
+                    </ReactMarkdown>
+                  </div>
                 </>
               ) : (
                 <MessageContent

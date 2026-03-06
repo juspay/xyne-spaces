@@ -175,6 +175,21 @@ THREAD CONTEXT - {{thread_context}}
   → Step 2: edit_canvas({canvasViewId: "abc123-def456", content: "# Updated\\n\\nNew content", title: "Updated Title"})
 **Access Control:** User must be the creator or have OWNER/EDITOR permissions. If access denied, tool returns error.
 **Constraints:** MUST call <tool>read_canvas</tool> before <tool>edit_canvas</tool> without fail.
+
+11. <tool>fetch_link_content</tool>
+**Usage:** Fetch content from Xyne Spaces internal links (messages, conversations, tickets, canvases).
+**Description:** Retrieves content from shared Xyne Spaces URLs.
+**Parameters:**
+- url: (required) The full Xyne Spaces URL to fetch
+**Supported Link Types:**
+- Messages: URLs containing messageId in the hash fragment
+- Conversations/Threads: /chat/{channelId}/{conversationId}
+- Tickets: URLs with ?ticket={ticketId} query parameter
+- Canvases: /chat/canvas/{canvasId}
+**IMPORTANT - Automatic Link Extraction:**
+- When fetching thread/channel messages, if any message contains a Xyne Spaces link (spaces.xyne.juspay.net or app.spaces.xyne.juspay.net), you SHOULD call this tool to fetch the linked content.
+- This allows you to provide complete context when summarizing threads or answering questions about shared links.
+**Constraints:** User must have access to the channel/canvas. DO NOT use for external URLs.
 </tools_definition>
 
 <behavior_guidelines>
@@ -284,6 +299,23 @@ You must respond with valid JSON containing these keys:
 **Step 2:** review current content from read_canvas response
 **Step 3:** edit_canvas({canvasViewId: "abc123-def456", content: "# Meeting Notes\\n\\n- Updated item 1\\n- Updated item 2", title: "Updated Meeting Notes"})
 **Response:** Confirmation that canvas was updated
+
+### Case G: Fetch Link Content
+**User:** "What's in this link: https://spaces.xyne.juspay.net/chat/canvas/abc123"
+**Step 1:** Call <tool>fetch_link_content</tool>({url: "https://spaces.xyne.juspay.net/chat/canvas/abc123"})
+**Response:** (JSON with summary of the canvas content, keypoints, citations)
+
+**User:** "Check this thread: https://spaces.xyne.juspay.net/chat/ch-xyz/conv-123"
+**Step 1:** Call <tool>fetch_link_content</tool>({url: "https://spaces.xyne.juspay.net/chat/ch-xyz/conv-123"})
+**Response:** (JSON with summary of the conversation messages, keypoints, citations)
+
+### Case H: Extracting Links from Thread Messages
+**User:** "Summarize this thread" (thread contains messages with Xyne Spaces links)
+**Step 1:** Call <tool>fetch_thread_messages</tool>()
+**Step 2:** Scan the returned messages for Xyne Spaces links (spaces.xyne.juspay.net or app.spaces.xyne.juspay.net)
+**Step 3:** For each link found, call <tool>fetch_link_content</tool>({url: "https://spaces.xyne.juspay.net/..."})
+**Step 4:** Combine the thread content with the linked content in your summary
+**Response:** (JSON with comprehensive summary including both thread messages and linked content, keypoints, citations)
 
 {{fetch_thread_messages_few_shot_example}}
 </few_shot_examples>
@@ -804,6 +836,37 @@ Use this tool when:
 The tool returns the canvas title and full content converted to markdown format.`;
 
 /**
+ * Fallback description for fetch_link_content tool
+ */
+const FETCH_LINK_CONTENT_FALLBACK = `Fetch content from a Xyne Spaces link (message, conversation, ticket, or canvas).
+
+Use this tool when:
+- User shares a Xyne Spaces link and asks about its content
+- User wants to retrieve specific content from a shared link
+- User asks to look at a message, thread, ticket, or canvas by URL
+
+**Supported Link Types:**
+- Messages: /chat/{channelId}/{conversationId}#origin={conversationId}&messageId={messageId}
+- Conversations/Threads: /chat/{channelId}/{conversationId}
+- Tickets: /chat/{channelId}/{conversationId}?ticket={ticketId}
+- Canvases: /chat/canvas/{canvasId} or /chat/canvas/{viewAccessId}
+
+**Supported Domains:**
+- spaces.xyne.juspay.net
+- app.spaces.xyne.juspay.net
+
+**Parameters:**
+- url: (required) The full Xyne Spaces URL to fetch content from
+
+**Access Control:**
+The user must have access to the channel/canvas containing the linked content.
+If access is denied, the tool returns an error message.
+
+**Output:**
+Returns the content in the same format as other fetch tools (messages, tickets, canvases),
+with proper citation support for the retrieved content.`;
+
+/**
  * Fallback description for edit_canvas tool
  */
 const EDIT_CANVAS_FALLBACK = `Edit an existing canvas by replacing its content.
@@ -967,6 +1030,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'xyne-ai': XYNE_AI_SYSTEM_FALLBACK,
   'fetch_channel_messages': FETCH_CHANNEL_MESSAGES_FALLBACK,
   'fetch_thread_messages': FETCH_THREAD_MESSAGES_FALLBACK,
+  'fetch_link_content': FETCH_LINK_CONTENT_FALLBACK,
   'search_relevant_messages': SEARCH_RELEVANT_MESSAGES_FALLBACK,
   'search_relevant_tickets': SEARCH_RELEVANT_TICKETS_FALLBACK,
   'genius_as_tool': GENIUS_FALLBACK,

@@ -71,6 +71,7 @@ import { createResearchAgentTool, getResearchAgentTool } from './research_agent.
 import { createCreateCanvasTool, getCreateCanvasTool } from './create_canvas.js';
 import { createReadCanvasTool, getReadCanvasTool } from './read_canvas.js';
 import { createEditCanvasTool, getEditCanvasTool } from './edit_canvas.js';
+import { createFetchLinkContentTool, getFetchLinkContentTool } from './fetch_link_content.js';
 
 import type { XyneAIAgentContext } from './types.js';
 
@@ -114,6 +115,9 @@ export { createReadCanvasTool, getReadCanvasTool };
 // Edit Canvas
 export { createEditCanvasTool, getEditCanvasTool };
 
+// Fetch Link Content
+export { createFetchLinkContentTool, getFetchLinkContentTool };
+
 // ============================================================================
 // Get All Tools
 // ============================================================================
@@ -148,6 +152,7 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createCreateCanvasTool(),
     createReadCanvasTool(),
     createEditCanvasTool(),
+    createFetchLinkContentTool(),
   ];
 
   // Add web search tool if runtime flag is true
