@@ -4,9 +4,8 @@
  */
 
 export interface IntegrityDebugWorkflowConfig {
-  // Mock mode configuration
+  // Mock mode configuration (for local development/testing only)
   useMockAnalysis: boolean;
-  createRealPR: boolean;  // If true, create actual PR; if false, just commit locally
 
   // Repository paths (for local development)
   localRepoPath?: {
@@ -14,7 +13,7 @@ export interface IntegrityDebugWorkflowConfig {
     'api-gateway': string;
   };
 
-  // Local mode - apply changes directly to local repo
+  // Local mode - apply changes directly to local repo (for testing)
   applyChangesToLocalRepo: boolean;  // If true, copy changes from /tmp to local repo
 
   // Prompts configuration
@@ -22,7 +21,7 @@ export interface IntegrityDebugWorkflowConfig {
     // Constraint for which files can be modified
     fileModificationConstraint: string;
 
-    // Instructions for PR creation
+    // Instructions for PR creation (always creates PR in production)
     prCreationInstructions: string;
 
     // Additional context for the agent
@@ -52,23 +51,20 @@ export const INTEGRITY_GIT_CONFIG = {
  */
 export function loadWorkflowConfig(): IntegrityDebugWorkflowConfig {
   const useMockAnalysis = process.env.USE_MOCK_ANALYSIS === 'true';
-  const createRealPR = process.env.CREATE_REAL_PR === 'true';
 
-  // In local/mock mode, apply changes to local repo by default
+  // In local/mock mode, apply changes to local repo by default (for testing only)
   const applyChangesToLocalRepo = process.env.APPLY_CHANGES_TO_LOCAL_REPO === 'true'
-    || (!createRealPR && useMockAnalysis);
+    || useMockAnalysis;
 
   // Default prompts
   const defaultFileConstraint = process.env.INTEGRITY_FILE_CONSTRAINT ||
     'Only modify gateway-specific files (e.g., Gateway/*/Flow.hs, Gateway/*/*.hs). Do NOT modify core service files like VerifyIntegrityService.hs or any shared utility files.';
 
-  const defaultPRInstructions = createRealPR
-    ? 'Create a pull request with the changes and provide the PR link.'
-    : 'Commit the changes locally. DO NOT push to remote or create a PR - we just want to see the local diff.';
+  // Always create PR in production (default behavior)
+  const defaultPRInstructions = 'Create a pull request with the changes and provide the PR link.';
 
   return {
     useMockAnalysis,
-    createRealPR,
     applyChangesToLocalRepo,
 
     localRepoPath: process.env.LOCAL_REPO_PATHS ? JSON.parse(process.env.LOCAL_REPO_PATHS) : {

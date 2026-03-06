@@ -218,4 +218,20 @@ export interface IntegrityDebugWorkflowOutput {
   analysisDetails: any; // Now contains comprehensive analysis (Step 4 output)
   logRequirements?: any; // NEW: Log requirements from Step 2
   integrityLocationsAnalyzed?: number; // NEW: Count of integrity locations analyzed
+
+  // Step errors (individual steps that failed but workflow continued)
+  stepErrors?: Array<{
+    step: string;
+    stepName: string;
+    error: string;
+  }>;
+
+  // Fatal error (workflow completely failed)
+  error?: {
+    message: string;
+    step: string;
+    stepName?: string;
+    details?: string;
+    timestamp: string;
+  };
 }

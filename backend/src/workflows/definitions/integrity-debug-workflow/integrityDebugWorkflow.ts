@@ -48,6 +48,7 @@ export enum IntegrityDebugWorkflowSteps {
   DECIDE_ACTION = 'decide_action',
   CREATE_FIX_PR = 'create_fix_pr',
   GENERATE_GATEWAY_ISSUE_REPORT = 'generate_gateway_issue_report',
+  SAVE_ERROR_DETAILS = 'save_error_details',
 }
 
 // ============================================================================
@@ -183,11 +184,12 @@ const identifyRepository = async (
 
     return identificationResult.repository;
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 1: Error identifying repository:`, error);
     logger.error(`${ticketId}_identify_repository_1_error`, {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
     });
-    throw error;
+    throw new Error(`STEP 1 (Repository Identification) failed: ${errorMessage}`);
   }
 };
 
@@ -285,11 +287,12 @@ const discoverAmountFormat = async (
 
     return amountFormatResult;
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 4: Error analyzing amount logic:`, error);
     logger.error(`${ticketId}_discover_amount_format_4_error`, {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
     });
-    throw error;
+    throw new Error(`STEP 4 (Amount Format Analysis) failed: ${errorMessage}`);
   }
 };
 
@@ -422,11 +425,12 @@ const discoverLogRequirements = async (
 
     return requirementsResult;
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 2: Error discovering log requirements:`, error);
     logger.error(`${ticketId}_discover_log_requirements_2_error`, {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
     });
-    throw error;
+    throw new Error(`STEP 2 (Log Requirements Discovery) failed: ${errorMessage}`);
   }
 };
 
@@ -475,7 +479,31 @@ const fetchLogs = async (
 
     // Build log collection prompt (Step 3)
     // Handle both field names: required_fields or required_fields_for_dry_run
-    const requiredFields = logRequirements.required_fields || logRequirements.required_fields_for_dry_run;
+    let requiredFields = logRequirements.required_fields || logRequirements.required_fields_for_dry_run;
+
+    // Flatten nested structure if present (e.g., database_fields, gateway_response_fields)
+    if (requiredFields && (requiredFields.database_fields || requiredFields.gateway_response_fields)) {
+      const flattenedFields: Record<string, any> = {};
+
+      // Merge database_fields
+      if (requiredFields.database_fields) {
+        Object.assign(flattenedFields, requiredFields.database_fields);
+      }
+
+      // Merge gateway_response_fields
+      if (requiredFields.gateway_response_fields) {
+        Object.assign(flattenedFields, requiredFields.gateway_response_fields);
+      }
+
+      // Merge verification_fields (as metadata)
+      if (requiredFields.verification_fields) {
+        flattenedFields.verification_metadata = requiredFields.verification_fields;
+      }
+
+      requiredFields = flattenedFields;
+      logger.info(`[${ticketId}] Flattened nested required_fields structure`);
+    }
+
     const logCollectionPrompt = buildStep4LogCollectionPrompt(
       gateway,
       orderIds,
@@ -539,11 +567,12 @@ const fetchLogs = async (
 
     return collectedLogs;
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 3: Error fetching logs:`, error);
     logger.error(`${ticketId}_fetch_logs_3_error`, {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
     });
-    throw error;
+    throw new Error(`STEP 3 (Log Collection) failed: ${errorMessage}`);
   }
 };
 
@@ -665,11 +694,12 @@ const analyzeCode = async (
 
     return analysisResult;
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 5: Error analyzing code:`, error);
     logger.error(`${ticketId}_analyze_code_5_error`, {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
     });
-    throw error;
+    throw new Error(`STEP 5 (Code Analysis) failed: ${errorMessage}`);
   }
 };
 
@@ -715,7 +745,6 @@ const prepareFixPRParams = async (
   logger.info(`${ticketId}_create_fix_pr_6_input`, {
     repository: analysisResult.repository,
     affectedFilesCount: analysisResult.affected_files.length,
-    createRealPR: workflowConfig.createRealPR,
     mockMode: config.use_mock_analysis,
   });
 
@@ -730,17 +759,16 @@ const prepareFixPRParams = async (
   }
 
   logger.info(`[${ticketId}] Using local repository at: ${localRepoPath}`);
-  logger.info(`[${ticketId}] Create real PR: ${workflowConfig.createRealPR}`);
   logger.info(`[${ticketId}] Mock mode: ${config.use_mock_analysis}`);
 
   // Build initial user message for agentic checkpoint
   let initialMessage = `Fix the integrity check issue identified in code analysis.\n\n`;
 
-  // Add repo context based on mode
-  if (workflowConfig.createRealPR) {
-    initialMessage += `**Repository**: ${analysisResult.repository}\n\n`;
-  } else {
+  // Add repo context
+  if (config.use_mock_analysis) {
     initialMessage += `**IMPORTANT**: You are working with a local repository at ${localRepoPath}.\n\n`;
+  } else {
+    initialMessage += `**Repository**: ${analysisResult.repository}\n\n`;
   }
 
   initialMessage += `## Analysis Summary\n${analysisResult.analysis_summary}\n\n`;
@@ -771,20 +799,20 @@ const prepareFixPRParams = async (
   const fixBranchName = `${INTEGRITY_GIT_CONFIG.branchPrefix}-${currentDate}-${gatewayName}`;
 
   // Determine repo configuration based on mode
-  // When CREATE_REAL_PR=false, work directly in local repo (no cloning)
-  // When CREATE_REAL_PR=true, clone from remote
-  const useLocalRepoDirectly = !workflowConfig.createRealPR || config.use_mock_analysis;
+  // In mock mode: work directly in local repo (no cloning)
+  // In production mode: clone from remote and create PR
+  const useLocalRepoDirectly = config.use_mock_analysis;
   const repoUrl = useLocalRepoDirectly
-    ? localRepoPath  // Direct path - no cloning
+    ? localRepoPath  // Direct path - no cloning (mock mode only)
     : (analysisResult.repository === 'api-txns'
       ? 'https://bitbucket.example.com/scm/be/euler-api-txns.git'
       : 'https://bitbucket.example.com/scm/be/euler-api-gateway.git');
 
-  // Skip branch operations when working directly in local repo
+  // Skip branch operations when working directly in local repo (mock mode)
   const skipBranchCheckout = useLocalRepoDirectly;
 
-  // Add PR target branch instruction to the initial message
-  if (workflowConfig.createRealPR && !config.use_mock_analysis) {
+  // Add PR target branch instruction (production mode only)
+  if (!config.use_mock_analysis) {
     initialMessage += `\n**IMPORTANT**: When creating the PR, set the target branch to: ${INTEGRITY_GIT_CONFIG.prTargetBranch}\n`;
   }
 
@@ -832,12 +860,24 @@ const generateGatewayIssueReport = async (
  */
 const IntegrityDebugInputSchema = z.object({
   ticketId: z.string().describe('Ticket ID for this workflow execution'),
-  gateway: z.string().describe('Payment gateway name (e.g., SETU, PAYU)'),
-  merchantId: z.string().describe('Merchant ID'),
-  flow: z.enum(['WEBHOOK', 'SYNC', 'REDIRECTION']).describe('Payment flow type'),
-  failureReason: z.string().describe('Failure reason (e.g., INTEGRITY_CHECK_FAILED)'),
-  orderIds: z.array(z.string()).describe('Array of order IDs that failed integrity check'),
-});
+
+  // Input format fields (from API) - optional because context won't have them at top level
+  gateway: z.string().optional().describe('Payment gateway name (e.g., SETU, PAYU)'),
+  merchantId: z.string().optional().describe('Merchant ID'),
+  flow: z.enum(['WEBHOOK', 'SYNC', 'REDIRECTION']).optional().describe('Payment flow type'),
+  failureReason: z.string().optional().describe('Failure reason (e.g., INTEGRITY_CHECK_FAILED)'),
+  orderIds: z.array(z.string()).optional().describe('Array of order IDs that failed integrity check'),
+
+  // Context format fields (after contextMapper) - optional because input won't have them
+  csvData: z.string().optional().describe('CSV data (legacy, not used)'),
+  sessions: z.array(z.object({
+    orderId: z.string(),
+    merchantId: z.string(),
+    failureReason: z.string(),
+    gateway: z.string(),
+    flow: z.enum(['WEBHOOK', 'SYNC', 'REDIRECTION']),
+  })).optional().describe('Sessions array (created by contextMapper)'),
+}).passthrough(); // Allow additional fields without validation errors
 
 /**
  * Context mapper to convert payload to workflow context
@@ -845,19 +885,18 @@ const IntegrityDebugInputSchema = z.object({
 const contextMapper = (payload: any): IntegrityDebugContext => {
   // Create a single session with all order IDs
   const sessions: SessionData[] = [{
-    orderId: payload.orderIds[0], // First order ID for compatibility
-    merchantId: payload.merchantId,
-    failureReason: payload.failureReason,
-    gateway: payload.gateway,
-    flow: payload.flow,
+    orderId: payload.orderIds?.[0] || 'unknown', // First order ID for compatibility
+    merchantId: payload.merchantId || 'unknown',
+    failureReason: payload.failureReason || 'unknown',
+    gateway: payload.gateway || 'unknown',
+    flow: payload.flow || 'WEBHOOK',
   }];
 
   return {
-    ...payload, // Include all original fields for validation on resume
     ticketId: payload.ticketId,
     csvData: '', // Not used anymore
     sessions,
-    orderIds: payload.orderIds, // Store all order IDs
+    orderIds: payload.orderIds || [], // Store all order IDs
   };
 };
 
@@ -870,90 +909,117 @@ async function execute(
   const context = engine.getContext();
   const ticketId = context.ticketId;
 
-  logger.info(`[${ticketId}] Starting NEW 4-STEP Integrity Debug Workflow`);
-  logger.info(`${ticketId}_workflow_start`, {
-    sessionCount: context.sessions.length,
-  });
+  // Track errors from each step
+  const stepErrors: Array<{step: string, stepName: string, error: string}> = [];
 
-  // Extract session context from first session
-  const firstSession = context.sessions[0];
-  if (!firstSession) {
-    throw new Error('No sessions found in context');
-  }
+  try {
+    // Extract session context from first session
+    const firstSession = context.sessions[0];
+    if (!firstSession) {
+      throw new Error('No sessions found in context');
+    }
   const gateway = firstSession.gateway;
   const merchantId = firstSession.merchantId;
   const flow = firstSession.flow;
-  
+
   // Use orderIds from context (new format) or fall back to sessions (old CSV format)
   const orderIds = context.orderIds || context.sessions.map(s => s.orderId);
 
-  logger.info(`[${ticketId}] Starting NEW 5-STEP Integrity Debug Workflow`);
-  logger.info(`[${ticketId}] Session context:`, { gateway, orderIds, merchantId, flow, orderCount: orderIds.length });
+  // STEP 1: Identify repository (continue with fallback on error)
+  let identifiedRepository = 'api-gateway'; // Default fallback
+  try {
+    identifiedRepository = await engine.createCheckpoint(
+      IntegrityDebugWorkflowSteps.IDENTIFY_REPOSITORY,
+      identifyRepository,
+      ticketId,
+      gateway
+    );
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`[${ticketId}] STEP 1 Failed: ${errorMsg} - continuing with fallback: ${identifiedRepository}`);
+    stepErrors.push({ step: 'identify_repository', stepName: 'Repository Identification', error: errorMsg });
+  }
 
-  // STEP 1: Identify repository
-  const identifiedRepository = await engine.createCheckpoint(
-    IntegrityDebugWorkflowSteps.IDENTIFY_REPOSITORY,
-    identifyRepository,
-    ticketId,
-    gateway
-  );
+  // STEP 2: Discover log requirements (continue with fallback on error)
+  let logRequirements: any = { integrity_locations_found: [], log_paths: [] }; // Default fallback
+  try {
+    logRequirements = await engine.createCheckpoint(
+      IntegrityDebugWorkflowSteps.DISCOVER_LOG_REQUIREMENTS,
+      discoverLogRequirements,
+      ticketId,
+      gateway,
+      orderIds,
+      merchantId,
+      flow,
+      identifiedRepository
+    );
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`[${ticketId}] STEP 2 Failed: ${errorMsg} - continuing with empty log requirements`);
+    stepErrors.push({ step: 'discover_log_requirements', stepName: 'Log Requirements Discovery', error: errorMsg });
+  }
 
-  logger.info(`[${ticketId}] STEP 1 Complete: Repository = ${identifiedRepository}`);
+  // STEP 3: Fetch logs based on requirements (continue with fallback on error)
+  let collectedLogs: any = { sessions: [] }; // Default fallback
+  try {
+    collectedLogs = await engine.createCheckpoint(
+      IntegrityDebugWorkflowSteps.FETCH_LOGS,
+      fetchLogs,
+      ticketId,
+      gateway,
+      orderIds,
+      merchantId,
+      flow,
+      logRequirements
+    );
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`[${ticketId}] STEP 3 Failed: ${errorMsg} - continuing with empty logs`);
+    stepErrors.push({ step: 'fetch_logs', stepName: 'Log Collection', error: errorMsg });
+  }
 
-  // STEP 2: Discover log requirements
-  const logRequirements = await engine.createCheckpoint(
-    IntegrityDebugWorkflowSteps.DISCOVER_LOG_REQUIREMENTS,
-    discoverLogRequirements,
-    ticketId,
-    gateway,
-    orderIds,
-    merchantId,
-    flow,
-    identifiedRepository
-  );
+  // STEP 4: Analyze amount logic using Money framework with collected logs (continue with fallback on error)
+  let amountFormat: any = { amount_format: 'unknown', calculated_amount: 'unknown' }; // Default fallback
+  try {
+    amountFormat = await engine.createCheckpoint(
+      IntegrityDebugWorkflowSteps.DISCOVER_AMOUNT_FORMAT,
+      discoverAmountFormat,
+      ticketId,
+      gateway,
+      identifiedRepository,
+      collectedLogs
+    );
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`[${ticketId}] STEP 4 Failed: ${errorMsg} - continuing with unknown amount format`);
+    stepErrors.push({ step: 'discover_amount_format', stepName: 'Amount Format Analysis', error: errorMsg });
+  }
 
-  logger.info(`[${ticketId}] STEP 2 Complete: Discovered ${logRequirements.integrity_locations_found?.length || 0} integrity locations`);
-
-  // STEP 3: Fetch logs based on requirements
-  const collectedLogs = await engine.createCheckpoint(
-    IntegrityDebugWorkflowSteps.FETCH_LOGS,
-    fetchLogs,
-    ticketId,
-    gateway,
-    orderIds,
-    merchantId,
-    flow,
-    logRequirements
-  );
-
-  logger.info(`[${ticketId}] STEP 3 Complete: Collected ${Object.keys(collectedLogs).length} log categories`);
-
-  // STEP 4: Analyze amount logic using Money framework with collected logs
-  const amountFormat = await engine.createCheckpoint(
-    IntegrityDebugWorkflowSteps.DISCOVER_AMOUNT_FORMAT,
-    discoverAmountFormat,
-    ticketId,
-    gateway,
-    identifiedRepository,
-    collectedLogs
-  );
-
-  logger.info(`[${ticketId}] STEP 4 Complete: Amount logic = ${amountFormat.amount_format}, calculated amount = ${amountFormat.calculated_amount}`);
-
-  // STEP 5: Comprehensive code analysis (with amount format context)
-  const analysisResult = await engine.createCheckpoint(
-    IntegrityDebugWorkflowSteps.ANALYZE_CODE,
-    analyzeCode,
-    ticketId,
-    gateway,
-    orderIds,
-    merchantId,
-    collectedLogs,
-    identifiedRepository,
-    amountFormat
-  );
-
-  logger.info(`[${ticketId}] STEP 5 Complete: Analysis shows ${analysisResult.is_our_issue ? 'OUR ISSUE' : 'GATEWAY ISSUE'}`);
+  // STEP 5: Comprehensive code analysis (with amount format context) (continue with fallback on error)
+  let analysisResult: any = {
+    is_our_issue: false,
+    issue_type: 'unknown',
+    analysis_summary: 'Analysis could not be completed',
+    affected_files: [],
+    suggested_fix: { code_changes: [] }
+  }; // Default fallback
+  try {
+    analysisResult = await engine.createCheckpoint(
+      IntegrityDebugWorkflowSteps.ANALYZE_CODE,
+      analyzeCode,
+      ticketId,
+      gateway,
+      orderIds,
+      merchantId,
+      collectedLogs,
+      identifiedRepository,
+      amountFormat
+    );
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`[${ticketId}] STEP 5 Failed: ${errorMsg} - continuing with incomplete analysis`);
+    stepErrors.push({ step: 'analyze_code', stepName: 'Code Analysis', error: errorMsg });
+  }
 
   // Step 6: Decide action
   const action = await engine.createCheckpoint(
@@ -982,7 +1048,7 @@ async function execute(
           repoUrl: fixPRParams.repoUrl,
           repoBranch: fixPRParams.skipBranchCheckout ? undefined : fixPRParams.fixBranchName,
           baseBranch: fixPRParams.skipBranchCheckout ? undefined : INTEGRITY_GIT_CONFIG.analysisBaseBranch,
-          earlyPRCreation: workflowConfig.createRealPR && !config.use_mock_analysis,
+          earlyPRCreation: !config.use_mock_analysis,  // Always create PR in production mode
         },
         conversationContext: {
           initialUserMessage: fixPRParams.initialMessage,
@@ -1036,18 +1102,16 @@ async function execute(
       commitHash,
       diffLength: gitDiff?.length || 0,
       prLink: prLinkFromAgent || 'N/A',
-      mode: workflowConfig.createRealPR ? 'PR' : 'local',
+      mode: config.use_mock_analysis ? 'mock' : 'production',
       appliedToLocal: workflowConfig.applyChangesToLocalRepo
     });
 
     // Set final PR link
     prLink = config.use_mock_analysis
       ? `MOCK MODE: Changes applied to ${fixPRParams.localRepoPath}. Run: cd ${fixPRParams.localRepoPath} && git diff`
-      : workflowConfig.createRealPR && prLinkFromAgent
-      ? prLinkFromAgent
-      : workflowConfig.applyChangesToLocalRepo
-      ? `Changes applied to ${fixPRParams.localRepoPath} on branch ${fixPRParams.fixBranchName}`
-      : `Local changes committed at ${fixPRParams.localRepoPath} (commit: ${commitHash})`;
+      : prLinkFromAgent || (workflowConfig.applyChangesToLocalRepo
+        ? `Changes applied to ${fixPRParams.localRepoPath} on branch ${fixPRParams.fixBranchName}`
+        : `Local changes committed (commit: ${commitHash})`);
   } else {
     // Step 6: Generate gateway issue report
     gatewayIssueReport = await engine.createCheckpoint(
@@ -1058,15 +1122,6 @@ async function execute(
       collectedLogs
     );
   }
-
-  logger.info(`[${ticketId}] Integrity Debug Workflow completed`);
-  logger.info(`${ticketId}_workflow_complete`, {
-    issueType: action === 'create_pr' ? 'our_issue' : 'gateway_issue',
-    prLink,
-    commitHash,
-    hasGitDiff: !!gitDiff,
-    hasGatewayReport: !!gatewayIssueReport,
-  });
 
   const workflowOutput: IntegrityDebugWorkflowOutput = {
     sessionsAnalyzed: orderIds.length,
@@ -1081,21 +1136,87 @@ async function execute(
     // New fields from 4-step workflow
     logRequirements,
     integrityLocationsAnalyzed: analysisResult.integrity_locations_analysis?.length || 0,
+    // Include step errors if any steps failed
+    stepErrors: stepErrors.length > 0 ? stepErrors : undefined,
   };
 
-  logger.info(`[${ticketId}] Returning NEW 4-STEP workflow output`);
-  logger.info(`[${ticketId}] Workflow Summary:`, {
-    gateway,
-    repository: identifiedRepository,
-    orderCount: orderIds.length,
-    integrityLocations: logRequirements.integrity_locations_found?.length || 0,
-    isOurIssue: analysisResult.is_our_issue,
-    issueType: analysisResult.issue_type,
-    action,
-  });
-  console.log(`[${ticketId}] NEW 4-STEP Workflow output:`, workflowOutput);
-
   return workflowOutput;
+  } catch (error) {
+    // Determine which step failed by checking the error stack or message
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+
+    // Try to identify the step that failed
+    let failedStep = 'unknown';
+    let failedStepName = 'Unknown Step';
+
+    if (errorMessage.includes('repository') || errorMessage.includes('STEP 1')) {
+      failedStep = IntegrityDebugWorkflowSteps.IDENTIFY_REPOSITORY;
+      failedStepName = 'Repository Identification';
+    } else if (errorMessage.includes('log requirements') || errorMessage.includes('STEP 2')) {
+      failedStep = IntegrityDebugWorkflowSteps.DISCOVER_LOG_REQUIREMENTS;
+      failedStepName = 'Log Requirements Discovery';
+    } else if (errorMessage.includes('fetch') || errorMessage.includes('logs') || errorMessage.includes('STEP 3')) {
+      failedStep = IntegrityDebugWorkflowSteps.FETCH_LOGS;
+      failedStepName = 'Log Collection';
+    } else if (errorMessage.includes('amount') || errorMessage.includes('STEP 4')) {
+      failedStep = IntegrityDebugWorkflowSteps.DISCOVER_AMOUNT_FORMAT;
+      failedStepName = 'Amount Format Analysis';
+    } else if (errorMessage.includes('code analysis') || errorMessage.includes('STEP 5')) {
+      failedStep = IntegrityDebugWorkflowSteps.ANALYZE_CODE;
+      failedStepName = 'Code Analysis';
+    } else if (errorMessage.includes('PR') || errorMessage.includes('commit') || errorMessage.includes('STEP 6')) {
+      failedStep = IntegrityDebugWorkflowSteps.CREATE_FIX_PR;
+      failedStepName = 'Create Fix PR';
+    } else if (errorMessage.includes('gateway') || errorMessage.includes('report')) {
+      failedStep = IntegrityDebugWorkflowSteps.GENERATE_GATEWAY_ISSUE_REPORT;
+      failedStepName = 'Generate Gateway Issue Report';
+    }
+
+    logger.error(`[${ticketId}] Workflow failed at step: ${failedStepName}`);
+    logger.error(`[${ticketId}] Error message: ${errorMessage}`);
+    logger.error(`${ticketId}_workflow_error`, {
+      step: failedStep,
+      stepName: failedStepName,
+      errorMessage,
+      errorStack: errorStack?.substring(0, 500), // Limit stack trace length
+    });
+
+    // Save error details to a checkpoint so it's available in the API response
+    const errorDetails = {
+      sessionsAnalyzed: 0,
+      issueType: 'our_issue' as const,
+      logsAggregated: {},
+      analysisDetails: {},
+      error: {
+        message: errorMessage,
+        step: failedStep,
+        stepName: failedStepName,
+        details: errorStack?.substring(0, 1000),
+        timestamp: new Date().toISOString(),
+      },
+    };
+
+    try {
+      await engine.createCheckpoint(
+        IntegrityDebugWorkflowSteps.SAVE_ERROR_DETAILS,
+        async () => errorDetails
+      );
+    } catch (e) {
+      logger.warn(`[${ticketId}] Failed to save error details to checkpoint:`, e);
+    }
+
+    // Now throw the error so workflow is marked as FAILURE
+    const structuredError = new Error(errorMessage);
+    (structuredError as any).workflowError = {
+      step: failedStep,
+      stepName: failedStepName,
+      details: errorStack?.substring(0, 1000),
+      timestamp: new Date().toISOString(),
+    };
+
+    throw structuredError;
+  }
 }
 
 // ============================================================================
