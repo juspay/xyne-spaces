@@ -1,3 +1,17 @@
+## [1.69.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.68.1...v1.69.0) (2026-03-06)
+
+
+### Features
+
+* : added precommit and instructions ([264f346](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/264f346b083dc982cfdb216171ad2511b0803029)), closes [#3887](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3887)
+* prompt improvemet and better error message. ([9890ff2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9890ff2cad707591e490927a860a1e8fa59d7ed5)), closes [#3879](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3879)
+
+
+### Bug Fixes
+
+* Fix dismiss and related ticket/message links in nudge framework + added cac config ([2ddcd51](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2ddcd510bbd3ed386251e71040698864e969d156))
+* workflow fixes, changes in the workflow screen, fetching only workflow, minor UI fixes ([c77d38e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c77d38e02796a22ff3ac587733a0f36957b73395)), closes [#3881](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3881)
+
 ## [1.68.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.68.0...v1.68.1) (2026-03-05)
 
 
