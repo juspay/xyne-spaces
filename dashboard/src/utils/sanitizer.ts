@@ -26,6 +26,14 @@ export const ALLOWED_TAGS = new Set([
   'del',
   'button',
   'hi',
+  'table',
+  'thead',
+  'tbody',
+  'tr',
+  'td',
+  'th',
+  'colgroup',
+  'col',
 ]);
 
 const ALLOWED_ATTRS: Record<string, string[]> = {
@@ -38,6 +46,14 @@ const ALLOWED_ATTRS: Record<string, string[]> = {
   ol: ['start', 'type'],
   ul: ['type'],
   img: ['src', 'alt', 'title', 'class', 'data-emoji', 'data-emoji-id'],
+  table: ['class'],
+  thead: ['class'],
+  tbody: ['class'],
+  tr: ['class'],
+  td: ['class', 'colspan', 'rowspan'],
+  th: ['class', 'colspan', 'rowspan'],
+  colgroup: ['class'],
+  col: ['class', 'span'],
 };
 
 const SAFE_PROTOCOLS = ['http:', 'https:', 'mailto:'];

@@ -7,6 +7,7 @@ import React, {
   useEffect,
 } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { DOMParser as PMDOMParser } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
@@ -37,6 +38,7 @@ import type { MentionResult } from '../Selectors/Selectors.types';
 import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
 import { ChannelMentionExtension, channelMentionPluginKey } from '../TipTapExtensions';
+import { TableExtensions } from '../TipTapExtensions';
 import { ColonEmojiExtension } from '../TipTapExtensions/ColonEmojiExtension';
 import type { InputBoxProps } from './InputBox.types';
 import { formatTypingMessage } from './InputBox.utils';
@@ -346,6 +348,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }),
         ChannelMentionExtension,
         CommandsExtension,
+        ...TableExtensions,
       ],
       content: value || '',
       editable: !isSending,
@@ -461,7 +464,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
           return false;
         },
-        handlePaste: (_view, event) => {
+        handlePaste: (view, event) => {
           const clipboard = event.clipboardData;
 
           /** Handle File Pasting */
@@ -470,7 +473,56 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             void addFilesWithLimit(files);
           }
 
+          /** Helper: insert arbitrary HTML into the editor via ProseMirror directly */
+          const insertHtmlAtCursor = (html: string): void => {
+            const container = document.createElement('div');
+            container.innerHTML = html;
+            const pmParser = PMDOMParser.fromSchema(view.state.schema);
+            const slice = pmParser.parseSlice(container);
+            view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
+          };
+
+          const htmlContent = clipboard?.getData('text/html');
+          if (htmlContent && htmlContent.includes('<table')) {
+            event.preventDefault();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlContent, 'text/html');
+            const tables = Array.from(doc.querySelectorAll('table'));
+            if (tables.length > 0) {
+              const tableHtml = tables.map(t => t.outerHTML).join('');
+              if (tableHtml.length > 11500) {
+                toast.error('Table content is too large', {
+                  description: 'Please paste a smaller table or copy the data as text.',
+                });
+                return true;
+              }
+              insertHtmlAtCursor(tableHtml);
+              return true;
+            }
+          }
+
           const pastedText = clipboard?.getData('text');
+
+          /** Handle tab-separated data paste (no HTML table available in clipboard) */
+          if (pastedText && !(htmlContent && htmlContent.includes('<table'))) {
+            const lines = pastedText.split('\n').filter(l => l.trim() !== '');
+            if (lines.length >= 2 && lines.every(l => l.includes('\t'))) {
+              event.preventDefault();
+              const rows = lines.map(l => l.split('\t'));
+              const [headerRow, ...bodyRows] = rows;
+              if (!headerRow) return false;
+              const thead = `<thead><tr>${headerRow.map(c => `<th>${c.trim()}</th>`).join('')}</tr></thead>`;
+              const tbody =
+                bodyRows.length > 0
+                  ? `<tbody>${bodyRows
+                      .map(r => `<tr>${r.map(c => `<td>${c.trim()}</td>`).join('')}</tr>`)
+                      .join('')}</tbody>`
+                  : '';
+              insertHtmlAtCursor(`<table>${thead}${tbody}</table>`);
+              return true;
+            }
+          }
+
           if (pastedText && pastedText.length > 11500) {
             event.preventDefault();
 
