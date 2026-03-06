@@ -62,6 +62,8 @@ export interface WorkflowHeaderProps {
   onOpenWorkflowGraph?: () => void;
   isGraphViewOpen?: boolean;
   onGraphViewToggle?: () => void;
+  isAgentChatOpen?: boolean;
+  onAgentChatToggle?: () => void;
   /** Git branch for Jenkins builds (from workflow gitInfo) */
   gitBranch?: string | undefined;
   workflowType?: string | undefined;
@@ -233,37 +235,37 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   // const displayDesc = !showDesc && desc.length > 150 ? desc.slice(0, 150) + '...' : desc;
 
   return (
-    <div className='flex-shrink-0 bg-white border-b border-red-100'>
-      <div className='flex items-center justify-between px-4 py-2.5'>
-        <div className='flex items-center gap-2 text-sm min-w-0'>
+    <div className='flex-shrink-0 bg-white border-b border-gray-100'>
+      <div className='flex items-center justify-between px-3 md:px-4 py-2 md:py-2.5 gap-2'>
+        <div className='flex items-center gap-1.5 md:gap-2 text-sm min-w-0 flex-1'>
           <button
             onClick={() => void navigate('/tickets?clear=true')}
-            className='p-1.5 rounded-md hover:bg-gray-100 transition-colors'
+            className='p-1.5 rounded-md hover:bg-gray-100 transition-colors flex-shrink-0'
             title='Back to Workflows'
             data-track-category='Workflows'
             data-track-name='NavigateBackToWorkflows'
             data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
           >
-            <ChevronLeft size={24} className='text-gray-500' />
+            <ChevronLeft size={20} className='text-gray-500' />
           </button>
-          <span className='font-semibold text-gray-900 truncate'>
+          <span className='font-semibold text-gray-900 truncate text-sm md:text-base'>
             {ticket.xyneId || `RUN-${ticket.id.slice(0, 4).toUpperCase()}`}
           </span>
           {workflowType && (
             <>
-              <ChevronRight size={14} className='text-gray-300 flex-shrink-0' />
-              <span className='text-gray-600 truncate'>
-                {workflowType.length > 20 ? `${workflowType.slice(0, 20)}...` : workflowType}
+              <ChevronRight size={14} className='text-gray-300 flex-shrink-0 hidden sm:block' />
+              <span className='text-gray-600 truncate hidden sm:block max-w-[120px] md:max-w-none'>
+                {workflowType.length > 15 ? `${workflowType.slice(0, 15)}...` : workflowType}
               </span>
             </>
           )}
           {executionStatus && (
             <>
-              <ChevronRight size={14} className='text-gray-300 flex-shrink-0' />
+              <ChevronRight size={14} className='text-gray-300 flex-shrink-0 hidden sm:block' />
               <div className='relative' ref={statusDropdownRef}>
                 <button
                   onClick={() => setShowStatusDropdown(!showStatusDropdown)}
-                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md ${statusConfig.bg} cursor-pointer hover:opacity-80 transition-opacity`}
+                  className={`inline-flex items-center gap-1 px-1.5 md:px-2 py-0.5 rounded-md ${statusConfig.bg} cursor-pointer hover:opacity-80 transition-opacity`}
                   data-track-category='Workflows'
                   data-track-name='ToggleStatusDropdown'
                   data-track-metadata={JSON.stringify({ executionStatus, ticketId: ticket.id })}
@@ -271,13 +273,13 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot} ${isRunning ? 'animate-pulse' : ''}`}
                   />
-                  <span className={`text-xs font-medium ${statusConfig.text}`}>
+                  <span className={`text-[10px] md:text-xs font-medium ${statusConfig.text}`}>
                     {statusConfig.label}
                   </span>
-                  <ChevronDown size={12} className={statusConfig.text} />
+                  <ChevronDown size={10} className={`${statusConfig.text} hidden sm:block`} />
                 </button>
                 {showStatusDropdown && (
-                  <div className='absolute left-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-50'>
+                  <div className='absolute left-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-[60]'>
                     {executorType && (
                       <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
                         <span className='font-medium text-gray-900'>Executor: {executorType}</span>
@@ -331,11 +333,11 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
             </>
           )}
         </div>
-        <div className='flex items-center gap-2 flex-shrink-0'>
+        <div className='flex items-center gap-1 md:gap-2 flex-shrink-0'>
           {onTriggerWorkflow && (
             <button
               onClick={onTriggerWorkflow}
-              className='inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors text-xs text-gray-700'
+              className='hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors text-xs text-gray-700'
               title='Trigger Workflow'
               data-track-category='Workflows'
               data-track-name='TriggerWorkflow'
@@ -356,12 +358,12 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               data-track-metadata={JSON.stringify({ executionId })}
             >
               <XCircle size={14} className='text-red-600 flex-shrink-0' />
-              {isCanceling ? 'Canceling...' : 'Cancel'}
+              <span className='hidden sm:inline'>{isCanceling ? 'Canceling...' : 'Cancel'}</span>
             </button>
           )}
           {(onOpenWorkflowGraph || onGraphViewToggle) && (
             <button
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border transition-colors text-xs ml-2 ${isGraphViewOpen ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100' : 'hover:bg-blue-100 hover:border-blue-300'}`}
+              className={`hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border transition-colors text-xs ${isGraphViewOpen ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
               title={isGraphViewOpen ? 'Hide Workflow Graph' : 'Show Workflow Graph'}
               onClick={onGraphViewToggle || onOpenWorkflowGraph}
               data-track-category='Workflows'
@@ -370,21 +372,13 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
             >
               <Workflow
                 size={14}
-                className={`${isGraphViewOpen ? 'text-blue-600' : 'text-gray-300'} flex-shrink-0`}
+                className={`${isGraphViewOpen ? 'text-blue-600' : 'text-gray-500'} flex-shrink-0`}
               />
-              {isGraphViewOpen ? 'Workflow' : 'Workflow'}
+              Workflow
             </button>
           )}
-          {/* {executionMetadata.length > 0 && onExecutionSelect && (
-            <ExecutionAttemptDropdown
-              executionMetadata={executionMetadata}
-              {...(selectedExecutionId && { selectedExecutionId })}
-              onExecutionSelect={onExecutionSelect}
-            />
-          )} */}
-          {/* Jenkins build Button - only show if branch is available */}
           {gitBranch && (
-            <div className='relative' ref={jenkinsPanelRef}>
+            <div className='relative hidden md:block' ref={jenkinsPanelRef}>
               <button
                 data-jenkins-trigger
                 onClick={() => setShowJenkinsPanel(!showJenkinsPanel)}
@@ -418,45 +412,6 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               )}
             </div>
           )}
-          {/* {onOpenDebugView && (
-            <button
-              onClick={onOpenDebugView}
-              className='inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-all'
-              title='Debug View'
-            >
-              <GitBranch size={14} className='text-gray-600' />
-              <span className='text-xs font-medium text-gray-600'>Workflow</span>
-            </button>
-          )} */}
-          {/* {!isFinished && (
-            <>
-              <ActionBtn
-                onClick={() => handleAction('cancel')}
-                disabled={isCanceling || !executionId}
-              >
-                <XCircle size={14} />
-                Cancel
-              </ActionBtn>
-              {isPaused ? (
-                <ActionBtn
-                  onClick={() => handleAction('resume')}
-                  disabled={isResuming || !executionId}
-                  primary
-                >
-                  <Play size={14} />
-                  Resume
-                </ActionBtn>
-              ) : (
-                <ActionBtn
-                  onClick={() => handleAction('pause')}
-                  disabled={isPausing || !executionId}
-                >
-                  <Pause size={14} />
-                  Pause
-                </ActionBtn>
-              )}
-            </>
-          )} */}
           <div className='relative' ref={menuRef}>
             <button
               className='p-1.5 rounded-md hover:bg-gray-100 transition-colors'
@@ -466,10 +421,57 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               data-track-name='ToggleMoreMenu'
               data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
             >
-              <MoreVertical size={16} className='text-gray-400' />
+              <MoreVertical size={18} className='text-gray-500' />
             </button>
             {showMenu && (
-              <div className='absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50'>
+              <div className='absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[100]'>
+                {onTriggerWorkflow && (
+                  <div className='md:hidden'>
+                    <MenuItem
+                      onClick={() => {
+                        onTriggerWorkflow();
+                        setShowMenu(false);
+                      }}
+                      icon={<Play size={14} className='text-gray-400' />}
+                      data-track-category='Workflows'
+                      data-track-name='TriggerWorkflow'
+                    >
+                      Trigger Workflow
+                    </MenuItem>
+                  </div>
+                )}
+                {(onOpenWorkflowGraph || onGraphViewToggle) && (
+                  <div className='md:hidden'>
+                    <MenuItem
+                      onClick={() => {
+                        (onGraphViewToggle || onOpenWorkflowGraph)?.();
+                        setShowMenu(false);
+                      }}
+                      icon={<Workflow size={14} className='text-gray-400' />}
+                      data-track-category='Workflows'
+                      data-track-name='ToggleWorkflowGraph'
+                    >
+                      {isGraphViewOpen ? 'Hide Workflow' : 'Show Workflow'}
+                    </MenuItem>
+                  </div>
+                )}
+
+                {gitBranch && (
+                  <div className='md:hidden'>
+                    <MenuItem
+                      onClick={() => {
+                        void handleTriggerJenkinsBuild();
+                        setShowMenu(false);
+                      }}
+                      icon={<Rocket size={14} className='text-orange-500' />}
+                      data-track-category='Workflows'
+                      data-track-name='TriggerJenkinsBuild'
+                    >
+                      Trigger Build
+                    </MenuItem>
+                  </div>
+                )}
+                <div className='border-t border-gray-100 md:border-t-0' />
                 <MenuItem
                   onClick={() => {
                     void navigator.clipboard.writeText(executionId || ticket.id);
@@ -513,21 +515,10 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           </div>
         </div>
       </div>
-      <div className='px-4 pb-3'>
-        <h1 className='text-base font-semibold text-gray-900 leading-tight'>{ticket.title}</h1>
-        {/* {desc && (
-          <div className='mt-1.5 flex items-start gap-2'>
-            <p className='text-sm text-gray-500 leading-relaxed flex-1'>{displayDesc}</p>
-            {desc.length > 150 && (
-              <button
-                onClick={() => setShowDesc(!showDesc)}
-                className='text-xs font-medium text-blue-500 hover:text-blue-600 whitespace-nowrap flex-shrink-0 mt-0.5'
-              >
-                {showDesc ? 'View Less' : 'View More'}
-              </button>
-            )}
-          </div>
-        )} */}
+      <div className='px-3 md:px-4 pb-2 md:pb-3'>
+        <h1 className='text-sm md:text-base font-semibold text-gray-900 leading-tight line-clamp-2'>
+          {ticket.title}
+        </h1>
       </div>
     </div>
   );

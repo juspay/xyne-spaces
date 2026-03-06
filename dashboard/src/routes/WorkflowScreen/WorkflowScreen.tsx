@@ -26,6 +26,7 @@ import LiveEditsPanel from '../../components/Workflows/LiveEditsPanel';
 import { RCADetailsPanel, type RCAItem } from '../../components/Workflows/RCADetailsPanel';
 import { workflowScreenMachine } from '../../machines/workflowScreenMachine';
 import { VSCodePanel } from '../../components/Workflows/VSCodePanel';
+import { usePlatform } from '../../hooks/usePlatform';
 
 const LAST_WORKFLOW_PATH_KEY = 'last-viewed-workflow-path';
 
@@ -40,6 +41,7 @@ const WorkflowScreen: React.FC = () => {
   const ticketsLoading = ticketQueryDetails.type === 'unknown';
 
   const isElectron = useMemo(() => isElectronApp(), []);
+  const { isMobile } = usePlatform();
 
   // Initialize state machine for persistent state management
   const [state, send] = useMachine(workflowScreenMachine);
@@ -47,15 +49,16 @@ const WorkflowScreen: React.FC = () => {
   // Initialize machine when ticketId is available and save current path
   useEffect(() => {
     if (ticketId) {
-      send({ type: 'INIT', ticketId });
+      send({ type: 'INIT', ticketId, defaultAgentChatOpen: isMobile });
       // Save the full path to restore later
       sessionStorage.setItem(LAST_WORKFLOW_PATH_KEY, window.location.pathname);
     }
-  }, [ticketId, send]);
+  }, [ticketId, send, isMobile]);
 
   // State from machine
   const selectedExecutionId = state.context.selectedExecutionId;
   const isGraphViewOpen = state.context.isGraphViewOpen;
+  const isAgentChatOpen = state.context.isAgentChatOpen;
   const selectedNodeStepIds = state.context.selectedNodeStepIds;
 
   const [selectedStep, setSelectedStep] = useState<
@@ -624,6 +627,8 @@ const WorkflowScreen: React.FC = () => {
         onOpenDebugView={handleOpenDebugView}
         isGraphViewOpen={isGraphViewOpen}
         onGraphViewToggle={() => send({ type: 'SET_GRAPH_VIEW_OPEN', isOpen: !isGraphViewOpen })}
+        isAgentChatOpen={isAgentChatOpen}
+        onAgentChatToggle={() => send({ type: 'SET_AGENT_CHAT_OPEN', isOpen: !isAgentChatOpen })}
         gitBranch={gitInfo?.branch}
         workflowType={workflowType}
         onTriggerWorkflow={() => setIsWorkflowModalOpen(true)}
@@ -662,6 +667,8 @@ const WorkflowScreen: React.FC = () => {
               onExecutionChange={handleExecutionSelect}
               isGraphViewOpen={isGraphViewOpen}
               onGraphViewChange={isOpen => send({ type: 'SET_GRAPH_VIEW_OPEN', isOpen })}
+              isAgentChatOpen={isAgentChatOpen}
+              onAgentChatChange={isOpen => send({ type: 'SET_AGENT_CHAT_OPEN', isOpen })}
               scrollPosition={state.context.scrollPosition}
               onScrollPositionChange={position => send({ type: 'SET_SCROLL_POSITION', position })}
               conversationId={ticket.conversationId}

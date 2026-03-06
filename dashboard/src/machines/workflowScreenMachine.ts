@@ -7,6 +7,7 @@ export interface WorkflowScreenContext {
   selectedExecutionId: string | null;
   activeTabId: string;
   isGraphViewOpen: boolean;
+  isAgentChatOpen: boolean;
   selectedNodeStepIds: string[];
   selectedFilePath: string | null;
   scrollPosition: number;
@@ -17,10 +18,12 @@ export type WorkflowScreenEvent =
       type: 'INIT';
       ticketId: string;
       defaultActiveTabId?: string;
+      defaultAgentChatOpen?: boolean;
     }
   | { type: 'SET_SELECTED_EXECUTION_ID'; executionId: string | null }
   | { type: 'SET_ACTIVE_TAB_ID'; tabId: string }
   | { type: 'SET_GRAPH_VIEW_OPEN'; isOpen: boolean }
+  | { type: 'SET_AGENT_CHAT_OPEN'; isOpen: boolean }
   | { type: 'SET_SELECTED_NODE_STEP_IDS'; stepIds: string[] }
   | { type: 'SET_SELECTED_FILE_PATH'; filePath: string | null }
   | { type: 'SET_SCROLL_POSITION'; position: number }
@@ -30,6 +33,7 @@ interface StorageData {
   selectedExecutionId: string | null;
   activeTabId: string;
   isGraphViewOpen: boolean;
+  isAgentChatOpen: boolean;
   selectedNodeStepIds: string[];
   selectedFilePath: string | null;
   scrollPosition: number;
@@ -39,7 +43,11 @@ const getStorageKey = (ticketId: string): string => {
   return `${STORAGE_KEY_PREFIX}-${ticketId}`;
 };
 
-const loadFromStorage = (ticketId: string, defaultActiveTabId: string): StorageData => {
+const loadFromStorage = (
+  ticketId: string,
+  defaultActiveTabId: string,
+  defaultAgentChatOpen = false,
+): StorageData => {
   try {
     const raw = sessionStorage.getItem(getStorageKey(ticketId));
     if (raw) {
@@ -48,6 +56,7 @@ const loadFromStorage = (ticketId: string, defaultActiveTabId: string): StorageD
         selectedExecutionId: parsed.selectedExecutionId ?? null,
         activeTabId: parsed.activeTabId ?? defaultActiveTabId,
         isGraphViewOpen: parsed.isGraphViewOpen ?? false,
+        isAgentChatOpen: parsed.isAgentChatOpen ?? defaultAgentChatOpen,
         selectedNodeStepIds: parsed.selectedNodeStepIds ?? [],
         selectedFilePath: parsed.selectedFilePath ?? null,
         scrollPosition: parsed.scrollPosition ?? 0,
@@ -60,6 +69,7 @@ const loadFromStorage = (ticketId: string, defaultActiveTabId: string): StorageD
     selectedExecutionId: null,
     activeTabId: defaultActiveTabId,
     isGraphViewOpen: false,
+    isAgentChatOpen: defaultAgentChatOpen,
     selectedNodeStepIds: [],
     selectedFilePath: null,
     scrollPosition: 0,
@@ -73,6 +83,7 @@ const saveToStorage = (context: WorkflowScreenContext): void => {
       selectedExecutionId: context.selectedExecutionId,
       activeTabId: context.activeTabId,
       isGraphViewOpen: context.isGraphViewOpen,
+      isAgentChatOpen: context.isAgentChatOpen,
       selectedNodeStepIds: context.selectedNodeStepIds,
       selectedFilePath: context.selectedFilePath,
       scrollPosition: context.scrollPosition,
@@ -123,13 +134,15 @@ export const workflowScreenMachine = setup({
       if (event.type !== 'INIT') return context;
 
       const defaultActiveTabId = event.defaultActiveTabId || 'live-edits';
-      const stored = loadFromStorage(event.ticketId, defaultActiveTabId);
+      const defaultAgentChatOpen = event.defaultAgentChatOpen || false;
+      const stored = loadFromStorage(event.ticketId, defaultActiveTabId, defaultAgentChatOpen);
 
       return {
         ticketId: event.ticketId,
         selectedExecutionId: stored.selectedExecutionId,
         activeTabId: stored.activeTabId,
         isGraphViewOpen: stored.isGraphViewOpen,
+        isAgentChatOpen: stored.isAgentChatOpen,
         selectedNodeStepIds: stored.selectedNodeStepIds,
         selectedFilePath: stored.selectedFilePath,
         scrollPosition: stored.scrollPosition,
@@ -153,6 +166,13 @@ export const workflowScreenMachine = setup({
     setGraphViewOpen: assign(({ event, context }) => {
       if (event.type !== 'SET_GRAPH_VIEW_OPEN') return context;
       const newContext = { ...context, isGraphViewOpen: event.isOpen };
+      saveToStorage(newContext);
+      return newContext;
+    }),
+
+    setAgentChatOpen: assign(({ event, context }) => {
+      if (event.type !== 'SET_AGENT_CHAT_OPEN') return context;
+      const newContext = { ...context, isAgentChatOpen: event.isOpen };
       saveToStorage(newContext);
       return newContext;
     }),
@@ -185,6 +205,7 @@ export const workflowScreenMachine = setup({
         selectedExecutionId: null,
         activeTabId: 'live-edits',
         isGraphViewOpen: false,
+        isAgentChatOpen: false,
         selectedNodeStepIds: [],
         selectedFilePath: null,
         scrollPosition: 0,
@@ -199,6 +220,7 @@ export const workflowScreenMachine = setup({
     selectedExecutionId: null,
     activeTabId: 'live-edits',
     isGraphViewOpen: false,
+    isAgentChatOpen: false,
     selectedNodeStepIds: [],
     selectedFilePath: null,
     scrollPosition: 0,
@@ -222,6 +244,9 @@ export const workflowScreenMachine = setup({
         },
         SET_GRAPH_VIEW_OPEN: {
           actions: 'setGraphViewOpen',
+        },
+        SET_AGENT_CHAT_OPEN: {
+          actions: 'setAgentChatOpen',
         },
         SET_SELECTED_NODE_STEP_IDS: {
           actions: 'setSelectedNodeStepIds',

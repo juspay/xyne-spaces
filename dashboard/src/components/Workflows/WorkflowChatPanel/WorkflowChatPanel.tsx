@@ -24,6 +24,7 @@ import {
   History,
   Search,
   MoreVertical,
+  Users2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AgentStepRenderer } from '../AgentStepRenderer/StepRenderer';
@@ -40,6 +41,7 @@ import { ThreadMessages } from '../../Chat/ThreadPannel';
 import { ThreadSummary } from '../../Chat/Summary';
 import { MessageSquare } from 'lucide-react';
 import { ErrorsPanel } from './ErrorsPanel';
+import { AgentChatView } from '../AgentChatView';
 
 interface WorkflowChatPanelProps {
   combinedStepsData: CombinedWorkflowData | null;
@@ -55,6 +57,8 @@ interface WorkflowChatPanelProps {
   onExecutionChange?: (executionId: string) => void;
   isGraphViewOpen?: boolean;
   onGraphViewChange?: (isOpen: boolean) => void;
+  isAgentChatOpen?: boolean;
+  onAgentChatChange?: (isOpen: boolean) => void;
   // Props for Thread tab
   conversationId?: string;
   channelId?: string;
@@ -223,6 +227,8 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
   onExecutionChange,
   isGraphViewOpen: externalIsGraphViewOpen,
   onGraphViewChange,
+  isAgentChatOpen: externalIsAgentChatOpen,
+  onAgentChatChange,
   // Thread tab props
   conversationId,
   channelId,
@@ -242,10 +248,20 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [internalIsAgentChatOpen, setInternalIsAgentChatOpen] = useState(false);
 
   // Use external control if provided, otherwise use internal state
   const isGraphViewOpen = externalIsGraphViewOpen ?? internalIsGraphViewOpen;
   const setIsGraphViewOpen = onGraphViewChange ?? setInternalIsGraphViewOpen;
+
+  const isAgentChatOpen = externalIsAgentChatOpen ?? internalIsAgentChatOpen;
+  const setIsAgentChatOpen = (isOpen: boolean): void => {
+    if (onAgentChatChange) {
+      onAgentChatChange(isOpen);
+    } else {
+      setInternalIsAgentChatOpen(isOpen);
+    }
+  };
 
   const [graphPosition, setGraphPosition] = useState<{
     top: number;
@@ -263,7 +279,10 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
 
   useEffect(() => {
     const updateGraphPosition = (): void => {
-      if (isGraphViewOpen && headerRef.current) {
+      if (
+        (isGraphViewOpen || (externalIsAgentChatOpen ?? internalIsAgentChatOpen)) &&
+        headerRef.current
+      ) {
         const headerRect = headerRef.current.getBoundingClientRect();
         const screenElement = document.querySelector("[data-component='WorkflowScreen']");
 
@@ -289,7 +308,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
     updateGraphPosition();
     window.addEventListener('resize', updateGraphPosition);
     return (): void => window.removeEventListener('resize', updateGraphPosition);
-  }, [isGraphViewOpen]);
+  }, [isGraphViewOpen, externalIsAgentChatOpen, internalIsAgentChatOpen]);
 
   // Graph node navigation state
   const [currentNodeIndex, setCurrentNodeIndex] = useState<number>(0);
@@ -981,6 +1000,30 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 <Search size={16} />
               </button>
 
+              {/* Agent Chat Toggle Button - hidden when externally controlled via WorkflowHeader */}
+              {externalIsAgentChatOpen === undefined && (
+                <button
+                  onClick={() => {
+                    const next = !isAgentChatOpen;
+                    setIsAgentChatOpen(next);
+                    // Close graph view when opening chat
+                    if (next) setIsGraphViewOpen(false);
+                  }}
+                  className={`flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors ${
+                    isAgentChatOpen
+                      ? 'bg-purple-50 text-purple-600 border-purple-200'
+                      : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                  }`}
+                  style={{ width: '42px', height: '42px' }}
+                  title='Agent Conversation'
+                  data-track-category='Workflows'
+                  data-track-name='ToggleAgentChat'
+                  data-track-metadata={JSON.stringify({ executionId })}
+                >
+                  <Users2 size={16} />
+                </button>
+              )}
+
               {/* Thread Button */}
               <button
                 onClick={() => setMainTab('thread')}
@@ -1328,6 +1371,32 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     onNodeSelect={handleGraphNodeClick}
                   />
                 )}
+              </div>,
+              document.body,
+            )}
+
+          {isAgentChatOpen &&
+            createPortal(
+              <div
+                className='fixed bg-white z-50 shadow-lg border-t border-gray-200 flex flex-col'
+                style={{
+                  left: graphPosition.left,
+                  top: graphPosition.top - 64,
+                  width: graphPosition.width,
+                  height: graphPosition.height + 64,
+                  right: 'auto',
+                  bottom: 'auto',
+                  overflow: 'hidden',
+                  borderRadius: '0 0 8px 8px',
+                }}
+              >
+                <div className='flex-1 overflow-hidden'>
+                  <AgentChatView
+                    combinedStepsData={combinedStepsData}
+                    graphNodes={graphNodes}
+                    onClose={() => setIsAgentChatOpen(false)}
+                  />
+                </div>
               </div>,
               document.body,
             )}
