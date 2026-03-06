@@ -69,6 +69,7 @@ const XyneAISidebar = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
+  const hasLoadedInitialConversationRef = useRef(false);
 
   // Update activeThreadInfo when threadInfo prop changes
   useEffect(() => {
@@ -172,6 +173,7 @@ const XyneAISidebar = ({
   });
 
   // Start fresh chat when startFreshChat flag is set
+  // This is triggered when XyneAI is invoked from a message or thread panel
   useEffect(() => {
     if (startFreshChat) {
       // Reset to fresh state
@@ -184,6 +186,8 @@ const XyneAISidebar = ({
       setVisibleCharsMap({});
       setShowHistorySidebar(false);
       setShowUserActivityPanel(false);
+
+      hasLoadedInitialConversationRef.current = true;
 
       // Abort any ongoing requests
       abortCurrentRequest();
@@ -213,6 +217,11 @@ const XyneAISidebar = ({
       return;
     }
 
+    if (hasLoadedInitialConversationRef.current) {
+      setIsLoadingConversation(false);
+      return;
+    }
+
     const loadMostRecentConversation = async (): Promise<void> => {
       try {
         setIsLoadingConversation(true);
@@ -225,6 +234,8 @@ const XyneAISidebar = ({
           channelId,
           threadConversationId,
         );
+
+        hasLoadedInitialConversationRef.current = true;
 
         if (!mostRecent) {
           setIsLoadingConversation(false);
