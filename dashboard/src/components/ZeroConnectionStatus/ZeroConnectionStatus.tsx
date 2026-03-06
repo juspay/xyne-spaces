@@ -60,6 +60,8 @@ export const ZeroConnectionStatus = (): ReactElement => {
             ${!isConnecting ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}
           `}
           title={isConnecting ? 'Connecting...' : 'Refresh connection'}
+          data-track-category='ZERO_CONNECTION'
+          data-track-name='REFRESH_CONNECTION_STATUS'
         >
           <RefreshCw
             className={`w-3 h-3 text-[var(--metrics-bar-color)] ${isConnecting ? 'animate-spin' : ''}`}
