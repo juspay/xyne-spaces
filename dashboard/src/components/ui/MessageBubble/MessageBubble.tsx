@@ -377,7 +377,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     isPinned,
     isBookmarked,
     isHighlighted,
-    isActiveCall,
+    isActiveCall && isCallMessage,
     isXyneBot,
     isPrivateSystemNotice,
     contentOnly,

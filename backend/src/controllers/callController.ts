@@ -11,6 +11,8 @@ import { callSideEffectService } from '@/services/callSideEffectService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import z from 'zod';
 import { TrackSource } from 'livekit-server-sdk';
+import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
+import { ScheduleCallSchema } from '@/validators/callValidator';
 
 export class CallController {
   /**
@@ -90,8 +92,8 @@ export class CallController {
       const existingCall = isHeadless
         ? null
         : conversationId
-        ? await repositories.calls.findActiveCallByChannelIdAndConversationId(finalChannelId, conversationId)
-        : await repositories.calls.findActiveCallByChannelId(finalChannelId);
+          ? await repositories.calls.findActiveCallByChannelIdAndConversationId(finalChannelId, conversationId)
+          : await repositories.calls.findActiveCallByChannelId(finalChannelId);
 
       if (existingCall) {
         // Verify the LiveKit room still exists
@@ -220,11 +222,47 @@ export class CallController {
         return;
       }
 
-      // Verify room exists in LiveKit
+      // Check if LiveKit room exists
       const roomInfo = await livekitService.getRoomInfo(callId);
-      if (!roomInfo) {
-        res.status(404).json({ success: false, error: 'Call room not found' });
-        return;
+
+      if (!roomInfo || (call && call.status === CallStatus.SCHEDULED)) {
+        // Room doesn't exist - create it if we have a call record
+        if (!call) {
+          res.status(404).json({ success: false, error: 'Call not found' });
+          return;
+        }
+
+        logger.info(`Room not found for call ${callId}, creating from call metadata`);
+
+        // Fetch channel to get metadata
+        const channel = await repositories.channels.findById(call.channelId);
+        if (!channel) {
+          res.status(404).json({ success: false, error: 'Channel not found' });
+          return;
+        }
+
+        // If room exists (entered due to SCHEDULED status), delete it before creating a fresh one
+        if (roomInfo) {
+          logger.info(`Found existing room ${callId}, deleting before creating new one`);
+          await livekitService.deleteRoom(callId);
+          logger.info(`Deleted existing room ${callId}`);
+        }
+
+        // Prepare room metadata
+        const roomMetadata = JSON.stringify({
+          channelId: channel.id,
+          projectId: channel.projectId,
+          ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
+        });
+
+        // Create LiveKit room
+        await livekitService.createRoom({
+          name: callId,
+          maxParticipants: 100,
+          emptyTimeout: 120,
+          metadata: roomMetadata,
+        });
+
       }
 
       // Generate access token
@@ -406,9 +444,9 @@ export class CallController {
         .map(async (call) => {
           let messageId: string | null = null;
           try {
-             // Find the matching head message using repository method
-             const callMessage = await repositories.messages.findHeadMessageByCallId(call.externalId);
-             messageId = callMessage?.messageId || null;
+            // Find the matching head message using repository method
+            const callMessage = await repositories.messages.findHeadMessageByCallId(call.externalId);
+            messageId = callMessage?.messageId || null;
           } catch (e) {
             logger.warn(`Failed to find head message for call ${call.externalId}`);
           }
@@ -617,13 +655,13 @@ export class CallController {
 
     try {
       const call = await repositories.calls.findByExternalId(callId);
-      
+
       if (!call) {
         logger.warn(`[${callId}] download_transcript_call_not_found | user_id=${userId}`);
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
-      
+
       logger.info(`[${callId}] download_transcript_call_found | call_status=${call.status}, created_by=${call.createdByUserId}`);
 
       let gcsPath = call.transcript;
@@ -633,30 +671,30 @@ export class CallController {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
       }
- 
+
 
       if (gcsPath.startsWith('gs://')) {
-          const match = gcsPath.match(/^gs:\/\/([^\/]+)\/(.+)$/);
-          if (match) {
-            const [, ,filePath] = match;
-            gcsPath = filePath; 
-          }
+        const match = gcsPath.match(/^gs:\/\/([^\/]+)\/(.+)$/);
+        if (match) {
+          const [, , filePath] = match;
+          gcsPath = filePath;
         }
+      }
       const transcriptBuffer = await transcriptService.downloadFormattedTranscript(callId, gcsPath);
-      
+
       if (!transcriptBuffer) {
         logger.warn(`[${callId}] download_transcript_not_available | gcs_path=${gcsPath}`);
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
       }
-      
+
       logger.info(`[${callId}] download_transcript_buffer_received | buffer_size=${transcriptBuffer.length} bytes`);
 
       const fileName = `call_transcript_${callId}_${new Date().toISOString().split('T')[0]}.txt`;
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.setHeader('Content-Length', transcriptBuffer.length);
-      
+
       logger.info(`[${callId}] download_transcript_headers_set | filename=${fileName}, content_length=${transcriptBuffer.length}`);
 
       res.send(transcriptBuffer);
@@ -1341,6 +1379,146 @@ export class CallController {
     }
   };
 
+
+  // POST /api/calls/schedule - Schedule a call for a future time
+  scheduleCall = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      // Validate request body with Zod
+      const { title, startsAt, endsAt, channelId, targetUserIds } = ScheduleCallSchema.parse(req.body);
+
+      let finalChannelId = channelId;
+      console.log("scheduleCall - targetUserIds:", finalChannelId, targetUserIds);
+      // If no channelId but targetUserIds is provided, find or create DM channel
+      if (!channelId && targetUserIds && targetUserIds.length > 0) {
+        finalChannelId = await repositories.channels.findOrCreateDMChannel(
+          userId,
+          targetUserIds,
+          repositories.channelParticipants,
+          title
+        );
+      }
+
+      // Generate IDs
+      const callId = uuidv4();
+      const externalId = uuidv4();
+
+      // Generate room link for scheduled call
+      const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${CallType.AUDIO}`;
+
+      // Get database client
+      const db = DatabaseClient.getInstance();
+
+      // Create the scheduled call and participants in a transaction
+      const participantUserIds = await db.$transaction(async (tx) => {
+        // Create the scheduled call
+        await tx.call.create({
+          data: {
+            id: callId,
+            externalId: externalId,
+            title: title,
+            createdByUserId: userId,
+            channelId: finalChannelId!,
+            callType: CallType.AUDIO,
+            status: CallStatus.SCHEDULED,
+            timezone: 'UTC',
+            isRecurring: false,
+            recordingEnabled: false,
+            roomLink: roomLink,
+            startsAt: new Date(startsAt),
+            endsAt: new Date(endsAt),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            lastActivityAt: new Date(),
+          },
+        });
+
+        // Get all channel participants to create call participants
+        const channelParticipants = await repositories.channelParticipants.getChannelParticipants(finalChannelId!);
+
+        // Create call participant records for all channel participants
+        await tx.callParticipant.createMany({
+          data: channelParticipants.map(participant => ({
+            id: uuidv4(),
+            callId: callId,
+            userId: participant.userId,
+            invitedBy: userId,
+            invitedAt: new Date(),
+            response: InvitationResponse.INVITED,
+            respondedAt: null,
+            joinedAt: null,
+            leftAt: null,
+          })),
+        });
+        
+        // Return participant IDs for notification (only if transaction succeeds)
+        return channelParticipants.map(p => p.userId);
+      });
+
+      // Send immediate notifications + create activities for all participants (excluding organizer)
+      try {
+        await scheduledCallNotificationService.sendScheduledCallNotifications({
+          callId,
+          callExternalId: externalId,
+          title,
+          startsAt: new Date(startsAt),
+          endsAt: new Date(endsAt),
+          channelId: finalChannelId!,
+          organizerUserId: userId,
+          participantUserIds,
+        });
+      } catch (error) {
+        logger.error(`Failed to send immediate notifications for call ${callId}:`, error);
+      }
+
+      // Schedule 10-minute reminder notification for all participants
+      try {
+        await scheduledCallNotificationService.scheduleCallReminder(
+          callId,
+          externalId,
+          title,
+          new Date(startsAt),
+          participantUserIds
+        );
+        logger.info(`Scheduled 10-minute reminder for call ${externalId} with ${participantUserIds.length} participants`);
+      } catch (error) {
+        // Log error but don't fail the call creation
+        logger.error(`Failed to schedule reminder for call ${callId}:`, error);
+      }
+
+      // Schedule auto-end job at endsAt time
+      try {
+        await scheduledCallNotificationService.scheduleCallAutoEnd(
+          callId,
+          externalId,
+          new Date(endsAt)
+        );
+        logger.info(`Scheduled auto-end for call ${externalId} at ${new Date(endsAt).toISOString()}`);
+      } catch (error) {
+        // Log error but don't fail the call creation
+        logger.error(`Failed to schedule auto-end for call ${callId}:`, error);
+      }
+
+      logger.info(`Scheduled call created: ${externalId} for channel ${finalChannelId} by user ${userId}`);
+
+      res.json({
+        success: true,
+        callId: callId,
+        externalId: externalId,
+        channelId: finalChannelId,
+      });
+    } catch (error) {
+      logger.error('Failed to schedule call:', error);
+      res.status(500).json({ success: false, error: 'Failed to schedule call' });
+    }
+  };
+
   /**
    * POST /api/calls/:callId/pulse-actionable
    * Browser-initiated "Create Actionable" proxy — forwards the request to the
@@ -1426,9 +1604,8 @@ export class CallController {
       logger.error('Failed to create Pulse actionable:', error);
       res.status(500).json({ success: false, error: 'Failed to create Pulse actionable' });
     }
-  };
+  }
 }
-
 
 export const callController = new CallController();
 

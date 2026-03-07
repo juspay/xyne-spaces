@@ -1,7 +1,8 @@
 import { BaseRepository } from './base';
 import { Channel, ChannelScopeType, ChannelVisibility, ChannelType } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
-import {logger} from '@/utils/logger';
+import { logger } from '@/utils/logger';
+import { formatDateTimeShort } from '@/utils/dateUtils';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
 
 export interface CreateChannelInput {
@@ -157,7 +158,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       // and can exceed 255 chars with many participants
       const channel = await this.findById(id);
       const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
-      
+
       if (!isDMChannel) {
         await this.validateString(data.name, 'name', 255);
       }
@@ -172,7 +173,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
 
     // Queue channel update for Vespa
-   // await this.queueChannelForVespa(result.id, 'update');
+    // await this.queueChannelForVespa(result.id, 'update');
 
     return result;
   }
@@ -183,7 +184,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
 
     // Queue channel deletion from Vespa
-   // await this.queueChannelForVespa(result.id, 'delete');
+    // await this.queueChannelForVespa(result.id, 'delete');
 
     return result;
   }
@@ -284,16 +285,20 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   /**
-   * Find or create a DM or GROUP_DM channel based on the number of invited users
+   * Find or create a DM or GROUP_DM channel based on the number of invited users.
+   * If the resulting channel name would exceed 255 characters (>~10 members),
+   * falls back to creating a private DEFAULT channel to avoid the DB constraint.
    * @param userId - The ID of the user initiating the channel creation
    * @param invitedUserIds - Array of user IDs to include in the channel
    * @param channelParticipants - Channel participants repository for adding users
+   * @param channelName - Optional friendly name override (e.g. scheduled call title)
    * @returns The channel ID (either existing or newly created)
    */
   async findOrCreateDMChannel(
     userId: string,
     invitedUserIds: string[],
-    channelParticipants: any // We'll pass this from the controller to avoid circular dependency
+    channelParticipants: any, // We'll pass this from the controller to avoid circular dependency
+    channelName?: string
   ): Promise<string> {
     if (invitedUserIds.length === 0) {
       throw new Error('No users to invite');
@@ -302,7 +307,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Single user - create or find DM channel
     if (invitedUserIds.length === 1) {
       const targetUserId = invitedUserIds[0];
-      
+
       // Check if DM channel exists
       let dmChannel = await this.getDMChannel(userId, targetUserId);
 
@@ -311,11 +316,11 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       }
 
       // Create new DM channel
-      const channelName = [userId, targetUserId].sort().join(',');
+      const dmChannelName = [userId, targetUserId].sort().join(',');
 
       dmChannel = await this.create({
         scopeType: ChannelScopeType.DM,
-        name: channelName,
+        name: dmChannelName,
         visibility: ChannelVisibility.PRIVATE,
         createdBy: userId,
         projectId: 'default',
@@ -330,30 +335,61 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
     // Multiple users - create or find group DM channel
     const allUserIds = [userId, ...invitedUserIds].sort();
-    const channelName = allUserIds.join(',');
+    const groupDmName = allUserIds.join(',');
 
-    // Check if group DM already exists with these exact participants
-    const existingGroupDM = await this.getGroupChannelByMembers(allUserIds);
+    // If the name would exceed 255 chars (large groups, ~9+ members),
+    // fall back to a private DEFAULT channel with a friendly name
+    const isLargeGroup = groupDmName.length > 255;
 
-    if (existingGroupDM) {
-      return existingGroupDM.id;
+    if (!isLargeGroup) {
+      // Check if group DM already exists with these exact participants
+      const existingGroupDM = await this.getGroupChannelByMembers(allUserIds);
+
+      if (existingGroupDM) {
+        return existingGroupDM.id;
+      }
+
+      // Create new group DM channel
+      const groupDMChannel = await this.create({
+        scopeType: ChannelScopeType.GROUP_DM,
+        name: groupDmName,
+        visibility: ChannelVisibility.PRIVATE,
+        createdBy: userId,
+        projectId: 'default',
+      });
+
+      // Add all users as participants
+      await channelParticipants.addParticipant(groupDMChannel.id, userId, 'ADMIN', false);
+      for (const invitedId of invitedUserIds) {
+        await channelParticipants.addParticipant(groupDMChannel.id, invitedId, 'MEMBER', false);
+      }
+
+      return groupDMChannel.id;
     }
 
-    // Create new group DM channel
-    const groupDMChannel = await this.create({
-      scopeType: ChannelScopeType.GROUP_DM,
-      name: channelName,
+    // Large group: create a private DEFAULT channel
+    // Use provided name, or generate a friendly human-readable name from the current time
+    const now = new Date();
+    const friendlyName = channelName
+      ? `Call-${channelName}-${formatDateTimeShort(now)}`.slice(0, 254) // ensure it fits within 255 chars
+      : `Call-${formatDateTimeShort(now)}`.slice(0, 254);
+
+    // For large groups there won't be an existing channel to reuse (unique name),
+    // so we always create a new one.
+    const privateChannel = await this.create({
+      scopeType: ChannelScopeType.DEFAULT,
+      name: friendlyName,
       visibility: ChannelVisibility.PRIVATE,
       createdBy: userId,
       projectId: 'default',
     });
 
     // Add all users as participants
-    await channelParticipants.addParticipant(groupDMChannel.id, userId, 'ADMIN', false);
+    await channelParticipants.addParticipant(privateChannel.id, userId, 'ADMIN', false);
     for (const invitedId of invitedUserIds) {
-      await channelParticipants.addParticipant(groupDMChannel.id, invitedId, 'MEMBER', false);
+      await channelParticipants.addParticipant(privateChannel.id, invitedId, 'MEMBER', false);
     }
 
-    return groupDMChannel.id;
+    return privateChannel.id;
   }
 }

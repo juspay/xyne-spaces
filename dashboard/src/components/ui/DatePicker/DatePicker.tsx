@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Calendar, X } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
-import Button from '../../ui/Button';
+import Button from '../Button';
+import { cn } from '../../../utils/classNames';
 
 // ==================== TYPES ====================
-interface InlineCalendarProps {
+interface DatePickerProps {
   selectedDate: Date | null;
   onSelect: (date: Date | null) => void;
   placeholder?: string;
@@ -146,7 +147,7 @@ const MonthView: React.FC<{
 };
 
 // ==================== MAIN COMPONENT ====================
-export const InlineCalendar: React.FC<InlineCalendarProps> = ({
+export const DatePicker: React.FC<DatePickerProps> = ({
   selectedDate,
   onSelect,
   placeholder = 'Select date',
@@ -382,7 +383,14 @@ export const InlineCalendar: React.FC<InlineCalendarProps> = ({
             e.stopPropagation();
           }}
           data-testid='ticket-due-date-calendar'
-          className='w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden z-50'
+          className={cn(
+            'w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden z-50',
+            // Animation classes
+            'data-[state=open]:animate-in data-[state=closed]:animate-out',
+            'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+            'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+            'duration-200',
+          )}
           sideOffset={4}
           align='start'
         >

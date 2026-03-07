@@ -2265,6 +2265,20 @@ export const mutators = defineMutators({
         }
       },
     ),
+    cancel: defineMutator(
+      z.object({ callId: z.string(), timestamp: z.number() }),
+      async ({ tx, args: { callId, timestamp } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+        if (!call || call.status !== CallStatus.SCHEDULED) {
+          throw new Error('Call not found or not scheduled');
+        }
+        await tx.mutate.calls.update({
+          id: call.id,
+          status: CallStatus.CANCELLED,
+          updatedAt: timestamp,
+        });
+      },
+    ),
   },
   activities: {
     markAsRead: defineMutator(

@@ -56,6 +56,7 @@ import userGroupRoutes from '@/routes/userGroups';
 import attachmentRoutes from '@/routes/attachments';
 import draftAttachmentRoutes from '@/routes/draftAttachments';
 import { notificationService } from '@/notification-service';
+import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
@@ -464,6 +465,10 @@ export class App {
     logger.info('Initializing notification service...');
     await notificationService.initialize();
 
+    // Initialize scheduled call notification service
+    logger.info('Initializing scheduled call notification service...');
+    await scheduledCallNotificationService.initialize();
+
     // Ensure default model and tools exist before synchronizing config
     await configSyncService.ensureDefaultModelAndTools();
 
@@ -543,6 +548,9 @@ export class App {
 
       // Shutdown notification service
       await notificationService.shutdown();
+
+      // Shutdown scheduled call notification service
+      await scheduledCallNotificationService.shutdown();
 
       await DatabaseClient.disconnect();
       await redisService.disconnect();

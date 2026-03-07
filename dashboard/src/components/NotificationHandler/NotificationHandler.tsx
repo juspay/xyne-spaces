@@ -432,6 +432,10 @@ function getToastFn(notificationType: string) {
       return toast.info;
     case 'workflow_completion':
       return toast.success;
+    case 'call_reminder':
+      return toast.warning;
+    case 'call_scheduled':
+      return toast.info;
     case 'workflow_failure':
       return toast.error;
     default:

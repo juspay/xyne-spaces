@@ -38,6 +38,21 @@ export interface ValidateRoomsRequest {
   callIds: string[];
 }
 
+export interface ScheduleCallRequest {
+  title: string;
+  startsAt: number;
+  endsAt: number;
+  channelId?: string;
+  targetUserIds?: string[];
+}
+
+export interface ScheduleCallResponse {
+  success: boolean;
+  callId: string;
+  externalId: string;
+  channelId: string;
+}
+
 export interface ApiErrorResponse {
   error: string;
   code?: string;
@@ -117,8 +132,9 @@ export class CallService {
   }
 
   /**
-   * Join an existing call
+   * Join an existing call (regular or scheduled)
    * Generates LiveKit token for the user to join the call
+   * For scheduled calls, backend will create the room if it doesn't exist yet
    */
   async joinCall(data: JoinCallRequest): Promise<JoinCallResponse> {
     try {
@@ -247,6 +263,40 @@ export class CallService {
           );
         }
       }
+      throw error;
+    }
+  }
+
+  /**
+   * Schedule a call for a future time
+   * Creates a scheduled call record and finds/creates DM channel if needed
+   */
+  async scheduleCall(data: ScheduleCallRequest): Promise<ScheduleCallResponse> {
+    try {
+      const response = await apiInstance.post<ScheduleCallResponse>('/calls/schedule', {
+        title: data.title,
+        startsAt: data.startsAt,
+        endsAt: data.endsAt,
+        channelId: data.channelId,
+        targetUserIds: data.targetUserIds,
+      });
+
+      return response.data;
+    } catch (error) {
+      // Handle Axios errors with proper typing
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+
+      // Re-throw unknown errors
       throw error;
     }
   }

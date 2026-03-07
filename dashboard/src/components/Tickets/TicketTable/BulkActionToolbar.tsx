@@ -4,7 +4,7 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import { CircleCheckBig, UserIcon, X, Layers, Calendar, Tag } from 'lucide-react';
 import { TicketStatusIcon } from '../../../assets/icons';
 import type { TicketStatusV2, TicketPriority } from '@xyne/shared';
-import { InlineCalendar } from '../CreateTicketModal/DateSelector';
+import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { cn } from '../../../utils/classNames';
 import type { User, UserGroup } from '../../../machines/stateMachine';
 import {
@@ -153,7 +153,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
 
             {activeMenu === 'dueDate' && (
               <div className='absolute bottom-full mb-4 left-0 z-50'>
-                <InlineCalendar
+                <DatePicker
                   selectedDate={null}
                   onSelect={date => {
                     onDueDateChange(date);

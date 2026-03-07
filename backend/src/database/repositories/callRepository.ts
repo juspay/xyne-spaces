@@ -68,7 +68,7 @@ export class CallRepository {
 
   async findActiveCallByChannelId(channelId: string): Promise<Call | null> {
     const result = await DatabaseClient.getInstance().call.findFirst({
-      where: { 
+      where: {
         channelId,
         status: CallStatus.ACTIVE,
         callOrigin: CallOrigin.CHANNEL,
@@ -79,14 +79,14 @@ export class CallRepository {
     });
     return result;
   }
-  
+
 
   async findActiveCallByChannelIdAndConversationId(
     channelId: string,
     conversationId: string
   ): Promise<Call | null> {
     const result = await DatabaseClient.getInstance().call.findFirst({
-      where: { 
+      where: {
         channelId,
         status: CallStatus.ACTIVE,
         callOrigin: CallOrigin.CONVERSATION,
@@ -128,7 +128,7 @@ export class CallRepository {
 
   async findByUserAndType(userId: string, callType: CallType): Promise<Call[]> {
     const result = await DatabaseClient.getInstance().call.findMany({
-      where: { 
+      where: {
         createdByUserId: userId,
         callType
       },
@@ -174,6 +174,22 @@ export class CallRepository {
         userId: true,
       },
     });
+  }
+
+  /**
+   * Get all participant IDs for a call matching a specific response
+   */
+  async getParticipantIdsByResponse(callId: string, response: InvitationResponse): Promise<string[]> {
+    const participants = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        callId,
+        response,
+      },
+      select: {
+        userId: true,
+      },
+    });
+    return participants.map((p) => p.userId);
   }
 
   /**
@@ -340,9 +356,10 @@ export class CallRepository {
   }
 
   /**
-   * Handle participant leaving - marks participant as left and ends call if no active participants
-   * Also updates system message within the transaction if call ends
-   * Returns whether the call should be ended, if message was updated, and the call data
+   * Handle participant leaving - marks participant as left and ends call if no active participants.
+   * If the call has a future endsAt (scheduled call), reverts to SCHEDULED instead of ENDED
+   * so participants can rejoin. Also updates system message within the transaction if call ends.
+   * Returns whether the call should be ended, if message was updated, and the call data.
    */
   async handleParticipantLeave(
     params: {
@@ -392,10 +409,18 @@ export class CallRepository {
 
       // End call if no active participants and not already ended
       if (activeCount === 0 && call.status !== CallStatus.ENDED) {
-        await this.endCall(call.id, leftAt, tx);
+        // If endsAt is in the future this is a scheduled call - revert to SCHEDULED so it can be rejoined
+        // Otherwise mark as permanently ENDED
+        const finalStatus =
+          call.endsAt && leftAt < call.endsAt ? CallStatus.SCHEDULED : CallStatus.ENDED;
+
+        await tx.call.update({
+          where: { id: call.id },
+          data: { status: finalStatus, endedAt: leftAt },
+        });
         shouldEndCall = true;
-        
-        // Update system message when ending the call
+
+        // Update system message whether the call is fully ended or just rescheduled
         messageUpdated = await updateCallSystemMessageIfNeeded({
           call,
           callId: callExternalId,
@@ -409,8 +434,8 @@ export class CallRepository {
   }
 
   /**
-   * Handle room finished - marks call as ended and updates system message
-   * Returns whether the call was ended and if message was updated
+   * Handle room finished - marks call as ended (or SCHEDULED if still within its window) and updates system message.
+   * Returns whether the call was ended and if message was updated.
    */
   async handleRoomFinished(
     params: {
@@ -435,18 +460,33 @@ export class CallRepository {
 
       // Check and update call status if not already ended
       if (call.status !== CallStatus.ENDED) {
-        await this.endCall(call.id, endedAt, tx);
-        shouldEndCall = true;
-      }
+        // If endsAt is in the future this is a scheduled call - revert to SCHEDULED so it can be rejoined
+        // Otherwise mark as permanently ENDED
+        const finalStatus =
+          call.endsAt && endedAt < call.endsAt ? CallStatus.SCHEDULED : CallStatus.ENDED;
 
-      // Update system message regardless of whether call was just ended or already ended
-      // This ensures message is updated even if call was already marked as ended
-      messageUpdated = await updateCallSystemMessageIfNeeded({
-        call,
-        callId: callExternalId,
-        endedAt: endedAt,
-        tx,
-      });
+        await tx.call.update({
+          where: { id: call.id },
+          data: { status: finalStatus, endedAt },
+        });
+        shouldEndCall = true;
+
+        // Update system message whether the call is fully ended or just rescheduled
+        messageUpdated = await updateCallSystemMessageIfNeeded({
+          call,
+          callId: callExternalId,
+          endedAt,
+          tx,
+        });
+      } else {
+        // Call already ended - still try to update system message if needed
+        messageUpdated = await updateCallSystemMessageIfNeeded({
+          call,
+          callId: callExternalId,
+          endedAt,
+          tx,
+        });
+      }
 
       // Clear conversation.callId when call ends (for conversation calls)
       const callMetadata = call.metadata as { conversationId?: string } | null;
@@ -466,10 +506,151 @@ export class CallRepository {
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Private helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
   /**
-   * Create initial call with all participants, conversation, and system message atomically
-   * This is used when the first participant joins a room
-   * Returns the call and list of invited participant IDs (excluding the joining user)
+   * Shared utility: create a conversation + system message inside an existing transaction.
+   * Used by both `createCallWithParticipantsAndMessage` (new call) and
+   * `activateScheduledCall` (SCHEDULED → ACTIVE transition).
+   */
+  private async createConversationAndSystemMessage(
+    tx: Prisma.TransactionClient,
+    params: {
+      conversationId: string;
+      messageId: string;
+      channelId: string;
+      callId: string;        // room externalId / roomName
+      callType?: CallType;   // undefined ⇒ regular call
+      initiatorName: string;
+      conversationMetadata?: Prisma.InputJsonValue;
+    }
+  ): Promise<void> {
+    const { conversationId, messageId, channelId, callId, callType, initiatorName, conversationMetadata } = params;
+    const isHeadless = callType === CallType.HEADLESS;
+
+    await tx.conversation.create({
+      data: {
+        conversationId,
+        channelId,
+        createdBy: 'system',
+        initialMessageId: messageId,
+        ...(conversationMetadata ? { metadata: conversationMetadata } : {}),
+      },
+    });
+
+    await tx.message.create({
+      data: {
+        messageId,
+        conversationId,
+        senderId: 'system',
+        content: isHeadless ? 'Recording started' : `${initiatorName} started a call`,
+        msgType: 'SYSTEM',
+        showInChannel: isHeadless ? true : false,
+        metadata: {
+          isCallMessage: true,
+          callId,
+          ...(callType ? { callType } : {}),
+          operation: 'call_active',
+          ...(isHeadless && { messageSubtype: 'call_started', isHeadlessRecording: true }),
+        },
+      },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Public composite methods
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Activate a SCHEDULED call when the first participant joins.
+   *
+   * Two cases handled inside a single $transaction:
+   *  1. No conversation yet → create conversation + system message, flip to ACTIVE.
+   *  2. Conversation already exists (rejoin within the window) → flip to ACTIVE only.
+   *
+   * Returns the fresh call record after the update.
+   */
+  async activateScheduledCall(params: {
+    call: Call;
+    initiatorName: string;
+    now: Date;
+  }): Promise<void> {
+    const { call: callParam, initiatorName, now } = params;
+
+    await DatabaseClient.getInstance().$transaction(async (tx) => {
+      // Re-read the call inside the transaction to ensure fresh data
+      const call = await tx.call.findUnique({
+        where: { id: callParam.id },
+      });
+
+      if (!call) {
+        throw new Error(`Call ${callParam.id} not found`);
+      }
+
+      const callMetadata = call.metadata as {
+        systemMessageId?: string;
+        conversationId?: string;
+      } | null;
+
+      if (!callMetadata?.conversationId) {
+        // First join: create conversation + system message, then activate
+        const conversationId = uuidv4();
+        const messageId = uuidv4();
+
+        await this.createConversationAndSystemMessage(tx, {
+          conversationId,
+          messageId,
+          channelId: call.channelId,
+          callId: call.externalId,
+          initiatorName,
+        });
+
+        await tx.call.update({
+          where: { id: call.id },
+          data: {
+            status: CallStatus.ACTIVE,
+            startedAt: now,
+            lastActivityAt: now,
+            updatedAt: now,
+            metadata: { systemMessageId: messageId, conversationId },
+          },
+        });
+      } else {
+        // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE
+        await tx.call.update({
+          where: { id: call.id },
+          data: {
+            status: CallStatus.ACTIVE,
+            startedAt: now,
+            lastActivityAt: now,
+            updatedAt: now,
+          },
+        });
+
+        // Also properly reset the system message back to ACTIVE
+        if (callMetadata?.systemMessageId) {
+          await tx.message.update({
+            where: { messageId: callMetadata.systemMessageId },
+            data: {
+              content: `${initiatorName} started a call`,
+              metadata: {
+                isCallMessage: true,
+                callId: call.externalId,
+                operation: 'call_active',
+              }
+            }
+          });
+        }
+      }
+    });
+  }
+
+  /**
+   * Create initial call with all participants, conversation, and system message atomically.
+   * This is used when the first participant joins a brand-new room.
+   * Returns the call and list of invited participant IDs (excluding the joining user).
    */
   async createCallWithParticipantsAndMessage(
     params: {
@@ -511,10 +692,10 @@ export class CallRepository {
           id: callId,
           externalId: roomName,
           createdByUserId: createdBy,
-          channelId: channelId,
-          callType: callType,
+          channelId,
+          callType,
           status: CallStatus.ACTIVE,
-          roomLink: roomLink,
+          roomLink,
           timezone: 'UTC',
           isRecurring: false,
           recordingEnabled: isHeadless,
@@ -523,18 +704,18 @@ export class CallRepository {
           callOrigin: callOrigin || CallOrigin.CHANNEL,
           metadata: {
             systemMessageId: messageId,
-            conversationId: conversationId,
+            conversationId,
           },
         },
       });
 
       // Create call_participants: joining user as ACCEPTED, others as INVITED
       const invitedParticipantIds: string[] = [];
-      
+
       for (const channelParticipant of channelParticipants) {
         const isJoiningUser = channelParticipant.userId === joiningUserId;
         const participantId = uuidv4();
-        
+
         await tx.callParticipant.create({
           data: {
             id: participantId,
@@ -546,20 +727,20 @@ export class CallRepository {
             joinedAt: isJoiningUser ? now : null,
           },
         });
-        
-        // Track invited participants for notification
+
         if (!isJoiningUser) {
           invitedParticipantIds.push(participantId);
         }
       }
 
-      // Get user info for message
+      // Get creator's name for the system message
       const user = await tx.user.findUnique({
         where: { id: createdBy },
-        select: { name: true }
+        select: { name: true },
       });
 
       if (callOrigin === CallOrigin.CONVERSATION) {
+        // For conversation-origin calls: find the existing conversation and link the call to it
         const existingConversation = await tx.conversation.findUnique({
           where: { conversationId },
         });
@@ -579,46 +760,43 @@ export class CallRepository {
         } else {
           throw new Error(`Conversation ${conversationId} not found for conversation call`);
         }
-      } else {
-        await tx.conversation.create({
+
+        // Create the system message directly (conversation already exists)
+        await tx.message.create({
           data: {
+            messageId,
             conversationId,
-            channelId: channelId,
-            createdBy: 'system',
-            initialMessageId: messageId,
-            metadata: isHeadless ? {
-              isHeadlessRecording: true,
+            senderId: 'system',
+            content: `${user?.name || 'Someone'} started a call`,
+            msgType: 'SYSTEM',
+            showInChannel: false,
+            metadata: {
+              isCallMessage: true,
               callId: roomName,
-            } : undefined,
+              callType: callType,
+              operation: 'call_active',
+            },
           },
         });
-      }
-
-      // Create system message
-      await tx.message.create({
-        data: {
-          messageId,
+      } else {
+        // For channel-origin and headless calls: use shared helper to create conversation + system message
+        await this.createConversationAndSystemMessage(tx, {
           conversationId,
-          senderId: 'system',
-          content: isHeadless ? `Recording started` : `${user?.name || 'Someone'} started a call`,
-          msgType: 'SYSTEM',
-          showInChannel: isHeadless ? true : false,
-          metadata: {
-            isCallMessage: true,
-            callId: roomName,
-            callType: callType,
-            operation: 'call_active',
-            ...(isHeadless && { messageSubtype: 'call_started', isHeadlessRecording: true }),
-          },
-        },
-      });
+          messageId,
+          channelId,
+          callId: roomName,
+          callType,
+          initiatorName: user?.name || 'Someone',
+          conversationMetadata: isHeadless
+            ? { isHeadlessRecording: true, callId: roomName }
+            : undefined,
+        });
+      }
 
       // Update channel last activity
       await tx.channel.update({
         where: { id: channelId },
-        data: {
-          lastActivityAt: now,
-        },
+        data: { lastActivityAt: now },
       });
 
       return { call, invitedParticipantIds };

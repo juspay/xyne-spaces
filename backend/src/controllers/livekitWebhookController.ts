@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { WebhookReceiver, WebhookEvent } from 'livekit-server-sdk';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { InvitationResponse } from '@prisma/client';
+import { CallStatus, InvitationResponse } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
@@ -42,7 +42,7 @@ class LiveKitWebhookController {
       // Note: req.body is a Buffer from express.raw() middleware
       // WebhookReceiver.receive() expects the raw body as a string
       const event = await this.receiver.receive(
-        req.body.toString('utf8'), 
+        req.body.toString('utf8'),
         req.get('Authorization')
       );
 
@@ -113,7 +113,7 @@ class LiveKitWebhookController {
 
     try {
       const now = new Date();
-      
+
       // Use repository method to handle room finished atomically (includes system message update)
       const result = await repositories.calls.handleRoomFinished({
         callExternalId: callId,
@@ -177,7 +177,7 @@ class LiveKitWebhookController {
       // If call doesn't exist, this is the first participant - create everything using repository
       if (callNotExist) {
         logger.info(`[LiveKit Webhook] First participant joined - creating call record for ${roomName}`);
-        
+
         // Parse room metadata to get channel info
         const roomMetadata = event.room?.metadata ? JSON.parse(event.room.metadata) : {};
         const channelId = roomMetadata.channelId;
@@ -217,7 +217,7 @@ class LiveKitWebhookController {
           // Use all channel participants (default behavior for channel calls)
           participantsToInvite = await repositories.channelParticipants.getChannelParticipants(channelId);
         }
-        
+
         const now = new Date();
 
         const conversationId = existingConversationId || uuidv4();
@@ -276,8 +276,32 @@ class LiveKitWebhookController {
           );
         }
       } else if (call) {
-        // Call exists, handle subsequent participant join
+        // If it's a scheduled call, activate it FIRST
+        if (call.status === CallStatus.SCHEDULED) {
+          // ── Scheduled call activation ──────────────────────────────────────────
+          // Delegate entirely to the repository, which handles the two sub-cases
+          // (first join vs. rejoin) atomically inside a single $transaction.
 
+          const now = new Date();
+
+          // Resolve the initiator's display name for the system message
+          const joiningUser = await this.db.user.findUnique({
+            where: { id: participant.identity },
+            select: { name: true },
+          });
+          const initiatorName = joiningUser?.name || participant.name;
+
+          await repositories.calls.activateScheduledCall({
+            call,
+            initiatorName,
+            now,
+          });
+
+          logger.info(`[LiveKit Webhook] Scheduled call ${roomName} activated (status → ACTIVE)`);
+          // ── End scheduled call activation ──────────────────────────────────────
+        }
+
+        // Now proceed with normal participant join tracking for ALL existing calls
         const existingParticipant = await repositories.calls.findParticipant(call.id, participant.identity);
 
         if (!existingParticipant) {
@@ -304,7 +328,7 @@ class LiveKitWebhookController {
             );
           });
           logger.info(`[LiveKit Webhook] Updated participant ${participant.identity} to ACCEPTED for call ${roomName}`);
-          
+
           // Trigger side effects for participant response (dismiss notification, cleanup timeout)
           try {
             await callSideEffectService.handleParticipantResponse(
@@ -344,7 +368,7 @@ class LiveKitWebhookController {
 
     try {
       const now = new Date();
-      
+
       // ACL Validation: Verify participant can update call status
       const aclCheck = await livekitWebhookACL.canUpdateCallStatus({
         callExternalId: callId,
@@ -357,7 +381,7 @@ class LiveKitWebhookController {
       }
 
       logger.info(`[LiveKit Webhook] ACL validation passed for participant leave: call=${callId}, user=${participant.identity}`);
-      
+
       // Use repository method to handle participant leave atomically (includes system message update)
       const result = await repositories.calls.handleParticipantLeave({
         callExternalId: callId,
@@ -374,7 +398,7 @@ class LiveKitWebhookController {
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);
-        
+
         // Trigger side effects for call end (missed call notifications, cleanup timeouts, activities)
         try {
           await callSideEffectService.handleCallEnded(result.call.id);

@@ -6,7 +6,7 @@ import {
   getAssigneeOptions,
   useStageOptions,
 } from './TicketTableHelper';
-import { InlineCalendar } from '../CreateTicketModal/DateSelector';
+import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import {
   AssigneeCellEditorProps,
   DueDateCellEditorProps,
@@ -150,7 +150,7 @@ export const DueDateCellEditor = ({ value, onValueChange }: DueDateCellEditorPro
 
   return (
     <div className='h-full px-2 flex items-center bg-white border border-blue-500'>
-      <InlineCalendar
+      <DatePicker
         minDate={yesterday}
         selectedDate={date}
         onSelect={handleDateSelect}

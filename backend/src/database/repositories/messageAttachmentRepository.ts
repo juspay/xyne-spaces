@@ -1,7 +1,7 @@
 import { DatabaseClient } from '../client';
 import { MessageAttachment, AttachmentEntityType } from '@prisma/client';
 import { websocketService } from '@/services/websocketService';
-import {logger} from '@/utils/logger';
+import { logger } from '@/utils/logger';
 
 export interface CreateMessageAttachmentInput {
   entityId: string; // Message ID or Ticket ID
@@ -92,6 +92,31 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findTranscriptByCallId(callId: string): Promise<MessageAttachment | null> {
+    return await this.db.messageAttachment.findFirst({
+      where: {
+        entityType: AttachmentEntityType.CHAT,
+        AND: [
+          {
+            metadata: {
+              path: ['type'],
+              equals: 'transcript',
+            },
+          },
+          {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+        ],
+      },
+      orderBy: {
+        createdAt: 'desc', // Get the most recent one
+      },
+    });
+  }
+
   async createMany(attachments: CreateMessageAttachmentInput[]): Promise<void> {
     await this.db.messageAttachment.createMany({
       data: attachments
@@ -115,7 +140,7 @@ export class MessageAttachmentRepository {
       }
     });
   }
-  
+
   async findByTicketId(ticketId: string): Promise<MessageAttachment[]> {
     return await this.db.messageAttachment.findMany({
       where: {
@@ -154,15 +179,31 @@ export class MessageAttachmentRepository {
   async updateVersion(id: string, metadata: Record<string, any>): Promise<MessageAttachment> { // eslint-disable-line @typescript-eslint/no-explicit-any
     // Increment version in metadata
     const currentVersion = (metadata.version as number) || 0;
-    
+
     return await this.db.messageAttachment.update({
       where: { id },
-      data: { 
+      data: {
         metadata: {
           ...metadata,
           version: currentVersion + 1
         }
       },
+    });
+  }
+
+  async update(id: string, data: Partial<CreateMessageAttachmentInput>): Promise<MessageAttachment> {
+    return await this.db.messageAttachment.update({
+      where: { id },
+      data: {
+        ...(data.url && { url: data.url }),
+        ...(data.size !== undefined && { size: data.size }),
+        ...(data.metadata && { metadata: data.metadata }),
+        ...(data.originalFilename && { originalFilename: data.originalFilename }),
+        ...(data.mimetype && { mimetype: data.mimetype }),
+        ...(data.thumbnailUrl && { thumbnailUrl: data.thumbnailUrl }),
+        ...(data.width && { width: data.width }),
+        ...(data.height && { height: data.height }),
+      }
     });
   }
 

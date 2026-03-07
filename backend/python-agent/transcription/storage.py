@@ -23,16 +23,21 @@ class GCSStreamer:
     
     Writes transcription events to GCS in real-time via a background thread.
     Handles connection retries and ensures data is flushed on stop.
+    Supports appending to existing transcripts when rejoining a call.
     """
     
-    def __init__(self, bucket: Any, filename: str):
+    def __init__(self, bucket: Any, filename: str, append_existing: bool = True):
         self.bucket = bucket
         self.filename = filename
+        self.append_existing = append_existing
         
         # Bounded queue to prevent OOM if GCS is slow
         self._queue: queue.Queue = queue.Queue(maxsize=2000)
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
+        
+        # Store existing content if appending
+        self._existing_content: str = ""
         
         # Idempotency for stop()
         self._stopped = False
@@ -45,11 +50,33 @@ class GCSStreamer:
         self._call_id = filename.replace('transcriptions/', '').replace('.jsonl', '')
         self._has_uploaded = False
 
-        logger.info(f"[GCS:STREAMER] Initialized | file={filename} | queue_max_size=2000")
+        logger.info(f"[GCS:STREAMER] Initialized | file={filename} | queue_max_size=2000 | append_mode={append_existing}")
         logger.info(f"gcs_streamer_initialized | queue_max_size=2000")
+    
+    def _load_existing_content(self):
+        """Load existing transcript content if file exists and append mode is enabled."""
+        if not self.append_existing:
+            return
+        
+        try:
+            blob = self.bucket.blob(self.filename)
+            if blob.exists():
+                self._existing_content = blob.download_as_string().decode('utf-8')
+                line_count = len(self._existing_content.strip().split('\n')) if self._existing_content.strip() else 0
+                logger.info(f"[GCS:APPEND] Loaded existing transcript | lines={line_count} | size={len(self._existing_content)} bytes")
+            else:
+                logger.info(f"[GCS:APPEND] No existing transcript found, starting fresh")
+        except Exception as e:
+            logger.warning(f"[GCS:APPEND] Failed to load existing content, starting fresh: {e}")
+            self._existing_content = ""
     
     def start(self):
         """Start the background writer thread."""
+        logger.info(f"[GCS:START] Starting background writer thread for {self.filename}")
+        
+        # Load existing content before starting writer thread
+        self._load_existing_content()
+        
         self._worker_thread = threading.Thread(target=self._run_writer, daemon=True)
         self._worker_thread.start()
         logger.info(f"gcs_writer_thread_started | thread_id={self._worker_thread.ident}")
@@ -115,6 +142,7 @@ class GCSStreamer:
         retry_count = 0
         max_retries = 5
         local_write_count = 0
+        wrote_existing = False
         
         while retry_count < max_retries:
             try:
@@ -124,6 +152,15 @@ class GCSStreamer:
                     blob_writer = blob.open("w", content_type="application/x-ndjson")
                     logger.info(f"gcs_stream_opened | gcs_path=gs://{self.bucket.name}/{self.filename}")
                     retry_count = 0  # Reset on success
+                    
+                    # Write existing content first if appending
+                    if self._existing_content and not wrote_existing:
+                        blob_writer.write(self._existing_content)
+                        # Ensure existing content ends with newline
+                        if not self._existing_content.endswith('\n'):
+                            blob_writer.write('\n')
+                        wrote_existing = True
+                        logger.info(f"[GCS:APPEND] Wrote existing content to stream | size={len(self._existing_content)} bytes")
                 
                 lines_since_flush = 0
                 
@@ -236,7 +273,8 @@ class TranscriptionStorage:
         # GCS streamer for production mode (real-time streaming)
         self.gcs_streamer: Optional[GCSStreamer] = None
         if bucket and not use_buffer:
-            self.gcs_streamer = GCSStreamer(bucket, self.gcs_filename)
+            # Enable append mode to support rejoining scheduled calls
+            self.gcs_streamer = GCSStreamer(bucket, self.gcs_filename, append_existing=True)
             self.gcs_streamer.start()
 
         # Track if any entries were uploaded to GCS
@@ -297,7 +335,7 @@ class TranscriptionStorage:
             logger.info(f"GCS streamer stopped, has_uploaded={self._has_uploaded}")
             return
         
-        # Buffered mode: upload all buffered entries
+        # Buffered mode: upload all buffered entries (with append support)
         if self.gcs_buffer is not None:
             if len(self.gcs_buffer) == 0:
                 logger.warning(f"buffer_flush_empty")
@@ -310,8 +348,23 @@ class TranscriptionStorage:
             try:
                 logger.info(f"gcs_upload_started | file={self.gcs_filename}, entries={len(self.gcs_buffer)}")
                 blob = self.bucket.blob(self.gcs_filename)
-                transcript_content = "".join(self.gcs_buffer)
-
+                # Check if existing transcript exists and append to it
+                existing_content = ""
+                if blob.exists():
+                    try:
+                        existing_content = blob.download_as_string().decode('utf-8')
+                        line_count = len(existing_content.strip().split('\n')) if existing_content.strip() else 0
+                        logger.info(f"[GCS:APPEND] Found existing transcript | lines={line_count} | size={len(existing_content)} bytes")
+                        # Ensure existing content ends with newline
+                        if existing_content and not existing_content.endswith('\n'):
+                            existing_content += '\n'
+                    except Exception as e:
+                        logger.warning(f"[GCS:APPEND] Failed to load existing content, overwriting: {e}")
+                        existing_content = ""
+                
+                # Combine existing content with new buffered entries
+                transcript_content = existing_content + "".join(self.gcs_buffer)
+                
                 # Run blocking upload in thread pool
                 await asyncio.to_thread(
                     blob.upload_from_string,
@@ -321,7 +374,7 @@ class TranscriptionStorage:
 
                 # Track that entries were uploaded
                 self._has_uploaded = True
-                logger.info(f"Successfully uploaded transcript to GCS: {self.gcs_filename}")
+                logger.info(f"Successfully uploaded transcript to GCS: {self.gcs_filename} (appended {len(self.gcs_buffer)} new entries)")
             except Exception as e:
                 logger.error(f"Error uploading to GCS: {e}")
 

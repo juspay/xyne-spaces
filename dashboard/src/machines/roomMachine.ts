@@ -256,10 +256,12 @@ export const roomMachine = setup({
     ),
 
     // Actor to join call - Uses backend API for LiveKit token generation
+    // Handles both regular calls and scheduled calls (backend logic determines behavior)
     joinCall: fromPromise(async ({ input }: { input: { callId: string } }) => {
       const { callId } = input;
 
       // Backend now only generates LiveKit credentials, no DB writes
+      // For scheduled calls, backend creates room if it doesn't exist yet
       const result = await callService.joinCall({ callId });
 
       return {
@@ -785,6 +787,7 @@ export const roomMachine = setup({
           }
 
           await new Promise(resolve => setTimeout(resolve, 200));
+
           // eslint-disable-next-line no-console
           console.log('[roomMachine] disconnectAndCleanup completed (web mode)');
         } catch (error) {
