@@ -1,3 +1,10 @@
+## [1.71.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.71.0...v1.71.1) (2026-03-07)
+
+
+### Bug Fixes
+
+* Change default landing screen on mobile from Home to DMs ([f8bf04d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f8bf04dae5333862a82d2f2c8d4b82c2289824ea)), closes [#3918](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3918)
+
 ## [1.71.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.70.0...v1.71.0) (2026-03-06)
 
 
