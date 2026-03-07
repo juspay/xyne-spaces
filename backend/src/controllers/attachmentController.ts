@@ -66,7 +66,15 @@ export class AttachmentController {
       // Encode filename to handle special characters
       const encodedFilename = encodeURIComponent(attachment.originalFilename);
       res.setHeader('Content-Disposition', `inline; filename="${encodedFilename}"`);
-      res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
+      
+      // Disable caching for transcripts (they can be updated), cache other files
+      if (meta?.type === 'transcript') {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      } else {
+        res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
+      }
 
       // Stream the file
       res.send(buffer);

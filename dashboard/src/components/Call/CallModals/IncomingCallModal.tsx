@@ -93,6 +93,15 @@ export function IncomingCallModal(): React.ReactElement | null {
       return false;
     }
 
+    // Don't show notification for scheduled calls that haven't started yet
+    if (call.startsAt) {
+      const startTime = new Date(call.startsAt).getTime();
+      const now = Date.now();
+      if (now < startTime) {
+        return false;
+      }
+    }
+
     const userParticipant = callWithRelations.participants?.find(
       (p: CallParticipant) => p.userId === user?.id,
     );

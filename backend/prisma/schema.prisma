@@ -1793,6 +1793,8 @@ enum NotificationType {
   INCOMING_CALL
   MISSED_CALL
   CALL_DISMISS
+  CALL_REMINDER
+  CALL_SCHEDULED
   @@schema("public")
 }
 

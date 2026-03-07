@@ -1,7 +1,15 @@
 import { ReactElement } from 'react';
-import { PhoneIncoming, PhoneOutgoing, PhoneMissed, Captions, Hash, Download } from 'lucide-react';
+import {
+  PhoneIncoming,
+  PhoneOutgoing,
+  PhoneMissed,
+  Captions,
+  Calendar,
+  Hash,
+  Download,
+} from 'lucide-react';
 import AvatarGroup from '../../components/ui/Avatar/AvatarGroup';
-import { type User, ChannelScopeType } from '@xyne/shared';
+import { type User, CallStatus, ChannelScopeType } from '@xyne/shared';
 import { formatRelativeTimestamp } from '../../utils/dateUtils';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
 import {
@@ -35,6 +43,9 @@ export function CallHistoryItem({
   handleGotoTranscript,
   handleDownloadTranscript,
 }: CallHistoryItemProps): ReactElement {
+  // Check if call is scheduled
+  const isScheduled = call.status === CallStatus.SCHEDULED;
+
   // Basic call info
   const isOutgoingCall = call.createdByUserId === currentUserId;
   const currentUserParticipant = call.participants?.find(p => p.userId === currentUserId);
@@ -79,6 +90,7 @@ export function CallHistoryItem({
     didNotAnswer,
     hasTranscript,
     isUserChannelMember,
+    isScheduled,
     onCallClick,
     handleGotoTranscript,
     handleDownloadTranscript,
@@ -98,6 +110,7 @@ interface RenderCallItemProps {
   didNotAnswer: boolean;
   hasTranscript: boolean;
   isUserChannelMember: boolean;
+  isScheduled: boolean;
   onCallClick: () => void;
   onParticipantsClick: () => void;
   handleGotoTranscript?: (() => void) | undefined;
@@ -116,6 +129,7 @@ function renderCallItem({
   didNotAnswer,
   hasTranscript,
   isUserChannelMember,
+  isScheduled,
   onCallClick,
   onParticipantsClick,
   handleGotoTranscript,
@@ -123,6 +137,9 @@ function renderCallItem({
 }: RenderCallItemProps): ReactElement {
   // Get call icon
   const getCallIcon = (): ReactElement => {
+    if (isScheduled) {
+      return <Calendar size={ICON_SIZE} />;
+    }
     if (isMissedCall) {
       return <PhoneMissed size={ICON_SIZE} />;
     }
@@ -133,23 +150,27 @@ function renderCallItem({
   };
 
   // Get icon color
-  const iconColorClass =
-    call.endedAt === null
+  const iconColorClass = isScheduled
+    ? 'text-blue-600 dark:text-blue-500'
+    : call.status === CallStatus.ACTIVE
       ? 'text-green-600 dark:text-green-500'
       : isMissedCall
         ? 'text-red-500 dark:text-red-400'
         : 'text-gray-400 dark:text-gray-500';
 
   // Get status text and color
-  const statusText = getStatusTextUtil(
-    isMissedCall,
-    didNotAnswer,
-    call.endedAt === null,
-    call.endedAt ? call.endedAt - call.startedAt : 0,
-  );
+  const statusText = isScheduled
+    ? 'Upcoming'
+    : getStatusTextUtil(
+        isMissedCall,
+        didNotAnswer,
+        call.status === CallStatus.ACTIVE,
+        call.endedAt ? call.endedAt - call.startedAt : 0,
+      );
 
-  const statusColorClass =
-    call.endedAt === null
+  const statusColorClass = isScheduled
+    ? 'text-blue-600 dark:text-blue-500 font-medium'
+    : call.status === CallStatus.ACTIVE
       ? 'text-green-600 dark:text-green-500 font-medium'
       : isMissedCall || didNotAnswer
         ? 'text-red-600 dark:text-red-400'
@@ -181,12 +202,17 @@ function renderCallItem({
           {/* Name and Details */}
           <div className='flex-1 min-w-0'>
             <h3 className='text-sm font-medium text-[#384049] dark:text-[#F1F3F4] break-words'>
-              {isChannelCall ? (
+              {call.title ? (
+                // If title exists, show title
+                <span className='text-[#384049] dark:text-[#F1F3F4] font-medium'>{call.title}</span>
+              ) : isChannelCall ? (
+                // If channel call, show channel name
                 <span className='flex items-center gap-1 visual-regression-hide'>
                   <Hash size={14} className='flex-shrink-0' />
                   {channel?.name || 'Unknown Channel'}
                 </span>
               ) : (
+                // Otherwise show participant names
                 <>
                   {primaryUser?.name || 'Unknown'}
                   {allUsers.length > 1 && (
@@ -210,7 +236,9 @@ function renderCallItem({
               <span
                 className={`text-xs ${isMissedCall ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}
               >
-                {formatRelativeTimestamp(call.startedAt)}
+                {isScheduled && call.startsAt
+                  ? formatRelativeTimestamp(call.startsAt)
+                  : formatRelativeTimestamp(call.startedAt)}
               </span>
               <span className='text-xs text-gray-400'>•</span>
               <span className={`text-xs ${statusColorClass}`}>{statusText}</span>

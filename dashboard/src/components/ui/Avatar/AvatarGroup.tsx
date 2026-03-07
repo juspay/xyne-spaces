@@ -15,7 +15,7 @@ interface AvatarGroupProps extends Omit<React.ComponentProps<'div'>, 'children'>
  * AvatarStackItem - Wrapper for individual avatars
  * The CSS in global.css handles the border styling and overlapping effect
  */
-function AvatarStackItem({
+export function AvatarStackItem({
   children,
   size,
   className,

@@ -10,6 +10,7 @@ import { AssignmentPauseActivity } from './AssignmentPauseActivity';
 import { TicketAssignmentActivity } from './TicketAssignmentActivity';
 import { TicketUpdateActivity } from './TicketUpdateActivity';
 import { WorkflowQuestionActivity } from './WorkflowQuestionActivity';
+import { ScheduledCallActivity } from './ScheduledCallActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -66,6 +67,10 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
 
     case 'workflow_question':
       return <WorkflowQuestionActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'scheduled_call':
+    case 'call_reminder':
+      return <ScheduledCallActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;

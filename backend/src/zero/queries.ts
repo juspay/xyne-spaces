@@ -1,6 +1,7 @@
 import { createBuilder, defineQueries } from '@rocicorp/zero';
 import {
   BaseTicketType,
+  CallType,
   CanvasVisibility,
   defineQuery,
   DocType,
@@ -475,9 +476,22 @@ export const queries = defineQueries({
     }
   ),
 
-  userCallHistory: defineQuery(() => {
-    return zql.calls.orderBy('startedAt', 'desc').limit(100).related('participants');
+  userScheduledCalls: defineQuery(() => {
+    return zql.calls
+      .where('status', CallStatus.SCHEDULED)
+      .orderBy('startsAt', 'asc')
+      .related('participants');
   }),
+
+  userCallHistory: defineQuery(() => {
+    return zql.calls
+      .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
+      .where(helpers => helpers.cmp('status', 'NOT IN', [CallStatus.SCHEDULED, CallStatus.CANCELLED]))
+      .orderBy('startedAt', 'desc')
+      .limit(100)
+      .related('participants');
+  }),
+
   userActivities: defineQuery(() => {
     return zql.activities
       .orderBy('createdAt', 'desc')

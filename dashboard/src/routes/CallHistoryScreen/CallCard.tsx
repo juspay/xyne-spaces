@@ -1,0 +1,489 @@
+import { CallStatus, ChannelScopeType, InvitationResponse, User } from '@xyne/shared';
+import {
+  CalendarDays,
+  Copy,
+  Download,
+  Hash,
+  MoveDownLeft,
+  MoveUpRight,
+  ScrollText,
+  MoreVertical,
+  Trash2,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import HuddleIcon from '../../components/icons/HuddleIcon';
+import Avatar from '../../components/ui/Avatar/Avatar';
+import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
+import Button from '../../components/ui/Button';
+import { formatRelativeTimestamp } from '../../utils/dateUtils';
+import {
+  Call,
+  getCallStatus,
+  getOtherParticipants,
+  getParticipantUsers,
+  getStatusText,
+  hasAnyoneJoined,
+  isScheduledCallJoinable,
+} from './callHistoryItem.utils';
+import { cn } from '../../utils/classNames';
+import { useAllChannels } from '../../hooks/useChannels';
+import { ReactElement } from 'react';
+import { useUsers } from '../../hooks/useUsers';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu';
+import { usePlatform } from '../../hooks/usePlatform';
+
+interface UpcomingCallCardProps {
+  call: Call;
+  channel?: { id: string; name: string };
+  allUsers: User[];
+  onCallClick: () => void;
+  onParticipantsClick: () => void;
+  isLastItem: boolean;
+  currentUserId?: string;
+  onCancelClick?: (e: React.MouseEvent) => void;
+}
+
+interface CallHistoryItemProps {
+  call: Call;
+  currentUserId: string | undefined;
+  isLastItem?: boolean;
+  onCallClick: () => void;
+  onParticipantsClick: () => void;
+  handleGotoTranscript?: (() => void) | undefined;
+  handleDownloadTranscript?: (() => void) | undefined;
+}
+
+const MAX_AVATARS_TO_SHOW = 3;
+
+export const UpcomingCallCard = ({
+  call,
+  channel,
+  onCallClick,
+  onParticipantsClick,
+  isLastItem,
+  currentUserId,
+  onCancelClick,
+}: UpcomingCallCardProps) => {
+  // Extract user IDs from call participants
+  const { isMobile } = usePlatform();
+  const userIds = call.participants?.map(p => p.userId) ?? [];
+  const avatarsToShow = userIds.slice(0, MAX_AVATARS_TO_SHOW);
+
+  const isCallJoinable = isScheduledCallJoinable(call);
+
+  const handleCopyLink = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!call.roomLink) {
+      toast.error('Failed to copy link');
+      return;
+    }
+
+    try {
+      void navigator.clipboard.writeText(call.roomLink);
+      toast.success('Link copied to clipboard');
+    } catch {
+      toast.error('Failed to copy link');
+    }
+  };
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onCancelClick?.(e);
+  };
+
+  return (
+    <div
+      className={cn(
+        'relative md:border border-gray-200 md:rounded-lg md:shadow-sm p-4 md:p-0',
+        !isLastItem && 'border-b ',
+      )}
+    >
+      <div className='relative md:py-8 flex md:flex-col gap-4 items-center justify-start md:justify-center md:bg-gray-50 rounded-lg '>
+        <div className='hidden md:block absolute top-3 right-3'>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant='ghost'
+                size='icon'
+                className='h-6 w-6 p-0.5 text-gray-400 hover:text-gray-600'
+              >
+                <MoreVertical className='size-4' />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end'>
+              <DropdownMenuItem onClick={handleCopyLink} className='flex items-center gap-2'>
+                <Copy className='size-4' />
+                Copy Link
+              </DropdownMenuItem>
+              {currentUserId === call.createdByUserId && (
+                <DropdownMenuItem
+                  onClick={handleDelete}
+                  className='flex items-center gap-2 text-red-600'
+                >
+                  <Trash2 className='size-4' />
+                  Delete
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        {/* Headphones Icon */}
+        <div className='w-10 h-10 flex flex-shrink-0 items-center justify-center rounded-[10px] border border-[#E4E6E7] relative'>
+          <HuddleIcon color='#3B4145' size={20} />
+          <span className='bg-[#F2F2F3] rounded-full w-[18px] h-[18px] flex items-center justify-center absolute bottom-0 right-0 translate-x-1/4 translate-y-1/4'>
+            <CalendarDays className='size-2.5' />
+          </span>
+        </div>
+        <div className='flex items-start justify-center w-full gap-2 overflow-hidden'>
+          <div className='block md:hidden flex-1 min-w-0 overflow-hidden'>
+            <p className='text-black font-medium text-sm truncate'>
+              {call.title ?? channel?.name ?? 'Scheduled Call'}
+            </p>
+            {call.startsAt && (
+              <p className={cn('text-[#868686] truncate', isMobile ? 'text-xs' : 'text-sm')}>
+                {formatRelativeTimestamp(call.startsAt)}
+              </p>
+            )}
+          </div>
+
+          <div className='flex items-center gap-1.5 flex-shrink-0'>
+            <p className='text-[#788187] text-sm font-medium leading-5 hidden md:block'>
+              {userIds.length} Participants
+            </p>
+            <div
+              role='button'
+              tabIndex={0}
+              onClick={e => {
+                e.stopPropagation();
+                onParticipantsClick();
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onParticipantsClick();
+                }
+              }}
+              className='flex items-center -space-x-1.5'
+              data-track-category='calls'
+              data-track-name='view-scheduled-participants'
+            >
+              {avatarsToShow.length > 0 &&
+                avatarsToShow.map((userId, index) => (
+                  <AvatarStackItem
+                    key={`${userId}-${index}`}
+                    size={isMobile ? 24 : 22}
+                    className={cn(
+                      'flex items-center justify-center ring-[2px] ring-white z-10',
+                      isMobile ? 'rounded-md' : 'rounded-full',
+                    )}
+                    data-slot='avatar-stack-item'
+                    data-index={index}
+                  >
+                    <Avatar size={'rg'} userId={userId} showActiveStatus={false} />
+                  </AvatarStackItem>
+                ))}
+            </div>
+            <Button
+              onClick={onCallClick}
+              variant='outline'
+              className={cn(
+                ' text-sm font-medium leading-5 rounded-lg h-8 w-20',
+                isCallJoinable
+                  ? 'border-green-600 text-green-600 hover:text-green-700 hover:border-green-700'
+                  : 'border-gray-400 text-gray-400 hover:text-gray-700 hover:border-gray-700',
+                'flex md:hidden',
+              )}
+            >
+              Join Call
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='md:hidden h-5 w-5 p-0.5 text-gray-400 hover:text-gray-600'
+                >
+                  <MoreVertical className='size-3.5' />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='end'>
+                <DropdownMenuItem onClick={handleCopyLink} className='flex items-center gap-2'>
+                  <Copy className='size-4' />
+                  Copy Link
+                </DropdownMenuItem>
+                {currentUserId === call.createdByUserId && (
+                  <DropdownMenuItem
+                    onClick={handleDelete}
+                    className='flex items-center gap-2 text-red-600'
+                  >
+                    <Trash2 className='size-4' />
+                    Delete
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </div>
+      <div className='space-y-1 px-4 pt-4 pb-5 border-t border-gray-200 text-start hidden md:flex gap-2 items-center justify-between'>
+        <div className='overflow-hidden'>
+          <p className='text-black font-medium text-sm text-nowrap truncate'>
+            {call.title ?? channel?.name ?? 'Scheduled Call'}
+          </p>
+          {call.startsAt && (
+            <p className='text-[#868686] text-sm'>{formatRelativeTimestamp(call.startsAt)}</p>
+          )}
+        </div>
+        <div className='flex gap-2 items-center'>
+          <Button
+            onClick={onCallClick}
+            variant='outline'
+            className={cn(
+              ' text-sm font-medium leading-5 rounded-lg h-8 w-20',
+              isCallJoinable
+                ? 'border-green-600 text-green-600 hover:text-green-700 hover:border-green-700'
+                : 'border-gray-400 text-gray-400 hover:text-gray-700 hover:border-gray-700',
+            )}
+          >
+            Join Call
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const CallCard = ({
+  call,
+  currentUserId,
+  onCallClick,
+  onParticipantsClick,
+  handleGotoTranscript,
+  handleDownloadTranscript,
+  isLastItem,
+}: CallHistoryItemProps) => {
+  // Get channel information
+  const allChannels = useAllChannels();
+  const { isMobile } = usePlatform();
+  const channel = allChannels.find(c => c.id === call.channelId);
+  const isChannelCall = channel?.scopeType === ChannelScopeType.DEFAULT;
+
+  // Basic call info
+  const isOutgoingCall = call.createdByUserId === currentUserId;
+  const currentUserParticipant = call.participants?.find(p => p.userId === currentUserId);
+
+  const hasCurrentUserJoined = currentUserParticipant?.response === InvitationResponse.ACCEPTED;
+
+  const otherParticipants = getOtherParticipants(call.participants, currentUserId);
+  const allUsersData = useUsers();
+
+  const participantUsers = getParticipantUsers(otherParticipants, allUsersData);
+  const userIds = participantUsers.map(u => u.id);
+  const primaryUser = participantUsers[0];
+
+  const isCallJoinable = isScheduledCallJoinable(call);
+  const isActiveState = call.status === CallStatus.ACTIVE;
+
+  // Determine call status
+  const anyoneJoined = hasAnyoneJoined(otherParticipants);
+  const { isMissedCall, didNotAnswer } = getCallStatus(
+    call,
+    isOutgoingCall,
+    hasCurrentUserJoined,
+    anyoneJoined,
+  );
+
+  const getCallIcon = (): ReactElement => {
+    if (isMissedCall) {
+      return <MoveDownLeft className='size-2.5 text-red-500' strokeWidth={2.3} />;
+    }
+    if (isOutgoingCall) {
+      return <MoveUpRight className='size-2.5 text-green-600' strokeWidth={2.3} />;
+    }
+    return <MoveDownLeft className='size-2.5 text-green-600' strokeWidth={2.3} />;
+  };
+
+  // Get icon color
+  const iconColorClass = isActiveState
+    ? 'text-green-600 dark:text-green-500'
+    : isMissedCall
+      ? 'text-red-500 dark:text-red-400'
+      : 'text-[#868686] dark:text-gray-500';
+
+  // Get status text and color
+  const statusText = getStatusText(
+    isMissedCall,
+    didNotAnswer,
+    call.endedAt === null,
+    call.endedAt ? call.endedAt - call.startedAt : 0,
+  );
+
+  const getCallTitle = () => {
+    if (call.title) {
+      return call.title;
+    }
+
+    if (call.title === null && isChannelCall) {
+      return (
+        <span className='flex items-center gap-1'>
+          <Hash size={14} className='flex-shrink-0' />
+          {channel.name}
+        </span>
+      );
+    }
+
+    const primaryUserDisplay = primaryUser?.name || primaryUser?.email || 'Unknown';
+
+    return (
+      <>
+        {primaryUserDisplay}
+        {participantUsers.length > 1 && (
+          <span>
+            {', '}
+            {participantUsers
+              .slice(1, 2)
+              .map(u => u?.name || u?.email || 'Unknown')
+              .join(', ')}
+            {participantUsers.length > 2 && (
+              <span className='ml-1 whitespace-nowrap'>
+                + {participantUsers.length - 2} other{participantUsers.length - 2 > 1 ? 's' : ''}
+              </span>
+            )}
+          </span>
+        )}
+      </>
+    );
+  };
+
+  return (
+    <div
+      className={cn(
+        'flex items-center justify-between p-4 hover:bg-gray-50',
+        !isLastItem && 'border-b border-gray-200',
+        isActiveState && 'bg-green-50 hover:bg-green-100',
+      )}
+    >
+      {/* Huddle Icon with Indication */}
+      <div className='flex items-center justify-start gap-4 w-full'>
+        {/* Headphones Icon */}
+        <div className='w-10 h-10 flex items-center justify-center rounded-[10px] border border-[#E4E6E7] relative bg-white'>
+          <HuddleIcon
+            color={isActiveState ? '#229C10' : isMissedCall ? '#D75850' : '#3B4145'}
+            size={20}
+          />
+          <span className='bg-[#F2F2F3] rounded-full w-[18px] h-[18px] flex items-center justify-center absolute bottom-0 right-0 translate-x-1/4 translate-y-1/4'>
+            {getCallIcon()}
+          </span>
+        </div>
+        <div className='flex flex-1 min-w-0 items-start justify-between gap-3'>
+          <div className='flex flex-col min-w-0 flex-1 overflow-hidden'>
+            <span
+              className={cn(
+                'text-black font-medium text-sm truncate max-w-full',
+                isActiveState ? 'text-green-600' : isMissedCall ? 'text-red-600' : 'text-gray-800',
+              )}
+            >
+              {getCallTitle()}
+            </span>
+            {call.status === CallStatus.ACTIVE ? (
+              <p className={cn('text-xs', iconColorClass)}>Ongoing</p>
+            ) : (
+              <div className='flex flex-col md:flex-row items-start md:items-center gap-0.5 md:gap-1'>
+                {(call.startsAt || call.startedAt) && (
+                  <p className={cn('text-xs', iconColorClass)}>
+                    {formatRelativeTimestamp(call.startsAt || call.startedAt)}
+                  </p>
+                )}
+                <span className={cn('text-xs hidden md:block', iconColorClass)}>•</span>
+                <span className={cn('text-xs', iconColorClass)}>{statusText}</span>
+              </div>
+            )}
+          </div>
+          <div className={cn('flex items-center', isMobile ? 'gap-1.5' : 'gap-2.5')}>
+            <div
+              role='button'
+              tabIndex={0}
+              onClick={e => {
+                e.stopPropagation();
+                onParticipantsClick();
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onParticipantsClick();
+                }
+              }}
+              className='flex items-center -space-x-1.5'
+              data-track-category='calls'
+              data-track-name='view-past-participants'
+            >
+              {userIds.length > 0 &&
+                userIds.slice(0, MAX_AVATARS_TO_SHOW).map((userId, index) => (
+                  <AvatarStackItem
+                    key={`${userId}-${index}`}
+                    size={24}
+                    className='rounded-md flex items-center justify-center ring-[2px] ring-white z-10'
+                    data-slot='avatar-stack-item'
+                    data-index={index}
+                  >
+                    <Avatar userId={userId} size='rg' showActiveStatus={false} />
+                  </AvatarStackItem>
+                ))}
+            </div>
+            {!isActiveState && !isCallJoinable && (
+              <>
+                <Button
+                  onClick={handleGotoTranscript}
+                  variant='outline'
+                  size='icon'
+                  className='size-7'
+                >
+                  <ScrollText className='size-3.5 text-[#3B4145]' />
+                </Button>
+                <Button
+                  onClick={handleDownloadTranscript}
+                  variant='outline'
+                  size='icon'
+                  className='size-7'
+                >
+                  <Download className='size-3.5 text-[#3B4145]' />
+                </Button>
+              </>
+            )}
+            <Button
+              onClick={onCallClick}
+              variant='outline'
+              className={cn(
+                isActiveState && !hasCurrentUserJoined
+                  ? 'ring ring-green-200 border-green-600 hover:bg-gray-50 rounded-lg h-8'
+                  : isCallJoinable && !hasCurrentUserJoined
+                    ? 'border-gray-300 hover:bg-gray-50 rounded-lg h-8'
+                    : (isActiveState || isCallJoinable) && hasCurrentUserJoined
+                      ? 'hidden'
+                      : 'size-7',
+                'gap-1.5 items-center',
+              )}
+            >
+              <HuddleIcon color={isActiveState ? '#229C10' : '#3B4145'} size={12} />
+              {(isActiveState || isCallJoinable) && !hasCurrentUserJoined && (
+                <span
+                  className={cn(
+                    'font-medium text-sm',
+                    isActiveState ? 'text-green-600 hover:text-green-600' : 'text-gray-700',
+                  )}
+                >
+                  Join Call
+                </span>
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

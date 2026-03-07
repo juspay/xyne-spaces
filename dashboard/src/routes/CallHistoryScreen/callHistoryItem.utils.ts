@@ -1,11 +1,11 @@
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { formatDuration } from '../../utils/dateUtils';
-import { type User } from '@xyne/shared';
+import { CallStatus, type User } from '@xyne/shared';
 
 export type Call = QueryResultType<typeof queries.userCallHistory>[number];
 
-export interface CallStatus {
+export interface CallStatusInfo {
   isMissedCall: boolean;
   didNotAnswer: boolean;
 }
@@ -35,8 +35,8 @@ export function getCallStatus(
   isOutgoingCall: boolean,
   hasCurrentUserJoined: boolean,
   anyoneJoined: boolean,
-): CallStatus {
-  const isCallEnded = call.endedAt !== null;
+): CallStatusInfo {
+  const isCallEnded = call.status === CallStatus.ENDED;
 
   if (isOutgoingCall) {
     // Outgoing call: "No answer" if ended and no one joined
@@ -64,4 +64,38 @@ export function getStatusText(
   if (didNotAnswer) return 'No answer';
   if (isActive) return 'Active';
   return formatDuration(duration);
+}
+
+// Get call title from participant names
+export function getCallTitleFromParticipants(
+  participants: Call['participants'],
+  allUsers: User[],
+  currentUserId: string | undefined,
+): string {
+  // Get other participants (excluding current user)
+  const otherParticipants = getOtherParticipants(participants, currentUserId);
+  const participantUsers = getParticipantUsers(otherParticipants, allUsers);
+
+  if (participantUsers.length === 0) {
+    return 'Unknown';
+  }
+
+  const firstNames = participantUsers.map(user => {
+    const fullName = user.name || 'Unknown';
+    return fullName.split(' ')[0];
+  });
+
+  return firstNames.join(', ');
+}
+
+export function isScheduledCallJoinable(call: Call): boolean {
+  if (!call.startsAt) return false;
+  if (call.status === CallStatus.ENDED) return false;
+
+  if (call.status === CallStatus.ACTIVE) return true;
+
+  const now = Date.now();
+  const scheduledTime = new Date(call.startsAt).getTime();
+
+  return now >= scheduledTime;
 }

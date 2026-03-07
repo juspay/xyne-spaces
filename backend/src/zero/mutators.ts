@@ -745,7 +745,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           draftMessage: z.string(),
           draftMessageId: z.string(),
         }),
-        async ({tx, args: { channelId, conversationId, timestamp, draftMessage, draftMessageId }}) => {
+        async ({ tx, args: { channelId, conversationId, timestamp, draftMessage, draftMessageId } }) => {
           const participant = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
@@ -779,7 +779,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Find the channel-level draft (conversationId === null)
           const draft = channelDrafts.find(d => d.conversationId === null);
 
-          if ( draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
             await tx.mutate.draft_messages.delete({ id: draft.id });
           } else {
             await tx.mutate.draft_messages.upsert({
@@ -795,15 +795,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           const unreadActivities = await tx.run(
-              zql.activities
-                .where('userId', authData.sub)
-                .where('isRead', false)
-                .where('channelId', channelId),
-            );
+            zql.activities
+              .where('userId', authData.sub)
+              .where('isRead', false)
+              .where('channelId', channelId),
+          );
 
-            if (unreadActivities.length === 0) {
-              return;
-            }
+          if (unreadActivities.length === 0) {
+            return;
+          }
 
 
           const messageIds = Array.from(
@@ -934,9 +934,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Filter for Root Activities (exclude thread replies and user's own messages)
           // Is Root if: Message exists AND InitialMessageId == MessageId AND not sent by current user
           const rootActivities = recentActivities.filter(activity => {
-             if (!activity.messageId || !activity.message) return false;
-             const msg = activity.message;
-             return msg.conversation && msg.conversation.initialMessageId === msg.messageId;
+            if (!activity.messageId || !activity.message) return false;
+            const msg = activity.message;
+            return msg.conversation && msg.conversation.initialMessageId === msg.messageId;
           });
 
           let unreadCount = 0;
@@ -2996,8 +2996,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (attachment.entityType === AttachmentEntityType.CHAT) {
             const message = await tx.run(zql.messages
-            .where('messageId', attachment.entityId)
-            .one());
+              .where('messageId', attachment.entityId)
+              .one());
 
             if (!message) {
               throw new Error("Attachment doesn't belong to a message");
@@ -3045,7 +3045,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const remainingAttachments = await tx.run(
               zql.message_attachments.where('entityId', attachment.entityId),
             );
-  
+
             if (remainingAttachments.length === 0) {
               await tx.mutate.draft_messages.update({
                 id: attachment.entityId,
@@ -3218,11 +3218,46 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Call not found');
           }
 
-          if (call.status !== CallStatus.ACTIVE) {
+          if (call.status !== CallStatus.ACTIVE && call.status !== CallStatus.SCHEDULED) {
             throw new Error('Call is not active');
           }
 
           const now = timestamp;
+
+          // If call is SCHEDULED, create system message and mark as ACTIVE
+          if (call.status === CallStatus.SCHEDULED) {
+            const callMetadata = call.metadata as { systemMessageId?: string; conversationId?: string } | null;
+
+            // Only create system message if conversationId doesn't exist
+            if (!callMetadata?.conversationId) {
+              const result = await sendCallSystemMessage(tx, {
+                callExternalId: call.externalId,
+                channelId: call.channelId,
+                initiatorUserName: authData.name,
+              });
+
+              await tx.mutate.calls.update({
+                id: call.id,
+                status: CallStatus.ACTIVE,
+                startedAt: now,
+                lastActivityAt: now,
+                updatedAt: now,
+                metadata: {
+                  systemMessageId: result.messageId,
+                  conversationId: result.conversationId,
+                },
+              });
+            } else {
+              // Just update status, keep existing metadata
+              await tx.mutate.calls.update({
+                id: call.id,
+                status: CallStatus.ACTIVE,
+                startedAt: now,
+                lastActivityAt: now,
+                updatedAt: now,
+              });
+            }
+          }
 
           const existingParticipant = await tx.run(zql.call_participants
             .where('callId', call.id)
@@ -3294,12 +3329,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // If no active participants remain, end the call and update system message
           if (activeParticipants.length === 0) {
+            // If endsAt exists and current time hasn't passed it, keep as SCHEDULED
+            // Otherwise, mark as ENDED
+            const scheduleStatus = call.endsAt && now < call.endsAt ? CallStatus.SCHEDULED : CallStatus.ENDED;
             const endedAt = now;
 
             await tx.mutate.calls.update({
               id: call.id,
-              status: CallStatus.ENDED,
-              endedAt,
+              status: scheduleStatus,
+              endedAt: now,
               updatedAt: now,
             });
 
@@ -3314,7 +3352,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   userName: p.user?.name || 'Unknown User',
                 }));
 
-                const totalCount = joinedParticipants.length;
+              const totalCount = joinedParticipants.length;
 
               if (totalCount > 0) {
                 await updateCallSystemMessageOnEnd(tx, {
@@ -3425,6 +3463,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
         },
+      ),
+      cancel: defineMutator(
+        z.object({ callId: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { callId, timestamp } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call || call.status !== CallStatus.SCHEDULED) {
+            throw new Error('Call not found or not scheduled');
+          }
+          await tx.mutate.calls.update({
+            id: call.id,
+            status: CallStatus.CANCELLED,
+            updatedAt: timestamp,
+          });
+        }
       ),
     },
     activities: {
@@ -3543,8 +3595,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       markThreadActivitiesAsRead: defineMutator(
-        z.object({conversationId: z.string(), draftMessage: z.string(), draftMessageId: z.string(), timestamp: z.number()}),
-        async ({tx, args: { conversationId, draftMessage, draftMessageId, timestamp }}) => {
+        z.object({ conversationId: z.string(), draftMessage: z.string(), draftMessageId: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { conversationId, draftMessage, draftMessageId, timestamp } }) => {
           const conversation = await tx.run(zql.conversations
             .where('conversationId', conversationId)
             .one());
@@ -3564,7 +3616,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .one(),
           );
 
-          if ( draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
             await tx.mutate.draft_messages.delete({ id: draft.id });
           } else {
             await tx.mutate.draft_messages.upsert({
@@ -3946,11 +3998,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   zql.stages
                     .where('boardId', ticket.boardId)
                 );
-                
+
                 const forwardStageIds = forwardStages
                   .filter(s => s.sequenceNumber > newStage.sequenceNumber)
                   .map(s => s.id);
-                
+
                 // 2. Delete all entries for forward stages
                 if (forwardStageIds.length > 0) {
                   const allStageEntries = await tx.run(
@@ -4397,7 +4449,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
         }
       ),
-    },   
+    },
     subTicket: {
       create: defineMutator(
         z.object({
@@ -6580,59 +6632,59 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
-  resourceAccess: {
-    grant: defineMutator(
-      z.object({
-        grants: z.array(z.object({
-          id: z.string(),
-          userId: z.string(),
-          resourceId: z.string(),
-          accessType: z.nativeEnum(AccessType),
-        })),
-        timestamp: z.number(),
-      }),
-      async ({ tx, args: { grants, timestamp } }) => {
-        for (const grant of grants) {
-          await tx.mutate.resource_access.insert({
-            id: grant.id,
-            userId: grant.userId,
-            resourceId: grant.resourceId,
-            accessType: grant.accessType as AccessType,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          });
-        }
-      },
-    ),
-    revoke: defineMutator(
-      z.object({
-        ids: z.array(z.string()),
-      }),
-      async ({ tx, args: { ids } }) => {
-        for (const id of ids) {
-          await tx.mutate.resource_access.delete({ id });
-        }
-      },
-    ),
-    update: defineMutator(
-      z.object({
-        updates: z.array(z.object({
-          id: z.string(),
-          accessType: z.nativeEnum(AccessType),
-        })),
-        timestamp: z.number(),
-      }),
-      async ({ tx, args: { updates, timestamp } }) => {
-        for (const update of updates) {
-          await tx.mutate.resource_access.update({
-            id: update.id,
-            accessType: update.accessType as AccessType,
-            updatedAt: timestamp,
-          });
-        }
-      },
-    ),
-  },
+    resourceAccess: {
+      grant: defineMutator(
+        z.object({
+          grants: z.array(z.object({
+            id: z.string(),
+            userId: z.string(),
+            resourceId: z.string(),
+            accessType: z.nativeEnum(AccessType),
+          })),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { grants, timestamp } }) => {
+          for (const grant of grants) {
+            await tx.mutate.resource_access.insert({
+              id: grant.id,
+              userId: grant.userId,
+              resourceId: grant.resourceId,
+              accessType: grant.accessType as AccessType,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      revoke: defineMutator(
+        z.object({
+          ids: z.array(z.string()),
+        }),
+        async ({ tx, args: { ids } }) => {
+          for (const id of ids) {
+            await tx.mutate.resource_access.delete({ id });
+          }
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          updates: z.array(z.object({
+            id: z.string(),
+            accessType: z.nativeEnum(AccessType),
+          })),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { updates, timestamp } }) => {
+          for (const update of updates) {
+            await tx.mutate.resource_access.update({
+              id: update.id,
+              accessType: update.accessType as AccessType,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+    },
     draft: {
       createAttachments: defineMutator(
         z.object({
@@ -7747,7 +7799,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           for (let i = 0; i < userIds.length; i++) {
             const targetUserId = userIds[i];
             const accessId = accessIds[i];
-            
+
             // Check if already shared
             const existing = await tx.run(
               zql.link_access

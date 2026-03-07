@@ -45,6 +45,35 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     super('message');
   }
 
+  /**
+   * Find an existing bot summary message for a specific call
+   */
+  async findSummaryByCallId(conversationId: string, callId: string): Promise<Message | null> {
+    return await this.db.message.findFirst({
+      where: {
+        conversationId,
+        msgType: MessageType.BOT,
+        AND: [
+          {
+            metadata: {
+              path: ['messageSubtype'],
+              equals: 'call_summary',
+            },
+          },
+          {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+        ],
+      },
+      orderBy: {
+        createdAt: 'desc', // Get the most recent summary
+      },
+    });
+  }
+
   async create(data: CreateMessageInput, disableMessageCountIncrement: boolean = false): Promise<Message> {
     
       await this.validateString(data.conversationId, 'conversationId');

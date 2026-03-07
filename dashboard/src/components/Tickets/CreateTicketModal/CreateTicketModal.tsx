@@ -69,7 +69,7 @@ import Textarea from '../../ui/Textarea';
 import Tooltip from '../../ui/Tooltip';
 import { getFilesDimensions } from '../../ui/utils/files';
 import { getPriorityOptions, parseAssignee, TAG_COLORS } from './createTicket.utils';
-import { InlineCalendar } from './DateSelector';
+import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from './ShimmerText';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
@@ -2061,7 +2061,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 {field => {
                   const yesterday = new Date(new Date().setDate(new Date().getDate() - 1));
                   return (
-                    <InlineCalendar
+                    <DatePicker
                       selectedDate={field.state.value}
                       onSelect={date => field.handleChange(date)}
                       placeholder={`Due Date${mandatoryDueDate ? ' *' : ''}`}

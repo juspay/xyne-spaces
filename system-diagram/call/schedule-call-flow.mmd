@@ -1,0 +1,58 @@
+flowchart TD
+    Start([User Schedules Call]) --> Validate["Validate Input
+    callValidator.ts
+    ScheduleCallSchema"]
+    
+    Validate --> FindChannel["Find/Create Channel
+    channelRepository.ts
+    Call-title-timestamp"]
+    
+    FindChannel --> Transaction["Database Transaction
+    callController.ts:1269"]
+    
+    Transaction --> CreateCall["Create Call
+    Status: SCHEDULED"]
+    CreateCall --> CreateParticipants["Create Participants
+    createMany - All INVITED"]
+    CreateParticipants --> ReturnIds[Return Participant IDs]
+    ReturnIds --> CommitTxn[Commit Transaction]
+    
+    CommitTxn --> SendNotif["Send Notifications
+    scheduledCallNotificationService.ts"]
+    SendNotif --> ScheduleReminder["Schedule Reminder Job
+    Bull Queue
+    startsAt - 10min"]
+    ScheduleReminder --> ScheduleAutoEnd["Schedule Auto-End Job
+    Bull Queue
+    at endsAt"]
+    
+    ScheduleAutoEnd --> End1([Call Scheduled])
+    
+    %% Reminder Phase
+    ReminderFires([10min Before Call]) --> CheckAccepted["Get Accepted Participants
+    Use Set for O1 lookup"]
+    CheckAccepted --> SendReminders["Send Reminders
+    to unaccepted users only"]
+    
+    %% Join Phase
+    UserJoins([User Joins Call]) --> CreateRoom["Create LiveKit Room
+    livekitWebhookController.ts"]
+    CreateRoom --> ActivateCall["Activate Scheduled Call
+    callRepository.ts:575"]
+    ActivateCall --> TxnActivate["Transaction: Re-read call
+    SCHEDULED → ACTIVE
+    INVITED → ACCEPTED"]
+    
+    %% Leave Phase
+    UserLeaves([Last User Leaves]) --> UpdateLeave["Update participant.leftAt
+    callRepository.ts:371"]
+    UpdateLeave --> CheckTime{leftAt < endsAt?}
+    CheckTime -->|Yes| RevertScheduled["ACTIVE → SCHEDULED
+    Can be rejoined"]
+    CheckTime -->|No| MarkEnded[ACTIVE → ENDED]
+    
+    %% Auto-End Phase
+    AutoEndFires([endsAt Reached]) --> CheckStatus{Call Status?}
+    CheckStatus -->|"SCHEDULED"| AutoEnd[SCHEDULED → ENDED]
+    CheckStatus -->|ACTIVE| Ignore["Ignore - ends
+    when users leave"]

@@ -248,18 +248,16 @@ export class TranscriptService {
     try {
       logger.info(`[${callId}] transcript_processing_started | message_id=${messageId}`);
 
-      // 0. Check if transcript attachment already exists to avoid redundant processing
-      logger.info(
-        `[${callId}] attachment_exists_check | message_id=${messageId}, attachment_type=transcript`
-      );
-      const transcriptAttachment =
-        await repositories.messageAttachments.findTranscriptByMessageId(messageId);
+      // 0. Check if transcript attachment already exists for this CALL (not just this message)
+      // This handles cases where multiple messages might be created for the same call
+      let existingTranscriptAttachment =
+        await repositories.messageAttachments.findTranscriptByCallId(callId);
 
-      if (transcriptAttachment) {
-        logger.warn(
-          `[${callId}] attachment_already_exists | message_id=${messageId}, skipping=true`
+      const isUpdate = !!existingTranscriptAttachment;
+      if (isUpdate) {
+        logger.info(
+          `Transcript for call ${callId} already exists (attachment: ${existingTranscriptAttachment.id}). Will update with latest data.`
         );
-        return;
       }
 
       // 1. Get call details
@@ -329,31 +327,57 @@ export class TranscriptService {
       const durationSeconds = Math.round(lastTimestamp - firstTimestamp);
       const uniqueParticipants = Array.from(new Set(entries.map((e) => e.user))).filter(Boolean);
 
-      // 11. Create attachment linked to the existing call message
-      logger.info(
-        `[${callId}] attachment_creation_started | message_id=${messageId}, attachment_type=transcript`
-      );
-      const attachment = await repositories.messageAttachments.create({
-        entityId: messageId,
-        entityType: AttachmentEntityType.CHAT,
-        originalFilename: `call_transcript.txt`,
-        size: formattedTranscript.length,
-        mimetype: 'text/plain',
-        url: gcsUrl,
-        uploadedByUserId: call.createdByUserId,
-        createdBy: call.createdByUserId,
-        storageProvider: 'gcs',
-        conversationId: callMessage.conversationId,
-        metadata: {
-          callId,
-          type: 'transcript',
-          duration: durationSeconds,
-          participantCount: uniqueParticipants.length,
-        },
-      });
-      logger.info(
-        `[${callId}] attachment_created | attachment_id=${attachment.id}, gcs_url=${gcsUrl}`
-      );
+      // 11. Update existing attachment or create new one
+      if (isUpdate && existingTranscriptAttachment) {
+        // Get existing version or start at 1
+        const existingMetadata = existingTranscriptAttachment.metadata as any;
+        const currentVersion = existingMetadata?.version || 1;
+
+        // IMPORTANT: Update entityId to point to current message
+        // This ensures the attachment shows up with the correct message in the UI
+        await repositories.messageAttachments.update(existingTranscriptAttachment.id, {
+          url: gcsUrl,
+          size: formattedTranscript.length,
+          metadata: {
+            callId,
+            type: 'transcript',
+            duration: durationSeconds,
+            participantCount: uniqueParticipants.length,
+            version: currentVersion + 1,
+            lastUpdatedAt: new Date().toISOString(),
+            entryCount: entries.length,
+          },
+        });
+        logger.info(`Updated transcript attachment ${existingTranscriptAttachment.id} to version ${currentVersion + 1}, linked to message ${messageId}`);
+      } else {
+        logger.info(
+          `[${callId}] attachment_creation_started | message_id=${messageId}, attachment_type=transcript`
+        );
+        const attachment = await repositories.messageAttachments.create({
+          entityId: messageId,
+          entityType: AttachmentEntityType.CHAT,
+          originalFilename: `call_transcript.txt`,
+          size: formattedTranscript.length,
+          mimetype: 'text/plain',
+          url: gcsUrl,
+          uploadedByUserId: call.createdByUserId,
+          createdBy: call.createdByUserId,
+          storageProvider: 'gcs',
+          conversationId: callMessage.conversationId,
+          metadata: {
+            callId,
+            type: 'transcript',
+            duration: durationSeconds,
+            participantCount: uniqueParticipants.length,
+            version: 1,
+            createdAt: new Date().toISOString(),
+            entryCount: entries.length,
+          },
+        });
+        logger.info(
+          `[${callId}] attachment_created | attachment_id=${attachment.id}, gcs_url=${gcsUrl}`
+        );
+      }
 
       // 11. Save transcript URL to Call record for easier access (used by recordings feature)
       await repositories.calls.update(call.id, {
@@ -1093,40 +1117,66 @@ Output ONLY the processed transcript, nothing else.`;
       fullMarkdownContent += '\n\n## Suggested Tickets:\n\n';
     }
 
-    // Use repository pattern for database operations
-    const message = await repositories.messages.create({
-      conversationId,
-      senderId: xyneAutomaticBot.id,
-      content: fullMarkdownContent,
-      msgType: MessageType.BOT,
-      showInChannel: false,
-      metadata: {
-        messageSubtype: 'call_summary',
-        callId,
-        isAiGenerated: true,
-        contentFormat: 'markdown',
-        hasSuggestedTickets: ticketSuggestions && ticketSuggestions.length > 0,
-        suggestedTicketsCount: ticketSuggestions?.length || 0,
-      },
-    });
+    // Check if a summary already exists for this call
+    const existingSummary = await repositories.messages.findSummaryByCallId(conversationId, callId);
 
-    logger.info(
-      `[postSummaryAsReply] Message created: ${message.messageId} in conversation ${conversationId}`
-    );
+    if (existingSummary) {
+      // Update existing summary
+      const existingMetadata = existingSummary.metadata as any;
+      const currentVersion = existingMetadata?.version || 1;
+
+      await repositories.messages.update(existingSummary.messageId, {
+        content: fullMarkdownContent,
+        metadata: {
+          messageSubtype: 'call_summary',
+          callId,
+          isAiGenerated: true,
+          contentFormat: 'markdown',
+          hasSuggestedTickets: ticketSuggestions && ticketSuggestions.length > 0,
+          suggestedTicketsCount: ticketSuggestions?.length || 0,
+          version: currentVersion + 1,
+          lastUpdatedAt: new Date().toISOString(),
+        },
+      });
+      logger.info(`[postSummaryAsReply] Updated existing summary message ${existingSummary.messageId} to version ${currentVersion + 1}`);
+    } else {
+      // Create new summary
+      const message = await repositories.messages.create({
+        conversationId,
+        senderId: xyneAutomaticBot.id,
+        content: fullMarkdownContent,
+        msgType: MessageType.BOT,
+        showInChannel: false,
+        metadata: {
+          messageSubtype: 'call_summary',
+          callId,
+          isAiGenerated: true,
+          contentFormat: 'markdown',
+          hasSuggestedTickets: ticketSuggestions && ticketSuggestions.length > 0,
+          suggestedTicketsCount: ticketSuggestions?.length || 0,
+          version: 1,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      logger.info(
+        `[postSummaryAsReply] Message created: ${message.messageId} in conversation ${conversationId}`
+      );
+    }
 
     await repositories.conversations.incrementReplyCount(conversationId);
     logger.info(`[postSummaryAsReply] Reply count incremented for conversation ${conversationId}`);
   }
 
-/**
-   * Process call transcript and generate AI summary
-   * This is the main orchestration method that:
-   * 1. Checks if transcript exists in GCS
-   * 2. Processes the transcript (existing functionality)
-   * 3. Generates AI summary
-   * 4. Saves summary to call record
-   * 5. Posts summary to channel
-   */
+  /**
+     * Process call transcript and generate AI summary
+     * This is the main orchestration method that:
+     * 1. Checks if transcript exists in GCS
+     * 2. Processes the transcript (existing functionality)
+     * 3. Generates AI summary
+     * 4. Saves summary to call record
+     * 5. Posts summary to channel
+     */
   async processCallWithSummary(
     callId: string,
     messageId: string,

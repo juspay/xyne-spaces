@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
+import { mutators } from '../../zero/mutators';
 import { roomActor } from '../../machines/roomMachine';
-import { CallType, ChannelScopeType } from '@xyne/shared';
+import { CallType, CallStatus, ChannelScopeType } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import { usePlatform } from '../../hooks/usePlatform';
 import { stateMachineActor, type User } from '../../machines/stateMachine';
-import { getParticipantUsers } from './callHistoryItem.utils';
+import { getCallStatus, getParticipantUsers } from './callHistoryItem.utils';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -19,10 +20,14 @@ import { blobToBase64 } from '../../services/clients/fileFetchService';
 import { logger, Event as Logger } from '../../utils/logger';
 
 type CallHistoryResult = QueryResultType<typeof queries.userCallHistory>;
+type ScheduledCallsResult = QueryResultType<typeof queries.userScheduledCalls>;
 type Call = CallHistoryResult[number];
+type ScheduledCall = ScheduledCallsResult[number];
 
 interface UseCallHistoryReturn {
   calls: Call[] | undefined;
+  scheduledCalls: ScheduledCall[] | undefined;
+  missedCalls: QueryResultType<typeof queries.userCallHistory>;
   queryDetails: ReturnType<typeof useCachedQuery>[1];
   selectedCall: Call | null;
   isParticipantsModalOpen: boolean;
@@ -35,7 +40,6 @@ interface UseCallHistoryReturn {
   handleParticipantsClick: (call: Call) => void;
   handleUserToggle: (user: User) => void;
   handleRemoveUser: (userId: string) => void;
-  handleInitiateCall: () => void;
   closeParticipantsModal: () => void;
   handleGotoTranscript: (call: Call) => void;
   handleDownloadTranscript: (call: Call) => void;
@@ -46,11 +50,14 @@ interface UseCallHistoryReturn {
   };
   handleConfirmCall: () => void;
   closeConfirmModal: () => void;
+  handleInstantCall: (selectedParticipants: string[]) => void;
+  handleCancelCall: (callId: string) => void;
 }
 
 export function useCallHistory(userId: string | undefined): UseCallHistoryReturn {
   const zero = useZero();
   const [calls, queryDetails] = useCachedQuery(queries.userCallHistory());
+  const [allScheduledCalls] = useCachedQuery(queries.userScheduledCalls());
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -75,6 +82,45 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
   // Get active calls to check if channel has ongoing call
   const activeCalls = useActiveCalls();
+  // Filter scheduled calls to only show those that haven't ended yet
+  const scheduledCalls = useMemo(() => {
+    if (!allScheduledCalls) return undefined;
+
+    const now = Date.now();
+    return allScheduledCalls.filter(call => {
+      // Only show scheduled calls that haven't passed their end time
+      if (call.status === CallStatus.ACTIVE) {
+        return false;
+      }
+      // Don't show calls that have already started
+      if (call.startsAt && new Date(call.startsAt).getTime() <= now) {
+        return false;
+      }
+      return call.endsAt && new Date(call.endsAt).getTime() > now;
+    });
+  }, [allScheduledCalls]);
+
+  const recentCalls = useMemo(() => {
+    if (!calls) return undefined;
+
+    const now = Date.now();
+
+    // Get active scheduled calls that have started
+    const activeScheduledCalls =
+      allScheduledCalls?.filter(
+        call =>
+          call.status === CallStatus.ACTIVE ||
+          (call.startsAt && new Date(call.startsAt).getTime() <= now),
+      ) || [];
+
+    const allCalls = [...calls, ...activeScheduledCalls];
+
+    return allCalls.sort((a, b) => {
+      const aTime = a.startedAt || a.startsAt || a.createdAt;
+      const bTime = b.startedAt || b.startsAt || b.createdAt;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
+  }, [calls, allScheduledCalls]);
 
   // Filter users by search query (excluding current user)
   const filteredUsers = useMemo(() => {
@@ -94,7 +140,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     if (!searchQuery.trim()) return calls || [];
 
     const lowerQuery = searchQuery.toLowerCase();
-    return (calls || []).filter(call => {
+    return (recentCalls || []).filter(call => {
       // Get all participants except current user
       const participants = call.participants?.filter(p => p.userId !== userId) || [];
       const users = getParticipantUsers(participants, allUsers);
@@ -106,7 +152,29 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
         return nameMatch || emailMatch;
       });
     });
-  }, [calls, searchQuery, userId, allUsers]);
+  }, [recentCalls, searchQuery, userId, allUsers]);
+
+  const missedCalls = useMemo(() => {
+    if (!recentCalls || !userId) return [];
+
+    return recentCalls.filter(call => {
+      // Skip scheduled and active calls
+      if (call.status === CallStatus.SCHEDULED || call.status === CallStatus.ACTIVE) {
+        return false;
+      }
+
+      const isOutgoingCall = call.createdByUserId === userId;
+      const currentUserParticipant = call.participants?.find(p => p.userId === userId);
+      const hasCurrentUserJoined =
+        currentUserParticipant !== null &&
+        currentUserParticipant?.joinedAt !== null &&
+        currentUserParticipant?.leftAt === null;
+      const anyoneJoined = (call.participants || []).some(p => p.joinedAt !== null);
+
+      const callStatus = getCallStatus(call, isOutgoingCall, hasCurrentUserJoined, anyoneJoined);
+      return callStatus.isMissedCall;
+    });
+  }, [recentCalls, userId]);
 
   // Check if user is currently in any call
   const roomSnapshot = useSelector(roomActor, state => state);
@@ -120,6 +188,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   // Get active calls to check if channel has ongoing call
 
   const joinCall = (callId: string): void => {
+    // Use JOIN_CALL for all calls - backend API handles both regular and scheduled calls
     roomActor.send({
       type: 'JOIN_CALL',
       callId: callId,
@@ -142,7 +211,6 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   };
 
   const handleJoinCall = (call: Call): void => {
-    // If user is already in a different call, show toast instead of allowing join
     if (isInCall && currentCallId !== call.externalId) {
       toast.info('Already in a call', {
         description: 'You are already in a call. Please leave your current call first.',
@@ -203,9 +271,14 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   };
 
   const handleCallRowClick = (call: Call): void => {
-    if (call.endedAt === null) {
+    // For scheduled calls, always join (even if not started yet)
+    if (call.status === CallStatus.SCHEDULED) {
+      handleJoinCall(call);
+    } else if (call.status === CallStatus.ACTIVE) {
+      // For active/in-progress calls, join them
       handleJoinCall(call);
     } else {
+      // For ended calls, restart them
       handleRestartCall(call);
     }
   };
@@ -220,9 +293,8 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       const isSelected = prev.some(u => u.id === user.id);
       if (isSelected) {
         return prev.filter(u => u.id !== user.id);
-      } else {
-        return [...prev, user];
       }
+      return [...prev, user];
     });
   };
 
@@ -230,8 +302,9 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     setSelectedUsers(prev => prev.filter(u => u.id !== userId));
   };
 
-  const handleInitiateCall = (): void => {
-    // If user is in any call, show toast instead of allowing new call
+  // Instant call
+  const handleInstantCall = (selectedParticipants: string[]): void => {
+    // Check if already in a call
     if (isInCall) {
       toast.info('Already in a call', {
         description: 'You are already in a call. Please leave your current call first.',
@@ -240,24 +313,42 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       return;
     }
 
-    if (selectedUsers.length === 0) {
+    // Validate participants
+    if (selectedParticipants.length === 0) {
+      toast.error('No participants selected', {
+        description: 'Please select at least one participant.',
+        duration: 2000,
+      });
       return;
     }
 
-    const targetUserIds = selectedUsers.map(u => u.id);
+    // Check if a channel is selected (starts with 'channel:')
+    const channelSelection = selectedParticipants.find(p => p.startsWith('channel:'));
 
-    // Backend will create DM for 1 user, group DM for multiple users
-    roomActor.send({
-      type: 'INITIATE_CALL',
-      callType: CallType.AUDIO,
-      targetUserIds,
-      zero,
-      viewMode: isMobile ? 'full' : 'mini',
-    });
+    if (channelSelection) {
+      // Extract channel ID and start call in that channel
+      const channelId = channelSelection.replace('channel:', '');
+      roomActor.send({
+        type: 'INITIATE_CALL',
+        channelId,
+        callType: CallType.AUDIO,
+        zero,
+        viewMode: isMobile ? 'full' : 'mini',
+      });
+    } else {
+      // Extract user IDs and create DM/group call
+      const targetUserIds = selectedParticipants
+        .filter(p => p.startsWith('user:'))
+        .map(p => p.replace('user:', ''));
 
-    // Clear selection after initiating call
-    setSelectedUsers([]);
-    setSearchQuery('');
+      roomActor.send({
+        type: 'INITIATE_CALL',
+        callType: CallType.AUDIO,
+        targetUserIds,
+        zero,
+        viewMode: isMobile ? 'full' : 'mini',
+      });
+    }
   };
 
   const closeParticipantsModal = (): void => {
@@ -287,11 +378,35 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     setCallIdToJoin(null);
   };
 
+  const handleCancelCall = (callId: string): void => {
+    try {
+      void zero.mutate(
+        mutators.calls.cancel({
+          callId,
+          timestamp: Date.now(),
+        }),
+      );
+      toast.success('Call cancelled successfully');
+    } catch (error) {
+      logger.error(Logger.API_CALL_FAILED, {
+        message: 'Failed to cancel call',
+        error,
+      });
+      toast.error('Failed to cancel call');
+    }
+  };
+
   const handleGotoTranscript = (call: Call): void => {
     const metadata = call.metadata as { conversationId?: string } | null;
     const conversationId = metadata?.conversationId;
 
-    const showInfo = ({ header, description }: { header: string; description: string }) =>
+    const showInfo = ({
+      header,
+      description,
+    }: {
+      header: string;
+      description: string;
+    }): string | number =>
       toast.info(header, {
         description,
         duration: 3000,
@@ -385,7 +500,9 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   };
 
   return {
-    calls,
+    calls: recentCalls,
+    scheduledCalls,
+    missedCalls,
     queryDetails,
     selectedCall,
     isParticipantsModalOpen,
@@ -398,7 +515,6 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     handleParticipantsClick,
     handleUserToggle,
     handleRemoveUser,
-    handleInitiateCall,
     closeParticipantsModal,
     handleGotoTranscript,
     handleDownloadTranscript,
@@ -406,5 +522,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     confirmModalConfig,
     handleConfirmCall,
     closeConfirmModal,
+    handleInstantCall,
+    handleCancelCall,
   };
 }
