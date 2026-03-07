@@ -1,3 +1,10 @@
+## [1.72.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.71.1...v1.72.0) (2026-03-07)
+
+
+### Features
+
+* schedule the calls ([d788995](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d78899552eb0c6cf8482f070f4da59aa2353e836)), closes [#3722](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3722)
+
 ## [1.71.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.71.0...v1.71.1) (2026-03-07)
 
 
