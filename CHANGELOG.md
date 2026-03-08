@@ -1,3 +1,10 @@
+## [1.72.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.72.0...v1.72.1) (2026-03-08)
+
+
+### Bug Fixes
+
+* made local store synchronous using mmkv instead of async-store in app ([91fc7b6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/91fc7b6815a1d342b9463aedd8ea93eec77e5b8c)), closes [#3915](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3915)
+
 ## [1.72.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.71.1...v1.72.0) (2026-03-07)
 
 
