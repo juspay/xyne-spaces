@@ -20,6 +20,9 @@ import { notificationHooks } from '@/hooks/notificationHooks'
 import { cleanupRepository } from '@framework'
 import { generateConsolidatedKnowledgeLearnings } from '../utils/knowledge-generator'
 import type { WorkflowStorage } from '../workflow-storage'
+import { db } from '@/database/client'
+
+const RECOVERY_INTERVAL_MS = 10 * 60 * 1000 // 10 minutes
 
 interface PollingLoop {
   index: number
@@ -34,6 +37,7 @@ export class WorkflowPoller {
   private workerId: string
   private lockService: LockService
   private loops: PollingLoop[] = []
+  private recoveryTimer?: NodeJS.Timeout
 
   constructor(config: PollingConfig = WORKFLOW_POLLER_CONFIG) {
     this.config = config
@@ -52,26 +56,33 @@ export class WorkflowPoller {
   private startWorkers(): void {
     this.loops = Array.from({ length: this.config.batchSize }, (_, i) => ({ index: i }))
     const staggerTime = Math.floor(this.config.minInterval / this.config.batchSize)
-    
+
     this.loops.forEach((loop, i) => {
       this.scheduleNextPoll(loop, i * staggerTime)
     })
+
+    this.scheduleRecovery()
   }
 
   async stop(): Promise<void> {
     logger.info('Workflow poller stop() called - initiating graceful shutdown')
-    
+
     const activeExecutions = this.loops
       .filter(loop => loop.currentExecutionId)
       .map(loop => loop.currentExecutionId!)
-    
+
     logger.info(`Active executions being processed: ${activeExecutions.length}`)
-    
+
     this.isRunning = false
     this.loops.forEach((loop) => {
       if (loop.timer) clearTimeout(loop.timer)
     })
-    
+
+    if (this.recoveryTimer) {
+      clearTimeout(this.recoveryTimer)
+      this.recoveryTimer = undefined
+    }
+
     if (activeExecutions.length > 0) {
       logger.info(`Marking ${activeExecutions.length} active workflow executions as PENDING for recovery`)
       const resetPromises = activeExecutions.map(async (executionId) => {
@@ -79,7 +90,7 @@ export class WorkflowPoller {
           await workflowStatusSyncService.updateWorkflowExecution(executionId, {
             status: WorkflowExecutionStatus.PENDING
           })
-          
+
           await this.lockService.releaseLock(executionId, this.workerId)
           logger.info(`Reset workflow execution ${executionId} to PENDING`)
         } catch (error) {
@@ -88,9 +99,53 @@ export class WorkflowPoller {
       })
       await Promise.all(resetPromises)
     }
-    
+
     this.loops = []
     logger.info('⏹️ Workflow poller stopped')
+  }
+
+  private scheduleRecovery(): void {
+    if (!this.isRunning) return
+
+    this.recoveryTimer = setTimeout(async () => {
+      try {
+        await this.claimAndRecoverStaleExecutions()
+      } catch (error) {
+        logger.warn('[RECOVERY] Error during stale execution recovery:', error)
+      } finally {
+        this.scheduleRecovery()
+      }
+    }, RECOVERY_INTERVAL_MS)
+  }
+
+  private async claimAndRecoverStaleExecutions(): Promise<void> {
+    const recovered = await db.$queryRaw<Array<{ id: string }>>`
+      WITH stale AS (
+        SELECT we."id"
+        FROM "workflow_executions" we
+        LEFT JOIN "workflow_execution_locks" wel
+          ON wel."workflowExecutionId" = we."id"
+        WHERE we."status" = ${WorkflowExecutionStatus.RUNNING}
+          AND (wel."id" IS NULL OR wel."expiry" <= NOW())
+        FOR UPDATE OF we SKIP LOCKED
+      ),
+      delete_locks AS (
+        DELETE FROM "workflow_execution_locks"
+        WHERE "workflowExecutionId" IN (SELECT id FROM stale)
+      )
+      UPDATE "workflow_executions" we
+      SET "status" = ${WorkflowExecutionStatus.PENDING},
+          "updatedAt" = NOW()
+      FROM stale
+      WHERE we."id" = stale."id"
+      RETURNING we."id"
+    `
+
+    if (recovered.length > 0) {
+      logger.info(
+        `[RECOVERY] Reset ${recovered.length} stale RUNNING execution(s) to PENDING: [${recovered.map(r => r.id).join(', ')}]`
+      )
+    }
   }
 
   private scheduleNextPoll(loop: PollingLoop, delay: number = this.currentInterval): void {
@@ -109,7 +164,7 @@ export class WorkflowPoller {
 
   private async pollAndExecute(loop: PollingLoop): Promise<boolean> {
     if (!this.isRunning) return false
-    
+
     const allowedWorkflowType = process.env.WORKFLOW_TYPE
     const pendingExecutions: WorkflowExecutionWithState[] = await repositories.workflowExecutions.findByStatus('PENDING', allowedWorkflowType, 1, ['root', 'rerun'])
 
@@ -145,12 +200,12 @@ export class WorkflowPoller {
   }
 
   private serializeError(err: Error) {
-  return {
-    name: err.name,
-    message: err.message,
-    stack: err.stack,
-  };
-}
+    return {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+    };
+  }
 
   private async handleWorkflowError(execution: WorkflowExecutionWithState, error: Error): Promise<void> {
     try {
@@ -159,13 +214,13 @@ export class WorkflowPoller {
       }
 
       if (error instanceof WorkflowPausedException) {
-        await workflowStatusSyncService.updateWorkflowExecution(execution.id, {status: WorkflowExecutionStatus.PAUSED})
+        await workflowStatusSyncService.updateWorkflowExecution(execution.id, { status: WorkflowExecutionStatus.PAUSED })
         // Don't cleanup on pause - workflow will resume later
         return
       }
 
       if (error instanceof WorkflowCancelledException) {
-        await workflowStatusSyncService.updateWorkflowExecution(execution.id, {status: WorkflowExecutionStatus.CANCELLED})
+        await workflowStatusSyncService.updateWorkflowExecution(execution.id, { status: WorkflowExecutionStatus.CANCELLED })
         // Cleanup workspace on cancellation for parent workflows
         if (!execution.parentWorkflowExecutionId) {
           const workspacePath = `/tmp/${execution.id}`
@@ -179,7 +234,7 @@ export class WorkflowPoller {
       }
 
       if (error instanceof WorkflowExternalWaitException) {
-        await workflowStatusSyncService.updateWorkflowExecution(execution.id, {status: WorkflowExecutionStatus.WAIT_FOR_EVENT})
+        await workflowStatusSyncService.updateWorkflowExecution(execution.id, { status: WorkflowExecutionStatus.WAIT_FOR_EVENT })
         // Don't cleanup on wait - workflow will resume later
         return
       }
@@ -315,14 +370,14 @@ export class WorkflowPoller {
     try {
       // Get all pending agentic results accumulated during workflow execution
       const pendingResults = storage.getPendingAgenticResults(workflowExecutionId)
-      
+
       if (pendingResults.length === 0) {
         logger.info(`ℹ️ No agentic results to consolidate for ${workflowExecutionId}`)
         return
       }
-      
+
       logger.info(`💡 Generating consolidated knowledge from ${pendingResults.length} agentic checkpoints for ${workflowExecutionId}`)
-      
+
       // Generate consolidated learnings from all checkpoint data
       const consolidatedLearnings = await generateConsolidatedKnowledgeLearnings(
         pendingResults.map(r => ({
@@ -331,29 +386,29 @@ export class WorkflowPoller {
           gitInfo: r.gitInfo
         }))
       )
-      
+
       if (consolidatedLearnings.length === 0) {
         logger.info(`ℹ️ No learnings generated for ${workflowExecutionId}`)
         storage.clearPendingAgenticResults(workflowExecutionId)
         return
       }
-      
+
       // Save consolidated learnings to database (checkpointId = 'consolidated')
       await storage.saveWorkflowKnowledge(
         workflowExecutionId,
         'consolidated',
         consolidatedLearnings
       )
-      
+
       // Trigger single consolidated canvas creation
       await storage.triggerConsolidatedKnowledgeCanvas(
         workflowExecutionId,
         consolidatedLearnings
       )
-      
+
       // Clear pending results after processing
       storage.clearPendingAgenticResults(workflowExecutionId)
-      
+
       logger.info(`✅ Generated and saved ${consolidatedLearnings.length} consolidated learnings for ${workflowExecutionId}`)
     } catch (error) {
       logger.error(`Failed to generate consolidated knowledge for ${workflowExecutionId}:`, error)
