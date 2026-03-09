@@ -287,6 +287,7 @@ export class CallController {
         livekitUrl: livekitService.getServerUrl(),
         externalId: callId,
         roomLink: call?.roomLink,
+        channelId: call?.channelId,
       });
     } catch (error) {
       logger.error('Failed to join call:', error);

@@ -32,6 +32,7 @@ export interface JoinCallResponse {
   livekitUrl: string;
   externalId: string;
   roomLink: string;
+  channelId?: string;
 }
 
 export interface ValidateRoomsRequest {
