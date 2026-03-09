@@ -1,3 +1,10 @@
+## [1.74.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.73.0...v1.74.0) (2026-03-09)
+
+
+### Features
+
+* bookmark automation test case ([4cce356](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4cce356a4af60a7a4147ecd636e5e64afcfd0a78)), closes [#3912](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3912)
+
 ## [1.73.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.72.1...v1.73.0) (2026-03-09)
 
 
