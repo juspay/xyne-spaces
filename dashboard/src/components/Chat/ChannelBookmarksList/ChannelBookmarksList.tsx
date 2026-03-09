@@ -22,16 +22,16 @@ const ChannelBookmarksList = ({ channelId }: ChannelBookmarksListProps): ReactEl
   const { groupedBookmarks, sortedDateKeys } = useBookmarkGrouping(channelMessageBookmarks);
 
   return (
-    <div className='flex-1 h-full flex flex-col overflow-hidden bg-white'>
+    <div className='flex-1 h-full flex flex-col overflow-hidden bg-background'>
       {/* Bookmarks List */}
       <div className='flex-1 overflow-y-auto'>
         {!channelMessageBookmarks || channelMessageBookmarks.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
-            <Bookmark className='text-gray-300 mb-4' size={48} />
-            <p className='text-gray-500 text-lg font-medium mb-2'>
+            <Bookmark className='text-muted-foreground/50 mb-4' size={48} />
+            <p className='text-muted-foreground text-lg font-medium mb-2'>
               No bookmarks in this channel yet
             </p>
-            <p className='text-gray-400 text-sm max-w-md'>
+            <p className='text-muted-foreground text-sm max-w-md'>
               Save messages for later by clicking the bookmark icon when you hover over a message
             </p>
           </div>
@@ -40,7 +40,7 @@ const ChannelBookmarksList = ({ channelId }: ChannelBookmarksListProps): ReactEl
             {sortedDateKeys.map(dateKey => (
               <div key={dateKey}>
                 {/* Date Header */}
-                <div className='sticky top-0 bg-white px-4 py-2 border-b border-gray-200 z-10'>
+                <div className='sticky top-0 bg-background px-4 py-2 border-b border-border z-10'>
                   <h3
                     className='text-xs font-medium text-[#788187] leading-[100%]'
                     style={{ fontFamily: 'Geist Mono' }}
@@ -50,7 +50,7 @@ const ChannelBookmarksList = ({ channelId }: ChannelBookmarksListProps): ReactEl
                 </div>
 
                 {/* Bookmarks for this date */}
-                <div className='divide-y divide-gray-100'>
+                <div className='divide-y divide-border'>
                   {groupedBookmarks[dateKey]?.map(bookmark => (
                     <BookmarkItem
                       key={bookmark.id}

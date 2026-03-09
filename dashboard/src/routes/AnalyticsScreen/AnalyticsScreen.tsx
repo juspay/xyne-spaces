@@ -208,7 +208,7 @@ const AnalyticsScreen = (): ReactElement => {
     <div
       id='analytics-screen'
       data-component='AnalyticsScreen'
-      className='flex overflow-y-auto no-scrollbar flex-col gap-4 md:gap-6 p-4 md:p-6 h-full bg-white rounded-2xl'
+      className='flex overflow-y-auto no-scrollbar flex-col gap-4 md:gap-6 p-4 md:p-6 h-full bg-background rounded-2xl'
     >
       {/* Header Section */}
       <div
@@ -217,8 +217,8 @@ const AnalyticsScreen = (): ReactElement => {
       >
         {/* Title and Subtext */}
         <div id='analytics-title-section' className='flex flex-col gap-1'>
-          <h1 className='text-xl font-semibold text-gray-800'>Analytics</h1>
-          <p className='text-sm text-gray-600'>
+          <h1 className='text-xl font-semibold text-foreground'>Analytics</h1>
+          <p className='text-sm text-muted-foreground'>
             Track and analyze your workspace performance metrics
           </p>
         </div>
@@ -235,15 +235,15 @@ const AnalyticsScreen = (): ReactElement => {
       {/* Content Section */}
       <div id='analytics-content' className='flex flex-col gap-4 md:gap-6'>
         {/* First Content Section */}
-        <div id='analytics-section-1' className='rounded-lg border border-gray-200 overflow-hidden'>
+        <div id='analytics-section-1' className='rounded-lg border border-border overflow-hidden'>
           <div id='analytics-section-1-container' className='flex flex-col lg:flex-row min-h-80'>
             {/* Left Column - Vertical Layout */}
             <div
               id='analytics-section-1-left'
-              className='flex flex-col flex-1 lg:border-r border-gray-200'
+              className='flex flex-col flex-1 lg:border-r border-border'
             >
               {/* Top Row - Active Messages and DM Messages */}
-              <div className='flex flex-col sm:flex-row flex-1 border-b border-gray-200'>
+              <div className='flex flex-col sm:flex-row flex-1 border-b border-border'>
                 <div className='flex-1'>
                   <StatCard
                     title='Active Messages'
@@ -259,8 +259,8 @@ const AnalyticsScreen = (): ReactElement => {
                       : {})}
                   />
                 </div>
-                <div className='hidden sm:block border-r border-gray-200'></div>
-                <div className='border-t sm:border-t-0 border-gray-200 sm:border-gray-0'></div>
+                <div className='hidden sm:block border-r border-border'></div>
+                <div className='border-t sm:border-t-0 border-border sm:border-gray-0'></div>
                 <div className='flex-1'>
                   <StatCard
                     title='DM Messages'
@@ -297,8 +297,8 @@ const AnalyticsScreen = (): ReactElement => {
                       : {})}
                   />
                 </div>
-                <div className='hidden sm:block border-r border-gray-200'></div>
-                <div className='border-t sm:border-t-0 border-gray-200 sm:border-gray-0'></div>
+                <div className='hidden sm:block border-r border-border'></div>
+                <div className='border-t sm:border-t-0 border-border sm:border-gray-0'></div>
                 <div className='flex-1'>
                   <StatCard
                     title='Group DM Messages'
@@ -319,7 +319,7 @@ const AnalyticsScreen = (): ReactElement => {
             {/* Right Column */}
             <div
               id='analytics-section-1-right'
-              className='flex-1 border-t lg:border-t-0 border-gray-200'
+              className='flex-1 border-t lg:border-t-0 border-border'
             >
               {currentUsersLoading ? (
                 <div className='flex items-center justify-center h-full'>
@@ -329,7 +329,7 @@ const AnalyticsScreen = (): ReactElement => {
                 <div className='flex items-center justify-center h-full'>
                   <div className='text-center'>
                     <div className='text-sm font-semibold mb-2'>Currently Online Users</div>
-                    <span className='text-gray-500'>{pieChartResult.errorMessage}</span>
+                    <span className='text-muted-foreground'>{pieChartResult.errorMessage}</span>
                   </div>
                 </div>
               ) : (
@@ -350,7 +350,7 @@ const AnalyticsScreen = (): ReactElement => {
         </div>
 
         {/* Second Content Section */}
-        <div id='analytics-section-2' className='rounded-lg border border-gray-200 overflow-hidden'>
+        <div id='analytics-section-2' className='rounded-lg border border-border overflow-hidden'>
           <div id='analytics-section-2-container' className='flex flex-col md:flex-row'>
             <div className='flex-1'>
               <StatCard
@@ -365,7 +365,7 @@ const AnalyticsScreen = (): ReactElement => {
                   : {})}
               />
             </div>
-            <div className='border-t md:border-t-0 md:border-r border-gray-200'></div>
+            <div className='border-t md:border-t-0 md:border-r border-border'></div>
             <div className='flex-1'>
               <StatCard
                 title='Active Users'
@@ -381,7 +381,7 @@ const AnalyticsScreen = (): ReactElement => {
                 })()}
               />
             </div>
-            <div className='border-t md:border-t-0 md:border-r border-gray-200'></div>
+            <div className='border-t md:border-t-0 md:border-r border-border'></div>
             <div className='flex-1'>
               <StatCard
                 title='Messages Per User'
@@ -402,7 +402,7 @@ const AnalyticsScreen = (): ReactElement => {
         </div>
 
         {/* Third Content Section */}
-        <div id='analytics-section-3' className='rounded-lg border border-gray-200 overflow-hidden'>
+        <div id='analytics-section-3' className='rounded-lg border border-border overflow-hidden'>
           <div id='analytics-section-3-container' className='flex flex-col md:flex-row'>
             <div className='flex-1'>
               <StatCard
@@ -424,7 +424,7 @@ const AnalyticsScreen = (): ReactElement => {
                   : {})}
               />
             </div>
-            <div className='border-t md:border-t-0 md:border-r border-gray-200'></div>
+            <div className='border-t md:border-t-0 md:border-r border-border'></div>
             {/* Users Onboarded - commented out, replaced by Total Duration of Calls */}
             {/* <div className='flex-1'>
               <StatCard
@@ -464,7 +464,7 @@ const AnalyticsScreen = (): ReactElement => {
                 );
               })()}
             </div>
-            <div className='border-t md:border-t-0 md:border-r border-gray-200'></div>
+            <div className='border-t md:border-t-0 md:border-r border-border'></div>
             <div className='flex-1'>
               <StatCard
                 title='Number of Calls'
@@ -482,7 +482,7 @@ const AnalyticsScreen = (): ReactElement => {
         </div>
 
         {/* Fourth Content Section */}
-        <div id='analytics-section-4' className='rounded-lg border border-gray-200 overflow-hidden'>
+        <div id='analytics-section-4' className='rounded-lg border border-border overflow-hidden'>
           <div id='analytics-section-4-container' className='flex flex-col md:flex-row'>
             <div className='flex-1'>
               <StatCard
@@ -497,7 +497,7 @@ const AnalyticsScreen = (): ReactElement => {
                   : {})}
               />
             </div>
-            <div className='border-t md:border-t-0 md:border-r border-gray-200'></div>
+            <div className='border-t md:border-t-0 md:border-r border-border'></div>
             <div className='flex-1'>
               <StatCard
                 title='Number of Canvases'
@@ -511,7 +511,7 @@ const AnalyticsScreen = (): ReactElement => {
                   : {})}
               />
             </div>
-            <div className='border-t md:border-t-0 md:border-r border-gray-200'></div>
+            <div className='border-t md:border-t-0 md:border-r border-border'></div>
             <div className='flex-1'>
               <StatCard
                 title='File Attachments Shared'
@@ -531,7 +531,7 @@ const AnalyticsScreen = (): ReactElement => {
         {/* Fifth Content Section - Top Users by Messages */}
         <div
           id='analytics-section-5'
-          className='rounded-lg border border-gray-200 overflow-hidden p-6'
+          className='rounded-lg border border-border overflow-hidden p-6'
         >
           {topUsersLoading ? (
             <div className='flex items-center justify-center h-64'>
@@ -539,23 +539,25 @@ const AnalyticsScreen = (): ReactElement => {
             </div>
           ) : topUsersError ? (
             <div className='flex items-center justify-center h-64'>
-              <span className='text-gray-500'>Failed to load top users data</span>
+              <span className='text-muted-foreground'>Failed to load top users data</span>
             </div>
           ) : topUsersData?.data && topUsersData.data.length > 0 ? (
             <div className='flex flex-col gap-4'>
               <div className='flex flex-col gap-1'>
                 <div className='text-sm font-semibold'>Top 10 Users by Messages Sent</div>
-                <div className='text-xs text-gray-500'>{subtitle}</div>
+                <div className='text-xs text-muted-foreground'>{subtitle}</div>
               </div>
               <div className='flex flex-col gap-2'>
                 {topUsersData.data.map((user, index) => (
                   <div
                     key={user.userId}
-                    className='flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors'
+                    className='flex items-center justify-between p-3 rounded-lg bg-muted hover:bg-muted transition-colors'
                   >
                     <div className='flex items-center gap-3'>
-                      <span className='text-sm font-medium text-gray-500 w-6'>{index + 1}.</span>
-                      <span className='text-sm font-medium text-gray-900'>{user.userName}</span>
+                      <span className='text-sm font-medium text-muted-foreground w-6'>
+                        {index + 1}.
+                      </span>
+                      <span className='text-sm font-medium text-foreground'>{user.userName}</span>
                     </div>
                     <span className='text-sm font-semibold text-blue-600'>
                       {user.messageCount.toLocaleString()} messages
@@ -566,7 +568,7 @@ const AnalyticsScreen = (): ReactElement => {
             </div>
           ) : (
             <div className='flex items-center justify-center h-64'>
-              <span className='text-gray-500'>No data available</span>
+              <span className='text-muted-foreground'>No data available</span>
             </div>
           )}
         </div>

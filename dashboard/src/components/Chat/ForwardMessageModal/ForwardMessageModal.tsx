@@ -296,9 +296,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           defaults.push({
             leftSlot:
               channel.visibility === ChannelVisibility.PUBLIC ? (
-                <Hash className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
+                <Hash className='w-3.5 h-3.5 text-muted-foreground' />
               ) : (
-                <Lock className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
+                <Lock className='w-3.5 h-3.5 text-muted-foreground' />
               ),
             label: channel.name,
             value: channel.id,
@@ -324,9 +324,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       .map(currChannel => ({
         leftSlot:
           currChannel.visibility === ChannelVisibility.PUBLIC ? (
-            <Hash className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
+            <Hash className='w-3.5 h-3.5 text-muted-foreground' />
           ) : (
-            <Lock className='w-3.5 h-3.5 text-gray-600 dark:text-gray-400' />
+            <Lock className='w-3.5 h-3.5 text-muted-foreground' />
           ),
         label: currChannel.name,
         value: currChannel.id,
@@ -398,8 +398,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       }}
     >
       {/* Header */}
-      <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-200 dark:border-gray-700'>
-        <h2 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>Forward message</h2>
+      <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-border'>
+        <h2 className='text-lg font-semibold text-foreground'>Forward message</h2>
         <button
           type='button'
           className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2'
@@ -512,11 +512,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         {/* Message preview */}
         <div>
           <span className='block text-sm font-medium text-foreground mb-1.5'>Message preview</span>
-          <div className='bg-gray-50 dark:bg-gray-700 rounded-md p-3 border border-gray-200 dark:border-gray-600 max-h-[200px] overflow-y-auto'>
+          <div className='bg-muted rounded-md p-3 border border-border max-h-[200px] overflow-y-auto'>
             <div className='flex gap-3'>
               <div className='flex-shrink-0'>
                 {isCallMessage ? (
-                  <div className='w-10 h-10 rounded-md flex items-center justify-center bg-gray-100'>
+                  <div className='w-10 h-10 rounded-md flex items-center justify-center bg-accent'>
                     <HuddleIcon color='#4b5563' size={20} />
                   </div>
                 ) : (
@@ -525,16 +525,16 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
               </div>
               <div className='flex-1 min-w-0'>
                 <div className='flex items-baseline gap-2 mb-1'>
-                  <h4 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+                  <h4 className='text-sm font-semibold text-foreground'>
                     {isCallMessage ? 'Xyne Call' : sender?.name || 'User'}
                   </h4>
-                  <span className='text-xs text-gray-500 dark:text-gray-400'>
+                  <span className='text-xs text-muted-foreground'>
                     {formatRelativeTimestamp(message.createdAt)}
                   </span>
                 </div>
                 {previewContent && (
                   <div
-                    className={`text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
+                    className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
                   >
                     <RenderMessageWithHTML message={previewContent} />
                   </div>
@@ -549,7 +549,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                         </div>
                       ))}
                     </div>
-                    <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                    <p className='text-xs text-muted-foreground mt-1'>
                       {message.attachments.length}{' '}
                       {message.attachments.length === 1 ? 'attachment' : 'attachments'} will be
                       forwarded

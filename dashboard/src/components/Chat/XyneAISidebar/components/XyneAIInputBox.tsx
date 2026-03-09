@@ -859,7 +859,7 @@ export const XyneAIInputBox = ({
             data-track-category='XyneAI'
             data-track-name='OPEN_CHANNEL_SELECTOR'
           >
-            <span className='text-gray-600 font-semibold text-sm'>#</span>
+            <span className='text-muted-foreground font-semibold text-sm'>#</span>
           </button>
 
           {/* Research Agent Button - only show if no research is selected */}
@@ -874,7 +874,7 @@ export const XyneAIInputBox = ({
               data-track-category='XyneAI'
               data-track-name='OPEN_RESEARCH_SELECTOR'
             >
-              <Search className='w-4 h-4 text-gray-600' />
+              <Search className='w-4 h-4 text-muted-foreground' />
             </button>
           )}
 
@@ -886,7 +886,7 @@ export const XyneAIInputBox = ({
               <button
                 type='button'
                 onClick={handleThreadPillClick}
-                className='flex items-center gap-1 cursor-pointer hover:bg-gray-50 transition-colors bg-transparent border-0 p-0'
+                className='flex items-center gap-1 cursor-pointer hover:bg-accent transition-colors bg-transparent border-0 p-0'
                 aria-label={`Navigate to thread from ${activeThreadInfo.senderName}`}
                 data-track-category='XYNE_AI'
                 data-track-name='ClickThreadContextPill'
@@ -899,7 +899,7 @@ export const XyneAIInputBox = ({
               <button
                 type='button'
                 onClick={handleRemoveThreadInfo}
-                className='hover:bg-gray-200 rounded p-0.5 transition-colors flex-shrink-0'
+                className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
                 aria-label='Remove thread context'
                 data-track-category='XYNE_AI'
                 data-track-name='RemoveThreadContext'
@@ -990,7 +990,7 @@ export const XyneAIInputBox = ({
               <div className='flex items-center gap-1'>
                 <div className='flex-shrink-0'>
                   {channel.isPrivate ? (
-                    <Lock className='h-3.5 w-3.5 text-gray-600' />
+                    <Lock className='h-3.5 w-3.5 text-muted-foreground' />
                   ) : (
                     <HashIcon />
                   )}
@@ -1021,9 +1021,9 @@ export const XyneAIInputBox = ({
               <div className='flex items-center gap-1'>
                 <div className='flex-shrink-0'>
                   {selectedResearch.type === 'product' ? (
-                    <Package className='w-3.5 h-3.5 text-gray-600' />
+                    <Package className='w-3.5 h-3.5 text-muted-foreground' />
                   ) : (
-                    <Code2 className='w-3.5 h-3.5 text-gray-600' />
+                    <Code2 className='w-3.5 h-3.5 text-muted-foreground' />
                   )}
                 </div>
                 <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap">
@@ -1032,7 +1032,7 @@ export const XyneAIInputBox = ({
               </div>
               <button
                 onClick={handleRemoveResearch}
-                className='hover:bg-gray-200 rounded p-0.5 transition-colors flex-shrink-0'
+                className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
                 aria-label={`Remove ${selectedResearch.name}`}
                 data-track-category='XyneAI'
                 data-track-name='REMOVE_RESEARCH'
@@ -1050,7 +1050,7 @@ export const XyneAIInputBox = ({
             >
               <div className='flex items-center gap-1'>
                 <div className='flex-shrink-0'>
-                  <FileText className='w-3.5 h-3.5 text-gray-600' />
+                  <FileText className='w-3.5 h-3.5 text-muted-foreground' />
                 </div>
                 <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
                   {attachment.name}
@@ -1117,17 +1117,17 @@ export const XyneAIInputBox = ({
             <button
               type='button'
               onClick={handleAttachmentClick}
-              className='p-1.5 -ml-1.5 rounded-lg hover:bg-gray-100 transition-colors'
+              className='p-1.5 -ml-1.5 rounded-lg hover:bg-accent transition-colors'
               aria-label='Attach files'
               title='Attach files'
               data-track-category='XyneAI'
               data-track-name='ATTACH_FILES'
             >
-              <Plus className='w-4 h-4 text-gray-600' />
+              <Plus className='w-4 h-4 text-muted-foreground' />
             </button>
 
             {/* Divider line */}
-            {onWebSearchToggle && <div className='h-4 w-px bg-gray-300' />}
+            {onWebSearchToggle && <div className='h-4 w-px bg-muted' />}
 
             {/* Web Search Toggle Button */}
             {onWebSearchToggle && (
@@ -1142,7 +1142,7 @@ export const XyneAIInputBox = ({
                 className={`p-1.5 rounded-lg transition-colors ${
                   webSearchEnabled
                     ? 'bg-[#E6F4EA] text-[#1E8E3E] hover:bg-[#D8EBE2]'
-                    : 'hover:bg-gray-100 text-gray-600'
+                    : 'hover:bg-accent text-muted-foreground'
                 } ${!webSearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
                 aria-label={
                   webSearchAccessible
@@ -1199,7 +1199,7 @@ export const XyneAIInputBox = ({
                 ? 'bg-[#FF4F4F] text-white hover:bg-[#E64545]'
                 : inputValue.trim()
                   ? 'bg-[#FF4F4F] text-white hover:bg-[#E64545]'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-muted text-muted-foreground cursor-not-allowed'
             }`}
             data-track-category='XyneAI'
             data-track-name={isStreaming ? 'ABORT_MESSAGE' : 'SUBMIT_MESSAGE'}
@@ -1213,10 +1213,10 @@ export const XyneAIInputBox = ({
       {showChannelDropdown && dropdownTriggeredBy === 'button' && (
         <div
           ref={dropdownRef}
-          className='absolute bottom-full left-4 right-4 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden'
+          className='absolute bottom-full left-4 right-4 mb-2 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden'
         >
           {/* Search Input */}
-          <div className='p-2 border-b border-gray-200 bg-gray-50'>
+          <div className='p-2 border-b border-border bg-muted'>
             <input
               ref={searchInputRef}
               type='text'
@@ -1224,7 +1224,7 @@ export const XyneAIInputBox = ({
               onChange={e => handleDropdownSearchChange(e.target.value)}
               onKeyDown={handleSearchKeyDown}
               placeholder='Search...'
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-['Inter']"
+              className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent font-['Inter']"
               data-track-category='XyneAI'
               data-track-name='CHANNEL_SEARCH_INPUT'
             />
@@ -1239,8 +1239,8 @@ export const XyneAIInputBox = ({
                     key={channel.id}
                     data-index={index}
                     onClick={() => handleDropdownChannelSelect(channel)}
-                    className={`w-full text-left px-3 py-2 hover:bg-gray-100 transition-colors flex items-center gap-2 ${
-                      index === highlightedIndex ? 'bg-gray-100' : ''
+                    className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${
+                      index === highlightedIndex ? 'bg-accent' : ''
                     }`}
                     data-track-category='XyneAI'
                     data-track-name='SELECT_CHANNEL'
@@ -1248,13 +1248,13 @@ export const XyneAIInputBox = ({
                   >
                     <div className='flex-shrink-0'>
                       {String(channel.visibility) === 'PRIVATE' ? (
-                        <Lock className='h-3.5 w-3.5 text-gray-600' />
+                        <Lock className='h-3.5 w-3.5 text-muted-foreground' />
                       ) : (
                         <HashIcon />
                       )}
                     </div>
                     <div className='flex-1 min-w-0'>
-                      <div className="text-sm font-medium text-gray-900 font-['Inter'] truncate">
+                      <div className="text-sm font-medium text-foreground font-['Inter'] truncate">
                         {channel.name}
                       </div>
                     </div>
@@ -1262,7 +1262,9 @@ export const XyneAIInputBox = ({
                 ))}
               </div>
             ) : (
-              <div className='px-3 py-6 text-center text-sm text-gray-500'>No channels found</div>
+              <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
+                No channels found
+              </div>
             )}
           </div>
         </div>
@@ -1272,10 +1274,10 @@ export const XyneAIInputBox = ({
       {showResearchDropdown && (
         <div
           ref={researchDropdownRef}
-          className='absolute bottom-full left-4 right-4 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden'
+          className='absolute bottom-full left-4 right-4 mb-2 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden'
         >
           {/* Tabs */}
-          <div className='flex border-b border-gray-200'>
+          <div className='flex border-b border-border'>
             <button
               type='button'
               onClick={() => {
@@ -1284,8 +1286,8 @@ export const XyneAIInputBox = ({
               }}
               className={`flex-1 px-4 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
                 researchTab === 'products'
-                  ? 'text-gray-900 border-b-2 border-gray-900 bg-gray-50'
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                  ? 'text-foreground border-b-2 border-foreground bg-muted'
+                  : 'text-muted-foreground hover:text-muted-foreground hover:bg-accent'
               }`}
               data-track-category='XyneAI'
               data-track-name='SELECT_PRODUCTS_TAB'
@@ -1301,8 +1303,8 @@ export const XyneAIInputBox = ({
               }}
               className={`flex-1 px-4 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
                 researchTab === 'repositories'
-                  ? 'text-gray-900 border-b-2 border-gray-900 bg-gray-50'
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                  ? 'text-foreground border-b-2 border-foreground bg-muted'
+                  : 'text-muted-foreground hover:text-muted-foreground hover:bg-accent'
               }`}
               data-track-category='XyneAI'
               data-track-name='SELECT_REPOSITORIES_TAB'
@@ -1313,7 +1315,7 @@ export const XyneAIInputBox = ({
           </div>
 
           {/* Search Input */}
-          <div className='p-2 border-b border-gray-200 bg-gray-50'>
+          <div className='p-2 border-b border-border bg-muted'>
             <input
               ref={researchSearchInputRef}
               type='text'
@@ -1324,7 +1326,7 @@ export const XyneAIInputBox = ({
               }}
               onKeyDown={handleResearchSearchKeyDown}
               placeholder={`Search ${researchTab}...`}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent font-['Inter']"
+              className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent font-['Inter']"
               data-track-category='XyneAI'
               data-track-name='RESEARCH_SEARCH_INPUT'
             />
@@ -1333,7 +1335,7 @@ export const XyneAIInputBox = ({
           {/* Items List */}
           <div className='max-h-64 overflow-y-auto'>
             {isResearchLoading ? (
-              <div className='px-3 py-6 text-center text-sm text-gray-500'>Loading...</div>
+              <div className='px-3 py-6 text-center text-sm text-muted-foreground'>Loading...</div>
             ) : filteredResearchItems.length > 0 ? (
               <div className='py-1'>
                 {filteredResearchItems.map((item, index) => (
@@ -1348,8 +1350,8 @@ export const XyneAIInputBox = ({
                         researchTab === 'products' ? 'product' : 'repository',
                       )
                     }
-                    className={`w-full text-left px-3 py-2 hover:bg-gray-100 transition-colors flex items-center gap-2 ${
-                      index === researchHighlightedIndex ? 'bg-gray-100' : ''
+                    className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${
+                      index === researchHighlightedIndex ? 'bg-accent' : ''
                     }`}
                     data-track-category='XyneAI'
                     data-track-name='SELECT_RESEARCH_ITEM'
@@ -1357,13 +1359,13 @@ export const XyneAIInputBox = ({
                   >
                     <div className='flex-shrink-0'>
                       {researchTab === 'products' ? (
-                        <Package className='w-4 h-4 text-gray-600' />
+                        <Package className='w-4 h-4 text-muted-foreground' />
                       ) : (
-                        <Code2 className='w-4 h-4 text-gray-600' />
+                        <Code2 className='w-4 h-4 text-muted-foreground' />
                       )}
                     </div>
                     <div className='flex-1 min-w-0'>
-                      <div className="text-sm font-medium text-gray-900 font-['Inter'] truncate">
+                      <div className="text-sm font-medium text-foreground font-['Inter'] truncate">
                         {item.name}
                       </div>
                     </div>
@@ -1371,7 +1373,7 @@ export const XyneAIInputBox = ({
                 ))}
               </div>
             ) : (
-              <div className='px-3 py-6 text-center text-sm text-gray-500'>
+              <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
                 No {researchTab} found
               </div>
             )}

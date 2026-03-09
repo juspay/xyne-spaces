@@ -35,7 +35,7 @@ export const PriorityFilter = ({
         className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors ${
           hasSelection
             ? 'border-blue-200 bg-blue-50 text-blue-700'
-            : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+            : 'border-border bg-background text-foreground hover:bg-muted'
         }`}
         onClick={() => setIsOpen(!isOpen)}
         data-track-category='TicketFilters'
@@ -64,13 +64,13 @@ export const PriorityFilter = ({
           size='icon'
           variant='ghost'
         >
-          <X className='w-3 h-3 text-gray-600' />
+          <X className='w-3 h-3 text-muted-foreground' />
         </Button>
       )}
 
       {/* Dropdown Content */}
       <div
-        className={`absolute top-full left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50 ${!isOpen && 'hidden'}`}
+        className={`absolute top-full left-0 mt-1 w-48 bg-background border border-border rounded-lg shadow-lg z-50 ${!isOpen && 'hidden'}`}
       >
         <div className='p-2'>
           {Object.entries(PRIORITY_CONFIG).map(([priority, config]) => {
@@ -79,13 +79,13 @@ export const PriorityFilter = ({
             return (
               <label
                 key={priority}
-                className='flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer transition-colors'
+                className='flex items-center gap-2 p-2 hover:bg-muted rounded cursor-pointer transition-colors'
               >
                 <input
                   type='checkbox'
                   checked={isSelected}
                   onChange={() => handleToggle(priority as TicketPriority)}
-                  className='rounded border-gray-300 text-blue-600 focus:ring-blue-500'
+                  className='rounded border-input text-blue-600 focus:ring-blue-500'
                   data-track-category='Tickets'
                   data-track-name='FilterPriority'
                   data-track-metadata={JSON.stringify({ priority })}
@@ -98,13 +98,13 @@ export const PriorityFilter = ({
           })}
 
           {selectedPriorities.length > 0 && (
-            <div className='mt-2 pt-2 border-t border-gray-100'>
+            <div className='mt-2 pt-2 border-t border-border'>
               <Button
                 onClick={handleClear}
                 data-track-category='TicketFilters'
                 data-track-name='ClearAllPriorityFilter'
                 data-track-metadata={JSON.stringify({ filterType: 'priority', selectedPriorities })}
-                className='text-xs text-gray-500 hover:text-gray-700 transition-colors p-0 h-auto'
+                className='text-xs text-muted-foreground hover:text-foreground transition-colors p-0 h-auto'
                 variant='ghost'
               >
                 Clear all

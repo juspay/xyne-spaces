@@ -93,7 +93,7 @@ export const ConversationHistory = ({
   return (
     <div className='flex-1 overflow-hidden flex flex-col bg-white h-full rounded-xl'>
       {/* Header */}
-      <div className='p-4 flex items-center justify-between gap-2 self-stretch border-gray-200 flex-shrink-0'>
+      <div className='p-4 flex items-center justify-between gap-2 self-stretch border-border flex-shrink-0'>
         {isSearchExpanded ? (
           <>
             <button
@@ -104,34 +104,36 @@ export const ConversationHistory = ({
               className={
                 isMobile
                   ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
-                  : 'p-1 hover:bg-gray-100 rounded transition-colors flex-shrink-0'
+                  : 'p-1 hover:bg-accent rounded transition-colors flex-shrink-0'
               }
               data-track-category='XyneAI'
               data-track-name='CloseSearch'
               data-track-metadata={JSON.stringify({ conversationId })}
             >
-              <ArrowLeft className={isMobile ? 'w-4 h-4 text-gray-700' : 'w-4 h-4 text-gray-700'} />
+              <ArrowLeft
+                className={isMobile ? 'w-4 h-4 text-foreground' : 'w-4 h-4 text-foreground'}
+              />
             </button>
-            <div className='flex-1 flex items-center gap-2 bg-white rounded-lg h-8 border border-gray-300 px-3 py-2'>
+            <div className='flex-1 flex items-center gap-2 bg-popover rounded-lg h-8 border border-border px-3 py-2'>
               <input
                 type='text'
                 placeholder='Search chats...'
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="flex-1 bg-transparent outline-none text-gray-900 placeholder:text-gray-400 text-sm font-['Inter']"
+                className="flex-1 bg-transparent outline-none text-foreground placeholder:text-muted-foreground text-sm font-['Inter']"
                 data-track-category='XyneAI'
                 data-track-name='SearchChatsInput'
               />
-              <Search className='w-4 h-4 text-gray-600' />
+              <Search className='w-4 h-4 text-muted-foreground' />
             </div>
             {!isMobile && (
               <button
                 onClick={handleClose}
-                className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+                className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                 data-track-category='XyneAI'
                 data-track-name='CloseHistory'
               >
-                <X className='w-4 h-4 text-gray-600' />
+                <X className='w-4 h-4 text-muted-foreground' />
               </button>
             )}
           </>
@@ -143,14 +145,14 @@ export const ConversationHistory = ({
                 className={
                   isMobile
                     ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
-                    : 'p-1 hover:bg-gray-100 rounded transition-colors'
+                    : 'p-1 hover:bg-accent rounded transition-colors'
                 }
                 data-track-category='XyneAI'
                 data-track-name='BackFromHistory'
               >
-                <ArrowLeft className='w-4 h-4 text-gray-700' />
+                <ArrowLeft className='w-4 h-4 text-foreground' />
               </button>
-              <span className="text-gray-900 text-base font-semibold font-['Inter']">Chats</span>
+              <span className="text-foreground text-base font-semibold font-['Inter']">Chats</span>
             </div>
             <div className='flex items-center gap-2'>
               <button
@@ -158,21 +160,25 @@ export const ConversationHistory = ({
                 className={
                   isMobile
                     ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
-                    : 'p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+                    : 'p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                 }
                 data-track-category='XyneAI'
                 data-track-name='OpenSearch'
               >
-                <Search className={isMobile ? 'w-4 h-4 text-gray-600' : 'w-4 h-4 text-gray-600'} />
+                <Search
+                  className={
+                    isMobile ? 'w-4 h-4 text-muted-foreground' : 'w-4 h-4 text-muted-foreground'
+                  }
+                />
               </button>
               {!isMobile && (
                 <button
                   onClick={handleClose}
-                  className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+                  className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                   data-track-category='XyneAI'
                   data-track-name='CloseHistory'
                 >
-                  <X className='w-4 h-4 text-gray-600' />
+                  <X className='w-4 h-4 text-muted-foreground' />
                 </button>
               )}
             </div>
@@ -253,7 +259,7 @@ export const ConversationHistory = ({
             {conversations.filter(
               c => searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase()),
             ).length === 0 && (
-              <div className='px-4 py-8 text-center text-gray-500 text-sm'>
+              <div className='px-4 py-8 text-center text-muted-foreground text-sm'>
                 {searchQuery
                   ? `No chats found matching "${searchQuery}"`
                   : 'No conversations yet. Start a new chat!'}
@@ -369,7 +375,7 @@ const ConversationSection = ({
       isMobile
         ? 'bg-[#F5F6F6] rounded-[12px] mx-4 my-4'
         : title === 'Starred'
-          ? 'border-b border-gray-200'
+          ? 'border-b border-border'
           : ''
     }
   >
@@ -378,7 +384,7 @@ const ConversationSection = ({
         className={
           isMobile
             ? "px-4 py-3 cursor-pointer flex items-center justify-between text-sm text-[#A1A5A9] font-medium font-['Inter']"
-            : "px-4 py-2 cursor-pointer hover:bg-gray-50 flex items-center justify-between text-sm text-gray-600 font-medium font-['Inter']"
+            : "px-4 py-2 cursor-pointer hover:bg-accent flex items-center justify-between text-sm text-muted-foreground font-medium font-['Inter']"
         }
       >
         <span>{title}</span>
@@ -412,7 +418,7 @@ const ConversationSection = ({
             />
           ))}
         {conversations.length === 0 && emptyMessage && (
-          <div className='px-4 py-8 text-center text-gray-500 text-sm'>{emptyMessage}</div>
+          <div className='px-4 py-8 text-center text-muted-foreground text-sm'>{emptyMessage}</div>
         )}
       </div>
     </details>
@@ -528,7 +534,7 @@ const ConversationItem = ({
         isMobile
           ? `relative w-full px-3 py-3 rounded-lg transition-colors flex items-center gap-3 group '
             }`
-          : `relative w-full px-4 py-3 hover:bg-gray-50 transition-colors flex items-center gap-3 group ${
+          : `relative w-full px-4 py-3 hover:bg-accent transition-colors flex items-center gap-3 group ${
               isActive ? (isStarred ? 'bg-blue-50' : 'bg-blue-50 border-l-2 border-blue-500') : ''
             }`
       }
@@ -547,7 +553,7 @@ const ConversationItem = ({
             }
           }}
           onBlur={onRename}
-          className={`flex-1 text-sm text-gray-900 font-${isStarred ? 'medium' : 'normal'} font-["Inter"] border border-gray-300 rounded px-2 py-1 outline-none focus:border-primary`}
+          className={`flex-1 text-sm text-foreground font-${isStarred ? 'medium' : 'normal'} font-["Inter"] border border-border rounded px-2 py-1 outline-none focus:border-primary`}
           data-track-category='XyneAI'
           data-track-name='RENAME_CONVERSATION_INPUT'
         />
@@ -569,7 +575,7 @@ const ConversationItem = ({
                 ? `text-[14px] leading-[20px] tracking-[0.14px] text-[#181B1D] font-['Inter'] truncate ${
                     isActive ? 'font-semibold' : 'font-normal'
                   }`
-                : `text-sm text-gray-900 font-${isStarred ? 'medium' : 'normal'} font-['Inter'] truncate`
+                : `text-sm text-foreground font-${isStarred ? 'medium' : 'normal'} font-['Inter'] truncate`
             }
           >
             {conversation.title}
@@ -595,14 +601,14 @@ const ConversationItem = ({
           title='Conversation Options'
           description='Manage this conversation'
         >
-          <div className='flex flex-col bg-white rounded-t-[20px] overflow-hidden'>
+          <div className='flex flex-col bg-popover rounded-t-[20px] overflow-hidden'>
             <button
               onClick={e => {
                 e.stopPropagation();
                 onToggleStar();
                 setOpenDropdownId(null);
               }}
-              className='w-full px-4 py-4 text-left text-sm active:bg-gray-100 flex items-center gap-3 border-b border-gray-100 touch-manipulation'
+              className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 border-b border-border touch-manipulation'
               data-track-category='XyneAI'
               data-track-name='TOGGLE_STAR_CONVERSATION'
               data-track-metadata={JSON.stringify({ conversationId: conversation.id, isStarred })}
@@ -616,7 +622,7 @@ const ConversationItem = ({
                 onStartRename();
                 setOpenDropdownId(null);
               }}
-              className='w-full px-4 py-4 text-left text-sm active:bg-gray-100 flex items-center gap-3 border-b border-gray-100 touch-manipulation'
+              className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 border-b border-border touch-manipulation'
               data-track-category='XyneAI'
               data-track-name='RENAME_CONVERSATION'
               data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
@@ -630,7 +636,7 @@ const ConversationItem = ({
                 onDelete();
                 setOpenDropdownId(null);
               }}
-              className='w-full px-4 py-4 text-left text-sm active:bg-gray-100 flex items-center gap-3 text-red-600 touch-manipulation'
+              className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 text-red-600 touch-manipulation'
               data-track-category='XyneAI'
               data-track-name='DELETE_CONVERSATION'
               data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
@@ -649,14 +655,14 @@ const ConversationItem = ({
           trigger={
             <button
               onClick={e => e.stopPropagation()}
-              className='opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded'
+              className='opacity-0 group-hover:opacity-100 p-1 hover:bg-accent rounded'
               data-track-category='XyneAI'
               data-track-name='OPEN_CONVERSATION_MENU'
             >
-              <MoreVertical className='w-4 h-4 text-gray-600' />
+              <MoreVertical className='w-4 h-4 text-muted-foreground' />
             </button>
           }
-          className='w-48 p-0 bg-white border border-gray-200 rounded-lg shadow-lg'
+          className='w-48 p-0 bg-popover border border-border rounded-lg shadow-lg'
         >
           <button
             onClick={e => {
@@ -664,7 +670,7 @@ const ConversationItem = ({
               onToggleStar();
               setOpenDropdownId(null);
             }}
-            className='w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100'
+            className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 border-b border-border'
             data-track-category='XyneAI'
             data-track-name='TOGGLE_STAR_DESKTOP'
             data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
@@ -678,7 +684,7 @@ const ConversationItem = ({
               onStartRename();
               setOpenDropdownId(null);
             }}
-            className='w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100'
+            className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 border-b border-border'
             data-track-category='XyneAI'
             data-track-name='RENAME_DESKTOP'
             data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
@@ -692,7 +698,7 @@ const ConversationItem = ({
               onDelete();
               setOpenDropdownId(null);
             }}
-            className='w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 text-red-600'
+            className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 text-red-600'
             data-track-category='XyneAI'
             data-track-name='DELETE_DESKTOP'
             data-track-metadata={JSON.stringify({ conversationId: conversation.id })}

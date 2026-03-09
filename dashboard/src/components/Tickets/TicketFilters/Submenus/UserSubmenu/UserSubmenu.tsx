@@ -73,11 +73,11 @@ export const UserSubmenu = ({
 
   return (
     <div
-      className={`w-80 flex flex-col bg-white overflow-hidden border border-gray-200 rounded-lg shadow-lg ${className}`}
+      className={`w-80 flex flex-col bg-background overflow-hidden border border-border rounded-lg shadow-lg ${className}`}
     >
-      <div className='p-3 border-b sticky top-0 bg-white z-10'>
+      <div className='p-3 border-b sticky top-0 bg-background z-10'>
         <div className='relative'>
-          <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none' />
+          <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
           <Input
             ref={searchInputRef}
             type='text'
@@ -90,7 +90,7 @@ export const UserSubmenu = ({
       </div>
       <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
         {!availableUsersData ? (
-          <div className='p-8 text-center text-sm text-gray-400'>Loading users...</div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>Loading users...</div>
         ) : finalResults.length > 0 ? (
           <div className='space-y-0.5'>
             {finalResults.map(user => {
@@ -102,7 +102,7 @@ export const UserSubmenu = ({
                   onClick={() => handleUserToggle(user.id)}
                   className={`
                     w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
-                    ${isSelected ? 'bg-[#F2F2F3] text-black' : 'hover:bg-gray-50 text-gray-700'}
+                    ${isSelected ? 'bg-accent text-black' : 'hover:bg-muted text-foreground'}
                     focus-visible:ring-2 focus-visible:ring-[#F2F2F3]
                   `}
                   data-track-category='Tickets'
@@ -117,13 +117,13 @@ export const UserSubmenu = ({
                   <div className='flex-1 text-left min-w-0'>
                     <p className='text-sm font-medium truncate'>{user.name}</p>
                   </div>
-                  {isSelected && <Check className='w-4 h-4 text-gray-400 shrink-0' />}
+                  {isSelected && <Check className='w-4 h-4 text-muted-foreground shrink-0' />}
                 </button>
               );
             })}
           </div>
         ) : (
-          <div className='p-8 text-center text-sm text-gray-500'>
+          <div className='p-8 text-center text-sm text-muted-foreground'>
             {searchQuery ? 'No matches found' : 'No users available'}
           </div>
         )}

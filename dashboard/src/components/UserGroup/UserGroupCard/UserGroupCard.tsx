@@ -39,15 +39,15 @@ export const UserGroupCard = ({
   const memberCount = members.length;
 
   return (
-    <div className='bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow'>
+    <div className='bg-background rounded-lg shadow-sm border border-border p-6 hover:shadow-md transition-shadow'>
       <div className='flex items-start justify-between mb-4'>
         <div className='flex-1'>
-          <h3 className='text-lg font-semibold text-gray-900 mb-2'>{userGroup.name}</h3>
+          <h3 className='text-lg font-semibold text-foreground mb-2'>{userGroup.name}</h3>
           {userGroup.description && (
-            <p className='text-sm text-gray-600 line-clamp-2'>{userGroup.description}</p>
+            <p className='text-sm text-muted-foreground line-clamp-2'>{userGroup.description}</p>
           )}
           {userGroup.alias && (
-            <p className='text-xs text-gray-500 mt-1'>Alias: {userGroup.alias}</p>
+            <p className='text-xs text-muted-foreground mt-1'>Alias: {userGroup.alias}</p>
           )}
         </div>
       </div>
@@ -55,7 +55,7 @@ export const UserGroupCard = ({
       {/* Members Section */}
       <div className='mb-4'>
         <div className='flex items-center justify-between mb-2'>
-          <span className='text-sm font-medium text-gray-700'>
+          <span className='text-sm font-medium text-foreground'>
             {memberCount} {memberCount === 1 ? 'Member' : 'Members'}
           </span>
         </div>
@@ -72,7 +72,7 @@ export const UserGroupCard = ({
             {/* Show overflow indicator */}
             {memberCount > 5 && (
               <div
-                className='relative flex items-center justify-center w-8 h-8 bg-gray-100 border-2 border-white rounded-full text-xs font-medium text-gray-600'
+                className='relative flex items-center justify-center w-8 h-8 bg-muted border-2 border-white rounded-full text-xs font-medium text-muted-foreground'
                 style={{ zIndex: 0 }}
               >
                 +{memberCount - 5}
@@ -80,12 +80,12 @@ export const UserGroupCard = ({
             )}
           </div>
         ) : (
-          <p className='text-sm text-gray-500 italic'>No members yet</p>
+          <p className='text-sm text-muted-foreground italic'>No members yet</p>
         )}
       </div>
 
-      <div className='border-t border-gray-100 pt-4 mt-4'>
-        <div className='text-xs text-gray-500 mb-3'>
+      <div className='border-t border-border pt-4 mt-4'>
+        <div className='text-xs text-muted-foreground mb-3'>
           <p>Created: {new Date(userGroup.createdAt).toLocaleDateString()}</p>
         </div>
 

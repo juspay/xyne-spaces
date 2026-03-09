@@ -35,7 +35,7 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ me
 
   return (
     <div className='flex justify-start min-[500px]:px-4 px-2 my-3' data-testid='ticket-activity'>
-      <div className='flex items-center gap-2 text-sm text-gray-400 px-10 py-0.5'>
+      <div className='flex items-center gap-2 text-sm text-muted-foreground px-10 py-0.5'>
         {getIcon()}
         <div>
           <RenderMessageWithHTML message={message.content} />

@@ -40,17 +40,20 @@ function CallParticipantsContent({
         {allParticipants.map(participant => (
           <div
             key={participant.userId}
-            className='flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-[#2A2A2A] transition-colors'
+            className='flex items-center gap-3 p-2 rounded-lg hover:bg-muted dark:hover:bg-[#2A2A2A] transition-colors'
           >
             <Avatar userId={participant.userId ?? null} size='md' />
             <div className='flex-1 min-w-0'>
               <h4 className='text-sm font-medium text-[#384049] dark:text-[#F1F3F4] truncate'>
                 {usersById.get(participant.userId)?.name ?? 'Unknown User'}
                 {participant.userId === currentUserId && (
-                  <span className='text-gray-500 dark:text-gray-400 font-normal'> (you)</span>
+                  <span className='text-muted-foreground dark:text-muted-foreground font-normal'>
+                    {' '}
+                    (you)
+                  </span>
                 )}
               </h4>
-              <p className='text-xs text-gray-500 dark:text-gray-400 truncate'>
+              <p className='text-xs text-muted-foreground dark:text-muted-foreground truncate'>
                 {usersById.get(participant.userId)?.email ?? ''}
               </p>
             </div>

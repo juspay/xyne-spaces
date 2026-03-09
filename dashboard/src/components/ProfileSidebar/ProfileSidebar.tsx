@@ -34,8 +34,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
 
   if (!user) {
     return (
-      <div className={`h-full flex items-center justify-center bg-white ${className}`}>
-        <div className='text-center text-gray-500'>
+      <div className={`h-full flex items-center justify-center bg-background ${className}`}>
+        <div className='text-center text-muted-foreground'>
           <div className='mb-4'>User not found</div>
           <Button
             onClick={handleClose}
@@ -55,12 +55,12 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
   const isOwnProfile = user.id === context.userID;
 
   return (
-    <div className={`h-full bg-white overflow-auto ${className}`}>
+    <div className={`h-full bg-background overflow-auto ${className}`}>
       {/* Header with back button */}
-      <div className='sticky top-0 z-10 bg-white pb-1 p-4'>
+      <div className='sticky top-0 z-10 bg-background pb-1 p-4'>
         <div className='flex items-center justify-between gap-3'>
           <div className='flex-1'>
-            <h1 className='text-lg font-semibold text-gray-900 truncate'>
+            <h1 className='text-lg font-semibold text-foreground truncate'>
               {isOwnProfile
                 ? 'Profile'
                 : `${user?.name || userProfile?.displayName || 'Unknown User'}`}
@@ -70,7 +70,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             variant='ghost'
             size='sm'
             onClick={handleClose}
-            className='!p-2 border border-gray-300 rounded-md hover:bg-gray-50'
+            className='!p-2 border border-border rounded-md hover:bg-accent'
             title='Close'
             data-track-category='Profile'
             data-track-name='CloseProfileSidebar'

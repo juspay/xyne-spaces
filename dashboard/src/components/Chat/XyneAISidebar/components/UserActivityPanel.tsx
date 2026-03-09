@@ -226,19 +226,21 @@ export const UserActivityPanel = ({
   return (
     <div className='flex-1 overflow-hidden flex flex-col bg-white h-full rounded-xl'>
       {/* Header */}
-      <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-b border-gray-200 flex-shrink-0'>
+      <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-b border-border flex-shrink-0'>
         <div className='flex items-center gap-2'>
           <button
             onClick={handleClose}
             className={
               isMobile
                 ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
-                : 'p-1 hover:bg-gray-100 rounded transition-colors'
+                : 'p-1 hover:bg-accent rounded transition-colors'
             }
           >
-            <ArrowLeft className={isMobile ? 'w-4 h-4 text-gray-700' : 'w-4 h-4 text-gray-700'} />
+            <ArrowLeft
+              className={isMobile ? 'w-4 h-4 text-foreground' : 'w-4 h-4 text-foreground'}
+            />
           </button>
-          <span className="text-gray-900 text-base font-semibold font-['Inter']">
+          <span className="text-foreground text-base font-semibold font-['Inter']">
             Your Activity
           </span>
         </div>
@@ -246,19 +248,19 @@ export const UserActivityPanel = ({
           {canManageUserActivity && (
             <button
               onClick={() => setAliasManagerOpen(true)}
-              className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2 overflow-hidden hover:bg-gray-100 transition-colors'
+              className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2 overflow-hidden hover:bg-accent transition-colors'
               title='Manage activity aliases'
               type='button'
             >
-              <Settings className='w-4 h-4 text-gray-600' />
+              <Settings className='w-4 h-4 text-muted-foreground' />
             </button>
           )}
           {!isMobile && (
             <button
               onClick={handleXyneAIClose}
-              className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+              className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             >
-              <X className='w-4 h-4 text-gray-600' />
+              <X className='w-4 h-4 text-muted-foreground' />
             </button>
           )}
         </div>
@@ -267,7 +269,7 @@ export const UserActivityPanel = ({
       {/* Activity List */}
       <div className='flex-1 overflow-y-auto min-h-0'>
         {activities.length === 0 && !isLoading ? (
-          <div className='px-4 py-8 text-center text-gray-500 text-sm'>
+          <div className='px-4 py-8 text-center text-muted-foreground text-sm'>
             No activity yet. Start using the app to see your activity here.
           </div>
         ) : (
@@ -282,7 +284,7 @@ export const UserActivityPanel = ({
                   onConfigure={handleConfigure}
                   canConfigure={canManageUserActivity}
                 />
-                {index < activities.length - 1 && <div className='border-b border-gray-100' />}
+                {index < activities.length - 1 && <div className='border-b border-border' />}
               </div>
             ))}
 
@@ -291,10 +293,10 @@ export const UserActivityPanel = ({
               <div className='px-4 py-4 space-y-3'>
                 {Array.from({ length: 3 }, (_, i) => (
                   <div key={i} className='flex items-start gap-3'>
-                    <div className='w-4 h-4 bg-gray-200 rounded animate-pulse flex-shrink-0 mt-0.5' />
+                    <div className='w-4 h-4 bg-muted rounded animate-pulse flex-shrink-0 mt-0.5' />
                     <div className='flex-1 space-y-2'>
-                      <div className='h-4 bg-gray-200 rounded animate-pulse w-3/4' />
-                      <div className='h-3 bg-gray-200 rounded animate-pulse w-1/2' />
+                      <div className='h-4 bg-muted rounded animate-pulse w-3/4' />
+                      <div className='h-3 bg-muted rounded animate-pulse w-1/2' />
                     </div>
                   </div>
                 ))}
@@ -304,13 +306,15 @@ export const UserActivityPanel = ({
             {/* Load more trigger */}
             {hasMore && !isLoading && (
               <div ref={loadMoreRef} className='h-8 flex items-center justify-center'>
-                <div className='w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin' />
+                <div className='w-5 h-5 border-2 border-border border-t-blue-500 rounded-full animate-spin' />
               </div>
             )}
 
             {/* End of list */}
             {!hasMore && activities.length > 0 && (
-              <div className='px-4 py-4 text-center text-gray-400 text-xs'>No more activity</div>
+              <div className='px-4 py-4 text-center text-muted-foreground text-xs'>
+                No more activity
+              </div>
             )}
           </>
         )}
@@ -318,7 +322,7 @@ export const UserActivityPanel = ({
 
       {/* Footer with Add to Chat button */}
       {selectedCount > 0 && (
-        <div className='p-4 border-t border-gray-200 flex-shrink-0'>
+        <div className='p-4 border-t border-border flex-shrink-0'>
           <button
             onClick={handleAddToChat}
             className='w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors'

@@ -88,20 +88,20 @@ export const ToolEditRenderer: React.FC<
 
     return (
       <div className='space-y-2 text-sm'>
-        <div className='rounded-lg border border-gray-200 overflow-hidden bg-white'>
+        <div className='rounded-lg border border-border overflow-hidden bg-background'>
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className='w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 transition-colors'
+            className='w-full flex items-center gap-2 px-3 py-2 hover:bg-muted transition-colors'
             data-track-category='Workflows'
             data-track-name='ToggleFileEditExpand'
             data-track-metadata={JSON.stringify({ fileName })}
           >
-            <span className='text-gray-400'>
+            <span className='text-muted-foreground'>
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </span>
             <FileEdit size={16} className='text-amber-500 shrink-0' />
-            <span className='text-sm font-medium text-gray-800'>{fileName}</span>
+            <span className='text-sm font-medium text-foreground'>{fileName}</span>
             <span className='ml-auto flex items-center gap-1 text-sm'>
               {success ? (
                 <span className='flex items-center gap-1 text-green-600'>
@@ -117,7 +117,7 @@ export const ToolEditRenderer: React.FC<
 
           {/* Diff Content */}
           {isExpanded && (
-            <div className='border-t border-gray-200 overflow-auto max-h-96'>
+            <div className='border-t border-border overflow-auto max-h-96'>
               <ReactDiffViewer
                 styles={diffStyles}
                 oldValue={oldString}

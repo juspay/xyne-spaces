@@ -140,7 +140,7 @@ const IndexCellRenderer = (params: ICellRendererParams<Ticket>) => {
           data-track-name='SelectRow'
         />
       ) : (
-        <span className='text-sm text-[#8D8D8D]'>{rowIndex}</span>
+        <span className='text-sm text-muted-foreground'>{rowIndex}</span>
       )}
     </button>
   );
@@ -304,14 +304,14 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               data-track-name='TicketRow'
             >
               <button
-                className='text-xs text-[#8D8D8D] font-medium font-mono hover:text-blue-600 hover:underline transition-colors'
+                className='text-xs text-muted-foreground font-medium font-mono hover:text-blue-600 hover:underline transition-colors'
                 onClick={handleTicketClick}
                 data-track-category='Tickets'
                 data-track-name='OpenTicket'
               >
                 {params.data.xyneId}
               </button>
-              <span className='truncate font-medium text-gray-900'>{params.value}</span>
+              <span className='truncate font-medium text-foreground'>{params.value}</span>
             </div>
           );
         },
@@ -351,7 +351,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         cellRenderer: (params: ICellRendererParams<Ticket>) => {
           if (!params.value) {
             return (
-              <div className='flex items-center gap-3 h-full text-gray-400'>
+              <div className='flex items-center gap-3 h-full text-muted-foreground'>
                 <Calendar className='w-3.5 h-3.5' />
                 <span className='text-sm'>No due date</span>
               </div>
@@ -370,7 +370,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           return (
             <div
               className={`flex items-center gap-2 h-full ${
-                isUrgent ? 'text-red-500' : 'text-[#505B62]'
+                isUrgent ? 'text-red-500' : 'text-muted-foreground'
               }`}
             >
               <Calendar className='w-3.5 h-3.5' />
@@ -448,11 +448,11 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           return (
             <div className='flex items-center gap-2 h-full'>
               <Tooltip content={`Priority: ${formatPriority(priorityValue)}`}>
-                <div className='flex items-center text-[#505B62]'>
+                <div className='flex items-center text-muted-foreground'>
                   {getPriorityIcon(priorityValue)}
                 </div>
               </Tooltip>
-              <span className='text-[#505B62] font-medium text-sm'>
+              <span className='text-muted-foreground font-medium text-sm'>
                 {formatPriority(priorityValue)}
               </span>
             </div>
@@ -480,7 +480,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         },
         cellRenderer: (params: ICellRendererParams<Ticket>) => (
           <div className='flex items-center h-full'>
-            <span className='text-sm text-[#525866]'>{params.value ?? '—'}</span>
+            <span className='text-sm text-muted-foreground'>{params.value ?? '—'}</span>
           </div>
         ),
       },
@@ -531,20 +531,22 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           if (!params.data) return null;
 
           const tags = ticketTags?.get(params.data.id) || [];
-          if (!tags.length) return <span className='text-gray-400'>—</span>;
+          if (!tags.length) return <span className='text-muted-foreground'>—</span>;
 
           return (
             <div className='flex items-center gap-2 h-full overflow-hidden'>
               {tags.slice(0, 2).map(tag => (
                 <span
                   key={tag.id}
-                  className='flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border bg-[#FCFCFD] text-[#6B7280] border-[#F0F0F0]'
+                  className='flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border bg-muted text-muted-foreground border-border'
                 >
                   <span className='w-2 h-2 rounded-full bg-[#C27AFF]'></span>
                   {tag.name}
                 </span>
               ))}
-              {tags.length > 2 && <span className='text-xs text-gray-400'>+{tags.length - 2}</span>}
+              {tags.length > 2 && (
+                <span className='text-xs text-muted-foreground'>+{tags.length - 2}</span>
+              )}
             </div>
           );
         },
@@ -723,24 +725,24 @@ const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
               showActiveStatus={false}
             />
           </Tooltip>
-          <span className='text-[#646464] truncate font-medium'>
+          <span className='text-muted-foreground truncate font-medium'>
             {assignedUser.name || assignedUser.email}
           </span>
         </div>
       ) : assignedGroup ? (
         <div className='flex items-center gap-2'>
           <Tooltip content={assignedGroup.name}>
-            <div className='w-6 h-6 rounded-lg bg-gray-200 flex items-center justify-center'>
-              <span className='text-xs font-medium text-[#505B62]'>
+            <div className='w-6 h-6 rounded-lg bg-border flex items-center justify-center'>
+              <span className='text-xs font-medium text-muted-foreground'>
                 {assignedGroup.name.charAt(0).toUpperCase()}
               </span>
             </div>
           </Tooltip>
-          <span className='text-[#505B62] truncate'>{assignedGroup.name}</span>
+          <span className='text-muted-foreground truncate'>{assignedGroup.name}</span>
         </div>
       ) : (
-        <div className='flex items-center gap-2 text-gray-400'>
-          <div className='w-6 h-6 rounded-full border border-dashed border-gray-400 flex items-center justify-center'>
+        <div className='flex items-center gap-2 text-muted-foreground'>
+          <div className='w-6 h-6 rounded-full border border-dashed border-muted-foreground flex items-center justify-center'>
             <User className='w-3 h-3' strokeWidth={1.5} />
           </div>
           <span>Unassigned</span>

@@ -35,8 +35,8 @@ export const ReactionAddedActivity = ({
       badgeColorClass={actorUser?.picture ? 'bg-[#FAFAFA]' : 'bg-[#EDF3F7]'}
       description={
         <>
-          <span className='text-gray-500 text-sm'>{actionText}</span>
-          <span className='text-gray-500 text-sm ml-1'>to your message in</span>
+          <span className='text-muted-foreground text-sm'>{actionText}</span>
+          <span className='text-muted-foreground text-sm ml-1'>to your message in</span>
         </>
       }
       targetPath={targetPath}

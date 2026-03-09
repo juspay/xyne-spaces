@@ -586,12 +586,12 @@ const RCADetailScreen = () => {
   const renderPhaseContent = () => {
     if (!selectedRecord) {
       return (
-        <div className='flex flex-col items-center justify-center h-full text-gray-500 gap-3'>
-          <ClipboardCheck className='h-12 w-12 text-gray-300' />
+        <div className='flex flex-col items-center justify-center h-full text-muted-foreground gap-3'>
+          <ClipboardCheck className='h-12 w-12 text-muted' />
           <p className='text-sm'>RCA not found.</p>
           <button
             type='button'
-            className='px-4 py-2 border rounded-lg text-sm hover:bg-gray-50'
+            className='px-4 py-2 border rounded-lg text-sm hover:bg-muted'
             onClick={() => void navigate('/rca')}
             data-track-category='RCA'
             data-track-name='BackToRCAListFromNotFound'
@@ -703,20 +703,20 @@ const RCADetailScreen = () => {
   };
 
   return (
-    <div className='h-full bg-gray-50' data-id='rca-screen'>
+    <div className='h-full bg-muted' data-id='rca-screen'>
       <section className='h-full flex-1 flex flex-col'>
-        <div className='border-b border-gray-200 bg-white px-6 py-4'>
+        <div className='border-b border-border bg-background px-6 py-4'>
           <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
             <div>
-              <h2 className='text-lg font-semibold text-gray-900'>RCA Workspace</h2>
-              <p className='text-sm text-gray-500'>
+              <h2 className='text-lg font-semibold text-foreground'>RCA Workspace</h2>
+              <p className='text-sm text-muted-foreground'>
                 Track release mapping, RCA, Impact, and COE phases for each incident.
               </p>
             </div>
-            <div className='flex flex-wrap items-center gap-2 text-xs text-gray-500'>
+            <div className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
               <button
                 type='button'
-                className='px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50'
+                className='px-3 py-1.5 border rounded-lg text-sm hover:bg-muted'
                 onClick={() => {
                   setSelectedImpactId(null);
                   setSelectedCoeId(null);

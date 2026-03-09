@@ -268,7 +268,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
         <div className='flex items-center justify-center h-full bg-gray-900 min-h-64'>
           <div className='text-center text-white'>
             <p className='text-lg font-semibold mb-2'>Failed to load video</p>
-            <p className='text-sm text-gray-400 px-4'>{error}</p>
+            <p className='text-sm text-muted-foreground px-4'>{error}</p>
           </div>
         </div>
       );
@@ -280,7 +280,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
         ref={containerRef}
         className={cn(
           `relative h-full w-full flex items-center justify-center group ${
-            isImmersiveMode ? 'bg-black' : 'bg-white'
+            isImmersiveMode ? 'bg-black' : 'bg-background'
           } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2`,
         )}
         onMouseLeave={() => {
@@ -352,7 +352,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                   }`,
                 )}
               ></div>
-              {isImmersiveMode && <div className='text-gray-300 text-sm'>Loading video...</div>}
+              {isImmersiveMode && <div className='text-muted text-sm'>Loading video...</div>}
             </div>
           </div>
         )}
@@ -400,7 +400,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                 <div
                   className={cn(
                     `absolute left-0 top-0 h-full rounded-lg ${
-                      isImmersiveMode ? 'bg-white' : 'bg-blue-500'
+                      isImmersiveMode ? 'bg-background' : 'bg-blue-500'
                     }`,
                   )}
                   style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
@@ -416,7 +416,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                       isImmersiveMode
                         ? '-top-1 h-3 opacity-0 group-hover/progress:opacity-100 transition-opacity [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4'
                         : 'top-0 h-1 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3'
-                    } [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:relative [&::-webkit-slider-thumb]:z-10 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer`,
+                    } [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-background [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:relative [&::-webkit-slider-thumb]:z-10 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-background [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer`,
                   )}
                   data-track-category='VIDEO_PLAYER'
                   data-track-name='SeekVideo'
@@ -444,8 +444,8 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                   onClick={togglePlay}
                   className={
                     isImmersiveMode
-                      ? 'inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-                      : 'text-white hover:text-gray-300 transition-colors'
+                      ? 'inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+                      : 'text-white hover:text-muted transition-colors'
                   }
                   title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
                   data-track-category='VIDEO_PLAYER'
@@ -469,8 +469,8 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                     onClick={toggleMute}
                     className={
                       isImmersiveMode
-                        ? 'inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-                        : 'text-white hover:text-gray-300 transition-colors'
+                        ? 'inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+                        : 'text-white hover:text-muted transition-colors'
                     }
                     title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
                     data-track-category='VIDEO_PLAYER'
@@ -494,7 +494,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                       <div
                         className={cn(
                           `absolute left-0 top-0 h-full rounded-lg transition-all duration-100 ${
-                            isImmersiveMode ? 'bg-white' : 'bg-blue-500'
+                            isImmersiveMode ? 'bg-background' : 'bg-blue-500'
                           }`,
                         )}
                         style={{ width: `${volume * 100}%` }}
@@ -506,7 +506,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                         step='0.1'
                         value={volume}
                         onChange={handleVolumeChange}
-                        className='absolute top-0 left-0 w-full h-1 appearance-none cursor-pointer bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:relative [&::-webkit-slider-thumb]:z-10 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer'
+                        className='absolute top-0 left-0 w-full h-1 appearance-none cursor-pointer bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-background [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:relative [&::-webkit-slider-thumb]:z-10 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-background [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer'
                         data-track-category='VIDEO_PLAYER'
                         data-track-name='AdjustVolume'
                         data-track-metadata={JSON.stringify({ volume, attachmentId })}
@@ -532,8 +532,8 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                       type='button'
                       className={
                         isImmersiveMode
-                          ? 'inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-                          : 'text-white hover:text-gray-300 transition-colors p-1'
+                          ? 'inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+                          : 'text-white hover:text-muted transition-colors p-1'
                       }
                       title='Playback speed'
                     >
@@ -556,7 +556,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                             key={rate}
                             onClick={() => handlePlaybackRateChange(rate)}
                             className={cn(
-                              `px-3 py-2 text-sm text-white hover:bg-white/10 rounded-md transition-colors cursor-pointer flex items-center justify-between outline-none ${playbackRate === rate ? 'bg-white/20' : ''}`,
+                              `px-3 py-2 text-sm text-white hover:bg-background/10 rounded-md transition-colors cursor-pointer flex items-center justify-between outline-none ${playbackRate === rate ? 'bg-background/20' : ''}`,
                             )}
                           >
                             <span>{rate}x</span>
@@ -574,8 +574,8 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                     onClick={onExpand}
                     className={cn(
                       isImmersiveMode
-                        ? 'inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-                        : 'text-white hover:text-gray-300 transition-colors',
+                        ? 'inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+                        : 'text-white hover:text-muted transition-colors',
                     )}
                     data-track-category='VIDEO_PLAYER'
                     data-track-name={isImmersiveMode ? 'ExitFullscreen' : 'EnterFullscreen'}

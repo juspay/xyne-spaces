@@ -78,12 +78,12 @@ const AboutChannel = ({ channel, isParticipant }: AboutChannelProps): ReactEleme
   }, [isEditingDescription]);
 
   return (
-    <div className='flex flex-col h-[392px] bg-[#FAFAFA]'>
+    <div className='flex flex-col h-[392px] bg-muted'>
       <div className='p-4 overflow-y-auto'>
-        <div className='relative bg-white p-[12px] rounded-[12px] border border-[#F2F2F3]'>
+        <div className='relative bg-card p-[12px] rounded-[12px] border border-border'>
           <div className='flex flex-col gap-y-2'>
             <div className='flex items-start justify-between'>
-              <p className='text-sm font-medium text-[#181B1D]'>Description</p>
+              <p className='text-sm font-medium text-foreground'>Description</p>
             </div>
             {isEditingDescription ? (
               <div>
@@ -92,7 +92,7 @@ const AboutChannel = ({ channel, isParticipant }: AboutChannelProps): ReactEleme
                   value={editDescription}
                   onChange={e => setEditDescription(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  className='w-full mt-2 p-2 text-sm border border-[#E4E6E7] rounded-[8px] resize-none focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+                  className='w-full mt-2 p-2 text-sm border border-border rounded-[8px] resize-none focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
                   rows={3}
                   placeholder='Add a description...'
                   data-track-event='blur'
@@ -124,7 +124,7 @@ const AboutChannel = ({ channel, isParticipant }: AboutChannelProps): ReactEleme
                 </div>
               </div>
             ) : (
-              <p className='text-sm text-[#505B62]'>
+              <p className='text-sm text-muted-foreground'>
                 {channel.description || 'No description set'}
               </p>
             )}
@@ -140,16 +140,16 @@ const AboutChannel = ({ channel, isParticipant }: AboutChannelProps): ReactEleme
               data-track-name='Edit_Description'
               data-track-metadata={JSON.stringify({ channelId: channel?.id })}
             >
-              <LucideSquarePen size={12} color='#505B62' />
+              <LucideSquarePen size={12} className='text-muted-foreground' />
             </Button>
           )}
         </div>
-        <div className='text-[14px] text-[#505B62] py-4'>
-          Created By <span className='text-[#0269B3]'>{createdByUser?.name || 'Unknown'}</span> on{' '}
+        <div className='text-[14px] text-muted-foreground py-4'>
+          Created By <span className='text-primary'>{createdByUser?.name || 'Unknown'}</span> on{' '}
           <span className='visual-regression-hide'>{formatDate(channel.createdAt)}</span>
         </div>
       </div>
-      <div className='mt-auto p-[12px] text-[12px] flex items-center justify-center text-[#788187] font-light border-t border-[#F2F2F3] visual-regression-hide'>
+      <div className='mt-auto p-[12px] text-[12px] flex items-center justify-center text-muted-foreground font-light border-t border-border visual-regression-hide'>
         Channel ID: {channel.id}
       </div>
     </div>

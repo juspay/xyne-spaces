@@ -29,7 +29,7 @@ export function CallStateTransition({
           <p className={cn('text-white font-semibold mb-1 text-sm sm:text-base')}>
             {machineState === 'initiating' ? 'Starting call...' : 'Joining call...'}
           </p>
-          <p className={cn('text-gray-400 text-xs sm:text-sm')}>Please wait</p>
+          <p className={cn('text-muted-foreground text-xs sm:text-sm')}>Please wait</p>
         </div>
       </div>
     );

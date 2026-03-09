@@ -59,7 +59,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
         <button
           type='button'
           onClick={toggleExpanded}
-          className='flex items-center gap-1 mt-1 text-sm text-blue-600 hover:text-blue-800 font-medium cursor-pointer bg-none border-none p-0 transition-colors duration-150'
+          className='flex items-center gap-1 mt-1 text-sm text-primary hover:text-primary/80 font-medium cursor-pointer bg-none border-none p-0 transition-colors duration-150'
           data-track-category='ChatMessage'
           data-track-name='TOGGLE_EXPAND_MESSAGE'
           data-track-metadata={JSON.stringify({ isExpanded, message: message.length })}

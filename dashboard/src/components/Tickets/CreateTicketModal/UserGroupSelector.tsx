@@ -66,7 +66,7 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
       value: group.id,
       label: group.name,
       // No subtitle for groups (unlike users who have email)
-      icon: <Users className='w-4 h-4 text-gray-600' />,
+      icon: <Users className='w-4 h-4 text-muted-foreground' />,
     }));
   }, [allGroups, searchValue]);
 

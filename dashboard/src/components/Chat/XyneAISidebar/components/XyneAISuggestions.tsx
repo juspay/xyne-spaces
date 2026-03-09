@@ -21,7 +21,7 @@ export const XyneAISuggestions = ({
       </div>
 
       {/* Heading */}
-      <h2 className="text-center text-gray-900 text-[24px] leading-[24px] font-semibold font-['Inter'] mb-6 md:mb-9">
+      <h2 className="text-center text-foreground text-[24px] leading-[24px] font-semibold font-['Inter'] mb-6 md:mb-9">
         Hey! What are we working
         <br />
         on today?
@@ -33,7 +33,7 @@ export const XyneAISuggestions = ({
           <button
             key={index}
             onClick={() => onSuggestionClick(query)}
-            className="px-[12px] py-[6px] rounded-full border border-[#EBEDF0] hover:border-[#D9D9D9] hover:bg-gray-50 bg-white transition-colors text-gray-700 font-medium text-[12px] leading-[22px] font-['Inter']"
+            className="px-[12px] py-[6px] rounded-full border border-border hover:border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-[12px] leading-[22px] font-['Inter']"
             data-track-category='XyneAI'
             data-track-name='SELECT_SUGGESTION'
             data-track-metadata={JSON.stringify({ suggestion: query })}

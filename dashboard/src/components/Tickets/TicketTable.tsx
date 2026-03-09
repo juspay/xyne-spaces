@@ -220,7 +220,7 @@ const TicketTable: React.FC<TicketTableProps> = ({ filters }) => {
       />
       {isLoading && allWorkflows.length > 0 && (
         <div className='flex justify-center py-4'>
-          <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-gray-600'></div>
+          <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-muted-foreground'></div>
         </div>
       )}
     </div>

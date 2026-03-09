@@ -1186,9 +1186,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [layoutView, availableColumns]);
 
   return (
-    <div className='flex flex-col h-full w-full bg-gray-50 relative'>
+    <div className='flex flex-col h-full w-full bg-muted relative'>
       {/* Header */}
-      <div className='flex flex-col lg:flex-row flex-wrap lg:flex-nowrap lg:items-center justify-between px-4 py-3 bg-white flex-shrink-0 gap-3'>
+      <div className='flex flex-col lg:flex-row flex-wrap lg:flex-nowrap lg:items-center justify-between px-4 py-3 bg-background flex-shrink-0 gap-3'>
         {/* Filters - Left Side */}
         {(effectiveProjectId || viewMode === 'my-tickets') && (
           <div className='flex-1 min-w-0'>
@@ -1231,7 +1231,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               data-track-name='CREATE_TICKET_KANBAN'
               data-track-metadata={JSON.stringify({ boardId, channelId })}
               onClick={() => setIsCreateModalOpen(true)}
-              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-sidebar-badge-accent rounded-lg transition-colors flex-shrink-0'
+              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-sidebar-badge-accent rounded-lg transition-colors flex-shrink-0'
             >
               <Plus className='w-4 h-4' />
               <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
@@ -1240,7 +1240,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           )}
           {/* Layout View Toggle */}
           <div className='flex items-center gap-2'>
-            <div className='flex items-center rounded-xl bg-[#F9F9F9] border'>
+            <div className='flex items-center rounded-xl bg-muted border'>
               <Tooltip content='Kanban'>
                 <button
                   onClick={() => {
@@ -1252,8 +1252,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   }}
                   className={`px-3 py-2 rounded-l-xl transition-colors border-r ${
                     layoutView === 'kanban'
-                      ? 'bg-white text-gray-900'
-                      : 'text-gray-500 hover:text-gray-700'
+                      ? 'bg-background text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
                   }`}
                   title='Kanban View'
                   data-track-category='Tickets'
@@ -1273,8 +1273,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   }}
                   className={`px-3 py-2 transition-colors border-r ${
                     layoutView === 'table'
-                      ? 'bg-white text-gray-900'
-                      : 'text-gray-500 hover:text-gray-700'
+                      ? 'bg-background text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
                   }`}
                   title='Table View'
                   data-track-category='Tickets'
@@ -1295,8 +1295,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     }}
                     className={`px-3 py-2 rounded-r-xl transition-colors ${
                       layoutView === 'calendar'
-                        ? 'bg-white text-gray-900'
-                        : 'text-gray-500 hover:text-gray-700'
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
                     }`}
                     title='Calendar View'
                     data-track-category='KANBAN'
@@ -1316,7 +1316,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             {/* My Tickets Filter Toggles - only show in my-tickets view */}
             {viewMode === 'my-tickets' && (
               /* CHANGE 1: Added 'overflow-hidden' */
-              <div className='flex items-center rounded-xl bg-[#F9F9F9] border h-8 overflow-hidden'>
+              <div className='flex items-center rounded-xl bg-muted border h-8 overflow-hidden'>
                 <Tooltip content='Assigned To Me'>
                   <button
                     onClick={() =>
@@ -1328,8 +1328,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     /* CHANGE 2: Replaced 'py-2' with 'h-full' */
                     className={`px-3 h-full rounded-l-xl transition-colors border-r ${
                       filters.assigned
-                        ? 'bg-white text-gray-900'
-                        : 'text-gray-500 hover:text-gray-700'
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
                     }`}
                     data-track-category='KANBAN'
                     data-track-name='ToggleAssignedToMeFilter'
@@ -1349,8 +1349,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     /* CHANGE 3: Replaced 'py-2' with 'h-full' */
                     className={`px-3 h-full rounded-r-xl transition-colors ${
                       filters.created
-                        ? 'bg-white text-gray-900'
-                        : 'text-gray-500 hover:text-gray-700'
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
                     }`}
                     data-track-category='KANBAN'
                     data-track-name='ToggleCreatedByMeFilter'
@@ -1368,7 +1368,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 className={`px-3 py-2 transition-colors ${
                   showOverdueOnly
                     ? 'bg-red-100 text-red-700 border border-red-300'
-                    : 'bg-white text-gray-500 hover:text-gray-700 border border-gray-300'
+                    : 'bg-background text-muted-foreground hover:text-foreground border border-input'
                 } rounded-lg flex items-center gap-2`}
                 title='Filter Overdue Tickets'
                 data-track-category='KANBAN'
@@ -1384,7 +1384,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   height='14'
                   viewBox='0 0 12 12'
                   fill='none'
-                  className={showOverdueOnly ? 'text-red-600' : 'text-gray-500'}
+                  className={showOverdueOnly ? 'text-red-600' : 'text-muted-foreground'}
                 >
                   <circle cx='6' cy='6' r='5' stroke='currentColor' strokeWidth='1.5' />
                   <path
@@ -1401,10 +1401,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               <DropdownMenu.Trigger>
                 <Tooltip content='Customize View'>
                   <button
-                    className='flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 transition-all outline-none focus:ring-2 focus:ring-gray-200 shadow-sm'
+                    className='flex items-center gap-2 px-3 py-2 rounded-xl border border-border bg-background hover:bg-muted transition-all outline-none focus:ring-2 focus:ring-border shadow-sm'
                     title='Configure Columns'
                   >
-                    <Settings2 className='w-3.5 h-3.5 text-gray-600' />
+                    <Settings2 className='w-3.5 h-3.5 text-muted-foreground' />
                     <span className='sr-only'>Columns</span>
                   </button>
                 </Tooltip>
@@ -1414,13 +1414,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 <DropdownMenu.Content
                   align='end'
                   sideOffset={8}
-                  className='z-50 min-w-[250px] bg-white border border-gray-200 rounded-lg shadow-xl animate-in fade-in zoom-in-95'
+                  className='z-50 min-w-[250px] bg-background border border-border rounded-lg shadow-xl animate-in fade-in zoom-in-95'
                 >
                   <div className='mb-1 border-b flex items-center justify-between px-4 py-3'>
                     <span className='text-sm font-bold tracking-wide'>Customise view</span>
                     <button
                       onClick={() => setIsCustomizeOpen(false)}
-                      className='cursor-pointer hover:bg-gray-100 rounded p-1 transition-colors'
+                      className='cursor-pointer hover:bg-muted rounded p-1 transition-colors'
                       data-track-category='Tickets'
                       data-track-name='CloseCustomizeView'
                     >
@@ -1429,13 +1429,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   </div>
 
                   {layoutView === 'table' && (
-                    <div className='px-4 py-3 border-b border-gray-50'>
-                      <div className='flex items-center justify-between gap-2 rounded-lg bg-[#F9F9F9] p-1 shadow-inner'>
+                    <div className='px-4 py-3 border-b border-border'>
+                      <div className='flex items-center justify-between gap-2 rounded-lg bg-muted p-1 shadow-inner'>
                         <button
                           onClick={() => setIsComfortView(true)}
                           className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2 
-            transition hover:bg-gray-100 focus:outline-none 
-            ${isComfortView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            transition hover:bg-muted focus:outline-none 
+            ${isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                           data-track-event='BUTTON_CLICK'
                           data-track-category='TICKETS'
                           data-track-name='KANBAN_VIEW_COMFORTABLE'
@@ -1450,8 +1450,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         <button
                           onClick={() => setIsComfortView(false)}
                           className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2 
-            transition hover:bg-white hover:text-gray-900
-            ${!isComfortView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            transition hover:bg-background hover:text-foreground
+            ${!isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                           data-track-event='BUTTON_CLICK'
                           data-track-category='TICKETS'
                           data-track-name='KANBAN_VIEW_COMPACT'
@@ -1467,14 +1467,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   {filteredAvailableColumns.map(column => (
                     <DropdownMenu.CheckboxItem
                       key={column.key}
-                      className='relative flex items-center justify-between py-3 px-4 text-sm text-gray-700 rounded-lg cursor-pointer outline-none select-none
-                     data-[highlighted]:bg-gray-100 data-[highlighted]:text-gray-900 transition-colors'
+                      className='relative flex items-center justify-between py-3 px-4 text-sm text-foreground rounded-lg cursor-pointer outline-none select-none
+                     data-[highlighted]:bg-muted data-[highlighted]:text-foreground transition-colors'
                       checked={visibleColumns.has(column.key)}
                       onCheckedChange={checked => handleColumnVisibilityChange(column.key, checked)}
                       onSelect={e => e.preventDefault()}
                     >
                       <div className='flex items-center gap-3'>
-                        <span className='text-gray-600 group-data-[highlighted]:text-gray-600 h-3 w-3'>
+                        <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
                           {column.icon}
                         </span>
                         <span className='font-medium text-sm'>{column.label}</span>
@@ -1483,11 +1483,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
                           visibleColumns.has(column.key)
                             ? 'bg-sidebar-badge-accent border'
-                            : 'border-gray-300 bg-white'
+                            : 'border-input bg-background'
                         }`}
                       >
                         {visibleColumns.has(column.key) && (
-                          <CheckIcon className='w-3 h-3 text-white stroke-[3]' />
+                          <CheckIcon className='w-3 h-3 text-primary-foreground stroke-[3]' />
                         )}
                       </div>
                     </DropdownMenu.CheckboxItem>
@@ -1498,16 +1498,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
-                <button className='flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-sm font-medium outline-none hover:bg-gray-50 transition-all min-w-[160px]'>
+                <button className='flex items-center gap-2 px-3 py-1.5 bg-background border border-border rounded-xl text-sm font-medium outline-none hover:bg-muted transition-all min-w-[160px]'>
                   <div className='flex items-center gap-2 flex-1'>
-                    <span className='text-gray-500 font-normal'>Group by:</span>
+                    <span className='text-muted-foreground font-normal'>Group by:</span>
                     {typeof groupBy === 'object' && groupBy.type === 'formField'
                       ? groupBy.fieldName
                       : groupingOptions
                           .find(opt => typeof opt.value === 'string' && opt.value === groupBy)
                           ?.label.replace('Group by: ', '') || 'None'}
                   </div>
-                  <ChevronDownIcon className='w-3.5 h-3.5 text-gray-400' />
+                  <ChevronDownIcon className='w-3.5 h-3.5 text-muted-foreground' />
                 </button>
               </DropdownMenu.Trigger>
 
@@ -1515,7 +1515,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 <DropdownMenu.Content
                   align='end'
                   sideOffset={8}
-                  className='z-50 min-w-[220px] p-1 bg-white border border-gray-200 rounded-lg flex flex-col gap-1 shadow-xl animate-in fade-in zoom-in-95'
+                  className='z-50 min-w-[220px] p-1 bg-background border border-border rounded-lg flex flex-col gap-1 shadow-xl animate-in fade-in zoom-in-95'
                 >
                   {/* Matching Header Style */}
                   <div className='mb-1 border-b flex items-center justify-between px-4 py-3'>
@@ -1528,7 +1528,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           setGroupBy('none');
                         }}
                       >
-                        <div className='cursor-pointer hover:bg-gray-100 rounded p-1 transition-colors'>
+                        <div className='cursor-pointer hover:bg-muted rounded p-1 transition-colors'>
                           <X className='w-3.5 h-3.5' />
                         </div>
                       </DropdownMenu.Item>
@@ -1539,10 +1539,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   {groupingOptions.map(({ value, label, icon }) => (
                     <DropdownMenu.CheckboxItem
                       key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
-                      className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-gray-700 cursor-pointer outline-none select-none
+                      className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
       transition-colors
-      data-[highlighted]:bg-gray-100 data-[highlighted]:text-gray-900
-      data-[state=checked]:bg-[#F2F2F3] data-[state=checked]:text-black data-[state=checked]:font-semibold'
+      data-[highlighted]:bg-muted data-[highlighted]:text-foreground
+      data-[state=checked]:bg-accent data-[state=checked]:text-black data-[state=checked]:font-semibold'
                       checked={
                         typeof value === 'string'
                           ? groupBy === value
@@ -1553,7 +1553,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       onCheckedChange={() => setGroupBy(value as GroupByType)}
                     >
                       <div className='flex items-center gap-3'>
-                        <span className='text-gray-600 group-data-[highlighted]:text-gray-600 h-3 w-3'>
+                        <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
                           {icon}
                         </span>
                         <span className='font-medium'>{label.replace('Group by: ', '')}</span>
@@ -1570,34 +1570,34 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       {/* Board-wise View for my-tickets, channel stage view, or multiple boards filter */}
       {/* Board-wise View */}
       {layoutView === 'calendar' ? (
-        <div className='flex-1 overflow-hidden bg-white'>
+        <div className='flex-1 overflow-hidden bg-background'>
           <CalendarView
             tickets={filteredTickets}
             onTicketClick={(ticket: Ticket) => handleTicketClick({} as React.MouseEvent, ticket)}
           />
         </div>
       ) : layoutView === 'table' ? (
-        <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-white pb-14'>
+        <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'>
           {processedGroups.map(group => {
             const isExpanded = expandedGroups.has(group.key);
             const showGroupHeader = groupBy !== 'none';
             return (
               <div
                 key={group.key}
-                className='flex flex-col rounded-lg border border-gray-200 overflow-hidden'
+                className='flex flex-col rounded-lg border border-border overflow-hidden'
               >
                 {showGroupHeader && (
                   <button
                     onClick={() => toggleGroupExpansion(group.key)}
-                    className={`flex items-center gap-3 px-4 py-3 bg-[#F7F7F8] transition-colors w-full text-left ${isExpanded ? 'border-b border-gray-200' : 'border-none'} `}
+                    className={`flex items-center gap-3 px-4 py-3 bg-muted transition-colors w-full text-left ${isExpanded ? 'border-b border-border' : 'border-none'} `}
                     data-track-category='Tickets'
                     data-track-name='ToggleGroupExpansion'
                     data-track-metadata={JSON.stringify({ groupKey: group.key, isExpanded })}
                   >
                     {isExpanded ? (
-                      <ChevronDownIcon className='w-4 h-4 text-gray-500 flex-shrink-0' />
+                      <ChevronDownIcon className='w-4 h-4 text-muted-foreground flex-shrink-0' />
                     ) : (
-                      <ChevronRight className='w-4 h-4 text-gray-500 flex-shrink-0' />
+                      <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
                     )}
                     <div className='flex items-center gap-4 flex-1'>
                       <div className='flex items-center gap-2'>
@@ -1607,8 +1607,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         )}
                         {/* Show group icon for group assignees */}
                         {group.entityType === 'group' && (
-                          <div className='w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0'>
-                            <User className='w-3 h-3 text-gray-600' />
+                          <div className='w-5 h-5 rounded-full bg-muted-foreground/50 flex items-center justify-center flex-shrink-0'>
+                            <User className='w-3 h-3 text-muted-foreground' />
                           </div>
                         )}
                         {/* Show priority icon when grouping by priority */}
@@ -1617,11 +1617,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                             {getPriorityIcon(group.priority)}
                           </div>
                         )}
-                        <h3 className='font-semibold text-gray-700 capitalize  text-sm'>
+                        <h3 className='font-semibold text-foreground capitalize  text-sm'>
                           {group.displayName}
                         </h3>
                       </div>
-                      <span className='text-xs font-medium bg-white text-gray-600 px-2 py-0.5 rounded-lg'>
+                      <span className='text-xs font-medium bg-background text-muted-foreground px-2 py-0.5 rounded-lg'>
                         {group.count}
                       </span>
                     </div>
@@ -1673,12 +1673,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         data-track-category='KanbanBoard'
                         data-track-name='ToggleGroupExpansion'
                         data-track-metadata={JSON.stringify({ groupKey: group.key, groupBy })}
-                        className={`flex items-center gap-3 p-4 bg-[#F0F0F0] hover:bg-gray-200 transition-colors sticky left-0 z-10 w-full text-left border-b border-gray-200 ${isExpanded ? 'rounded-t-lg ' : 'rounded-lg'}`}
+                        className={`flex items-center gap-3 p-4 bg-muted hover:bg-border transition-colors sticky left-0 z-10 w-full text-left border-b border-border ${isExpanded ? 'rounded-t-lg ' : 'rounded-lg'}`}
                       >
                         {isExpanded ? (
-                          <ChevronDownIcon className='w-4 h-4 text-gray-500' />
+                          <ChevronDownIcon className='w-4 h-4 text-muted-foreground' />
                         ) : (
-                          <ChevronRight className='w-4 h-4 text-gray-500' />
+                          <ChevronRight className='w-4 h-4 text-muted-foreground' />
                         )}
                         <div className='flex items-center gap-4'>
                           <div className='flex items-center gap-2'>
@@ -1688,8 +1688,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                             )}
                             {/* Show group icon for group assignees */}
                             {group.entityType === 'group' && (
-                              <div className='w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0'>
-                                <User className='w-3 h-3 text-gray-600' />
+                              <div className='w-5 h-5 rounded-full bg-muted-foreground/50 flex items-center justify-center flex-shrink-0'>
+                                <User className='w-3 h-3 text-muted-foreground' />
                               </div>
                             )}
                             {/* Show priority icon when grouping by priority */}
@@ -1698,11 +1698,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                 {getPriorityIcon(group.priority)}
                               </div>
                             )}
-                            <h3 className='font-semibold text-gray-700 capitalize  text-sm'>
+                            <h3 className='font-semibold text-foreground capitalize  text-sm'>
                               {group.displayName}
                             </h3>
                           </div>
-                          <span className='text-xs font-medium bg-white text-gray-600 px-2 py-0.5 rounded-lg'>
+                          <span className='text-xs font-medium bg-background text-muted-foreground px-2 py-0.5 rounded-lg'>
                             {group.count}
                           </span>
                         </div>
@@ -1712,7 +1712,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     {/* Only show Kanban columns if expanded OR if no grouping is applied */}
                     {(isExpanded || !showGroupHeader) && (
                       <div
-                        className={showGroupHeader ? 'h-[calc(100vh-300px)] bg-white' : 'h-full'}
+                        className={
+                          showGroupHeader ? 'h-[calc(100vh-300px)] bg-background' : 'h-full'
+                        }
                       >
                         <KanbanColumns
                           stages={stages}
@@ -1781,7 +1783,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           title='Confirm Stage Change'
         >
           <div className='p-6'>
-            <p className='text-sm text-gray-600 mb-6'>
+            <p className='text-sm text-muted-foreground mb-6'>
               Moving to a previous stage will clear all status change requests for status after this
               one. These requests will need to be submitted again. Do you want to continue?
             </p>
@@ -1821,7 +1823,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     setShowBackwardConfirmDialog(false);
                   }
                 }}
-                className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
+                className='bg-sidebar-badge-accent text-primary-foreground hover:bg-blue-700'
                 data-track-category='Tickets'
                 data-track-name='ConfirmBackwardStageChange'
                 data-track-metadata={JSON.stringify({
@@ -1844,7 +1846,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           title='Approve Rejected Request'
         >
           <div className='p-6'>
-            <p className='text-sm text-gray-600 mb-6'>
+            <p className='text-sm text-muted-foreground mb-6'>
               This request was previously rejected. Approving now will mark the request as Approved
               and update the ticket stage to {rejectedApprovalConfirm.targetStage.name}. Do you want
               to continue?
@@ -1856,7 +1858,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               </Button>
               <Button
                 onClick={confirmRejectedApproval}
-                className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
+                className='bg-sidebar-badge-accent text-primary-foreground hover:bg-blue-700'
               >
                 Approve
               </Button>

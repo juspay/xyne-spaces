@@ -47,8 +47,8 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
         {...(onOpenChange && { onOpenChange })}
       >
         {label && <span className='block text-sm font-medium text-foreground mb-1.5'>{label}</span>}
-        <div className='relative flex items-center border border-gray-600 h-8 px-2 rounded-lg'>
-          <div className='absolute text-gray-600'>
+        <div className='relative flex items-center border border-input h-8 px-2 rounded-lg'>
+          <div className='absolute text-muted-foreground'>
             <Search size={16} />
           </div>
           <BaseCombobox.Input
@@ -64,7 +64,7 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
             style={{
               fieldSizing: 'content',
             }}
-            className='text-[14px] w-full text-gray-700 font-normal bg-transparent pl-6 outline-none relative placeholder:text-gray-500'
+            className='text-[14px] w-full text-foreground font-normal bg-transparent pl-6 outline-none relative placeholder:text-muted-foreground'
           />
         </div>
         {hintText && <p className='text-xs text-muted-foreground mt-1.5'>{hintText}</p>}
@@ -76,14 +76,14 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
           >
             <BaseCombobox.Popup
               data-combobox-popup
-              className='border border-[#E1E4EA] w-[var(--anchor-width)] max-h-[14rem] rounded-md bg-white text-gray-900 transition duration-100 origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 outline outline-1 outline-gray-200 shadow-lg pointer-events-auto'
+              className='border border-border w-[var(--anchor-width)] max-h-[14rem] rounded-md bg-background text-foreground transition duration-100 origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 outline outline-1 outline-border shadow-lg pointer-events-auto'
               onWheel={e => e.stopPropagation()}
               onTouchStart={e => e.stopPropagation()}
               onTouchMove={e => e.stopPropagation()}
               onMouseDown={e => e.stopPropagation()}
             >
               <BaseCombobox.Empty>
-                <p className='text-sm text-gray-600 px-3 py-2'>No options found</p>
+                <p className='text-sm text-muted-foreground px-3 py-2'>No options found</p>
               </BaseCombobox.Empty>
               <BaseCombobox.List
                 className='
@@ -100,7 +100,7 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
                         relative flex justify-between
                         items-center
                         px-2 mx-1 py-1.5 leading-none
-                        data-[highlighted]:bg-gray-200 rounded-md'
+                        data-[highlighted]:bg-accent rounded-md'
                   >
                     <div className='flex items-center gap-3'>
                       {item.leftSlot && (

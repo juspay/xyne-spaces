@@ -32,20 +32,20 @@ const FormScreen = (): ReactElement => {
 
   if (loading) {
     return (
-      <div className='h-full bg-gray-50 flex items-center justify-center'>
-        <p className='text-gray-600'>Loading...</p>
+      <div className='h-full bg-muted flex items-center justify-center'>
+        <p className='text-muted-foreground'>Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className='h-full w-full overflow-hidden bg-gray-50'>
+    <div className='h-full w-full overflow-hidden bg-muted'>
       <div className='h-full overflow-hidden'>
         <div className='flex flex-col h-full'>
-          <div className='flex items-center justify-between p-6 border-b border-gray-200 bg-white'>
+          <div className='flex items-center justify-between p-6 border-b border-border bg-background'>
             <div>
-              <h2 className='text-lg font-bold text-gray-900'>Forms</h2>
-              <p className='text-xs text-gray-600 mt-1'>
+              <h2 className='text-lg font-bold text-foreground'>Forms</h2>
+              <p className='text-xs text-muted-foreground mt-1'>
                 Manage and configure forms for different entity types
               </p>
             </div>
@@ -85,9 +85,9 @@ const FormScreen = (): ReactElement => {
               </div>
             ) : (
               <div className='text-center py-16'>
-                <div className='text-gray-400 text-5xl mb-4'>📋</div>
-                <h3 className='text-xl font-semibold text-gray-700 mb-2'>No forms yet</h3>
-                <p className='text-gray-500'>Get started by creating your first form</p>
+                <div className='text-muted-foreground text-5xl mb-4'>📋</div>
+                <h3 className='text-xl font-semibold text-foreground mb-2'>No forms yet</h3>
+                <p className='text-muted-foreground'>Get started by creating your first form</p>
               </div>
             )}
           </div>

@@ -42,7 +42,7 @@ export function CalendarView({ tickets, onTicketClick }: CalendarViewProps) {
   };
 
   return (
-    <div className='flex flex-col h-full bg-white'>
+    <div className='flex flex-col h-full bg-background'>
       <CalendarToolbar
         currentDate={currentDate}
         viewMode={viewMode}

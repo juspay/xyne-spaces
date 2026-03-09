@@ -110,7 +110,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             isAlone ? 'opacity-50 cursor-not-allowed' : '',
             isMobile
               ? 'p-3 rounded-full border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
-              : 'rounded-lg bg-white border-border hover:bg-gray-50',
+              : 'rounded-lg bg-background border-border hover:bg-muted',
             className,
           )}
         >

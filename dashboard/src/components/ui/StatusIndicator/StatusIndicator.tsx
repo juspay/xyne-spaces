@@ -67,19 +67,19 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
             side='top'
             align='center'
             sideOffset={5}
-            className='z-50 bg-gray-900 text-white px-3 py-2 rounded-lg shadow-lg max-w-48'
+            className='z-50 bg-popover text-popover-foreground px-3 py-2 rounded-lg shadow-lg max-w-48'
           >
             <div className='text-sm text-center'>
               <div className='font-medium text-white break-words flex items-center justify-center gap-1'>
                 {renderEmoji(statusEmoji)} {statusContent}
               </div>
               {statusExpiryAt && (
-                <div className='text-xs text-gray-300 mt-1'>
+                <div className='text-xs text-muted-foreground mt-1'>
                   {formatExpiryTime(statusExpiryAt, true)}
                 </div>
               )}
             </div>
-            <Tooltip.Arrow className='fill-gray-900' />
+            <Tooltip.Arrow className='fill-popover' />
           </Tooltip.Content>
         </Tooltip.Portal>
       </Tooltip.Root>

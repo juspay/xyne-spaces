@@ -32,10 +32,10 @@ export const LLMCallRenderer: React.FC<
   // Show full content without truncation
   return (
     <div
-      className='text-gray-800 dark:text-gray-200 border-0 px-1 py-2 overflow-hidden max-w-full min-w-0 m-2'
+      className='text-foreground dark:text-gray-200 border-0 px-1 py-2 overflow-hidden max-w-full min-w-0 m-2'
       style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
     >
-      <div className='overflow-hidden max-w-full [&_*]:max-w-full [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_code]:break-all [&_pre]:!bg-gray-50 [&_pre_code]:!text-gray-900 [&_.wmde-markdown]:bg-transparent [&_.wmde-markdown_code]:!bg-gray-50 [&_.wmde-markdown_code]:!text-gray-900'>
+      <div className='overflow-hidden max-w-full [&_*]:max-w-full [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_code]:break-all [&_pre]:!bg-muted [&_pre_code]:!text-foreground [&_.wmde-markdown]:bg-transparent [&_.wmde-markdown_code]:!bg-muted [&_.wmde-markdown_code]:!text-foreground'>
         <MarkdownPreview
           source={response}
           style={{

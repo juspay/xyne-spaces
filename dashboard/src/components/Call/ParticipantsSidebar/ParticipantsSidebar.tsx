@@ -168,7 +168,7 @@ export function ParticipantsSidebar({
       showMuteButton && isInCall && userId !== currentUserId && !userId.startsWith('agent-');
 
     return (
-      <div className='flex items-center gap-3 py-2 px-3 hover:bg-gray-100 rounded-lg transition-colors'>
+      <div className='flex items-center gap-3 py-2 px-3 hover:bg-muted rounded-lg transition-colors'>
         <div className='relative'>
           <Avatar userId={userId} size='sm' />
           {isInCall && (
@@ -244,7 +244,7 @@ export function ParticipantsSidebar({
   }): React.ReactElement => (
     <button
       onClick={onToggle}
-      className='flex items-center justify-between w-full px-3 py-2.5 hover:bg-gray-50 transition-colors'
+      className='flex items-center justify-between w-full px-3 py-2.5 hover:bg-muted transition-colors'
       data-track-category='CALLS'
       data-track-name='Toggle_Participants_Section'
       data-track-metadata={JSON.stringify({ section: title, isExpanded: !isExpanded })}
@@ -263,7 +263,7 @@ export function ParticipantsSidebar({
 
   return (
     <>
-      <div className='flex flex-col h-full bg-white text-foreground'>
+      <div className='flex flex-col h-full bg-background text-foreground'>
         {/* Header */}
         <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
           <div className='flex items-center gap-2'>
@@ -288,7 +288,7 @@ export function ParticipantsSidebar({
             )}
             <button
               onClick={() => setShowInviteModal(true)}
-              className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white hover:bg-gray-100 text-black border border-gray-300 transition-colors'
+              className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background hover:bg-muted text-black border border-input transition-colors'
               title='Add People'
               data-testid='add-people-button'
               data-track-category='CALLS'
@@ -300,7 +300,7 @@ export function ParticipantsSidebar({
             </button>
             <button
               onClick={onClose}
-              className='p-1 hover:bg-gray-100 rounded-full transition-colors'
+              className='p-1 hover:bg-muted rounded-full transition-colors'
               title='Close'
               data-track-category='CALLS'
               data-track-name='Close_Participants_Sidebar'

@@ -48,19 +48,23 @@ export const GenericMentionHoverPopover: React.FC<GenericMentionHoverPopoverProp
       closeDelay={200}
       className='min-w-[300px] bg-transparent p-0 border-0 shadow-none'
     >
-      <div className='bg-white rounded-lg shadow-lg min-w-[300px] border border-gray-200'>
+      <div className='bg-popover rounded-lg shadow-lg min-w-[300px] border border-border'>
         <div className='p-4'>
           {/* Title row */}
           <div className='flex items-center gap-2 mb-2'>
             {data.icon && <span className='text-lg'>{data.icon}</span>}
-            <div className='font-semibold text-gray-900'>{data.title}</div>
+            <div className='font-semibold text-foreground'>{data.title}</div>
           </div>
 
-          {data.subtitle && <div className='text-sm text-gray-600 mb-1'>{data.subtitle}</div>}
+          {data.subtitle && (
+            <div className='text-sm text-muted-foreground mb-1'>{data.subtitle}</div>
+          )}
 
-          {data.description && <div className='text-sm text-gray-700 mb-3'>{data.description}</div>}
+          {data.description && (
+            <div className='text-sm text-foreground mb-3'>{data.description}</div>
+          )}
 
-          {data.meta && <div className='text-xs text-gray-500'>{data.meta}</div>}
+          {data.meta && <div className='text-xs text-muted-foreground'>{data.meta}</div>}
         </div>
       </div>
     </HoverCard>

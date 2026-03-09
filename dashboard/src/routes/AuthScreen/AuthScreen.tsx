@@ -88,7 +88,7 @@ const AuthScreen = (): ReactElement => {
 
   return (
     <ThemeProvider>
-      <div className='min-h-screen w-full overflow-x-hidden overflow-y-auto relative bg-white'>
+      <div className='min-h-screen w-full overflow-x-hidden overflow-y-auto relative bg-background'>
         <div className='min-h-screen w-full flex flex-col items-stretch'>
           <div
             className='w-full flex flex-col items-center justify-center p-4 sm:p-6 md:p-8 lg:p-12 min-h-screen py-8 sm:py-10 md:py-12 relative z-10'
@@ -187,7 +187,7 @@ const AuthScreen = (): ReactElement => {
 
         {/* Copyright */}
         <div className='text-center pt-2 absolute bottom-16 w-full'>
-          <p className='text-xs sm:text-sm text-gray-400'>
+          <p className='text-xs sm:text-sm text-muted-foreground'>
             &copy; {new Date().getFullYear()} Xyne Spaces. All rights reserved.
           </p>
         </div>

@@ -181,12 +181,12 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
       {numPages && (
         <div className='sticky top-0 bg-white dark:bg-[#1E1E1E] shadow-md z-10 p-4 pt-[65px] border-b border-gray-200 dark:border-gray-700 w-full flex-shrink-0'>
           <div className='flex items-center justify-center'>
-            <div className='flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg px-4 py-2 shadow-sm'>
+            <div className='flex items-center bg-muted dark:bg-gray-700 rounded-lg px-4 py-2 shadow-sm'>
               {/* Previous Page Button */}
               <button
                 onClick={goToPreviousPage}
                 disabled={currentVisiblePage <= 1}
-                className='flex items-center gap-1 px-3 py-1 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white disabled:text-gray-400 dark:disabled:text-gray-600 disabled:cursor-not-allowed transition-colors'
+                className='flex items-center gap-1 px-3 py-1 text-sm font-medium text-foreground dark:text-muted hover:text-foreground dark:hover:text-white disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
                 title='Previous page'
                 data-track-category='FileViewer'
                 data-track-name='PREVIOUS_PDF_PAGE'
@@ -195,11 +195,13 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
                 {!isMobile && <span>Previous</span>}
               </button>
 
-              <div className='w-px h-4 bg-gray-300 dark:bg-gray-600 mx-3'></div>
+              <div className='w-px h-4 bg-muted-foreground/50 dark:bg-gray-600 mx-3'></div>
 
               {/* Page Display */}
               <div className='flex items-center gap-2'>
-                <span className='text-sm text-gray-500 dark:text-gray-400'>Page</span>
+                <span className='text-sm text-muted-foreground dark:text-muted-foreground'>
+                  Page
+                </span>
                 <input
                   type='number'
                   min='1'
@@ -231,18 +233,20 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
                       setPageInput(null);
                     }
                   }}
-                  className='w-16 px-2 py-1 text-sm text-center bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 rounded text-gray-800 dark:text-gray-200 focus:outline-none focus:border-gray-400 dark:focus:border-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                  className='w-16 px-2 py-1 text-sm text-center bg-background dark:bg-gray-600 border border-input dark:border-gray-500 rounded text-foreground dark:text-gray-200 focus:outline-none focus:border-muted-foreground dark:focus:border-muted-foreground [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                 />
-                <span className='text-sm text-gray-500 dark:text-gray-400'>of {numPages}</span>
+                <span className='text-sm text-muted-foreground dark:text-muted-foreground'>
+                  of {numPages}
+                </span>
               </div>
 
-              <div className='w-px h-4 bg-gray-300 dark:bg-gray-600 mx-3'></div>
+              <div className='w-px h-4 bg-muted-foreground/50 dark:bg-gray-600 mx-3'></div>
 
               {/* Next Page Button */}
               <button
                 onClick={goToNextPage}
                 disabled={currentVisiblePage >= numPages}
-                className='flex items-center gap-1 px-3 py-1 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white disabled:text-gray-400 dark:disabled:text-gray-600 disabled:cursor-not-allowed transition-colors'
+                className='flex items-center gap-1 px-3 py-1 text-sm font-medium text-foreground dark:text-muted hover:text-foreground dark:hover:text-white disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
                 title='Next page'
                 data-track-category='FileViewer'
                 data-track-name='NEXT_PDF_PAGE'
@@ -257,8 +261,8 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
 
       {/* Loading Overlay */}
       {isLoading && (
-        <div className='absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-black/50 z-20'>
-          <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-gray-700 dark:border-gray-300'></div>
+        <div className='absolute inset-0 flex items-center justify-center bg-background/80 dark:bg-black/50 z-20'>
+          <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-gray-700 dark:border-input'></div>
         </div>
       )}
 

@@ -878,9 +878,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       {variant !== 'pinned' && showLinkPreview && linkPreviewMetadata && !canvasId && (
         <div
           className={cn(
-            'pr-3 max-w-full border-l-4 border-l-gray-300 dark:border-l-gray-600 pl-4 ml-14 transition-colors rounded-r',
+            'pr-3 max-w-full border-l-4 border-l-border pl-4 ml-14 transition-colors rounded-r',
             message.senderId === user?.id && 'max-[500px]:mb-5',
-            showHoverActions && 'bg-gray-100/50 dark:bg-gray-800/50',
+            showHoverActions && 'bg-accent/50',
           )}
         >
           <LinkPreview metadata={linkPreviewMetadata} onClose={() => setShowLinkPreview(false)} />
@@ -952,10 +952,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       >
         <div>
           {/* Header with title and close button */}
-          <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-200 dark:border-gray-700'>
-            <h2 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
-              Delete message
-            </h2>
+          <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-border'>
+            <h2 className='text-lg font-semibold text-foreground'>Delete message</h2>
             <button
               className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2 disabled:pointer-events-none'
               onClick={() => setShowDeleteConfirm(false)}
@@ -969,12 +967,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           </div>
 
           <div className='px-6 py-4 space-y-4'>
-            <p className='text-sm text-gray-900 dark:text-gray-100'>
+            <p className='text-sm text-foreground'>
               Are you sure you want to delete this message? This cannot be undone.
             </p>
 
             {/* Message Preview */}
-            <div className='bg-gray-50 dark:bg-gray-700 rounded-md p-3 border border-gray-200 dark:border-gray-600'>
+            <div className='bg-muted rounded-md p-3 border border-border'>
               <div className='flex gap-3'>
                 <div className='flex-shrink-0'>
                   <Avatar userId={message.senderId} size='md' />
@@ -982,10 +980,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
                 <div className='flex-1 min-w-0'>
                   <div className='flex items-baseline gap-2 mb-1'>
-                    <h4 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+                    <h4 className='text-sm font-semibold text-foreground'>
                       {sender?.name || 'User'}
                     </h4>
-                    <span className='text-xs text-gray-500 dark:text-gray-400'>
+                    <span className='text-xs text-muted-foreground'>
                       {formatRelativeTimestamp(message.createdAt)}
                     </span>
                   </div>
@@ -997,24 +995,24 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                         <div className='flex flex-col gap-2'>
                           {forwardedData.optionalText && (
                             <div
-                              className={`text-gray-700 dark:text-gray-300 ${getEmojiFontSizeClass(forwardedData.optionalText)}`}
+                              className={`text-foreground ${getEmojiFontSizeClass(forwardedData.optionalText)}`}
                             >
                               <RenderMessageWithHTML message={forwardedData.optionalText} />
                             </div>
                           )}
-                          <div className='border-l-4 border-gray-300 pl-3'>
+                          <div className='border-l-4 border-border pl-3'>
                             <div className='flex items-center gap-2 mb-1'>
-                              <span className='text-xs font-medium text-gray-700 dark:text-gray-300'>
+                              <span className='text-xs font-medium text-foreground'>
                                 {forwardedData.originalSenderName}
                               </span>
                               {forwardedData.originalCreatedAt && (
-                                <span className='text-xs text-gray-500 dark:text-gray-400'>
+                                <span className='text-xs text-muted-foreground'>
                                   {formatRelativeTimestamp(forwardedData.originalCreatedAt)}
                                 </span>
                               )}
                             </div>
                             <div
-                              className={`text-gray-600 dark:text-gray-400 ${getEmojiFontSizeClass(forwardedData.content)}`}
+                              className={`text-muted-foreground ${getEmojiFontSizeClass(forwardedData.content)}`}
                             >
                               <RenderMessageWithHTML message={forwardedData.content} />
                             </div>
@@ -1022,7 +1020,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                         </div>
                       ) : (
                         <div
-                          className={`text-gray-700 dark:text-gray-300 overflow-auto max-h-[350px] ${getEmojiFontSizeClass(message.content)}`}
+                          className={`text-foreground overflow-auto max-h-[350px] ${getEmojiFontSizeClass(message.content)}`}
                         >
                           <RenderMessageWithHTML message={message.content} />
                         </div>
@@ -1030,7 +1028,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                     })()
                   ) : (
                     <div
-                      className={`text-gray-700 dark:text-gray-300 overflow-auto max-h-[350px] ${getEmojiFontSizeClass(message.content)}`}
+                      className={`text-foreground overflow-auto max-h-[350px] ${getEmojiFontSizeClass(message.content)}`}
                     >
                       <RenderMessageWithHTML message={message.content} />
                     </div>

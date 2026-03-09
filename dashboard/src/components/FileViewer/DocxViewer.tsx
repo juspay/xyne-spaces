@@ -86,10 +86,10 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source }) => {
   return (
     <div className='relative min-h-screen dark:bg-neutral-900 p-4'>
       {loading && (
-        <div className='absolute inset-0 flex items-center justify-center bg-white/60 dark:bg-neutral-900/70 z-10'>
+        <div className='absolute inset-0 flex items-center justify-center bg-background/60 dark:bg-neutral-900/70 z-10'>
           <div className='text-center'>
-            <div className='animate-spin border-b-2 border-gray-600 dark:border-gray-300 h-10 w-10 rounded-full mx-auto mb-2' />
-            <p className='text-gray-600 dark:text-gray-300'>Loading document...</p>
+            <div className='animate-spin border-b-2 border-gray-600 dark:border-input h-10 w-10 rounded-full mx-auto mb-2' />
+            <p className='text-muted-foreground dark:text-muted'>Loading document...</p>
           </div>
         </div>
       )}
@@ -114,7 +114,7 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source }) => {
 
       <div
         ref={containerRef}
-        className={`docx-container bg-white flex ${isMobile ? 'flex-col' : 'flex-row'} flex-wrap align-center justify-center mt-[65px] mb-[65px]`}
+        className={`docx-container bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} flex-wrap align-center justify-center mt-[65px] mb-[65px]`}
       />
     </div>
   );

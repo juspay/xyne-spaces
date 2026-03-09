@@ -62,7 +62,7 @@ export const UserManagement = ({
   return (
     <div className='h-full flex flex-col'>
       <div className='px-6 pt-6 pb-3'>
-        <h3 className='text-sm font-medium text-gray-900'>Group Members</h3>
+        <h3 className='text-sm font-medium text-foreground'>Group Members</h3>
       </div>
 
       {/* Unified Search, Add and List Users */}

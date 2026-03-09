@@ -28,11 +28,11 @@ const getStageStatusIcon = (status: JenkinsStage['status']): React.ReactNode => 
     case 'IN_PROGRESS':
       return <Loader2 size={14} className='text-blue-500 animate-spin' />;
     case 'ABORTED':
-      return <XCircle size={14} className='text-gray-400' />;
+      return <XCircle size={14} className='text-muted-foreground' />;
     case 'PAUSED_PENDING_INPUT':
       return <Clock size={14} className='text-amber-500' />;
     default:
-      return <Clock size={14} className='text-gray-300' />;
+      return <Clock size={14} className='text-muted' />;
   }
 };
 
@@ -45,11 +45,11 @@ const getStageStatusClass = (status: JenkinsStage['status']): string => {
     case 'IN_PROGRESS':
       return 'bg-blue-50 border-blue-200 text-blue-700';
     case 'ABORTED':
-      return 'bg-gray-50 border-gray-200 text-gray-500';
+      return 'bg-muted border-border text-muted-foreground';
     case 'PAUSED_PENDING_INPUT':
       return 'bg-amber-50 border-amber-200 text-amber-700';
     default:
-      return 'bg-gray-50 border-gray-200 text-gray-500';
+      return 'bg-muted border-border text-muted-foreground';
   }
 };
 
@@ -61,11 +61,11 @@ const getBuildStatusClass = (result: string | null, building: boolean): string =
     case 'FAILURE':
       return 'bg-red-50 border-red-200 text-red-700';
     case 'ABORTED':
-      return 'bg-gray-50 border-gray-200 text-gray-500';
+      return 'bg-muted border-border text-muted-foreground';
     case 'UNSTABLE':
       return 'bg-amber-50 border-amber-200 text-amber-700';
     default:
-      return 'bg-gray-50 border-gray-200 text-gray-500';
+      return 'bg-muted border-border text-muted-foreground';
   }
 };
 
@@ -120,10 +120,10 @@ export const JenkinsBuildPanel: React.FC<JenkinsBuildPanelProps> = ({
   }, [fetchLatestBuild]);
 
   return (
-    <div className='absolute right-0 top-full mt-2 w-96 bg-white border border-gray-200 rounded-lg shadow-xl z-[100]'>
+    <div className='absolute right-0 top-full mt-2 w-96 bg-background border border-border rounded-lg shadow-xl z-[100]'>
       {/* Header */}
-      <div className='flex items-center justify-between px-4 py-3 border-b border-gray-100'>
-        <h3 className='text-sm font-semibold text-gray-900'>Jenkins Build</h3>
+      <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
+        <h3 className='text-sm font-semibold text-foreground'>Jenkins Build</h3>
         <div className='flex items-center gap-2'>
           <Button
             onClick={() => void fetchLatestBuild()}
@@ -134,7 +134,10 @@ export const JenkinsBuildPanel: React.FC<JenkinsBuildPanelProps> = ({
             data-track-category='Workflows'
             data-track-name='RefreshJenkinsBuild'
           >
-            <RefreshCw size={14} className={`text-gray-500 ${isLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              size={14}
+              className={`text-muted-foreground ${isLoading ? 'animate-spin' : ''}`}
+            />
           </Button>
           <Button
             onClick={onClose}
@@ -144,7 +147,7 @@ export const JenkinsBuildPanel: React.FC<JenkinsBuildPanelProps> = ({
             data-track-category='Workflows'
             data-track-name='CloseJenkinsBuildPanel'
           >
-            <X size={14} className='text-gray-500' />
+            <X size={14} className='text-muted-foreground' />
           </Button>
         </div>
       </div>
@@ -155,7 +158,7 @@ export const JenkinsBuildPanel: React.FC<JenkinsBuildPanelProps> = ({
 
         {isLoading && !latestBuild && (
           <div className='p-8 flex items-center justify-center'>
-            <Loader2 size={24} className='text-gray-400 animate-spin' />
+            <Loader2 size={24} className='text-muted-foreground animate-spin' />
           </div>
         )}
 
@@ -163,7 +166,7 @@ export const JenkinsBuildPanel: React.FC<JenkinsBuildPanelProps> = ({
           <div className='p-4'>
             <div className='flex items-center justify-between mb-3'>
               <div className='flex items-center gap-2'>
-                <span className='text-sm font-medium text-gray-900'>#{latestBuild.number}</span>
+                <span className='text-sm font-medium text-foreground'>#{latestBuild.number}</span>
                 <span
                   className={`px-2 py-0.5 text-xs rounded border ${getBuildStatusClass(latestBuild.result, latestBuild.building)}`}
                 >
@@ -186,7 +189,7 @@ export const JenkinsBuildPanel: React.FC<JenkinsBuildPanelProps> = ({
             {/* Stages */}
             {stages.length > 0 && (
               <div className='space-y-2'>
-                <h4 className='text-xs font-medium text-gray-500 uppercase tracking-wide'>
+                <h4 className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>
                   Stages
                 </h4>
                 <div className='space-y-1'>
@@ -211,12 +214,12 @@ export const JenkinsBuildPanel: React.FC<JenkinsBuildPanelProps> = ({
         )}
 
         {!isLoading && !latestBuild && !error && (
-          <div className='p-8 text-center text-sm text-gray-500'>No builds found</div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>No builds found</div>
         )}
       </div>
 
       {/* Footer with Trigger Build Button */}
-      <div className='px-4 py-3 border-t border-gray-100'>
+      <div className='px-4 py-3 border-t border-border'>
         <Button
           onClick={() => void onTriggerBuild()}
           disabled={isTriggering}

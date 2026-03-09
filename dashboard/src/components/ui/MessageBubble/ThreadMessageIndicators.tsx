@@ -40,9 +40,9 @@ export const ThreadInfoIndicator: React.FC<ThreadInfoIndicatorProps> = ({
       role='button'
       tabIndex={0}
     >
-      <span className='text-blue-600 whitespace-nowrap shrink-0'>replied to a thread:</span>
+      <span className='text-primary whitespace-nowrap shrink-0'>replied to a thread:</span>
 
-      <span className='text-blue-600 font-medium truncate max-w-xs'>{threadInfo.preview}</span>
+      <span className='text-primary font-medium truncate max-w-xs'>{threadInfo.preview}</span>
     </div>
   );
 };
@@ -71,7 +71,7 @@ export const AlsoSentToChannelIndicator: React.FC<AlsoSentToChannelIndicatorProp
           const messageLink = `/chat/dir/${channelId}#origin=${childConversationId}`;
           void navigate(messageLink);
         }}
-        className='text-xs text-blue-600 hover:text-blue-700 hover:underline mt-1 p-0 h-auto'
+        className='text-xs text-primary hover:text-primary/80 hover:underline mt-1 p-0 h-auto'
       >
         Also sent to{' '}
         {channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM
@@ -120,7 +120,7 @@ export const ViewNewerRepliesButton: React.FC<ViewNewerRepliesButtonProps> = ({
           isMe ? 'max-[500px]:justify-end' : ''
         }`}
       >
-        <span className='font-medium text-blue-600'>View newer replies</span>
+        <span className='font-medium text-primary'>View newer replies</span>
       </button>
     </div>
   );

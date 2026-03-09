@@ -42,20 +42,20 @@ export const ToolWriteRenderer: React.FC<
 
     return (
       <div className='space-y-2 text-sm'>
-        <div className='rounded-lg border border-gray-200 overflow-hidden bg-white'>
+        <div className='rounded-lg border border-border overflow-hidden bg-background'>
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className='w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 transition-colors'
+            className='w-full flex items-center gap-2 px-3 py-2 hover:bg-muted transition-colors'
             data-track-category='Workflows'
             data-track-name='ToggleFileWriteExpand'
             data-track-metadata={JSON.stringify({ fileName })}
           >
-            <span className='text-gray-400'>
+            <span className='text-muted-foreground'>
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </span>
             <FileEdit size={16} className='text-blue-500 shrink-0' />
-            <span className='text-sm font-medium text-gray-800'>{fileName}</span>
+            <span className='text-sm font-medium text-foreground'>{fileName}</span>
             <span className='ml-auto flex items-center gap-1 text-sm'>
               {success && !error ? (
                 <span className='flex items-center gap-1 text-green-600'>
@@ -72,7 +72,7 @@ export const ToolWriteRenderer: React.FC<
 
           {/* Expanded Content */}
           {isExpanded && (
-            <div className='border-t border-gray-200 overflow-auto max-h-96'>
+            <div className='border-t border-border overflow-auto max-h-96'>
               {/* Error message */}
               {error && (
                 <div className='p-3 bg-red-50 border-b border-red-200'>
@@ -82,13 +82,13 @@ export const ToolWriteRenderer: React.FC<
               )}
 
               {/* Content stats */}
-              <div className='px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-600'>
+              <div className='px-3 py-2 bg-muted border-b border-border text-xs text-muted-foreground'>
                 {charCount} characters, {lineCount} lines
               </div>
 
               {/* File content preview */}
               {content && (
-                <pre className='p-3 text-xs font-mono text-gray-800 whitespace-pre-wrap break-words'>
+                <pre className='p-3 text-xs font-mono text-foreground whitespace-pre-wrap break-words'>
                   {content.length > 2000 ? `${content.substring(0, 2000)}...` : content}
                 </pre>
               )}

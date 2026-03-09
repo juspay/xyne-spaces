@@ -71,7 +71,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ channelId }) => {
   };
 
   return (
-    <div className='bg-white'>
+    <div className='bg-background'>
       {/* Top Header Section */}
       <div className='flex items-center justify-between px-4 py-3'>
         {/* Left Section - Channel Info */}

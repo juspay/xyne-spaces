@@ -89,11 +89,11 @@ const getPriorityConfig = (priority: string): PriorityConfig => {
       };
     default:
       return {
-        color: 'text-gray-700',
-        bg: 'bg-gray-50',
-        border: 'border-gray-200',
+        color: 'text-foreground',
+        bg: 'bg-muted',
+        border: 'border-border',
         icon: Circle,
-        dotColor: 'bg-gray-500',
+        dotColor: 'bg-muted0',
       };
   }
 };
@@ -137,9 +137,9 @@ const getStatusConfig = (status: string): StatusConfig => {
       };
     default:
       return {
-        color: 'text-gray-700',
-        bg: 'bg-gray-50',
-        border: 'border-gray-200',
+        color: 'text-foreground',
+        bg: 'bg-muted',
+        border: 'border-border',
         icon: Circle,
       };
   }
@@ -170,7 +170,7 @@ interface InfoFieldProps {
 
 const InfoField: React.FC<InfoFieldProps> = ({ label, icon: iconComponent, value, config }) => (
   <div className='space-y-2'>
-    <span className='block text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1'>
+    <span className='block text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1'>
       {React.createElement(iconComponent, { className: 'w-3 h-3' })}
       {label}
     </span>
@@ -178,7 +178,7 @@ const InfoField: React.FC<InfoFieldProps> = ({ label, icon: iconComponent, value
       className={`px-3 py-2 border rounded-lg text-sm ${
         config
           ? `${config.bg} ${config.border} flex items-center gap-2`
-          : 'bg-gray-50 border-gray-200 font-medium text-gray-700'
+          : 'bg-muted border-border font-medium text-foreground'
       }`}
     >
       {'icon' in (config || {}) && (config as PriorityConfig | StatusConfig)?.icon && (
@@ -356,23 +356,23 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
 
   if (!ticket) {
     return (
-      <div className='flex items-center justify-center h-full bg-gray-50'>
+      <div className='flex items-center justify-center h-full bg-muted'>
         <div className='text-center'>
-          <div className='w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-600 rounded-full animate-spin' />
-          <p className='text-sm text-gray-500'>Loading ticket...</p>
+          <div className='w-12 h-12 mx-auto mb-3 border-4 border-input border-t-blue-600 rounded-full animate-spin' />
+          <p className='text-sm text-muted-foreground'>Loading ticket...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className='flex flex-col h-full bg-white'>
+    <div className='flex flex-col h-full bg-background'>
       {/* Header */}
-      <div className='px-4 md:px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white'>
+      <div className='px-4 md:px-6 py-4 border-b border-border bg-gradient-to-r from-muted to-background'>
         <div className='flex items-start justify-between mb-3 gap-3'>
           <div className='flex-1 min-w-0'>
             <div className='flex items-center gap-2 mb-2'>
-              <span className='text-xs font-semibold text-gray-500 uppercase tracking-wide px-2 py-1 bg-gray-100 rounded'>
+              <span className='text-xs font-semibold text-muted-foreground uppercase tracking-wide px-2 py-1 bg-muted rounded'>
                 {ticket.xyneId}
               </span>
               <div
@@ -410,13 +410,13 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                 }}
               </form.Field>
             ) : (
-              <h2 className='text-xl font-bold text-gray-900'>{ticket.title}</h2>
+              <h2 className='text-xl font-bold text-foreground'>{ticket.title}</h2>
             )}
           </div>
           <div className='flex items-center gap-2 flex-shrink-0'>
             <button
               onClick={() => setIsEditing(!isEditing)}
-              className='p-2 hover:bg-blue-50 rounded-lg transition-all text-gray-500 hover:text-blue-600'
+              className='p-2 hover:bg-blue-50 rounded-lg transition-all text-muted-foreground hover:text-blue-600'
               title={isEditing ? 'Cancel editing' : 'Edit ticket'}
               data-track-category='Tickets'
               data-track-name='ToggleTicketEdit'
@@ -429,7 +429,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                   onClose();
                 }
               }}
-              className='p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all duration-200'
+              className='p-2 rounded-lg text-muted-foreground hover:text-muted-foreground hover:bg-muted transition-all duration-200'
               data-track-category='Tickets'
               data-track-name='CloseTicketSidebar'
             >
@@ -457,7 +457,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className='flex items-center border-b border-gray-200 bg-white px-4 md:px-6'>
+      <div className='flex items-center border-b border-border bg-background px-4 md:px-6'>
         {tabs.map(tab => (
           <button
             key={tab.id}
@@ -465,7 +465,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
             className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition-all ${
               activeTab === tab.id
                 ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-input'
             }`}
             data-track-category='Tickets'
             data-track-name='SelectTicketTab'
@@ -482,8 +482,8 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
         {activeTab === 'overview' && (
           <div className='p-4 md:p-6 space-y-6'>
             {/* Description */}
-            <div className='p-4 bg-gray-50 rounded-lg border border-gray-200'>
-              <span className='block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3'>
+            <div className='p-4 bg-muted rounded-lg border border-border'>
+              <span className='block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3'>
                 Description
               </span>
               {isEditing ? (
@@ -517,7 +517,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                   }}
                 </form.Field>
               ) : (
-                <p className='text-sm text-gray-700 leading-relaxed whitespace-pre-wrap'>
+                <p className='text-sm text-foreground leading-relaxed whitespace-pre-wrap'>
                   {ticket.description || 'No description provided.'}
                 </p>
               )}
@@ -525,7 +525,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
 
             {/* Ticket Information */}
             <div>
-              <h3 className='text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2'>
+              <h3 className='text-sm font-semibold text-foreground mb-4 flex items-center gap-2'>
                 <Tag className='w-4 h-4' />
                 Ticket Information
               </h3>
@@ -599,7 +599,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                     </div>
 
                     <div className='space-y-2'>
-                      <span className='block text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1'>
+                      <span className='block text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1'>
                         <User className='w-3 h-3' />
                         Assignee
                       </span>
@@ -608,7 +608,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                           <div className='relative' ref={assigneeDropdownRef}>
                             <button
                               type='button'
-                              className='w-full px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-left flex items-center gap-2 justify-between'
+                              className='w-full px-3 py-2 border border-input rounded-lg bg-background hover:bg-muted transition-colors text-left flex items-center gap-2 justify-between'
                               onClick={() => toggleDropdown('assignee')}
                               data-track-category='Tickets'
                               data-track-name='ToggleAssigneeDropdown'
@@ -620,29 +620,29 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                       userId={field.state.value}
                                       showActiveStatus={false}
                                     />
-                                    <span className='text-sm text-gray-900'>
+                                    <span className='text-sm text-foreground'>
                                       {users?.find(u => u.id === field.state.value)?.name ||
                                         'Unknown User'}
                                     </span>
                                   </>
                                 ) : (
-                                  <span className='text-sm text-gray-500'>Unassigned</span>
+                                  <span className='text-sm text-muted-foreground'>Unassigned</span>
                                 )}
                               </div>
-                              <Search className='w-4 h-4 text-gray-400' />
+                              <Search className='w-4 h-4 text-muted-foreground' />
                             </button>
 
                             {dropdown.assignee && (
-                              <div className='absolute top-full left-0 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-hidden flex flex-col'>
-                                <div className='p-2 border-b border-gray-200'>
+                              <div className='absolute top-full left-0 mt-1 w-full bg-background border border-border rounded-lg shadow-lg z-50 max-h-64 overflow-hidden flex flex-col'>
+                                <div className='p-2 border-b border-border'>
                                   <div className='relative'>
-                                    <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400' />
+                                    <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
                                     <input
                                       type='text'
                                       placeholder='Search users...'
                                       value={assigneeSearch}
                                       onChange={e => setAssigneeSearch(e.target.value)}
-                                      className='w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
+                                      className='w-full pl-9 pr-3 py-1.5 border border-input rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
                                       data-track-category='Tickets'
                                       data-track-name='SearchAssignee'
                                     />
@@ -657,14 +657,14 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                       toggleDropdown('assignee');
                                       setAssigneeSearch('');
                                     }}
-                                    className='w-full text-left px-3 py-2 text-sm hover:bg-gray-100 transition-colors flex items-center gap-2'
+                                    className='w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-2'
                                     data-track-category='Tickets'
                                     data-track-name='UnassignTicket'
                                   >
-                                    <div className='w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center'>
-                                      <X className='w-3 h-3 text-gray-500' />
+                                    <div className='w-6 h-6 rounded-full bg-border flex items-center justify-center'>
+                                      <X className='w-3 h-3 text-muted-foreground' />
                                     </div>
-                                    <span className='text-gray-700'>Unassigned</span>
+                                    <span className='text-foreground'>Unassigned</span>
                                     {!field.state.value && (
                                       <div className='w-4 h-4 ml-auto border-2 border-blue-600 rounded-full' />
                                     )}
@@ -679,15 +679,15 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                         toggleDropdown('assignee');
                                         setAssigneeSearch('');
                                       }}
-                                      className='w-full text-left px-3 py-2 text-sm hover:bg-gray-100 transition-colors flex items-center gap-2'
+                                      className='w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-2'
                                       data-track-category='Tickets'
                                       data-track-name='SelectAssignee'
                                       data-track-metadata={JSON.stringify({ userId: user.id })}
                                     >
                                       <UserAvatar userId={user.id} showActiveStatus={false} />
                                       <div className='flex-1 min-w-0'>
-                                        <div className='text-gray-900 truncate'>{user.name}</div>
-                                        <div className='text-xs text-gray-500 truncate'>
+                                        <div className='text-foreground truncate'>{user.name}</div>
+                                        <div className='text-xs text-muted-foreground truncate'>
                                           {user.email}
                                         </div>
                                       </div>
@@ -698,7 +698,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                   ))}
 
                                   {filteredUsers.length === 0 && assigneeSearch && (
-                                    <div className='px-3 py-2 text-sm text-gray-500 text-center'>
+                                    <div className='px-3 py-2 text-sm text-muted-foreground text-center'>
                                       No users found
                                     </div>
                                   )}
@@ -715,7 +715,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
             </div>
 
             {isEditing && (
-              <div className='sticky bottom-0 p-4 bg-white border-t border-gray-200 shadow-lg flex items-center gap-3'>
+              <div className='sticky bottom-0 p-4 bg-background border-t border-border shadow-lg flex items-center gap-3'>
                 <Button
                   text='Cancel'
                   buttonType={ButtonType.SECONDARY}
@@ -749,7 +749,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
               initialScrollOffset={0}
               conversation={conversation}
             />
-            <div className='p-4 border-t border-gray-200 bg-white'>
+            <div className='p-4 border-t border-border bg-background'>
               <ChatInput
                 channelId={actualChannelId || ''}
                 conversation={conversation}

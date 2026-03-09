@@ -157,7 +157,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
       case 'rename':
         return <GitBranch className='w-4 h-4 text-purple-600' />;
       default:
-        return <Edit className='w-4 h-4 text-gray-600' />;
+        return <Edit className='w-4 h-4 text-muted-foreground' />;
     }
   };
 
@@ -170,25 +170,25 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
 
   if (!executionId) {
     return (
-      <div className='h-full flex items-center justify-center bg-gray-50'>
+      <div className='h-full flex items-center justify-center bg-muted'>
         <div className='text-center'>
-          <AlertCircle className='w-12 h-12 text-gray-400 mx-auto mb-4' />
-          <p className='text-gray-600'>No execution selected</p>
+          <AlertCircle className='w-12 h-12 text-muted-foreground mx-auto mb-4' />
+          <p className='text-muted-foreground'>No execution selected</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className='h-full flex flex-col bg-white'>
+    <div className='h-full flex flex-col bg-background'>
       {/* Header */}
-      <div className='flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50'>
+      <div className='flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-muted'>
         <div className='flex items-center gap-4'>
           {diffData && (
-            <div className='flex items-center gap-4 text-sm text-gray-600'>
+            <div className='flex items-center gap-4 text-sm text-muted-foreground'>
               <div className='flex items-center gap-2'>
                 <GitBranch className='w-4 h-4 text-blue-500' />
-                <span className='font-semibold text-gray-900'>{diffData.branch}</span>
+                <span className='font-semibold text-foreground'>{diffData.branch}</span>
               </div>
               {diffData.commitHash && (
                 <div className='flex items-center gap-2'>
@@ -201,7 +201,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
           <button
             onClick={() => void handleRefresh()}
             disabled={isRefreshing}
-            className='flex items-center gap-1.5 px-3 py-1 bg-white border border-gray-300 text-gray-700 text-xs font-medium rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50'
+            className='flex items-center gap-1.5 px-3 py-1 bg-background border border-input text-foreground text-xs font-medium rounded-md hover:bg-muted transition-colors disabled:opacity-50'
             data-track-category='Workflows'
             data-track-name='RefreshGitDiff'
           >
@@ -212,7 +212,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
 
         <div className='flex items-center gap-3'>
           {diffData && (
-            <div className='flex items-center gap-3 text-sm text-gray-600'>
+            <div className='flex items-center gap-3 text-sm text-muted-foreground'>
               <span className='text-green-600'>+{diffData.stats.additions}</span>
               <span className='text-red-600'>-{diffData.stats.deletions}</span>
               <span>{diffData.stats.files} files</span>
@@ -222,7 +222,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
           <select
             value={viewType}
             onChange={e => setViewType(e.target.value as 'split' | 'unified')}
-            className='px-2 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+            className='px-2 py-1 text-xs border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
             data-track-category='Workflows'
             data-track-name='ChangeGitDiffViewType'
             data-track-metadata={JSON.stringify({ viewType })}
@@ -237,9 +237,9 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
       <div className='flex-1 flex overflow-hidden'>
         {/* File List Sidebar */}
         {diffData && diffData.gitDiff.length > 0 && (
-          <div className='w-72 border-r border-gray-200 overflow-y-auto bg-gray-50'>
+          <div className='w-72 border-r border-border overflow-y-auto bg-muted'>
             <div className='p-2'>
-              <h3 className='text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 px-2'>
+              <h3 className='text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 px-2'>
                 Changed Files
               </h3>
               <div className='space-y-0.5'>
@@ -252,7 +252,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
                       key={index}
                       onClick={() => setSelectedFile(isSelected ? null : fileName)}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded transition-colors text-left ${
-                        isSelected ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+                        isSelected ? 'bg-blue-100 text-blue-700' : 'hover:bg-muted text-foreground'
                       }`}
                       data-track-category='Workflows'
                       data-track-name='SelectGitDiffFile'
@@ -274,7 +274,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
             <div className='flex items-center justify-center h-full'>
               <div className='text-center'>
                 <Loader2 className='w-8 h-8 text-blue-500 animate-spin mx-auto mb-4' />
-                <p className='text-gray-600 text-sm'>Loading git diff...</p>
+                <p className='text-muted-foreground text-sm'>Loading git diff...</p>
               </div>
             </div>
           )}
@@ -294,12 +294,12 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
             <div className='p-4'>
               {parsedDiffData.gitDiff.length === 0 ? (
                 <div className='text-center py-12'>
-                  <GitBranch className='w-12 h-12 mx-auto text-gray-400 mb-4' />
-                  <p className='text-gray-600'>
+                  <GitBranch className='w-12 h-12 mx-auto text-muted-foreground mb-4' />
+                  <p className='text-muted-foreground'>
                     No changes detected on branch{' '}
                     <span className='font-semibold'>{parsedDiffData.branch}</span>
                   </p>
-                  <p className='text-sm text-gray-500 mt-2'>
+                  <p className='text-sm text-muted-foreground mt-2'>
                     The bot did not make any commits during this workflow execution.
                   </p>
                 </div>
@@ -308,7 +308,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
                   .filter(file => !selectedFile || getFileName(file) === selectedFile)
                   .map((file, index) => (
                     <div key={index} className='mb-6'>
-                      <div className='flex items-center gap-2 font-medium text-sm text-gray-700 mb-2 px-2 py-1 bg-gray-100 rounded'>
+                      <div className='flex items-center gap-2 font-medium text-sm text-foreground mb-2 px-2 py-1 bg-muted rounded'>
                         {getFileIcon(file.type)}
                         <span className='font-mono'>{getFileName(file)}</span>
                       </div>
@@ -327,7 +327,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
 
                                     if (lineGap > 3) {
                                       return (
-                                        <div className='my-4 border-t border-dashed border-gray-300' />
+                                        <div className='my-4 border-t border-dashed border-input' />
                                       );
                                     }
                                   }
@@ -346,7 +346,9 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
                           ))}
                         </>
                       ) : (
-                        <div className='text-sm text-gray-500 italic px-2'>No hunks available</div>
+                        <div className='text-sm text-muted-foreground italic px-2'>
+                          No hunks available
+                        </div>
                       )}
                     </div>
                   ))

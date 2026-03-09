@@ -533,7 +533,7 @@ export const router = createBrowserRouter([
                           {
                             index: true,
                             element: (
-                              <div className='flex items-center justify-center h-full text-gray-400'>
+                              <div className='flex items-center justify-center h-full text-muted-foreground'>
                                 Select a conversation to view messages
                               </div>
                             ),
@@ -834,7 +834,7 @@ export const router = createBrowserRouter([
           <ZeroProvider>
             <InitialStateLoader>
               <EditProvider>
-                <div className='h-full bg-white'>
+                <div className='h-full bg-background'>
                   <Outlet />
                 </div>
                 <AttachmentGalleryModal />

@@ -243,13 +243,13 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
   if (!user) {
     return (
       <div className={cn('p-6', className)}>
-        <div className='text-center text-gray-500'>User not found</div>
+        <div className='text-center text-muted-foreground'>User not found</div>
       </div>
     );
   }
 
   return (
-    <div className={cn('bg-white rounded-lg shadow-sm border border-gray-200', className)}>
+    <div className={cn('bg-background rounded-lg shadow-sm border border-border', className)}>
       {/* Header Section */}
       <div className='pt-2 px-6 pb-6 flex flex-col items-center'>
         <div className='relative mb-8'>
@@ -257,7 +257,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
         </div>
 
         <div className='w-full'>
-          <h2 className='text-2xl font-semibold text-gray-900 mb-1'>
+          <h2 className='text-2xl font-semibold text-foreground mb-1'>
             {userProfile?.displayName || user?.name || 'Unknown User'}
           </h2>
 
@@ -275,7 +275,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                   }}
                   placeholder='Enter team name'
                   maxLength={20}
-                  className='flex-1 px-2 py-1 text-lg border border-gray-300 rounded focus:outline-none focus:border-gray-400'
+                  className='flex-1 px-2 py-1 text-lg border border-input rounded focus:outline-none focus:border-ring'
                 />
                 <button
                   onClick={handleSaveEdit}
@@ -286,7 +286,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                 </button>
                 <button
                   onClick={handleCancelEdit}
-                  className='p-1 text-gray-600 hover:bg-gray-100 rounded'
+                  className='p-1 text-muted-foreground hover:bg-accent rounded'
                   title='Cancel'
                 >
                   <X className='size-4' />
@@ -296,11 +296,11 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
             </div>
           ) : userProfile?.team ? (
             <div className='flex items-center gap-2 mt-1'>
-              <div className='text-lg text-gray-600'>{userProfile.team}</div>
+              <div className='text-lg text-muted-foreground'>{userProfile.team}</div>
               {isOwnProfile && (
                 <button
                   onClick={() => handleStartEdit('team', userProfile.team)}
-                  className='text-gray-400 hover:text-gray-600'
+                  className='text-muted-foreground hover:text-muted-foreground'
                   title='Edit team'
                 >
                   <Edit2 className='size-3' />
@@ -318,11 +318,11 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
 
           {/* Online/Away Status - Use live Socket.IO presence status */}
           {livePresenceStatus && (
-            <div className='flex items-center gap-2 mt-2 text-sm text-gray-600'>
+            <div className='flex items-center gap-2 mt-2 text-sm text-muted-foreground'>
               {livePresenceStatus === 'ONLINE' ? (
                 <div className='w-2 h-2 rounded-full bg-green-500' />
               ) : (
-                <div className='w-2 h-2 rounded-full border border-gray-400' />
+                <div className='w-2 h-2 rounded-full border border-muted-foreground' />
               )}
               <span className='capitalize'>
                 {livePresenceStatus === 'ONLINE' ? 'Active' : livePresenceStatus.toLowerCase()}
@@ -338,7 +338,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                 <span>{statusContent}</span>
               </div>
               {statusExpiryAt && (
-                <div className='text-xs text-gray-500 mt-1'>
+                <div className='text-xs text-muted-foreground mt-1'>
                   {formatExpiryTime(statusExpiryAt, true)}
                 </div>
               )}
@@ -350,7 +350,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
             <div className='flex items-center gap-2 mt-4'>
               <Button
                 onClick={handleMessageClick}
-                className='flex items-center gap-2 px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-900 rounded-lg'
+                className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
                 variant='outline'
               >
                 <MessageSquare className='size-4' />
@@ -358,7 +358,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
               </Button>
               <Button
                 onClick={handleHuddleClick}
-                className='flex items-center gap-2 px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-900 rounded-lg'
+                className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
                 variant='outline'
               >
                 <Headphones className='size-4' />
@@ -375,10 +375,10 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           <div className='space-y-1'>
             <div
               className={cn(
-                'px-2 py-2 rounded-lg border cursor-pointer hover:bg-gray-200 transition-colors w-full',
+                'px-2 py-2 rounded-lg border cursor-pointer hover:bg-accent transition-colors w-full',
                 hasStatus
-                  ? 'border-gray-200 bg-transparent hover:bg-gray-100'
-                  : 'border-gray-200 bg-gray-50',
+                  ? 'border-border bg-transparent hover:bg-accent'
+                  : 'border-border bg-muted',
               )}
               onClick={() => setIsStatusModalOpen(true)}
               onKeyDown={e => {
@@ -403,7 +403,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                         showOnHover={false}
                       />
                     </div>
-                    <div className='text-xs font-medium text-gray-900 truncate'>
+                    <div className='text-xs font-medium text-foreground truncate'>
                       {user?.presenceStatus?.statusContent}
                     </div>
                   </div>
@@ -411,21 +411,21 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                     variant='ghost'
                     size='sm'
                     onClick={handleClearStatus}
-                    className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
+                    className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                     title='Clear status'
                   >
-                    <X className='size-3 text-gray-600' />
+                    <X className='size-3 text-muted-foreground' />
                   </Button>
                 </div>
               ) : (
-                <div className='flex items-center gap-2 text-gray-600'>
+                <div className='flex items-center gap-2 text-muted-foreground'>
                   <SmilePlus className='size-4 flex-shrink-0' />
                   <span className='text-sm truncate'>Update your status</span>
                 </div>
               )}
             </div>
             {hasStatus && user?.presenceStatus?.statusExpiryAt && (
-              <div className='text-xs text-gray-500'>
+              <div className='text-xs text-muted-foreground'>
                 {formatExpiryTime(user.presenceStatus.statusExpiryAt, true)}
               </div>
             )}
@@ -434,20 +434,20 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
       )}
 
       {/* Divider */}
-      <div className='mx-6 border-b border-gray-200' />
+      <div className='mx-6 border-b border-border' />
 
       {/* Manager Section */}
       {(managerUser || isOwnProfile) && (
         <div className='px-6 py-4'>
           <div className='flex items-center gap-2 mb-3'>
-            <h3 className='text-sm font-semibold text-gray-900'>Manager</h3>
+            <h3 className='text-sm font-semibold text-foreground'>Manager</h3>
             {isOwnProfile && managerUser && editingField !== 'manager' && (
               <button
                 onClick={() => {
                   setEditingField('manager');
                   setSelectedManagerUsers([managerUser]);
                 }}
-                className='text-gray-400 hover:text-gray-600'
+                className='text-muted-foreground hover:text-muted-foreground'
                 title='Edit manager'
               >
                 <Edit2 className='size-3' />
@@ -479,7 +479,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                     setEditingField(null);
                     setSelectedManagerUsers([]);
                   }}
-                  className='px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800'
+                  className='px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground'
                 >
                   Cancel
                 </button>
@@ -509,7 +509,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
             <div className='flex items-center gap-3'>
               <Avatar userId={managerUser.id} size='md' />
               <div className='flex-1'>
-                <div className='text-sm font-medium text-gray-900'>{managerUser.name}</div>
+                <div className='text-sm font-medium text-foreground'>{managerUser.name}</div>
               </div>
             </div>
           ) : isOwnProfile ? (
@@ -528,32 +528,34 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
 
       {/* Contact Information Section */}
       <div className='px-6 pb-4 pt-4'>
-        <h3 className='text-sm font-semibold text-gray-900 mb-4'>Contact Information</h3>
+        <h3 className='text-sm font-semibold text-foreground mb-4'>Contact Information</h3>
         <div className='space-y-4'>
           {/* Email Address */}
           <div className='flex items-start gap-3'>
-            <div className='p-2 bg-gray-100 rounded-lg flex-shrink-0'>
-              <Mail className='size-4 text-gray-400' />
+            <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+              <Mail className='size-4 text-muted-foreground' />
             </div>
             <div className='flex-1'>
-              <div className='text-sm font-semibold text-gray-900 leading-tight'>Email Address</div>
-              <div className='text-sm text-gray-800 mt-1'>{user.email}</div>
+              <div className='text-sm font-semibold text-foreground leading-tight'>
+                Email Address
+              </div>
+              <div className='text-sm text-foreground mt-1'>{user.email}</div>
             </div>
           </div>
 
           {/* Phone Number */}
           {userProfile?.phoneNumber || isOwnProfile ? (
             <div className='flex items-start gap-3'>
-              <div className='p-2 bg-gray-100 rounded-lg flex-shrink-0'>
-                <Phone className='size-4 text-gray-400' />
+              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+                <Phone className='size-4 text-muted-foreground' />
               </div>
               <div className='flex-1'>
-                <div className='text-sm font-semibold text-gray-900 leading-tight flex items-center gap-2'>
+                <div className='text-sm font-semibold text-foreground leading-tight flex items-center gap-2'>
                   Phone Number
                   {isOwnProfile && userProfile?.phoneNumber && editingField !== 'phoneNumber' && (
                     <button
                       onClick={() => handleStartEdit('phoneNumber', userProfile.phoneNumber)}
-                      className='text-gray-400 hover:text-gray-600'
+                      className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit phone number'
                     >
                       <Edit2 className='size-3' />
@@ -573,7 +575,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                         }}
                         placeholder='Enter phone number'
                         maxLength={15}
-                        className='flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-gray-400'
+                        className='flex-1 px-2 py-1 text-sm border border-input rounded focus:outline-none focus:border-ring'
                       />
                       <button
                         onClick={handleSaveEdit}
@@ -584,7 +586,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                       </button>
                       <button
                         onClick={handleCancelEdit}
-                        className='p-1 text-gray-600 hover:bg-gray-100 rounded'
+                        className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
                       >
                         <X className='size-4' />
@@ -593,7 +595,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                     {editError && <p className='text-xs text-red-600'>{editError}</p>}
                   </div>
                 ) : userProfile?.phoneNumber ? (
-                  <div className='text-sm text-gray-800 mt-1'>{userProfile.phoneNumber}</div>
+                  <div className='text-sm text-foreground mt-1'>{userProfile.phoneNumber}</div>
                 ) : (
                   <button
                     onClick={() => handleStartEdit('phoneNumber')}
@@ -609,12 +611,14 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           {/* Start Date */}
           {userProfile?.joinedOn && (
             <div className='flex items-start gap-3'>
-              <div className='p-2 bg-gray-100 rounded-lg flex-shrink-0'>
-                <Calendar className='size-4 text-gray-400' />
+              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+                <Calendar className='size-4 text-muted-foreground' />
               </div>
               <div className='flex-1'>
-                <div className='text-sm font-semibold text-gray-900 leading-tight'>Start Date</div>
-                <div className='text-sm text-gray-800 mt-1'>
+                <div className='text-sm font-semibold text-foreground leading-tight'>
+                  Start Date
+                </div>
+                <div className='text-sm text-foreground mt-1'>
                   {new Date(userProfile.joinedOn)
                     .toLocaleDateString('en-US', {
                       year: 'numeric',
@@ -631,16 +635,16 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           {/* Birth Date */}
           {userProfile?.dob || isOwnProfile ? (
             <div className='flex items-start gap-3'>
-              <div className='p-2 bg-gray-100 rounded-lg flex-shrink-0'>
-                <Cake className='size-4 text-gray-400' />
+              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+                <Cake className='size-4 text-muted-foreground' />
               </div>
               <div className='flex-1'>
-                <div className='text-sm font-semibold text-gray-900 leading-tight flex items-center gap-2'>
+                <div className='text-sm font-semibold text-foreground leading-tight flex items-center gap-2'>
                   Birth Date
                   {isOwnProfile && userProfile?.dob && editingField !== 'dob' && (
                     <button
                       onClick={() => handleStartEdit('dob', userProfile.dob)}
-                      className='text-gray-400 hover:text-gray-600'
+                      className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit birth date'
                     >
                       <Edit2 className='size-3' />
@@ -659,7 +663,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                           if (e.key === 'Escape') handleCancelEdit();
                         }}
                         max={new Date().toISOString().split('T')[0]}
-                        className='flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:border-gray-400'
+                        className='flex-1 px-2 py-1 text-sm border border-input rounded focus:outline-none focus:border-ring'
                       />
                       <button
                         onClick={handleSaveEdit}
@@ -670,7 +674,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                       </button>
                       <button
                         onClick={handleCancelEdit}
-                        className='p-1 text-gray-600 hover:bg-gray-100 rounded'
+                        className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
                       >
                         <X className='size-4' />
@@ -679,7 +683,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                     {editError && <p className='text-xs text-red-600'>{editError}</p>}
                   </div>
                 ) : userProfile?.dob ? (
-                  <div className='text-sm text-gray-800 mt-1'>
+                  <div className='text-sm text-foreground mt-1'>
                     {new Date(userProfile.dob)
                       .toLocaleDateString('en-US', {
                         year: 'numeric',

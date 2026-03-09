@@ -160,7 +160,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
   return (
     <div className='flex flex-col mb-1'>
       {showText && (
-        <div className='text-sm text-gray-700'>
+        <div className='text-sm text-foreground'>
           <RenderMessageWithHTML message={content} />
         </div>
       )}
@@ -169,7 +169,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
           <div className='flex gap-x-2'>
             {canAddMembers && (
               <Button
-                className='bg-white text-black hover:bg-gray-50'
+                className='bg-secondary text-secondary-foreground hover:bg-accent'
                 size='sm'
                 onClick={() => void handleAddToChannel()}
                 disabled={isLoading}
@@ -178,7 +178,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
               </Button>
             )}
             <Button
-              className='bg-white text-black hover:bg-gray-50'
+              className='bg-secondary text-secondary-foreground hover:bg-accent'
               size='sm'
               onClick={() => void handleIgnore()}
               disabled={isLoading}

@@ -26,12 +26,12 @@ export const AssignmentPauseActivity = ({
 
   // Determine badge icon and text based on action type
   const badgeIcon = isPaused ? (
-    <PauseCircle className='w-4 h-4 text-gray-600' />
+    <PauseCircle className='w-4 h-4 text-muted-foreground' />
   ) : (
     <PlayCircle className='w-4 h-4 text-green-600' />
   );
 
-  const badgeColorClass = isPaused ? 'bg-gray-100' : 'bg-green-100';
+  const badgeColorClass = isPaused ? 'bg-muted' : 'bg-green-100';
 
   const expandedText = isPaused
     ? `${userName} has paused from ticket assignment`
@@ -49,7 +49,7 @@ export const AssignmentPauseActivity = ({
       channelId={undefined}
       badgeIcon={badgeIcon}
       badgeColorClass={badgeColorClass}
-      description={<span className='text-gray-500 text-sm'>ticket assignment</span>}
+      description={<span className='text-muted-foreground text-sm'>ticket assignment</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
       actorAction={activity.actorAction}

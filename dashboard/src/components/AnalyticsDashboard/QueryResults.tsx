@@ -142,7 +142,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
 
   if (queriesData.length === 0) {
     return (
-      <div className='flex items-center justify-center h-32 text-gray-500'>
+      <div className='flex items-center justify-center h-32 text-muted-foreground'>
         No queries created yet
       </div>
     );
@@ -171,21 +171,21 @@ const QueryResults: React.FC<QueryResultsProps> = ({
         const resultLabel = isAggregation ? 'groups' : 'rows';
 
         return (
-          <div key={r.queryId} className='border border-gray-200 rounded-lg overflow-hidden'>
+          <div key={r.queryId} className='border border-border rounded-lg overflow-hidden'>
             {/* Query Header */}
-            <div className='flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200'>
+            <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>
               <div className='flex items-center gap-2'>
                 {r.isLoading && (
-                  <div className='h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900' />
+                  <div className='h-3 w-3 animate-spin rounded-full border-2 border-input border-t-gray-900' />
                 )}
-                <h4 className='text-xs font-semibold text-gray-900'>{r.queryTitle}</h4>
+                <h4 className='text-xs font-semibold text-foreground'>{r.queryTitle}</h4>
                 {isAggregation && (
                   <span className='text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded'>
                     AGG
                   </span>
                 )}
                 {!r.isLoading && r.data && (
-                  <span className='text-[10px] text-gray-500'>
+                  <span className='text-[10px] text-muted-foreground'>
                     ({r.data.length} {resultLabel})
                   </span>
                 )}
@@ -240,7 +240,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
 
             {/* Query Results Table */}
             {r.isLoading ? (
-              <div className='flex items-center justify-center h-24 text-xs text-gray-500'>
+              <div className='flex items-center justify-center h-24 text-xs text-muted-foreground'>
                 Loading results...
               </div>
             ) : r.error ? (
@@ -249,26 +249,26 @@ const QueryResults: React.FC<QueryResultsProps> = ({
               </div>
             ) : r.data && r.data.length > 0 ? (
               <div className='overflow-auto' style={{ maxHeight: '150px' }}>
-                <table className='min-w-full divide-y divide-gray-200 text-xs'>
-                  <thead className='bg-gray-50 sticky top-0'>
+                <table className='min-w-full divide-y divide-border text-xs'>
+                  <thead className='bg-muted sticky top-0'>
                     <tr>
                       {Object.keys(r.data[0]!).map(key => (
                         <th
                           key={key}
-                          className='px-2 py-1.5 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider'
+                          className='px-2 py-1.5 text-left text-[10px] font-medium text-muted-foreground uppercase tracking-wider'
                         >
                           {key}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className='bg-white divide-y divide-gray-200'>
+                  <tbody className='bg-background divide-y divide-border'>
                     {r.data.map((row, index) => (
                       <tr key={index}>
                         {Object.values(row).map((value, cellIndex) => (
                           <td
                             key={cellIndex}
-                            className='px-2 py-1.5 whitespace-nowrap text-[11px] text-gray-900'
+                            className='px-2 py-1.5 whitespace-nowrap text-[11px] text-foreground'
                           >
                             {formatCellValue(value)}
                           </td>
@@ -279,7 +279,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                 </table>
               </div>
             ) : (
-              <div className='flex items-center justify-center h-24 text-xs text-gray-500'>
+              <div className='flex items-center justify-center h-24 text-xs text-muted-foreground'>
                 No results
               </div>
             )}

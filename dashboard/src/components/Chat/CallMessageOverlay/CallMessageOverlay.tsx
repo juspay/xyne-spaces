@@ -120,7 +120,7 @@ export function CallMessageOverlay({
       <div className='flex items-center gap-2'>
         {/* Call Info */}
         <div className='flex-1 min-w-0'>
-          <div className='text-sm text-gray-700'>
+          <div className='text-sm text-foreground'>
             {participantCount > 0 ? (
               <>
                 {participantText} {participantCount === 1 ? 'is' : 'are'} in a call

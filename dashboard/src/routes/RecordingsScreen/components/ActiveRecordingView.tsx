@@ -62,16 +62,16 @@ export function ActiveRecordingView({
   return (
     <div className='flex flex-col h-full'>
       {/* Recording Header */}
-      <div className='px-6 py-4 border-b border-gray-300 dark:border-gray-700'>
+      <div className='px-6 py-4 border-b border-input dark:border-gray-700'>
         <div className='flex items-center gap-3'>
           <div className='w-10 h-10 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center'>
             <Mic className='w-5 h-5 text-red-500' />
           </div>
           <div>
-            <h2 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
+            <h2 className='text-lg font-semibold text-foreground dark:text-gray-100'>
               Note Taker Recording
             </h2>
-            <div className='flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400'>
+            <div className='flex items-center gap-2 text-sm text-muted-foreground dark:text-muted-foreground'>
               {startTime && <span>{formatTime(startTime)}</span>}
               <span className='w-1 h-1 rounded-full bg-gray-400' />
               <span className='flex items-center gap-1.5'>
@@ -117,10 +117,10 @@ export function ActiveRecordingView({
                   <div className='flex-1 min-w-0'>
                     {/* Speaker Name & Time */}
                     <div className='flex items-center gap-2 mb-1.5'>
-                      <span className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+                      <span className='text-sm font-semibold text-foreground dark:text-gray-100'>
                         {group.speaker}
                       </span>
-                      <span className='text-xs text-gray-400 dark:text-gray-500'>
+                      <span className='text-xs text-muted-foreground dark:text-muted-foreground'>
                         {group.entries[0] && formatTimestamp(group.entries[0].timestamp)}
                       </span>
                     </div>
@@ -130,7 +130,7 @@ export function ActiveRecordingView({
                       {group.entries.map(entry => (
                         <div
                           key={entry.id}
-                          className='text-[15px] text-gray-800 dark:text-gray-200 leading-relaxed'
+                          className='text-[15px] text-foreground dark:text-gray-200 leading-relaxed'
                         >
                           {entry.text}
                         </div>
@@ -148,7 +148,7 @@ export function ActiveRecordingView({
                 {[0, 1, 2, 3, 4].map(i => (
                   <div
                     key={i}
-                    className='w-1 rounded-full bg-gray-300 dark:bg-gray-600'
+                    className='w-1 rounded-full bg-muted-foreground/50 dark:bg-gray-600'
                     style={{
                       animation: `listeningPulse 1s ease-in-out ${i * 0.15}s infinite alternate`,
                       height: '16px',
@@ -156,7 +156,7 @@ export function ActiveRecordingView({
                   />
                 ))}
               </div>
-              <p className='text-sm text-gray-500 dark:text-gray-400'>
+              <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
                 Listening... Start speaking and your words will appear here.
               </p>
             </div>

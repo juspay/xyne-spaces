@@ -389,13 +389,13 @@ export const TicketActivity = ({
   return (
     <div className='mt-8' data-testid='ticket-activity-section'>
       <div className='flex items-center justify-between'>
-        <h3 className='text-base font-semibold text-gray-900 mb-4 flex items-center gap-2'>
+        <h3 className='text-base font-semibold text-foreground mb-4 flex items-center gap-2'>
           Activity
         </h3>
 
         <button
           onClick={toggleSort}
-          className='flex items-center text-[13px] text-[#838383] gap-2'
+          className='flex items-center text-[13px] text-muted-foreground gap-2'
           title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
           data-track-category='Tickets'
           data-track-name='ToggleActivitySort'
@@ -421,7 +421,7 @@ export const TicketActivity = ({
           ))}
         </div>
       ) : (
-        <div className='text-center py-12 text-gray-400'>
+        <div className='text-center py-12 text-muted-foreground'>
           <Activity className='w-12 h-12 mx-auto mb-3 opacity-50' />
           <p className='text-sm'>No activity yet</p>
         </div>
@@ -458,18 +458,18 @@ export const ActivityComponent = ({
       {/* Icon */}
       <div className='flex flex-col items-center self-stretch mt-2'>
         {getActivityIcon(activity)}
-        {!isLast && <span className='w-0 flex-1 my-1 border-[0.8px] border-[#E1E1E1]' />}
+        {!isLast && <span className='w-0 flex-1 my-1 border-[0.8px] border-border' />}
       </div>
 
       {/* Content */}
       <div className='flex-1 min-w-0 mt-1 pb-6'>
         <div className='flex items-center gap-2'>
-          <p className='text-sm text-[#838383]'>
+          <p className='text-sm text-muted-foreground'>
             {activity.activityType !== ActivityType.PR && (activityUser?.name || 'Someone')}{' '}
             {description}
-            {details && <span className='text-[#646464]'> {details}</span>}
+            {details && <span className='text-muted-foreground'> {details}</span>}
           </p>
-          <span className='text-xs text-gray-400 whitespace-nowrap'>
+          <span className='text-xs text-muted-foreground whitespace-nowrap'>
             {formatTimestamp(activity.timestamp)}
           </span>
         </div>

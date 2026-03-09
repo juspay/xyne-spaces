@@ -187,7 +187,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
       case CanvasRole.EDITOR:
         return <Shield className='w-4 h-4 text-blue-500' />;
       case CanvasRole.VIEWER:
-        return <Eye className='w-4 h-4 text-gray-500' />;
+        return <Eye className='w-4 h-4 text-muted-foreground' />;
       default:
         return null;
     }
@@ -219,7 +219,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
         {/* Make Visible to Channel Toggle */}
         <div className='flex items-center justify-between py-4'>
           <div className='flex items-center gap-3'>
-            <CornerDownRight size={18} className='text-gray-500' />
+            <CornerDownRight size={18} className='text-muted-foreground' />
             <span className='text-sm font-medium'>Make visible to channel</span>
           </div>
           <button
@@ -229,7 +229,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
             onClick={handleVisibilityToggle}
             disabled={!isOwner}
             className={`relative w-12 h-6 rounded-full transition-all duration-200 ${
-              isPublic ? 'bg-green-500' : 'bg-gray-300'
+              isPublic ? 'bg-green-500' : 'bg-muted'
             } ${!isOwner ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             data-testid='canvas-visibility-toggle'
             data-track-category='CANVAS'
@@ -238,19 +238,19 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
           >
             <span
               aria-hidden='true'
-              className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${
+              className={`absolute top-1 w-4 h-4 bg-background rounded-full shadow transition-all duration-200 ${
                 isPublic ? 'left-7' : 'left-1'
               }`}
             />
           </button>
         </div>
 
-        <div className='border-t border-gray-300 my-4' />
+        <div className='border-t border-border my-4' />
 
         {/* Anyone with this link */}
         <div className='py-4 space-y-3'>
           <div className='flex items-center gap-3'>
-            <Globe size={18} className='text-gray-500' />
+            <Globe size={18} className='text-muted-foreground' />
             <span className='text-sm'>Anyone with this link can view</span>
           </div>
 
@@ -261,12 +261,12 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
               type='text'
               readOnly
               value={viewLink || 'Not available'}
-              className='flex-1 text-sm bg-gray-50 visual-regression-hide'
+              className='flex-1 text-sm bg-muted visual-regression-hide'
               disabled={!viewLink}
             />
             <button
               onClick={handleCopyLink}
-              className='px-3 py-2 text-sm text-gray-500 hover:text-gray-700 font-medium border border-gray-300 rounded-md bg-white hover:bg-gray-50'
+              className='px-3 py-2 text-sm text-muted-foreground hover:text-foreground font-medium border border-border rounded-md bg-background hover:bg-accent'
               data-testid='canvas-copy-link-button'
               data-track-category='CANVAS'
               data-track-name='COPY_CANVAS_LINK'
@@ -280,7 +280,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
           </div>
         </div>
 
-        <div className='border-t border-gray-300 my-4' />
+        <div className='border-t border-border my-4' />
 
         <div className='pt-4'></div>
 
@@ -301,7 +301,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
             {/* Role Selection Buttons */}
             {selectedUsers.length > 0 && (
               <div className='mt-2 flex items-center flex-wrap gap-2'>
-                <span className='text-sm text-gray-500'>Add as:</span>
+                <span className='text-sm text-muted-foreground'>Add as:</span>
                 <Button
                   onClick={() => void handleAddParticipants(CanvasRole.VIEWER)}
                   disabled={isAddingUser}
@@ -359,25 +359,27 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
 
         {/* People with Access */}
         <div className='mb-2'>
-          <span className='text-xs text-gray-400 uppercase tracking-wider'>People with access</span>
+          <span className='text-xs text-muted-foreground uppercase tracking-wider'>
+            People with access
+          </span>
         </div>
 
         <div className='max-h-60 overflow-y-auto space-y-1'>
           {participants?.map(participant => (
             <div
               key={participant.userId}
-              className='flex items-center justify-between py-2 px-2 hover:bg-gray-50 rounded-lg'
+              className='flex items-center justify-between py-2 px-2 hover:bg-accent rounded-lg'
             >
               <div className='flex items-center gap-3 flex-1 min-w-0'>
                 <Avatar userId={participant.userId} size='md' />
                 <div className='flex-1 min-w-0'>
-                  <p className='text-sm font-medium text-gray-900 truncate'>
+                  <p className='text-sm font-medium text-foreground truncate'>
                     {usersById.get(participant.userId)?.name || 'Unknown User'}
                     {participant.userId === currentUser?.id && (
-                      <span className='ml-2 text-xs text-gray-500'>(You)</span>
+                      <span className='ml-2 text-xs text-muted-foreground'>(You)</span>
                     )}
                   </p>
-                  <p className='text-xs text-gray-500 truncate'>
+                  <p className='text-xs text-muted-foreground truncate'>
                     {usersById.get(participant.userId)?.email || ''}
                   </p>
                 </div>
@@ -394,14 +396,14 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                       void handleUpdateRole(participant.userId, value as CanvasRole)
                     }
                   >
-                    <Select.Trigger className='w-[100px] h-8 text-xs flex items-center justify-between px-2 border border-gray-300 rounded bg-white'>
+                    <Select.Trigger className='w-[100px] h-8 text-xs flex items-center justify-between px-2 border border-border rounded bg-background'>
                       <Select.Value />
                       <Select.Icon>
                         <ChevronDown className='size-3 opacity-50' />
                       </Select.Icon>
                     </Select.Trigger>
                     <Select.Portal>
-                      <Select.Content className='bg-white rounded border border-gray-200 shadow-md z-[60] overflow-hidden'>
+                      <Select.Content className='bg-background rounded border border-border shadow-md z-[60] overflow-hidden'>
                         <Select.Viewport className='p-1'>
                           {[
                             CanvasRole.VIEWER,
@@ -411,7 +413,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                             <Select.Item
                               key={role}
                               value={role}
-                              className='relative flex items-center px-6 py-1.5 text-xs rounded-sm cursor-pointer hover:bg-gray-100 outline-none select-none data-[highlighted]:bg-gray-100'
+                              className='relative flex items-center px-6 py-1.5 text-xs rounded-sm cursor-pointer hover:bg-accent outline-none select-none data-[highlighted]:bg-accent'
                             >
                               <Select.ItemText>{getRoleName(role)}</Select.ItemText>
                               <Select.ItemIndicator className='absolute left-1.5'>
@@ -424,11 +426,11 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                     </Select.Portal>
                   </Select.Root>
                 ) : (
-                  <div className='flex items-center gap-1 text-sm text-gray-600'>
+                  <div className='flex items-center gap-1 text-sm text-muted-foreground'>
                     {getRoleIcon(participant.role)}
                     <span>{getRoleName(participant.role)}</span>
                     {participant.userId === canvas.createdBy && (
-                      <span className='text-xs text-gray-400'>(Creator)</span>
+                      <span className='text-xs text-muted-foreground'>(Creator)</span>
                     )}
                   </div>
                 )}
@@ -466,7 +468,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
           title='Remove Participant'
         >
           <div className='p-6'>
-            <p className='text-gray-600 mb-6'>
+            <p className='text-muted-foreground mb-6'>
               Are you sure you want to remove this participant from the canvas?
             </p>
             <div className='flex justify-end gap-3'>

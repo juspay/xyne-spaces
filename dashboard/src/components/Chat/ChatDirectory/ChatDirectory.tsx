@@ -194,7 +194,7 @@ const ChatDirectory = ({
         // - ref @fractal for issues
       }}
     >
-      <div className='block sm:hidden -mx-2 px-2 bg-white/70 backdrop-blur-md rounded-b-3xl border-b border-black/10'>
+      <div className='block sm:hidden -mx-2 px-2 bg-background/70 backdrop-blur-md rounded-b-3xl border-b border-black/10'>
         <div className='px-2 pt-2 pb-3 flex items-center justify-between'>
           <div className='flex items-center gap-2'>
             <img src='/svgs/xyne.svg' alt='Xyne Logo' className='h-3 w-auto' />
@@ -584,7 +584,7 @@ const ChatDirectory = ({
               void navigate('/chat/bookmarks');
             }}
           />
-          <hr className='border-gray-200 mt-4' />
+          <hr className='border-border mt-4' />
         </div> */}
         {/* 
         <div className='h-fit min-[500px]:pt-0 pt-4'>

@@ -121,7 +121,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             variant='ghost'
             size='sm'
             onClick={onClose}
-            className='size-7 p-0 text-gray-500 hover:text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100'
+            className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
             data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
             data-track-name='Close_Assignment_Modal'
           >
@@ -132,9 +132,9 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
         {/* Datetime Input */}
         <div className='space-y-4 pt-2'>
           <div className='space-y-2'>
-            <span className='text-sm font-medium text-gray-700'>Available after</span>
+            <span className='text-sm font-medium text-foreground'>Available after</span>
             <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
-              <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500'>
+              <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500'>
                 <Select.Value />
                 <Select.Icon>
                   <ChevronDown className='size-4' />
@@ -147,14 +147,14 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
                   side='bottom'
                   align='start'
                   sideOffset={6}
-                  className='bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden z-50'
+                  className='bg-background rounded-lg border border-border shadow-lg overflow-hidden z-50'
                 >
                   <Select.Viewport className='p-1'>
                     {ASSIGNMENT_EXPIRY_OPTIONS.map(option => (
                       <Select.Item
                         key={option.value}
                         value={option.value}
-                        className='relative flex items-center px-3 py-2 rounded-md text-sm cursor-pointer hover:bg-gray-100 outline-none select-none data-[highlighted]:bg-gray-100'
+                        className='relative flex items-center px-3 py-2 rounded-md text-sm cursor-pointer hover:bg-muted outline-none select-none data-[highlighted]:bg-muted'
                       >
                         <Select.ItemText>{option.label}</Select.ItemText>
                         <Select.ItemIndicator className='absolute right-2'>
@@ -171,7 +171,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
           {/* Custom Date/Time Picker */}
           {showDatePicker && (
             <div className='flex items-center gap-2'>
-              <div className='px-3 py-2 border border-gray-300 rounded-lg flex-1 bg-white'>
+              <div className='px-3 py-2 border border-input rounded-lg flex-1 bg-background'>
                 <Input
                   type='date'
                   value={customDate ? customDate.toISOString().split('T')[0] : ''}
@@ -184,7 +184,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
                 />
               </div>
 
-              <div className='px-3 py-2 border border-gray-300 rounded-lg bg-white'>
+              <div className='px-3 py-2 border border-input rounded-lg bg-background'>
                 <Input
                   type='time'
                   value={customTime}
@@ -207,7 +207,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
           <Button
             variant='ghost'
             onClick={onClose}
-            className='text-gray-700 hover:bg-gray-100'
+            className='text-foreground hover:bg-muted'
             data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
             data-track-name='Cancel_Assignment_Availability'
           >

@@ -38,19 +38,19 @@ const PolicySelect: React.FC<PolicySelectProps> = ({ value, onValueChange, disab
       }}
       disabled={disabled}
     >
-      <Select.Trigger className='flex w-full items-center justify-between rounded-[8px] border border-[#E4E6E7] bg-white px-3 py-2 text-sm text-[#505B62] select-none disabled:cursor-not-allowed disabled:opacity-70 focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent hover:bg-[#FAFAFA] data-[popup-open]:ring-1 data-[popup-open]:ring-primary'>
+      <Select.Trigger className='flex w-full items-center justify-between rounded-[8px] border border-border bg-background px-3 py-2 text-sm text-muted-foreground select-none disabled:cursor-not-allowed disabled:opacity-70 focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent hover:bg-accent data-[popup-open]:ring-1 data-[popup-open]:ring-primary'>
         <Select.Value placeholder='Select policy' />
         <Select.Icon className='flex'>
-          <ChevronDown className='h-4 w-4 text-[#505B62]' />
+          <ChevronDown className='h-4 w-4 text-muted-foreground' />
         </Select.Icon>
       </Select.Trigger>
       <Select.Positioner sideOffset={4} alignItemWithTrigger={false} className='z-[100]'>
-        <Select.Popup className='w-[var(--anchor-width)] rounded-[8px] border border-[#E4E6E7] bg-white shadow-md py-1'>
+        <Select.Popup className='w-[var(--anchor-width)] rounded-[8px] border border-border bg-card shadow-md py-1'>
           {POLICY_OPTIONS.map(option => (
             <Select.Item
               key={option.value}
               value={option.value}
-              className='grid grid-cols-[1rem_1fr] items-center gap-2 px-3 py-2 text-sm text-[#505B62] outline-none data-[highlighted]:bg-[#FAFAFA] cursor-pointer'
+              className='grid grid-cols-[1rem_1fr] items-center gap-2 px-3 py-2 text-sm text-muted-foreground outline-none data-[highlighted]:bg-accent cursor-pointer'
             >
               <Select.ItemIndicator>
                 <Check className='h-3.5 w-3.5 text-primary' />
@@ -146,25 +146,27 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
   if (!isDefaultChannel) {
     return (
       <div className='p-4'>
-        <p className='text-sm text-gray-600'>Settings are only available for default channels.</p>
+        <p className='text-sm text-muted-foreground'>
+          Settings are only available for default channels.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className='flex flex-col h-[392px] bg-[#FAFAFA]'>
+    <div className='flex flex-col h-[392px] bg-muted'>
       <div className='p-4 overflow-y-auto space-y-3'>
         {/* Permission card */}
-        <div className='bg-white p-[12px] rounded-[12px] border border-[#F2F2F3]'>
+        <div className='bg-card p-[12px] rounded-[12px] border border-border'>
           <div className='flex flex-col gap-y-2'>
-            <p className='text-sm font-medium text-[#181B1D]'>Who can add users</p>
+            <p className='text-sm font-medium text-foreground'>Who can add users</p>
             <PolicySelect
               value={selectedPolicy}
               onValueChange={handlePolicyChange}
               disabled={!isAdmin}
             />
             {!isAdmin && (
-              <p className='text-sm text-[#505B62]'>
+              <p className='text-sm text-muted-foreground'>
                 You don&apos;t have permission to change this setting.
               </p>
             )}
@@ -172,11 +174,11 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
         </div>
 
         {/* Copy actions card */}
-        <div className='bg-white rounded-[12px] border border-[#F2F2F3] overflow-hidden'>
+        <div className='bg-card rounded-[12px] border border-border overflow-hidden'>
           <button
             type='button'
             onClick={() => void handleCopyNames()}
-            className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-[#181B1D] transition-colors hover:bg-[#FAFAFA]'
+            className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
             data-track-category='CHANNEL_SETTINGS'
             data-track-name='CopyMemberNames'
             data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
@@ -184,12 +186,12 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
             <span className='inline-flex items-center gap-2'>Copy member names</span>
           </button>
 
-          <div className='h-px bg-[#F2F2F3]' />
+          <div className='h-px bg-border' />
 
           <button
             type='button'
             onClick={() => void handleCopyEmails()}
-            className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-[#181B1D] transition-colors hover:bg-[#FAFAFA]'
+            className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
             data-track-category='CHANNEL_SETTINGS'
             data-track-name='CopyMemberEmails'
             data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
@@ -200,20 +202,20 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
 
         {/* Private -> public card */}
         {isPrivateChannel && (
-          <div className='bg-white p-[12px] rounded-[12px] border border-[#F2F2F3]'>
+          <div className='bg-card p-[12px] rounded-[12px] border border-border'>
             <div className='flex items-start gap-3'>
-              <Hash className='mt-0.5 h-5 w-5 text-[#505B62]' />
+              <Hash className='mt-0.5 h-5 w-5 text-muted-foreground' />
               <div className='flex flex-col gap-y-2 min-w-0'>
-                <p className='text-sm font-medium text-[#181B1D]'>Change to a public channel</p>
+                <p className='text-sm font-medium text-foreground'>Change to a public channel</p>
                 {isAdmin ? (
                   <>
-                    <p className='text-sm text-[#505B62]'>
+                    <p className='text-sm text-muted-foreground'>
                       Anyone in your workspace will be able to find and join this channel.
                     </p>
                     <button
                       type='button'
                       onClick={handleMakePublic}
-                      className='mt-1 inline-flex items-center self-start rounded-[8px] border border-[#E4E6E7] bg-white px-3 py-1.5 text-sm font-medium text-[#181B1D] hover:bg-[#FAFAFA]'
+                      className='mt-1 inline-flex items-center self-start rounded-[8px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent'
                       data-track-category='CHANNEL_SETTINGS'
                       data-track-name='MakeChannelPublic'
                       data-track-metadata={JSON.stringify({ channelId: channel.id })}
@@ -222,7 +224,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
                     </button>
                   </>
                 ) : (
-                  <p className='text-sm text-[#505B62]'>
+                  <p className='text-sm text-muted-foreground'>
                     You don&apos;t have permission to change this channel to public
                   </p>
                 )}

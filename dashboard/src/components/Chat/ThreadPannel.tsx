@@ -637,7 +637,7 @@ export const ThreadMessages = ({
   if (underTicketView) {
     return (
       <div
-        className='flex-1 h-full flex flex-col bg-white rounded-lg overflow-hidden relative'
+        className='flex-1 h-full flex flex-col bg-background rounded-lg overflow-hidden relative'
         ref={dragAndDropAreaRef}
       >
         {/* Drag and Drop Overlay */}
@@ -648,8 +648,8 @@ export const ThreadMessages = ({
           className='flex-1 flex flex-col h-full overflow-hidden'
         >
           {/* Tab Header */}
-          <div className='w-full p-4 pb-0 bg-white'>
-            <div className='border-b border-gray-200'>
+          <div className='w-full p-4 pb-0 bg-background'>
+            <div className='border-b border-border'>
               <Tabs.List className='flex items-center justify-between'>
                 <div className='flex items-center'>
                   {/* Replies Tab */}
@@ -812,7 +812,7 @@ export const ThreadMessages = ({
 
             {/* ChatInput at the bottom - only show if user is a member */}
             {isUserMember ? (
-              <div className='px-4 pb-4 bg-white'>
+              <div className='px-4 pb-4 bg-background'>
                 <ChatInput
                   ref={inputRef}
                   channelId={derivedChannelId}
@@ -832,11 +832,11 @@ export const ThreadMessages = ({
           {/* Workflows Tab Content */}
           <Tabs.Content
             value='workflows'
-            className='flex-1 overflow-auto bg-white p-4 data-[state=inactive]:hidden'
+            className='flex-1 overflow-auto bg-background p-4 data-[state=inactive]:hidden'
           >
             {workflowMessages.length === 0 ? (
-              <div className='flex flex-col items-center justify-center h-full text-gray-500'>
-                <FileText size={48} className='mb-2 text-gray-400' />
+              <div className='flex flex-col items-center justify-center h-full text-muted-foreground'>
+                <FileText size={48} className='mb-2 text-muted-foreground' />
                 <p>No workflows in this thread</p>
               </div>
             ) : (
@@ -868,13 +868,13 @@ export const ThreadMessages = ({
           {isFixTicket && (
             <Tabs.Content
               value='rca'
-              className='flex-1 overflow-hidden bg-white data-[state=inactive]:hidden'
+              className='flex-1 overflow-hidden bg-background data-[state=inactive]:hidden'
             >
               {derivedTicketId ? (
                 <RCAPanelView ticketId={derivedTicketId} />
               ) : (
-                <div className='flex flex-col items-center justify-center h-full text-gray-500'>
-                  <ClipboardCheck size={48} className='mb-2 text-gray-400' />
+                <div className='flex flex-col items-center justify-center h-full text-muted-foreground'>
+                  <ClipboardCheck size={48} className='mb-2 text-muted-foreground' />
                   <p>Ticket ID not found</p>
                 </div>
               )}
@@ -896,7 +896,7 @@ export const ThreadMessages = ({
 
   return (
     <div
-      className='flex-1 h-full flex flex-col bg-white rounded-lg overflow-hidden relative'
+      className='flex-1 h-full flex flex-col bg-background rounded-lg overflow-hidden relative'
       ref={dragAndDropAreaRef}
     >
       {/* Drag and Drop Overlay */}
@@ -927,7 +927,7 @@ export const ThreadMessages = ({
         <div className='flex justify-between items-center w-full px-4 py-2'>
           <div className='flex gap-2 items-center min-w-0'>
             <CornerDownRight className='size-4 flex-shrink-0' />
-            <span className='text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded flex-shrink-0'>
+            <span className='text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded flex-shrink-0'>
               {ticket.xyneId}
             </span>
             <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0'>
@@ -986,7 +986,7 @@ export const ThreadMessages = ({
                       threadInfo,
                     });
                   }}
-                  className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
+                  className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-background border-border'
                 >
                   <XyneAIStar />
                 </Button>
@@ -1083,7 +1083,7 @@ export const ThreadMessages = ({
         >
           {/* Header with title, close button, and tabs */}
           <div className='w-full pb-0 '>
-            <div className='relative flex justify-between w-full border-b border-gray-200'>
+            <div className='relative flex justify-between w-full border-b border-border'>
               {/* Tabs List */}
               <div className='overflow-x-auto no-scrollbar'>
                 <Tabs.List className='flex items-center justify-start'>
@@ -1110,7 +1110,7 @@ export const ThreadMessages = ({
                           {tab.label}
                         </span>
                         {tab.count !== undefined && tab.count > 0 && (
-                          <span className='text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full'>
+                          <span className='text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full'>
                             {tab.count}
                           </span>
                         )}
@@ -1141,7 +1141,7 @@ export const ThreadMessages = ({
                   ) : (
                     <button
                       onClick={handleCloseTicketDetailsThread}
-                      className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
+                      className='p-1 rounded-md text-muted-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
                       aria-label='Close thread panel'
                       data-track-category='THREAD_PANEL'
                       data-track-name='CLOSE_THREAD_PANEL'
@@ -1173,7 +1173,7 @@ export const ThreadMessages = ({
 
             {/* ChatInput at the bottom - only show if user is a member */}
             {isUserMember ? (
-              <div className='px-4 pb-4 bg-white'>
+              <div className='px-4 pb-4 bg-background'>
                 <ChatInput
                   ref={inputRef}
                   channelId={derivedChannelId}
@@ -1193,7 +1193,7 @@ export const ThreadMessages = ({
           {/* Details Tab Content */}
           <Tabs.Content
             value='details'
-            className='flex-1 bg-white overflow-auto data-[state=inactive]:hidden'
+            className='flex-1 bg-background overflow-auto data-[state=inactive]:hidden'
           >
             <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
           </Tabs.Content>
@@ -1202,7 +1202,7 @@ export const ThreadMessages = ({
           {isFixTicket && (
             <Tabs.Content
               value='rca'
-              className='flex-1 overflow-hidden bg-white data-[state=inactive]:hidden'
+              className='flex-1 overflow-hidden bg-background data-[state=inactive]:hidden'
             >
               <RCAPanelView ticketId={derivedTicketId} />
             </Tabs.Content>
@@ -1211,11 +1211,11 @@ export const ThreadMessages = ({
           {/* Files Tab Content */}
           <Tabs.Content
             value='files'
-            className='flex-1 overflow-auto bg-white p-4 data-[state=inactive]:hidden'
+            className='flex-1 overflow-auto bg-background p-4 data-[state=inactive]:hidden'
           >
             {files.length === 0 ? (
-              <div className='flex flex-col items-center justify-center h-full text-gray-500'>
-                <FileText size={48} className='mb-2 text-gray-400' />
+              <div className='flex flex-col items-center justify-center h-full text-muted-foreground'>
+                <FileText size={48} className='mb-2 text-muted-foreground' />
                 <p>No files in this thread</p>
               </div>
             ) : (
@@ -1235,11 +1235,11 @@ export const ThreadMessages = ({
           {/* Workflows Tab Content*/}
           <Tabs.Content
             value='workflows'
-            className='flex-1 overflow-auto bg-white p-4 data-[state=inactive]:hidden'
+            className='flex-1 overflow-auto bg-background p-4 data-[state=inactive]:hidden'
           >
             {workflowMessages.length === 0 ? (
-              <div className='flex flex-col items-center justify-center h-full text-gray-500'>
-                <FileText size={48} className='mb-2 text-gray-400' />
+              <div className='flex flex-col items-center justify-center h-full text-muted-foreground'>
+                <FileText size={48} className='mb-2 text-muted-foreground' />
                 <p>No workflows in this thread</p>
               </div>
             ) : (
@@ -1274,7 +1274,7 @@ export const ThreadMessages = ({
           {!hideHeader && !isThreadsRoute && (
             <div
               className={cn(
-                'p-4 flex items-center gap-2 self-stretch bg-white border-b border-gray-200 h-14',
+                'p-4 flex items-center gap-2 self-stretch bg-background border-b border-border h-14',
               )}
             >
               {isStandaloneWindow() && (
@@ -1282,7 +1282,7 @@ export const ThreadMessages = ({
                   <Button
                     variant='ghost'
                     size='sm'
-                    className='text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-all duration-100'
+                    className='text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-100'
                     onClick={() => void navigate(`/newWindow/chat/dir/${derivedChannelId}`)}
                     aria-label='Back to channel'
                   >
@@ -1292,13 +1292,13 @@ export const ThreadMessages = ({
               )}
               {/* Show icon only when thread summary is active (non-simpleView) */}
               {!simpleView && isThreadSummaryActive && (
-                <CornerDownRight className='w-4 h-4 text-gray-700' />
+                <CornerDownRight className='w-4 h-4 text-muted-foreground' />
               )}
 
               {simpleView ? (
                 /* Simple View: Header matching regular view style */
                 <>
-                  <h3 className='flex-1 font-semibold text-gray-900'>Thread</h3>
+                  <h3 className='flex-1 font-semibold text-foreground'>Thread</h3>
 
                   {/* Action Buttons */}
                   <div className='flex items-center gap-2'>
@@ -1345,7 +1345,7 @@ export const ThreadMessages = ({
                               threadInfo,
                             });
                           }}
-                          className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
+                          className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-background border-border'
                         >
                           <XyneAIStar />
                         </Button>
@@ -1381,7 +1381,7 @@ export const ThreadMessages = ({
               ) : (
                 /* Regular View: Title and action buttons */
                 <>
-                  <h3 className='flex-1 font-semibold text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
+                  <h3 className='flex-1 font-semibold text-foreground whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
                     {isTicketThread && ticket ? ticket.title : 'Thread message'}
                   </h3>
                   <Tooltip content='Toggle notification subscription'>
@@ -1428,7 +1428,7 @@ export const ThreadMessages = ({
                                 threadInfo,
                               });
                             }}
-                            className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
+                            className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-background border-border'
                           >
                             <XyneAIStar />
                           </Button>
@@ -1530,7 +1530,7 @@ export const ThreadMessages = ({
                       ) : (
                         <button
                           onClick={handleCloseTicketDetailsThread}
-                          className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
+                          className='p-1 rounded-md text-muted-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
                           aria-label='Close thread panel'
                           data-track-category='THREAD_PANEL'
                           data-track-name='CLOSE_THREAD_PANEL'
@@ -1558,7 +1558,7 @@ export const ThreadMessages = ({
 
           {/* ChatInput at the bottom - only show if user is a member */}
           {isUserMember ? (
-            <div className='px-4 pb-4 bg-white'>
+            <div className='px-4 pb-4 bg-background'>
               <ChatInput
                 ref={inputRef}
                 channelId={derivedChannelId}

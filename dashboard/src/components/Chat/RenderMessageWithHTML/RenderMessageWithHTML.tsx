@@ -102,7 +102,11 @@ function MentionRenderer({
   return (
     <UserHoverWrapper userId={userId}>
       <span
-        className={isCurrentUser ? 'mention-text !bg-[#fef3c7] !text-[#1264a3]' : 'mention-text'}
+        className={
+          isCurrentUser
+            ? 'mention-text !bg-[var(--mention-current-user-bg)] !text-[color:var(--mention-color)]'
+            : 'mention-text'
+        }
       >
         {children}
       </span>
@@ -179,7 +183,7 @@ function ChannelMentionRenderer({
           <button
             type='button'
             onClick={handleChannelClick}
-            className='text-xs cursor-pointer bg-none border border-gray-200 px-2 py-1 rounded-md text-gray-700 hover:bg-gray-100 w-full'
+            className='text-xs cursor-pointer bg-none border border-border px-2 py-1 rounded-md text-muted-foreground hover:bg-accent w-full'
             data-track-category='MESSAGE'
             data-track-name='VIEW_CHANNEL_MENTION'
             data-track-metadata={JSON.stringify({ channelId })}
@@ -201,7 +205,7 @@ function ChannelMentionRenderer({
       }}
       onClick={handleChannelClick}
     >
-      <span className='text-[#1264A3] bg-[#1D9BD11A] hover:bg-[#04374d1a] px-[2px] pt-[1px] font-normal no-underline transition-colors duration-200 inline whitespace-nowrap leading-none align-baseline '>
+      <span className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] px-[2px] pt-[1px] font-normal no-underline transition-colors duration-200 inline whitespace-nowrap leading-none align-baseline '>
         {isPrivate ? <Lock className='h-3 w-3 inline-block mr-0.5 mb-1' /> : '#'}
         {channelName}
       </span>
@@ -268,7 +272,7 @@ function CollapsibleConversationHistory({
       <button
         type='button'
         onClick={toggleExpanded}
-        className='see-more-btn text-blue-600 hover:text-blue-800 font-medium text-sm underline cursor-pointer bg-none border-none p-0 mb-2'
+        className='see-more-btn text-primary hover:text-primary/80 font-medium text-sm underline cursor-pointer bg-none border-none p-0 mb-2'
         data-track-category='MESSAGE'
         data-track-name='TOGGLE_CONVERSATION_HISTORY'
         data-track-metadata={JSON.stringify({ isExpanded })}
@@ -282,7 +286,7 @@ function CollapsibleConversationHistory({
         style={{
           marginTop: isExpanded ? '10px' : '0',
           paddingTop: isExpanded ? '10px' : '0',
-          borderTop: isExpanded ? '1px solid #ccc' : 'none',
+          borderTop: isExpanded ? '1px solid hsl(var(--border))' : 'none',
         }}
       >
         {children}
@@ -476,10 +480,7 @@ const parseNode = (
           <CanvasLink
             key={`${keyPrefix}-url-${offset}`}
             href={url}
-            className={cn(
-              'text-blue-600 dark:text-blue-400 hover:underline',
-              breakLongLinks && 'break-all',
-            )}
+            className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
           >
             {url}
           </CanvasLink>,
@@ -504,10 +505,7 @@ const parseNode = (
             key={`${keyPrefix}-url-${offset}`}
             href={url}
             {...linkProps}
-            className={cn(
-              'text-blue-600 dark:text-blue-400 hover:underline',
-              breakLongLinks && 'break-all',
-            )}
+            className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
             data-track-category='MESSAGE'
             data-track-name='ClickExternalLink'
             data-track-metadata={JSON.stringify({ url, isExternal: isExternalUrl })}
@@ -633,11 +631,13 @@ const parseNode = (
       return (
         <div key={`${keyPrefix}-tool-${idx}`} className='mt-3 w-full max-w-[500px] overflow-hidden'>
           {toolOutput.description && (
-            <div className='text-sm text-gray-600 mb-2 leading-[1.8]'>{toolOutput.description}</div>
+            <div className='text-sm text-muted-foreground mb-2 leading-[1.8]'>
+              {toolOutput.description}
+            </div>
           )}
           <ToolOutputRenderer
             toolOutput={toolOutput}
-            className={toolOutput.singleStat ? '' : 'border border-gray-200 rounded-lg'}
+            className={toolOutput.singleStat ? '' : 'border border-border rounded-lg'}
           />
         </div>
       );
@@ -918,7 +918,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     if (!showEdited || parsedContent.length === 0) return parsedContent;
 
     const editedSpan = (
-      <span key={`edited-${keyPrefix}`} className='text-xs text-[#868D95] ml-1.5'>
+      <span key={`edited-${keyPrefix}`} className='text-xs text-muted-foreground ml-1.5'>
         (edited)
       </span>
     );

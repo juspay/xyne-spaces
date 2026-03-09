@@ -29,13 +29,13 @@ interface SearchSummaryModalProps {
 
 const SkeletonLoader = (): ReactElement => (
   <div className='flex flex-col items-start gap-2 w-full'>
-    <div className='self-stretch h-4 bg-gray-200 rounded animate-pulse' />
+    <div className='self-stretch h-4 bg-muted rounded animate-pulse' />
     <div
-      className='self-stretch h-4 bg-gray-200 rounded animate-pulse delay-75'
+      className='self-stretch h-4 bg-muted rounded animate-pulse delay-75'
       style={{ width: '90%' }}
     />
     <div
-      className='self-stretch h-4 bg-gray-200 rounded animate-pulse delay-150'
+      className='self-stretch h-4 bg-muted rounded animate-pulse delay-150'
       style={{ width: '75%' }}
     />
   </div>
@@ -112,21 +112,21 @@ export const SearchSummaryModal = ({
       />
 
       {/* Modal Card */}
-      <div className='relative z-10 bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-h-[90%] overflow-hidden flex flex-col mt-2'>
+      <div className='relative z-10 bg-popover rounded-xl shadow-2xl border border-border w-full max-h-[90%] overflow-hidden flex flex-col mt-2'>
         {/* Header */}
-        <div className='flex items-center justify-between px-4 py-3 border-b border-gray-100 shrink-0 bg-gray-50/50'>
+        <div className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0 bg-muted/50'>
           <div className='flex items-center gap-2'>
             <Sparkles className='w-5 h-5 text-purple-600' />
-            <h3 className='font-semibold text-gray-900'>AI Summary</h3>
+            <h3 className='font-semibold text-foreground'>AI Summary</h3>
           </div>
           <button
             onClick={onClose}
-            className='p-1.5 rounded-md hover:bg-gray-200 transition-colors'
+            className='p-1.5 rounded-md hover:bg-accent transition-colors'
             aria-label='Close summary'
             data-track-category='GLOBAL_SEARCH'
             data-track-name='CLOSE_SUMMARY_BUTTON'
           >
-            <X className='w-5 h-5 text-gray-500' />
+            <X className='w-5 h-5 text-muted-foreground' />
           </button>
         </div>
 
@@ -135,7 +135,7 @@ export const SearchSummaryModal = ({
           {/* Loading State */}
           {state === 'loading' && visibleChars === 0 && (
             <div className='space-y-4'>
-              <p className='text-gray-600'>
+              <p className='text-muted-foreground'>
                 Summarizing results for &ldquo;<span className='font-medium'>{searchQuery}</span>
                 &rdquo;...
               </p>
@@ -156,10 +156,10 @@ export const SearchSummaryModal = ({
               <div className='w-14 h-14 rounded-full bg-purple-50 flex items-center justify-center mb-4'>
                 <Sparkles className='w-7 h-7 text-purple-400' />
               </div>
-              <p className='text-gray-800 text-lg font-medium text-center mb-2'>
+              <p className='text-foreground text-lg font-medium text-center mb-2'>
                 No messages to summarize
               </p>
-              <p className='text-gray-500 text-sm text-center max-w-sm'>
+              <p className='text-muted-foreground text-sm text-center max-w-sm'>
                 Search for messages first, then click summarize to get an AI-generated summary of
                 the results.
               </p>
@@ -170,7 +170,7 @@ export const SearchSummaryModal = ({
           {(state === 'streaming' || state === 'complete') && (
             <div className='space-y-4'>
               {(visibleChars > 0 || state === 'complete') && (
-                <div className='text-gray-700 leading-relaxed whitespace-pre-wrap'>
+                <div className='text-muted-foreground leading-relaxed whitespace-pre-wrap'>
                   {state === 'complete' ? displaySummary : visibleSummary}
                   {state === 'streaming' && visibleChars < displaySummary.length && (
                     <span className='animate-pulse'>▊</span>
@@ -179,13 +179,13 @@ export const SearchSummaryModal = ({
               )}
 
               {displayKeypoints.length > 0 && (
-                <div className='space-y-3 pt-4 border-t border-gray-200'>
-                  <h4 className='text-sm font-semibold text-gray-500 uppercase tracking-wide'>
+                <div className='space-y-3 pt-4 border-t border-border'>
+                  <h4 className='text-sm font-semibold text-muted-foreground uppercase tracking-wide'>
                     Key Points
                   </h4>
                   <ul className='space-y-2'>
                     {displayKeypoints.map((point, index) => (
-                      <li key={index} className='flex items-start gap-3 text-gray-700'>
+                      <li key={index} className='flex items-start gap-3 text-muted-foreground'>
                         <span className='text-purple-500 mt-1 shrink-0'>•</span>
                         <span
                           dangerouslySetInnerHTML={{
@@ -199,7 +199,7 @@ export const SearchSummaryModal = ({
               )}
 
               {state === 'streaming' && (
-                <div className='flex items-center gap-2 text-sm text-gray-400 pt-3'>
+                <div className='flex items-center gap-2 text-sm text-muted-foreground pt-3'>
                   <Loader2 className='w-4 h-4 animate-spin' />
                   <span>Generating summary...</span>
                 </div>

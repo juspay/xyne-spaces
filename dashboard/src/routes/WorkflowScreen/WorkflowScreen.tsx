@@ -437,7 +437,7 @@ const WorkflowScreen: React.FC = () => {
           ) : null;
         case 'table':
           return ticket && combinedStepsData ? (
-            <div className='h-full bg-white overflow-auto'>
+            <div className='h-full bg-background overflow-auto'>
               <WorkflowTableView
                 ticket={ticket}
                 combinedStepsData={combinedStepsData}
@@ -480,7 +480,7 @@ const WorkflowScreen: React.FC = () => {
   // Loading state UI
   if (isLoading) {
     return (
-      <div className='h-screen bg-white flex flex-col'>
+      <div className='h-screen bg-background flex flex-col'>
         {ticket && (
           <WorkflowHeader
             ticket={ticket}
@@ -499,7 +499,7 @@ const WorkflowScreen: React.FC = () => {
         <div className='flex-1 flex items-center justify-center'>
           <div className='text-center'>
             <Loader2 className='w-8 h-8 text-blue-500 animate-spin mx-auto mb-4' />
-            <p className='text-gray-600 text-sm'>Loading workflow data...</p>
+            <p className='text-muted-foreground text-sm'>Loading workflow data...</p>
           </div>
         </div>
       </div>
@@ -509,11 +509,11 @@ const WorkflowScreen: React.FC = () => {
   // Ticket not found state
   if (ticketNotFound) {
     return (
-      <div className='h-screen bg-white flex flex-col'>
-        <div className='h-14 border-b border-gray-200 flex items-center px-4'>
+      <div className='h-screen bg-background flex flex-col'>
+        <div className='h-14 border-b border-border flex items-center px-4'>
           <button
             onClick={() => window.history.back()}
-            className='flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors'
+            className='flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors'
             data-track-category='Workflow'
             data-track-name='BackFromTicketNotFound'
           >
@@ -524,11 +524,11 @@ const WorkflowScreen: React.FC = () => {
         <div className='flex-1 flex items-center justify-center'>
           <div className='text-center max-w-md px-4'>
             <AlertCircle className='w-12 h-12 text-orange-500 mx-auto mb-4' />
-            <h3 className='text-lg font-semibold text-gray-900 mb-2'>Ticket Not Found</h3>
-            <p className='text-gray-600 text-sm mb-6'>
+            <h3 className='text-lg font-semibold text-foreground mb-2'>Ticket Not Found</h3>
+            <p className='text-muted-foreground text-sm mb-6'>
               The ticket with ID{' '}
-              <code className='bg-gray-100 px-1.5 py-0.5 rounded text-xs'>{ticketId}</code> could
-              not be found.
+              <code className='bg-muted px-1.5 py-0.5 rounded text-xs'>{ticketId}</code> could not
+              be found.
             </p>
             <button
               onClick={() => window.history.back()}
@@ -551,7 +551,7 @@ const WorkflowScreen: React.FC = () => {
     const errorMessage = error?.message || 'Failed to load workflow data';
 
     return (
-      <div className='h-screen bg-white flex flex-col'>
+      <div className='h-screen bg-background flex flex-col'>
         {ticket && (
           <WorkflowHeader
             ticket={ticket}
@@ -571,8 +571,8 @@ const WorkflowScreen: React.FC = () => {
         <div className='flex-1 flex items-center justify-center'>
           <div className='text-center max-w-md px-4'>
             <AlertCircle className='w-12 h-12 text-red-500 mx-auto mb-4' />
-            <h3 className='text-lg font-semibold text-gray-900 mb-2'>Failed to load workflow</h3>
-            <p className='text-gray-600 text-sm mb-6'>{errorMessage}</p>
+            <h3 className='text-lg font-semibold text-foreground mb-2'>Failed to load workflow</h3>
+            <p className='text-muted-foreground text-sm mb-6'>{errorMessage}</p>
             <button
               onClick={handleRefresh}
               className='px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors'
@@ -590,11 +590,11 @@ const WorkflowScreen: React.FC = () => {
   // Safety check
   if (!ticket) {
     return (
-      <div className='h-screen bg-white flex items-center justify-center'>
+      <div className='h-screen bg-background flex items-center justify-center'>
         <div className='text-center'>
-          <AlertCircle className='w-12 h-12 text-gray-400 mx-auto mb-4' />
-          <h3 className='text-lg font-medium text-gray-900 mb-2'>Unexpected Error</h3>
-          <p className='text-gray-600 text-sm mb-4'>Please refresh the page.</p>
+          <AlertCircle className='w-12 h-12 text-muted-foreground mx-auto mb-4' />
+          <h3 className='text-lg font-medium text-foreground mb-2'>Unexpected Error</h3>
+          <p className='text-muted-foreground text-sm mb-4'>Please refresh the page.</p>
           <button
             onClick={() => window.location.reload()}
             className='px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors'
@@ -610,7 +610,7 @@ const WorkflowScreen: React.FC = () => {
 
   return (
     <div
-      className='h-full bg-white flex flex-col overflow-hidden rounded-lg shadow-[0_0_8px_0_rgba(0,0,0,0.15)] relative'
+      className='h-full bg-background flex flex-col overflow-hidden rounded-lg shadow-[0_0_8px_0_rgba(0,0,0,0.15)] relative'
       data-component='WorkflowScreen'
     >
       {/* Minimal Header */}
@@ -677,7 +677,7 @@ const WorkflowScreen: React.FC = () => {
           </Panel>
 
           {/* Resize Handle */}
-          <PanelResizeHandle className='w-px bg-gray-200 hover:bg-blue-400 transition-colors cursor-col-resize' />
+          <PanelResizeHandle className='w-px bg-border hover:bg-blue-400 transition-colors cursor-col-resize' />
 
           {/* Right Panel - Tabs */}
           <Panel defaultSize={70} minSize={45}>

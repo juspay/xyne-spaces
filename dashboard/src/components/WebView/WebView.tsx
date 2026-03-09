@@ -30,8 +30,8 @@ const WebView = (): ReactElement => {
   // Empty state when no tabs
   if (tabs.length === 0) {
     return (
-      <div className='flex flex-col items-center justify-center h-full w-full bg-white'>
-        <div className='text-gray-500 text-center'>
+      <div className='flex flex-col items-center justify-center h-full w-full bg-background'>
+        <div className='text-muted-foreground text-center'>
           <span className='text-6xl mb-4 block'>🌐</span>
           <h3 className='text-lg font-semibold mb-2'>No tabs open</h3>
           <p className='text-sm'>Add a tab to start browsing</p>
@@ -44,14 +44,14 @@ const WebView = (): ReactElement => {
     <div className='flex flex-col h-full w-full p-2 bg-[#F0F2F5]'>
       <div className='flex flex-1 flex-col bg-[#F0F2F5] rounded-lg overflow-hidden border-[#DDE2E7] border'>
         {/* Tab Header Bar */}
-        <div className='flex items-center bg-gray-100 border-b border-gray-200 overflow-x-auto no-scrollbar debug'>
+        <div className='flex items-center bg-muted border-b border-border overflow-x-auto no-scrollbar debug'>
           {tabs.map((tab, index) => (
             <div
               key={index}
-              className={`flex items-center border-r border-gray-200 text-sm whitespace-nowrap transition-colors ${
+              className={`flex items-center border-r border-border text-sm whitespace-nowrap transition-colors ${
                 activeTab === index
-                  ? 'bg-white border-b-2 border-blue-500 text-gray-900'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                  ? 'bg-background border-b-2 border-blue-500 text-foreground'
+                  : 'bg-muted hover:bg-border text-foreground'
               }`}
             >
               {/* Tab content area - clicks to switch tabs */}

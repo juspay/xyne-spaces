@@ -64,19 +64,19 @@ const ProjectsListView = (): ReactElement => {
 
   if (loading) {
     return (
-      <div className='h-full bg-gray-50 flex items-center justify-center'>
-        <p className='text-gray-600'>Loading...</p>
+      <div className='h-full bg-muted flex items-center justify-center'>
+        <p className='text-muted-foreground'>Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className='h-full bg-gray-50 flex flex-col'>
+    <div className='h-full bg-muted flex flex-col'>
       <div className='flex-1 overflow-y-auto p-4'>
         {/* Header */}
         <div className='mb-6'>
           <div className='flex items-center justify-between mb-2'>
-            <h2 className='text-lg font-bold text-gray-900'>Projects</h2>
+            <h2 className='text-lg font-bold text-foreground'>Projects</h2>
             <Button
               buttonType={ButtonType.PRIMARY}
               text='New'
@@ -85,7 +85,7 @@ const ProjectsListView = (): ReactElement => {
               data-track-name='CreateProject'
             />
           </div>
-          <p className='text-xs text-gray-600'>Manage your projects</p>
+          <p className='text-xs text-muted-foreground'>Manage your projects</p>
         </div>
 
         {/* Projects List */}
@@ -103,9 +103,9 @@ const ProjectsListView = (): ReactElement => {
         {/* Empty State */}
         {projects?.length === 0 && (
           <div className='text-center py-8'>
-            <div className='text-gray-400 text-3xl mb-3'>📁</div>
-            <h3 className='text-sm font-semibold text-gray-700 mb-1'>No projects yet</h3>
-            <p className='text-xs text-gray-500'>Create your first project</p>
+            <div className='text-muted-foreground text-3xl mb-3'>📁</div>
+            <h3 className='text-sm font-semibold text-foreground mb-1'>No projects yet</h3>
+            <p className='text-xs text-muted-foreground'>Create your first project</p>
           </div>
         )}
       </div>

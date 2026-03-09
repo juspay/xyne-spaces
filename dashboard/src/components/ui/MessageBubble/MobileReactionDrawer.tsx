@@ -181,7 +181,7 @@ export default function MobileReactionDrawer({
         />
         <Drawer.Content
           asChild
-          className='fixed inset-x-0 bottom-0 z-[110] rounded-t-3xl bg-white'
+          className='fixed inset-x-0 bottom-0 z-[110] rounded-t-3xl bg-popover'
           onTouchStart={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
           onTouchEnd={e => e.stopPropagation()}
@@ -199,22 +199,22 @@ export default function MobileReactionDrawer({
                 className='relative z-0 flex gap-1 px-1 pb-1 border-b overflow-x-auto [scrollbar-color:transparent_transparent]'
               >
                 <Tabs.Tab
-                  className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-gray-600 outline-none select-none rounded-md ~hover:text-gray-900 ~hover:bg-gray-100 ~focus-visible:ring-2 ~focus-visible:ring-blue-500 data-[active]:text-gray-900 ~data-[active]:bg-gray-100'
+                  className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-blue-500 data-[active]:text-foreground ~data-[active]:bg-accent'
                   value='all'
                   onClick={() => handleTabClick('all')}
                 >
                   <span>All</span>
-                  <span className='text-xs text-gray-500'>{reactions.length}</span>
+                  <span className='text-xs text-muted-foreground'>{reactions.length}</span>
                 </Tabs.Tab>
                 {groupedReactions.map(({ emojiName, count }) => (
                   <Tabs.Tab
                     key={emojiName}
-                    className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-gray-600 outline-none select-none rounded-md ~hover:text-gray-900 ~hover:bg-gray-100 ~focus-visible:ring-2 ~focus-visible:ring-blue-500 data-[active]:text-gray-900 ~data-[active]:bg-gray-100'
+                    className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-blue-500 data-[active]:text-foreground ~data-[active]:bg-accent'
                     value={emojiName}
                     onClick={() => handleTabClick(emojiName)}
                   >
                     <span>{renderEmoji(emojiName)}</span>
-                    <span className='text-xs text-gray-500'>{count}</span>
+                    <span className='text-xs text-muted-foreground'>{count}</span>
                   </Tabs.Tab>
                 ))}
                 <Tabs.Indicator className='absolute bottom-0 left-0 z-[-1] h-0.5 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] rounded-t-sm bg-blue-500 transition-all duration-200 ease-out' />
@@ -248,12 +248,12 @@ export default function MobileReactionDrawer({
                         <button
                           key={idx}
                           onClick={() => paginate(idx + 1 - currentTabIndex)}
-                          className='flex items-start gap-3 px-2 py-2 w-full text-left hover:bg-gray-50 active:bg-gray-100 rounded-lg transition-colors'
+                          className='flex items-start gap-3 px-2 py-2 w-full text-left hover:bg-accent active:bg-accent rounded-lg transition-colors'
                         >
                           <span className='*:text-2xl flex-shrink-0'>
                             {renderEmoji(group.emojiName)}
                           </span>
-                          <p className='text-sm self-center text-gray-700 line-clamp-3'>
+                          <p className='text-sm self-center text-foreground line-clamp-3'>
                             {group.userNames}
                           </p>
                         </button>
@@ -271,10 +271,10 @@ export default function MobileReactionDrawer({
                               className='flex items-center gap-3 px-2 py-2'
                             >
                               <Avatar userId={user.userId} size='sm' showActiveStatus={false} />
-                              <span className='text-sm text-gray-900 truncate'>
+                              <span className='text-sm text-foreground truncate'>
                                 {user.name}
                                 {currentUser && user.userId === currentUser.id && (
-                                  <span className='text-gray-500'>(you)</span>
+                                  <span className='text-muted-foreground'>(you)</span>
                                 )}
                               </span>
                             </button>

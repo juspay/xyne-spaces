@@ -157,17 +157,17 @@ export const UserGroupForm = ({
       className='flex flex-col h-[800px]'
     >
       {/* User Group Header */}
-      <div className='px-6 py-4 border-b border-gray-200'>
+      <div className='px-6 py-4 border-b border-border'>
         <div className='flex items-center gap-3'>
           <div className='w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center'>
             <Users className='w-5 h-5 text-primary' />
           </div>
           <div>
-            <h2 className='text-lg font-semibold text-gray-900'>
+            <h2 className='text-lg font-semibold text-foreground'>
               {isEdit ? userGroup.name : 'New User Group'}
             </h2>
             {isEdit && userGroup.alias && (
-              <p className='text-sm text-gray-500'>@{userGroup.alias}</p>
+              <p className='text-sm text-muted-foreground'>@{userGroup.alias}</p>
             )}
           </div>
         </div>
@@ -180,7 +180,7 @@ export const UserGroupForm = ({
       )}
 
       {/* Tabs Header */}
-      <div className='border-b border-gray-200 px-6'>
+      <div className='border-b border-border px-6'>
         <div className='flex gap-6'>
           <Button
             type='button'
@@ -189,7 +189,7 @@ export const UserGroupForm = ({
             className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors rounded-none ${
               activeTab === 'about'
                 ? 'border-primary text-primary'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-input'
             }`}
             data-track-category='UserGroups'
             data-track-name='SwitchToAboutTab'
@@ -203,7 +203,7 @@ export const UserGroupForm = ({
             className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors rounded-none ${
               activeTab === 'members'
                 ? 'border-primary text-primary'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-input'
             }`}
             data-track-category='UserGroups'
             data-track-name='SwitchToMembersTab'
@@ -301,7 +301,7 @@ export const UserGroupForm = ({
       </div>
 
       {/* Footer Actions */}
-      <div className='border-t border-gray-200 p-6 flex gap-2 justify-end bg-white'>
+      <div className='border-t border-border p-6 flex gap-2 justify-end bg-background'>
         <Button
           variant='outline'
           onClick={onCancel}

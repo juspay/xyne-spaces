@@ -72,18 +72,20 @@ export const ToolGlobRenderer: React.FC<
     return (
       <div className='space-y-3 text-sm'>
         <div>
-          <span className='font-semibold text-gray-900 dark:text-gray-100'>Input:</span>
+          <span className='font-semibold text-foreground dark:text-gray-100'>Input:</span>
           <div className='space-y-2 mt-2'>
             <div>
-              <span className='font-medium text-gray-900 dark:text-gray-100'>Pattern: </span>
-              <code className='bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300'>
+              <span className='font-medium text-foreground dark:text-gray-100'>Pattern: </span>
+              <code className='bg-muted dark:bg-gray-800 px-2 py-1 rounded text-xs text-foreground dark:text-muted'>
                 {pattern}
               </code>
             </div>
             {searchPath && (
               <div>
-                <span className='font-medium text-gray-900 dark:text-gray-100'>Search Path: </span>
-                <code className='bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300'>
+                <span className='font-medium text-foreground dark:text-gray-100'>
+                  Search Path:{' '}
+                </span>
+                <code className='bg-muted dark:bg-gray-800 px-2 py-1 rounded text-xs text-foreground dark:text-muted'>
                   {searchPath}
                 </code>
               </div>
@@ -92,7 +94,7 @@ export const ToolGlobRenderer: React.FC<
         </div>
 
         <div>
-          <span className='font-semibold text-gray-900 dark:text-gray-100'>Output:</span>
+          <span className='font-semibold text-foreground dark:text-gray-100'>Output:</span>
           <div className='space-y-2 mt-2'>
             {error && (
               <div>
@@ -108,22 +110,22 @@ export const ToolGlobRenderer: React.FC<
             {!error && (
               <>
                 <div>
-                  <span className='font-medium text-gray-900 dark:text-gray-100'>
+                  <span className='font-medium text-foreground dark:text-gray-100'>
                     Files Found:{' '}
                   </span>
-                  <span className='text-gray-700 dark:text-gray-300'>{count}</span>
+                  <span className='text-foreground dark:text-muted'>{count}</span>
                 </div>
 
                 {files.length > 0 && (
                   <div>
-                    <span className='font-medium text-gray-900 dark:text-gray-100 block mb-2'>
+                    <span className='font-medium text-foreground dark:text-gray-100 block mb-2'>
                       Matching Files:
                     </span>
-                    <div className='bg-gray-100 dark:bg-gray-800 p-3 rounded text-xs max-h-64 overflow-auto border'>
+                    <div className='bg-muted dark:bg-gray-800 p-3 rounded text-xs max-h-64 overflow-auto border'>
                       {files.map((file, _index) => (
                         <div
                           key={file}
-                          className='font-mono text-gray-700 dark:text-gray-300 py-0.5'
+                          className='font-mono text-foreground dark:text-muted py-0.5'
                         >
                           {file}
                         </div>
@@ -133,7 +135,7 @@ export const ToolGlobRenderer: React.FC<
                 )}
 
                 {files.length === 0 && !error && (
-                  <div className='text-gray-500 dark:text-gray-400 italic'>
+                  <div className='text-muted-foreground dark:text-muted-foreground italic'>
                     No files matched the pattern
                   </div>
                 )}

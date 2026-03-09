@@ -36,14 +36,14 @@ const ErrorUI = ({ error, errorInfo }: ErrorFallbackProps): ReactElement => {
   return (
     <div
       data-id='error-fallback'
-      className='flex h-screen w-full items-center justify-center bg-white'
+      className='flex h-screen w-full items-center justify-center bg-background'
     >
       <div className='flex flex-col items-center text-center space-y-4 max-w-4xl px-4'>
         <div className='flex flex-col items-center space-y-4 select-none'>
           <img src='/svgs/icons/error.svg' alt='Error' className='w-40 h-36' draggable='false' />
           <div className='space-y-2'>
-            <p className='text-xl font-semibold text-gray-800'>Oops! Something went wrong</p>
-            <p className='text-md text-gray-500'>
+            <p className='text-xl font-semibold text-foreground'>Oops! Something went wrong</p>
+            <p className='text-md text-muted-foreground'>
               We couldn&apos;t complete your request. Please try again
             </p>
           </div>
@@ -51,27 +51,27 @@ const ErrorUI = ({ error, errorInfo }: ErrorFallbackProps): ReactElement => {
 
         {isDevelopment && error !== null && error !== undefined && (
           <div className='w-full text-left'>
-            <div className='bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-4'>
+            <div className='bg-muted border border-border rounded-lg p-4 space-y-4'>
               <div>
-                <p className='text-sm font-semibold text-gray-700 mb-2'>
+                <p className='text-sm font-semibold text-foreground mb-2'>
                   {error instanceof Error ? 'Error Message:' : 'Error Details:'}
                 </p>
-                <pre className='text-xs text-red-600 bg-white p-3 rounded border border-red-200 overflow-x-auto'>
+                <pre className='text-xs text-red-600 bg-background p-3 rounded border border-red-200 overflow-x-auto'>
                   {formatError(error)}
                 </pre>
               </div>
               {error instanceof Error && error.stack && (
                 <div>
-                  <p className='text-sm font-semibold text-gray-700 mb-2'>Stack Trace:</p>
-                  <pre className='text-xs text-gray-600 bg-white p-3 rounded border border-gray-200 overflow-x-auto max-h-64 overflow-y-auto'>
+                  <p className='text-sm font-semibold text-foreground mb-2'>Stack Trace:</p>
+                  <pre className='text-xs text-muted-foreground bg-background p-3 rounded border border-border overflow-x-auto max-h-64 overflow-y-auto'>
                     {error.stack}
                   </pre>
                 </div>
               )}
               {errorInfo?.componentStack && (
                 <div>
-                  <p className='text-sm font-semibold text-gray-700 mb-2'>Component Stack:</p>
-                  <pre className='text-xs text-gray-600 bg-white p-3 rounded border border-gray-200 overflow-x-auto max-h-64 overflow-y-auto'>
+                  <p className='text-sm font-semibold text-foreground mb-2'>Component Stack:</p>
+                  <pre className='text-xs text-muted-foreground bg-background p-3 rounded border border-border overflow-x-auto max-h-64 overflow-y-auto'>
                     {errorInfo.componentStack}
                   </pre>
                 </div>

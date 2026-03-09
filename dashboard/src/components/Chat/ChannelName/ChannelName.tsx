@@ -45,9 +45,9 @@ export const ChannelName: React.FC<ChannelNameProps> = ({
       channel.scopeType === ChannelScopeType.GROUP_DM
     ) {
       if (channel.visibility === ChannelVisibility.PUBLIC) {
-        return <Hash className={`${iconSizeClasses[iconSize]} text-gray-600`} />;
+        return <Hash className={`${iconSizeClasses[iconSize]} text-muted-foreground`} />;
       }
-      return <Lock className={`${iconSizeClasses[iconSize]} text-gray-600`} />;
+      return <Lock className={`${iconSizeClasses[iconSize]} text-muted-foreground`} />;
     }
 
     if (channel.scopeType === ChannelScopeType.DM) {
@@ -64,7 +64,7 @@ export const ChannelName: React.FC<ChannelNameProps> = ({
       );
     }
 
-    return <Hash className={`${iconSizeClasses[iconSize]} text-gray-400`} />;
+    return <Hash className={`${iconSizeClasses[iconSize]} text-muted-foreground`} />;
   };
 
   return (
@@ -77,7 +77,7 @@ export const ChannelName: React.FC<ChannelNameProps> = ({
     >
       {showIcon && renderChannelIcon()}
       <span
-        className={`font-semibold text-gray-900 ${textSizeClasses[textSize]} ${onClick ? 'hover:underline' : ''}`}
+        className={`font-semibold text-foreground ${textSizeClasses[textSize]} ${onClick ? 'hover:underline' : ''}`}
       >
         {displayName}
       </span>

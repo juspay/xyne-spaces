@@ -222,31 +222,31 @@ const Info = ({
   const popoverContainerRef = useRef<HTMLDivElement>(null);
 
   const headerLinkContainerStyle =
-    'flex items-center flex-col gap-y-2 border border-[#E4E6E7] p-[12px] min-w-[98px] rounded-[10px] cursor-pointer flex-1';
+    'flex items-center flex-col gap-y-2 border border-border p-[12px] min-w-[98px] rounded-[10px] cursor-pointer flex-1 text-muted-foreground';
 
   return (
     <div
       ref={popoverContainerRef}
-      className='overflow-clip h-[600px]'
+      className='overflow-clip h-[600px] bg-background'
       style={{ position: 'relative' }}
     >
       <div className='w-full flex items-start justify-between gap-2 p-4 pb-6'>
         <div className='flex items-center gap-2'>
-          <div className='w-11 h-11 rounded-[10px] border border-[#E4E6E7] bg-[#F2F2F3] flex items-center justify-center'>
+          <div className='w-11 h-11 rounded-[10px] border border-border bg-muted flex items-center justify-center'>
             <ChannelIcon channel={channel} />
           </div>
           <div>
-            <div className='text-[17px] font-medium text-[#181B1D] visual-regression-hide'>
+            <div className='text-[17px] font-medium text-foreground visual-regression-hide'>
               {channelDisplayName}
             </div>
             <div className='flex items-center gap-x-2'>
               <div className='flex items-center gap-1'>
-                <LucideKanbanSquare color='#788187' size={14} />
-                <div className='text-[#788187] text-[13px]'>{project?.name ?? 'NA'}</div>
+                <LucideKanbanSquare className='text-muted-foreground' size={14} />
+                <div className='text-muted-foreground text-[13px]'>{project?.name ?? 'NA'}</div>
               </div>
               <img src='/svgs/icons/dot.svg' alt='dot-icon' />
               <div className='flex items-center gap-1'>
-                <div className='text-[#788187] text-[13px]'>
+                <div className='text-muted-foreground text-[13px]'>
                   {boards.length} {boards.length === 1 ? 'Board' : 'Boards'}
                 </div>
               </div>
@@ -255,12 +255,12 @@ const Info = ({
         </div>
         <button
           onClick={onClose}
-          className='w-7 h-7 flex items-center justify-center border border-[#E4E6E7] rounded-[8px] cursor-pointer'
+          className='w-7 h-7 flex items-center justify-center border border-border rounded-[8px] cursor-pointer'
           data-track-category='CHAT_INFO'
           data-track-name='CLOSE_INFO'
           data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
-          <LucideX color='#505B62' size={16} />
+          <LucideX className='text-muted-foreground' size={16} />
         </button>
       </div>
 
@@ -282,10 +282,10 @@ const Info = ({
           {channelUserStatus?.isStarred ? (
             <LucideStar size={16} color='#FACC14' fill='#FACC14' />
           ) : (
-            <LucideStar color='#788187' size={16} />
+            <LucideStar className='text-muted-foreground' size={16} />
           )}
           <div
-            className={`${channelUserStatus?.isStarred ? 'text-[#FACC14]' : 'text-[#788187]'} text-[13px]`}
+            className={`${channelUserStatus?.isStarred ? 'text-[#FACC14]' : 'text-muted-foreground'} text-[13px]`}
           >
             Starred
           </div>
@@ -303,8 +303,8 @@ const Info = ({
               currentParticipantCount: participants.length,
             })}
           >
-            <LucideUserPlus size={16} color='#788187' />
-            <div className='text-[#788187] text-[13px]'>Add People</div>
+            <LucideUserPlus size={16} className='text-muted-foreground' />
+            <div className='text-muted-foreground text-[13px]'>Add People</div>
           </button>
         )}
         <button
@@ -318,12 +318,12 @@ const Info = ({
           {isUserInCurrentChannelCall ? (
             <PhoneOff className='w-4 h-4 text-[#D14040]' />
           ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
-            <HuddleIcon color='#788187' />
+            <HuddleIcon color='currentColor' />
           ) : (
-            <HuddleIcon color='#788187' />
+            <HuddleIcon color='currentColor' />
           )}
           <div
-            className={`${isUserInCurrentChannelCall ? 'text-[#D14040]' : 'text-[#788187]'} text-[13px]`}
+            className={`${isUserInCurrentChannelCall ? 'text-[#D14040]' : 'text-muted-foreground'} text-[13px]`}
           >
             {isUserInCurrentChannelCall ? 'Leave' : 'Call'}
           </div>
@@ -336,8 +336,8 @@ const Info = ({
             data-track-name='PROMOTE_GROUP_DM'
             data-track-metadata={JSON.stringify({ channelId: channel.id })}
           >
-            <ArrowUpCircle size={16} color='#788187' />
-            <div className='text-[#788187] text-[13px]'>Promote</div>
+            <ArrowUpCircle size={16} className='text-muted-foreground' />
+            <div className='text-muted-foreground text-[13px]'>Promote</div>
           </button>
         )}
         {isParticipant && !isDM && !isGroupDM && (
@@ -495,14 +495,14 @@ const ParticipantListItem = ({
     user?.presenceStatus?.statusEmoji &&
     (!user?.presenceStatus?.statusExpiryAt || !isStatusExpired(user.presenceStatus.statusExpiryAt));
 
-  const popoverStyle = `w-full flex items-center gap-x-1 p-2 cursor-pointer hover:bg-[#F2F2F3] rounded-md pr-6`;
+  const popoverStyle = `w-full flex items-center gap-x-1 p-2 cursor-pointer hover:bg-accent rounded-md pr-6`;
   return (
     <div className='px-4 group'>
-      <div className='flex items-center py-3 px-2 gap-3 transition-colors relative group-hover:bg-gray-100 rounded-lg'>
+      <div className='flex items-center py-3 px-2 gap-3 transition-colors relative group-hover:bg-accent rounded-lg'>
         <Avatar userId={participant.userId} size='md' showActiveStatus={true} />
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-2'>
-            <span className='text-sm truncate text-[#181B1D]'>{user?.name}</span>
+            <span className='text-sm truncate text-foreground'>{user?.name}</span>
             {hasValidStatus && (
               <Tooltip
                 content={`${user?.presenceStatus?.statusContent || 'Status'}`}
@@ -516,12 +516,14 @@ const ParticipantListItem = ({
               </Tooltip>
             )}
             {(isCreator || isAdmin) && (
-              <span className='px-2 py-[0.8px] text-[13px] bg-[#F2F2F3] text-[#788187] rounded-full whitespace-nowrap'>
+              <span className='px-2 py-[0.8px] text-[13px] bg-muted text-muted-foreground rounded-full whitespace-nowrap'>
                 Admin
               </span>
             )}
           </div>
-          <div className='text-sm text-muted-foreground truncate text-[#788187]'>{user?.email}</div>
+          <div className='text-sm text-muted-foreground truncate text-muted-foreground'>
+            {user?.email}
+          </div>
         </div>
 
         <div
@@ -546,7 +548,7 @@ const ParticipantListItem = ({
               sideOffset={8}
               align='end'
               {...(popoverContainer ? { container: popoverContainer } : {})}
-              className='p-1 border border-[#E4E6E7] rounded-lg shadow-[0px_8px_24px_0px_rgba(43,45,47,0.08)] overflow-hidden z-[100]'
+              className='p-1 border border-border rounded-lg shadow-[0px_8px_24px_0px_rgba(43,45,47,0.08)] overflow-hidden z-[100]'
             >
               <div>
                 {canManageThisUser &&
@@ -559,7 +561,7 @@ const ParticipantListItem = ({
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
                     >
                       <LucideUserMinus size={14} />
-                      <span className='text-[14px] text-[#181B1D]'>Remove admin</span>
+                      <span className='text-[14px] text-foreground'>Remove admin</span>
                     </button>
                   ) : (
                     <button
@@ -570,7 +572,7 @@ const ParticipantListItem = ({
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
                     >
                       <LucideUser size={14} />
-                      <span className='text-[14px] text-[#181B1D]'>Make admin</span>
+                      <span className='text-[14px] text-foreground'>Make admin</span>
                     </button>
                   ))}
                 {canRemoveThisUser && (
@@ -789,16 +791,16 @@ const ChannelMembers = ({
   }, [accumulatedParticipants, searchQuery, searchResults, usersById]);
 
   return (
-    <div className='relative bg-white h-[328px] flex flex-col'>
+    <div className='relative bg-background h-[328px] flex flex-col'>
       <div className='shrink-0 z-10 p-4'>
         <div className='relative'>
-          <Search className='text-gray-300 absolute left-3 top-1/2 size-4 -translate-y-1/2 pointer-events-none' />
+          <Search className='text-muted-foreground absolute left-3 top-1/2 size-4 -translate-y-1/2 pointer-events-none' />
           <Input
             type='text'
             placeholder='Find members'
             value={searchQuery}
             onChange={handleSearchChange}
-            className='placeholder:text-gray-400 px-10 rounded-[8px] border border-[#E4E6E7] focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+            className='placeholder:text-muted-foreground px-10 rounded-[8px] border border-border focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
           />
         </div>
       </div>

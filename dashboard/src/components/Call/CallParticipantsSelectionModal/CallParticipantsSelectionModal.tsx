@@ -73,7 +73,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             userId={user.id}
             size='sm'
             showActiveStatus={false}
-            className='rounded-md size-[18px] flex items-center justify-center bg-white'
+            className='rounded-md size-[18px] flex items-center justify-center bg-background'
           />
         ),
         subtitle: user.email,
@@ -164,8 +164,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       className='max-w-[584px] rounded-xl overflow-hidden'
     >
       <div className='flex flex-col w-full'>
-        <div className='flex items-start justify-between px-5 py-3.5 border-b border-gray-200 h-14'>
-          <h2 className='text-[15px] font-semibold text-gray-900 leading-5'>
+        <div className='flex items-start justify-between px-5 py-3.5 border-b border-border h-14'>
+          <h2 className='text-[15px] font-semibold text-foreground leading-5'>
             Start an Instant Call
           </h2>
           <Button variant='outline' size='icon' className='size-7 rounded-lg' onClick={handleClose}>
@@ -181,7 +181,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 {selectedUsers.map(user => (
                   <div
                     key={user.id}
-                    className='flex items-center gap-1.5 rounded-md bg-gray-50 border border-gray-200 px-2 py-1.5'
+                    className='flex items-center gap-1.5 rounded-md bg-muted border border-border px-2 py-1.5'
                   >
                     <Avatar
                       userId={user.id}
@@ -189,7 +189,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                       showActiveStatus={false}
                       className='rounded-md flex-shrink-0'
                     />
-                    <span className='text-sm font-medium text-gray-900 whitespace-nowrap'>
+                    <span className='text-sm font-medium text-foreground whitespace-nowrap'>
                       {user.name ?? user.email}
                     </span>
                     <button
@@ -200,7 +200,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                           selectedParticipants.filter(p => p !== valueToRemove),
                         );
                       }}
-                      className='text-gray-400 hover:text-gray-600 flex-shrink-0'
+                      className='text-muted-foreground hover:text-muted-foreground flex-shrink-0'
                       data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
                       data-track-name='RemoveCallParticipant'
                       data-track-metadata={JSON.stringify({

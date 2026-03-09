@@ -183,8 +183,8 @@ const TicketKeyValuePair = ({
 }): React.ReactElement => {
   return (
     <div className='flex flex-wrap items-center gap-2 w-fit'>
-      <span className='text-sm text-[#181B1D] w-[85px]'>{ticketKey}</span>
-      <div className={`text-sm text-[#3B4145] break-all ${className}`}>{value}</div>
+      <span className='text-sm text-foreground w-[85px]'>{ticketKey}</span>
+      <div className={`text-sm text-foreground break-all ${className}`}>{value}</div>
     </div>
   );
 };
@@ -758,7 +758,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   if (!ticket) {
     return (
       <div className='max-w-5xl mx-auto px-6 py-6'>
-        <p className='text-gray-500'>Loading ticket details...</p>
+        <p className='text-muted-foreground'>Loading ticket details...</p>
       </div>
     );
   }
@@ -1255,7 +1255,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           {allowEdit ? (
             <div className='relative inline-flex items-center'>
               <select
-                className='appearance-none pl-3 pr-8 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg shadow-sm'
+                className='appearance-none pl-3 pr-8 py-2 text-sm font-medium text-foreground bg-background border border-border rounded-lg shadow-sm'
                 value={reference.relationType}
                 onChange={event =>
                   handleReferenceRelationChange(
@@ -1273,28 +1273,28 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   </option>
                 ))}
               </select>
-              <ChevronDown className='pointer-events-none absolute right-3 h-4 w-4 text-gray-400' />
+              <ChevronDown className='pointer-events-none absolute right-3 h-4 w-4 text-muted-foreground' />
             </div>
           ) : (
-            <span className='inline-flex items-center px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 bg-white shadow-sm'>
+            <span className='inline-flex items-center px-3 py-2 rounded-lg border border-border text-sm font-medium text-foreground bg-background shadow-sm'>
               {label}
             </span>
           )}
         </div>
 
-        <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-[#F9F9F9] px-3 py-2.5 shadow-sm'>
+        <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-border bg-muted px-3 py-2.5 shadow-sm'>
           <div className='flex items-center gap-3 min-w-0'>
             <TicketStageIcon progressPercentage={displayProgress} size={18} />
             <div className='flex items-center gap-4 min-w-0'>
-              <span className='text-sm font-medium text-gray-500 font-mono shrink-0'>
+              <span className='text-sm font-medium text-muted-foreground font-mono shrink-0'>
                 {relatedTicket?.xyneId || relatedTicket?.id || '—'}
               </span>
               {link ? (
-                <Link className='text-sm font-normal text-gray-900 truncate' to={link}>
+                <Link className='text-sm font-normal text-foreground truncate' to={link}>
                   {getReferenceTitle(relatedTicket)}
                 </Link>
               ) : (
-                <span className='text-sm font-normal text-gray-900 truncate'>
+                <span className='text-sm font-normal text-foreground truncate'>
                   {getReferenceTitle(relatedTicket)}
                 </span>
               )}
@@ -1310,13 +1310,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 showActiveStatus={false}
               />
             ) : (
-              <div className='h-7 w-7 rounded-lg border border-gray-200 bg-gray-100' />
+              <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
             )}
           </div>
           {allowEdit && (
             <button
               type='button'
-              className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100'
+              className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted hover:text-red-500 opacity-0 group-hover:opacity-100'
               onClick={() => handleRemoveReference(reference.id)}
               aria-label='Remove reference'
               data-track-category='Tickets'
@@ -1343,7 +1343,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             >
               <ChevronLeft size={18} color='#222530' />
             </button>
-            <span className='text-[14px] font-medium text-[#2B303B] px-2 py-0.5'>
+            <span className='text-[14px] font-medium text-foreground px-2 py-0.5'>
               {ticket.xyneId}
             </span>
           </div>
@@ -1354,7 +1354,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 disabled={!navigation?.canNavigatePrevious}
                 className={
                   navigation?.canNavigatePrevious
-                    ? 'hover:bg-gray-100 rounded cursor-pointer'
+                    ? 'hover:bg-muted rounded cursor-pointer'
                     : 'opacity-40 cursor-not-allowed'
                 }
                 aria-label='Previous ticket'
@@ -1368,7 +1368,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 disabled={!navigation?.canNavigateNext}
                 className={
                   navigation?.canNavigateNext
-                    ? 'hover:bg-gray-100 rounded cursor-pointer'
+                    ? 'hover:bg-muted rounded cursor-pointer'
                     : 'opacity-40 cursor-not-allowed'
                 }
                 aria-label='Next ticket'
@@ -1377,16 +1377,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               >
                 <ChevronDown size={18} color='#222530' />
               </button>
-              <div className='flex items-center gap-x-1/2 text-[14px] text-[#2B303B] font-medium'>
+              <div className='flex items-center gap-x-1/2 text-[14px] text-foreground font-medium'>
                 <span>{(navigation?.currentIndex ?? 0) + 1}</span>
                 <span>/</span>
-                <span className='text-[#99A0AE]'>{navigation?.totalCount ?? 0}</span>
+                <span className='text-muted-foreground'>{navigation?.totalCount ?? 0}</span>
               </div>
             </div>
             <div className='flex items-center gap-x-2'>
               <Tooltip content='Copy Ticket Link'>
                 <Button
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
                   variant='ghost'
                   size='sm'
                   onClick={handleCopyTicketViewLink}
@@ -1399,7 +1399,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <Button
                   variant='ghost'
                   size='sm'
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
                   onClick={() => {
                     void navigate(
                       `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
@@ -1412,7 +1412,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               </Tooltip>
               <Tooltip content='Trigger Workflow'>
                 <Button
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
                   variant='ghost'
                   size='sm'
                   onClick={() => setIsWorkflowModalOpen(true)}
@@ -1423,7 +1423,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               </Tooltip>
               <Tooltip content='Minimize View'>
                 <Button
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
                   variant='ghost'
                   size='sm'
                   onClick={handleMinimizeExpandedView}
@@ -1456,7 +1456,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   setEditingTitle(false);
                 }
               }}
-              className='flex-1 text-2xl font-semibold text-gray-900 outline-none bg-transparent'
+              className='flex-1 text-2xl font-semibold text-foreground outline-none bg-transparent'
               data-track-category='Tickets'
               data-track-name='EditTicketTitle'
               data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -1466,7 +1466,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <div
             role='button'
             tabIndex={0}
-            className='text-[20px] font-semibold text-[#2B303B] flex-1 cursor-text px-2 -mx-2 break-all'
+            className='text-[20px] font-semibold text-foreground flex-1 cursor-text px-2 -mx-2 break-all'
             onClick={() => setEditingTitle(true)}
             onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -1483,7 +1483,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       </div>
       <div>
         {editingDescription ? (
-          <div className='bg-gray-50 rounded-lg p-4 border border-gray-300'>
+          <div className='bg-muted rounded-lg p-4 border border-input'>
             <textarea
               ref={descriptionTextareaRef}
               value={descriptionValue}
@@ -1495,7 +1495,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   setEditingDescription(false);
                 }
               }}
-              className='w-full text-sm text-gray-700 leading-relaxed outline-none bg-transparent resize-none min-h-[100px]'
+              className='w-full text-sm text-foreground leading-relaxed outline-none bg-transparent resize-none min-h-[100px]'
               data-track-category='Tickets'
               data-track-name='EditDescription'
               data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -1505,7 +1505,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <div
             role='button'
             tabIndex={0}
-            className='cursor-text my-3 text-[#181B1D] flex flex-col'
+            className='cursor-text my-3 text-foreground flex flex-col'
             onClick={() => setEditingDescription(true)}
             onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -1517,13 +1517,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             data-track-name='StartEditDescription'
           >
             {!ticket.description ? (
-              <p className='text-sm text-gray-400 italic'>Add description</p>
+              <p className='text-sm text-muted-foreground italic'>Add description</p>
             ) : (
               <>
                 <p
                   ref={descriptionRef}
                   className={cn(
-                    'whitespace-pre-wrap text-gray-700 break-all text-sm',
+                    'whitespace-pre-wrap text-foreground break-all text-sm',
                     !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
                   )}
                 >
@@ -1619,7 +1619,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           shape={AvatarShape.CIRCULAR}
                           showActiveStatus={false}
                         />
-                        <span className='text-sm text-gray-700'>{reviewer?.name || 'Unknown'}</span>
+                        <span className='text-sm text-foreground'>
+                          {reviewer?.name || 'Unknown'}
+                        </span>
                       </div>
                     );
                   })}
@@ -1640,7 +1642,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     shape={AvatarShape.CIRCULAR}
                     showActiveStatus={false}
                   />
-                  <span className='text-sm text-gray-700'>
+                  <span className='text-sm text-foreground'>
                     {users?.find((u: { id: string; name: string }) => u.id === qaId)?.name ||
                       'Unknown'}
                   </span>
@@ -1729,7 +1731,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       return (
                         <span
                           key={tag.id}
-                          className={`inline-flex items-center gap-1.5 px-2 py-1 text-sm font-medium group relative rounded-[6px] border border-[#F2F2F3] bg-[#FAFAFA]`}
+                          className={`inline-flex items-center gap-1.5 px-2 py-1 text-sm font-medium group relative rounded-[6px] border border-border bg-muted`}
                         >
                           {/* <Tag size={14} className={color.icon} /> */}
                           <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
@@ -1754,7 +1756,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     })}
                   <button
                     onClick={() => setShowTagDropdown(!showTagDropdown)}
-                    className='inline-flex items-center justify-center gap-1 text-sm text-gray-600 hover:text-gray-900 transition-colors'
+                    className='inline-flex items-center justify-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors'
                     aria-label='Add tag'
                     data-track-category='Tickets'
                     data-track-name='ToggleTagDropdown'
@@ -1766,9 +1768,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </div>
 
                 {showTagDropdown && (
-                  <div className='absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[250px] max-h-64 overflow-hidden'>
+                  <div className='absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[250px] max-h-64 overflow-hidden'>
                     {/* Search Input */}
-                    <div className='p-2 border-b border-gray-200'>
+                    <div className='p-2 border-b border-border'>
                       <input
                         ref={tagInputRef}
                         type='text'
@@ -1776,7 +1778,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         onChange={e => setTagSearchQuery(e.target.value)}
                         onKeyDown={handleTagKeyDown}
                         placeholder='Search or create tag...'
-                        className='w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-blue-500'
+                        className='w-full px-2.5 py-1.5 text-sm border border-input rounded outline-none focus:border-blue-500'
                         data-track-category='Tickets'
                         data-track-name='SearchTags'
                       />
@@ -1787,7 +1789,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       {tagSearchQuery.trim() && !exactMatch && (
                         <button
                           onClick={() => void handleToggleTag(tagSearchQuery)}
-                          className='w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100'
+                          className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
                           data-track-category='Tickets'
                           data-track-name='CreateTag'
                           data-track-metadata={JSON.stringify({ tagName: tagSearchQuery.trim() })}
@@ -1806,7 +1808,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           <button
                             key={tagName}
                             onClick={() => void handleToggleTag(tagName)}
-                            className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-gray-50'
+                            className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
                             data-track-category='Tickets'
                             data-track-name='ToggleTag'
                             data-track-metadata={JSON.stringify({
@@ -1815,7 +1817,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             })}
                           >
                             <div className='flex items-center gap-2'>
-                              <Tag size={14} className='text-gray-400' />
+                              <Tag size={14} className='text-muted-foreground' />
                               <span>{tagName}</span>
                             </div>
 
@@ -1971,7 +1973,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         setEditingETA(false);
                       }
                     }}
-                    className='text-sm border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+                    className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
                     data-track-category='Tickets'
                     data-track-name='StageETAInput'
                     data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -1982,7 +1984,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   role='button'
                   tabIndex={0}
                   data-testid='ticket-detail-eta-display'
-                  className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] cursor-pointer hover:bg-gray-100 px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-gray-200 transition-colors'
+                  className='inline-flex items-center gap-1.5 text-sm text-foreground cursor-pointer hover:bg-muted px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-border transition-colors'
                   data-track-category='TicketDetails'
                   data-track-name='EditStageETA'
                   data-track-metadata={JSON.stringify({
@@ -2013,7 +2015,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                       ticket.statusV2 !== TicketStatusV2.CANCELLED
                         ? 'text-red-500'
-                        : 'text-gray-500'
+                        : 'text-muted-foreground'
                     }
                   />
                   <span>{ticket.eta ? formatETADisplay(ticket.eta) : 'Set Due Date'}</span>
@@ -2056,7 +2058,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           setEditingStageETA(false);
                         }
                       }}
-                      className='text-sm border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+                      className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
                       data-track-category='Tickets'
                       data-track-name='StageETAInput'
                       data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -2067,7 +2069,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     role='button'
                     tabIndex={0}
                     data-testid='ticket-detail-stage-eta-display'
-                    className='inline-flex items-center gap-1.5 text-sm text-[#3B4145] cursor-pointer hover:bg-gray-100 px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-gray-200 transition-colors'
+                    className='inline-flex items-center gap-1.5 text-sm text-foreground cursor-pointer hover:bg-muted px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-border transition-colors'
                     onClick={() => {
                       if (currentStageEntry?.stageEta) {
                         setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
@@ -2098,7 +2100,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                         ticket.statusV2 !== TicketStatusV2.CANCELLED
                           ? 'text-red-500'
-                          : 'text-gray-500'
+                          : 'text-muted-foreground'
                       }
                     />
                     <span>
@@ -2141,13 +2143,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         : (ticket.eta ?? null);
 
                     return (
-                      <div className='inline-flex items-center gap-2 text-sm text-[#3B4145]'>
+                      <div className='inline-flex items-center gap-2 text-sm text-foreground'>
                         <span>{formatETADisplay(projectedEta ?? undefined)}</span>
                       </div>
                     );
                   })()
                 ) : (
-                  <span className='text-sm text-gray-500'>-</span>
+                  <span className='text-sm text-muted-foreground'>-</span>
                 )
               }
             />
@@ -2170,14 +2172,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       {ticket.merchantId && (
         <TicketKeyValuePair
           ticketKey='Merchant ID'
-          value={<span className='text-sm text-[#525866]'>{ticket.merchantId}</span>}
+          value={<span className='text-sm text-muted-foreground'>{ticket.merchantId}</span>}
         />
       )}
 
       {/* Additional Form Fields */}
       {allFormFields && allFormFields.length > 0 && (
-        <div className='border border-gray-200 bg-gray-50 rounded-lg p-4 my-4'>
-          <h3 className='text-base font-semibold text-gray-900 mb-4'>Additional Form Fields</h3>
+        <div className='border border-border bg-muted rounded-lg p-4 my-4'>
+          <h3 className='text-base font-semibold text-foreground mb-4'>Additional Form Fields</h3>
           <div className='space-y-4'>
             {allFormFields.map(fieldValue => (
               <EditableFormField
@@ -2199,8 +2201,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       {formsToShow.length > 0 && (
         <div className='my-4'>
           <div className='flex items-center gap-3 mb-4'>
-            <p className='text-base font-semibold text-gray-900'>Status Change Requests</p>
-            <span className='inline-flex items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'>
+            <p className='text-base font-semibold text-foreground'>Status Change Requests</p>
+            <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
               {formsToShow.length}
             </span>
           </div>
@@ -2229,14 +2231,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     <div className='flex items-center justify-between gap-4'>
                       <div className='flex items-center gap-4 flex-1 min-w-0'>
                         {/* Form Name or Stage Name */}
-                        <p className='text-base font-medium text-gray-900'>
+                        <p className='text-base font-medium text-foreground'>
                           {item.formId
                             ? (item.form?.formName ?? 'Form')
                             : `Stage: ${stage?.name || 'Unknown Stage'}`}
                         </p>
 
                         {/* Old Stage -> New Stage */}
-                        <p className='text-sm text-gray-500'>
+                        <p className='text-sm text-muted-foreground'>
                           {previousStage?.name || 'Start'} &rarr; {stage?.name || 'Unknown Stage'}
                         </p>
 
@@ -2331,7 +2333,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                         hasApprovers: true,
                                       })
                                     }
-                                    className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
+                                    className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
                                     aria-label='View form'
                                     data-track-category='Tickets'
                                     data-track-name='ViewStageForm'
@@ -2392,7 +2394,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     existingRequest: item.request!,
                                   })
                                 }
-                                className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
+                                className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
                                 aria-label='View form'
                                 data-track-category='Tickets'
                                 data-track-name='ViewApprovedStageForm'
@@ -2524,7 +2526,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 existingRequest: item.request!,
                               })
                             }
-                            className='text-gray-500 hover:text-blue-600 transition-colors border border-gray-300 rounded-md p-1.5'
+                            className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
                             aria-label='View form'
                             data-track-category='Tickets'
                             data-track-name='ViewStageFormNoApprovers'
@@ -2569,20 +2571,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             data-track-category='Tickets'
             data-track-name='FillRCA'
             data-testid='fill-rca-button'
-            className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 shadow-sm hover:shadow-md hover:border-gray-300 transition-all'
+            className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
           >
             <span className='inline-flex items-center gap-3'>
-              <span className='flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-700'>
+              <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>
                 <ClipboardCheck size={18} />
               </span>
               <span className='flex flex-col text-left'>
-                <span className='text-sm font-semibold text-gray-900'>Fill RCA</span>
-                <span className='text-xs text-gray-600'>
+                <span className='text-sm font-semibold text-foreground'>Fill RCA</span>
+                <span className='text-xs text-muted-foreground'>
                   Add root cause, impact, and COE details
                 </span>
               </span>
             </span>
-            <ArrowRight className='h-4 w-4 text-gray-500 transition-transform group-hover:translate-x-0.5' />
+            <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />
           </button>
         </div>
       )}
@@ -2591,9 +2593,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       <div className='mt-6 space-y-6' data-testid='sub-tickets-section'>
         <div>
           <div className='flex items-center gap-3'>
-            <p className='text-base font-semibold text-gray-900'>Sub-Tickets</p>
+            <p className='text-base font-semibold text-foreground'>Sub-Tickets</p>
             <span
-              className='inline-flex items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'
+              className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
               data-testid='sub-tickets-count'
             >
               {subTickets.length}
@@ -2655,13 +2657,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         subTicketId: subTicket.id,
                         mappedTicketId: subTicket.mappedTicketId,
                       })}
-                      className='flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer'
+                      className='flex items-center justify-between p-3 bg-muted rounded-lg hover:bg-muted transition-colors cursor-pointer'
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
-                        <span className='text-xs font-medium text-gray-500 whitespace-nowrap'>
+                        <span className='text-xs font-medium text-muted-foreground whitespace-nowrap'>
                           {displayId}
                         </span>
-                        <span className='text-sm text-gray-900 truncate'>{displayTitle}</span>
+                        <span className='text-sm text-foreground truncate'>{displayTitle}</span>
                         {subTicket.mappedTicketId && (
                           <FileText size={14} className='text-blue-600 flex-shrink-0' />
                         )}
@@ -2671,7 +2673,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         {boardStages && boardStages.length > 0 && (
                           <div className='flex items-center gap-1.5'>
                             <TicketStageIcon progressPercentage={displayProgress} size={18} />
-                            <span className='text-xs font-medium text-gray-700 whitespace-nowrap'>
+                            <span className='text-xs font-medium text-foreground whitespace-nowrap'>
                               {boardStages.findIndex(s => s.name === mappedTicket?.stageName) + 1}/
                               {boardStages.length}
                             </span>
@@ -2686,7 +2688,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             showActiveStatus={false}
                           />
                         ) : (
-                          <div className='h-7 w-7 rounded-lg border border-gray-200 bg-gray-100' />
+                          <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
                         )}
                       </div>
                     </div>
@@ -2701,7 +2703,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               data-track-category='TICKETS'
               data-track-name='CREATE_SUB_TICKET'
               data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-              className='flex items-center gap-2 mt-3 text-sm text-gray-600 hover:text-gray-900 transition-colors'
+              className='flex items-center gap-2 mt-3 text-sm text-muted-foreground hover:text-foreground transition-colors'
             >
               <Plus size={16} />
               Create Sub-Ticket
@@ -2710,11 +2712,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </div>
       </div>
       {/* Related Tickets Section */}
-      <div className='border-t border-gray-200 pt-6 mt-6'>
+      <div className='border-t border-border pt-6 mt-6'>
         <div>
           <div className='flex items-center gap-3'>
-            <p className='text-base font-semibold text-gray-900'>Related Tickets</p>
-            <span className='inline-flex items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600'>
+            <p className='text-base font-semibold text-foreground'>Related Tickets</p>
+            <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
               {referencesOut.length + referencesIn.length + (parentTickets?.length || 0)}
             </span>
           </div>
@@ -2738,26 +2740,26 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   return (
                     <div key={parentTicket.id} className='flex flex-col gap-2'>
                       <div>
-                        <span className='inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-gray-700'>
+                        <span className='inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-foreground'>
                           Parent:
                         </span>
                       </div>
-                      <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-[#F9F9F9] px-3 py-2.5 shadow-sm'>
+                      <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-border bg-muted px-3 py-2.5 shadow-sm'>
                         <div className='flex items-center gap-3 min-w-0'>
                           <TicketStageIcon progressPercentage={displayProgress} size={18} />
                           <div className='flex items-center gap-4 min-w-0'>
-                            <span className='text-sm font-medium text-gray-500 font-mono shrink-0'>
+                            <span className='text-sm font-medium text-muted-foreground font-mono shrink-0'>
                               {parentTicket.xyneId || parentTicket.id.substring(0, 8).toUpperCase()}
                             </span>
                             {link ? (
                               <Link
-                                className='text-sm font-normal text-gray-900 truncate'
+                                className='text-sm font-normal text-foreground truncate'
                                 to={link}
                               >
                                 {parentTicket.title || 'Untitled Ticket'}
                               </Link>
                             ) : (
-                              <span className='text-sm font-normal text-gray-900 truncate'>
+                              <span className='text-sm font-normal text-foreground truncate'>
                                 {parentTicket.title || 'Untitled Ticket'}
                               </span>
                             )}
@@ -2775,7 +2777,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                               showActiveStatus={false}
                             />
                           ) : (
-                            <div className='h-7 w-7 rounded-lg border border-gray-200 bg-gray-100' />
+                            <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
                           )}
                         </div>
                         <button
@@ -2823,11 +2825,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             )}
 
             {!parentTickets?.length && referencesOut.length + referencesIn.length === 0 && (
-              <p className='text-sm text-gray-400'>No related tickets yet.</p>
+              <p className='text-sm text-muted-foreground'>No related tickets yet.</p>
             )}
 
             <div
-              className={`rounded-lg border border-gray-200 px-3 py-2 flex items-center ${
+              className={`rounded-lg border border-border px-3 py-2 flex items-center ${
                 isReferenceSaving ? 'opacity-60 pointer-events-none' : ''
               }`}
             >
@@ -2932,7 +2934,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           title='Confirm Stage Change'
         >
           <div className='p-6'>
-            <p className='text-sm text-gray-600 mb-6'>
+            <p className='text-sm text-muted-foreground mb-6'>
               Moving to a previous stage will clear all status change requests for status after this
               one. These requests will need to be submitted again. Do you want to continue?
             </p>
@@ -2992,7 +2994,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           title='Confirm Board Change'
         >
           <div className='p-6'>
-            <p className='text-sm text-gray-600 mb-6'>
+            <p className='text-sm text-muted-foreground mb-6'>
               Changing the board will move this ticket to the first stage of the selected board. All
               previous stage progress and change requests will be permanently removed.
             </p>

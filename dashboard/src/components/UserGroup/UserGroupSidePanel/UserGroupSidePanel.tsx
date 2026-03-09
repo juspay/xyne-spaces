@@ -67,16 +67,16 @@ export const UserGroupSidePanel = (): ReactElement | null => {
   if (!groupId || !userGroup) return null;
 
   return (
-    <div className='h-full w-full bg-white flex flex-col'>
+    <div className='h-full w-full bg-background flex flex-col'>
       {/* Header - Slack-like design */}
-      <div className='flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0'>
+      <div className='flex items-center justify-between px-6 py-4 border-b border-border bg-background flex-shrink-0'>
         <div className='flex items-center gap-3 min-w-0 flex-1'>
           <div className='flex items-center justify-center w-9 h-9 bg-blue-500 rounded-md flex-shrink-0'>
             <Users className='w-5 h-5 text-white' />
           </div>
           <div className='min-w-0 flex-1'>
-            <h2 className='text-[15px] font-bold text-gray-900 truncate'>{userGroup.name}</h2>
-            <p className='text-[13px] text-gray-600'>
+            <h2 className='text-[15px] font-bold text-foreground truncate'>{userGroup.name}</h2>
+            <p className='text-[13px] text-muted-foreground'>
               {memberCount} {memberCount === 1 ? 'member' : 'members'}
             </p>
           </div>
@@ -85,36 +85,36 @@ export const UserGroupSidePanel = (): ReactElement | null => {
           onClick={handleClose}
           data-track-category='USER_GROUP_SIDEPANEL'
           data-track-name='CLOSE_SIDEPANEL'
-          className='p-1.5 hover:bg-gray-100 rounded transition-colors flex-shrink-0 ml-2'
+          className='p-1.5 hover:bg-muted rounded transition-colors flex-shrink-0 ml-2'
           aria-label='Close'
         >
-          <X className='w-5 h-5 text-gray-500' />
+          <X className='w-5 h-5 text-muted-foreground' />
         </button>
       </div>
 
       {/* Content */}
-      <div className='flex-1 overflow-y-auto bg-white'>
+      <div className='flex-1 overflow-y-auto bg-background'>
         {/* Description */}
         {userGroup.description && (
-          <div className='px-6 py-4 border-b border-gray-200'>
-            <h3 className='text-[13px] font-semibold text-gray-900 mb-2'>About</h3>
-            <p className='text-[15px] text-gray-700 leading-relaxed'>{userGroup.description}</p>
+          <div className='px-6 py-4 border-b border-border'>
+            <h3 className='text-[13px] font-semibold text-foreground mb-2'>About</h3>
+            <p className='text-[15px] text-foreground leading-relaxed'>{userGroup.description}</p>
           </div>
         )}
 
         {/* Members Section */}
         <div className='px-6 py-4'>
-          <h3 className='text-[13px] font-semibold text-gray-900 mb-3'>Members</h3>
-          <div className='divide-y divide-gray-100'>
+          <h3 className='text-[13px] font-semibold text-foreground mb-3'>Members</h3>
+          <div className='divide-y divide-border'>
             {membersWithRoles.map(({ user, responsibility }) => (
               <div
                 key={user.id}
-                className='flex items-center gap-3 py-2.5 px-2 -mx-2 rounded hover:bg-gray-50 transition-colors cursor-pointer'
+                className='flex items-center gap-3 py-2.5 px-2 -mx-2 rounded hover:bg-muted transition-colors cursor-pointer'
               >
                 <Avatar userId={user.id} size='md' showActiveStatus={true} />
                 <div className='flex-1 min-w-0'>
-                  <p className='text-[14px] font-medium text-gray-900 truncate'>{user.name}</p>
-                  <p className='text-[12px] text-gray-500 truncate'>{user.email}</p>
+                  <p className='text-[14px] font-medium text-foreground truncate'>{user.name}</p>
+                  <p className='text-[12px] text-muted-foreground truncate'>{user.email}</p>
                 </div>
                 <span
                   className={`text-[12px] px-2 py-0.5 rounded font-medium flex-shrink-0 ${
@@ -122,7 +122,7 @@ export const UserGroupSidePanel = (): ReactElement | null => {
                       ? 'bg-purple-100 text-purple-700'
                       : responsibility === UserResponsibility.TEAM_LEAD
                         ? 'bg-blue-100 text-blue-700'
-                        : 'bg-gray-100 text-gray-600'
+                        : 'bg-muted text-muted-foreground'
                   }`}
                 >
                   {responsibility === UserResponsibility.MANAGER
@@ -141,8 +141,8 @@ export const UserGroupSidePanel = (): ReactElement | null => {
 
           {memberCount === 0 && (
             <div className='text-center py-12'>
-              <Users className='w-12 h-12 text-gray-300 mx-auto mb-3' />
-              <p className='text-[15px] text-gray-500'>No members in this group</p>
+              <Users className='w-12 h-12 text-muted mx-auto mb-3' />
+              <p className='text-[15px] text-muted-foreground'>No members in this group</p>
             </div>
           )}
         </div>

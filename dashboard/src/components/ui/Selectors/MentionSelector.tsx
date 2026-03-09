@@ -117,7 +117,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
     (item: MentionResult, _index: number, isSelected: boolean) => (
       <div
         className={`flex items-center transition-all duration-200 ease-in active:scale-[0.98] ${mentionBasedClass} ${
-          isSelected ? 'bg-gray-200' : ''
+          isSelected ? 'bg-accent' : ''
         }`}
       >
         {/* Channel mentions (triggered by #) */}
@@ -125,13 +125,13 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
           <>
             <div className='w-8 h-8 flex items-center justify-center flex-shrink-0'>
               {item.isPrivate ? (
-                <Lock className='h-3.5 w-3.5 text-gray-600' />
+                <Lock className='h-3.5 w-3.5 text-muted-foreground' />
               ) : (
-                <Hash className='h-3.5 w-3.5 text-gray-600' />
+                <Hash className='h-3.5 w-3.5 text-muted-foreground' />
               )}
             </div>
             <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-              <span className='text-sm font-medium text-gray-800 whitespace-nowrap overflow-hidden text-ellipsis'>
+              <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
                 {item.name}
               </span>
             </div>
@@ -147,7 +147,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
               <span className='text-sm font-medium text-orange-700 whitespace-nowrap overflow-hidden text-ellipsis'>
                 @{item.name}
               </span>
-              <span className='text-xs text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis'>
+              <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
                 {item.description}
               </span>
             </div>
@@ -158,10 +158,10 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
               <span className='text-base leading-none'>👥</span>
             </div>
             <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-              <span className='text-sm font-medium text-gray-800 whitespace-nowrap overflow-hidden text-ellipsis'>
+              <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
                 {item.alias ? `@${item.alias}` : item.name}
               </span>
-              <span className='text-xs text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis'>
+              <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
                 {item.alias && item.name !== item.alias ? item.name : ''}
                 {/* {item.memberCount} member{item.memberCount !== 1 ? 's' : ''} */}
               </span>
@@ -178,17 +178,17 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
             />
             <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
               <div className='flex items-center gap-2'>
-                <span className='text-sm font-medium text-gray-800 whitespace-nowrap overflow-hidden text-ellipsis'>
+                <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
                   {item.name}
                 </span>
                 {item.isChannelMember === false && (
-                  <span className='text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded'>
+                  <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
                     Not in channel
                   </span>
                 )}
               </div>
               {item.email && (
-                <span className='text-xs text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis'>
+                <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
                   {item.email}
                 </span>
               )}

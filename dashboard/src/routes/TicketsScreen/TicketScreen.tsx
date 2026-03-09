@@ -66,14 +66,14 @@ const TicketsScreen = (): ReactElement => {
   }, [searchParams, navigate]);
 
   if (shouldRedirect) {
-    return <div className='h-full bg-gray-50' />;
+    return <div className='h-full bg-muted' />;
   }
 
   return (
-    <div className='h-full bg-gray-50 rounded-lg shadow-[0_0_8px_0_rgba(0,0,0,0.15)]'>
+    <div className='h-full bg-muted rounded-lg shadow-[0_0_8px_0_rgba(0,0,0,0.15)]'>
       <main className='mx-auto py-6 sm:px-6 lg:px-8'>
         <div className='px-4 py-6 sm:px-0'>
-          <div className='bg-white rounded-lg shadow'>
+          <div className='bg-background rounded-lg shadow'>
             <div className='px-6 py-4'>
               <TicketHeader filters={filters} onFiltersChange={setFilters} />
               <TicketTable filters={filters} />

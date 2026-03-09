@@ -21,7 +21,7 @@ const ProjectsScreen = (): ReactElement => {
   return (
     <div
       ref={containerRef}
-      className='h-full relative bg-white md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)]'
+      className='h-full relative bg-background md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)]'
       data-component='ProjectsScreen'
     >
       {isWideScreen ? (
@@ -44,7 +44,7 @@ const ProjectsScreen = (): ReactElement => {
 
           {/* RESIZE HANDLE */}
           <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-            <div id='panel-resize-divider' className='w-[1px] h-full bg-gray-200'></div>
+            <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
           </PanelResizeHandle>
 
           {/* RIGHT PANEL (Content View) */}
@@ -57,15 +57,15 @@ const ProjectsScreen = (): ReactElement => {
       ) : (
         // Narrow screen: Overlay pattern
         <>
-          <aside className='h-full min-[500px]:px-4 border-r border-gray-200'>
+          <aside className='h-full min-[500px]:px-4 border-r border-border'>
             {/* Placeholder for Project Directory */}
-            <div className='h-full flex items-center justify-center text-gray-500'>
+            <div className='h-full flex items-center justify-center text-muted-foreground'>
               Project Directory Placeholder
             </div>
           </aside>
           {/* Content overlay - Show when not on root projects path */}
           {location.pathname !== '/projects' && (
-            <div className='absolute inset-0 z-50 bg-white'>
+            <div className='absolute inset-0 z-50 bg-background'>
               <main data-id='projects-screen' className='h-full overflow-hidden'>
                 <Outlet />
               </main>

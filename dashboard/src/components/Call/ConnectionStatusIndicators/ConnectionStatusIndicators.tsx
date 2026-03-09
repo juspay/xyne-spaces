@@ -186,7 +186,7 @@ export function ConnectionStatusIndicators({
       case 'reconnecting':
         return 'bg-yellow-500/90 text-white';
       case 'connecting':
-        return 'bg-gray-500/90 text-white';
+        return 'bg-muted0/90 text-white';
       case 'disconnected':
         return 'bg-red-500/90 text-white';
     }

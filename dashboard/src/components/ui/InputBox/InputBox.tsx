@@ -294,7 +294,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           },
           blockquote: {
             HTMLAttributes: {
-              class: 'border-l-4 border-gray-400 pl-4 text-gray-700',
+              class: 'border-l-4 border-muted-foreground pl-4 text-foreground',
             },
           },
           bulletList: {
@@ -335,7 +335,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }).configure({
           openOnClick: false,
           HTMLAttributes: {
-            class: 'text-blue-600 hover:text-blue-700 underline cursor-text',
+            class: 'text-primary hover:text-blue-700 underline cursor-text',
             rel: 'noopener noreferrer',
           },
         }),
@@ -867,12 +867,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 onChange={e => {
                   onAlsoSendToChannelChange(e.target.checked);
                 }}
-                className='h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded'
+                className='h-3 w-3 text-primary focus:ring-ring border-input rounded'
                 disabled={disabled || isSending}
               />
               <label
                 htmlFor='also-send-to-channel'
-                className='text-xs text-gray-500 cursor-pointer'
+                className='text-xs text-muted-foreground cursor-pointer'
               >
                 Also send to channel
               </label>
@@ -901,11 +901,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     trigger={
                       <button
                         type='button'
-                        className='p-1.5 bg-[#E8EAED] hover:bg-[#ccd3d9] transition-all duration-200 ease-in-out rounded-full'
+                        className='p-1.5 bg-muted hover:bg-accent transition-all duration-200 ease-in-out rounded-full'
                         aria-label='Add content'
                         disabled={disabled || isSending}
                       >
-                        <Plus className='h-4 w-4 text-gray-600' />
+                        <Plus className='h-4 w-4 text-muted-foreground' />
                       </button>
                     }
                     open={isPlusMenuOpen}
@@ -960,7 +960,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   />
                 </Dialog>
 
-                <div className='h-3 w-px bg-gray-300 mx-1' aria-hidden='true' />
+                <div className='h-3 w-px bg-border mx-1' aria-hidden='true' />
 
                 {features.emojiPicker && (
                   // Inside InputBox.tsx -> EmojiPickerButton component
@@ -977,11 +977,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       onClick={() => {
                         editor?.chain().focus().insertContent('@').run();
                       }}
-                      className='p-1.5 rounded hover:bg-gray-100 transition-all duration-200 ease-in-out'
+                      className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                       aria-label='Mention user'
                       disabled={disabled || isSending}
                     >
-                      <AtSign className='h-4 w-4 text-gray-600' />
+                      <AtSign className='h-4 w-4 text-muted-foreground' />
                     </button>
                   </Tooltip>
                 )}
@@ -992,11 +992,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     onClick={() => {
                       editor?.chain().focus().insertContent('#').run();
                     }}
-                    className='p-1.5 rounded hover:bg-gray-100 transition-all duration-200 ease-in-out'
+                    className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                     aria-label='Mention channel'
                     disabled={disabled || isSending}
                   >
-                    <span className='text-gray-600 font-semibold text-sm'>#</span>
+                    <span className='text-muted-foreground font-semibold text-sm'>#</span>
                   </button>
                 </Tooltip>
               </div>
@@ -1007,7 +1007,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     <button
                       type='button'
                       onClick={onCancel}
-                      className='p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                      className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                       aria-label='Cancel editing'
                     >
                       <X className='h-4 w-4' />
@@ -1022,7 +1022,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                           content || allAttachments.length > 0 || sendMode === 'ticket'
                             ? 'bg-primary text-white hover:bg-primary/90'
-                            : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-50'
+                            : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                         }`}
                       >
                         <Tooltip
@@ -1075,8 +1075,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <div
                           className={`w-px h-4 ${
                             content || allAttachments.length > 0 || sendMode === 'ticket'
-                              ? 'bg-white/20'
-                              : 'bg-gray-400/20'
+                              ? 'bg-background/20'
+                              : 'bg-muted-foreground/20'
                           }`}
                         ></div>
                         <Menu
@@ -1133,7 +1133,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
                             (content || allAttachments.length > 0) && !disabled
                               ? 'bg-primary text-white hover:bg-primary/90'
-                              : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-80'
+                              : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}
                           aria-label='Send message'
                           data-testid='send-message-button'
@@ -1164,17 +1164,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         {/* Typing Indicator - Always reserve space to prevent layout shift */}
         <div className='mt-1 h-4 flex items-baseline justify-start px-1 mb-1 absolute -bottom-1 right-0 left-0 translate-y-full'>
           {showTypingIndicator && typingUsers.length > 0 && (
-            <small className='text-[10px] text-gray-600 flex items-baseline'>
+            <small className='text-[10px] text-muted-foreground flex items-baseline'>
               {formatTypingMessage(typingUsers)}
               <span className='flex items-center ml-1'>
                 <span className='animate-[loading-dots_1.4s_infinite_0.2s]'>
-                  <DotIcon className='size-2 text-gray-500' />
+                  <DotIcon className='size-2 text-muted-foreground' />
                 </span>
                 <span className='animate-[loading-dots_1.4s_infinite_0.4s]'>
-                  <DotIcon className='size-2 text-gray-500' />
+                  <DotIcon className='size-2 text-muted-foreground' />
                 </span>
                 <span className='animate-[loading-dots_1.4s_infinite_0.6s]'>
-                  <DotIcon className='size-2 text-gray-500' />
+                  <DotIcon className='size-2 text-muted-foreground' />
                 </span>
               </span>
             </small>

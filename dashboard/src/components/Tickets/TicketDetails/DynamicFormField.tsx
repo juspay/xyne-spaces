@@ -114,15 +114,17 @@ const BooleanFieldComponent: React.FC<{
   <div className='space-y-1'>
     <label
       htmlFor={field.name}
-      className='flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors'
+      className='flex items-center justify-between p-3 bg-muted dark:bg-gray-800/50 border border-border dark:border-gray-700 rounded-lg cursor-pointer hover:bg-muted dark:hover:bg-gray-800 transition-colors'
     >
       <div className='flex-1 pr-4'>
-        <span className='text-sm font-medium text-gray-700 dark:text-gray-200'>
+        <span className='text-sm font-medium text-foreground dark:text-gray-200'>
           {field.label}
           {field.required === true && <span className='text-red-500 ml-0.5'>*</span>}
         </span>
         {field.description && (
-          <p className='text-xs text-gray-500 dark:text-gray-400 mt-0.5'>{field.description}</p>
+          <p className='text-xs text-muted-foreground dark:text-muted-foreground mt-0.5'>
+            {field.description}
+          </p>
         )}
       </div>
       <div className='relative flex-shrink-0'>
@@ -136,8 +138,8 @@ const BooleanFieldComponent: React.FC<{
           data-track-name='DynamicBooleanField'
           data-track-metadata={JSON.stringify({ fieldName: field.name })}
         />
-        <div className='w-11 h-6 bg-gray-200 dark:bg-gray-700 rounded-full peer peer-checked:bg-blue-600 transition-colors' />
-        <div className='absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform peer-checked:translate-x-5' />
+        <div className='w-11 h-6 bg-border dark:bg-gray-700 rounded-full peer peer-checked:bg-blue-600 transition-colors' />
+        <div className='absolute left-0.5 top-0.5 w-5 h-5 bg-background rounded-full shadow-sm transition-transform peer-checked:translate-x-5' />
       </div>
     </label>
     {renderError(error)}

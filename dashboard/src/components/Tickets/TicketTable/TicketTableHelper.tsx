@@ -91,8 +91,8 @@ export const getAssigneeOptions = (users: User[], userGroups: UserGroup[]): Enti
     label: group.name,
     subtitle: 'Group',
     icon: (
-      <div className='w-5 h-5 rounded-lg bg-gray-200 flex items-center justify-center'>
-        <span className='text-xs font-medium text-[#505B62]'>
+      <div className='w-5 h-5 rounded-lg bg-border flex items-center justify-center'>
+        <span className='text-xs font-medium text-muted-foreground'>
           {group.name.charAt(0).toUpperCase()}
         </span>
       </div>
@@ -106,7 +106,7 @@ export const UNASSIGNED_OPTION: EntityOption = {
   value: '',
   label: 'Unassigned',
   icon: (
-    <div className='w-5 h-5 rounded-full border border-dashed border-gray-400 flex items-center justify-center'>
+    <div className='w-5 h-5 rounded-full border border-dashed border-muted-foreground flex items-center justify-center'>
       <UserIcon className='w-3 h-3' strokeWidth={1.5} />
     </div>
   ),

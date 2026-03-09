@@ -38,7 +38,7 @@ export const BoardFilterBar: React.FC<BoardFilterBarProps> = ({
     <div
       role='tablist'
       aria-label='Boards'
-      className='flex items-center border border-[#ECEFF3] bg-white absolute bottom-0 right-0 z-20 w-full overflow-x-auto no-scrollbar'
+      className='flex items-center border border-border bg-background absolute bottom-0 right-0 z-20 w-full overflow-x-auto no-scrollbar'
     >
       {/* All Boards Tab */}
       <Button
@@ -47,10 +47,10 @@ export const BoardFilterBar: React.FC<BoardFilterBarProps> = ({
         aria-selected={isAllSelected}
         onClick={selectAllBoards}
         className={cn(
-          'px-6 py-3 text-sm font-medium whitespace-nowrap min-w-[100px] border-r border-[#ECEFF3] rounded-none h-auto',
+          'px-6 py-3 text-sm font-medium whitespace-nowrap min-w-[100px] border-r border-border rounded-none h-auto',
           isAllSelected
             ? 'bg-blue-50 text-blue-600 border-b-2 border-b-blue-600'
-            : 'text-gray-500 hover:bg-gray-50',
+            : 'text-muted-foreground hover:bg-muted',
         )}
         data-track-category='Tickets'
         data-track-name='SelectAllBoards'
@@ -70,10 +70,10 @@ export const BoardFilterBar: React.FC<BoardFilterBarProps> = ({
             aria-selected={isActive}
             onClick={() => selectSingleBoard(board.id)}
             className={cn(
-              'px-6 py-3 text-sm font-medium whitespace-nowrap min-w-[100px] border-r border-[#ECEFF3] rounded-none h-auto',
+              'px-6 py-3 text-sm font-medium whitespace-nowrap min-w-[100px] border-r border-border rounded-none h-auto',
               isActive
-                ? 'text-sidebar-badge-accent border-b-2 border-b-sidebar-badge-accent bg-gray-50'
-                : 'text-gray-500 hover:bg-gray-50',
+                ? 'text-sidebar-badge-accent border-b-2 border-b-sidebar-badge-accent bg-muted'
+                : 'text-muted-foreground hover:bg-muted',
             )}
             data-track-category='Tickets'
             data-track-name='SelectBoardTab'

@@ -37,19 +37,19 @@ const UserRow = ({
   };
 
   return (
-    <div className='flex items-center px-6 py-4 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-b-0'>
+    <div className='flex items-center px-6 py-4 hover:bg-muted transition-colors border-b border-border last:border-b-0'>
       {/* User Column */}
       <div className='flex items-center gap-3 flex-1 min-w-0'>
         <Avatar userId={user.id} size='sm' />
         <div className='min-w-0'>
-          <div className='text-sm font-medium text-gray-900 truncate'>{user.name}</div>
-          <div className='text-xs text-gray-500 truncate'>{user.email}</div>
+          <div className='text-sm font-medium text-foreground truncate'>{user.name}</div>
+          <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
         </div>
       </div>
 
       {/* Team Column */}
       <div className='flex-1 min-w-0 px-4'>
-        <div className='text-sm text-gray-700 truncate'>{userProfile?.team || '-'}</div>
+        <div className='text-sm text-foreground truncate'>{userProfile?.team || '-'}</div>
       </div>
 
       {/* Manager Column */}
@@ -57,16 +57,16 @@ const UserRow = ({
         {manager ? (
           <div className='flex items-center gap-2'>
             <Avatar userId={manager.id} size='sm' />
-            <span className='text-sm text-gray-700 truncate'>{manager.name}</span>
+            <span className='text-sm text-foreground truncate'>{manager.name}</span>
           </div>
         ) : (
-          <span className='text-sm text-gray-400'>-</span>
+          <span className='text-sm text-muted-foreground'>-</span>
         )}
       </div>
 
       {/* Role Column */}
       <div className='flex-1 min-w-0 px-4'>
-        <div className='text-sm text-gray-700 truncate'>{userProfile?.role || '-'}</div>
+        <div className='text-sm text-foreground truncate'>{userProfile?.role || '-'}</div>
       </div>
 
       {/* Actions Column */}
@@ -111,28 +111,28 @@ export const UserListView = ({ users, onEditResource }: UserListViewProps): Reac
   };
 
   return (
-    <div className='bg-white rounded-lg border border-gray-200 overflow-hidden'>
+    <div className='bg-background rounded-lg border border-border overflow-hidden'>
       {/* Header */}
-      <div className='flex items-center px-6 py-3 bg-gray-50 border-b border-gray-200'>
-        <div className='flex-1 text-xs font-semibold text-gray-500 uppercase tracking-wider'>
+      <div className='flex items-center px-6 py-3 bg-muted border-b border-border'>
+        <div className='flex-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
           User
         </div>
-        <div className='flex-1 text-xs font-semibold text-gray-500 uppercase tracking-wider px-4'>
+        <div className='flex-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4'>
           Team
         </div>
-        <div className='flex-1 text-xs font-semibold text-gray-500 uppercase tracking-wider px-4'>
+        <div className='flex-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4'>
           Manager
         </div>
-        <div className='flex-1 text-xs font-semibold text-gray-500 uppercase tracking-wider px-4'>
+        <div className='flex-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4'>
           Role
         </div>
-        <div className='w-32 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider'>
+        <div className='w-32 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
           Actions
         </div>
       </div>
 
       {/* User Rows */}
-      <div className='divide-y divide-gray-100'>
+      <div className='divide-y divide-border'>
         {usersWithProfiles.map(user => (
           <UserRow key={user.id} user={user} onEditResource={onEditResource} />
         ))}
@@ -140,8 +140,8 @@ export const UserListView = ({ users, onEditResource }: UserListViewProps): Reac
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className='flex items-center justify-between px-6 py-3 bg-gray-50 border-t border-gray-200'>
-          <div className='text-sm text-gray-500'>
+        <div className='flex items-center justify-between px-6 py-3 bg-muted border-t border-border'>
+          <div className='text-sm text-muted-foreground'>
             Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} -{' '}
             {Math.min(currentPage * ITEMS_PER_PAGE, users.length)} of {users.length} users
           </div>
@@ -155,7 +155,7 @@ export const UserListView = ({ users, onEditResource }: UserListViewProps): Reac
             >
               <ChevronLeft className='w-4 h-4' />
             </Button>
-            <span className='text-sm text-gray-700'>
+            <span className='text-sm text-foreground'>
               Page {currentPage} of {totalPages}
             </span>
             <Button

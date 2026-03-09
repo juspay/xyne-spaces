@@ -20,7 +20,7 @@ const ChatRedirect = (): ReactElement => {
   return (
     <div className='flex flex-col items-center justify-center h-full touch-action-none'>
       <img src={'/images/empty-chats.png'} alt='Loading chat' width={400} height={500} />
-      <p className='text-gray-800 select-none'>Loading...</p>
+      <p className='text-foreground select-none'>Loading...</p>
     </div>
   );
 };

@@ -24,19 +24,19 @@ export function WeekView({
 
   return (
     <>
-      <div className='flex-1 overflow-auto bg-white px-6 py-6'>
-        <div className='bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden'>
-          <div className='grid grid-cols-7 bg-gray-50 border-b border-gray-200'>
+      <div className='flex-1 overflow-auto bg-background px-6 py-6'>
+        <div className='bg-background rounded-xl border border-border shadow-sm overflow-hidden'>
+          <div className='grid grid-cols-7 bg-muted border-b border-border'>
             {days.map(day => {
               const isToday = isSameDay(day, new Date());
               return (
                 <div key={format(day, 'yyyy-MM-dd')} className='px-3 py-4 text-center'>
-                  <div className='text-xs font-medium text-gray-400 uppercase tracking-wide mb-1'>
+                  <div className='text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1'>
                     {format(day, 'EEE')}
                   </div>
                   <div
                     className={`text-xl font-semibold ${
-                      isToday ? 'text-blue-500' : 'text-gray-900'
+                      isToday ? 'text-blue-500' : 'text-foreground'
                     }`}
                   >
                     {format(day, 'd')}
@@ -57,7 +57,7 @@ export function WeekView({
                   type='button'
                   key={dateKey}
                   onClick={() => dayTickets.length > 0 && setSelectedDate(day)}
-                  className={`p-3 border-r border-gray-100 last:border-r-0 text-left transition-all duration-200 hover:bg-gray-50/50 ${
+                  className={`p-3 border-r border-border last:border-r-0 text-left transition-all duration-200 hover:bg-muted/50 ${
                     isToday ? 'bg-blue-50/30' : ''
                   }`}
                   data-track-category='CALENDAR_WEEK_VIEW'
@@ -79,13 +79,13 @@ export function WeekView({
                       />
                     ))}
                     {dayTickets.length > 8 && (
-                      <div className='text-xs text-gray-400 pl-1 font-medium'>
+                      <div className='text-xs text-muted-foreground pl-1 font-medium'>
                         +{dayTickets.length - 8} more
                       </div>
                     )}
                     {dayTickets.length === 0 && (
                       <div className='flex items-center justify-center h-full min-h-[100px]'>
-                        <span className='text-xs text-gray-300'>No tickets</span>
+                        <span className='text-xs text-muted'>No tickets</span>
                       </div>
                     )}
                   </div>

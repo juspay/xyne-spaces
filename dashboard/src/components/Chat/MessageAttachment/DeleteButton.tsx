@@ -18,8 +18,9 @@ interface DeleteButtonProps {
 }
 
 const VARIANT_STYLES: Record<DeleteButtonVariant, string> = {
-  default: 'flex-shrink-0 text-gray-600 dark:text-gray-400 hover:text-red-600 text-red-500',
-  overlay: 'hover:bg-white/20 text-white hover:text-red-400',
+  default:
+    'flex-shrink-0 text-muted-foreground dark:text-muted-foreground hover:text-red-600 text-red-500',
+  overlay: 'hover:bg-background/20 text-white hover:text-red-400',
 } as const;
 
 const ICON_SIZES: Record<DeleteButtonVariant, number> = {
@@ -103,10 +104,10 @@ export const DeleteButton = memo<DeleteButtonProps>(
           <div className='p-6'>
             <div className='flex items-start justify-between mb-4'>
               <div className='flex-1'>
-                <h2 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
+                <h2 className='text-lg font-semibold text-foreground dark:text-gray-100'>
                   Delete Attachment
                 </h2>
-                <p className='text-sm text-gray-600 dark:text-gray-400 mt-1'>
+                <p className='text-sm text-muted-foreground dark:text-muted-foreground mt-1'>
                   Are you sure you want to delete this attachment?
                 </p>
               </div>
@@ -120,14 +121,14 @@ export const DeleteButton = memo<DeleteButtonProps>(
               </Button>
             </div>
 
-            <div className='border-t border-gray-200 dark:border-gray-700 mb-4' />
+            <div className='border-t border-border dark:border-gray-700 mb-4' />
 
             <div className='space-y-3 mb-6'>
-              <p className='text-sm text-gray-600 dark:text-gray-400'>
+              <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
                 This action cannot be undone.
               </p>
-              <div className='bg-gray-50 dark:bg-gray-900 rounded-md p-3 border border-gray-200 dark:border-gray-700'>
-                <p className='text-sm font-medium text-gray-900 dark:text-gray-100 truncate'>
+              <div className='bg-muted dark:bg-gray-900 rounded-md p-3 border border-border dark:border-gray-700'>
+                <p className='text-sm font-medium text-foreground dark:text-gray-100 truncate'>
                   {fileName}
                 </p>
               </div>

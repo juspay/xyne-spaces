@@ -29,20 +29,20 @@ export const AboutChannel: React.FC<AboutChannelProps> = ({ channel }) => {
   return (
     <div className='p-4 space-y-6'>
       {/* Description Section */}
-      <div className='space-y-2 border-t border-gray-200 pt-6'>
+      <div className='space-y-2 border-t border-border pt-6'>
         <div className='flex justify-between items-start'>
-          <h3 className='text-sm font-medium text-gray-900'>Description</h3>
+          <h3 className='text-sm font-medium text-foreground'>Description</h3>
           <Button buttonType={ButtonType.SECONDARY} size={ButtonSize.SMALL} text='Edit' />
         </div>
-        <p className='text-sm text-gray-600'>
+        <p className='text-sm text-muted-foreground'>
           {channel.description || 'Click edit to add description'}
         </p>
       </div>
 
       {/* Created by Section */}
-      <div className='space-y-2 border-t border-gray-200 pt-6'>
-        <h3 className='text-sm font-medium text-gray-900'>Created by</h3>
-        <p className='text-sm text-gray-600'>
+      <div className='space-y-2 border-t border-border pt-6'>
+        <h3 className='text-sm font-medium text-foreground'>Created by</h3>
+        <p className='text-sm text-muted-foreground'>
           {createdByUser?.name || 'Unknown'} on{' '}
           {new Date(channel.createdAt).toLocaleDateString('en-US', {
             year: 'numeric',
@@ -54,18 +54,18 @@ export const AboutChannel: React.FC<AboutChannelProps> = ({ channel }) => {
 
       {/* Leave Channel */}
       {isAChannelParticipant && (
-        <div className='border-t border-gray-200 pt-6'>
+        <div className='border-t border-border pt-6'>
           <Button buttonType={ButtonType.DANGER} size={ButtonSize.SMALL} text='Leave channel' />
         </div>
       )}
 
       {/* Channel ID */}
-      <div className='border-t border-gray-200 pt-4'>
+      <div className='border-t border-border pt-4'>
         <div className='flex items-center'>
-          <span className='text-xs text-gray-500'>Channel ID: {channel.id}</span>
+          <span className='text-xs text-muted-foreground'>Channel ID: {channel.id}</span>
           <button
             onClick={() => void handleCopyChannelId()}
-            className='p-1  text-gray-400 hover:text-gray-600 transition-colors'
+            className='p-1  text-muted-foreground hover:text-muted-foreground transition-colors'
             title='Copy Channel ID'
             data-track-category='CHANNEL_INFORMATION'
             data-track-name='COPY_CHANNEL_ID'

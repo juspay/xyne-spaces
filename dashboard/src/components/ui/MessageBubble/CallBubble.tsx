@@ -55,7 +55,7 @@ export const GeneratePRDButton: React.FC<{
         onClick={() => setIsModalOpen(true)}
         disabled={isLoading}
         className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
-        style={{ color: '#0077FF' }}
+        style={{ color: 'var(--nav-active-icon, #0077FF)' }}
       >
         {isLoading ? (
           <>
@@ -122,7 +122,7 @@ const ChatWithAskAIButton: React.FC<{
       type='button'
       onClick={handleClick}
       className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all'
-      style={{ color: '#0077FF' }}
+      style={{ color: 'var(--nav-active-icon, #0077FF)' }}
     >
       <span>Chat with Transcript</span>
     </button>
@@ -153,7 +153,9 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
         <>
           {/* Call ended message content */}
           {message.content && (
-            <div className='text-sm text-gray-600 visual-regression-hide'>{message.content}</div>
+            <div className='text-sm text-muted-foreground visual-regression-hide'>
+              {message.content}
+            </div>
           )}
 
           {/* Attachments */}
@@ -161,23 +163,23 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
             <div>
               <div className='flex items-center gap-3 text-xs font-medium'>
                 <div className='flex items-center gap-1'>
-                  <span className='text-gray-500'>
+                  <span className='text-muted-foreground'>
                     {attachments.length > 1
                       ? `${attachments.length} files`
                       : attachments[0]?.originalFilename}
                   </span>
                   <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
                     {isExpanded ? (
-                      <ChevronDown className='w-4 h-4 text-gray-500' />
+                      <ChevronDown className='w-4 h-4 text-muted-foreground' />
                     ) : (
-                      <ChevronRight className='w-4 h-4 text-gray-500' />
+                      <ChevronRight className='w-4 h-4 text-muted-foreground' />
                     )}
                   </button>
                 </div>
 
                 {attachments.length > 1 && (
                   <>
-                    <span className='text-gray-400'>|</span>
+                    <span className='text-muted-foreground'>|</span>
                     <button
                       type='button'
                       onClick={() => {
@@ -185,7 +187,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                           void downloadAttachment(attachment.id, attachment.originalFilename);
                         });
                       }}
-                      className='flex items-center gap-2 text-gray-600 hover:text-gray-900'
+                      className='flex items-center gap-2 text-muted-foreground hover:text-foreground'
                     >
                       <span>Download all</span>
                     </button>
@@ -243,7 +245,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
               />
 
               {/* Separator */}
-              <span className='text-gray-400'>•</span>
+              <span className='text-muted-foreground'>•</span>
 
               {/* Chat with Transcript Button */}
               <ChatWithAskAIButton

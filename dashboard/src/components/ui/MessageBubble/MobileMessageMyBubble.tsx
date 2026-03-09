@@ -112,7 +112,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
       )}
 
       {isBookmarked && (
-        <div className='flex items-center gap-1 text-[11px] text-blue-600 font-normal mb-1 justify-end pr-2'>
+        <div className='flex items-center gap-1 text-[11px] text-primary font-normal mb-1 justify-end pr-2'>
           <Bookmark className='w-3 h-3 fill-current' />
           <span>Reminder Set</span>
         </div>
@@ -186,7 +186,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                   </div>
                 )}
                 {/* Forwarded message content with left border */}
-                <div className='border-l-4 border-gray-300 pl-3'>
+                <div className='border-l-4 border-border pl-3'>
                   <div className='flex items-center gap-2 mb-1'>
                     {forwardedMessageData.originalSenderId && (
                       <UserAvatar
@@ -195,18 +195,18 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                         showActiveStatus={false}
                       />
                     )}
-                    <span className='text-xs font-medium text-gray-700'>
+                    <span className='text-xs font-medium text-muted-foreground'>
                       {forwardedMessageData.originalSenderName || 'Unknown User'}
                     </span>
                     {forwardedMessageData.originalCreatedAt && (
-                      <span className='text-xs text-gray-500'>
+                      <span className='text-xs text-muted-foreground'>
                         {formatRelativeTimestamp(forwardedMessageData.originalCreatedAt)}
                       </span>
                     )}
                   </div>
                   <div
                     className={cn(
-                      'jp-message-html whitespace-pre-wrap break-all-words inline-block text-gray-600',
+                      'jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground',
                       getEmojiFontSizeClass(forwardedMessageData.content),
                     )}
                   >

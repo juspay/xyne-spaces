@@ -149,9 +149,9 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
   if (imageError) {
     return (
       <div className='flex items-center justify-center h-full'>
-        <div className='text-center text-gray-300'>
+        <div className='text-center text-muted'>
           <p className='text-lg font-semibold mb-2 text-white'>Failed to load image</p>
-          <p className='text-sm text-gray-400'>The image could not be displayed</p>
+          <p className='text-sm text-muted-foreground'>The image could not be displayed</p>
         </div>
       </div>
     );
@@ -244,7 +244,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
             <div className='relative w-full h-full flex items-center justify-center'>
               {!imageLoaded && (
                 <div className='absolute inset-0 flex items-center justify-center z-10'>
-                  <div className='text-gray-300 bg-black/60 px-4 py-2 rounded backdrop-blur-sm'>
+                  <div className='text-muted bg-black/60 px-4 py-2 rounded backdrop-blur-sm'>
                     Loading image...
                   </div>
                 </div>
@@ -276,7 +276,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
           >
             <button
               onClick={handleRotate}
-              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
               title='Rotate (Ctrl R)'
               data-track-category='FileViewer'
               data-track-name='ROTATE_IMAGE'
@@ -286,7 +286,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
             </button>
             <button
               onClick={handleZoomOut}
-              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
               title='Zoom Out (Ctrl -)'
               data-track-category='FileViewer'
               data-track-name='ZOOM_OUR_IMAGE'
@@ -297,7 +297,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
 
             <button
               onClick={handleZoomIn}
-              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
               title='Zoom In (Ctrl +)'
               data-track-category='FileViewer'
               data-track-name='ZOOM_IN_IMAGE'
@@ -315,7 +315,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
           >
             <button
               onClick={handleReset}
-              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
               title='Fit to Screen (Ctrl 0)'
               data-track-category='FileViewer'
               data-track-name='FIT_IMAGE_TO_SCREEN'
@@ -326,7 +326,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
 
             <button
               onClick={handleOpenInNewWindow}
-              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
               title='Open in New Window'
               data-track-category='FileViewer'
               data-track-name='OPEN_IMAGE_IN_NEW_WINDOW'

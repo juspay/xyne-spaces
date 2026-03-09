@@ -511,7 +511,7 @@ export const TicketFiltersDropdown = ({
             side='bottom'
             align='start'
             sideOffset={6}
-            className='z-[60] min-w-[220px] bg-white border border-gray-200 rounded-lg shadow-lg'
+            className='z-[60] min-w-[220px] bg-background border border-border rounded-lg shadow-lg'
           >
             <BoardSubmenu
               selectedBoards={filters.boards || []}
@@ -530,7 +530,7 @@ export const TicketFiltersDropdown = ({
               <Button
                 variant='outline'
                 size='sm'
-                className='rounded-[10px] border-gray-200 hover:bg-gray-50'
+                className='rounded-[10px] border-border hover:bg-muted'
               >
                 <div className='flex items-center gap-1.5'>
                   <User className='w-3 h-3 p-px font-medium' />
@@ -549,7 +549,7 @@ export const TicketFiltersDropdown = ({
               side='bottom'
               align='start'
               sideOffset={6}
-              className='z-[60] min-w-[200px] bg-white border border-gray-200 rounded-lg shadow-lg'
+              className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
             >
               <UserSubmenu
                 selectedUsers={filters.assignee || []}
@@ -565,7 +565,7 @@ export const TicketFiltersDropdown = ({
             <Button
               variant='outline'
               size='sm'
-              className={cn(hasActiveFilters ? 'border-gray-200' : '', 'rounded-[10px]')}
+              className={cn(hasActiveFilters ? 'border-border' : '', 'rounded-[10px]')}
             >
               <div className='flex items-center gap-1.5'>
                 <ListFilter className='w-3 h-3 font-medium' />
@@ -579,7 +579,7 @@ export const TicketFiltersDropdown = ({
             side='bottom'
             align='start'
             sideOffset={6}
-            className='w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
+            className='w-56 bg-background border border-border rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
             onInteractOutside={e => {
               // Prevent closing when clicking on the submenu
               if (
@@ -612,8 +612,8 @@ export const TicketFiltersDropdown = ({
                       }}
                       onClick={() => handleMenuItemClick(item.id)}
                       className={cn(
-                        'w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-gray-100',
-                        isActive ? 'bg-gray-100 font-medium' : '',
+                        'w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                        isActive ? 'bg-muted font-medium' : '',
                       )}
                       data-track-category='Tickets'
                       data-track-name='OpenFilterSubmenu'
@@ -629,7 +629,7 @@ export const TicketFiltersDropdown = ({
                           <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
                         )}
                       </div>
-                      <ChevronRight className='w-4 h-4 text-gray-400' />
+                      <ChevronRight className='w-4 h-4 text-muted-foreground' />
                     </button>
                   );
                 })}
@@ -651,7 +651,7 @@ export const TicketFiltersDropdown = ({
         {/* Analytics Dashboard Button */}
         <Button
           variant='outline'
-          className='bg-white border border-gray-200 rounded-[10px] h-8'
+          className='bg-background border border-border rounded-[10px] h-8'
           onClick={() => void navigate('/analytics-dashboard')}
           data-track-category='Tickets'
           data-track-name='OpenAnalyticsDashboard'
@@ -664,7 +664,7 @@ export const TicketFiltersDropdown = ({
         {hasActiveFilters && (
           <Button
             variant='outline'
-            className='bg-white border border-gray-200 rounded-[10px] h-8'
+            className='bg-background border border-border rounded-[10px] h-8'
             onClick={handleClearAllFilters}
             data-track-category='Tickets'
             data-track-name='ClearAllFiltersDropdown'
@@ -677,7 +677,7 @@ export const TicketFiltersDropdown = ({
         {/* ticket search */}
         <div className=' w-full max-w-56'>
           <div className='relative'>
-            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
+            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
             <input
               ref={inputRef}
               type='text'
@@ -690,7 +690,7 @@ export const TicketFiltersDropdown = ({
                   onSearchChange(value);
                 }
               }}
-              className='w-full text-sm bg-white border border-gray-200 text-gray-900 rounded-lg pl-10 pr-3 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
+              className='w-full text-sm bg-background border border-border text-foreground rounded-lg pl-10 pr-3 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
               aria-label='Search Tickets'
               data-track-category='Tickets'
               data-track-name='SearchTickets'

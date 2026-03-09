@@ -21,7 +21,7 @@ export interface TicketListItemProps {
 }
 
 const ticketStatusConfig: Record<TicketStatus, ReactElement> = {
-  [TicketStatus.NEW]: <CircleDashed size={14} className='text-gray-600' />,
+  [TicketStatus.NEW]: <CircleDashed size={14} className='text-muted-foreground' />,
   [TicketStatus.IN_PROGRESS]: (
     <Circle size={14} className='text-yellow-600' fill='currentColor' fillOpacity={0.2} />
   ),
@@ -123,8 +123,8 @@ export const TicketListItem = ({
       role='button'
       tabIndex={0}
       className={cn(
-        'flex items-center justify-between px-6 py-3 border-b border-gray-200 w-full cursor-pointer transition-colors gap-10',
-        isActive ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50',
+        'flex items-center justify-between px-6 py-3 border-b border-border w-full cursor-pointer transition-colors gap-10',
+        isActive ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-muted',
       )}
       data-track-category='Tickets'
       data-track-name='OpenTicket'
@@ -141,26 +141,26 @@ export const TicketListItem = ({
             {statusIcon}
           </span>
         </Tooltip>
-        <span className='text-xs text-[#8492A1] font-mono flex-shrink-0 font-medium'>
+        <span className='text-xs text-muted-foreground font-mono flex-shrink-0 font-medium'>
           {ticketIdValue}
         </span>
-        <span className='text-sm font-medium text-[#181B1D] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap'>
+        <span className='text-sm font-medium text-foreground min-w-0 overflow-hidden text-ellipsis whitespace-nowrap'>
           {ticket.title}
         </span>
         {!shouldHideDetails && (
           <>
             {displayName && (
               <>
-                <span className='size-1 rounded-full bg-gray-300 flex-shrink-0' />
-                <span className='text-xs text-[#8492A1] flex-shrink-0 whitespace-nowrap'>
+                <span className='size-1 rounded-full bg-muted flex-shrink-0' />
+                <span className='text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap'>
                   {displayName}
                 </span>
               </>
             )}
             {displayCompany && (
               <>
-                <span className='size-1 rounded-full bg-gray-300 flex-shrink-0' />
-                <span className='text-xs text-[#8492A1] flex-shrink-0 whitespace-nowrap'>
+                <span className='size-1 rounded-full bg-muted flex-shrink-0' />
+                <span className='text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap'>
                   {displayCompany}
                 </span>
               </>
@@ -169,7 +169,7 @@ export const TicketListItem = ({
         )}
       </div>
       <div className='flex items-center justify-center gap-2 flex-shrink-0'>
-        <span className='text-xs text-gray-900 whitespace-nowrap'>{formatDate(dueDate)}</span>
+        <span className='text-xs text-foreground whitespace-nowrap'>{formatDate(dueDate)}</span>
       </div>
     </div>
   );

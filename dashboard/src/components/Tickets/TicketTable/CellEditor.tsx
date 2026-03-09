@@ -127,7 +127,7 @@ export const TagsCellEditor: React.FC<TagsCellEditorProps> = ({
   };
 
   return (
-    <div className='h-full flex items-center px-2 bg-white'>
+    <div className='h-full flex items-center px-2 bg-background'>
       <TagSelector
         availableTags={availableTags}
         selectedTags={selectedTags}

@@ -166,8 +166,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     ) : assignedGroup ? (
       <div className='relative group/assignee'>
         <Tooltip content={assignedGroup.name}>
-          <div className='w-6 h-6 rounded-lg bg-gray-200 flex items-center justify-center'>
-            <span className='text-xs font-medium text-gray-600'>
+          <div className='w-6 h-6 rounded-lg bg-border flex items-center justify-center'>
+            <span className='text-xs font-medium text-muted-foreground'>
               {assignedGroup.name.charAt(0).toUpperCase()}
             </span>
           </div>
@@ -176,8 +176,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     ) : (
       <div className='relative group/assignee'>
         <Tooltip content='Unassigned'>
-          <div className='w-6 h-6 rounded-lg border border-dashed border-gray-400 bg-white flex items-center justify-center'>
-            <User className='w-3 h-3 text-gray-400' strokeWidth={1.5} />
+          <div className='w-6 h-6 rounded-lg border border-dashed border-muted-foreground bg-background flex items-center justify-center'>
+            <User className='w-3 h-3 text-muted-foreground' strokeWidth={1.5} />
           </div>
         </Tooltip>
       </div>
@@ -219,12 +219,12 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         <Tooltip content='No due date'>
           <div
             className={cn(
-              'flex items-center gap-1.5 px-2 rounded-md py-1 bg-gray-50',
-              showBorder ? 'border border-dashed border-gray-300' : '',
+              'flex items-center gap-1.5 px-2 rounded-md py-1 bg-muted',
+              showBorder ? 'border border-dashed border-input' : '',
               className,
             )}
           >
-            <Calendar className='w-3.5 h-3.5 text-gray-400' strokeWidth={2} />
+            <Calendar className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2} />
           </div>
         </Tooltip>
       );
@@ -243,10 +243,12 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         )}
       >
         <Calendar
-          className={cn('w-3.5 h-3.5 text-[#838383]', isUrgent && 'text-red-500')}
+          className={cn('w-3.5 h-3.5 text-muted-foreground', isUrgent && 'text-red-500')}
           strokeWidth={2}
         />
-        <span className={cn('text-xs font-medium text-[#838383]', isUrgent && 'text-red-500')}>
+        <span
+          className={cn('text-xs font-medium text-muted-foreground', isUrgent && 'text-red-500')}
+        >
           {etaText}
         </span>
       </div>
@@ -260,9 +262,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
 
   // Check if ticket is from a release
   const releaseBoardBgColor =
-    isReleaseTicket(ticket.ticketType as BaseTicketType) && isConversation
-      ? 'bg-[#F4FCF3]'
-      : 'bg-[#FDFDFD]';
+    isReleaseTicket(ticket.ticketType as BaseTicketType) && isConversation ? 'bg-muted' : 'bg-card';
   return (
     <button
       type='button'
@@ -282,10 +282,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           <div className='w-8 sm:w-10 rounded-l-xl flex items-center justify-center'>
             <div className='flex flex-col gap-4 items-center py-4'>
               {Array.from({ length: 5 }).map((_, index) => (
-                <div
-                  key={index}
-                  className='w-3 h-3 rounded-full border border-gray-300 bg-[#f3f3f3]'
-                />
+                <div key={index} className='w-3 h-3 rounded-full border border-input bg-muted' />
               ))}
             </div>
           </div>
@@ -302,7 +299,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
             <div className='flex items-center justify-between'>
               {/*Ticket ID */}
               <div className='flex flex-wrap items-center gap-2.5 flex-1 min-w-0'>
-                <span className='text-xs font-medium text-[#99A0AE] font-mono'>
+                <span className='text-xs font-medium text-muted-foreground font-mono'>
                   {ticket.xyneId}
                 </span>
                 {!isCompact && <TicketStatusWithStages currentStageName={ticket.stageName} />}
@@ -320,7 +317,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           e.stopPropagation();
                           setShowIDEModal(true);
                         }}
-                        className='flex items-center p-1 hover:bg-gray-100 rounded transition-colors'
+                        className='flex items-center p-1 hover:bg-muted rounded transition-colors'
                         data-track-category='Tickets'
                         data-track-name='OpenTicketInIDE'
                         data-track-metadata={JSON.stringify({
@@ -328,7 +325,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           xyneId: ticket.xyneId,
                         })}
                       >
-                        <Code2 className='w-4 h-4 text-gray-500 hover:text-blue-600' />
+                        <Code2 className='w-4 h-4 text-muted-foreground hover:text-blue-600' />
                       </button>
                     </Tooltip>
                   </div>
@@ -340,8 +337,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                       <DueDateDisplay eta={ticket.eta} showBorder={false} />
                     ) : (
                       <Tooltip content='No due date'>
-                        <div className='flex items-center gap-1.5 px-2 rounded-md py-1 border border-dashed border-gray-300 bg-gray-50'>
-                          <Calendar className='w-3.5 h-3.5 text-gray-400' strokeWidth={2} />
+                        <div className='flex items-center gap-1.5 px-2 rounded-md py-1 border border-dashed border-input bg-muted'>
+                          <Calendar className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2} />
                         </div>
                       </Tooltip>
                     ))}
@@ -429,8 +426,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     ) : assignedGroup ? (
                       <div className='relative group/assignee'>
                         <Tooltip content={assignedGroup.name}>
-                          <div className='w-6 h-6 rounded-lg bg-gray-200 flex items-center justify-center'>
-                            <span className='text-xs font-medium text-gray-600'>
+                          <div className='w-6 h-6 rounded-lg bg-border flex items-center justify-center'>
+                            <span className='text-xs font-medium text-muted-foreground'>
                               {assignedGroup.name.charAt(0).toUpperCase()}
                             </span>
                           </div>
@@ -439,8 +436,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     ) : (
                       <div className='relative group/assignee'>
                         <Tooltip content='Unassigned'>
-                          <div className='w-6 h-6 rounded-lg border border-dashed border-gray-400 bg-white flex items-center justify-center'>
-                            <User className='w-3 h-3 text-gray-400' strokeWidth={1.5} />
+                          <div className='w-6 h-6 rounded-lg border border-dashed border-muted-foreground bg-background flex items-center justify-center'>
+                            <User className='w-3 h-3 text-muted-foreground' strokeWidth={1.5} />
                           </div>
                         </Tooltip>
                       </div>
@@ -457,7 +454,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
               <h3
                 data-testid='ticket-card-title'
                 className={cn(
-                  'text-[#202020] line-clamp-1 break-all mb-2',
+                  'text-foreground line-clamp-1 break-all mb-2',
                   isCompact ? 'font-medium text-sm' : 'font-semibold text-[15px]',
                 )}
               >
@@ -471,7 +468,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 <p
                   ref={descriptionRef}
                   className={cn(
-                    'whitespace-pre-wrap overflow-hidden text-[#5D646C] text-clip line-clamp-1 sm:line-clamp-2 break-all text-[13px]',
+                    'whitespace-pre-wrap overflow-hidden text-muted-foreground text-clip line-clamp-1 sm:line-clamp-2 break-all text-[13px]',
                   )}
                 >
                   <RenderMessageWithHTML message={ticket.description || ''} breakLongLinks={true} />
@@ -488,8 +485,11 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         <DueDateDisplay eta={ticket.eta} />
                       ) : (
                         <Tooltip content='No due date'>
-                          <div className='flex items-center gap-1.5 px-2 rounded-md py-1 border border-dashed border-gray-300 bg-gray-50'>
-                            <Calendar className='w-3.5 h-3.5 text-gray-400' strokeWidth={2} />
+                          <div className='flex items-center gap-1.5 px-2 rounded-md py-1 border border-dashed border-input bg-muted'>
+                            <Calendar
+                              className='w-3.5 h-3.5 text-muted-foreground'
+                              strokeWidth={2}
+                            />
                           </div>
                         </Tooltip>
                       ))}
@@ -524,21 +524,24 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         >
                           {hasTags ? (
                             <>
-                              <span className='inline-flex max-w-[120px] items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border bg-[#FCFCFD] text-[#6B7280] border-[#F0F0F0]'>
+                              <span className='inline-flex max-w-[120px] items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border bg-card text-muted-foreground border-border'>
                                 <span className='w-2 h-2 rounded-full bg-[#C27AFF] shrink-0'></span>
                                 <span className='truncate'>{tags[0]?.name}</span>
                               </span>
 
                               {tags.length > 1 && (
-                                <span className='inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border bg-[#FCFCFD] text-[#6B7280] border-[#F0F0F0]'>
+                                <span className='inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border bg-card text-muted-foreground border-border'>
                                   +{tags.length - 1}
                                 </span>
                               )}
                             </>
                           ) : isCompact ? (
                             <Tooltip content='Add tags'>
-                              <div className='flex items-center gap-1.5 px-1.5 py-1 rounded-md border border-gray-200 bg-gray-50 hover:border-gray-300 transition-colors'>
-                                <Tag className='w-3.5 h-3.5 text-gray-400' strokeWidth={2} />
+                              <div className='flex items-center gap-1.5 px-1.5 py-1 rounded-md border border-border bg-muted hover:border-input transition-colors'>
+                                <Tag
+                                  className='w-3.5 h-3.5 text-muted-foreground'
+                                  strokeWidth={2}
+                                />
                               </div>
                             </Tooltip>
                           ) : null}
@@ -568,11 +571,11 @@ export const TicketCard: React.FC<TicketCardProps> = ({
 
             {/* Metadata Subsections*/}
             {hasCompactMetadata && (
-              <div className='mt-4 pt-4 border-gray-100 grid grid-cols-2 gap-4'>
+              <div className='mt-4 pt-4 border-border grid grid-cols-2 gap-4'>
                 {/* Sub-status */}
                 {showSubStatus && (
                   <div className='flex flex-col gap-0.5'>
-                    <span className='text-xs text-[#8D8D8D]'>Sub-status</span>
+                    <span className='text-xs text-muted-foreground'>Sub-status</span>
                     <div className='flex items-center gap-2'>
                       <TicketStatusWithStages
                         currentStageName={ticket.stageName}
@@ -580,7 +583,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         iconOnly
                       />
 
-                      <span className='text-xs text-[#202020] truncate'>
+                      <span className='text-xs text-foreground truncate'>
                         {ticket.stageName || 'Not set'}
                       </span>
                     </div>
@@ -590,8 +593,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 {/* Created at */}
                 {showCreatedAt && (
                   <div className='flex flex-col gap-0.5'>
-                    <span className='text-xs text-[#8D8D8D]'>Created at</span>
-                    <span className='text-xs text-[#202020]'>
+                    <span className='text-xs text-muted-foreground'>Created at</span>
+                    <span className='text-xs text-foreground'>
                       {formatCreatedDate(ticket.createdAt)}
                     </span>
                   </div>
@@ -600,18 +603,18 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 {/* Created by */}
                 {showCreatedBy && (
                   <div className='flex flex-col gap-1'>
-                    <span className='text-xs text-[#8D8D8D]'>Created by</span>
+                    <span className='text-xs text-muted-foreground'>Created by</span>
                     <div className='flex items-center gap-2'>
                       {creator && (
                         <>
                           <Avatar userId={creator.id} showActiveStatus={false} className='size-3' />
-                          <span className='text-xs text-[#202020]'>
+                          <span className='text-xs text-foreground'>
                             {creator.name || creator.email || 'Unknown'}
                           </span>
                         </>
                       )}
                       {!creator && (
-                        <span className='text-sm font-medium text-gray-400'>Unknown</span>
+                        <span className='text-sm font-medium text-muted-foreground'>Unknown</span>
                       )}
                     </div>
                   </div>

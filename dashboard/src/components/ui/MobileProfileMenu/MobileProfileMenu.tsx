@@ -61,7 +61,7 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
           />
           <Drawer.Content
             asChild
-            className='fixed inset-x-0 bottom-0 z-50 rounded-t-3xl bg-white max-h-[90dvh] overflow-auto'
+            className='fixed inset-x-0 bottom-0 z-50 rounded-t-3xl bg-background max-h-[90dvh] overflow-auto'
           >
             <motion.div
               animate={{

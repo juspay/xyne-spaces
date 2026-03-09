@@ -97,7 +97,7 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
   };
 
   return (
-    <div className='flex flex-col bg-[#FAFAFA] border border-[#F0F0F0] p-3 gap-3 rounded-xl transition-all duration-200 hover:shadow-md'>
+    <div className='flex flex-col bg-card border border-border p-3 gap-3 rounded-xl transition-all duration-200 hover:shadow-md'>
       <div className='flex justify-between items-center gap-2 min-w-0'>
         <div className='flex items-center gap-2 min-w-0 flex-1'>
           {workflowNumber !== undefined && (
@@ -106,7 +106,7 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
             </span>
           )}
           <Tooltip content={workflowName || ''}>
-            <span className='font-[15px] text-gray-800 truncate block max-w-[200px] sm:max-w-[300px] md:max-w-[400px]'>
+            <span className='font-[15px] text-foreground truncate block max-w-[200px] sm:max-w-[300px] md:max-w-[400px]'>
               {workflowName}
             </span>
           </Tooltip>
@@ -206,17 +206,17 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
         </span>
       </div>
       {metadata?.gitInfo && (
-        <div className='bg-white border border-gray-200 rounded-xl p-4 flex flex-col gap-2'>
+        <div className='bg-card border border-border rounded-xl p-4 flex flex-col gap-2'>
           <div className='flex items-center gap-2.5'>
-            <span className='font-medium text-gray-900'>Changes made in </span>
+            <span className='font-medium text-foreground'>Changes made in </span>
             <span className='font-medium bg-muted rounded-md px-2 py-1 text-sm'>
               {metadata.gitInfo.repoUrl?.split('/').pop()?.replace('.git', '')}
             </span>
           </div>
 
-          <div className='flex flex-col text-sm text-gray-700 gap-2'>
+          <div className='flex flex-col text-sm text-muted-foreground gap-2'>
             <div className='flex items-center gap-3 mt-1'>
-              <span className='font-medium text-gray-900'>
+              <span className='font-medium text-foreground'>
                 <GitBranch size={14} />
               </span>
               <span className='font-medium  hover:underline cursor-pointer'>
@@ -236,12 +236,12 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
 
             {metadata.gitInfo?.preview?.url && (
               <div className='break-all'>
-                <span className='font-medium text-sm text-gray-900'>Preview:</span>{' '}
+                <span className='font-medium text-sm text-foreground'>Preview:</span>{' '}
                 <a
                   href={metadata.gitInfo.preview.url}
                   target='_blank'
                   rel='noopener noreferrer'
-                  className='text-blue-600 underline cursor-pointer'
+                  className='text-primary underline cursor-pointer'
                 >
                   {metadata.gitInfo.preview.url}
                 </a>
@@ -253,8 +253,10 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
 
       {((metadata.completedSteps && metadata.completedSteps.length > 0) ||
         (metadata.pendingSteps && metadata.pendingSteps.length > 0)) && (
-        <div className='bg-white border border-gray-200 rounded-xl p-4 space-y-2'>
-          <h4 className='text-[13px] font-semibold text-gray-700 mb-3'>Workflow Activity</h4>
+        <div className='bg-card border border-border rounded-xl p-4 space-y-2'>
+          <h4 className='text-[13px] font-semibold text-muted-foreground mb-3'>
+            Workflow Activity
+          </h4>
 
           <div className='flex flex-col gap-2 transition-all duration-200'>
             {metadata.completedSteps && metadata.completedSteps.length > 0 && (

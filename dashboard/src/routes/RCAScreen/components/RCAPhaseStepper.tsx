@@ -3,7 +3,7 @@ import type { RCAPhaseStepperProps } from '../RCAScreen.types';
 
 export const RCAPhaseStepper = ({ phases, activePhase, onPhaseClick }: RCAPhaseStepperProps) => {
   return (
-    <div className='bg-white border-b border-gray-200 px-2 sm:px-2 py-2'>
+    <div className='bg-background border-b border-border px-2 sm:px-2 py-2'>
       <div className='mx-auto w-full max-w-4xl'>
         <div className='pb-1 -mb-1'>
           <div
@@ -25,14 +25,14 @@ export const RCAPhaseStepper = ({ phases, activePhase, onPhaseClick }: RCAPhaseS
                     className={cn(
                       'flex items-center gap-1.5 px-1 py-1.5 sm:px-3 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all whitespace-nowrap',
                       isActive
-                        ? 'bg-gray-100 text-gray-900 shadow-sm'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50',
+                        ? 'bg-muted text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                     )}
                   >
                     <span
                       className={cn(
                         'flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full text-[10px] sm:text-xs font-semibold shrink-0',
-                        isActive ? 'bg-white text-gray-900' : 'bg-gray-200 text-gray-700',
+                        isActive ? 'bg-background text-foreground' : 'bg-border text-foreground',
                       )}
                     >
                       {index + 1}
@@ -41,7 +41,7 @@ export const RCAPhaseStepper = ({ phases, activePhase, onPhaseClick }: RCAPhaseS
                   </button>
 
                   {index < phases.length - 1 && (
-                    <div className='h-px w-4 sm:w-8 bg-gray-200 mx-1 sm:mx-2 shrink-0' />
+                    <div className='h-px w-4 sm:w-8 bg-border mx-1 sm:mx-2 shrink-0' />
                   )}
                 </div>
               );

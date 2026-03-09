@@ -218,7 +218,7 @@ export const downloadAttachment = async (attachmentId: string, fileName: string)
  */
 export const getFileIcon = (mimeType: string, size = 16): JSX.Element => {
   const category = getFileCategory(mimeType);
-  const iconProps = { size, className: 'text-gray-500' };
+  const iconProps = { size, className: 'text-muted-foreground' };
 
   switch (category) {
     case 'image':

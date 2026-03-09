@@ -116,9 +116,9 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
               onClick={() => handleNavigateToTicket(created)}
               className='text-sm text-left hover:underline focus:outline-none bg-transparent border-none p-0'
             >
-              <span className='font-semibold text-blue-600'>{created.xyneId}</span>
-              <span className='mx-1.5 text-gray-400'>•</span>
-              <span className='font-normal text-gray-700'>{created.title}</span>
+              <span className='font-semibold text-primary'>{created.xyneId}</span>
+              <span className='mx-1.5 text-muted-foreground'>•</span>
+              <span className='font-normal text-foreground'>{created.title}</span>
             </button>
           </div>
         </div>
@@ -135,14 +135,16 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
               id={checkboxId}
               type='checkbox'
               checked={isSelected}
-              className='mt-1 h-4 w-4 shrink-0 rounded border-gray-300 cursor-pointer'
+              className='mt-1 h-4 w-4 shrink-0 rounded border-border cursor-pointer'
               disabled={isUpdating}
               onChange={() => toggleSelection(suggestion.suggestionId)}
             />
             <label htmlFor={checkboxId} className='text-sm text-left flex-1 cursor-pointer'>
-              <span className='font-medium text-gray-700'>{suggestion.title}</span>
-              <span className='text-gray-500'>: </span>
-              <span className='text-gray-500'>{previewDescription(suggestion.description)}</span>
+              <span className='font-medium text-foreground'>{suggestion.title}</span>
+              <span className='text-muted-foreground'>: </span>
+              <span className='text-muted-foreground'>
+                {previewDescription(suggestion.description)}
+              </span>
             </label>
           </div>
         );
@@ -154,7 +156,7 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
           <button
             onClick={startCreation}
             disabled={isUpdating}
-            className='text-sm font-medium text-blue-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed bg-transparent border-none p-0'
+            className='text-sm font-medium text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed bg-transparent border-none p-0'
           >
             {isUpdating ? 'Creating...' : `Create Tickets (${selectedIds.length})`}
           </button>

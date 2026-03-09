@@ -87,9 +87,9 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
   );
 
   return (
-    <div className={`h-full flex flex-col bg-white ${className}`}>
+    <div className={`h-full flex flex-col bg-background ${className}`}>
       {/* Tab Bar - Clean style */}
-      <div className='flex-shrink-0 bg-gray-50 border-b border-gray-200'>
+      <div className='flex-shrink-0 bg-muted border-b border-border'>
         <div className='flex items-center h-9'>
           {/* Tab List */}
           <div
@@ -109,12 +109,12 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
                 onDragEnd={handleDragEnd}
                 draggable={!tab.disabled}
                 title={tab.disabled ? tab.disabledTooltip : undefined}
-                className={`group relative flex items-center gap-1.5 px-3 h-9 min-w-[100px] max-w-[160px] border-r border-gray-200/50 transition-all duration-150 ${
+                className={`group relative flex items-center gap-1.5 px-3 h-9 min-w-[100px] max-w-[160px] border-r border-border/50 transition-all duration-150 ${
                   tab.disabled
-                    ? 'cursor-not-allowed opacity-50 bg-transparent text-gray-400'
+                    ? 'cursor-not-allowed opacity-50 bg-transparent text-muted-foreground'
                     : activeTabId === tab.id
-                      ? 'cursor-pointer bg-white text-gray-800'
-                      : 'cursor-pointer bg-transparent text-gray-500 hover:bg-white/50 hover:text-gray-700'
+                      ? 'cursor-pointer bg-background text-foreground'
+                      : 'cursor-pointer bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground'
                 } ${isDragging && draggedTabId === tab.id ? 'opacity-50' : ''}`}
                 data-track-category='Workflows'
                 data-track-name='SelectTab'
@@ -123,10 +123,10 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
                 <span
                   className={`flex-shrink-0 ${
                     tab.disabled
-                      ? 'text-gray-300'
+                      ? 'text-muted'
                       : activeTabId === tab.id
                         ? 'text-blue-500'
-                        : 'text-gray-400'
+                        : 'text-muted-foreground'
                   }`}
                 >
                   {getTabIcon(tab.type, tab.icon)}
@@ -138,13 +138,13 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
                       e.stopPropagation();
                       onTabClose(tab.id);
                     }}
-                    className='flex-shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 transition-all'
+                    className='flex-shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-border transition-all'
                     aria-label={`Close ${tab.title}`}
                     data-track-category='Workflows'
                     data-track-name='CloseWorkflowTab'
                     data-track-metadata={JSON.stringify({ tabId: tab.id, tabType: tab.type })}
                   >
-                    <X size={10} className='text-gray-400' />
+                    <X size={10} className='text-muted-foreground' />
                   </button>
                 )}
                 {/* Active indicator line */}
@@ -159,7 +159,7 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
           {onTabAdd && (
             <button
               onClick={onTabAdd}
-              className='flex-shrink-0 flex items-center justify-center w-9 h-9 text-gray-400 hover:text-gray-600 hover:bg-white/50 transition-colors border-l border-gray-200/50'
+              className='flex-shrink-0 flex items-center justify-center w-9 h-9 text-muted-foreground hover:text-muted-foreground hover:bg-background/50 transition-colors border-l border-border/50'
               title='New tab'
               aria-label='Add new tab'
               data-track-category='Workflows'

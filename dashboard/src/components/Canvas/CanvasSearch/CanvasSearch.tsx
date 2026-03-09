@@ -106,7 +106,7 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
   if (!isOpen) return null;
 
   return (
-    <div className='absolute top-4 right-4 z-50 bg-white rounded-lg shadow-lg border border-gray-200 p-2 flex items-center gap-2 min-w-[300px]'>
+    <div className='absolute top-4 right-4 z-50 bg-background rounded-lg shadow-lg border border-border p-2 flex items-center gap-2 min-w-[300px]'>
       <div className='relative flex-1'>
         <input
           ref={inputRef}
@@ -115,7 +115,7 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
           onChange={e => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder='Search in canvas...'
-          className='w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+          className='w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent'
           data-track-event='blur'
           data-track-category='CANVAS'
           data-track-name='Canvas_Search_Input'
@@ -123,10 +123,10 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
       </div>
 
       {matches.length > 0 && (
-        <div className='flex items-center gap-1 text-xs text-gray-600'>
+        <div className='flex items-center gap-1 text-xs text-muted-foreground'>
           <button
             onClick={goToPrevious}
-            className='p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed'
+            className='p-1 hover:bg-accent rounded disabled:opacity-50 disabled:cursor-not-allowed'
             disabled={matches.length === 0}
             aria-label='Previous match'
             data-track-category='CANVAS'
@@ -158,7 +158,7 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
 
           <button
             onClick={goToNext}
-            className='p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed'
+            className='p-1 hover:bg-accent rounded disabled:opacity-50 disabled:cursor-not-allowed'
             disabled={matches.length === 0}
             aria-label='Next match'
             data-track-category='CANVAS'
@@ -188,7 +188,7 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
 
       <button
         onClick={onClose}
-        className='p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700'
+        className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground'
         aria-label='Close search'
         data-track-category='CANVAS'
         data-track-name='Close_Canvas_Search'

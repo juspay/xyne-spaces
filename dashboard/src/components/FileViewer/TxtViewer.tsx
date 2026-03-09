@@ -7,7 +7,7 @@ const LoadingSpinner: React.FC = () => (
   <div className='flex items-center justify-center h-full min-h-[200px]'>
     <div className='text-center'>
       <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3'></div>
-      <p className='text-gray-600 dark:text-gray-300 text-sm'>Loading text file...</p>
+      <p className='text-muted-foreground dark:text-muted text-sm'>Loading text file...</p>
     </div>
   </div>
 );
@@ -132,7 +132,7 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   // Render loading state
   if (loading) {
     return (
-      <div className='relative h-full bg-white dark:bg-[#1E1E1E]'>
+      <div className='relative h-full bg-background dark:bg-[#1E1E1E]'>
         <LoadingSpinner />
       </div>
     );
@@ -141,7 +141,7 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   // Render error state
   if (error) {
     return (
-      <div className='relative h-full bg-white dark:bg-[#1E1E1E]'>
+      <div className='relative h-full bg-background dark:bg-[#1E1E1E]'>
         <ErrorDisplay error={error} canRetry onRetry={handleRetry} />
       </div>
     );
@@ -150,7 +150,7 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   // Render content
   return (
     <div
-      className={`font-mono text-sm bg-white dark:bg-[#1E1E1E] text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-lg ${isLargeFile ? 'mt-[65px]' : ''}`}
+      className={`font-mono text-sm bg-background dark:bg-[#1E1E1E] text-foreground dark:text-gray-100 border border-border dark:border-gray-700 rounded-lg ${isLargeFile ? 'mt-[65px]' : ''}`}
       style={{
         height: '100%',
         width: '100%',
@@ -159,16 +159,16 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
       }}
     >
       {/* Header with file info */}
-      <div className='flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 rounded-t-lg'>
+      <div className='flex items-center justify-between p-3 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-t-lg'>
         <div className='flex items-center gap-2'>
-          <svg className='w-4 h-4 text-gray-500' fill='currentColor' viewBox='0 0 20 20'>
+          <svg className='w-4 h-4 text-muted-foreground' fill='currentColor' viewBox='0 0 20 20'>
             <path
               fillRule='evenodd'
               d='M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z'
               clipRule='evenodd'
             />
           </svg>
-          <span className='text-xs text-gray-600 dark:text-gray-400'>
+          <span className='text-xs text-muted-foreground dark:text-muted-foreground'>
             {lines.length.toLocaleString()} lines • {fileSizeMB.toFixed(2)}MB
           </span>
         </div>
@@ -209,7 +209,7 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
                 }}
               >
                 <div className='flex w-full'>
-                  <span className='text-gray-400 dark:text-gray-600 text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
+                  <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
                     {virtualRow.index + 1}
                   </span>
                   <span className='flex-1 whitespace-pre-wrap break-words'>
@@ -224,7 +224,7 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
           <div>
             {lines.map((line, index) => (
               <div key={index} className='flex min-h-[20px]'>
-                <span className='text-gray-400 dark:text-gray-600 text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
+                <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
                   {index + 1}
                 </span>
                 <span className='flex-1 whitespace-pre-wrap break-words'>

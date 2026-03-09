@@ -45,9 +45,9 @@ const ProjectDetailScreen = (): ReactElement => {
   // Early return if no projectId
   if (!projectId) {
     return (
-      <div className='h-full bg-gray-50 flex items-center justify-center'>
+      <div className='h-full bg-muted flex items-center justify-center'>
         <div className='text-center'>
-          <p className='text-gray-600 mb-4'>Invalid project ID</p>
+          <p className='text-muted-foreground mb-4'>Invalid project ID</p>
           <Button
             variant='default'
             onClick={() => void navigate('/listProjects')}
@@ -274,17 +274,17 @@ const ProjectDetailScreen = (): ReactElement => {
 
   if (loading) {
     return (
-      <div className='h-full bg-gray-50 flex items-center justify-center'>
-        <p className='text-gray-600'>Loading...</p>
+      <div className='h-full bg-muted flex items-center justify-center'>
+        <p className='text-muted-foreground'>Loading...</p>
       </div>
     );
   }
 
   if (!project) {
     return (
-      <div className='h-full bg-gray-50 flex items-center justify-center'>
+      <div className='h-full bg-muted flex items-center justify-center'>
         <div className='text-center'>
-          <p className='text-gray-600 mb-4'>Project not found</p>
+          <p className='text-muted-foreground mb-4'>Project not found</p>
           <Button
             variant='default'
             onClick={() => void navigate('/listProjects')}
@@ -299,12 +299,12 @@ const ProjectDetailScreen = (): ReactElement => {
   }
 
   return (
-    <div className='h-full bg-gray-50 p-8'>
+    <div className='h-full bg-muted p-8'>
       <div className='max-w-7xl mx-auto'>
         {/* Header with Back Button */}
         <button
           onClick={() => void navigate('/listProjects')}
-          className='flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6 transition-colors'
+          className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'
           data-track-category='ProjectDetail'
           data-track-name='BackToProjects'
         >
@@ -313,12 +313,14 @@ const ProjectDetailScreen = (): ReactElement => {
         </button>
 
         {/* Project Details Section */}
-        <div className='bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8'>
+        <div className='bg-background rounded-lg shadow-sm border border-border p-6 mb-8'>
           <div className='flex items-start justify-between'>
             <div className='flex-1'>
-              <h1 className='text-3xl font-bold text-gray-900 mb-2'>{project.name}</h1>
-              {project.description && <p className='text-gray-600 mb-4'>{project.description}</p>}
-              <div className='text-sm text-gray-500'>
+              <h1 className='text-3xl font-bold text-foreground mb-2'>{project.name}</h1>
+              {project.description && (
+                <p className='text-muted-foreground mb-4'>{project.description}</p>
+              )}
+              <div className='text-sm text-muted-foreground'>
                 Created: {new Date(project.createdAt).toLocaleDateString()}
               </div>
             </div>
@@ -337,7 +339,7 @@ const ProjectDetailScreen = (): ReactElement => {
 
         {/* Boards Section */}
         <div className='mb-6 flex items-center justify-between'>
-          <h2 className='text-2xl font-bold text-gray-900'>Boards</h2>
+          <h2 className='text-2xl font-bold text-foreground'>Boards</h2>
           <Button
             variant='default'
             onClick={() => setShowCreateBoardModal(true)}

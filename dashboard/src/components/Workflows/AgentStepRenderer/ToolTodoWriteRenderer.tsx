@@ -75,7 +75,7 @@ export const ToolTodoWriteRenderer: React.FC<
     //       return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
     //     case 'pending':
     //     default:
-    //       return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+    //       return 'bg-muted text-foreground dark:bg-gray-800 dark:text-muted';
     //   }
     // };
 
@@ -107,19 +107,19 @@ export const ToolTodoWriteRenderer: React.FC<
       <div className='space-y-4 text-sm'>
         {/* Header */}
         {/* <div>
-          <span className='font-semibold text-gray-900 dark:text-gray-100'>Todo List Update</span>
+          <span className='font-semibold text-foreground dark:text-gray-100'>Todo List Update</span>
         </div> */}
 
         {/* Count */}
         {/* <div>
-          <span className='font-medium text-gray-900 dark:text-gray-100'>Total Todos: </span>
-          <span className='text-gray-700 dark:text-gray-300'>{todos.length}</span>
+          <span className='font-medium text-foreground dark:text-gray-100'>Total Todos: </span>
+          <span className='text-foreground dark:text-muted'>{todos.length}</span>
         </div> */}
 
         {/* Todos */}
         {todos.length > 0 && (
           <div>
-            {/* <span className='font-semibold text-gray-900 dark:text-gray-100 block mb-2'>
+            {/* <span className='font-semibold text-foreground dark:text-gray-100 block mb-2'>
               Todo Items
             </span> */}
 
@@ -171,12 +171,12 @@ export const ToolTodoWriteRenderer: React.FC<
                           </span>
                         </div>
 
-                        <div className='text-sm text-gray-900 dark:text-gray-100 mb-1'>
+                        <div className='text-sm text-foreground dark:text-gray-100 mb-1'>
                           {content}
                         </div>
 
                         {activeForm && (
-                          <div className='text-xs text-gray-600 dark:text-gray-400 italic'>
+                          <div className='text-xs text-muted-foreground dark:text-muted-foreground italic'>
                             Active: {activeForm}
                           </div>
                         )}
@@ -191,7 +191,7 @@ export const ToolTodoWriteRenderer: React.FC<
 
         {/* Output */}
         <div className='hidden'>
-          <span className='font-semibold text-gray-900 dark:text-gray-100'>Output</span>
+          <span className='font-semibold text-foreground dark:text-gray-100'>Output</span>
 
           <div className='space-y-2 mt-2'>
             {error && (
@@ -206,7 +206,7 @@ export const ToolTodoWriteRenderer: React.FC<
             {!error && (
               <>
                 <div>
-                  <span className='font-medium text-gray-900 dark:text-gray-100'>Status: </span>
+                  <span className='font-medium text-foreground dark:text-gray-100'>Status: </span>
                   <span
                     className={`px-2 py-1 rounded text-xs ${
                       success
@@ -220,10 +220,10 @@ export const ToolTodoWriteRenderer: React.FC<
 
                 {typeof todosUpdated === 'number' && (
                   <div>
-                    <span className='font-medium text-gray-900 dark:text-gray-100'>
+                    <span className='font-medium text-foreground dark:text-gray-100'>
                       Todos Updated:{' '}
                     </span>
-                    <span className='text-gray-700 dark:text-gray-300'>{todosUpdated}</span>
+                    <span className='text-foreground dark:text-muted'>{todosUpdated}</span>
                   </div>
                 )}
               </>

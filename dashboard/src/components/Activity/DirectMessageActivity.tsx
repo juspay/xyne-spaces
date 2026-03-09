@@ -35,7 +35,7 @@ export const DirectMessageActivity = ({
       channelId={message.conversation?.channelId}
       badgeIcon={<MessageCircle className='w-4 h-4 text-emerald-500' />}
       badgeColorClass='bg-[#FAFAFA]'
-      description={<span className='text-gray-500 text-sm'>sent you a DM in</span>}
+      description={<span className='text-muted-foreground text-sm'>sent you a DM in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
       className='flex items-start'

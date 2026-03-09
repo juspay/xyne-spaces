@@ -29,12 +29,12 @@ const ApproverChip: React.FC<{
   disabled?: boolean;
 }> = ({ userName, onRemove, disabled }) => {
   return (
-    <span className='inline-flex items-center gap-1 rounded-md bg-blue-100 px-2 py-0.5 text-xs font-medium text-gray-800'>
+    <span className='inline-flex items-center gap-1 rounded-md bg-blue-100 px-2 py-0.5 text-xs font-medium text-foreground'>
       {userName}
       <button
         type='button'
         onClick={onRemove}
-        className='ml-0.5 rounded-full p-0.5 text-gray-500 hover:bg-gray-300 hover:text-gray-800'
+        className='ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground'
         disabled={disabled}
         data-track-category='Board'
         data-track-name='Remove_Approver'
@@ -621,7 +621,10 @@ export const BoardForm = ({
 
       {!providedProjectId && (
         <div>
-          <label htmlFor='project-select' className='block text-sm font-medium text-gray-700 mb-1'>
+          <label
+            htmlFor='project-select'
+            className='block text-sm font-medium text-foreground mb-1'
+          >
             Project <span className='text-red-500'>*</span>
           </label>
           <select
@@ -629,7 +632,7 @@ export const BoardForm = ({
             value={projectId}
             onChange={e => setProjectId(e.target.value)}
             disabled={isLoading || loadingProjects || isEdit}
-            className='w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+            className='w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
             data-track-event='change'
             data-track-category='Board_Form'
             data-track-name='Select_Project'
@@ -642,7 +645,7 @@ export const BoardForm = ({
             ))}
           </select>
           {isEdit && (
-            <p className='mt-1 text-xs text-gray-500'>
+            <p className='mt-1 text-xs text-muted-foreground'>
               Project cannot be changed when editing a board
             </p>
           )}
@@ -651,7 +654,7 @@ export const BoardForm = ({
 
       <div>
         <div className='flex items-center justify-between mb-2'>
-          <div className='text-sm font-medium text-gray-700'>
+          <div className='text-sm font-medium text-foreground'>
             Stages <span className='text-red-500'>*</span>
           </div>
           <div className='flex items-center gap-2'>
@@ -660,7 +663,7 @@ export const BoardForm = ({
                 value={selectedTemplate}
                 onChange={e => setSelectedTemplate(e.target.value as StageTemplateType)}
                 disabled={isLoading}
-                className='px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+                className='px-3 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
                 data-track-event='change'
                 data-track-category='Board_Form'
                 data-track-name='Select_Stage_Template'
@@ -684,7 +687,7 @@ export const BoardForm = ({
         <div className='space-y-3'>
           {stages.map((stage, index) => {
             return (
-              <div key={stage.tempId} className='border rounded-md p-3 border-gray-200 bg-gray-50'>
+              <div key={stage.tempId} className='border rounded-md p-3 border-border bg-muted'>
                 <div className='flex items-start gap-2'>
                   <div className='flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold bg-blue-100 text-blue-700'>
                     {stage.sequenceNumber}
@@ -726,7 +729,7 @@ export const BoardForm = ({
                             setStages(newStages);
                           }}
                           disabled={isLoading}
-                          className='w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer'
+                          className='w-4 h-4 rounded border-input text-blue-600 focus:ring-ring cursor-pointer'
                           title='Toggle ETA'
                           data-testid={`stage-eta-toggle-${index}`}
                           data-track-category='Board_Form'
@@ -753,7 +756,7 @@ export const BoardForm = ({
                     <div className='mt-2'>
                       <label
                         htmlFor={`stage-status-${index}`}
-                        className='block text-xs text-gray-500 mb-1'
+                        className='block text-xs text-muted-foreground mb-1'
                       >
                         Default Ticket Status
                       </label>
@@ -768,7 +771,7 @@ export const BoardForm = ({
                           )
                         }
                         disabled={isLoading}
-                        className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
                         data-track-event='change'
                         data-track-category='Board_Form'
                         data-track-name='Select_Stage_Status'
@@ -802,7 +805,7 @@ export const BoardForm = ({
 
                     {/* Approvers Selector */}
                     <div className='mt-2'>
-                      <p className='block text-xs text-gray-500 mb-1'>Stage Approvers</p>
+                      <p className='block text-xs text-muted-foreground mb-1'>Stage Approvers</p>
 
                       {/* Display existing approvers as removable chips */}
                       {stage.approverIds && stage.approverIds.length > 0 && (
@@ -851,7 +854,7 @@ export const BoardForm = ({
                     <div className='mt-2'>
                       <label
                         htmlFor={`stage-form-${index}`}
-                        className='block text-xs text-gray-500 mb-1'
+                        className='block text-xs text-muted-foreground mb-1'
                       >
                         Optional Form (leave empty for approval only)
                       </label>
@@ -862,7 +865,7 @@ export const BoardForm = ({
                           updateStage(index, 'formId', e.target.value);
                         }}
                         disabled={isLoading || !stageForms}
-                        className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed'
+                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
                         data-track-event='change'
                         data-track-category='Board_Form'
                         data-track-name='Select_Stage_Form'
@@ -907,7 +910,7 @@ export const BoardForm = ({
       {/* Form Selector - Only in edit mode */}
       {isEdit && (
         <div>
-          <hr className='border-gray-200 my-6' />
+          <hr className='border-border my-6' />
           <BoardFormSelector
             selectedFormIds={selectedFormIds}
             onFormSelect={handleFormSelect}
@@ -920,7 +923,7 @@ export const BoardForm = ({
       {/* Ticket Form Configuration - Only in edit mode */}
       {isEdit && board && (
         <div>
-          <hr className='border-gray-200 my-6' />
+          <hr className='border-border my-6' />
           <BoardTicketFormConfig
             config={ticketFormConfig}
             onChange={setTicketFormConfig}

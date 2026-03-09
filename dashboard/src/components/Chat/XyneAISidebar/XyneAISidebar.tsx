@@ -738,7 +738,7 @@ const XyneAISidebar = ({
 
   return (
     <div
-      className={`w-full ${isMobile ? 'h-[95vh] pb-4' : 'h-full rounded-xl'} bg-white flex flex-col min-h-0`}
+      className={`w-full ${isMobile ? 'h-[95vh] pb-4' : 'h-full rounded-xl'} bg-background flex flex-col min-h-0`}
     >
       {/* Header */}
       {showHistorySidebar ? (
@@ -775,14 +775,14 @@ const XyneAISidebar = ({
                 <div className='space-y-4'>
                   {/* User message shimmer */}
                   <div className='flex justify-end'>
-                    <div className='w-3/4 h-12 bg-gray-200 rounded-xl animate-pulse' />
+                    <div className='w-3/4 h-12 bg-muted rounded-xl animate-pulse' />
                   </div>
                   {/* Bot message shimmer */}
                   <div className='flex justify-start'>
                     <div className='w-full space-y-2'>
-                      <div className='h-4 bg-gray-200 rounded animate-pulse' />
-                      <div className='h-4 bg-gray-200 rounded animate-pulse w-5/6' />
-                      <div className='h-4 bg-gray-200 rounded animate-pulse w-4/6' />
+                      <div className='h-4 bg-muted rounded animate-pulse' />
+                      <div className='h-4 bg-muted rounded animate-pulse w-5/6' />
+                      <div className='h-4 bg-muted rounded animate-pulse w-4/6' />
                     </div>
                   </div>
                 </div>

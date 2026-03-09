@@ -161,7 +161,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   };
 
   const renderFormComponent = (): ReactElement => (
-    <div className='space-y-6 max-w-md mx-auto bg-white'>
+    <div className='space-y-6 max-w-md mx-auto bg-background'>
       <div className='text-xl font-medium text-foreground mb-1'>
         {mode === 'promote' ? 'Promote to Channel' : 'Create a channel'}
       </div>
@@ -180,11 +180,11 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       >
         {field => (
           <div className='space-y-1.5'>
-            <label htmlFor='channel-name' className='text-sm font-medium text-gray-700'>
+            <label htmlFor='channel-name' className='text-sm font-medium text-foreground'>
               Channel Name
             </label>
             <div className='relative'>
-              <div className='absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm'>
+              <div className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm'>
                 #
               </div>
               <Input
@@ -203,7 +203,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 data-track-name='EDIT_CHANNEL_NAME'
                 data-track-metadata={JSON.stringify({ mode, channelName: field.state.value })}
               />
-              <div className='absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500'>
+              <div className='absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground'>
                 {getCharacterCount()}/80
               </div>
             </div>
@@ -249,7 +249,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       <form.Field name='description'>
         {field => (
           <div className='space-y-1.5'>
-            <label htmlFor='channel-description' className='text-sm font-medium text-gray-700'>
+            <label htmlFor='channel-description' className='text-sm font-medium text-foreground'>
               Description (optional)
             </label>
             <Textarea
@@ -290,7 +290,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       <form.Field name='topicTags'>
         {field => (
           <div className='space-y-1.5'>
-            <label htmlFor='topic-tags' className='text-sm font-medium text-gray-700'>
+            <label htmlFor='topic-tags' className='text-sm font-medium text-foreground'>
               Topic Tags (optional)
             </label>
             {field.state.value.length > 0 && (
@@ -321,7 +321,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='Edit_Topic_Tag'
             />
-            <p className='text-xs text-gray-500'>
+            <p className='text-xs text-muted-foreground'>
               Add tags to help organize and discover this channel
             </p>
           </div>

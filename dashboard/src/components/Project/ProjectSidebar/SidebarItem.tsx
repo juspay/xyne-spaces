@@ -44,7 +44,7 @@ const SidebarItem = ({
           className='size-5 rounded-full object-cover'
         />
       ) : (
-        <div className='size-5 rounded-full bg-gray-300 flex items-center justify-center'>
+        <div className='size-5 rounded-full bg-muted-foreground/50 flex items-center justify-center'>
           <span className='text-[10px] text-white font-medium'>{avatar.fallbackText}</span>
         </div>
       );
@@ -59,7 +59,7 @@ const SidebarItem = ({
     if (isExpandable) {
       return (
         <ChevronRight
-          className={`size-4 text-gray-500 transition-transform ${
+          className={`size-4 text-muted-foreground transition-transform ${
             isExpanded ? 'rotate-90' : 'rotate-0'
           }`}
         />
@@ -71,7 +71,7 @@ const SidebarItem = ({
   };
 
   // Determine text color based on variant
-  const textColor = variant === 'nested' ? 'text-gray-600' : 'text-gray-700';
+  const textColor = variant === 'nested' ? 'text-muted-foreground' : 'text-foreground';
 
   return (
     <button
@@ -79,7 +79,7 @@ const SidebarItem = ({
       data-testid={dataTestId}
       className={cn(
         'w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors group',
-        'hover:bg-gray-100',
+        'hover:bg-muted',
 
         isActive ? 'bg-[#E4E6E7]' : 'bg-transparent',
       )}
@@ -94,7 +94,7 @@ const SidebarItem = ({
         className={cn(
           'text-[13px] flex-1 text-left truncate',
           isActive ? 'text-[#181B1D] font-semibold' : textColor,
-          !isActive && 'group-hover:text-gray-900',
+          !isActive && 'group-hover:text-foreground',
         )}
       >
         {label}
@@ -102,7 +102,9 @@ const SidebarItem = ({
 
       {/* Badge */}
       {badge && (
-        <span className='text-[11px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded'>{badge}</span>
+        <span className='text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+          {badge}
+        </span>
       )}
     </button>
   );

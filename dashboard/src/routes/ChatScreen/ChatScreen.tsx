@@ -118,7 +118,10 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
 
             {/* MIDDLE PANEL (Conversation View) */}
             <Panel defaultSize={80} minSize={30}>
-              <main data-id='conversation-view' className='flex-1 h-full overflow-hidden bg-white'>
+              <main
+                data-id='conversation-view'
+                className='flex-1 h-full overflow-hidden bg-background'
+              >
                 <Outlet context={{ shouldStackThread }} />
               </main>
             </Panel>
@@ -129,7 +132,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             {/* Mobile: Only show directory sidebar on directory root */}
             {isMobile ? (
               location.pathname === '/chat/dir' || location.pathname === '/chat/dir/' ? (
-                <aside className='h-full min-[500px]:px-4 border-r border-gray-200 w-screen'>
+                <aside className='h-full min-[500px]:px-4 border-r border-border w-screen'>
                   <MobileChatDirectory
                     channelData={channelData}
                     allChannelsUserStatus={allChannelsUserStatus}
@@ -137,7 +140,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                 </aside>
               ) : null
             ) : (
-              <aside className='h-full min-[500px]:px-4 border-r border-gray-200 w-screen'>
+              <aside className='h-full min-[500px]:px-4 border-r border-border w-screen'>
                 <ChatDirectory
                   channelData={channelData}
                   allChannelsUserStatus={allChannelsUserStatus}
@@ -148,7 +151,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             {location.pathname !== '/chat/dir' &&
               location.pathname !== '/chat/dir/' &&
               !location.pathname.startsWith('/chat/dir/my-tickets') && (
-                <div className='absolute inset-0 z-50 bg-white w-screen'>
+                <div className='absolute inset-0 z-50 bg-background w-screen'>
                   <main data-id='chat-screen' className='h-full overflow-hidden'>
                     <Outlet context={{ shouldStackThread }} />
                   </main>

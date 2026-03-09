@@ -36,14 +36,14 @@ export function MonthView({
 
   return (
     <>
-      <div className='flex-1 overflow-auto bg-white px-6 py-6'>
-        <div className='bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden'>
+      <div className='flex-1 overflow-auto bg-background px-6 py-6'>
+        <div className='bg-background rounded-xl border border-border shadow-sm overflow-hidden'>
           {/* Weekday Headers */}
-          <div className='grid grid-cols-7 bg-gray-50 border-b border-gray-200'>
+          <div className='grid grid-cols-7 bg-muted border-b border-border'>
             {weekDays.map(day => (
               <div
                 key={day}
-                className='px-3 py-3 text-xs font-semibold text-gray-500 text-center uppercase tracking-wide'
+                className='px-3 py-3 text-xs font-semibold text-muted-foreground text-center uppercase tracking-wide'
               >
                 {day}
               </div>
@@ -64,8 +64,8 @@ export function MonthView({
                   type='button'
                   key={dateKey}
                   onClick={() => hasTickets && setSelectedDate(day)}
-                  className={`min-h-[120px] p-3 border-r border-b border-gray-100 last:border-r-0 text-left transition-all duration-200 hover:bg-gray-50/50 ${
-                    !isCurrentMonth ? 'bg-gray-50/30' : 'bg-white'
+                  className={`min-h-[120px] p-3 border-r border-b border-border last:border-r-0 text-left transition-all duration-200 hover:bg-muted/50 ${
+                    !isCurrentMonth ? 'bg-muted/30' : 'bg-background'
                   } ${hasTickets ? 'hover:shadow-inner' : ''}`}
                   data-track-category='CALENDAR_MONTH_VIEW'
                   data-track-name='SelectDay'
@@ -81,14 +81,14 @@ export function MonthView({
                         isToday
                           ? 'bg-blue-500 text-white rounded-full'
                           : isCurrentMonth
-                            ? 'text-gray-900'
-                            : 'text-gray-400'
+                            ? 'text-foreground'
+                            : 'text-muted-foreground'
                       }`}
                     >
                       {format(day, 'd')}
                     </span>
                     {hasTickets && (
-                      <span className='text-[10px] font-medium text-gray-400'>
+                      <span className='text-[10px] font-medium text-muted-foreground'>
                         {dayTickets.length}
                       </span>
                     )}
@@ -107,7 +107,7 @@ export function MonthView({
                       />
                     ))}
                     {dayTickets.length > 3 && (
-                      <div className='text-xs text-gray-400 pl-1 font-medium'>
+                      <div className='text-xs text-muted-foreground pl-1 font-medium'>
                         +{dayTickets.length - 3} more
                       </div>
                     )}

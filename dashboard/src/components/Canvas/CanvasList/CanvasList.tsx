@@ -211,16 +211,16 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   }
 
   return (
-    <div className='flex flex-col h-full bg-white' data-testid='canvas-list'>
-      <div className='px-4 md:px-6 py-4 border-b border-gray-100'>
+    <div className='flex flex-col h-full bg-background' data-testid='canvas-list'>
+      <div className='px-4 md:px-6 py-4 border-b border-border'>
         <div className='flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0'>
           <div className='flex items-center gap-2'>
             <button
               onClick={() => setActiveFilter('all')}
               className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
                 activeFilter === 'all'
-                  ? 'bg-gray-100 text-gray-900'
-                  : 'text-gray-600 hover:bg-gray-50'
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:bg-accent'
               }`}
               data-testid='canvas-filter-all'
               data-track-category='CANVAS'
@@ -233,8 +233,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               onClick={() => setActiveFilter('created_by_me')}
               className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
                 activeFilter === 'created_by_me'
-                  ? 'bg-gray-100 text-gray-900'
-                  : 'text-gray-600 hover:bg-gray-50'
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:bg-accent'
               }`}
               data-testid='canvas-filter-created-by-me'
               data-track-category='CANVAS'
@@ -249,7 +249,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all flex items-center gap-1.5 ${
                   activeFilter === 'quarto_docs'
                     ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-50'
+                    : 'text-muted-foreground hover:bg-accent'
                 }`}
                 data-testid='canvas-filter-quarto-docs'
                 data-track-category='CANVAS'
@@ -266,7 +266,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           </div>
 
           <div className='relative w-full sm:w-auto'>
-            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
+            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
             <Input
               type='text'
               value={searchQuery}
@@ -281,18 +281,18 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       <div className='flex-1 overflow-auto'>
         {filteredCanvases.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full text-center py-16'>
-            <FileText className='w-16 h-16 text-gray-200 mb-4' />
-            <h3 className='text-lg font-medium text-gray-700 mb-2'>
+            <FileText className='w-16 h-16 text-muted-foreground mb-4' />
+            <h3 className='text-lg font-medium text-foreground mb-2'>
               {searchQuery ? 'No canvases found' : 'No canvases yet'}
             </h3>
-            <p className='text-gray-500 text-sm'>
+            <p className='text-muted-foreground text-sm'>
               {searchQuery
                 ? 'Try adjusting your search'
                 : 'Create your first canvas to get started'}
             </p>
           </div>
         ) : (
-          <div className='divide-y divide-gray-50'>
+          <div className='divide-y divide-border'>
             {filteredCanvases.map(canvas => {
               const canvasWithParticipants = canvas as Canvas & {
                 participants?: { userId: string; role: CanvasRole }[];
@@ -312,7 +312,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   key={canvas.id}
                   role='button'
                   tabIndex={0}
-                  className='group flex items-center px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer'
+                  className='group flex items-center px-6 py-4 hover:bg-accent transition-colors cursor-pointer'
                   onClick={e =>
                     isQuartoDoc ? handleQuartoDocClick(e, canvas) : onSelect(e, canvas)
                   }
@@ -352,32 +352,32 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   <div className='flex-shrink-0 mr-4'>
                     <div
                       className={`w-8 h-8 flex items-center justify-center rounded ${
-                        isQuartoDoc ? 'bg-blue-50' : 'bg-gray-50'
+                        isQuartoDoc ? 'bg-blue-50' : 'bg-muted'
                       }`}
                     >
                       {isQuartoDoc ? (
                         <BookMarked className='w-4 h-4 text-blue-500' strokeWidth={2.5} />
                       ) : (
-                        <FileText className='w-4 h-4 text-gray-500' strokeWidth={2.5} />
+                        <FileText className='w-4 h-4 text-muted-foreground' strokeWidth={2.5} />
                       )}
                     </div>
                   </div>
 
                   <div className='flex-1 min-w-0'>
                     <div className='flex items-center gap-2 mb-1'>
-                      <h3 className='font-medium text-gray-900 truncate' title={canvas.title}>
+                      <h3 className='font-medium text-foreground truncate' title={canvas.title}>
                         {canvas.title}
                       </h3>
                       {isQuartoDoc &&
                         canvas.quartoDocumentType &&
                         canvas.quartoDocumentType !== 'docs' && (
-                          <span className='px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600'>
+                          <span className='px-2 py-0.5 text-xs font-medium rounded-full bg-muted text-muted-foreground'>
                             {canvas.quartoDocumentType}
                           </span>
                         )}
                     </div>
 
-                    <div className='flex flex-wrap items-center gap-3 text-sm text-gray-500'>
+                    <div className='flex flex-wrap items-center gap-3 text-sm text-muted-foreground'>
                       <UserHoverWrapper userId={canvas.createdBy}>
                         <span className='flex items-center gap-1.5 cursor-pointer'>
                           <Avatar userId={canvas.createdBy} size='sm' />
@@ -390,7 +390,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                         </span>
                       </UserHoverWrapper>
 
-                      <span className='text-gray-300'>|</span>
+                      <span className='text-muted-foreground'>|</span>
 
                       {isQuartoDoc && canvas.userRepo ? (
                         <span
@@ -409,7 +409,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                             </>
                           ) : (
                             <>
-                              <Lock className='w-3.5 h-3.5 text-gray-400' strokeWidth={2.5} />
+                              <Lock
+                                className='w-3.5 h-3.5 text-muted-foreground'
+                                strokeWidth={2.5}
+                              />
                               <span>Private</span>
                             </>
                           )}
@@ -445,12 +448,15 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                       <DropdownMenuTrigger asChild>
                         <button
                           onClick={e => e.stopPropagation()}
-                          className='p-1.5 rounded hover:bg-gray-100'
+                          className='p-1.5 rounded hover:bg-accent'
                           data-track-category='CANVAS'
                           data-track-name='Open_Canvas_Menu'
                           data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
                         >
-                          <MoreVertical className='w-4 h-4 text-gray-500' strokeWidth={2.5} />
+                          <MoreVertical
+                            className='w-4 h-4 text-muted-foreground'
+                            strokeWidth={2.5}
+                          />
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align='end' className='w-48'>

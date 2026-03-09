@@ -196,11 +196,11 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
 
   if (!selectedRecord) {
     content = (
-      <div className='flex flex-col items-center justify-center h-full text-gray-500 gap-4 p-6'>
-        <ClipboardCheck className='h-12 w-12 text-gray-300' />
+      <div className='flex flex-col items-center justify-center h-full text-muted-foreground gap-4 p-6'>
+        <ClipboardCheck className='h-12 w-12 text-muted' />
         <div className='text-center'>
-          <p className='text-sm font-medium text-gray-900'>No RCA for this ticket</p>
-          <p className='text-xs text-gray-500 mt-1'>
+          <p className='text-sm font-medium text-foreground'>No RCA for this ticket</p>
+          <p className='text-xs text-muted-foreground mt-1'>
             Create a Root Cause Analysis to track the incident.
           </p>
         </div>
@@ -325,17 +325,17 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
   }
 
   const containerClass = isExpanded
-    ? 'fixed inset-0 z-50 bg-white flex flex-col h-screen'
+    ? 'fixed inset-0 z-50 bg-background flex flex-col h-screen'
     : 'flex flex-col h-full overflow-hidden relative';
 
   return (
     <div className={containerClass}>
       {isExpanded && (
-        <div className='flex items-center justify-between px-10 py-4 border-b border-gray-200 bg-gray-50'>
-          <span className='text-lg font-bold text-gray-900'>Root Cause Analysis</span>
+        <div className='flex items-center justify-between px-10 py-4 border-b border-border bg-muted'>
+          <span className='text-lg font-bold text-foreground'>Root Cause Analysis</span>
           <button
             type='button'
-            className='p-2 rounded-md hover:bg-gray-100 transition-colors'
+            className='p-2 rounded-md hover:bg-muted transition-colors'
             onClick={() => setIsExpanded(prev => !prev)}
             aria-label='Collapse RCA panel'
             title='Collapse'
@@ -348,12 +348,12 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
       )}
       {!isExpanded && (
         <div className='flex items-center justify-between px-4 py-2'>
-          <span className='text-base font-semibold text-gray-800 truncate'>
+          <span className='text-base font-semibold text-foreground truncate'>
             Root Cause Analysis
           </span>
           <button
             type='button'
-            className='rounded-md bg-white/90 p-2 shadow-sm ring-1 ring-gray-200 hover:bg-white transition-colors'
+            className='rounded-md bg-background/90 p-2 shadow-sm ring-1 ring-border hover:bg-background transition-colors'
             onClick={() => setIsExpanded(true)}
             aria-label='Expand RCA panel'
             title='Expand'

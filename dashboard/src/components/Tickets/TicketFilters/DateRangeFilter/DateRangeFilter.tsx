@@ -145,7 +145,7 @@ export const DateRangeFilter = ({
         className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors min-w-0 ${
           hasSelection
             ? 'border-blue-200 bg-blue-50 text-blue-700'
-            : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+            : 'border-border bg-background text-foreground hover:bg-muted'
         }`}
       >
         <Calendar className='w-4 h-4 flex-shrink-0' />
@@ -167,20 +167,20 @@ export const DateRangeFilter = ({
           data-track-category='TicketFilters'
           data-track-name='ClearDateRangeFilter'
           data-track-metadata={JSON.stringify({ filterType: 'dateRange', startDate, endDate })}
-          className='absolute -top-1 -right-1 bg-gray-100 hover:bg-gray-200 rounded-full p-1 transition-colors'
+          className='absolute -top-1 -right-1 bg-muted hover:bg-border rounded-full p-1 transition-colors'
           title={`Clear ${label.toLowerCase()} filter`}
         >
-          <X className='w-3 h-3 text-gray-600' />
+          <X className='w-3 h-3 text-muted-foreground' />
         </button>
       )}
 
       {/* Dropdown */}
       {isOpen && (
-        <div className='absolute top-full left-0 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50'>
+        <div className='absolute top-full left-0 mt-1 w-80 bg-background border border-border rounded-lg shadow-lg z-50'>
           <div className='p-4'>
             {/* Quick Presets */}
             <div className='mb-4'>
-              <div className='text-xs font-medium text-gray-500 mb-2'>Quick presets</div>
+              <div className='text-xs font-medium text-muted-foreground mb-2'>Quick presets</div>
               <div className='flex gap-2'>
                 <Button
                   onClick={() => handlePresetClick('today')}
@@ -219,14 +219,14 @@ export const DateRangeFilter = ({
             </div>
 
             {/* Custom Date Range */}
-            <div className='border-t border-gray-100 pt-4'>
-              <div className='text-xs font-medium text-gray-500 mb-3'>Custom range</div>
+            <div className='border-t border-border pt-4'>
+              <div className='text-xs font-medium text-muted-foreground mb-3'>Custom range</div>
 
               <div className='space-y-3'>
                 <div>
                   <label
                     htmlFor='start-date'
-                    className='block text-xs font-medium text-gray-700 mb-1'
+                    className='block text-xs font-medium text-foreground mb-1'
                   >
                     Start date
                   </label>
@@ -236,7 +236,7 @@ export const DateRangeFilter = ({
                     value={startDate}
                     onChange={handleStartDateChange}
                     max={endDate || new Date().toISOString().split('T')[0]}
-                    className='w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                    className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                     data-track-category='Tickets'
                     data-track-name='FilterStartDate'
                   />
@@ -245,7 +245,7 @@ export const DateRangeFilter = ({
                 <div>
                   <label
                     htmlFor='end-date'
-                    className='block text-xs font-medium text-gray-700 mb-1'
+                    className='block text-xs font-medium text-foreground mb-1'
                   >
                     End date
                   </label>
@@ -256,7 +256,7 @@ export const DateRangeFilter = ({
                     onChange={handleEndDateChange}
                     min={startDate || ''}
                     max={new Date().toISOString().split('T')[0]}
-                    className='w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                    className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                     data-track-category='Tickets'
                     data-track-name='FilterEndDate'
                   />
@@ -266,7 +266,7 @@ export const DateRangeFilter = ({
 
             {/* Clear Button */}
             {hasSelection && (
-              <div className='border-t border-gray-100 pt-3 mt-4'>
+              <div className='border-t border-border pt-3 mt-4'>
                 <button
                   onClick={handleClear}
                   data-track-category='TicketFilters'
@@ -276,7 +276,7 @@ export const DateRangeFilter = ({
                     startDate,
                     endDate,
                   })}
-                  className='w-full text-xs text-gray-500 hover:text-gray-700 transition-colors py-2'
+                  className='w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-2'
                 >
                   Clear date range
                 </button>

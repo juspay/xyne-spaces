@@ -9,6 +9,7 @@ import { Toaster } from 'sonner';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './services/clients/queryClient';
 import { XYNE_FOUNDATION_TOKENS } from './themes/XYNE_FOUNDATION_TOKENS';
+import { XYNE_DARK_FOUNDATION_TOKENS } from './themes/XYNE_DARK_FOUNDATION_TOKENS';
 import { XYNE_THEME_COMPONENT_TOKENS } from './themes/componentTokens';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useTheme } from './hooks/useTheme';
@@ -22,7 +23,7 @@ import { TRUSTED_ORIGINS } from './config';
 
 const App = (): ReactElement => {
   // Initialize theme on app load
-  useTheme();
+  const { theme } = useTheme();
 
   // Listen for Electron logs
   useEffect(() => {
@@ -82,8 +83,11 @@ const App = (): ReactElement => {
               <CodeServerProvider>
                 <VSCodeProvider>
                   <ThemeProvider
-                    foundationTokens={XYNE_FOUNDATION_TOKENS}
+                    foundationTokens={
+                      theme === 'midnight' ? XYNE_DARK_FOUNDATION_TOKENS : XYNE_FOUNDATION_TOKENS
+                    }
                     componentTokens={XYNE_THEME_COMPONENT_TOKENS}
+                    theme={theme === 'midnight' ? 'dark' : 'light'}
                   >
                     <ShortcutsProvider>
                       <main className='h-screen' style={{ background: 'var(--root-bg)' }}>

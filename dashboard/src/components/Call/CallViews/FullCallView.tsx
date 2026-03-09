@@ -258,7 +258,7 @@ export function FullCallView({
 
       {/* Thread Panel - Sidebar */}
       {isChatOpen && channelId && conversationId && (
-        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-white shadow-xl z-[60]'>
+        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
           <ThreadMessages
             channelId={channelId}
             conversationId={conversationId}
@@ -269,7 +269,7 @@ export function FullCallView({
 
       {/* Participants Sidebar */}
       {isParticipantsSidebarOpen && (
-        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-white shadow-xl z-[60]'>
+        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
           <ParticipantsSidebar callId={callId} onClose={handleToggleParticipantsSidebar} />
         </div>
       )}

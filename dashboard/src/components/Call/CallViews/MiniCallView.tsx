@@ -269,8 +269,8 @@ export function MiniCallView({
                       <div className='absolute inset-0 w-2 h-2 bg-green-500 rounded-full animate-ping'></div>
                     </div>
                     <span className='text-white text-xs font-semibold'>Call Active</span>
-                    <span className='text-gray-400 text-xs'>·</span>
-                    <span className='text-gray-400 text-xs' data-testid='participant-count'>
+                    <span className='text-muted-foreground text-xs'>·</span>
+                    <span className='text-muted-foreground text-xs' data-testid='participant-count'>
                       {participantCount} participant{participantCount !== 1 ? 's' : ''}
                     </span>
                   </div>
@@ -351,7 +351,7 @@ export function MiniCallView({
           {/* Thread Panel - Below Call */}
           {isChatOpen && channelId && conversationId && (
             <div
-              className='bg-white shadow-2xl border-2 border-gray-200 border-t-0 overflow-hidden relative'
+              className='bg-background shadow-2xl border-2 border-border border-t-0 overflow-hidden relative'
               style={{
                 width: `${size.width}px`,
                 height: '400px',
@@ -371,7 +371,7 @@ export function MiniCallView({
           {/* Participants Sidebar - Below Call */}
           {isParticipantsSidebarOpen && (
             <div
-              className='bg-white shadow-2xl border-2 border-gray-200 border-t-0 overflow-hidden relative h-[400px] rounded-b-xl'
+              className='bg-background shadow-2xl border-2 border-border border-t-0 overflow-hidden relative h-[400px] rounded-b-xl'
               style={{ width: `${size.width}px` }}
             >
               <ParticipantsSidebar

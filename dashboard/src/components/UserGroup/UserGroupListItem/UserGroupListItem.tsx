@@ -40,24 +40,28 @@ export const UserGroupListItem = ({
   const memberCount = members.length;
 
   return (
-    <div className='bg-white border rounded-lg p-4 hover:bg-gray-50 transition-colors'>
+    <div className='bg-background border rounded-lg p-4 hover:bg-muted transition-colors'>
       <div className='flex items-center justify-between'>
         <div className='flex-1'>
           <div className='flex items-center space-x-3'>
-            <div className='flex items-center justify-center w-10 h-10 bg-gray-100 rounded-lg'>
-              <span className='text-gray-600 font-medium'>👥</span>
+            <div className='flex items-center justify-center w-10 h-10 bg-muted rounded-lg'>
+              <span className='text-muted-foreground font-medium'>👥</span>
             </div>
             <div>
-              <h3 className='font-medium text-gray-900'>{userGroup.name}</h3>
+              <h3 className='font-medium text-foreground'>{userGroup.name}</h3>
               {userGroup.description && (
-                <p className='text-sm text-gray-600 line-clamp-1'>{userGroup.description}</p>
+                <p className='text-sm text-muted-foreground line-clamp-1'>
+                  {userGroup.description}
+                </p>
               )}
-              {userGroup.alias && <p className='text-xs text-gray-500'>Alias: {userGroup.alias}</p>}
+              {userGroup.alias && (
+                <p className='text-xs text-muted-foreground'>Alias: {userGroup.alias}</p>
+              )}
             </div>
           </div>
 
           <div className='mt-2 flex items-center space-x-4'>
-            <div className='flex items-center text-sm text-gray-600'>
+            <div className='flex items-center text-sm text-muted-foreground'>
               <span className='font-medium'>{memberCount}</span>
               <span className='ml-1'>{memberCount === 1 ? 'member' : 'members'}</span>
             </div>
@@ -78,7 +82,7 @@ export const UserGroupListItem = ({
                 {/* Show overflow indicator */}
                 {memberCount > 3 && (
                   <div
-                    className='relative flex items-center justify-center w-5 h-5 bg-gray-100 border border-white rounded-full text-xs font-medium text-gray-600'
+                    className='relative flex items-center justify-center w-5 h-5 bg-muted border border-white rounded-full text-xs font-medium text-muted-foreground'
                     style={{ zIndex: 0 }}
                   >
                     +{memberCount - 3}

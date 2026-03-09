@@ -222,11 +222,11 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
               <button
                 type='button'
                 onClick={() => onShowFormattingToolbar?.()}
-                className='p-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors'
+                className='p-2 rounded-full hover:bg-accent active:bg-accent transition-colors'
                 aria-label='Text formatting'
                 onMouseDown={e => e.preventDefault()}
               >
-                <span className='text-gray-600 font-semibold text-xl'>Aa</span>
+                <span className='text-muted-foreground font-semibold text-xl'>Aa</span>
               </button>
 
               {/* Emoji Picker Button */}
@@ -263,11 +263,11 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                     editor?.chain().focus().insertContent('@').run();
                     onMentionClick();
                   }}
-                  className='p-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors'
+                  className='p-2 rounded-full hover:bg-accent active:bg-accent transition-colors'
                   aria-label='Mention user'
                   onMouseDown={e => e.preventDefault()}
                 >
-                  <AtSign className='h-5 w-5 text-gray-600' />
+                  <AtSign className='h-5 w-5 text-muted-foreground' />
                 </button>
               )}
 
@@ -279,11 +279,11 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                     editor?.chain().focus().insertContent('#').run();
                     onChannelClick();
                   }}
-                  className='p-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors'
+                  className='p-2 rounded-full hover:bg-accent active:bg-accent transition-colors'
                   aria-label='Mention channel'
                   onMouseDown={e => e.preventDefault()}
                 >
-                  <span className='text-gray-600 font-semibold text-xl'>#</span>
+                  <span className='text-muted-foreground font-semibold text-xl'>#</span>
                 </button>
               )}
 

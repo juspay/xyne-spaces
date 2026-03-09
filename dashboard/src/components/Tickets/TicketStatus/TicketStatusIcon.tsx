@@ -102,7 +102,7 @@ export const TicketStatusWithStages: React.FC<TicketStatusWithStagesProps> = ({
   }
   return (
     <div className={cn('flex items-center gap-1.5', className)}>
-      {showLeadingDot && <div className='rounded-full h-1 w-1 bg-gray-400'></div>}
+      {showLeadingDot && <div className='rounded-full h-1 w-1 bg-muted-foreground'></div>}
       <TicketStatusIcon progressPercentage={25} size={12} />
       <span className={cn('text-xs line-clamp-1 break-all text-blue-500', labelClassName)}>
         {currentStageName || 'Not Started'}

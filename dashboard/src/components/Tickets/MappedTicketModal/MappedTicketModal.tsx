@@ -64,16 +64,16 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
       />
 
       {/* Modal */}
-      <div className='relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-[80vw] max-w-[1400px] h-[90vh] mx-auto flex flex-col'>
+      <div className='relative bg-background dark:bg-gray-800 rounded-lg shadow-xl w-[80vw] max-w-[1400px] h-[90vh] mx-auto flex flex-col'>
         {/* Header */}
-        <div className='flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700'>
+        <div className='flex items-center justify-between p-4 border-b border-border dark:border-gray-700'>
           {/* Breadcrumb */}
           <div className='flex items-center gap-2 text-sm flex-1 min-w-0 mr-4 overflow-x-auto'>
             {ticketHistory.length > 0 ? (
               ticketHistory.map((ticket, index) => (
                 <React.Fragment key={ticket.id}>
                   {index > 0 && (
-                    <span className='text-gray-400 dark:text-gray-500 flex-shrink-0 text-lg'>
+                    <span className='text-muted-foreground dark:text-muted-foreground flex-shrink-0 text-lg'>
                       ›
                     </span>
                   )}
@@ -83,8 +83,8 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
                     onClick={() => onNavigateToParent(ticket.id)}
                     className={`px-2 py-1 font-medium rounded transition-colors flex-shrink-0 max-w-[200px] truncate ${
                       index === ticketHistory.length - 1
-                        ? 'text-gray-900 dark:text-gray-100'
-                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                        ? 'text-foreground dark:text-gray-100'
+                        : 'text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-muted'
                     }`}
                     title={ticket.title}
                     data-track-category='Tickets'
@@ -96,7 +96,9 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
                 </React.Fragment>
               ))
             ) : (
-              <span className='text-gray-900 dark:text-gray-100 font-semibold'>Ticket Details</span>
+              <span className='text-foreground dark:text-gray-100 font-semibold'>
+                Ticket Details
+              </span>
             )}
           </div>
 
@@ -109,14 +111,14 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
             data-track-category='Tickets'
             data-track-name='CloseMappedTicketModal'
           >
-            <X className='w-5 h-5 text-gray-500' />
+            <X className='w-5 h-5 text-muted-foreground' />
           </Button>
         </div>
 
         {/* Content - Split View */}
         <div className='flex-1 min-h-0 flex'>
           {/* Left: Ticket Details */}
-          <div className='flex-1 overflow-y-auto border-r border-gray-200 dark:border-gray-700'>
+          <div className='flex-1 overflow-y-auto border-r border-border dark:border-gray-700'>
             <TicketDetails ticketId={mappedTicketId} onNavigateToTicket={onNavigateToParent} />
           </div>
 

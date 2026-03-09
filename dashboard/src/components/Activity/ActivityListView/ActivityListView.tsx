@@ -1,12 +1,4 @@
-import {
-  ReactElement,
-  useState,
-  useMemo,
-  useCallback,
-  cloneElement,
-  useEffect,
-  useRef,
-} from 'react';
+import { ReactElement, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
@@ -499,7 +491,7 @@ const ActivityListView = (): ReactElement => {
     }
 
     return (
-      <div className='flex-1 flex flex-col items-center justify-center text-gray-400 px-4 py-8'>
+      <div className='flex-1 flex flex-col items-center justify-center text-muted-foreground px-4 py-8'>
         <Bell className='w-16 h-16 mb-4' />
         <p className='text-base font-medium'>
           {showUnreadOnly ? 'No unread activities' : 'No activities yet'}
@@ -515,27 +507,27 @@ const ActivityListView = (): ReactElement => {
   const renderLeftPanel = (): ReactElement => (
     <div
       data-id='activity-list-view'
-      className='h-full bg-white flex flex-col max-w-full overflow-hidden'
+      className='h-full bg-background flex flex-col max-w-full overflow-hidden'
     >
       <div className='px-4 py-4 flex items-center justify-between gap-2'>
         <div className='flex items-center gap-2'>
           {!isMobile && (
             <Link
               to='/chat/dir'
-              className='p-1 rounded-md text-gray-900 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
+              className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
               aria-label='Go back'
             >
               <ArrowLeft size={20} />
             </Link>
           )}
-          <h2 className='text-xl font-semibold text-gray-900 truncate'>Activity</h2>
+          <h2 className='text-xl font-semibold text-foreground truncate'>Activity</h2>
         </div>
         <div className='flex items-center gap-4'>
           {/* Unread Toggle */}
           <div className='flex items-center gap-3 flex-shrink-0'>
             <label
               htmlFor='activity-unread-filter'
-              className='text-xs font-medium text-gray-700 cursor-pointer select-none whitespace-nowrap'
+              className='text-xs font-medium text-muted-foreground cursor-pointer select-none whitespace-nowrap'
             >
               Unread
             </label>
@@ -552,14 +544,14 @@ const ActivityListView = (): ReactElement => {
               })}
               className={cn(
                 'relative inline-flex h-5 w-9 items-center rounded-full',
-                'bg-gray-200 transition-colors duration-200',
+                'bg-muted transition-colors duration-200',
                 'data-[state=checked]:bg-sidebar-badge-accent',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
               )}
             >
               <Switch.Thumb
                 className={cn(
-                  'block h-4 w-4 rounded-full bg-white shadow-sm',
+                  'block h-4 w-4 rounded-full bg-background shadow-sm',
                   'transition-transform duration-200',
                   'translate-x-0.5 data-[state=checked]:translate-x-4',
                 )}
@@ -579,27 +571,27 @@ const ActivityListView = (): ReactElement => {
             })}
             className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary'
           >
-            <div className='text-xs font-medium text-gray-700'>Mark as read</div>
+            <div className='text-xs font-medium text-muted-foreground'>Mark as read</div>
           </Button>
 
           {/* 3-dot menu with Actionable Toggle and View Toggle (Desktop & Mobile) */}
           <div className='relative' ref={mobileMenuRef}>
             <button
               onClick={() => setShowMobileMenu(!showMobileMenu)}
-              className='p-2 rounded-md hover:bg-gray-100 transition-colors duration-200'
+              className='p-2 rounded-md hover:bg-accent transition-colors duration-200'
               aria-label='More options'
               data-track-category='ACTIVITY'
               data-track-name='TOGGLE_MOBILE_MENU'
               data-track-metadata={JSON.stringify({ menuState: !showMobileMenu })}
             >
-              <MoreVertical size={20} className='text-gray-700' />
+              <MoreVertical size={20} className='text-muted-foreground' />
             </button>
 
             {showMobileMenu && (
-              <div className='absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
+              <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
                 {/* Actionable Toggle */}
                 <div className='px-4 py-2 flex items-center justify-between'>
-                  <span className='text-sm font-medium text-gray-700'>Actionable</span>
+                  <span className='text-sm font-medium text-muted-foreground'>Actionable</span>
                   <Switch.Root
                     checked={actionableToggle}
                     onCheckedChange={handleActionableToggle}
@@ -610,14 +602,14 @@ const ActivityListView = (): ReactElement => {
                     })}
                     className={cn(
                       'relative inline-flex h-5 w-9 items-center rounded-full',
-                      'bg-gray-200 transition-colors duration-200',
+                      'bg-muted transition-colors duration-200',
                       'data-[state=checked]:bg-sidebar-badge-accent',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                     )}
                   >
                     <Switch.Thumb
                       className={cn(
-                        'block h-4 w-4 rounded-full bg-white shadow-sm',
+                        'block h-4 w-4 rounded-full bg-background shadow-sm',
                         'transition-transform duration-200',
                         'translate-x-0.5 data-[state=checked]:translate-x-4',
                       )}
@@ -626,7 +618,7 @@ const ActivityListView = (): ReactElement => {
                 </div>
 
                 {/* Divider */}
-                <div className='border-t border-gray-200 my-1'></div>
+                <div className='border-t border-border my-1'></div>
 
                 {/* Condensed View */}
                 <button
@@ -635,8 +627,8 @@ const ActivityListView = (): ReactElement => {
                     setShowMobileMenu(false);
                   }}
                   className={cn(
-                    'w-full px-4 py-2 flex items-center gap-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors',
-                    active === 'condensed' && 'bg-gray-100',
+                    'w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors',
+                    active === 'condensed' && 'bg-accent',
                   )}
                   data-track-category='ACTIVITY'
                   data-track-name='CHANGE_VIEW_CONDENSED'
@@ -652,8 +644,8 @@ const ActivityListView = (): ReactElement => {
                     setShowMobileMenu(false);
                   }}
                   className={cn(
-                    'w-full px-4 py-2 flex items-center gap-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors',
-                    active === 'detailed' && 'bg-gray-100',
+                    'w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors',
+                    active === 'detailed' && 'bg-accent',
                   )}
                   data-track-category='ACTIVITY'
                   data-track-name='CHANGE_VIEW_DETAILED'
@@ -681,7 +673,7 @@ const ActivityListView = (): ReactElement => {
           onValueChange={handleTabChange}
           style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
         >
-          <div className='overflow-x-auto border-b border-gray-200 no-scrollbar'>
+          <div className='overflow-x-auto border-b border-border no-scrollbar'>
             <Tabs.List className='flex items-center sm:justify-start min-w-max'>
               {visibleTabs.map(tab => {
                 const count = activityCounts[tab.value];
@@ -701,15 +693,18 @@ const ActivityListView = (): ReactElement => {
                       )}
                     >
                       {IconComponent && (
-                        <span className='size-4 flex items-center justify-center shrink-0'>
-                          {cloneElement(<IconComponent className='w-4 h-4' />, {
-                            color: activeTab === tab.value ? '#2B303B' : '#788187',
-                          } as { color: string })}
+                        <span
+                          className={cn(
+                            'size-4 flex items-center justify-center shrink-0',
+                            activeTab === tab.value ? 'text-primary' : 'text-muted-foreground',
+                          )}
+                        >
+                          <IconComponent className='w-4 h-4' />
                         </span>
                       )}
                       <span
                         className={cn(
-                          'text-xs sm:text-sm font-medium text-gray-900 truncate',
+                          'text-xs sm:text-sm font-medium text-foreground truncate',
                           activeTab === tab.value ? 'text-primary' : 'text-muted-foreground',
                         )}
                       >
@@ -755,7 +750,7 @@ const ActivityListView = (): ReactElement => {
     // If on a specific activity route, render the outlet for detail view with white background
     if (!isOnIndexRoute) {
       return (
-        <div className='flex flex-col h-full max-w-full bg-white text-gray-900 overflow-x-hidden w-screen'>
+        <div className='flex flex-col h-full max-w-full bg-background text-foreground overflow-x-hidden w-screen'>
           <Outlet />
         </div>
       );
@@ -785,13 +780,13 @@ const ActivityListView = (): ReactElement => {
 
         {/* RIGHT PANEL - Detail View */}
         <Panel>
-          <div className='flex-1 flex flex-col bg-white relative h-full'>
+          <div className='flex-1 flex flex-col bg-background relative h-full'>
             <div className='flex-1 h-full overflow-hidden flex items-center justify-center'>
               {isOnIndexRoute ? (
                 <div className='flex flex-col items-center justify-center p-8 text-center'>
-                  <Bell className='text-gray-300 mb-4' size={64} />
-                  <h3 className='text-xl font-medium text-gray-900 mb-2'>Select an activity</h3>
-                  <p className='text-gray-500 max-w-md'>
+                  <Bell className='text-muted-foreground mb-4' size={64} />
+                  <h3 className='text-xl font-medium text-foreground mb-2'>Select an activity</h3>
+                  <p className='text-muted-foreground max-w-md'>
                     Choose an activity from the list to view its details
                   </p>
                 </div>

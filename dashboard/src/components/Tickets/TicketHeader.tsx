@@ -120,7 +120,7 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange })
           {filters.searchQuery.trim() && (
             <button
               onClick={clearAllFilters}
-              className='flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors whitespace-nowrap'
+              className='flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors whitespace-nowrap'
               data-track-category='Tickets'
               data-track-name='ClearAllSearch'
             >
@@ -133,7 +133,7 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange })
           {hasActiveFilters() && (
             <button
               onClick={clearFilters}
-              className='flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors whitespace-nowrap'
+              className='flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors whitespace-nowrap'
               data-track-category='Tickets'
               data-track-name='ClearFilters'
             >

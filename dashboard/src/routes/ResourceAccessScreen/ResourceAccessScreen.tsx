@@ -32,21 +32,21 @@ export const ResourceAccessScreen = (): ReactElement => {
   const loading = users === undefined;
 
   return (
-    <div className='h-full bg-gray-50 flex flex-col md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'>
+    <div className='h-full bg-muted flex flex-col md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'>
       <div className='flex-1 overflow-y-auto p-4'>
         {/* Header */}
         <div className='mb-6'>
           <div className='flex items-center justify-between mb-2'>
-            <h2 className='text-lg font-bold text-gray-900'>User Management</h2>
+            <h2 className='text-lg font-bold text-foreground'>User Management</h2>
           </div>
-          <p className='text-xs text-gray-600'>Manage resource access for users</p>
+          <p className='text-xs text-muted-foreground'>Manage resource access for users</p>
         </div>
 
         {/* Search Bar */}
         <div className='mb-6'>
           <div className='relative max-w-md'>
             <div className='absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none'>
-              <Search size={18} className='text-gray-400' />
+              <Search size={18} className='text-muted-foreground' />
             </div>
             <Input
               type='text'
@@ -61,7 +61,7 @@ export const ResourceAccessScreen = (): ReactElement => {
         {/* Loading State */}
         {loading && (
           <div className='h-64 flex items-center justify-center'>
-            <p className='text-gray-600'>Loading users...</p>
+            <p className='text-muted-foreground'>Loading users...</p>
           </div>
         )}
 
@@ -73,18 +73,18 @@ export const ResourceAccessScreen = (): ReactElement => {
         {/* Empty State - No users at all */}
         {!loading && users.length === 0 && (
           <div className='text-center py-8'>
-            <div className='text-gray-400 text-3xl mb-3'>👥</div>
-            <h3 className='text-sm font-semibold text-gray-700 mb-1'>No users found</h3>
-            <p className='text-xs text-gray-500'>There are no users in the system</p>
+            <div className='text-muted-foreground text-3xl mb-3'>👥</div>
+            <h3 className='text-sm font-semibold text-foreground mb-1'>No users found</h3>
+            <p className='text-xs text-muted-foreground'>There are no users in the system</p>
           </div>
         )}
 
         {/* Empty State - Search returned no results */}
         {!loading && users.length > 0 && filteredUsers.length === 0 && (
           <div className='text-center py-8'>
-            <div className='text-gray-400 text-3xl mb-3'>🔍</div>
-            <h3 className='text-sm font-semibold text-gray-700 mb-1'>No users match</h3>
-            <p className='text-xs text-gray-500'>Try adjusting your search query</p>
+            <div className='text-muted-foreground text-3xl mb-3'>🔍</div>
+            <h3 className='text-sm font-semibold text-foreground mb-1'>No users match</h3>
+            <p className='text-xs text-muted-foreground'>Try adjusting your search query</p>
           </div>
         )}
       </div>

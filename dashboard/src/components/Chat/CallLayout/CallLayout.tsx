@@ -119,7 +119,7 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
                   <span
                     className={cn(
                       'w-1 h-1 rounded-full',
-                      isUserInCall ? 'bg-black/50' : 'bg-white/50',
+                      isUserInCall ? 'bg-black/50' : 'bg-background/50',
                     )}
                   />
                 )}

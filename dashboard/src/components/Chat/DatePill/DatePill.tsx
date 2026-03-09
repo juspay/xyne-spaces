@@ -51,11 +51,11 @@ export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
       className='relative flex items-center justify-center py-2 bg-transparent'
     >
       {showLines && (
-        <div className='absolute left-0 right-0 top-1/2 h-px bg-gray-300 -translate-y-1/2' />
+        <div className='absolute left-0 right-0 top-1/2 h-px bg-border -translate-y-1/2' />
       )}
 
       <div className='relative'>
-        <Badge variant='outline' className='bg-white'>
+        <Badge variant='outline' className='bg-background'>
           {dateText}
         </Badge>
       </div>

@@ -237,7 +237,7 @@ const AttachmentPreview = ({ attachment }: { attachment: MessageAttachment }): R
   const isImage = attachment.mimeType.startsWith('image/');
 
   return (
-    <div className='flex items-center gap-2 p-2 rounded-lg bg-white border border-gray-200'>
+    <div className='flex items-center gap-2 p-2 rounded-lg bg-card border border-border'>
       {isImage ? (
         <div className='relative w-full max-w-[200px] rounded overflow-hidden'>
           <img
@@ -248,14 +248,16 @@ const AttachmentPreview = ({ attachment }: { attachment: MessageAttachment }): R
         </div>
       ) : (
         <div className='flex items-center gap-2'>
-          <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-gray-100 rounded'>
-            <FileDocumentIcon color='#788187' size={20} />
+          <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
+            <FileDocumentIcon color='currentColor' size={20} className='text-muted-foreground' />
           </div>
           <div className='flex flex-col overflow-hidden'>
-            <span className="text-sm font-medium text-gray-900 font-['Inter'] truncate">
+            <span className="text-sm font-medium text-foreground font-['Inter'] truncate">
               {attachment.filename}
             </span>
-            <span className="text-xs text-gray-500 font-['Inter']">{attachment.mimeType}</span>
+            <span className="text-xs text-muted-foreground font-['Inter']">
+              {attachment.mimeType}
+            </span>
           </div>
         </div>
       )}
@@ -372,24 +374,24 @@ export const MessageItem = ({
         message.statusMessage &&
         !displayContent ? (
           <div className='flex items-center gap-0.5 mt-1'>
-            <span className="text-xs text-gray-500 font-['Inter'] italic">
+            <span className="text-xs text-muted-foreground font-['Inter'] italic">
               {sanitizeText(message.statusMessage)}
             </span>
             <span className='inline-flex gap-0.5'>
               <span
-                className='animate-bounce text-xs text-gray-500'
+                className='animate-bounce text-xs text-muted-foreground'
                 style={{ animationDelay: '0ms', animationDuration: '1s' }}
               >
                 .
               </span>
               <span
-                className='animate-bounce text-xs text-gray-500'
+                className='animate-bounce text-xs text-muted-foreground'
                 style={{ animationDelay: '200ms', animationDuration: '1s' }}
               >
                 .
               </span>
               <span
-                className='animate-bounce text-xs text-gray-500'
+                className='animate-bounce text-xs text-muted-foreground'
                 style={{ animationDelay: '400ms', animationDuration: '1s' }}
               >
                 .
@@ -401,8 +403,8 @@ export const MessageItem = ({
             <div
               className={`${
                 message.type === 'user'
-                  ? 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[#E4E8F4] text-[#181B1D] md:block md:rounded-2xl md:bg-[#F5F5F5] md:text-gray-900 md:px-4 md:py-2 md:w-fit'
-                  : 'rounded-2xl bg-transparent text-gray-900 max-w-full'
+                  ? 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[var(--chat-mobile-my-bubble)] text-foreground md:block md:rounded-2xl md:bg-muted md:text-foreground md:px-4 md:py-2 md:w-fit'
+                  : 'rounded-2xl bg-transparent text-foreground max-w-full'
               }`}
             >
               {message.type === 'user' ? (
@@ -493,7 +495,7 @@ export const MessageItem = ({
               message.statusMessage &&
               displayContent && (
                 <div className='mt-2'>
-                  <span className="text-xs text-gray-500 font-['Inter'] italic flex items-center gap-0.5">
+                  <span className="text-xs text-muted-foreground font-['Inter'] italic flex items-center gap-0.5">
                     {sanitizeText(message.statusMessage)}
                     <span className='inline-flex gap-0.5'>
                       <span
@@ -777,11 +779,11 @@ const SummarizerContent = ({
     {/* Key Points */}
     {message.summarizerOutput?.keyPoints && message.summarizerOutput.keyPoints.length > 0 && (
       <div className='space-y-2'>
-        <h3 className='text-sm font-semibold text-gray-600'>Key Points</h3>
+        <h3 className='text-sm font-semibold text-muted-foreground'>Key Points</h3>
         <ul className='space-y-1.5'>
           {message.summarizerOutput.keyPoints.map((keyPoint: SummarizerKeyPoint, index: number) => (
             <li key={index} className='flex items-start'>
-              <span className='text-gray-700 text-sm inline prose prose-sm max-w-none'>
+              <span className='text-foreground text-sm inline prose prose-sm max-w-none'>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
@@ -833,7 +835,7 @@ const SummarizerContent = ({
                             onSummarizerCitationClick(keyPoint.citation);
                           }
                         }}
-                        className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
+                        className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-muted text-muted-foreground font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-accent transition-colors cursor-pointer align-middle"
                         title={`Jump to ${keyPoint.citation.entityType || 'message'} ${keyPoint.citation.messageIndex}`}
                         data-track-category='XyneAI'
                         data-track-name='CITATION_CLICK'
@@ -861,7 +863,7 @@ const GeniusKeyPoints = ({
   onCitationClick,
 }: GeniusKeyPointsProps): ReactElement => (
   <div className='space-y-2'>
-    <h3 className='text-sm font-semibold text-gray-600'>Key Points</h3>
+    <h3 className='text-sm font-semibold text-muted-foreground'>Key Points</h3>
     <ul className='space-y-1.5'>
       {parsedContent.keypoints.map((point: string, index: number) => {
         const keypointNum = index + 1;
@@ -874,7 +876,7 @@ const GeniusKeyPoints = ({
 
         return (
           <li key={index} className='flex items-start'>
-            <span className='text-gray-700 text-sm inline prose prose-sm max-w-none'>
+            <span className='text-foreground text-sm inline prose prose-sm max-w-none'>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
@@ -923,7 +925,7 @@ const GeniusKeyPoints = ({
                       message.channelIdMapping,
                     )
                   }
-                  className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
+                  className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-muted text-muted-foreground font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-accent transition-colors cursor-pointer align-middle"
                   title={`Jump to message ${keypointNum}`}
                   data-track-category='XyneAI'
                   data-track-name='KEY_POINT_CITATION_CLICK'
@@ -1040,7 +1042,7 @@ const MessageActions = ({
       {/* Copy Button */}
       <button
         onClick={onCopy}
-        className='p-1.5 rounded transition-colors hover:bg-gray-100'
+        className='p-1.5 rounded transition-colors hover:bg-accent'
         title={copied ? 'Copied!' : 'Copy'}
         data-track-category='XyneAI'
         data-track-name='COPY_MESSAGE'
@@ -1055,7 +1057,7 @@ const MessageActions = ({
       {/* Like Button */}
       <button
         onClick={() => onFeedback(message.id, 'LIKE')}
-        className='p-1.5 rounded transition-colors hover:bg-gray-100'
+        className='p-1.5 rounded transition-colors hover:bg-accent'
         title='Like'
         data-track-category='XyneAI'
         data-track-name='LIKE_MESSAGE'
@@ -1071,15 +1073,16 @@ const MessageActions = ({
           <g clipPath='url(#clip0_9950_23975)'>
             <path
               d='M9.99479 3.9187L9.32813 6.66536H13.2148C13.4218 6.66536 13.6259 6.71356 13.8111 6.80613C13.9962 6.8987 14.1573 7.0331 14.2815 7.1987C14.4057 7.36429 14.4896 7.55653 14.5266 7.76018C14.5636 7.96384 14.5528 8.17332 14.4948 8.37203L12.9415 13.7054C12.8607 13.9823 12.6923 14.2256 12.4615 14.3987C12.2307 14.5718 11.95 14.6654 11.6615 14.6654H2.66146C2.30784 14.6654 1.9687 14.5249 1.71865 14.2748C1.4686 14.0248 1.32813 13.6857 1.32812 13.332V7.9987C1.32812 7.64508 1.4686 7.30594 1.71865 7.05589C1.9687 6.80584 2.30784 6.66536 2.66146 6.66536H4.50146C4.74951 6.66523 4.99262 6.59591 5.20343 6.46518C5.41424 6.33445 5.58441 6.14751 5.69479 5.92536L7.99479 1.33203C8.30918 1.33592 8.61862 1.41081 8.89999 1.5511C9.18137 1.69138 9.42741 1.89344 9.61973 2.14217C9.81205 2.3909 9.94567 2.67987 10.0106 2.9875C10.0756 3.29513 10.0702 3.61345 9.99479 3.9187Z'
-              stroke={feedbackValue === 'LIKE' ? '#788187' : '#788187'}
-              fill={feedbackValue === 'LIKE' ? '#D1D5DB' : 'none'}
+              stroke='currentColor'
+              fill={feedbackValue === 'LIKE' ? 'currentColor' : 'none'}
               strokeWidth='1.33333'
               strokeLinecap='round'
               strokeLinejoin='round'
+              fillOpacity={feedbackValue === 'LIKE' ? 0.3 : 1}
             />
             <path
               d='M4.67188 6.66797V14.668'
-              stroke={feedbackValue === 'LIKE' ? '#788187' : '#788187'}
+              stroke='currentColor'
               strokeWidth='1.33333'
               strokeLinecap='round'
               strokeLinejoin='round'
@@ -1096,7 +1099,7 @@ const MessageActions = ({
       {/* Dislike Button */}
       <button
         onClick={() => onFeedback(message.id, 'DISLIKE')}
-        className='p-1.5 rounded transition-colors hover:bg-gray-100'
+        className='p-1.5 rounded transition-colors hover:bg-accent'
         title='Dislike'
         data-track-category='XyneAI'
         data-track-name='DISLIKE_MESSAGE'
@@ -1112,15 +1115,16 @@ const MessageActions = ({
           <g clipPath='url(#clip0_9950_23979)'>
             <path
               d='M6.00521 12.0813L6.67188 9.33464L2.78521 9.33464C2.57822 9.33464 2.37406 9.28644 2.18892 9.19387C2.00378 9.1013 1.84274 8.9669 1.71854 8.8013C1.59435 8.63571 1.51041 8.44347 1.47338 8.23982C1.43635 8.03616 1.44725 7.82668 1.50521 7.62797L3.05854 2.29464C3.13932 2.01768 3.30775 1.7744 3.53854 1.6013C3.76934 1.42821 4.05005 1.33464 4.33854 1.33464L13.3385 1.33464C13.6922 1.33464 14.0313 1.47511 14.2814 1.72516C14.5314 1.97521 14.6719 2.31435 14.6719 2.66797L14.6719 8.0013C14.6719 8.35493 14.5314 8.69406 14.2814 8.94411C14.0313 9.19416 13.6922 9.33464 13.3385 9.33464L11.4985 9.33464C11.2505 9.33477 11.0074 9.4041 10.7966 9.53482C10.5858 9.66555 10.4156 9.85249 10.3052 10.0746L8.00521 14.668C7.69082 14.6641 7.38138 14.5892 7.10001 14.4489C6.81863 14.3086 6.57259 14.1066 6.38027 13.8578C6.18795 13.6091 6.05433 13.3201 5.98938 13.0125C5.92444 12.7049 5.92985 12.3865 6.00521 12.0813Z'
-              stroke={feedbackValue === 'DISLIKE' ? '#788187' : '#788187'}
-              fill={feedbackValue === 'DISLIKE' ? '#D1D5DB' : 'none'}
+              stroke='currentColor'
+              fill={feedbackValue === 'DISLIKE' ? 'currentColor' : 'none'}
               strokeWidth='1.33333'
               strokeLinecap='round'
               strokeLinejoin='round'
+              fillOpacity={feedbackValue === 'DISLIKE' ? 0.3 : 1}
             />
             <path
               d='M11.3359 9.33203L11.3359 1.33203'
-              stroke={feedbackValue === 'DISLIKE' ? '#788187' : '#788187'}
+              stroke='currentColor'
               strokeWidth='1.33333'
               strokeLinecap='round'
               strokeLinejoin='round'

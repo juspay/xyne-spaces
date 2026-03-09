@@ -86,7 +86,7 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
   return (
     <button
       onClick={handleToggleSubscription}
-      className={`flex items-center gap-2 px-3 py-2 rounded hover:bg-gray-100 transition-colors ${className}`}
+      className={`flex items-center gap-2 px-3 py-2 rounded hover:bg-accent transition-colors ${className}`}
       title={isSubscribed ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}
       aria-label={isSubscribed ? 'Unsubscribe from conversation' : 'Subscribe to conversation'}
       data-track-category='CONVERSATION_SUBSCRIPTION'
@@ -94,13 +94,13 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
     >
       {isSubscribed ? (
         <>
-          <BellOff size={16} className='text-gray-400' />
+          <BellOff size={16} className='text-muted-foreground' />
           <span className='text-sm'>Unsubscribe from notifications</span>
         </>
       ) : (
         <>
           <Bell size={16} className='text-blue-600' />
-          <span className='text-sm text-gray-600'>Subscribe to notifications</span>
+          <span className='text-sm text-muted-foreground'>Subscribe to notifications</span>
         </>
       )}
     </button>

@@ -82,35 +82,37 @@ export const ActivityConfigDialog = ({
 
   return (
     <div className='fixed inset-0 z-[60] flex items-center justify-center bg-black/50'>
-      <div className='bg-white rounded-lg shadow-lg w-full max-w-md mx-4 overflow-hidden'>
+      <div className='bg-popover rounded-lg shadow-lg w-full max-w-md mx-4 overflow-hidden'>
         {/* Header */}
-        <div className='flex items-center justify-between px-4 py-3 border-b border-gray-200'>
-          <h2 className='text-lg font-semibold text-gray-900'>
+        <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
+          <h2 className='text-lg font-semibold text-foreground'>
             {hasExistingAlias ? 'Edit Activity Alias' : 'Create Activity Alias'}
           </h2>
           <button
             onClick={onClose}
-            className='p-1 hover:bg-gray-100 rounded transition-colors'
+            className='p-1 hover:bg-accent rounded transition-colors'
             type='button'
           >
-            <X className='w-5 h-5 text-gray-500' />
+            <X className='w-5 h-5 text-muted-foreground' />
           </button>
         </div>
 
         {/* Body */}
         <div className='p-4 space-y-4'>
           {/* Original Key Info (read-only) */}
-          <div className='bg-gray-50 rounded-md p-3 space-y-2'>
+          <div className='bg-muted rounded-md p-3 space-y-2'>
             <div className='flex items-center gap-2'>
-              <span className='text-xs text-gray-500 uppercase font-medium'>Original Key Name</span>
-              <span className='text-xs text-gray-400'>(cannot change)</span>
+              <span className='text-xs text-muted-foreground uppercase font-medium'>
+                Original Key Name
+              </span>
+              <span className='text-xs text-muted-foreground'>(cannot change)</span>
             </div>
-            <div className='text-sm font-medium text-gray-900 font-mono'>{eventName}</div>
+            <div className='text-sm font-medium text-foreground font-mono'>{eventName}</div>
             <div className='pt-1'>
-              <span className='text-xs text-gray-500 uppercase font-medium'>
+              <span className='text-xs text-muted-foreground uppercase font-medium'>
                 Original Key Category
               </span>
-              <div className='text-sm font-medium text-gray-900 font-mono'>{eventCategory}</div>
+              <div className='text-sm font-medium text-foreground font-mono'>{eventCategory}</div>
             </div>
           </div>
 
@@ -138,7 +140,7 @@ export const ActivityConfigDialog = ({
               id='blacklist'
               checked={isBlacklisted}
               onChange={e => handleBlacklistChange(e.target.checked)}
-              className='w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500'
+              className='w-4 h-4 text-red-600 border-border rounded focus:ring-red-500'
             />
             <label htmlFor='blacklist' className='flex-1 text-sm text-red-700 cursor-pointer'>
               Blacklist this activity
@@ -155,7 +157,7 @@ export const ActivityConfigDialog = ({
                 <div>
                   <label
                     htmlFor='newName'
-                    className='block text-sm font-medium text-gray-700 mb-1.5'
+                    className='block text-sm font-medium text-muted-foreground mb-1.5'
                   >
                     New Display Name
                   </label>
@@ -165,14 +167,14 @@ export const ActivityConfigDialog = ({
                     value={newEventName}
                     onChange={e => setNewEventName(e.target.value)}
                     placeholder='Enter display name'
-                    className='w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all'
+                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
                   />
                 </div>
 
                 <div>
                   <label
                     htmlFor='newCategory'
-                    className='block text-sm font-medium text-gray-700 mb-1.5'
+                    className='block text-sm font-medium text-muted-foreground mb-1.5'
                   >
                     New Display Category
                   </label>
@@ -182,7 +184,7 @@ export const ActivityConfigDialog = ({
                     value={newEventCategory}
                     onChange={e => setNewEventCategory(e.target.value)}
                     placeholder='Enter display category'
-                    className='w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all'
+                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
                   />
                 </div>
               </div>
@@ -205,10 +207,10 @@ export const ActivityConfigDialog = ({
         </div>
 
         {/* Footer */}
-        <div className='flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50'>
+        <div className='flex justify-end gap-2 px-4 py-3 border-t border-border bg-muted'>
           <button
             onClick={onClose}
-            className='px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors'
+            className='px-4 py-2 text-sm font-medium text-muted-foreground bg-background border border-border rounded-md hover:bg-muted transition-colors'
             type='button'
           >
             Cancel

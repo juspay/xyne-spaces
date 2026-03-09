@@ -77,7 +77,7 @@ export const ActivityItemCard = ({
       onClick={handleClick}
       className={cn(
         'group flex w-full items-start gap-3 p-4 text-left transition-colors duration-150 h-auto rounded-none border-b border-[#F2F2F3]',
-        !activity.isRead ? 'bg-[#F2F2F3] hover:bg-[#EDF3F7]' : 'bg-white hover:bg-gray-50',
+        !activity.isRead ? 'bg-muted hover:bg-accent' : 'bg-card hover:bg-muted',
         className,
       )}
       data-track-category='ACTIVITY'
@@ -114,11 +114,11 @@ export const ActivityItemCard = ({
         <div className='flex w-full items-start justify-between gap-2 flex-wrap'>
           <div className='flex flex-wrap items-baseline gap-x-1.5 text-sm leading-snug min-w-0 flex-1'>
             {isMobile ? (
-              <span className='font-semibold text-[#181B1D]'>{actorName}</span>
+              <span className='font-semibold text-foreground'>{actorName}</span>
             ) : (
               <UserHoverWrapper userId={actorId}>
                 <button
-                  className='font-semibold text-[#181B1D] hover:underline flex-shrink-0'
+                  className='font-semibold text-foreground hover:underline flex-shrink-0'
                   onClick={e => e.stopPropagation()}
                   data-track-category='ACTIVITY'
                   data-track-name='VIEW_USER_PROFILE'
@@ -129,13 +129,13 @@ export const ActivityItemCard = ({
               </UserHoverWrapper>
             )}
 
-            <span className='text-[#505B62] flex-shrink-0'>{description}</span>
+            <span className='text-muted-foreground flex-shrink-0'>{description}</span>
 
             {actorAction !== 'paused_from_assignment' &&
               actorAction !== 'resumed_from_assignment' &&
               actorAction !== 'workflow_question' &&
               (isMobile ? (
-                <span className='font-semibold text-[#3B4145]'>
+                <span className='font-semibold text-foreground'>
                   {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
                 </span>
               ) : (
@@ -147,7 +147,7 @@ export const ActivityItemCard = ({
                   }}
                 >
                   <button
-                    className='font-semibold text-[#3B4145] hover:underline cursor-pointer text-left whitespace-normal'
+                    className='font-semibold text-foreground hover:underline cursor-pointer text-left whitespace-normal'
                     onClick={e => e.stopPropagation()}
                     data-track-category='ACTIVITY'
                     data-track-name='VIEW_CHANNEL'
@@ -163,7 +163,7 @@ export const ActivityItemCard = ({
               ))}
           </div>
 
-          <span className='flex-shrink-0 whitespace-nowrap text-xs text-[#505B62] ml-auto sm:ml-2'>
+          <span className='flex-shrink-0 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
             {getTimestampDisplay(activity.createdAt)}
           </span>
         </div>
@@ -171,7 +171,7 @@ export const ActivityItemCard = ({
         {/* Content Body */}
         <div
           className={cn(
-            'mt-px w-full text-[#3B4145]',
+            'mt-px w-full text-foreground',
             isExpanded
               ? 'whitespace-normal break-normal'
               : 'line-clamp-1 break-normal whitespace-normal',

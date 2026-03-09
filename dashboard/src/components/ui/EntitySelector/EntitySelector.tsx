@@ -131,8 +131,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         type='button'
         data-testid={testId}
         className={cn(
-          'group flex items-center gap-1.5 text-sm rounded-lg transition-colors bg-white',
-          noBorder ? 'border-none' : 'border border-gray-200 hover:bg-gray-50 px-2 py-0.5 ',
+          'group flex items-center gap-1.5 text-sm rounded-lg transition-colors bg-background',
+          noBorder ? 'border-none' : 'border border-border hover:bg-accent px-2 py-0.5 ',
           inputClassName,
         )}
         style={{ width }}
@@ -149,7 +149,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {/* Label: Show selected option's label or placeholder */}
         <span
           className={cn(
-            'text-left break-words whitespace-normal text-gray-700',
+            'text-left break-words whitespace-normal text-foreground',
             noBorder ? 'py-0' : 'py-1',
           )}
         >
@@ -158,12 +158,12 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {showClearButton && selectedOption ? (
           <button
             onClick={handleClear}
-            className='flex-shrink-0 hover:bg-gray-200 rounded p-0.5 transition-colors'
+            className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
-            <X className='w-3 h-3 text-gray-500' />
+            <X className='w-3 h-3 text-muted-foreground' />
           </button>
         ) : showIndicator ? (
-          <ChevronRight className='ml-auto w-4 h-4 text-gray-400 flex-shrink-0' />
+          <ChevronRight className='ml-auto w-4 h-4 text-muted-foreground flex-shrink-0' />
         ) : null}
       </button>
     );
@@ -188,7 +188,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           handleOpenChange(false);
         }}
         className={cn(
-          'relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-gray-50 w-fit max-w-full overflow-hidden ',
+          'relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-muted w-fit max-w-full overflow-hidden ',
           inputClassName,
         )}
       >
@@ -208,7 +208,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           data-testid={testId ? `${testId}-input` : undefined}
           style={{ fieldSizing: 'content' }}
           className={cn(
-            'border-none focus-visible:ring-0 text-[13px] placeholder:text-gray-700 outline-none bg-gray-50 max-w-40 min-w-9 truncate',
+            'border-none focus-visible:ring-0 text-[13px] placeholder:text-foreground outline-none bg-muted max-w-40 min-w-9 truncate',
             inputClassName,
           )}
           placeholder={placeholder}
@@ -247,12 +247,12 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {showClearButton && selectedOption ? (
           <button
             onClick={handleClear}
-            className='flex-shrink-0 hover:bg-gray-200 rounded p-0.5 transition-colors'
+            className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
-            <X className='w-3 h-3 text-gray-500' />
+            <X className='w-3 h-3 text-muted-foreground' />
           </button>
         ) : showIndicator ? (
-          <ChevronRight className='ml-auto w-4 h-4 text-gray-400 flex-shrink-0' />
+          <ChevronRight className='ml-auto w-4 h-4 text-muted-foreground flex-shrink-0' />
         ) : null}
       </div>
     );
@@ -271,7 +271,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           side='bottom'
           align='start'
           sideOffset={4}
-          className='z-[100] w-auto max-w-64 max-h-96 overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg'
+          className='z-[100] w-auto max-w-64 max-h-96 overflow-auto rounded-lg border border-border bg-background shadow-lg'
           style={{
             maxHeight: 360,
             overflowY: 'auto',
@@ -289,9 +289,9 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         >
           {/* ========== SEARCH INPUT ========== */}
           {variant === 'default' && showSearch && (
-            <div className='p-2 border-b border-gray-200'>
+            <div className='p-2 border-b border-border'>
               <div className='relative'>
-                <Search className='absolute left-1 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400' />
+                <Search className='absolute left-1 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
                 <input
                   ref={inputRef}
                   type='text'
@@ -316,7 +316,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           >
             {isLoading ? (
               // Loading state
-              <div className='p-4 text-center text-sm text-gray-500'>Loading...</div>
+              <div className='p-4 text-center text-sm text-muted-foreground'>Loading...</div>
             ) : filteredOptions.length > 0 ? (
               // Options list
               <ul
@@ -335,8 +335,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                       disabled={option.disabled}
                       className={`relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left ${
                         option.disabled
-                          ? 'cursor-not-allowed opacity-50 text-gray-400'
-                          : 'cursor-pointer text-gray-900 hover:bg-gray-200'
+                          ? 'cursor-not-allowed opacity-50 text-muted-foreground'
+                          : 'cursor-pointer text-foreground hover:bg-accent'
                       }`}
                       onClick={() => !option.disabled && handleSelect(option.value)}
                       onKeyDown={(e): void => {
@@ -354,9 +354,11 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                       )}
                       {/* Option label and subtitle */}
                       <div className='flex-1 min-w-0'>
-                        <div className='truncate font-medium text-[#525866]'>{option.label}</div>
+                        <div className='truncate font-medium text-foreground'>{option.label}</div>
                         {option.subtitle && (
-                          <div className='truncate text-xs text-gray-500'>{option.subtitle}</div>
+                          <div className='truncate text-xs text-muted-foreground'>
+                            {option.subtitle}
+                          </div>
                         )}
                       </div>
 
@@ -371,7 +373,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
               </ul>
             ) : (
               // Empty state (no results found)
-              <div className='p-2 text-center text-sm text-gray-500'>
+              <div className='p-2 text-center text-sm text-muted-foreground'>
                 {searchValue.trim()
                   ? `No results found for "${searchValue}"`
                   : 'No options available'}

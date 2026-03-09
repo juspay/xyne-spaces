@@ -31,7 +31,7 @@ const TicketView = (): ReactElement => {
 
   if (!ticketId) {
     return (
-      <div className='flex items-center justify-center h-full text-gray-500'>
+      <div className='flex items-center justify-center h-full text-muted-foreground'>
         <p className='text-sm'>No ticket selected</p>
       </div>
     );
@@ -41,11 +41,11 @@ const TicketView = (): ReactElement => {
     <div
       ref={ticketViewContainerRef}
       data-component='TicketView'
-      className='h-full bg-white flex flex-col'
+      className='h-full bg-background flex flex-col'
     >
       {/* Header with Ticket Sequence ID */}
       {ticket && (
-        <div className='flex justify-between items-center px-6 py-3 border-b border-gray-200 bg-white flex-shrink-0'>
+        <div className='flex justify-between items-center px-6 py-3 border-b border-border bg-background flex-shrink-0'>
           <div className='flex items-center gap-2'>
             <ChevronLeft
               size={16}
@@ -60,7 +60,7 @@ const TicketView = (): ReactElement => {
               data-track-category='Tickets'
               data-track-name='NavigateBackFromTicket'
             />
-            <span className='text-[14px] texxt-[#202020] font-mono'>{ticket.xyneId}</span>
+            <span className='text-[14px] text-foreground font-mono'>{ticket.xyneId}</span>
           </div>
           <Link
             to={
@@ -68,7 +68,7 @@ const TicketView = (): ReactElement => {
                 ? `/chat/dir/${ticket.channelId}?tab=tickets&layout=table`
                 : `/projects/${projectId}/${boardId}`
             }
-            className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
+            className='p-1 rounded-md text-muted-foreground hover:text-muted-foreground hover:bg-muted transition-colors duration-200'
             aria-label='Close thread panel'
           >
             <X size={20} />
@@ -81,7 +81,7 @@ const TicketView = (): ReactElement => {
         {shouldStack ? (
           <>
             <TicketDetails ticketId={ticketId} />
-            <div className='absolute inset-0 bg-white z-10 rounded-lg'>
+            <div className='absolute inset-0 bg-background z-10 rounded-lg'>
               <ThreadMessages />
             </div>
           </>
@@ -92,7 +92,7 @@ const TicketView = (): ReactElement => {
             </Panel>
 
             <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-              <div id='panel-resize-divider' className='w-[1px] h-full bg-gray-200'></div>
+              <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
             </PanelResizeHandle>
 
             <Panel defaultSize={47} minSize={40}>

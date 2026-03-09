@@ -104,7 +104,7 @@ export const UserSearchValueEditor: React.FC<{
               <button
                 type='button'
                 onClick={() => handleRemove(item.id)}
-                className='rounded-full p-0.5 hover:bg-white/20 transition-colors'
+                className='rounded-full p-0.5 hover:bg-background/20 transition-colors'
                 data-track-category='ANALYTICS'
                 data-track-name='REMOVE_USER_ITEM'
                 data-track-metadata={JSON.stringify({ userId: item.id, itemName: item.name })}
@@ -184,7 +184,7 @@ export const ProjectSearchValueEditor: React.FC<{
               <button
                 type='button'
                 onClick={() => handleRemove(item.id)}
-                className='rounded-full p-0.5 hover:bg-white/20 transition-colors'
+                className='rounded-full p-0.5 hover:bg-background/20 transition-colors'
                 data-track-category='ANALYTICS'
                 data-track-name='REMOVE_PROJECT_ITEM'
                 data-track-metadata={JSON.stringify({ projectId: item.id, itemName: item.name })}
@@ -253,7 +253,7 @@ export const UserGroupSearchValueEditor: React.FC<{
               <button
                 type='button'
                 onClick={() => handleRemove(item.id)}
-                className='rounded-full p-0.5 hover:bg-white/20 transition-colors'
+                className='rounded-full p-0.5 hover:bg-background/20 transition-colors'
                 data-track-event='BUTTON_CLICK'
                 data-track-category='ANALYTICS'
                 data-track-name='REMOVE_USER_GROUP_ITEM'
@@ -335,7 +335,7 @@ export const BoardSearchValueEditor: React.FC<{
               <button
                 type='button'
                 onClick={() => handleRemove(item.id)}
-                className='rounded-full p-0.5 hover:bg-white/20 transition-colors'
+                className='rounded-full p-0.5 hover:bg-background/20 transition-colors'
                 data-track-category='ANALYTICS'
                 data-track-name='REMOVE_BOARD_ITEM'
                 data-track-metadata={JSON.stringify({ boardId: item.id, itemName: item.name })}
@@ -468,7 +468,7 @@ export const CustomValueEditor = (props: ValueEditorProps): React.ReactNode => {
                 className={`px-2 py-1 text-xs rounded border ${
                   isSelected
                     ? 'bg-blue-100 border-blue-300 text-blue-700'
-                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                    : 'bg-background border-input text-foreground hover:bg-muted'
                 }`}
                 data-track-category='ANALYTICS'
                 data-track-name='Toggle_Enum_Value'
@@ -487,7 +487,7 @@ export const CustomValueEditor = (props: ValueEditorProps): React.ReactNode => {
       <select
         value={(value as string) || ''}
         onChange={e => handleChange(e.target.value || null)}
-        className='w-full px-2 py-1 text-sm border rounded bg-white'
+        className='w-full px-2 py-1 text-sm border rounded bg-background'
         data-track-category='ANALYTICS'
         data-track-name='Select_Filter_Value'
       >

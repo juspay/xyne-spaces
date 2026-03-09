@@ -180,7 +180,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
 
       {/* Include History Checkbox - Only for GROUP_DM channels */}
       {channel?.scopeType === ChannelScopeType.GROUP_DM && (
-        <div className='mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200'>
+        <div className='mt-4 p-3 bg-muted rounded-lg border border-border'>
           <Checkbox
             defaultChecked={includeHistory}
             checked={includeHistory}

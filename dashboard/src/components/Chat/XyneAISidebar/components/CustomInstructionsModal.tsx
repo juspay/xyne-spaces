@@ -70,13 +70,13 @@ export const CustomInstructionsModal = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50'>
-      <div className='bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col'>
+      <div className='bg-popover rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col'>
         {/* Header */}
-        <div className='flex items-center justify-between p-6 border-b border-gray-200'>
-          <h2 className='text-xl font-semibold text-gray-900'>Custom Instructions</h2>
+        <div className='flex items-center justify-between p-6 border-b border-border'>
+          <h2 className='text-xl font-semibold text-foreground'>Custom Instructions</h2>
           <button
             onClick={onClose}
-            className='p-2 rounded-lg hover:bg-gray-100 transition-colors'
+            className='p-2 rounded-lg hover:bg-accent transition-colors'
             disabled={isSaving}
             data-track-category='XYNE_AI'
             data-track-name='CloseCustomInstructionsModal'
@@ -90,7 +90,10 @@ export const CustomInstructionsModal = ({
           <div className='space-y-4'>
             {/* Textarea */}
             <div>
-              <label htmlFor='instruction' className='block text-sm font-medium text-gray-900 mb-2'>
+              <label
+                htmlFor='instruction'
+                className='block text-sm font-medium text-foreground mb-2'
+              >
                 Instructions
               </label>
               <textarea
@@ -100,7 +103,7 @@ export const CustomInstructionsModal = ({
                 placeholder={
                   isLoading ? 'Loading...' : 'Additional behavior, style, and tone preferences'
                 }
-                className='w-full h-48 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-sm'
+                className='w-full h-48 px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent resize-none text-sm'
                 disabled={isSaving || isLoading}
                 data-track-category='XYNE_AI'
                 data-track-name='EditCustomInstructions'
@@ -110,7 +113,7 @@ export const CustomInstructionsModal = ({
         </div>
 
         {/* Footer */}
-        <div className='flex items-center justify-between p-6 border-t border-gray-200'>
+        <div className='flex items-center justify-between p-6 border-t border-border'>
           <button
             onClick={() => void handleClear()}
             className='px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors'
@@ -123,7 +126,7 @@ export const CustomInstructionsModal = ({
           <div className='flex gap-2'>
             <button
               onClick={onClose}
-              className='px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors'
+              className='px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent rounded-lg transition-colors'
               disabled={isSaving}
               data-track-category='XYNE_AI'
               data-track-name='CancelCustomInstructions'

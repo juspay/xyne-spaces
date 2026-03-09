@@ -117,7 +117,7 @@ export const DmListItem = ({
         <div className='w-full flex-1 min-w-0 space-y-1'>
           <div className='w-full flex items-start justify-between gap-3 min-w-0'>
             <div className='flex items-center gap-1.5 min-w-0 flex-1'>
-              <p className='text-[16px] tracking-[-0.32px] text-[#202020] font-medium min-w-0 truncate'>
+              <p className='text-[16px] tracking-[-0.32px] text-foreground font-medium min-w-0 truncate'>
                 {displayName}
               </p>
               {isDM && (
@@ -130,14 +130,14 @@ export const DmListItem = ({
                 />
               )}
             </div>
-            <p className='shrink-0 text-[14px] tracking-[-0.28px] text-[#BBB]'>
+            <p className='shrink-0 text-[14px] tracking-[-0.28px] text-muted-foreground'>
               {formatTime(lastMessage?.createdAt)}
             </p>
           </div>
           <div className='w-full flex items-start justify-between gap-3 min-w-0'>
             <div
               className={cn(
-                'min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-normal leading-[1.35] text-[#838383]',
+                'min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-normal leading-[1.35] text-muted-foreground',
               )}
             >
               {getPreviewText()}
@@ -154,15 +154,15 @@ export const DmListItem = ({
   }
 
   return (
-    <div className='w-full border-b border-gray-100 last:border-0 mt-0'>
+    <div className='w-full border-b border-border last:border-0 mt-0'>
       <div
         key={`dm-${channel.id}`}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         className={cn(
           'flex w-full items-center gap-[12px] px-4 py-3 cursor-pointer transition-colors',
-          'hover:bg-gray-50 active:bg-gray-100',
-          isSelected && 'bg-gray-100',
+          'hover:bg-accent active:bg-accent',
+          isSelected && 'bg-accent',
         )}
         role='button'
         tabIndex={0}
@@ -186,7 +186,7 @@ export const DmListItem = ({
           {/* Top Row: Name and Time */}
           <div className='flex items-center justify-between gap-[4px] w-full'>
             <div className='flex items-center gap-1.5 min-w-0 flex-1'>
-              <h4 className="font-['Inter'] font-semibold text-[16px] text-[#181b1d] tracking-[-0.32px] truncate leading-[1.2]">
+              <h4 className="font-['Inter'] font-semibold text-[16px] text-foreground tracking-[-0.32px] truncate leading-[1.2]">
                 {displayName}
               </h4>
               {isDM && (
@@ -200,7 +200,7 @@ export const DmListItem = ({
               )}
             </div>
             {lastMessage && (
-              <span className="shrink-0 font-['Inter'] font-normal text-[12px] text-[#788187] tracking-[-0.24px] leading-[1.2]">
+              <span className="shrink-0 font-['Inter'] font-normal text-[12px] text-muted-foreground tracking-[-0.24px] leading-[1.2]">
                 {formatTime(lastMessage.createdAt)}
               </span>
             )}
@@ -210,8 +210,8 @@ export const DmListItem = ({
           <div className='flex items-start justify-between gap-[4px] w-full'>
             <p
               className={cn(
-                "font-['Inter'] font-normal text-[14px] text-[#788187] tracking-[-0.28px] leading-[1.35] truncate flex-1",
-                unreadCount > 0 && 'text-[#181b1d] font-medium',
+                "font-['Inter'] font-normal text-[14px] text-muted-foreground tracking-[-0.28px] leading-[1.35] truncate flex-1",
+                unreadCount > 0 && 'text-foreground font-medium',
               )}
             >
               {getPreviewText()}

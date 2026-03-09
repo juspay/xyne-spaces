@@ -18,8 +18,8 @@ export const RCASidebar = ({
   onPreviousPage,
 }: RCASidebarProps) => {
   return (
-    <aside className='h-full w-full bg-white flex flex-col border border-gray-200 rounded-xl shadow-sm overflow-hidden'>
-      <div className='p-5 border-b border-gray-200 flex items-center justify-between bg-white'>
+    <aside className='h-full w-full bg-background flex flex-col border border-border rounded-xl shadow-sm overflow-hidden'>
+      <div className='p-5 border-b border-border flex items-center justify-between bg-background'>
         <div className='flex items-center gap-2'>
           <ClipboardCheck className='h-4 w-4 text-slate-700' />
           <div>
@@ -30,20 +30,20 @@ export const RCASidebar = ({
 
       <div className='flex-1 overflow-y-auto' data-id='rca-list'>
         {isLoading && (
-          <div className='flex items-center justify-center h-full text-gray-500 text-sm py-10'>
+          <div className='flex items-center justify-center h-full text-muted-foreground text-sm py-10'>
             Loading RCAs...
           </div>
         )}
 
         {!isLoading && records?.length === 0 && (
-          <div className='flex flex-col items-center justify-center h-full text-gray-500 text-sm py-10'>
-            <ClipboardCheck className='h-8 w-8 text-gray-300 mb-2' />
+          <div className='flex flex-col items-center justify-center h-full text-muted-foreground text-sm py-10'>
+            <ClipboardCheck className='h-8 w-8 text-muted mb-2' />
             No RCAs yet.
           </div>
         )}
 
         {!isLoading && records?.length > 0 && (
-          <div className='hidden md:grid grid-cols-12 gap-3 px-4 py-2 border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-50'>
+          <div className='hidden md:grid grid-cols-12 gap-3 px-4 py-2 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted'>
             <p className='col-span-2'>Ticket</p>
             <p className='col-span-2'>Bug Type</p>
             <p className='col-span-2'>Owner</p>
@@ -67,8 +67,8 @@ export const RCASidebar = ({
               data-track-category='RCA'
               data-track-name='SelectRCARecord'
               className={cn(
-                'w-full text-left border-b border-gray-200 px-4 py-3 transition-colors',
-                'bg-white hover:bg-gray-50',
+                'w-full text-left border-b border-border px-4 py-3 transition-colors',
+                'bg-background hover:bg-muted',
               )}
             >
               <div className='md:hidden space-y-2'>
@@ -87,7 +87,7 @@ export const RCASidebar = ({
                 </p>
                 <div className='grid grid-cols-1 gap-2'>
                   <div>
-                    <p className='text-[10px] text-gray-500 uppercase'>Status</p>
+                    <p className='text-[10px] text-muted-foreground uppercase'>Status</p>
                     <Badge
                       variant={record.status === RCAStatus.DRAFT ? 'secondary' : 'success'}
                       className='text-[10px] leading-4 mt-1'
@@ -131,7 +131,7 @@ export const RCASidebar = ({
 
         {/* Pagination Controls - only show if there's more than one page or we're not on page 1 */}
         {!isLoading && (hasPreviousPage || hasNextPage) && (
-          <div className='flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50'>
+          <div className='flex items-center justify-between px-4 py-3 border-t border-border bg-muted'>
             <Button
               variant='outline'
               size='sm'

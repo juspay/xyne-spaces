@@ -158,21 +158,21 @@ const CanvasPanel = (): ReactElement => {
 
   // Render the left panel content
   const renderLeftPanel = (): ReactElement => (
-    <div className='flex-1 h-full flex flex-col bg-white border-r border-gray-200'>
+    <div className='flex-1 h-full flex flex-col bg-background border-r border-border'>
       {/* Header */}
-      <div className='p-4 border-b border-gray-100'>
+      <div className='p-4 border-b border-border'>
         <div className='flex items-center justify-between mb-3'>
           <div className='flex items-center gap-2'>
             {!isMobile && (
               <Link
                 to='/chat/dir'
-                className='p-1 rounded-md text-gray-900 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
+                className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
                 aria-label='Go back'
               >
                 <ArrowLeft size={20} />
               </Link>
             )}
-            <h2 className='text-lg font-semibold text-gray-900'>Canvases</h2>
+            <h2 className='text-lg font-semibold text-foreground'>Canvases</h2>
           </div>
           {activeFilter === 'quarto_docs' ? (
             <Button
@@ -225,11 +225,11 @@ const CanvasPanel = (): ReactElement => {
 
   // Placeholder for right panel when no canvas is selected
   const renderPlaceholder = (): ReactElement => (
-    <div className='flex-1 flex flex-col items-center justify-center bg-gray-50 h-full'>
+    <div className='flex-1 flex flex-col items-center justify-center bg-muted h-full'>
       <div className='text-center max-w-md mx-auto flex flex-col items-center'>
-        <FileText className='text-gray-300 mb-4' size={64} />
-        <h3 className='text-xl font-medium text-gray-900 mb-2'>Select a canvas</h3>
-        <p className='text-gray-500 max-w-md'>
+        <FileText className='text-muted-foreground mb-4' size={64} />
+        <h3 className='text-xl font-medium text-foreground mb-2'>Select a canvas</h3>
+        <p className='text-muted-foreground max-w-md'>
           Choose a canvas from the list to view its details or create a new one
         </p>
       </div>
@@ -241,7 +241,7 @@ const CanvasPanel = (): ReactElement => {
     // If on a specific canvas route, render the canvas detail using Outlet
     if (!isOnIndexRoute) {
       return (
-        <div className='flex flex-col h-full bg-white w-screen'>
+        <div className='flex flex-col h-full bg-background w-screen'>
           <Outlet />
         </div>
       );
@@ -250,7 +250,7 @@ const CanvasPanel = (): ReactElement => {
     // Show canvas list on index route
     return (
       <>
-        <div className='flex flex-col h-full bg-white w-screen'>{renderLeftPanel()}</div>
+        <div className='flex flex-col h-full bg-background w-screen'>{renderLeftPanel()}</div>
         <QuartoDocModal isOpen={showQuartoModal} onClose={() => setShowQuartoModal(false)} />
       </>
     );
@@ -276,7 +276,7 @@ const CanvasPanel = (): ReactElement => {
 
         {/* RIGHT PANEL - Detail View */}
         <Panel>
-          <div className='flex-1 flex flex-col bg-white relative h-full'>
+          <div className='flex-1 flex flex-col bg-background relative h-full'>
             <div className='flex-1 h-full overflow-hidden'>
               {isOnIndexRoute ? renderPlaceholder() : <Outlet />}
             </div>

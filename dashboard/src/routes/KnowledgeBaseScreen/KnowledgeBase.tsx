@@ -95,13 +95,13 @@ const KnowledgeBaseScreen = (): ReactElement => {
   };
 
   return (
-    <div className='h-full bg-gray-50 flex flex-col rounded-lg shadow-[0_0_8px_0_rgba(0,0,0,0.15)] overflow-clip'>
+    <div className='h-full bg-muted flex flex-col rounded-lg shadow-[0_0_8px_0_rgba(0,0,0,0.15)] overflow-clip'>
       {/* Header */}
-      <div className='bg-white border-b px-6 py-4'>
+      <div className='bg-background border-b px-6 py-4'>
         <div className='flex items-center justify-between'>
           <div className='flex items-center gap-3'>
             <BookOpen size={24} className='text-blue-600' />
-            <h1 className='text-xl font-semibold text-gray-900'>Knowledge Base</h1>
+            <h1 className='text-xl font-semibold text-foreground'>Knowledge Base</h1>
           </div>
         </div>
       </div>
@@ -110,8 +110,8 @@ const KnowledgeBaseScreen = (): ReactElement => {
       <div className='flex-1 overflow-auto p-6'>
         <div className='max-w-5xl mx-auto'>
           {/* Project Selector */}
-          <div className='bg-white rounded-lg shadow-sm border p-4 mb-6'>
-            <p className='block text-sm font-medium text-gray-700 mb-2'>Select Project</p>
+          <div className='bg-background rounded-lg shadow-sm border p-4 mb-6'>
+            <p className='block text-sm font-medium text-foreground mb-2'>Select Project</p>
             <div className='max-w-md'>
               <SingleSelect
                 placeholder={
@@ -127,33 +127,33 @@ const KnowledgeBaseScreen = (): ReactElement => {
           {/* Documents Section */}
           {!selectedProjectId ? (
             // No project selected state
-            <div className='bg-white rounded-lg shadow-sm border p-12 text-center'>
-              <FolderOpen size={48} className='mx-auto text-gray-300 mb-4' />
-              <h2 className='text-lg font-medium text-gray-900 mb-2'>Select a Project</h2>
-              <p className='text-gray-500'>
+            <div className='bg-background rounded-lg shadow-sm border p-12 text-center'>
+              <FolderOpen size={48} className='mx-auto text-muted mb-4' />
+              <h2 className='text-lg font-medium text-foreground mb-2'>Select a Project</h2>
+              <p className='text-muted-foreground'>
                 Choose a project from the dropdown above to view its knowledge documents.
               </p>
             </div>
           ) : isLoadingDocuments ? (
             // Loading state
-            <div className='bg-white rounded-lg shadow-sm border p-12 text-center'>
+            <div className='bg-background rounded-lg shadow-sm border p-12 text-center'>
               <Loader2 size={32} className='mx-auto text-blue-500 animate-spin mb-4' />
-              <p className='text-gray-500'>Loading documents...</p>
+              <p className='text-muted-foreground'>Loading documents...</p>
             </div>
           ) : documents.length === 0 ? (
             // Empty state
-            <div className='bg-white rounded-lg shadow-sm border p-12 text-center'>
-              <FileText size={48} className='mx-auto text-gray-300 mb-4' />
-              <h2 className='text-lg font-medium text-gray-900 mb-2'>No Documents Yet</h2>
-              <p className='text-gray-500'>
+            <div className='bg-background rounded-lg shadow-sm border p-12 text-center'>
+              <FileText size={48} className='mx-auto text-muted mb-4' />
+              <h2 className='text-lg font-medium text-foreground mb-2'>No Documents Yet</h2>
+              <p className='text-muted-foreground'>
                 Knowledge documents approved for this project will appear here.
               </p>
             </div>
           ) : (
             // Documents list
-            <div className='bg-white rounded-lg shadow-sm border overflow-hidden'>
-              <div className='px-4 py-3 border-b bg-gray-50'>
-                <h2 className='font-medium text-gray-900'>
+            <div className='bg-background rounded-lg shadow-sm border overflow-hidden'>
+              <div className='px-4 py-3 border-b bg-muted'>
+                <h2 className='font-medium text-foreground'>
                   Knowledge Documents ({documentsData?.total || 0})
                 </h2>
               </div>
@@ -164,7 +164,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                     key={doc.id}
                     role='button'
                     tabIndex={0}
-                    className='p-4 hover:bg-gray-50 transition-colors cursor-pointer'
+                    className='p-4 hover:bg-muted transition-colors cursor-pointer'
                     onClick={() => setSelectedDocument(doc)}
                     onKeyDown={e => e.key === 'Enter' && setSelectedDocument(doc)}
                     data-track-category='KnowledgeBase'
@@ -178,12 +178,12 @@ const KnowledgeBaseScreen = (): ReactElement => {
                       <div className='flex-1 min-w-0'>
                         <div className='flex items-center gap-2 mb-1'>
                           <FileText size={16} className='text-blue-500 flex-shrink-0' />
-                          <h3 className='font-medium text-gray-900 truncate'>{doc.title}</h3>
+                          <h3 className='font-medium text-foreground truncate'>{doc.title}</h3>
                         </div>
-                        <p className='text-sm text-gray-500 line-clamp-2 mb-2'>
+                        <p className='text-sm text-muted-foreground line-clamp-2 mb-2'>
                           {doc.content.substring(0, 200)}...
                         </p>
-                        <div className='flex items-center gap-4 text-xs text-gray-400'>
+                        <div className='flex items-center gap-4 text-xs text-muted-foreground'>
                           <span>Approved: {formatDate(doc.approvedAt)}</span>
                           {doc.repositoryUrl && (
                             <span className='truncate max-w-xs'>Repo: {doc.repositoryUrl}</span>
@@ -193,7 +193,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                       <button
                         onClick={() => void handleDeleteDocument(doc.id)}
                         disabled={deletingId === doc.id}
-                        className='p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-50'
+                        className='p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-50'
                         title='Delete document'
                         data-track-category='KnowledgeBase'
                         data-track-name='DeleteDocument'
@@ -212,15 +212,15 @@ const KnowledgeBaseScreen = (): ReactElement => {
 
               {/* Pagination */}
               {totalPages > 1 && (
-                <div className='px-4 py-3 border-t bg-gray-50 flex items-center justify-between'>
-                  <span className='text-sm text-gray-500'>
+                <div className='px-4 py-3 border-t bg-muted flex items-center justify-between'>
+                  <span className='text-sm text-muted-foreground'>
                     Page {currentPage} of {totalPages}
                   </span>
                   <div className='flex items-center gap-2'>
                     <button
                       onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                       disabled={currentPage === 1}
-                      className='p-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                      className='p-1.5 rounded border bg-background hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
                       data-track-category='KnowledgeBase'
                       data-track-name='PreviousPage'
                       data-track-metadata={JSON.stringify({ currentPage, totalPages })}
@@ -230,7 +230,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                     <button
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                       disabled={currentPage === totalPages}
-                      className='p-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                      className='p-1.5 rounded border bg-background hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
                       data-track-category='KnowledgeBase'
                       data-track-name='NextPage'
                       data-track-metadata={JSON.stringify({ currentPage, totalPages })}
@@ -253,7 +253,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
         className='max-w-3xl'
       >
         <div className='prose prose-sm w-full max-h-[70vh] overflow-auto max-w-3xl relative'>
-          <div className='flex items-center justify-between gap-4 text-sm mb-4 p-4 border-b sticky top-0 bg-white rounded-t-lg'>
+          <div className='flex items-center justify-between gap-4 text-sm mb-4 p-4 border-b sticky top-0 bg-background rounded-t-lg'>
             <div className='flex items-center gap-2'>
               {selectedDocument?.repositoryUrl && (
                 <div className='flex items-center gap-2'>

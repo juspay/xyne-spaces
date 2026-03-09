@@ -93,19 +93,21 @@ export const ToolBashRenderer: React.FC<
     return (
       <div className='space-y-3 text-sm overflow-safe word-break-safe'>
         <div className='overflow-safe'>
-          <span className='font-semibold text-gray-900 dark:text-gray-100'>Input:</span>
+          <span className='font-semibold text-foreground dark:text-gray-100'>Input:</span>
           <div className='space-y-2 mt-2'>
-            <code className='bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-800 dark:text-gray-200 block text-wrap overflow-safe'>
+            <code className='bg-muted dark:bg-gray-800 px-2 py-1 rounded text-xs text-foreground dark:text-gray-200 block text-wrap overflow-safe'>
               {command}
             </code>
             {description && (
-              <div className='text-xs text-gray-600 dark:text-gray-400 italic'>{description}</div>
+              <div className='text-xs text-muted-foreground dark:text-muted-foreground italic'>
+                {description}
+              </div>
             )}
           </div>
         </div>
 
         <div className='overflow-safe'>
-          <span className='font-semibold text-gray-900 dark:text-gray-100'>Output:</span>
+          <span className='font-semibold text-foreground dark:text-gray-100'>Output:</span>
           <div className='space-y-2 mt-2'>
             {error && (
               <div>
@@ -120,7 +122,7 @@ export const ToolBashRenderer: React.FC<
 
             {!error && stdout && (
               <div className='overflow-safe'>
-                <div className='bg-gray-100 dark:bg-gray-800 p-3 rounded text-xs scroll-safe max-h-96 font-mono text-wrap overflow-auto'>
+                <div className='bg-muted dark:bg-gray-800 p-3 rounded text-xs scroll-safe max-h-96 font-mono text-wrap overflow-auto'>
                   {formatOutput(stdout)}
                 </div>
               </div>
@@ -153,7 +155,7 @@ export const ToolBashRenderer: React.FC<
 
             {!error && typeof exitCode !== 'undefined' && exitCode !== 0 && (
               <div>
-                <span className='font-medium text-gray-900 dark:text-gray-100'>Exit Code: </span>
+                <span className='font-medium text-foreground dark:text-gray-100'>Exit Code: </span>
                 <span className='px-2 py-1 rounded text-xs bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'>
                   {exitCode}
                 </span>
@@ -162,8 +164,8 @@ export const ToolBashRenderer: React.FC<
 
             {!error && duration > 0 && (
               <div>
-                <span className='font-medium text-gray-900 dark:text-gray-100'>Duration: </span>
-                <span className='text-gray-700 dark:text-gray-300'>{duration}ms</span>
+                <span className='font-medium text-foreground dark:text-gray-100'>Duration: </span>
+                <span className='text-foreground dark:text-muted'>{duration}ms</span>
               </div>
             )}
 

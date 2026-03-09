@@ -99,23 +99,23 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
     <div className={className}>
       <div className='flex items-center gap-3 text-xs font-medium'>
         <div className='flex items-center gap-1'>
-          <span className='text-gray-500'>
+          <span className='text-muted-foreground'>
             {attachments.length > 1
               ? `${attachments.length} files`
               : attachments[0]?.originalFilename}
           </span>
           <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
             {isExpanded ? (
-              <ChevronDown className='w-4 h-4 text-gray-500' />
+              <ChevronDown className='w-4 h-4 text-muted-foreground' />
             ) : (
-              <ChevronRight className='w-4 h-4 text-gray-500' />
+              <ChevronRight className='w-4 h-4 text-muted-foreground' />
             )}
           </button>
         </div>
 
         {attachments.length > 1 && (
           <>
-            <span className='text-gray-400'>|</span>
+            <span className='text-muted-foreground'>|</span>
             <button
               type='button'
               onClick={() => {
@@ -123,7 +123,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                   void downloadAttachment(attachment.id, attachment.originalFilename);
                 });
               }}
-              className='flex items-center gap-2 text-gray-600 hover:text-gray-900'
+              className='flex items-center gap-2 text-muted-foreground hover:text-foreground'
             >
               <span>Download all</span>
             </button>
@@ -207,18 +207,18 @@ const getMessageBubbleClassName = (
       !isActiveCall &&
       !isPrivateSystemNotice &&
       !isShowInChannel &&
-      'hover:bg-gray-100/50',
+      'hover:bg-accent/50',
     variant !== 'pinned' &&
       !isActiveCall &&
       !isPrivateSystemNotice &&
       !isShowInChannel &&
-      'active:bg-gray-200/50 transition-colors',
+      'active:bg-accent/50 transition-colors',
     variant !== 'pinned' &&
       isHovered &&
       !isActiveCall &&
       !isPrivateSystemNotice &&
       !isShowInChannel &&
-      'bg-gray-100/50',
+      'bg-muted/50',
     isActiveCall && 'bg-green-50 rounded-md',
     isShowInChannel &&
       variant !== 'pinned' && [
@@ -239,10 +239,10 @@ const getMessageBubbleClassName = (
         'bg-blue-50 rounded-sm',
         'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-blue-400',
       ],
-    variant === 'pinned' && 'bg-white border border-gray-200 shadow-sm rounded-xl',
+    variant === 'pinned' && 'bg-background border border-border shadow-sm rounded-xl',
     isHighlighted && 'highlight-message',
     isXyneBot && 'pt-5',
-    isPrivateSystemNotice && 'bg-gray-100 pt-3',
+    isPrivateSystemNotice && 'bg-muted pt-3',
     contentOnly && '!px-0',
   ]
     .flat()
@@ -409,8 +409,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           svgBgColor='#F3F4F6'
           icon='visibility'
           text='Only Visible to you'
-          backgroundColor='bg-gray-100'
-          textColor='text-[#1D1E1F]'
+          backgroundColor='bg-muted'
+          textColor='text-foreground'
         />
       )}
 
@@ -436,8 +436,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {!contentOnly && (
           <div className='w-8 h-full flex items-start justify-center'>
             {message.isDeleted ? (
-              <div className='w-8 h-8 rounded-md flex items-center justify-center bg-gray-100'>
-                <Trash2 className='w-4 h-4 text-gray-500' />
+              <div className='w-8 h-8 rounded-md flex items-center justify-center bg-muted'>
+                <Trash2 className='w-4 h-4 text-muted-foreground' />
               </div>
             ) : isWorkflowMessage ? (
               <img
@@ -448,7 +448,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               />
             ) : showAvatar && isCallMessage ? (
               <div
-                className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-green-100' : 'bg-gray-100'}`}
+                className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-green-100' : 'bg-muted'}`}
               >
                 <HuddleIcon color={isActiveCall ? '#15803d' : '#4b5563'} />
               </div>
@@ -495,7 +495,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </svg>
               </div>
             ) : isPrivateSystemNotice ? (
-              <div className={`w-8 h-8 flex items-center justify-center bg-gray-200 rounded-lg`}>
+              <div
+                className={`w-8 h-8 flex items-center justify-center bg-muted-foreground/20 rounded-lg`}
+              >
                 <svg
                   width='16'
                   height='16'
@@ -558,7 +560,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               </div>
             ) : (
               <div
-                className={`text-[10px] text-[#868D95] flex items-center gap-1 cursor-pointer hover:underline pt-[5px] ${shouldShowPending ? '' : 'opacity-0 group-hover:opacity-100'} visual-regression-hide`}
+                className={`text-[10px] text-muted-foreground flex items-center gap-1 cursor-pointer hover:underline pt-[5px] ${shouldShowPending ? '' : 'opacity-0 group-hover:opacity-100'} visual-regression-hide`}
               >
                 {formatTime12HourNoAmPm(message.createdAt)}
                 {shouldShowPending && (
@@ -579,16 +581,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {showAvatar && !isWorkflowMessage && (
             <div className='w-full flex items-baseline gap-2 min-h-4 '>
               {isCallMessage ? (
-                <h3 className='text-sm font-medium text-[#1D1E1F]'>
+                <h3 className='text-sm font-medium text-foreground'>
                   {isActiveCall ? 'A call is going on' : 'A call happened'}
                 </h3>
               ) : isXyneBot ? (
-                <h3 className='text-sm font-medium text-[#1D1E1F]'>
+                <h3 className='text-sm font-medium text-foreground'>
                   {sender?.name || 'AI Assistant'}
                 </h3>
               ) : isPrivateSystemNotice ? (
                 <div className=''>
-                  <h3 className='text-sm font-medium text-[#1D1E1F]'>System</h3>
+                  <h3 className='text-sm font-medium text-foreground'>System</h3>
                   {isMentionUserAddition && (
                     <div className='gap-2 mt-1'>
                       <NonParticipantActions
@@ -602,13 +604,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   )}
                 </div>
               ) : isTicketNudge ? (
-                <h3 className='text-sm font-medium text-[#1D1E1F]'>System</h3>
+                <h3 className='text-sm font-medium text-foreground'>System</h3>
               ) : sender ? (
                 isMobile ? (
                   <Button
                     variant='ghost'
                     onClick={() => handleUserClick(sender.id)}
-                    className={`text-[15px] leading-tight font-semibold tracking-tight text-[#1D1E1F] hover:underline p-0 h-auto min-w-0`}
+                    className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-foreground hover:underline p-0 h-auto min-w-0`}
                     aria-label={`View ${sender?.name || 'user'} profile`}
                   >
                     {sender.name}
@@ -626,14 +628,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   </UserHoverWrapper>
                 )
               ) : (
-                <h3 className='text-sm font-medium text-[#1D1E1F] cursor-pointer hover:underline'>
+                <h3 className='text-sm font-medium text-foreground cursor-pointer hover:underline'>
                   {'User'}
                 </h3>
               )}
 
               <Tooltip content={formatFullTimestamp(message.createdAt)} side={TooltipSide.TOP}>
                 <h3
-                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-[#868D95] cursor-pointer hover:underline transition-all duration-150 visual-regression-hide`}
+                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition-all duration-150 visual-regression-hide`}
                 >
                   {context === 'thread'
                     ? formatThreadTimestamp(message.createdAt)
@@ -686,7 +688,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           ) : (
             <div className='w-full flex flex-col gap-1 '>
               {message.isDeleted ? (
-                <div className='text-sm text-gray-500 italic'>This message was deleted</div>
+                <div className='text-sm text-muted-foreground italic'>This message was deleted</div>
               ) : isMentionUserAddition ? (
                 <NonParticipantActions
                   messageId={message.messageId}
@@ -748,10 +750,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     </div>
                   )}
                   {/* Forwarded message content with left border */}
-                  <div className='border-l-4 border-gray-300 pl-3'>
+                  <div className='border-l-4 border-border pl-3'>
                     <div className='flex items-center gap-2 mb-1'>
                       {forwardedMessageData.originalSenderName === 'Xyne Call' ? (
-                        <div className='w-5 h-5 rounded-md flex items-center justify-center bg-gray-100'>
+                        <div className='w-5 h-5 rounded-md flex items-center justify-center bg-muted'>
                           <HuddleIcon color='#4b5563' size={14} />
                         </div>
                       ) : (
@@ -763,11 +765,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           />
                         )
                       )}
-                      <span className='text-xs font-medium text-gray-700'>
+                      <span className='text-xs font-medium text-foreground'>
                         {forwardedMessageData.originalSenderName || 'Unknown User'}
                       </span>
                       {forwardedMessageData.originalCreatedAt && (
-                        <span className='text-xs text-gray-500 visual-regression-hide'>
+                        <span className='text-xs text-muted-foreground visual-regression-hide'>
                           {formatRelativeTimestamp(forwardedMessageData.originalCreatedAt)}
                         </span>
                       )}
@@ -793,7 +795,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     ) : (
                       <>
                         <div
-                          className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-gray-600 ${getEmojiFontSizeClass(forwardedMessageData.content)}`}
+                          className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(forwardedMessageData.content)}`}
                         >
                           {isMobile ? (
                             <ExpandableMessage
@@ -931,7 +933,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         </div>
 
         {renderActions && (
-          <div className='absolute -top-2 right-4 flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1 shadow-lg z-10'>
+          <div className='absolute -top-2 right-4 flex items-center gap-1 bg-background border border-border rounded-lg p-1 shadow-lg z-10'>
             {renderActions(message)}
           </div>
         )}
@@ -1070,7 +1072,7 @@ export const ReactionView = ({
                 className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
                   reaction.userHasReacted
                     ? 'bg-blue-100 border border-blue-400 hover:bg-blue-200'
-                    : 'bg-[#F0F2F5] hover:bg-[#E5E7EB]'
+                    : 'bg-muted hover:bg-accent'
                 }`}
                 onClick={e => {
                   toggleReaction({
@@ -1117,7 +1119,7 @@ export const ReactionView = ({
               >
                 {renderEmoji(reaction.emojiName)}
                 {reaction.count > 1 && (
-                  <span className='text-xs font-medium text-gray-700'>{reaction.count}</span>
+                  <span className='text-xs font-medium text-foreground'>{reaction.count}</span>
                 )}
               </button>
             </Tooltip>
@@ -1129,7 +1131,7 @@ export const ReactionView = ({
           <Popover.Trigger asChild>
             <button
               type='button'
-              className='inline-flex items-center justify-center w-6 h-6 rounded-full text-gray-500 bg-[#F0F2F5] hover:bg-[#E5E7EB] cursor-pointer transition-all duration-150'
+              className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
               onClick={e => e.stopPropagation()}
             >
               <span className='text-sm font-medium'>+</span>
@@ -1144,7 +1146,7 @@ export const ReactionView = ({
                 sideOffset={4}
                 collisionPadding={16}
                 avoidCollisions={true}
-                className='z-50 bg-white rounded-lg shadow-lg'
+                className='z-50 bg-background rounded-lg shadow-lg'
               >
                 <EmojiPicker
                   emojiStyle={EmojiStyle.NATIVE}

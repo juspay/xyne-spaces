@@ -225,7 +225,7 @@ const ThreadList = ({
       <div
         data-component='ThreadList'
         ref={scrollContainerRef}
-        className='flex-1 overflow-auto no-scrollbar min-h-0 bg-white py-6'
+        className='flex-1 overflow-auto no-scrollbar min-h-0 bg-background py-6'
       >
         {messagesWithSeparators.map((item, index) => {
           if (item.type === 'date-separator') {
@@ -284,11 +284,11 @@ const ThreadList = ({
               </div>
               {messageIndex === 0 && threadMessages.length > 1 && (
                 <div className='flex items-center my-3 pl-2 gap-2'>
-                  <span className='flex text-xs text-gray-500'>
+                  <span className='flex text-xs text-muted-foreground'>
                     {threadMessages.length - 1}{' '}
                     {threadMessages.length - 1 === 1 ? 'reply' : 'replies'}
                   </span>
-                  <div className='flex-1 bg-gray-200 w-full h-[1px]'></div>
+                  <div className='flex-1 bg-border w-full h-[1px]'></div>
                 </div>
               )}
             </div>
@@ -303,7 +303,7 @@ const ThreadList = ({
     <div
       data-component='ThreadList'
       ref={scrollContainerRef}
-      className='flex-1 overflow-auto no-scrollbar min-h-0 bg-white py-6'
+      className='flex-1 overflow-auto no-scrollbar min-h-0 bg-background py-6'
     >
       {visibleMessages.map((threadMessage, index) => {
         const showAvatar =
@@ -338,11 +338,11 @@ const ThreadList = ({
             </div>
             {!isThreadsRoute && index === 0 && visibleMessages.length > 1 && (
               <div className='flex items-center pb-2 pl-2 gap-2'>
-                <span className='flex text-xs text-gray-500'>
+                <span className='flex text-xs text-muted-foreground'>
                   {visibleMessages.length - 1}{' '}
                   {visibleMessages.length - 1 === 1 ? 'reply' : 'replies'}
                 </span>
-                <div className='flex-1 bg-gray-200 w-full h-[1px]'></div>
+                <div className='flex-1 bg-border w-full h-[1px]'></div>
               </div>
             )}
             {/* Show collapse/expand button after first message when in collapsed mode */}
@@ -350,17 +350,17 @@ const ThreadList = ({
               <div className='flex items-center my-1 px-2 gap-2'>
                 <button
                   onClick={() => setIsExpanded(true)}
-                  className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors group'
+                  className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors group'
                   data-track-category='THREAD_PANEL'
                   data-track-name='EXPAND_THREAD'
                   data-track-metadata={JSON.stringify({ hiddenCount })}
                 >
-                  <ChevronRight className='w-3.5 h-3.5 text-gray-500 group-hover:text-gray-700' />
+                  <ChevronRight className='w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground' />
                   <span>
                     {hiddenCount} hidden {hiddenCount === 1 ? 'reply' : 'replies'}
                   </span>
                 </button>
-                <div className='flex-1 bg-gray-200 h-[1px]'></div>
+                <div className='flex-1 bg-border h-[1px]'></div>
               </div>
             )}
           </div>
@@ -370,14 +370,14 @@ const ThreadList = ({
         <div className='flex items-center my-1.5 px-2 gap-2'>
           <button
             onClick={() => setIsExpanded(false)}
-            className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors group'
+            className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors group'
             data-track-category='THREAD_PANEL'
             data-track-name='COLLAPSE_THREAD'
           >
-            <ChevronUp className='w-3.5 h-3.5 text-gray-500 group-hover:text-gray-700' />
+            <ChevronUp className='w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground' />
             <span>Collapse thread</span>
           </button>
-          <div className='flex-1 bg-gray-200 h-[1px]'></div>
+          <div className='flex-1 bg-border h-[1px]'></div>
         </div>
       )}
     </div>

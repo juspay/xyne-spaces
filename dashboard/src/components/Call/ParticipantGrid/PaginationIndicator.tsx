@@ -30,9 +30,9 @@ export function PaginationIndicator({
             vertical ? 'w-2 h-2' : 'w-2 h-2',
             i === currentPage
               ? vertical
-                ? 'bg-white h-6'
-                : 'bg-white w-6'
-              : 'bg-white/40 hover:bg-white/60',
+                ? 'bg-background h-6'
+                : 'bg-background w-6'
+              : 'bg-background/40 hover:bg-background/60',
           )}
         />
       ))}
