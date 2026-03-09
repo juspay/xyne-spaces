@@ -37,6 +37,7 @@ const BookmarksPanel = (): ReactElement => {
               to='/chat/dir'
               className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
               aria-label='Go back'
+              data-testid='bookmarks-go-back-link'
             >
               <ArrowLeft size={20} />
             </Link>

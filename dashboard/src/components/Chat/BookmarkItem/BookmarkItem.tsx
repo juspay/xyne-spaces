@@ -303,6 +303,7 @@ export const BookmarkItem = ({
               onClick={handleRemoveBookmark}
               className='p-1.5 rounded hover:bg-accent transition-colors duration-150'
               aria-label='Mark as done'
+              data-testid='bookmark-mark-as-done-btn'
               data-track-category='CHAT_BOOKMARK'
               data-track-name='Mark_Bookmark_Done'
               data-track-metadata={JSON.stringify({ entityId })}

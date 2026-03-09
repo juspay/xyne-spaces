@@ -259,6 +259,7 @@ const ChatDirectory = ({
           onClick={() => {
             void navigate('/chat/bookmarks');
           }}
+          data-testid='open-bookmarks-button'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='OPEN_BOOKMARKS'
         >
@@ -274,6 +275,7 @@ const ChatDirectory = ({
           onClick={() => {
             void navigate('/chat/dm');
           }}
+          data-testid='open-dms-button'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='OPEN_DMS'
         >
