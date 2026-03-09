@@ -1,3 +1,18 @@
+## [1.75.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.74.0...v1.75.0) (2026-03-09)
+
+
+### Features
+
+* add agent chat in desktop ([5e47f8a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5e47f8aa07b841f43608ce0bb928f4ac43d1198a)), closes [#3934](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3934)
+* added xyne-rca workflow ([183c56c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/183c56cf0013e6a9064564efa2bbfa5949a03724)), closes [#3932](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3932)
+* v1 optimisation kanban screen queries adding more granularity to queries ([4b82d15](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4b82d15cf023aa8c21239dc28249a20eadfce25d)), closes [#3622](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3622)
+
+
+### Bug Fixes
+
+* dont show modal for disconnected state ([dc3d6be](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dc3d6bece6cfcbc7a1af5660f5f87c86e0573425)), closes [#3942](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3942)
+* fix schedule calls ux changes ([47e1d68](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/47e1d686d37c289739a48209545cffd6030079af))
+
 ## [1.74.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.73.0...v1.74.0) (2026-03-09)
 
 
