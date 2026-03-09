@@ -1,9 +1,15 @@
 import { ReactElement } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, X } from 'lucide-react';
 import { isElectronApp } from '../../utils/electronApp';
 import { logger, Event as LoggerEvent } from '../../utils/logger';
 
-export const ZeroConnectionFailureModal = (): ReactElement => {
+interface ZeroConnectionFailureModalProps {
+  onClose?: () => void;
+}
+
+export const ZeroConnectionFailureModal = ({
+  onClose,
+}: ZeroConnectionFailureModalProps = {}): ReactElement => {
   const isElectron = isElectronApp();
 
   const handleRefresh = (): void => {
@@ -26,11 +32,24 @@ export const ZeroConnectionFailureModal = (): ReactElement => {
       role='presentation'
     >
       <div
-        className='bg-white rounded-lg shadow-2xl p-8 max-w-md w-full mx-4'
+        className='bg-white rounded-lg shadow-2xl p-8 max-w-md w-full mx-4 relative'
         role='dialog'
         aria-labelledby='modal-title'
         aria-describedby='modal-description'
       >
+        {/* Close button */}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className='absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors'
+            aria-label='Close modal'
+            data-track-category='ZERO_CONNECTION'
+            data-track-name='CLOSE_CONNECTION_FAILURE_MODAL'
+          >
+            <X className='w-5 h-5' />
+          </button>
+        )}
+
         {/* Icon */}
         <div className='flex justify-center mb-4'>
           <div className='w-16 h-16 rounded-full bg-red-100 flex items-center justify-center'>
