@@ -1,3 +1,16 @@
+## [1.73.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.72.1...v1.73.0) (2026-03-09)
+
+
+### Features
+
+* added logger for debugging SAM meet summary api ([6def95b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6def95b9b2b4d5a0d881d5274c9331d15c2387e0)), closes [#3927](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3927)
+
+
+### Bug Fixes
+
+* dark mode changes across app ([6f70780](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6f707806e2f206a4413e1538d9e6c03c1b3a57de)), closes [#3781](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3781)
+* workflow stale status ([03118b9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/03118b9737420cd26c3dd7508c480ea667bba430)), closes [#3735](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3735)
+
 ## [1.72.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.72.0...v1.72.1) (2026-03-08)
 
 
