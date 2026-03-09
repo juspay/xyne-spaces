@@ -58,13 +58,13 @@ export interface TicketFiltersProps {
   availableUsers?: string[] | undefined;
   availableUserGroups?: string[] | undefined;
   availableBoards?: string[] | undefined;
-  allBoardsList?: Array<{ id: string; name: string }> | undefined;
   showBoardsFilter?: boolean;
-  selectedBoard?: { id: string; name: string } | null | undefined;
   availableTags?: string[] | undefined;
   availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
   hideAssigneeFilter?: boolean;
   formMappings?: readonly FormContextMapping[] | undefined;
+  /** Board name from parent (avoids waiting for lazy board list fetch) */
+  selectedBoardName?: string | undefined;
 }
 
 export interface PriorityFilterProps {

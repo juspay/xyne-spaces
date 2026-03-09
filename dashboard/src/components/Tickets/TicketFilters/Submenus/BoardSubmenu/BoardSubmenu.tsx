@@ -1,47 +1,27 @@
-import { ReactElement, useMemo } from 'react';
+import { ReactElement, useTransition } from 'react';
 import { Check } from 'lucide-react';
-import { createBuilder } from '@rocicorp/zero';
-import { schema } from '@xyne/shared';
+import type { Board } from '@xyne/shared';
 import { Button } from '../../../../ui/Button/Button';
-import { useRawQuery } from '../../../../../hooks/useQuery';
 
 interface BoardSubmenuProps {
   selectedBoards: string[];
   onChange: (boardIds: string[]) => void;
   onClose: () => void;
-  availableBoards?: string[] | undefined;
-  projectId?: string | undefined;
+  boards?: Board[];
 }
 
 export const BoardSubmenu = ({
   selectedBoards,
   onChange,
-  availableBoards: availableBoardIds,
-  projectId,
+  boards: allBoards = [],
 }: BoardSubmenuProps): ReactElement => {
-  const builder = createBuilder(schema);
-  const [allBoardsRaw] = useRawQuery(
-    projectId
-      ? builder.boards.where('projectId', projectId).orderBy('name', 'asc')
-      : builder.boards.orderBy('name', 'asc'),
-    'boards_submenu',
-  );
-
-  const availableBoardIdSet = useMemo(() => {
-    return availableBoardIds && availableBoardIds.length > 0 ? new Set(availableBoardIds) : null;
-  }, [availableBoardIds]);
-
-  const allBoards = useMemo(() => {
-    return (allBoardsRaw || []).filter(board => {
-      if (availableBoardIdSet && !availableBoardIdSet.has(board.id)) {
-        return false;
-      }
-      return true;
-    });
-  }, [allBoardsRaw, availableBoardIdSet]);
+  const [isPending, startTransition] = useTransition();
 
   const handleBoardToggle = (boardId: string): void => {
-    onChange([boardId]);
+    // Mark the filter update as non-urgent to avoid blocking UI
+    startTransition(() => {
+      onChange([boardId]);
+    });
   };
 
   const isAllBoardsSelected = selectedBoards.length === 0;
@@ -52,13 +32,13 @@ export const BoardSubmenu = ({
       {allBoards.length > 1 && (
         <Button
           variant='ghost'
-          onClick={() => onChange([])}
+          onClick={() => startTransition(() => onChange([]))}
           data-track-category='TicketFilters'
           data-track-name='SelectAllBoards'
-          data-track-metadata={JSON.stringify({ filterType: 'board', projectId, selectedBoards })}
+          data-track-metadata={JSON.stringify({ filterType: 'board', selectedBoards })}
           className={`w-full justify-between px-3 py-2 h-auto text-foreground ${
             isAllBoardsSelected ? 'bg-accent' : ''
-          }`}
+          } ${isPending ? 'opacity-60' : ''}`}
         >
           <span className='text-sm font-medium'>All Boards</span>
           {isAllBoardsSelected && <Check className='w-5 h-5 text-foreground' strokeWidth={2.5} />}
@@ -77,13 +57,12 @@ export const BoardSubmenu = ({
               data-track-name='ToggleBoard'
               data-track-metadata={JSON.stringify({
                 filterType: 'board',
-                projectId,
                 boardId: board.id,
                 selectedBoards,
               })}
               className={`w-full justify-between px-3 py-2 h-auto text-foreground ${
                 isSelected ? 'bg-accent' : ''
-              }`}
+              } ${isPending ? 'opacity-60' : ''}`}
             >
               <span className='text-sm font-medium'>{board.name}</span>
 

@@ -115,6 +115,85 @@ export const queries = defineQueries({
       .related('stageEtaEntries');
   }),
 
+  // Centralized ticket query with view mode
+ ticketsQuery: defineQuery(
+    z.object({
+      viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
+      projectId: z.string().optional(),
+      boardId: z.string().optional(),
+      userId: z.string().optional(),
+      groupId: z.string().optional(),
+      formEntityValueFieldIds: z.array(z.string()).optional(),
+    }),
+    ({ ctx, args: { viewMode, projectId, boardId, userId, groupId, formEntityValueFieldIds } }) => {
+      let query = zql.tickets;
+
+      // Apply explicit board filter if provided (works across all view modes)
+      // boardId implicitly scopes to project, so no need for separate projectId filter
+      if (boardId && viewMode !== 'my-tickets') {
+        query = query.where('boardId', boardId);
+      }
+
+      // Apply projectId filter ONLY if:
+      // 1. No boardId exists (boardId is more specific and implies project)
+      // 2. viewMode is not 'my-tickets' (should be cross-project)
+      // This allows combining project scoping with user/group filtering
+      if (!boardId && viewMode !== 'my-tickets' && projectId) {
+        query = query.where('projectId', projectId);
+      }
+      // Apply context filter based on viewMode
+      switch (viewMode) {
+        case 'my-tickets':
+          query = query.where(helpers =>
+            helpers.or(
+              helpers.cmp('assignedTo', `user:${ctx.userID}`),
+              helpers.cmp('assignedTo', ctx.userID),
+              helpers.cmp('createdBy', `user:${ctx.userID}`),
+              helpers.cmp('createdBy', ctx.userID),
+            ),
+          );
+          break;
+        case 'user-tickets':
+          if (userId) {
+            query = query.where(helpers =>
+              helpers.or(
+                helpers.cmp('assignedTo', `user:${userId}`),
+                helpers.cmp('assignedTo', userId),
+                helpers.cmp('createdBy', `user:${userId}`),
+                helpers.cmp('createdBy', userId),
+              ),
+            );
+          }
+          break;
+        case 'group-tickets':
+          if (groupId) {
+            query = query.where(helpers =>
+              helpers.or(
+                helpers.cmp('userGroupId', `group:${groupId}`),
+                helpers.cmp('userGroupId', groupId),
+              ),
+            );
+          }
+          break;
+      }
+      // Build the base query with related data
+      let finalQuery = query
+        .orderBy('createdAt', 'desc')
+        .related('assignments')
+        .related('stageEtaEntries');
+
+      // Conditionally add formEntityValues related query when fieldIds are provided
+      // All dynamic field filtering is done client-side via applyTicketFilters
+      if (formEntityValueFieldIds && formEntityValueFieldIds.length > 0) {
+        finalQuery = finalQuery.related('formEntityValues', fev =>
+          fev.where('fieldId', 'IN', formEntityValueFieldIds).related('formField'),
+        );
+      }
+
+      return finalQuery;
+    },
+  ),
+
   workflowsPaginated: defineQuery(
     z.object({
       limit: z.number(),
@@ -613,6 +692,24 @@ export const queries = defineQueries({
       );
   }),
 
+  // Full board detail with stages, approvers, formContextMappings, and formFields.
+  // Used by KanbanBoardScreen when a single board is selected.
+  boardDetailById: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
+    return zql.boards
+      .where('id', boardId)
+      .related('stages', stagesQuery =>
+        stagesQuery
+          .orderBy('sequenceNumber', 'asc')
+          .related('approvers')
+          .related('formContextMappings', fcm => fcm.related('form')),
+      )
+      .related('formContextMappings', mappingQuery =>
+        mappingQuery.related('formFields'),
+      )
+      .one();
+  }),
+
+
   stagesByBoard: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) =>
     zql.stages
       .where('boardId', boardId)
@@ -715,6 +812,29 @@ export const queries = defineQueries({
   getAllProjects: defineQuery(() => {
     return zql.projects.orderBy('createdAt', 'desc').related('boards');
   }),
+
+
+  // Fetch a specific set of boards by their IDs — used in my-tickets view
+  // to avoid fetching all boards globally when we already know which boards exist
+  // from the user's tickets. The caller is responsible for only enabling this
+  // query when boardIds is non-empty.
+  boardsByIds: defineQuery(
+    z.object({ boardIds: z.array(z.string()) }),
+    ({ args: { boardIds } }) => {
+      return zql.boards
+        .where(helpers => helpers.cmp('id', 'IN', boardIds))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
+  boardsListByProject: defineQuery(
+    z.object({ projectId: z.string() }),
+    ({ args: { projectId } }) => {
+      return zql.boards
+        .where('projectId', projectId)
+        .orderBy('createdAt', 'asc');
+    },
+  ),
 
   getAllBoards: defineQuery(() => {
     return zql.boards
@@ -1178,7 +1298,7 @@ export const queries = defineQueries({
         .one();
     }
   ),
-  // Query to get all form entity values for tickets (cached for reuse across all boards)
+    // Query to get all form entity values for tickets (cached for reuse across all boards)
   getAllFormEntityValues: defineQuery(() => {
     return zql.form_entity_values.where('entityType', FormEntityType.TICKET).related('formField');
   }),

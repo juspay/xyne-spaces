@@ -1,9 +1,7 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { logger, Event } from '../../utils/logger';
-import { mixpanelService } from '../../services/Analytics/mixpanelService';
-import { EVENTS } from '../../services/Analytics/mixpanel.types';
 import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -49,13 +47,12 @@ import { useDragAndDrop } from '../../hooks/useDragAndDrop';
 import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
-import type { Ticket, FormEntityValues, TicketStageRequest } from '@xyne/shared';
+import type { Ticket, FormEntityValues, TicketStageRequest, TicketAssignment } from '@xyne/shared';
 import { TicketStatusV2, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
   getStageColor,
   getStatusColumns,
-  filterTicketsByBoard,
   createTagsByTicketIdMap,
   groupTicketsByStage,
   groupTicketsByStatus,
@@ -125,7 +122,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const mountTimeRef = useRef(performance.now());
   const latencySessionKeyRef = useRef('');
   const entityTimingsRef = useRef<Record<string, boolean>>({
-    boards: false,
     allProjectTickets: false,
     tags: false,
     formEntityValues: false,
@@ -139,7 +135,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       latencySessionKeyRef.current = sessionKey;
       mountTimeRef.current = performance.now();
       entityTimingsRef.current = {
-        boards: false,
         allProjectTickets: false,
         tags: false,
         formEntityValues: false,
@@ -152,12 +147,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     const elapsed = performance.now() - mountTimeRef.current;
     const ctx = { viewMode, channelId, projectId: effectiveProjectId };
     logger.info(Event.KANBAN_ENTITY_LOADED, { entity: entityName, latency: elapsed, ...ctx });
-    mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
-      type: `kanban_${entityName}`,
-      timeTakenMs: elapsed,
-      ...ctx,
-    });
   };
+
   // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
@@ -262,7 +253,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (projectIdParam || channel) return 'project'; // Show all boards in project
     if (viewModeProp === 'user-tickets') return 'user-tickets'; // Show specific user's tickets
     if (viewModeProp === 'group-tickets') return 'group-tickets'; // Show specific group's tickets
-    return 'all'; // Show all projects
+    return 'project'; // Default to project view
   }, [viewModeProp, projectIdParam, boardId, channel]);
 
   // Get user's channel status for selectedBoardId persistence
@@ -289,16 +280,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       searchParams,
       setSearchParams,
     });
-  }, [
-    send,
-    channelId,
-    projectIdParam,
-    boardId,
-    viewMode,
-    selectedBoardIdFromDb,
-    searchParams,
-    setSearchParams,
-  ]);
+  }, [send, channelId, projectIdParam, boardId, viewMode, selectedBoardIdFromDb]);
 
   // Sync URL changes to machine (browser back/forward)
   useEffect(() => {
@@ -388,11 +370,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     useSensor(KeyboardSensor),
   );
 
-  // Fetch board details (only when boardId is present)
-  const [ticketsForAll, ticketsDetails] = useCachedQuery(queries.allTickets());
-
-  // Determine effective project ID
-  const effectiveProjectId = projectIdParam || channel?.projectId || ticketsForAll?.[0]?.projectId;
+  // Determine effective project ID (must be before queries that depend on it)
+  const effectiveProjectId = projectIdParam || channel?.projectId;
 
   // Determine if we should show board-wise view or stage-based grouping
   const shouldShowBoardWiseView = useMemo(() => {
@@ -404,37 +383,31 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [filters.boards]);
 
   // Fetch stages for filtered single board (when exactly one board is in filter)
+  // In board view, the path param boardId IS the single board context
   const filteredSingleBoardId = useMemo(() => {
-    if (filters.boards && filters.boards.length === 1) {
-      return filters.boards[0];
-    }
+    if (viewMode === 'board' && boardId) return boardId;
+    if (filters.boards && filters.boards.length === 1) return filters.boards[0];
     return null;
-  }, [filters.boards]);
+  }, [viewMode, boardId, filters.boards]);
 
   // Get all boards for the project (needed for channel stage view and create ticket modal)
   // In my-tickets/user-tickets/group-tickets, fetch ALL boards (no project filter) since tickets can span projects
   const isMyTicketsView =
     viewMode === 'my-tickets' || viewMode === 'user-tickets' || viewMode === 'group-tickets';
 
-  const [allBoardsGlobal, allBoardsGlobalDetails] = useCachedQuery(queries.getAllBoards(), {
-    enabled: isMyTicketsView,
-  });
-
-  const [allBoardsProject, allBoardsProjectDetails] = useCachedQuery(
-    queries.boardsByProject({ projectId: effectiveProjectId || '' }),
+  // Fetch full board details only when a single board is selected
+  const [selectedBoardDetail] = useCachedQuery(
+    queries.boardDetailById({ boardId: filteredSingleBoardId || '' }),
     {
-      enabled: !isMyTicketsView && !!effectiveProjectId,
+      enabled: !!filteredSingleBoardId,
     },
   );
 
-  const allBoards = isMyTicketsView ? allBoardsGlobal : allBoardsProject;
-  const boardsDetails = isMyTicketsView ? allBoardsGlobalDetails : allBoardsProjectDetails;
-  if (boardsDetails.type === 'complete') logEntityTiming('boards');
-
   // Create memo of form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
+  // Uses selectedBoardDetail (lazily fetched when a single board is selected)
   const groupByFormFields = useMemo(
-    () => extractGroupableFormFields(filters, allBoards),
-    [filters.boards, allBoards],
+    () => extractGroupableFormFields(filters, selectedBoardDetail ? [selectedBoardDetail] : []),
+    [filters.boards, selectedBoardDetail],
   );
 
   // Dynamic grouping options based on form fields
@@ -476,17 +449,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return [...baseOptions, ...formFieldOptions];
   }, [groupByFormFields]);
 
-  const stagesDataForFilteredBoard = useMemo(
-    () => allBoards.find(b => b.id === filteredSingleBoardId)?.stages,
-    [allBoards, filteredSingleBoardId],
-  );
-
-  const selectedBoard = useMemo(() => {
-    if (filters.boards?.length === 1 && allBoards) {
-      return allBoards.find(b => b.id === filters.boards![0]);
-    }
-    return null;
-  }, [filters.boards, allBoards]);
+  // Use stages from selectedBoardDetail (full board details) instead of lightweight allBoards
+  const stagesDataForFilteredBoard = selectedBoardDetail?.stages;
 
   // Aggregate stages/columns based on view mode and board filter
   const stages = useMemo<Stage[]>(() => {
@@ -581,10 +545,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       }
     }
 
-    // For project, all, and my-tickets views, use status-based columns
+    // For project and my-tickets views, use status-based columns
     if (
       viewMode === 'project' ||
-      viewMode === 'all' ||
       viewMode === 'my-tickets' ||
       viewMode === 'user-tickets' ||
       viewMode === 'group-tickets'
@@ -637,66 +600,96 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     stagesDataForFilteredBoard,
     channelId,
     channelViewType,
-    allBoards,
     effectiveProjectId,
     filters.boards,
   ]);
 
-  const projectIdForQuery =
-    (viewMode === 'project' || viewMode === 'board') && effectiveProjectId
-      ? effectiveProjectId
-      : undefined;
+  // Determine if we're grouping by a form field — its fieldId must be fetched
+  const groupByFieldId = isFormFieldGroup(groupBy) ? groupBy.fieldId : null;
 
-  const ticketsForProject = useMemo(
-    () => ticketsForAll.filter(ticket => ticket.projectId === projectIdForQuery),
-    [ticketsForAll, projectIdForQuery],
-  );
+  // Combined set of fieldIds whose FEV rows must be fetched:
+  //   - dynamic field filter fieldIds: needed for client-side filter matching
+  //   - groupByFieldId: needed so groupTicketsByFormField can read the value directly from the ticket
+  const fevFieldIds = useMemo(() => {
+    const ids = new Set<string>();
+    // Add all dynamic field filter fieldIds
+    if (filters.dynamicFields) {
+      Object.keys(filters.dynamicFields).forEach(fieldId => ids.add(fieldId));
+    }
+    // Add groupBy fieldId if grouping by form field
+    if (groupByFieldId) ids.add(groupByFieldId);
+    return Array.from(ids);
+  }, [filters.dynamicFields, groupByFieldId]);
 
-  // Get ALL tickets (unfiltered) for calculating available filter options
-  const allProjectTickets = useMemo(() => {
-    if (viewMode === 'board') {
-      return filterTicketsByBoard(ticketsForProject, boardId);
+  // CENTRALIZED TICKET QUERY - fetch only tickets relevant to the current context.
+  // Dynamic field filtering is done CLIENT-SIDE via applyTicketFilters.
+  // When fevFieldIds is non-empty, formEntityValues are fetched as a related query.
+  const ticketsQueryParams = useMemo(() => {
+    const params: {
+      viewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+      projectId?: string;
+      boardId?: string;
+      userId?: string;
+      groupId?: string;
+      formEntityValueFieldIds?: string[];
+    } = {
+      viewMode: viewMode,
+    };
+
+    // Always pass boardId if it exists (from URL param)
+    // Board ID implicitly scopes to project, so no need for projectId in this case
+    if (boardId) {
+      params.boardId = boardId;
     }
-    if (viewMode === 'project') {
-      return ticketsForProject || [];
+
+    // If a board is selected via filter, use that (overrides URL boardId if present)
+    // BUT: Don't apply board filter in my-tickets view - let client-side filtering handle it
+    // so that availableBoards shows all possible boards
+    if (!isMyTicketsView && filters.boards && filters.boards.length === 1 && filters.boards[0]) {
+      params.boardId = filters.boards[0];
     }
-    if (viewMode === 'my-tickets') {
-      // For my-tickets, show ALL tickets created by OR assigned to user (unfiltered)
-      // This is used for calculating available filter options (boards, priorities, etc.)
-      const userId = user?.id;
-      if (!userId) return [];
-      const isAssignedToMe = (ticket: Ticket) =>
-        ticket.assignedTo === `user:${userId}` || ticket.assignedTo === `${userId}`;
-      const isCreatedByMe = (ticket: Ticket) =>
-        ticket.createdBy === `user:${userId}` || ticket.createdBy === `${userId}`;
-      return (ticketsForAll || []).filter(
-        ticket => isAssignedToMe(ticket) || isCreatedByMe(ticket),
-      );
+
+    // Pass projectId ONLY if:
+    // 1. No boardId exists (boardId is more specific and implies project)
+    // 2. viewMode is not 'my-tickets' (should be cross-project)
+    if (!params.boardId && viewMode !== 'my-tickets' && effectiveProjectId) {
+      params.projectId = effectiveProjectId;
     }
+
+    // Pass user/group filters for specific viewModes
     if (viewMode === 'user-tickets' && filterByUserId) {
-      return (ticketsForAll || []).filter(
-        ticket =>
-          ticket.assignedTo === `user:${filterByUserId}` ||
-          ticket.assignedTo === `${filterByUserId}`,
-      );
+      params.userId = filterByUserId;
+    } else if (viewMode === 'group-tickets' && filterByGroupId) {
+      params.groupId = filterByGroupId;
     }
-    if (viewMode === 'group-tickets' && filterByGroupId) {
-      return (ticketsForAll || []).filter(
-        ticket =>
-          ticket.userGroupId === `group:${filterByGroupId}` ||
-          ticket.userGroupId === `${filterByGroupId}`,
-      );
+
+    // Pass fieldIds for which to fetch formEntityValues (when filtering/grouping by dynamic fields)
+    if (fevFieldIds.length > 0) {
+      params.formEntityValueFieldIds = fevFieldIds;
     }
-    return ticketsForAll || [];
+
+    return params;
   }, [
     viewMode,
-    ticketsForProject,
-    ticketsForAll,
     boardId,
-    user?.id,
+    effectiveProjectId,
     filterByUserId,
     filterByGroupId,
+    fevFieldIds,
+    filters.boards,
   ]);
+
+  const [allProjectTickets, ticketsDetails] = useCachedQuery(
+    queries.ticketsQuery(ticketsQueryParams),
+    {
+      enabled:
+        (viewMode === 'board' && !!boardId) ||
+        (viewMode === 'project' && !!effectiveProjectId) ||
+        viewMode === 'my-tickets' ||
+        (viewMode === 'user-tickets' && !!filterByUserId) ||
+        (viewMode === 'group-tickets' && !!filterByGroupId),
+    },
+  );
   if (ticketsDetails.type === 'complete') logEntityTiming('allProjectTickets');
 
   // Calculate available priorities, users, and user groups from ALL project tickets (not filtered)
@@ -716,10 +709,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       }
       userIds.add(ticket.createdBy);
       // Collect from ticket.assignments (PR reviewers, QA, etc.)
-      const assignments = (ticket as Ticket & { assignments?: Array<{ userId: string }> })
-        .assignments;
-      if (Array.isArray(assignments)) {
-        assignments.forEach(assignment => {
+      if (Array.isArray(ticket.assignments)) {
+        (ticket.assignments as TicketAssignment[]).forEach(assignment => {
           if (assignment.userId) {
             userIds.add(assignment.userId);
           }
@@ -737,59 +728,51 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return Array.from(new Set(groups));
   }, [allProjectTickets]);
 
-  // Get available board IDs based on view mode
+  // Get available board IDs based on view mode (only needed for my-tickets views)
+  // Use allProjectTickets (assigned + created) instead of scopedTickets (only assigned)
+  // so that boards from both assigned AND created tickets appear in the dropdown
   const availableBoards = useMemo(() => {
-    // For my-tickets/user-tickets/group-tickets, get boards from the filtered tickets
     if (isMyTicketsView) {
-      if (!allProjectTickets || allProjectTickets.length === 0) return undefined;
+      if (!allProjectTickets || allProjectTickets.length === 0) return [];
       const boardIds = allProjectTickets
         .map(ticket => ticket.boardId)
         .filter((id): id is string => id !== null);
       return Array.from(new Set(boardIds));
     }
-    // For other views, use boards from the project
-    if (!allBoards || allBoards.length === 0) return undefined;
-    return allBoards.map(board => board.id);
-  }, [allBoards, allProjectTickets, viewMode, filters]);
+    return undefined;
+  }, [allProjectTickets, isMyTicketsView]);
 
   // Clear invalid board filters in my-tickets/user-tickets/group-tickets views
   useEffect(() => {
-    if (isMyTicketsView) {
-      // If there's a board filter set but it doesn't match any available boards, clear it
-      if (
-        filters.boards &&
-        filters.boards.length > 0 &&
-        availableBoards &&
-        availableBoards.length > 0
-      ) {
-        const validBoards = filters.boards.filter(boardId => availableBoards.includes(boardId));
+    // Early return if not in my-tickets view
+    if (!isMyTicketsView) return;
 
-        // If none of the filtered boards are valid, clear the filter
-        if (validBoards.length === 0) {
-          setFilters({
-            ...filters,
-            boards: [],
-          });
-        }
-        // If some but not all are valid, update to only valid ones
-        else if (validBoards.length !== filters.boards.length) {
-          setFilters({
-            ...filters,
-            boards: validBoards,
-          });
-        }
-      }
+    // Early return if no filters or boards
+    if (!filters.boards || filters.boards.length === 0) return;
+    if (!availableBoards || availableBoards.length === 0) return;
+
+    const validBoards = filters.boards.filter(boardId => availableBoards.includes(boardId));
+
+    // If none of the filtered boards are valid, clear the filter
+    if (validBoards.length === 0) {
+      setFilters({
+        ...filters,
+        boards: [],
+      });
+      return;
     }
-  }, [viewMode, filters.boards, availableBoards, filters, setFilters]);
+    // If some but not all are valid, update to only valid ones
+    if (validBoards.length !== filters.boards.length) {
+      setFilters({
+        ...filters,
+        boards: validBoards,
+      });
+    }
+  }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
 
   const [allTags, allTagsDetails] = useCachedQuery(queries.getAllTicketTags());
   const allUsers = useUsers();
   const allUserGroups = useUserGroups();
-
-  // Fetch all form entity values (cached and used across all boards)
-  const [allFormEntityValues, allFormEntityValuesDetails] = useCachedQuery(
-    queries.getAllFormEntityValues(),
-  );
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId)
   const stageFormMap = useMemo(() => {
@@ -809,37 +792,64 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [allTags]);
   if (allTagsDetails.type === 'complete') logEntityTiming('tags');
 
-  // Create map of form entity values by ticket ID and field info by field ID
+  // ============================================================================
+  // FORM ENTITY VALUES — fetched as related data on tickets when fevFieldIds is non-empty.
+  // Extract formEntityValues from tickets and build lookup maps for filtering/grouping.
+  // ============================================================================
+
+  // Build maps used by applyTicketFilters and groupTicketsByFormField.
+  //   formValuesByTicketId: ticketId → FEV rows
+  //   formFieldsById: fieldId → { fieldType, fieldEnum }
   const { formValuesByTicketId, formFieldsById } = useMemo(() => {
     const valuesMap = new Map<string, FormEntityValues[]>();
     const fieldsMap = new Map<string, { fieldType: FormFieldType; fieldEnum?: string[] | null }>();
 
-    if (allFormEntityValues) {
-      allFormEntityValues.forEach(value => {
-        if (!valuesMap.has(value.entityId)) {
-          valuesMap.set(value.entityId, []);
-        }
-        valuesMap.get(value.entityId)!.push(value);
+    // Extract formEntityValues from tickets (when fetched as related data)
+    if (allProjectTickets && fevFieldIds.length > 0) {
+      allProjectTickets.forEach(ticket => {
+        const ticketFEVs = (
+          ticket as Ticket & {
+            formEntityValues?: Array<
+              FormEntityValues & {
+                formField?: { fieldType: FormFieldType; fieldEnum?: unknown } | null;
+              }
+            >;
+          }
+        ).formEntityValues;
+        if (ticketFEVs && ticketFEVs.length > 0) {
+          // Filter to only include FEVs for the fieldIds we're interested in
+          if (ticketFEVs.length > 0) {
+            valuesMap.set(ticket.id, ticketFEVs);
 
-        // Store field info from the related formField
-        if (value.formField && !fieldsMap.has(value.fieldId)) {
-          fieldsMap.set(value.fieldId, {
-            fieldType: value.formField.fieldType,
-            fieldEnum: value.formField.fieldEnum as string[] | null,
-          });
+            // Build field metadata map from the related formField data
+            ticketFEVs.forEach(fev => {
+              if (fev.formField && !fieldsMap.has(fev.fieldId)) {
+                fieldsMap.set(fev.fieldId, {
+                  fieldType: fev.formField.fieldType,
+                  fieldEnum: (fev.formField.fieldEnum as string[] | null) ?? null,
+                });
+              }
+            });
+          }
         }
       });
     }
 
     return { formValuesByTicketId: valuesMap, formFieldsById: fieldsMap };
-  }, [allFormEntityValues]);
-  if (allFormEntityValuesDetails.type === 'complete') logEntityTiming('formEntityValues');
+  }, [allProjectTickets, fevFieldIds]);
+  if (fevFieldIds.length === 0 || ticketsDetails.type === 'complete')
+    logEntityTiming('formEntityValues');
 
-  // Filter tickets based on view mode and filters
+  // Filter tickets based on view mode and filters.
+  // NOTE: ALL filters including dynamic field filters are applied CLIENT-SIDE.
+  // formValuesByTicketId is populated when dynamic filters are active (via allFormEntityValuesForFiltering).
+  // Use deferred values to avoid blocking UI updates during board selection
+  const deferredFilters = useDeferredValue(filters);
+
   const filteredTickets = useMemo(() => {
     let tickets = applyTicketFilters(
       allProjectTickets,
-      filters,
+      deferredFilters,
       tagsByTicketId,
       formValuesByTicketId,
       formFieldsById,
@@ -870,22 +880,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       tickets = tickets.filter(ticket => isStageEtaOverdue(ticket));
     }
 
-    // Latency: log when filtered tickets are first computed with data
-    if (
-      ticketsDetails.type === 'complete' &&
-      boardsDetails.type === 'complete' &&
-      allTagsDetails.type === 'complete' &&
-      allFormEntityValuesDetails.type === 'complete'
-    )
-      logEntityTiming('filteredTickets');
     return tickets;
   }, [
     allProjectTickets,
-    filters,
-    channelId,
-    viewMode,
-    channelViewType,
-    filteredSingleBoardId,
+    deferredFilters,
     tagsByTicketId,
     formValuesByTicketId,
     formFieldsById,
@@ -893,6 +891,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     user?.id,
     showOverdueOnly,
   ]);
+
+  if (ticketsDetails.type === 'complete' && allTagsDetails.type === 'complete') {
+    logEntityTiming('filteredTickets');
+  }
 
   useEffect(() => {
     if (!isDraggingRef.current && filteredTickets) {
@@ -1085,16 +1087,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
 
   // Get first board for create ticket modal
-  const firstBoardId = useMemo(() => {
-    if (boardId) return boardId;
-    if (allBoards && allBoards.length > 0) return allBoards[0]?.id || null;
-    return null;
-  }, [boardId, allBoards]);
+  // CreateTicketModal fetches its own boards and auto-selects the first one if needed
+  const firstBoardId = boardId || null;
 
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(localTickets, groupBy);
     const shouldGroupByStatus =
-      (!filteredSingleBoardId && ['project', 'all', 'my-tickets'].includes(viewMode)) ||
+      (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
       (channelId && viewMode === 'project' && channelViewType !== 'stage');
 
     const entries = Object.entries(groupedRows);
@@ -1204,18 +1203,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               availableUsers={availableUsers}
               availableUserGroups={availableUserGroups}
               availableBoards={availableBoards}
-              allBoardsList={allBoards}
               showBoardsFilter={!!channelId || isMyTicketsView}
-              selectedBoard={selectedBoard}
               availableTags={availableTags}
               availableStages={availableStages}
               hideAssigneeFilter={viewMode === 'my-tickets' ? true : false}
               formMappings={
-                filters.boards?.length === 1 && allBoardsProject
-                  ? allBoardsProject.find(b => b.id === filters.boards?.[0])?.formContextMappings ||
-                    []
+                filters.boards?.length === 1 && selectedBoardDetail
+                  ? selectedBoardDetail.formContextMappings || []
                   : []
               }
+              selectedBoardName={selectedBoardDetail?.name ?? undefined}
               onSearchChange={setSearchTerm}
             />
           </div>
@@ -1319,12 +1316,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               <div className='flex items-center rounded-xl bg-muted border h-8 overflow-hidden'>
                 <Tooltip content='Assigned To Me'>
                   <button
-                    onClick={() =>
+                    onClick={() => {
+                      const newAssigned = !filters.assigned;
                       setFilters({
                         ...filters,
-                        assigned: !filters.assigned,
-                      })
-                    }
+                        assigned: newAssigned,
+                        created: newAssigned ? false : (filters.created ?? false), // If turning assigned on, turn created off
+                      });
+                    }}
                     /* CHANGE 2: Replaced 'py-2' with 'h-full' */
                     className={`px-3 h-full rounded-l-xl transition-colors border-r ${
                       filters.assigned
@@ -1340,12 +1339,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 </Tooltip>
                 <Tooltip content='Created By Me'>
                   <button
-                    onClick={() =>
+                    onClick={() => {
+                      const newCreated = !filters.created;
                       setFilters({
                         ...filters,
-                        created: !filters.created,
-                      })
-                    }
+                        created: newCreated,
+                        assigned: newCreated ? false : (filters.assigned ?? false), // If turning created on, turn assigned off
+                      });
+                    }}
                     /* CHANGE 3: Replaced 'py-2' with 'h-full' */
                     className={`px-3 h-full rounded-r-xl transition-colors ${
                       filters.created
