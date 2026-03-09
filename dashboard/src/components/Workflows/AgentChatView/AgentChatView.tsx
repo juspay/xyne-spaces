@@ -10,6 +10,7 @@ import {
   ChevronUp,
   MessageSquare,
   FileEdit,
+  Bot,
 } from 'lucide-react';
 import { CombinedWorkflowData } from '../../../services/Workflow/workflowGraphService.types';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -31,17 +32,34 @@ import { ResponseModal } from './ResponseModal';
 import LiveEditsPanel from '../LiveEditsPanel';
 
 const StatusIcon: React.FC<{ status: string; size?: number }> = ({ status, size = 12 }) => {
+  const containerClass = 'flex items-center justify-center rounded-md p-1';
   switch (status) {
     case 'running':
-      return <Loader2 size={size} className='text-sky-500 animate-spin' />;
+      return (
+        <div className={`${containerClass} bg-blue-500/10`}>
+          <Loader2 size={size} className='text-blue-500 animate-spin' />
+        </div>
+      );
     case 'completed':
-      return <CheckCircle size={size} className='text-emerald-500' />;
+      return (
+        <div className={`${containerClass} bg-emerald-500/10`}>
+          <CheckCircle size={size} className='text-emerald-500' />
+        </div>
+      );
     case 'failed':
-      return <AlertCircle size={size} className='text-rose-500 stroke-[2.5]' />;
+      return (
+        <div className={`${containerClass} bg-red-500/10`}>
+          <AlertCircle size={size} className='text-red-500' />
+        </div>
+      );
     case 'pending':
-      return <Clock size={size} className='text-gray-400 stroke-[2.5]' />;
+      return (
+        <div className={`${containerClass} bg-muted`}>
+          <Clock size={size} className='text-muted-foreground' />
+        </div>
+      );
     default:
-      return <Circle size={size} className='text-gray-300 stroke-[2.5]' />;
+      return <Circle size={size} className='text-gray-300' />;
   }
 };
 
@@ -50,7 +68,7 @@ const MarkdownContent: React.FC<{ content: string; small?: boolean }> = ({
   small = false,
 }) => (
   <div
-    className={`overflow-hidden max-w-full [&_*]:max-w-full [&_pre]:overflow-x-auto [&_pre]:!bg-white/70 [&_.wmde-markdown]:bg-transparent [&_.wmde-markdown_code]:!bg-white/70 prose-xs ${small ? 'text-xs' : 'text-sm'} text-gray-800`}
+    className={`overflow-hidden max-w-full [&_*]:max-w-full [&_pre]:overflow-x-auto [&_pre]:!bg-muted/70 [&_.wmde-markdown]:bg-transparent [&_.wmde-markdown_code]:!bg-muted/70 prose-xs ${small ? 'text-xs' : 'text-sm'} text-foreground`}
   >
     <MarkdownPreview
       source={content}
@@ -119,7 +137,7 @@ const TruncatableMarkdownContent: React.FC<TruncatableMarkdownContentProps> = ({
     <div className='relative'>
       <div
         ref={contentRef}
-        className={`overflow-hidden max-w-full [&_*]:max-w-full [&_pre]:overflow-x-auto [&_pre]:!bg-white/70 [&_.wmde-markdown]:bg-transparent [&_.wmde-markdown_code]:!bg-white/70 prose-xs ${small ? 'text-xs' : 'text-sm'} text-gray-800`}
+        className={`overflow-hidden max-w-full [&_*]:max-w-full [&_pre]:overflow-x-auto [&_pre]:!bg-muted/70 [&_.wmde-markdown]:bg-transparent [&_.wmde-markdown_code]:!bg-muted/70 prose-xs ${small ? 'text-xs' : 'text-sm'} text-foreground`}
         style={
           shouldTruncate
             ? {
@@ -177,7 +195,7 @@ const SubMessageRow: React.FC<{
   index: number;
   agentInfo: AgentInfo;
 }> = ({ subMsg, index, agentInfo }) => (
-  <div className='flex items-start gap-2 py-2 border-t border-gray-100 first:border-t-0'>
+  <div className='flex items-start gap-2 py-2 border-t border-border first:border-t-0'>
     <div className='flex-shrink-0 flex flex-col items-center gap-0.5 mt-0.5'>
       <div
         className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${agentInfo.avatarBg} ${agentInfo.avatarText} opacity-70`}
@@ -191,11 +209,13 @@ const SubMessageRow: React.FC<{
         <span className={`text-[10px] font-semibold ${agentInfo.labelColor}`}>
           {agentInfo.name}
         </span>
-        <span className='text-[10px] text-gray-400 font-mono bg-gray-100 px-1 rounded'>
+        <span className='text-[10px] text-muted-foreground font-mono bg-muted px-1 rounded'>
           {formatStepName(subMsg.stepName)}
         </span>
         {subMsg.createdAt && (
-          <span className='text-[9px] text-gray-400 ml-auto'>{formatTime(subMsg.createdAt)}</span>
+          <span className='text-[9px] text-muted-foreground ml-auto'>
+            {formatTime(subMsg.createdAt)}
+          </span>
         )}
       </div>
       <MarkdownContent content={subMsg.content} small />
@@ -205,11 +225,13 @@ const SubMessageRow: React.FC<{
 
 const EmptyState: React.FC = () => (
   <div className='flex flex-col items-center justify-center h-full py-16 text-center'>
-    <div className='w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3'>
-      <MessageSquare size={24} className='text-gray-300' />
+    <div className='w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-3'>
+      <MessageSquare size={24} className='text-muted-foreground opacity-50' />
     </div>
-    <p className='text-gray-500 text-sm font-medium'>No agent conversation yet</p>
-    <p className='text-gray-400 text-xs mt-1'>Messages will appear here as the workflow runs</p>
+    <p className='text-foreground/70 text-sm font-medium'>No agent conversation yet</p>
+    <p className='text-muted-foreground text-xs mt-1'>
+      Messages will appear here as the workflow runs
+    </p>
   </div>
 );
 
@@ -217,9 +239,14 @@ export interface AgentChatViewProps {
   combinedStepsData: CombinedWorkflowData | null;
   graphNodes: GraphNodeInfo[];
   onClose?: () => void;
+  hideTabs?: boolean;
 }
 
-export const AgentChatView: React.FC<AgentChatViewProps> = ({ combinedStepsData, graphNodes }) => {
+export const AgentChatView: React.FC<AgentChatViewProps> = ({
+  combinedStepsData,
+  graphNodes,
+  hideTabs,
+}) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(0);
 
@@ -312,60 +339,86 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({ combinedStepsData,
   }, [visibleMessages]);
 
   return (
-    <div className='flex flex-col h-full bg-white overflow-hidden'>
-      <div className='flex-shrink-0 px-3 md:px-4 py-3 md:py-4 border-b border-gray-100 bg-gray-50/50'>
-        <div className='flex flex-col gap-3 w-full'>
-          <div className='flex items-center justify-between w-full'>
-            <div className='flex bg-gray-200/60 p-1 rounded-lg w-full'>
+    <div className='flex flex-col h-full bg-background overflow-hidden relative'>
+      {!hideTabs && (
+        <div className='flex-shrink-0 px-3 py-2 border-b border-border bg-background shadow-sm z-20'>
+          <div className='flex items-center justify-center md:justify-between gap-3'>
+            {/* Left: Section Title - Hidden on mobile */}
+            <div className='hidden md:flex items-center gap-2 px-1'>
+              <div className='w-8 h-8 rounded-lg bg-muted border border-border flex items-center justify-center'>
+                <Bot size={16} className='text-foreground/70' />
+              </div>
+              <div className='flex flex-col'>
+                <span className='text-xs font-bold text-foreground tracking-tight leading-none mb-0.5'>
+                  Agent Chat
+                </span>
+                <div className='flex items-center gap-1.5'>
+                  <div className='w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse' />
+                  <span className='text-[10px] text-muted-foreground font-medium uppercase tracking-wider'>
+                    Live Channel
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Middle: Premium Tab Switcher */}
+            <div className='flex bg-muted/80 backdrop-blur-md p-1 rounded-xl border border-border w-full md:w-auto md:min-w-[260px] shadow-inner'>
               <button
                 onClick={() => setActiveTab('chat')}
-                className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-1.5 px-4 text-[11px] font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2.5 ${
                   activeTab === 'chat'
-                    ? 'bg-white text-gray-800 shadow-sm ring-1 ring-gray-900/5'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100/50'
+                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
                 }`}
                 data-track-category='Workflows'
                 data-track-name='SwitchToAgentChatTab'
               >
-                <MessageSquare
-                  size={13}
-                  className={activeTab === 'chat' ? 'text-sky-500' : 'text-gray-400'}
-                />
+                <div
+                  className={`p-1 rounded-md transition-colors duration-200 ${activeTab === 'chat' ? 'bg-muted text-foreground' : 'bg-transparent text-muted-foreground'}`}
+                >
+                  <Bot size={13} strokeWidth={2.5} />
+                </div>
                 Chat View
                 <span
-                  className={`px-1.5 py-0.5 rounded-full text-[9px] ${activeTab === 'chat' ? 'bg-gray-100 text-gray-600' : 'bg-gray-200/80 text-gray-500'}`}
+                  className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono transition-colors duration-200 ${activeTab === 'chat' ? 'bg-muted/60 text-foreground' : 'bg-muted/40 text-muted-foreground'}`}
                 >
                   {visibleMessages.length}
                 </span>
               </button>
               <button
                 onClick={() => setActiveTab('diff')}
-                className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-1.5 px-4 text-[11px] font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2.5 ${
                   activeTab === 'diff'
-                    ? 'bg-white text-gray-800 shadow-sm ring-1 ring-gray-900/5'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100/50'
+                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
                 }`}
                 data-track-category='Workflows'
                 data-track-name='SwitchToAgentDiffTab'
               >
-                <FileEdit
-                  size={13}
-                  className={activeTab === 'diff' ? 'text-amber-500' : 'text-gray-400'}
-                />
+                <div
+                  className={`p-1 rounded-md transition-colors duration-200 ${activeTab === 'diff' ? 'bg-muted text-foreground' : 'bg-transparent text-muted-foreground'}`}
+                >
+                  <FileEdit size={13} strokeWidth={2.5} />
+                </div>
                 Diff View
                 <span
-                  className={`px-1.5 py-0.5 rounded-full text-[9px] ${activeTab === 'diff' ? 'bg-gray-100 text-gray-600' : 'bg-gray-200/80 text-gray-500'}`}
+                  className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono transition-colors duration-200 ${activeTab === 'diff' ? 'bg-muted/60 text-foreground' : 'bg-muted/40 text-muted-foreground'}`}
                 >
                   {allEditSteps.length}
                 </span>
               </button>
             </div>
+
+            {/* Right: Close/Action Button (Optional or spacer) */}
+            <div className='w-[100px] hidden md:flex justify-end'>
+              {/* Optional actions or just a spacer to balance the header */}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className='flex-1 overflow-y-auto px-3 md:px-6 lg:px-8 py-4 space-y-4 no-scrollbar'>
-        {activeTab === 'diff' ? (
+        {!hideTabs && activeTab === 'diff' ? (
           <div className='h-full -mx-3 md:-mx-6 lg:-mx-8 -my-4'>
             <LiveEditsPanel combinedStepsData={combinedStepsData} />
           </div>
@@ -383,8 +436,10 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({ combinedStepsData,
             ))}
           </>
         )}
-        <div ref={bottomRef} />
+        <div ref={bottomRef} className='h-12 flex-shrink-0' />
       </div>
+
+      <div className='absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent pointer-events-none z-10' />
 
       {modalState.agentInfo && (
         <ResponseModal
@@ -433,12 +488,12 @@ const AgentMessageBubble: React.FC<{
         <AgentAvatar agentInfo={agentInfo} />
       </div>
 
-      <div className='flex-1 min-w-0 max-w-full md:max-w-[85%] lg:max-w-[75%]'>
+      <div className='flex-1 min-w-0 w-full'>
         <div className='flex items-center gap-1.5 md:gap-2 mb-1.5 flex-wrap'>
           <span className={`text-xs font-semibold ${agentInfo.labelColor}`}>{agentInfo.name}</span>
 
           {hasMultipleTurns && (
-            <span className='flex items-center gap-1 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded'>
+            <span className='flex items-center gap-1 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
               <MessageSquare size={9} />
               {subMessages.length} turns
             </span>
@@ -451,7 +506,7 @@ const AgentMessageBubble: React.FC<{
             </span>
           )}
 
-          <span className='flex items-center gap-1 text-[10px] text-gray-400 ml-auto'>
+          <span className='flex items-center gap-1 text-[10px] text-muted-foreground ml-auto'>
             <StatusIcon status={status} size={10} />
             <span className='capitalize hidden sm:inline'>{status}</span>
           </span>
@@ -460,7 +515,7 @@ const AgentMessageBubble: React.FC<{
 
         {(summary || isRunning || canShowTurns) && (
           <div
-            className={`rounded-xl md:rounded-2xl rounded-tl-sm border px-3 md:px-4 py-2.5 md:py-3 ${agentInfo.bubbleBg} ${agentInfo.bubbleBorder} transition-shadow ${isLatest && isRunning ? 'shadow-sm ring-1 ring-sky-200' : ''}`}
+            className={`rounded-xl md:rounded-2xl rounded-tl-sm border px-3 md:px-4 py-2 md:py-2.5 ${agentInfo.bubbleBg} ${agentInfo.bubbleBorder} transition-shadow ${isLatest && isRunning ? 'shadow-sm ring-1 ring-sky-100' : ''}`}
           >
             {summary ? (
               <TruncatableMarkdownContent
@@ -469,12 +524,12 @@ const AgentMessageBubble: React.FC<{
                 onViewMore={handleViewMore}
               />
             ) : isRunning ? (
-              <div className='flex items-center gap-2 text-sm text-gray-500 py-0.5'>
+              <div className='flex items-center gap-2 text-sm text-muted-foreground py-0.5'>
                 <Loader2 size={14} className='animate-spin text-sky-400' />
                 <span>Running…</span>
               </div>
             ) : (
-              <span className='text-sm text-gray-400 italic'>No output available</span>
+              <span className='text-sm text-muted-foreground italic'>No output available</span>
             )}
 
             {canShowTurns && (
@@ -499,7 +554,7 @@ const AgentMessageBubble: React.FC<{
                 </button>
 
                 {isTurnsExpanded && (
-                  <div className='mt-3 space-y-0 divide-y divide-gray-100 rounded-xl border border-black/5 bg-white/60 p-3'>
+                  <div className='mt-3 space-y-0 divide-y divide-border rounded-xl border border-border bg-muted/60 p-3'>
                     {subMessages.map((sub: SubMessage, idx: number) => (
                       <SubMessageRow key={sub.id} subMsg={sub} index={idx} agentInfo={agentInfo} />
                     ))}
@@ -511,7 +566,9 @@ const AgentMessageBubble: React.FC<{
         )}
 
         {createdAt && (
-          <span className='text-[10px] text-gray-400 mt-1 block'>{formatTime(createdAt)}</span>
+          <span className='text-[10px] text-muted-foreground mt-1 block'>
+            {formatTime(createdAt)}
+          </span>
         )}
       </div>
     </div>
