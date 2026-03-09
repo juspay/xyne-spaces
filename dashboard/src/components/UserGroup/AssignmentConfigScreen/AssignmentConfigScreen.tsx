@@ -376,11 +376,11 @@ export const AssignmentConfigScreen = ({
   };
 
   return (
-    <div className='h-full w-full overflow-hidden bg-gray-50'>
+    <div className='h-full w-full overflow-hidden bg-muted'>
       <div className='h-full overflow-hidden'>
         <div className='flex flex-col h-full'>
           {/* Header */}
-          <div className='flex items-center justify-between p-6 border-b border-gray-200 bg-white'>
+          <div className='flex items-center justify-between p-6 border-b border-border bg-background'>
             <div>
               <div className='flex items-center gap-3 mb-2'>
                 <Button
@@ -392,9 +392,9 @@ export const AssignmentConfigScreen = ({
                 >
                   ← Back
                 </Button>
-                <h1 className='text-2xl font-bold text-gray-900'>Assignment Configuration</h1>
+                <h1 className='text-2xl font-bold text-foreground'>Assignment Configuration</h1>
               </div>
-              <p className='text-sm text-gray-600'>
+              <p className='text-sm text-muted-foreground'>
                 {userGroup?.name || 'User Group'}
                 {userGroup?.description ? ` • ${userGroup.description}` : ''}
               </p>
@@ -415,10 +415,10 @@ export const AssignmentConfigScreen = ({
           <div className='flex-1 overflow-auto p-6'>
             <div className='max-w-7xl mx-auto space-y-6'>
               {/* Board Filter */}
-              <div className='bg-white border border-gray-200 rounded-lg p-4'>
+              <div className='bg-background border border-border rounded-lg p-4'>
                 <label
                   htmlFor='board-filter'
-                  className='block text-sm font-medium text-gray-700 mb-2'
+                  className='block text-sm font-medium text-foreground mb-2'
                 >
                   Filter by Board
                 </label>
@@ -426,7 +426,7 @@ export const AssignmentConfigScreen = ({
                   id='board-filter'
                   value={selectedBoardId ?? ''}
                   onChange={e => setSelectedBoardId(e.target.value || null)}
-                  className='block w-full max-w-md px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm'
+                  className='block w-full max-w-md px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm'
                   data-track-event='change'
                   data-track-category='UserGroups'
                   data-track-name='SelectBoardFilter'
@@ -442,14 +442,14 @@ export const AssignmentConfigScreen = ({
 
               {/* Board Weight Configuration - Only shown when a specific board is selected */}
               {selectedBoardId && (
-                <div className='bg-white border border-gray-200 rounded-lg p-4'>
+                <div className='bg-background border border-border rounded-lg p-4'>
                   <label
                     htmlFor='board-weight'
-                    className='block text-sm font-medium text-gray-700 mb-2'
+                    className='block text-sm font-medium text-foreground mb-2'
                   >
                     Board Weight
                   </label>
-                  <p className='text-xs text-gray-500 mb-3'>
+                  <p className='text-xs text-muted-foreground mb-3'>
                     Higher weights increase the workload impact for this board during assignment.
                     Range: 1 to 100.
                   </p>
@@ -469,19 +469,19 @@ export const AssignmentConfigScreen = ({
                       }
                     }}
                     placeholder='1'
-                    className='block w-32 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                    className='block w-32 px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                     data-track-event='change'
                     data-track-category='UserGroups'
                     data-track-name='SetBoardWeight'
                   />
 
-                  <div className='mt-4 pt-4 border-t border-gray-100'>
+                  <div className='mt-4 pt-4 border-t border-border'>
                     <div className='flex items-center justify-between'>
                       <div>
-                        <span className='block text-sm font-medium text-gray-700'>
+                        <span className='block text-sm font-medium text-foreground'>
                           Use Percentage Assignment
                         </span>
-                        <p className='text-xs text-gray-500 mt-1'>
+                        <p className='text-xs text-muted-foreground mt-1'>
                           When enabled, tickets are distributed based on % Share. When disabled,
                           uses standard workload-based assignment.
                         </p>
@@ -499,27 +499,27 @@ export const AssignmentConfigScreen = ({
               )}
 
               {/* User Assignment Table */}
-              <div className='bg-white border border-gray-200 rounded-lg overflow-hidden'>
-                <table className='min-w-full divide-y divide-gray-200'>
-                  <thead className='bg-gray-50'>
+              <div className='bg-background border border-border rounded-lg overflow-hidden'>
+                <table className='min-w-full divide-y divide-border'>
+                  <thead className='bg-muted'>
                     <tr>
-                      <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
+                      <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
                         User
                       </th>
-                      <th className='px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider'>
+                      <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
                         On-Call
                       </th>
-                      <th className='px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider'>
+                      <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
                         Active
                       </th>
                       {selectedBoardId && (
                         <>
-                          <th className='px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider'>
+                          <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
                             Expertise ({boards.find(b => b.id === selectedBoardId)?.name})
                           </th>
                           {localUsePercentage && (
                             <>
-                              <th className='px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider'>
+                              <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
                                 % Share
                                 <span
                                   className={`block text-xs font-normal mt-1 ${
@@ -529,7 +529,7 @@ export const AssignmentConfigScreen = ({
                                   (Total: {getTotalPercentage()}%)
                                 </span>
                               </th>
-                              <th className='px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider'>
+                              <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
                                 Max Tickets
                               </th>
                             </>
@@ -538,7 +538,7 @@ export const AssignmentConfigScreen = ({
                       )}
                     </tr>
                   </thead>
-                  <tbody className='bg-white divide-y divide-gray-200'>
+                  <tbody className='bg-background divide-y divide-border'>
                     {users.map((user: User) => {
                       const localState = getUserLocalState(user.id);
                       const assignmentUnavailableUntil = (
@@ -551,22 +551,22 @@ export const AssignmentConfigScreen = ({
                         ? `Unavailable until ${formatExpiryTime(assignmentUnavailableUntil, false)}`
                         : 'Unavailable for ticket assignment';
                       return (
-                        <tr key={user.id} className='hover:bg-gray-50'>
+                        <tr key={user.id} className='hover:bg-muted'>
                           <td className='px-6 py-4 whitespace-nowrap'>
                             <div className='flex items-center'>
                               <Avatar userId={user.id} size='sm' showActiveStatus={false} />
                               <div className='ml-4 flex-1'>
                                 <div className='flex items-center gap-2'>
-                                  <div className='text-sm font-medium text-gray-900'>
+                                  <div className='text-sm font-medium text-foreground'>
                                     {user.name}
                                   </div>
                                   {isUnavailable && (
                                     <Tooltip content={unavailableTooltip}>
-                                      <PauseCircle className='size-3.5 text-gray-500 flex-shrink-0' />
+                                      <PauseCircle className='size-3.5 text-muted-foreground flex-shrink-0' />
                                     </Tooltip>
                                   )}
                                 </div>
-                                <div className='text-sm text-gray-500'>{user.email}</div>
+                                <div className='text-sm text-muted-foreground'>{user.email}</div>
                               </div>
                             </div>
                           </td>
@@ -593,7 +593,7 @@ export const AssignmentConfigScreen = ({
                                   type='checkbox'
                                   checked={hasLocalExpertise(user.id)}
                                   onChange={() => handleToggleExpertise(user.id)}
-                                  className='h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer'
+                                  className='h-4 w-4 text-blue-600 focus:ring-blue-500 border-input rounded cursor-pointer'
                                   data-track-category='UserGroup'
                                   data-track-name='ToggleExpertise'
                                   data-track-metadata={JSON.stringify({ userId: user.id })}
@@ -639,7 +639,7 @@ export const AssignmentConfigScreen = ({
                       <tr>
                         <td
                           colSpan={selectedBoardId ? (localUsePercentage ? 6 : 4) : 3}
-                          className='px-6 py-4 text-center text-sm text-gray-500'
+                          className='px-6 py-4 text-center text-sm text-muted-foreground'
                         >
                           No users in this group
                         </td>

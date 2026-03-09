@@ -117,7 +117,7 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
     if (!data) {
       return (
         <div className='flex flex-col items-center justify-center py-6 text-center'>
-          <p className='text-gray-400 text-sm'>
+          <p className='text-muted-foreground text-sm'>
             No {isInput ? 'input' : 'output'} data available for this step.
           </p>
         </div>
@@ -126,7 +126,7 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
 
     return (
       <div className='bg-slate-50 rounded-md p-3 border border-slate-100 overflow-safe w-full'>
-        <pre className='text-xs text-gray-700 overflow-y-auto overflow-x-hidden max-h-80 min-w-0 w-full font-mono leading-relaxed text-wrap'>
+        <pre className='text-xs text-foreground overflow-y-auto overflow-x-hidden max-h-80 min-w-0 w-full font-mono leading-relaxed text-wrap'>
           {formatStepData(data)}
         </pre>
       </div>
@@ -135,12 +135,12 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
 
   if (!step || !originalStep) {
     return (
-      <div className='flex items-center justify-center h-64 bg-white'>
+      <div className='flex items-center justify-center h-64 bg-background'>
         <div className='text-center'>
-          <div className='w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2'>
-            <ChevronRight size={18} className='text-gray-400' />
+          <div className='w-10 h-10 rounded-full bg-muted flex items-center justify-center mx-auto mb-2'>
+            <ChevronRight size={18} className='text-muted-foreground' />
           </div>
-          <p className='text-gray-500 text-sm'>Select a step to view details</p>
+          <p className='text-muted-foreground text-sm'>Select a step to view details</p>
         </div>
       </div>
     );
@@ -152,40 +152,40 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
 
   const renderSummarySection = (): JSX.Element => (
     <div className='space-y-3'>
-      <h3 className='text-sm font-semibold text-gray-800 border-b border-gray-100 pb-2'>Summary</h3>
+      <h3 className='text-sm font-semibold text-foreground border-b border-border pb-2'>Summary</h3>
       <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
         <div className='bg-slate-50 rounded-md p-3 border border-slate-100'>
           <div className='flex items-center gap-1.5 mb-1'>
-            {getWorkflowIcon('code', { size: 12, className: 'text-gray-400' })}
-            <span className='text-xs font-medium text-gray-500'>Executor Type</span>
+            {getWorkflowIcon('code', { size: 12, className: 'text-muted-foreground' })}
+            <span className='text-xs font-medium text-muted-foreground'>Executor Type</span>
           </div>
-          <p className='text-sm text-gray-800 font-medium'>
+          <p className='text-sm text-foreground font-medium'>
             {originalStep.stepExecutorType?.toLocaleUpperCase()}
           </p>
         </div>
 
         <div className='bg-slate-50 rounded-md p-3 border border-slate-100'>
           <div className='flex items-center gap-1.5 mb-1'>
-            {getWorkflowIcon('clock', { size: 12, className: 'text-gray-400' })}
-            <span className='text-xs font-medium text-gray-500'>Created</span>
+            {getWorkflowIcon('clock', { size: 12, className: 'text-muted-foreground' })}
+            <span className='text-xs font-medium text-muted-foreground'>Created</span>
           </div>
-          <p className='text-sm text-gray-800'>{formatWorkflowDate(originalStep.createdAt)}</p>
+          <p className='text-sm text-foreground'>{formatWorkflowDate(originalStep.createdAt)}</p>
         </div>
 
         <div className='bg-slate-50 rounded-md p-3 border border-slate-100'>
           <div className='flex items-center gap-1.5 mb-1'>
-            {getWorkflowIcon('clock', { size: 12, className: 'text-gray-400' })}
-            <span className='text-xs font-medium text-gray-500'>Updated</span>
+            {getWorkflowIcon('clock', { size: 12, className: 'text-muted-foreground' })}
+            <span className='text-xs font-medium text-muted-foreground'>Updated</span>
           </div>
-          <p className='text-sm text-gray-800'>{formatWorkflowDate(originalStep.updatedAt)}</p>
+          <p className='text-sm text-foreground'>{formatWorkflowDate(originalStep.updatedAt)}</p>
         </div>
 
         {gitInfo && (
           <>
             <div className='bg-slate-50 rounded-md p-3 border border-slate-100'>
               <div className='flex items-center gap-1.5 mb-1'>
-                {getWorkflowIcon('code', { size: 12, className: 'text-gray-400' })}
-                <span className='text-xs font-medium text-gray-500'>Branch</span>
+                {getWorkflowIcon('code', { size: 12, className: 'text-muted-foreground' })}
+                <span className='text-xs font-medium text-muted-foreground'>Branch</span>
               </div>
               <a
                 href={`${convertRepoToHttp(gitInfo.repoUrl)}/commits?until=refs/heads/${encodeURIComponent(gitInfo.branch)}`}
@@ -200,8 +200,8 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
             {gitInfo.pr_link && (
               <div className='bg-slate-50 rounded-md p-3 border border-slate-100'>
                 <div className='flex items-center gap-1.5 mb-1'>
-                  {getWorkflowIcon('git', { size: 12, className: 'text-gray-400' })}
-                  <span className='text-xs font-medium text-gray-500'>Pull Request</span>
+                  {getWorkflowIcon('git', { size: 12, className: 'text-muted-foreground' })}
+                  <span className='text-xs font-medium text-muted-foreground'>Pull Request</span>
                 </div>
                 <a
                   href={gitInfo.pr_link}
@@ -221,7 +221,7 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
 
   const renderInputSection = (): JSX.Element => (
     <div className='space-y-3'>
-      <h3 className='text-sm font-semibold text-gray-800 border-b border-gray-100 pb-2'>Input</h3>
+      <h3 className='text-sm font-semibold text-foreground border-b border-border pb-2'>Input</h3>
       {renderStepData(step.input?.data, true)}
     </div>
   );
@@ -238,10 +238,10 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
     if (!executions.length) {
       return (
         <div className='space-y-3'>
-          <h3 className='text-sm font-semibold text-gray-800 border-b border-gray-100 pb-2'>
+          <h3 className='text-sm font-semibold text-foreground border-b border-border pb-2'>
             Audit Trail
           </h3>
-          <div className='text-sm text-gray-400 bg-slate-50 p-3 rounded-md border border-slate-100'>
+          <div className='text-sm text-muted-foreground bg-slate-50 p-3 rounded-md border border-slate-100'>
             No audit data available for this step.
           </div>
         </div>
@@ -250,7 +250,7 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
 
     return (
       <div className='space-y-3 overflow-safe'>
-        <h3 className='text-sm font-semibold text-gray-800 border-b border-gray-100 pb-2'>
+        <h3 className='text-sm font-semibold text-foreground border-b border-border pb-2'>
           Audit Trail
         </h3>
         {executions.map(exec => (
@@ -258,13 +258,13 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
             key={exec?.executionId}
             className='bg-slate-50 rounded-md p-3 border border-slate-100 overflow-safe'
           >
-            <div className='text-xs font-medium text-gray-600 mb-2 break-all'>
-              Execution: <span className='text-gray-800'>{exec?.executionId}</span>
+            <div className='text-xs font-medium text-muted-foreground mb-2 break-all'>
+              Execution: <span className='text-foreground'>{exec?.executionId}</span>
             </div>
 
             <div className='space-y-1.5 overflow-safe'>
               {exec.steps.map(s => (
-                <div key={s.id} className='text-sm text-gray-700 overflow-safe'>
+                <div key={s.id} className='text-sm text-foreground overflow-safe'>
                   <AgentStepRenderer step={s} />
                 </div>
               ))}
@@ -286,18 +286,18 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
 
     return (
       <div className='space-y-3'>
-        <h3 className='text-sm font-semibold text-gray-800 border-b border-gray-100 pb-2'>
+        <h3 className='text-sm font-semibold text-foreground border-b border-border pb-2'>
           Continue Agent
         </h3>
         <div className='bg-slate-50 rounded-md p-3 border border-slate-100'>
-          <p className='text-xs text-gray-500 mb-2'>
+          <p className='text-xs text-muted-foreground mb-2'>
             Provide additional context or instructions to continue this agent step.
           </p>
           <textarea
             value={continuationMessage}
             onChange={e => setContinuationMessage(e.target.value)}
             placeholder='Enter additional context or instructions...'
-            className='w-full p-2 border border-gray-200 rounded-md resize-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-sm'
+            className='w-full p-2 border border-border rounded-md resize-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-sm'
             rows={2}
             disabled={isContinuing}
             data-track-category='Workflows'
@@ -338,7 +338,7 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
     }
     return (
       <div className='space-y-3'>
-        <h3 className='text-sm font-semibold text-gray-800 border-b border-gray-100 pb-2'>
+        <h3 className='text-sm font-semibold text-foreground border-b border-border pb-2'>
           Output
         </h3>
         {renderStepData(step.output?.data, false)}
@@ -348,18 +348,18 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
 
   return (
     <div
-      className='h-full bg-white flex flex-col overflow-hidden'
+      className='h-full bg-background flex flex-col overflow-hidden'
       style={{ maxWidth: '100%', width: '100%' }}
       data-id='step-details'
     >
       {/* Header */}
-      <div className='border-b border-gray-100 px-4 py-3 flex-shrink-0'>
+      <div className='border-b border-border px-4 py-3 flex-shrink-0'>
         <div className='flex items-center justify-center gap-2'>
           {totalAttempts > 1 && currentAttempt && (
             <button
               onClick={() => onNavigateAttempt && onNavigateAttempt('previous')}
               disabled={currentAttempt === 1}
-              className='disabled:opacity-30 hover:bg-gray-100 p-1 rounded transition-colors'
+              className='disabled:opacity-30 hover:bg-muted p-1 rounded transition-colors'
               data-track-category='Workflows'
               data-track-name='NavigateToPreviousStepAttempt'
               data-track-metadata={JSON.stringify({
@@ -368,17 +368,17 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
                 totalAttempts,
               })}
             >
-              <ChevronLeft size={14} className='text-gray-400' />
+              <ChevronLeft size={14} className='text-muted-foreground' />
             </button>
           )}
 
           <h3
-            className='text-sm font-semibold text-gray-800 truncate flex items-center gap-1.5'
+            className='text-sm font-semibold text-foreground truncate flex items-center gap-1.5'
             title={step.stepName ?? ''}
           >
             {step.stepName}
             {totalAttempts > 1 && currentAttempt && (
-              <span className='text-xs text-gray-400 font-medium'>
+              <span className='text-xs text-muted-foreground font-medium'>
                 ({currentAttempt}/{totalAttempts})
               </span>
             )}
@@ -388,7 +388,7 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
             <button
               onClick={() => onNavigateAttempt && onNavigateAttempt('next')}
               disabled={currentAttempt === totalAttempts}
-              className='disabled:opacity-30 hover:bg-gray-100 p-1 rounded transition-colors'
+              className='disabled:opacity-30 hover:bg-muted p-1 rounded transition-colors'
               data-track-category='Workflows'
               data-track-name='NavigateToNextStepAttempt'
               data-track-metadata={JSON.stringify({
@@ -397,7 +397,7 @@ const StepDetails: React.FC<StepDetailsProps> = ({ step, onNavigateAttempt }) =>
                 totalAttempts,
               })}
             >
-              <ChevronRight size={14} className='text-gray-400' />
+              <ChevronRight size={14} className='text-muted-foreground' />
             </button>
           )}
         </div>

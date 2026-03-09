@@ -125,9 +125,9 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
     >
       <Headphones className={cn('h-4 w-4', isMobile ? 'text-black !w-6' : 'text-white')} />
       {!isMobile && hasActiveCalls && (
-        <Badge className='bg-white text-sidebar-badge-accent'>{validActiveCalls.length}</Badge>
+        <Badge className='bg-background text-sidebar-badge-accent'>{validActiveCalls.length}</Badge>
       )}
-      {!isMobile && <div className='h-4 w-px bg-gray-300' />}
+      {!isMobile && <div className='h-4 w-px bg-muted-foreground/50' />}
       {!isMobile && <ChevronDown className='w-4 h-4 text-white' />}
     </button>
   );
@@ -163,7 +163,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
         <div>
           <div
             className={cn(
-              'text-xs font-medium text-gray-600 p-6 pb-2 font-mono',
+              'text-xs font-medium text-muted-foreground p-6 pb-2 font-mono',
               isMobile ? '!pt-2' : '',
             )}
           >
@@ -187,20 +187,20 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
         <div>
           <div
             className={cn(
-              'text-xs font-medium text-gray-600 p-6 pb-2 font-mono',
+              'text-xs font-medium text-muted-foreground p-6 pb-2 font-mono',
               isMobile && validActiveCalls.length === 1 && currentCallData ? '!pt-2' : '',
             )}
           >
             Other Options
           </div>
           <button
-            className='flex items-center gap-3 w-full px-6 py-4 rounded-lg hover:bg-gray-50 transition-colors'
+            className='flex items-center gap-3 w-full px-6 py-4 rounded-lg hover:bg-muted transition-colors'
             onClick={() => handleCallAction(handleInitiateCall)}
             data-track-category='CALL'
             data-track-name='StartCallNow'
             data-track-metadata={JSON.stringify({ channelId, targetUserIds })}
           >
-            <div className='rounded-md bg-gray-200 p-2'>
+            <div className='rounded-md bg-border p-2'>
               <Headphones className='w-5 h-5 text-black' />
             </div>
             <span className='text-sm font-semibold text-black'>Start call now</span>
@@ -227,7 +227,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
           trigger={triggerButton}
           side='left'
           sideOffset={-100}
-          className='w-auto min-w-[400px] rounded-lg border border-gray-200 bg-white shadow-lg p-0 mt-24 z-[1000]'
+          className='w-auto min-w-[400px] rounded-lg border border-border bg-background shadow-lg p-0 mt-24 z-[1000]'
           open={isOpen}
           onOpenChange={handleOpenChange}
         >

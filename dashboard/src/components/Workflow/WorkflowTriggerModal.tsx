@@ -317,13 +317,13 @@ export default function WorkflowTriggerModal({
     );
 
     return (
-      <div className='space-y-4 mt-4 border-t pt-4 border-gray-200'>
+      <div className='space-y-4 mt-4 border-t pt-4 border-border'>
         {visibleFields.length > 0 && (
           <>
-            <h3 className='text-sm font-medium text-gray-700'>
+            <h3 className='text-sm font-medium text-foreground'>
               Required Parameters
               {hasSavedValues && (
-                <span className='text-xs text-gray-500 font-normal ml-2'>
+                <span className='text-xs text-muted-foreground font-normal ml-2'>
                   (includes saved values)
                 </span>
               )}
@@ -340,7 +340,7 @@ export default function WorkflowTriggerModal({
               </Button>
             ) : (
               <>
-                <h3 className='text-sm font-medium text-gray-700 mt-6'>Optional Parameters</h3>
+                <h3 className='text-sm font-medium text-foreground mt-6'>Optional Parameters</h3>
                 {hiddenFields.map(field => renderField(field))}
                 <Button
                   type='button'
@@ -381,11 +381,13 @@ export default function WorkflowTriggerModal({
         }}
         render={({ field: controllerField }) => (
           <div className='space-y-1'>
-            <label className='block text-sm font-medium text-gray-700'>
+            <label className='block text-sm font-medium text-foreground'>
               {field.name}
               {field.required && <span className='text-red-500 ml-1'>*</span>}
               {field.description && (
-                <span className='text-xs text-gray-500 block mt-1'>{field.description}</span>
+                <span className='text-xs text-muted-foreground block mt-1'>
+                  {field.description}
+                </span>
               )}
             </label>
 
@@ -408,7 +410,7 @@ export default function WorkflowTriggerModal({
             ) : (
               <input
                 type={field.type === 'number' ? 'number' : 'text'}
-                className='w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+                className='w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
                 data-track-category='Workflows'
                 data-track-name='WorkflowParameterInput'
                 data-track-metadata={JSON.stringify({
@@ -501,11 +503,11 @@ export default function WorkflowTriggerModal({
   if (workflowTypesLoading) {
     return (
       <div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'>
-        <div className='bg-white rounded-lg p-6 max-w-md w-full mx-4'>
+        <div className='bg-background rounded-lg p-6 max-w-md w-full mx-4'>
           <div className='flex items-center justify-center h-32'>
             <div className='text-center'>
               <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4' />
-              <p className='text-gray-600'>Loading workflow types...</p>
+              <p className='text-muted-foreground'>Loading workflow types...</p>
             </div>
           </div>
         </div>
@@ -517,7 +519,7 @@ export default function WorkflowTriggerModal({
   if (workflowTypesError) {
     return (
       <div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'>
-        <div className='bg-white rounded-lg p-6 max-w-md w-full mx-4'>
+        <div className='bg-background rounded-lg p-6 max-w-md w-full mx-4'>
           <div className='flex items-center justify-center h-32'>
             <div className='text-center'>
               <div className='mx-auto mb-4 w-12 h-12 text-red-500'>
@@ -530,10 +532,10 @@ export default function WorkflowTriggerModal({
                   />
                 </svg>
               </div>
-              <h3 className='text-lg font-medium text-gray-900 mb-2'>
+              <h3 className='text-lg font-medium text-foreground mb-2'>
                 Failed to load workflow types
               </h3>
-              <p className='text-gray-600 mb-4'>
+              <p className='text-muted-foreground mb-4'>
                 {typeof workflowTypesError === 'string' ? workflowTypesError : 'Unknown error'}
               </p>
               <button
@@ -553,15 +555,15 @@ export default function WorkflowTriggerModal({
 
   return (
     <div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'>
-      <div className='bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto'>
+      <div className='bg-background rounded-lg p-6 max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto'>
         <div className='flex items-center justify-between mb-4'>
           <div className='flex items-center gap-2'>
             <Play className='w-5 h-5 text-blue-600' />
-            <h2 className='text-lg font-semibold text-gray-900'>Trigger Workflow</h2>
+            <h2 className='text-lg font-semibold text-foreground'>Trigger Workflow</h2>
           </div>
           <button
             onClick={handleClose}
-            className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors'
+            className='p-1 rounded-md text-muted-foreground hover:text-muted-foreground hover:bg-muted transition-colors'
             data-track-category='Workflows'
             data-track-name='CloseWorkflowTriggerModal'
           >
@@ -570,8 +572,8 @@ export default function WorkflowTriggerModal({
         </div>
 
         <form onSubmit={handleFormSubmit} className='space-y-4'>
-          <div className='text-sm text-gray-600 mb-2'>
-            Ticket ID: <span className='font-mono bg-gray-100 px-2 py-1 rounded'>{ticketId}</span>
+          <div className='text-sm text-muted-foreground mb-2'>
+            Ticket ID: <span className='font-mono bg-muted px-2 py-1 rounded'>{ticketId}</span>
           </div>
 
           <Controller
@@ -605,7 +607,7 @@ export default function WorkflowTriggerModal({
           {/* Show reset button if there are saved values */}
           {hasSavedValues && selectedWorkflow && (
             <div className='flex items-center justify-between py-2'>
-              <span className='text-xs text-gray-500'>Using previously saved values</span>
+              <span className='text-xs text-muted-foreground'>Using previously saved values</span>
               <button
                 type='button'
                 onClick={handleResetToDefaults}

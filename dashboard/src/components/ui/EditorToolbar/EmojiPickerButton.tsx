@@ -50,18 +50,18 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
       }}
       role='presentation'
     >
-      <div className='w-full max-w-[520px] mx-4 rounded-lg bg-white text-gray-900 shadow-xl'>
+      <div className='w-full max-w-[520px] mx-4 rounded-lg bg-background text-foreground shadow-xl'>
         {/* Header */}
         <div className='flex items-center justify-between px-6 py-4 border-b'>
           <h2 className='text-lg font-semibold'>Add emoji</h2>
           <button onClick={handleClose}>
-            <X className='h-5 w-5 text-gray-500 hover:text-gray-800' />
+            <X className='h-5 w-5 text-muted-foreground hover:text-foreground' />
           </button>
         </div>
 
         {/* Body */}
         <div className='px-6 py-4 space-y-6 text-sm'>
-          <p className='text-gray-600'>
+          <p className='text-muted-foreground'>
             Custom emojis will appear in the emoji picker under the custom section.
           </p>
 
@@ -69,7 +69,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
           <div className='space-y-2'>
             <p className='font-medium'>1. Upload an image</p>
             <div className='flex items-center gap-4'>
-              <div className='h-16 w-16 rounded border flex items-center justify-center bg-gray-50'>
+              <div className='h-16 w-16 rounded border flex items-center justify-center bg-muted'>
                 {file ? (
                   <img
                     src={URL.createObjectURL(file)}
@@ -77,11 +77,11 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
                     className='h-12 w-12 object-contain'
                   />
                 ) : (
-                  <ImageIcon className='h-6 w-6 text-gray-400' />
+                  <ImageIcon className='h-6 w-6 text-muted-foreground' />
                 )}
               </div>
 
-              <label className='cursor-pointer rounded border px-4 py-2 hover:bg-gray-100'>
+              <label className='cursor-pointer rounded border px-4 py-2 hover:bg-accent'>
                 Upload image
                 <input
                   type='file'
@@ -91,7 +91,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
                 />
               </label>
             </div>
-            <p className='text-xs text-gray-500'>Max file size: 500KB</p>
+            <p className='text-xs text-muted-foreground'>Max file size: 500KB</p>
           </div>
 
           {/* Name */}
@@ -101,9 +101,9 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder=':party_parrot:'
-              className='w-full rounded border px-3 py-2 outline-none focus:border-gray-500'
+              className='w-full rounded border px-3 py-2 outline-none focus:border-ring'
             />
-            <p className='text-xs text-gray-500'>Letters, numbers, and underscores only</p>
+            <p className='text-xs text-muted-foreground'>Letters, numbers, and underscores only</p>
           </div>
 
           {/* Error message */}
@@ -115,7 +115,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
           <button
             onClick={handleClose}
             disabled={isLoading}
-            className='px-4 py-2 rounded hover:bg-gray-100 disabled:opacity-40'
+            className='px-4 py-2 rounded hover:bg-accent disabled:opacity-40'
           >
             Cancel
           </button>
@@ -168,12 +168,10 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
       type='button'
       disabled={disabled}
       onClick={() => setEmojiOpen(true)}
-      className={`p-1.5 rounded hover:bg-gray-100 ${
-        disabled ? 'opacity-50 cursor-not-allowed' : ''
-      }`}
+      className={`p-1.5 rounded hover:bg-accent ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       aria-label='Insert emoji'
     >
-      <Smile className='w-5 h-5 text-gray-600' />
+      <Smile className='w-5 h-5 text-muted-foreground' />
     </button>
   );
 
@@ -210,7 +208,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
           {/* Add Emoji Button */}
           <button
             type='button'
-            className='flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100'
+            className='flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent'
             onClick={() => {
               setEmojiOpen(false);
               setShowAddEmoji(true);

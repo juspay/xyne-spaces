@@ -112,7 +112,7 @@ const DmsPage = (): ReactElement => {
     // If on a specific DM route, render the outlet for chat view with white background
     if (!isOnIndexRoute) {
       return (
-        <div className='flex flex-col h-full max-w-full bg-white text-gray-900 overflow-x-hidden w-screen'>
+        <div className='flex flex-col h-full max-w-full bg-background text-foreground overflow-x-hidden w-screen'>
           <Outlet />
         </div>
       );
@@ -120,7 +120,7 @@ const DmsPage = (): ReactElement => {
 
     // Show DM list on index route
     return (
-      <div className='flex flex-col h-full max-w-full bg-white text-gray-900 overflow-x-hidden px-2 bg-sidebar w-screen'>
+      <div className='flex flex-col h-full max-w-full bg-background text-foreground overflow-x-hidden px-2 bg-sidebar w-screen'>
         <div className='block sm:hidden -mx-2 px-4 pt-2 pb-4 bg-[#E9ECF5D9] rounded-b-[24px] border-b border-[#181B1D] border-opacity-[0.07]'>
           {/* Top Row: Logo + Avatar */}
           <div className='flex items-center justify-between mb-4'>
@@ -133,11 +133,11 @@ const DmsPage = (): ReactElement => {
           {/* Search Row: Input Only */}
           <div className='relative w-full'>
             <div className='absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none'>
-              <Search className='size-5 text-gray-400' />
+              <Search className='size-5 text-muted-foreground' />
             </div>
             <input
               type='text'
-              className='w-full h-11 pl-12 pr-10 py-3 bg-white bg-opacity-70 rounded-full border border-[#181B1D] border-opacity-[0.06] text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-0'
+              className='w-full h-11 pl-12 pr-10 py-3 bg-background/70 rounded-full border border-[#181B1D] border-opacity-[0.06] text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-0'
               placeholder='Search'
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
@@ -153,7 +153,7 @@ const DmsPage = (): ReactElement => {
                 variant='link'
                 size='icon'
               >
-                <X className='size-4 text-gray-400 hover:text-gray-600' />
+                <X className='size-4 text-muted-foreground hover:text-foreground' />
               </Button>
             )}
           </div>
@@ -168,8 +168,8 @@ const DmsPage = (): ReactElement => {
                 alt='No conversations'
                 className='w-full max-w-[280px] h-auto mb-6 opacity-90'
               />
-              <h3 className='text-lg font-medium text-gray-900 mb-2'>No conversations yet</h3>
-              <p className='text-sm text-gray-500 text-center max-w-[250px]'>
+              <h3 className='text-lg font-medium text-foreground mb-2'>No conversations yet</h3>
+              <p className='text-sm text-muted-foreground text-center max-w-[250px]'>
                 Start a new chat with your team members to collaborate and share ideas.
               </p>
             </div>
@@ -222,14 +222,14 @@ const DmsPage = (): ReactElement => {
       >
         {/* LEFT PANEL - DM List */}
         <Panel ref={dmPanelRef} defaultSize={20} minSize={30} maxSize={40}>
-          <div className='flex flex-col bg-white text-gray-900 border-r border-gray-200 h-full'>
+          <div className='flex flex-col bg-background text-foreground border-r border-border h-full'>
             {/* Desktop search/header */}
             <div className='p-4'>
               <div className='flex items-center justify-between mb-3'>
                 <div className='flex items-center gap-2'>
                   <Link
                     to='/chat/dir'
-                    className='p-1 rounded-md text-gray-900 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
+                    className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
                     aria-label='Go back'
                   >
                     <ArrowLeft size={20} />
@@ -237,7 +237,7 @@ const DmsPage = (): ReactElement => {
                   <h2 className='text-lg font-semibold'>Direct Messages</h2>
                 </div>
                 <button
-                  className='flex items-center justify-center size-10 rounded-full bg-white border-[0.1px] backdrop-blur-[10px] shadow-md hover:bg-blue-50 hover:border-blue-200 transition-colors'
+                  className='flex items-center justify-center size-10 rounded-full bg-background border-[0.1px] backdrop-blur-[10px] shadow-md hover:bg-accent hover:border-primary transition-colors'
                   onClick={handleAddDirectMessage}
                   aria-label='Create new message'
                   data-track-category='DM'
@@ -247,10 +247,10 @@ const DmsPage = (): ReactElement => {
                 </button>
               </div>
               <div className='relative'>
-                <Search className='absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400' />
+                <Search className='absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground' />
                 <input
                   type='text'
-                  className='w-full pl-9 pr-4 py-2 bg-gray-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-300'
+                  className='w-full pl-9 pr-4 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring'
                   placeholder='Search messages'
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
@@ -270,8 +270,8 @@ const DmsPage = (): ReactElement => {
                     alt='No conversations'
                     className='w-full max-w-[280px] h-auto mb-6 opacity-90'
                   />
-                  <h3 className='text-lg font-medium text-gray-900 mb-2'>No conversations yet</h3>
-                  <p className='text-sm text-gray-500 text-center max-w-[250px]'>
+                  <h3 className='text-lg font-medium text-foreground mb-2'>No conversations yet</h3>
+                  <p className='text-sm text-muted-foreground text-center max-w-[250px]'>
                     Start a new chat with your team members to collaborate and share ideas.
                   </p>
                 </div>
@@ -298,7 +298,7 @@ const DmsPage = (): ReactElement => {
 
         {/* RIGHT PANEL - Chat View */}
         <Panel>
-          <div className='flex-1 flex flex-col bg-white relative h-full'>
+          <div className='flex-1 flex flex-col bg-background relative h-full'>
             <div className='flex-1 h-full overflow-hidden flex items-center justify-center'>
               {isOnIndexRoute ? (
                 <div className='max-w-full max-h-full flex items-center justify-center'>

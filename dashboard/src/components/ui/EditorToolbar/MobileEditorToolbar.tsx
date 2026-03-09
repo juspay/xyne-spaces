@@ -137,7 +137,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
 
   const buttonClass = (active: boolean): string =>
     `p-1.5 rounded transition-all duration-200 ease-in-out flex-shrink-0 ${
-      active ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-600'
+      active ? 'bg-blue-100 text-blue-600' : 'hover:bg-accent text-muted-foreground'
     }`;
 
   return (
@@ -192,7 +192,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         </button>
 
         {/* Separator */}
-        <div className='h-4 w-px bg-gray-300 mx-1 flex-shrink-0' aria-hidden='true' />
+        <div className='h-4 w-px bg-border mx-1 flex-shrink-0' aria-hidden='true' />
 
         {/* Code Block */}
         <button
@@ -219,7 +219,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         </button>
 
         {/* Separator */}
-        <div className='h-4 w-px bg-gray-300 mx-1 flex-shrink-0' aria-hidden='true' />
+        <div className='h-4 w-px bg-border mx-1 flex-shrink-0' aria-hidden='true' />
 
         {/* Blockquote */}
         <button

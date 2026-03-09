@@ -104,20 +104,20 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
 
   return (
     <div
-      className='link-preview relative flex flex-col gap-1 max-w-3/4 w-full rounded-2xl border border-[#D3DAE0A8] dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800 py-2 pr-8 pl-3'
+      className='link-preview relative flex flex-col gap-1 max-w-3/4 w-full rounded-2xl border border-border overflow-hidden bg-card py-2 pr-8 pl-3'
       aria-label={`Link preview: ${displayTitle}`}
     >
       {onClose && (
         <button
           type='button'
-          className='link-preview__close-button absolute top-2 right-2 z-10 p-1 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400'
+          className='link-preview__close-button absolute top-2 right-2 z-10 p-1 rounded-full bg-muted hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
           onClick={handleClose}
           aria-label='Close link preview'
           data-track-category='MESSAGE'
           data-track-name='CLOSE_LINK_PREVIEW'
           data-track-metadata={JSON.stringify({ url })}
         >
-          <X size={14} className='text-gray-600 dark:text-gray-300' />
+          <X size={14} className='text-muted-foreground' />
         </button>
       )}
 
@@ -126,7 +126,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
         href={url}
         target='_blank'
         rel='noopener noreferrer'
-        className='flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:underline min-w-0 w-fit'
+        className='flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground hover:underline min-w-0 w-fit'
       >
         <span className='flex-shrink-0 w-5 h-5 rounded overflow-hidden flex items-center justify-center'>
           {faviconUrl ? (
@@ -144,7 +144,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
           ) : null}
           <ExternalLink
             size={14}
-            className='text-gray-500 dark:text-gray-400'
+            className='text-muted-foreground'
             style={{ display: faviconUrl ? 'none' : 'block' }}
           />
         </span>
@@ -164,7 +164,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
 
       {/* Line 3: Description if present */}
       {description && (
-        <p className='text-xs text-gray-500 dark:text-gray-400 line-clamp-3' title={description}>
+        <p className='text-xs text-muted-foreground line-clamp-3' title={description}>
           {description.length > 200 ? description.slice(0, 200) + '...' : description}
         </p>
       )}

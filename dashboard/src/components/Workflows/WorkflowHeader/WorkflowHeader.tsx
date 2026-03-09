@@ -124,8 +124,8 @@ const getStatusConfig = (status?: string): StatusConfig => {
   const key = status?.toLowerCase().replace(/_/g, '') || '';
   return (
     STATUS_MAP[key] || {
-      bg: 'bg-gray-50 border border-gray-200',
-      text: 'text-gray-600',
+      bg: 'bg-muted border border-border',
+      text: 'text-muted-foreground',
       dot: 'bg-gray-400',
       label: status || 'Unknown',
     }
@@ -141,7 +141,7 @@ const MenuItem: React.FC<
 > = ({ onClick, icon, children, ...rest }) => (
   <button
     onClick={onClick}
-    className='w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+    className='w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors'
     data-track-category='Workflows'
     data-track-name='SelectMenuItem'
     {...rest}
@@ -343,7 +343,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               data-track-name='TriggerWorkflow'
               data-track-metadata={JSON.stringify({ ticketId: ticket.id, workflowType })}
             >
-              <Play size={14} className='text-gray-600 flex-shrink-0' />
+              <Play size={14} className='text-muted-foreground flex-shrink-0' />
               Trigger
             </button>
           )}
@@ -414,7 +414,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           )}
           <div className='relative' ref={menuRef}>
             <button
-              className='p-1.5 rounded-md hover:bg-gray-100 transition-colors'
+              className='p-1.5 rounded-md hover:bg-muted transition-colors'
               onClick={() => setShowMenu(!showMenu)}
               title='More'
               data-track-category='Workflows'
@@ -478,7 +478,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                     toast.success('Copied', { description: 'Run ID copied', duration: 2000 });
                     setShowMenu(false);
                   }}
-                  icon={<Copy size={14} className='text-gray-400' />}
+                  icon={<Copy size={14} className='text-muted-foreground' />}
                   data-track-category='Workflows'
                   data-track-name='CopyRunId'
                   data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -491,7 +491,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                       onOpenTableView();
                       setShowMenu(false);
                     }}
-                    icon={<Table2 size={14} className='text-gray-400' />}
+                    icon={<Table2 size={14} className='text-muted-foreground' />}
                     data-track-category='Workflows'
                     data-track-name='OpenTableView'
                     data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -505,7 +505,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                       onOpenGitDiff();
                       setShowMenu(false);
                     }}
-                    icon={<GitDiff size={14} className='text-gray-400' />}
+                    icon={<GitDiff size={14} className='text-muted-foreground' />}
                   >
                     View Git Diff
                   </MenuItem>

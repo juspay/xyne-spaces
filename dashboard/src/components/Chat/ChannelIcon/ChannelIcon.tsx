@@ -16,9 +16,9 @@ const ChannelIcon = ({ channel }: ChannelIconProps): React.ReactNode | null => {
     channel.scopeType === ChannelScopeType.GROUP_DM
   ) {
     if (channel.visibility === ChannelVisibility.PUBLIC) {
-      return <Hash className='w-4 h-4 text-gray-900' />;
+      return <Hash className='w-4 h-4 text-foreground' />;
     }
-    return <Lock className='w-4 h-4 text-gray-900' />;
+    return <Lock className='w-4 h-4 text-foreground' />;
   }
 
   if (channel.scopeType === ChannelScopeType.DM) {
@@ -28,7 +28,7 @@ const ChannelIcon = ({ channel }: ChannelIconProps): React.ReactNode | null => {
     return <Avatar userId={otherUserId} size='sm' />;
   }
 
-  return <Hash className='w-4 h-4 text-gray-900' />;
+  return <Hash className='w-4 h-4 text-foreground' />;
 };
 
 export default ChannelIcon;

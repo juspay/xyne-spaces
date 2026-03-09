@@ -39,7 +39,7 @@ const ExecutionAttemptDropdown: React.FC<ExecutionAttemptDropdownProps> = ({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className='flex items-center gap-1 px-2.5 py-1 rounded-md border border-gray-300 text-xs bg-white hover:bg-blue-100 hover:border-blue-300 transition-colors h-[26px] min-w-[120px] font-medium leading-[1.2]'>
+        <button className='flex items-center gap-1 px-2.5 py-1 rounded-md border border-input text-xs bg-background hover:bg-blue-100 hover:border-blue-300 transition-colors h-[26px] min-w-[120px] font-medium leading-[1.2]'>
           Attempt {currentExecutionIndex + 1} of {orderedExecutionMetadata.length}
           <ChevronDown size={14} />
         </button>
@@ -57,7 +57,7 @@ const ExecutionAttemptDropdown: React.FC<ExecutionAttemptDropdownProps> = ({
             <DropdownMenuItem
               key={exec.executionId}
               onClick={() => onExecutionSelect(exec.executionId)}
-              className={exec.executionId === selectedExecutionId ? 'bg-gray-100' : ''}
+              className={exec.executionId === selectedExecutionId ? 'bg-muted' : ''}
               data-track-category='Workflows'
               data-track-name='SelectExecutionAttempt'
               data-track-metadata={JSON.stringify({
@@ -70,7 +70,7 @@ const ExecutionAttemptDropdown: React.FC<ExecutionAttemptDropdownProps> = ({
                   Attempt {index + 1} {exec.tag === 'root' ? '(Original)' : ''}
                   {exec.executionId === selectedExecutionId && ' ✓'}
                 </span>
-                <span className='text-xs text-gray-500'>
+                <span className='text-xs text-muted-foreground'>
                   {format(new Date(exec.createdAt), 'PPpp')} · {exec.executionStatus}
                 </span>
                 {exec.sourceStepName && parentAttemptNumber && (

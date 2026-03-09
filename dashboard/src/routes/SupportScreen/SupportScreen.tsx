@@ -100,7 +100,7 @@ const DropdownIcon = ({
       'w-4 h-4 rounded-md flex items-center justify-center font-bold text-[10px]',
       variant === 'channel'
         ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300',
+        : 'bg-border dark:bg-gray-700 text-foreground dark:text-muted',
     )}
   >
     {children}
@@ -339,7 +339,7 @@ const SupportScreen = (): ReactElement => {
   );
 
   return (
-    <div className='h-full flex flex-col relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] bg-white'>
+    <div className='h-full flex flex-col relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] bg-background'>
       <PanelGroup
         key={`support-panel-${viewMode}-${ticketId ? 'detail' : 'list'}`}
         direction='horizontal'
@@ -348,7 +348,7 @@ const SupportScreen = (): ReactElement => {
         {!(viewMode === 'kanban' && ticketId) && (
           <Panel defaultSize={ticketId ? 40 : 100} minSize={25} maxSize={ticketId ? 60 : 100}>
             <div className='h-full flex flex-col'>
-              <div className='flex-shrink-0 h-14 px-4 border-b border-gray-200 flex items-center justify-between'>
+              <div className='flex-shrink-0 h-14 px-4 border-b border-border flex items-center justify-between'>
                 <div className='flex items-center gap-2 font-semibold min-w-0 flex-1'>
                   <span className='shrink-0'>
                     <Mail size={16} />
@@ -364,8 +364,8 @@ const SupportScreen = (): ReactElement => {
                     placeholder='Channels'
                     searchPlaceholder='Search channel...'
                     showClearButton={selectedChannelId !== null}
-                    inputClassName='rounded-[10px] border border-gray-200 hover:bg-gray-50 px-3 py-1.5 h-8 text-sm font-medium whitespace-nowrap [&>svg:last-child]:rotate-90'
-                    inputIcon={<Hash className='w-3 h-3 text-gray-500' />}
+                    inputClassName='rounded-[10px] border border-border hover:bg-muted px-3 py-1.5 h-8 text-sm font-medium whitespace-nowrap [&>svg:last-child]:rotate-90'
+                    inputIcon={<Hash className='w-3 h-3 text-muted-foreground' />}
                     showIndicator={true}
                     width='auto'
                   />
@@ -377,8 +377,8 @@ const SupportScreen = (): ReactElement => {
                     placeholder='Merchants'
                     searchPlaceholder='Search merchant...'
                     showClearButton={selectedMerchantMid !== null}
-                    inputClassName='rounded-[10px] border border-gray-200 hover:bg-gray-50 px-3 py-1.5 h-8 text-sm font-medium whitespace-nowrap [&>svg:last-child]:rotate-90'
-                    inputIcon={<Store className='w-3 h-3 text-gray-500' />}
+                    inputClassName='rounded-[10px] border border-border hover:bg-muted px-3 py-1.5 h-8 text-sm font-medium whitespace-nowrap [&>svg:last-child]:rotate-90'
+                    inputIcon={<Store className='w-3 h-3 text-muted-foreground' />}
                     showIndicator={true}
                     width='auto'
                   />
@@ -387,8 +387,8 @@ const SupportScreen = (): ReactElement => {
                     className={cn(
                       'text-sm font-medium transition-colors px-2 py-1 rounded whitespace-nowrap',
                       showMyTicketsOnly
-                        ? 'text-primary  bg-gray-200'
-                        : 'text-gray-600 hover:text-gray-900',
+                        ? 'text-primary  bg-border'
+                        : 'text-muted-foreground hover:text-foreground',
                     )}
                     data-track-category='Support'
                     data-track-name='ToggleMyTickets'
@@ -397,14 +397,14 @@ const SupportScreen = (): ReactElement => {
                     My Tickets
                   </button>
                   {/* View Toggle */}
-                  <div className='flex items-center border border-gray-200 rounded-lg overflow-hidden'>
+                  <div className='flex items-center border border-border rounded-lg overflow-hidden'>
                     <button
                       onClick={() => setViewMode('kanban')}
                       className={cn(
                         'p-1.5 transition-colors',
                         viewMode === 'kanban'
-                          ? 'bg-gray-100 text-gray-900'
-                          : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+                          ? 'bg-muted text-foreground'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                       )}
                       title='Kanban View'
                       data-track-category='Support'
@@ -417,8 +417,8 @@ const SupportScreen = (): ReactElement => {
                       className={cn(
                         'p-1.5 transition-colors',
                         viewMode === 'list'
-                          ? 'bg-gray-100 text-gray-900'
-                          : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+                          ? 'bg-muted text-foreground'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                       )}
                       title='List View'
                       data-track-category='Support'
@@ -502,7 +502,7 @@ const SupportScreen = (): ReactElement => {
           <>
             {viewMode !== 'kanban' && (
               <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                <div id='panel-resize-divider' className='w-[1px] h-full bg-gray-200'></div>
+                <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
               </PanelResizeHandle>
             )}
             <Panel defaultSize={viewMode === 'kanban' ? 100 : 60} minSize={40}>
@@ -743,7 +743,7 @@ ${email.body || 'No content'}
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
-        <div className='text-lg font-semibold text-gray-500'>Ticket not found</div>
+        <div className='text-lg font-semibold text-muted-foreground'>Ticket not found</div>
       </div>
     );
   }
@@ -759,10 +759,10 @@ ${email.body || 'No content'}
           <div className='h-full flex flex-col overflow-hidden relative'>
             <div className='w-full px-6 py-5 flex items-center justify-between flex-shrink-0'>
               <div className='flex items-center gap-2 min-w-0'>
-                <span className='bg-gray-200 py-[3px] px-3 flex items-center justify-center text-xs text-gray-700 rounded-xl font-mono min-w-0 whitespace-nowrap overflow-hidden text-ellipsis shrink-0'>
+                <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-xl font-mono min-w-0 whitespace-nowrap overflow-hidden text-ellipsis shrink-0'>
                   {ticketIdParam}
                 </span>
-                <span className='font-semibold text-gray-900 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis'>
+                <span className='font-semibold text-foreground min-w-0 whitespace-nowrap overflow-hidden text-ellipsis'>
                   {title || 'Untitled Ticket'}
                 </span>
               </div>
@@ -787,29 +787,31 @@ ${email.body || 'No content'}
                     <div className='flex items-center justify-between'>
                       <div className='flex items-center gap-1.5'>
                         <AIICIcon />
-                        <span className='text-sm text-gray-600'>AI Summary</span>
+                        <span className='text-sm text-muted-foreground'>AI Summary</span>
                         {isGeneratingSummary && (
-                          <span className='text-sm text-gray-400 ml-1'>Generating summary...</span>
+                          <span className='text-sm text-muted-foreground ml-1'>
+                            Generating summary...
+                          </span>
                         )}
                       </div>
                       <div className='flex items-center gap-1'>
                         {aiSummary && !isGeneratingSummary && (
                           <button
                             onClick={() => void generateSummary(true)}
-                            className='p-1 hover:bg-gray-200 rounded transition-colors'
+                            className='p-1 hover:bg-border rounded transition-colors'
                             aria-label='Regenerate summary'
                             title='Regenerate summary'
                             data-track-category='Support'
                             data-track-name='RegenerateAISummary'
                             data-track-metadata={JSON.stringify({ ticketId })}
                           >
-                            <RefreshCw size={16} className='text-gray-600' />
+                            <RefreshCw size={16} className='text-muted-foreground' />
                           </button>
                         )}
                         {(aiSummary || isGeneratingSummary) && (
                           <button
                             onClick={() => setIsSummaryCollapsed(!isSummaryCollapsed)}
-                            className='p-1 hover:bg-gray-200 rounded transition-colors'
+                            className='p-1 hover:bg-border rounded transition-colors'
                             aria-label={isSummaryCollapsed ? 'Expand summary' : 'Collapse summary'}
                             data-track-category='Support'
                             data-track-name='ToggleAISummaryCollapse'
@@ -819,9 +821,9 @@ ${email.body || 'No content'}
                             })}
                           >
                             {isSummaryCollapsed ? (
-                              <ChevronDown size={16} className='text-gray-600' />
+                              <ChevronDown size={16} className='text-muted-foreground' />
                             ) : (
-                              <ChevronUp size={16} className='text-gray-600' />
+                              <ChevronUp size={16} className='text-muted-foreground' />
                             )}
                           </button>
                         )}
@@ -837,7 +839,7 @@ ${email.body || 'No content'}
                           style={{ overflow: 'hidden' }}
                         >
                           {isGeneratingSummary ? (
-                            <div className='text-sm text-gray-700 pt-3 space-y-2'>
+                            <div className='text-sm text-foreground pt-3 space-y-2'>
                               <Skeleton className='h-4 w-full' />
                               <Skeleton className='h-4 w-5/6' />
                               <Skeleton className='h-4 w-full' />
@@ -846,7 +848,7 @@ ${email.body || 'No content'}
                               <Skeleton className='h-4 w-3/4' />
                             </div>
                           ) : aiSummary ? (
-                            <div className='text-sm text-gray-700 pt-3'>
+                            <div className='text-sm text-foreground pt-3'>
                               <style>{`
                                 .markdown-preview-summary h1 a,
                                 .markdown-preview-summary h2 a,
@@ -892,7 +894,7 @@ ${email.body || 'No content'}
                               />
                             </div>
                           ) : (
-                            <div className='text-sm text-gray-600'>
+                            <div className='text-sm text-muted-foreground'>
                               {emails && emails.length > 0
                                 ? 'AI Summary will be displayed here once available.'
                                 : 'No emails available to summarize.'}
@@ -919,7 +921,7 @@ ${email.body || 'No content'}
           <>
             {' '}
             <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-              <div className='w-[1px] h-full bg-gray-200'></div>
+              <div className='w-[1px] h-full bg-border'></div>
             </PanelResizeHandle>
             <Panel defaultSize={50} minSize={30} maxSize={70}>
               <div
@@ -934,8 +936,8 @@ ${email.body || 'No content'}
                     className='flex-1 flex flex-col h-full overflow-hidden'
                   >
                     {/* Tabs Header */}
-                    <div className='w-full p-4 pb-0 bg-white flex-shrink-0'>
-                      <div className='border-b border-gray-200 flex items-center justify-between'>
+                    <div className='w-full p-4 pb-0 bg-background flex-shrink-0'>
+                      <div className='border-b border-border flex items-center justify-between'>
                         <Tabs.List className='flex items-center justify-start'>
                           <Tabs.Trigger asChild value='messages'>
                             <button
@@ -982,13 +984,13 @@ ${email.body || 'No content'}
                         </Tabs.List>
                         <button
                           onClick={() => setIsRightPanelOpen(false)}
-                          className='p-1.5 hover:bg-gray-100 rounded transition-colors flex items-center justify-center'
+                          className='p-1.5 hover:bg-muted rounded transition-colors flex items-center justify-center'
                           aria-label='Close panel'
                           title='Close panel'
                           data-track-category='Support'
                           data-track-name='CloseRightPanel'
                         >
-                          <X size={16} className='text-gray-600' />
+                          <X size={16} className='text-muted-foreground' />
                         </button>
                       </div>
                     </div>
@@ -1008,7 +1010,7 @@ ${email.body || 'No content'}
                         channelScopeType={channel?.scopeType}
                       />
                       {isUserMember ? (
-                        <div className='px-4 pb-4 bg-white flex-shrink-0'>
+                        <div className='px-4 pb-4 bg-background flex-shrink-0'>
                           <ChatInput
                             ref={inputRef}
                             channelId={channelId}
@@ -1033,8 +1035,8 @@ ${email.body || 'No content'}
                       {ticketId ? (
                         <TicketDetails ticketId={ticketId} />
                       ) : (
-                        <div className='flex flex-col items-center justify-center h-full text-gray-500 p-4'>
-                          <FileText size={48} className='mb-2 text-gray-400' />
+                        <div className='flex flex-col items-center justify-center h-full text-muted-foreground p-4'>
+                          <FileText size={48} className='mb-2 text-muted-foreground' />
                           <p>Ticket ID not found</p>
                         </div>
                       )}
@@ -1042,7 +1044,9 @@ ${email.body || 'No content'}
                   </Tabs.Root>
                 ) : (
                   <div className='h-full flex items-center justify-center'>
-                    <div className='text-lg font-semibold text-gray-500'>No conversation found</div>
+                    <div className='text-lg font-semibold text-muted-foreground'>
+                      No conversation found
+                    </div>
                   </div>
                 )}
               </div>
@@ -1144,7 +1148,7 @@ const EmailThread = ({ emails }: { emails: Email[] }): ReactElement => {
       <div className='py-3 flex items-center justify-center'>
         <button
           onClick={() => setIsExpanded(true)}
-          className='px-4 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors cursor-pointer'
+          className='px-4 py-1.5 text-xs font-medium text-foreground bg-muted hover:bg-border rounded-full transition-colors cursor-pointer'
           data-track-category='Support'
           data-track-name='ExpandEmailThread'
           data-track-metadata={JSON.stringify({ collapsedCount })}
@@ -1223,7 +1227,7 @@ const EmailThreadItem = ({
         <div className='flex items-start justify-between mb-2'>
           <div className='flex-1'>
             <div className='flex items-center gap-2 mb-1'>
-              <span className='text-sm font-semibold text-gray-900'>{fromName}</span>
+              <span className='text-sm font-semibold text-foreground'>{fromName}</span>
               {email.type === EmailType.DEFAULT &&
                 email.externalThreadId === email.externalMessageId &&
                 email.id !== firstEmail.id && (
@@ -1244,22 +1248,22 @@ const EmailThreadItem = ({
                   </button>
                 )}
             </div>
-            <div className='text-xs text-gray-500 mb-2'>
+            <div className='text-xs text-muted-foreground mb-2'>
               <div>To: {toList.join(', ')}</div>
               {ccList.length > 0 && <div>CC: {ccList.join(', ')}</div>}
             </div>
           </div>
-          <div className='text-xs text-gray-500 flex-shrink-0 ml-4'>
+          <div className='text-xs text-muted-foreground flex-shrink-0 ml-4'>
             {formatEmailDate(email.createdAt)}
           </div>
         </div>
-        <div className='text-sm text-gray-700 leading-relaxed'>
+        <div className='text-sm text-foreground leading-relaxed'>
           {email.body ? (
             <div className='jp-message-html'>
               <RenderMessageWithHTML message={email.body} />
             </div>
           ) : (
-            <span className='text-gray-400 italic'>No content</span>
+            <span className='text-muted-foreground italic'>No content</span>
           )}
         </div>
       </div>
@@ -1505,7 +1509,7 @@ const EmailComposer = ({
   return (
     <div className='w-full p-4'>
       <div
-        className={`border border-gray-200 rounded-xl relative ${isSending ? 'opacity-60 pointer-events-none' : ''}`}
+        className={`border border-border rounded-xl relative ${isSending ? 'opacity-60 pointer-events-none' : ''}`}
       >
         <div className='px-4 pt-3'>
           {!isExpanded ? (
@@ -1523,16 +1527,16 @@ const EmailComposer = ({
                 draftEmailId: drafts?.[0]?.id,
               })}
             >
-              <ReplyAll size={16} className='text-gray-800 flex-shrink-0' />
-              <span className='text-sm text-gray-800 font-medium'>Reply to</span>
+              <ReplyAll size={16} className='text-foreground flex-shrink-0' />
+              <span className='text-sm text-foreground font-medium'>Reply to</span>
               <div className='flex items-center gap-1.5 flex-wrap flex-1'>
                 {collapsedDisplay.visibleEmails.map(email => (
-                  <span key={email} className='text-sm text-gray-700'>
+                  <span key={email} className='text-sm text-foreground'>
                     &lt;{email}&gt;
                   </span>
                 ))}
                 {collapsedDisplay.remainingCount > 0 && (
-                  <span className='text-sm text-gray-600 bg-gray-100 px-2 py-0.5 rounded hover:bg-gray-200'>
+                  <span className='text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded hover:bg-border'>
                     {collapsedDisplay.remainingCount} more
                   </span>
                 )}
@@ -1544,7 +1548,7 @@ const EmailComposer = ({
                 <button
                   type='button'
                   onClick={() => setIsExpanded(false)}
-                  className='flex-shrink-0 p-0.5 hover:bg-gray-100 rounded transition-colors mt-0.5'
+                  className='flex-shrink-0 p-0.5 hover:bg-muted rounded transition-colors mt-0.5'
                   title='Collapse'
                   data-track-category='SUPPORT'
                   data-track-name='CollapseReplyComposer'
@@ -1556,9 +1560,9 @@ const EmailComposer = ({
                     draftEmailId: drafts?.[0]?.id,
                   })}
                 >
-                  <ReplyAll size={16} className='text-gray-500' />
+                  <ReplyAll size={16} className='text-muted-foreground' />
                 </button>
-                <span className='text-sm text-gray-800 font-medium flex-shrink-0 mt-1'>To</span>
+                <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>To</span>
 
                 <div
                   className='flex-1 flex flex-wrap items-center gap-1.5 cursor-text min-h-[28px]'
@@ -1617,7 +1621,7 @@ const EmailComposer = ({
                   {!showCc && (
                     <button
                       onClick={() => setShowCc(true)}
-                      className='text-sm text-gray-500 hover:text-gray-700 px-1 transition-colors'
+                      className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
                       data-track-category='SUPPORT'
                       data-track-name='ShowCcField'
                       data-track-metadata={JSON.stringify({
@@ -1633,7 +1637,7 @@ const EmailComposer = ({
                   {!showBcc && (
                     <button
                       onClick={() => setShowBcc(true)}
-                      className='text-sm text-gray-500 hover:text-gray-700 px-1 transition-colors'
+                      className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
                       data-track-category='SUPPORT'
                       data-track-name='ShowBccField'
                       data-track-metadata={JSON.stringify({
@@ -1652,7 +1656,7 @@ const EmailComposer = ({
               {showCc && (
                 <div className='flex items-start gap-2 mt-1'>
                   <div className='w-[20px] flex-shrink-0' />
-                  <span className='text-sm text-gray-800 font-medium flex-shrink-0 mt-1'>Cc</span>
+                  <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>Cc</span>
                   <div
                     className='flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text'
                     onClick={() => ccInputRef.current?.focus()}
@@ -1714,7 +1718,9 @@ const EmailComposer = ({
               {showBcc && (
                 <div className='flex items-start gap-2 mt-1'>
                   <div className='w-[20px] flex-shrink-0' />
-                  <span className='text-sm text-gray-800 font-medium flex-shrink-0 mt-1'>Bcc</span>
+                  <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>
+                    Bcc
+                  </span>
                   <div
                     className='flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text'
                     onClick={() => bccInputRef.current?.focus()}
@@ -1786,7 +1792,7 @@ const EmailComposer = ({
 
         <div className='px-4 py-3 flex items-center justify-end'>
           <button
-            className='size-8 flex items-center justify-center rounded-full bg-gray-400 text-white hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+            className='size-8 flex items-center justify-center rounded-full bg-gray-400 text-white hover:bg-muted0 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
             onClick={() => void handleSendEmail()}
             disabled={!emailContent.trim() || !conversationId || isSending || toEmails.length === 0}
             aria-label='Send email'

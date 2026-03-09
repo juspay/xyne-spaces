@@ -425,7 +425,7 @@ function CallNotificationUI({
             <button
               type='button'
               className={cn(
-                'text-lg font-medium text-gray-700 dark:text-gray-300 bg-transparent border-none p-0',
+                'text-lg font-medium text-foreground dark:text-muted bg-transparent border-none p-0',
                 conversationId && channelId ? 'cursor-pointer hover:underline' : 'cursor-default',
               )}
               onClick={handleTitleClick}
@@ -460,8 +460,8 @@ function CallNotificationUI({
 
         {/* Call Info */}
         <div className='space-y-2'>
-          <p className='text-lg font-medium text-gray-700 dark:text-gray-300'>{caller.name}</p>
-          <p className='text-sm text-gray-500 dark:text-gray-400'>{caller.email}</p>
+          <p className='text-lg font-medium text-foreground dark:text-muted'>{caller.name}</p>
+          <p className='text-sm text-muted-foreground dark:text-muted-foreground'>{caller.email}</p>
         </div>
 
         {/* Call Type Icon */}

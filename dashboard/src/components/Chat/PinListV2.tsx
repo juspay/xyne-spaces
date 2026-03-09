@@ -19,7 +19,7 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
 
   if (pinned.length === 0) {
     return (
-      <div className='text-center text-gray-500 py-8 bg-[#FFF] flex items-center justify-center flex-1'>
+      <div className='text-center text-muted-foreground py-8 bg-background flex items-center justify-center flex-1'>
         No pinned messages yet.
       </div>
     );
@@ -39,8 +39,8 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
     <div className='overflow-auto no-scrollbar p-6'>
       {/* Header */}
       <div className='pb-4'>
-        <h2 className='text-lg font-semibold text-gray-800'>Pinned messages</h2>
-        <p className='text-sm text-gray-500'>Important messages saved for later</p>
+        <h2 className='text-lg font-semibold text-foreground'>Pinned messages</h2>
+        <p className='text-sm text-muted-foreground'>Important messages saved for later</p>
       </div>
 
       {/* List */}
@@ -54,7 +54,7 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
             <div key={conv.conversationId}>
               <button
                 onClick={() => handleOpenOriginalMessage(conv.conversationId)}
-                className='w-full text-left block rounded-xl hover:bg-gray-50 transition'
+                className='w-full text-left block rounded-xl hover:bg-muted transition'
                 data-track-category='CHAT_PINNED'
                 data-track-name='Open_Pinned_Message'
                 data-track-metadata={JSON.stringify({ conversationId: conv.conversationId })}

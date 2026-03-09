@@ -96,20 +96,22 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
       }}
     >
       <div
-        className='bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden'
+        className='bg-background rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden'
         role='dialog'
         aria-modal='true'
         aria-label='Create Pulse Actionable'
         tabIndex={-1}
       >
         {/* Header */}
-        <div className='flex items-center gap-2 px-5 py-4 border-b border-gray-100'>
+        <div className='flex items-center gap-2 px-5 py-4 border-b border-border'>
           <span className='text-lg'>⚡</span>
-          <h2 className='text-base font-semibold text-gray-900 flex-1'>Create Pulse Actionable</h2>
+          <h2 className='text-base font-semibold text-foreground flex-1'>
+            Create Pulse Actionable
+          </h2>
           <button
             type='button'
             onClick={onClose}
-            className='text-gray-400 hover:text-gray-600 transition-colors rounded-md p-1 hover:bg-gray-100'
+            className='text-muted-foreground hover:text-foreground transition-colors rounded-md p-1 hover:bg-accent'
             aria-label='Close modal'
           >
             ✕
@@ -123,13 +125,13 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
             <div className='flex flex-col gap-1'>
               <label
                 htmlFor='pulse-merchant'
-                className='text-xs font-medium text-gray-600 uppercase tracking-wide'
+                className='text-xs font-medium text-muted-foreground uppercase tracking-wide'
               >
                 Merchant
               </label>
               <div
                 id='pulse-merchant'
-                className='border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-gray-50 select-none cursor-default'
+                className='border border-border rounded-lg px-3 py-2 text-sm text-foreground bg-muted select-none cursor-default'
               >
                 {merchant.name}
               </div>
@@ -140,7 +142,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
           <div className='flex flex-col gap-1'>
             <label
               htmlFor='pulse-title'
-              className='text-xs font-medium text-gray-600 uppercase tracking-wide'
+              className='text-xs font-medium text-muted-foreground uppercase tracking-wide'
             >
               Title <span className='text-red-500'>*</span>
             </label>
@@ -151,7 +153,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
               onChange={e => setTitle(e.target.value)}
               disabled={submitting}
               required
-              className='border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition disabled:opacity-60'
+              className='border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition disabled:opacity-60'
               placeholder='Actionable title'
             />
           </div>
@@ -160,7 +162,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
           <div className='flex flex-col gap-1'>
             <label
               htmlFor='pulse-description'
-              className='text-xs font-medium text-gray-600 uppercase tracking-wide'
+              className='text-xs font-medium text-muted-foreground uppercase tracking-wide'
             >
               Description
             </label>
@@ -170,7 +172,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
               onChange={e => setDescription(e.target.value)}
               disabled={submitting}
               rows={3}
-              className='border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition resize-none disabled:opacity-60'
+              className='border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition resize-none disabled:opacity-60'
               placeholder='Add more context (optional)'
             />
           </div>
@@ -193,7 +195,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
               type='button'
               onClick={onClose}
               disabled={submitting}
-              className='px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100 transition disabled:opacity-50'
+              className='px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent transition disabled:opacity-50'
             >
               Cancel
             </button>

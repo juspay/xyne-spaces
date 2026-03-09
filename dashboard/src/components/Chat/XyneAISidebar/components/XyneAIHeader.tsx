@@ -45,7 +45,7 @@ export const XyneAIHeader = ({
                 className='w-4 h-4'
               />
             </button>
-            <div className='text-gray-500 text-base font-medium'>New chat</div>
+            <div className='text-muted-foreground text-base font-medium'>New chat</div>
           </div>
 
           {/* Right: Settings, User Activity, Chat History, and Close Icons */}
@@ -106,13 +106,13 @@ export const XyneAIHeader = ({
 
   return (
     <>
-      <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-gray-200'>
-        <div className="text-gray-900 text-base font-semibold font-['Inter']">Ask AI</div>
+      <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-border'>
+        <div className="text-foreground text-base font-semibold font-['Inter']">Ask AI</div>
         <div className='flex items-center gap-2'>
           {/* New Chat Icon */}
           <button
             onClick={onNewChat}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             title='New chat'
             data-track-category='XyneAI'
             data-track-name='NEW_CHAT_DESKTOP'
@@ -122,7 +122,7 @@ export const XyneAIHeader = ({
           {/* Chat History Icon */}
           <button
             onClick={onShowHistory}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             title='Chat history'
             data-track-category='XyneAI'
             data-track-name='SHOW_HISTORY_DESKTOP'
@@ -132,7 +132,7 @@ export const XyneAIHeader = ({
           {/* User Activity Icon */}
           <button
             onClick={onShowUserActivity}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             title='Your activity'
             data-track-category='XyneAI'
             data-track-name='SHOW_USER_ACTIVITY_DESKTOP'
@@ -142,7 +142,7 @@ export const XyneAIHeader = ({
           {/* Settings Icon */}
           <button
             onClick={() => setIsSettingsModalOpen(true)}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             title='Custom instructions'
             data-track-category='XYNE_AI'
             data-track-name='OpenCustomInstructions'
@@ -152,7 +152,7 @@ export const XyneAIHeader = ({
           {/* Close Icon */}
           <button
             onClick={handleClose}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             data-track-category='XyneAI'
             data-track-name='CLOSE_DESKTOP'
           >

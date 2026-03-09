@@ -131,7 +131,7 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
   const content = renderer ? (
     renderer()
   ) : (
-    <pre className='bg-gray-50 p-2 rounded text-xs scroll-safe max-h-48 overflow-safe w-full text-wrap'>
+    <pre className='bg-muted p-2 rounded text-xs scroll-safe max-h-48 overflow-safe w-full text-wrap'>
       <code className='text-wrap'>{formatStepData(step.data)}</code>
     </pre>
   );

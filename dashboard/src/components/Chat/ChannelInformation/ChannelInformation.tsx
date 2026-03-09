@@ -43,8 +43,8 @@ export const ChannelInformation: React.FC<ChannelInformationProps> = ({
 
   if (!channel) {
     const loadingContent = (
-      <div className='w-80 bg-white border border-gray-200 p-4'>
-        <div className='text-center text-gray-600'>Loading channel information...</div>
+      <div className='w-80 bg-card border border-border p-4'>
+        <div className='text-center text-muted-foreground'>Loading channel information...</div>
       </div>
     );
 
@@ -65,9 +65,9 @@ export const ChannelInformation: React.FC<ChannelInformationProps> = ({
   }
 
   const ChannelContent = (): ReactElement => (
-    <div className={`w-full bg-white  flex flex-col ${height}`}>
+    <div className={`w-full bg-card  flex flex-col ${height}`}>
       {/* Header */}
-      <div className='p-4 border-b border-gray-200'>
+      <div className='p-4 border-b border-border'>
         <div className='flex items-center justify-between mb-3'>
           <ChannelName channel={channel} showIcon={true} iconSize='md' textSize='lg' />
           {onClose && (

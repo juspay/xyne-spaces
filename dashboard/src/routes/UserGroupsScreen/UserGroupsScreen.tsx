@@ -134,21 +134,21 @@ const UserGroupsScreen = (): ReactElement => {
 
   if (loading) {
     return (
-      <div className='h-full bg-gray-50 flex items-center justify-center'>
-        <p className='text-gray-600'>Loading...</p>
+      <div className='h-full bg-muted flex items-center justify-center'>
+        <p className='text-muted-foreground'>Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className='h-full w-full overflow-hidden bg-gray-50'>
+    <div className='h-full w-full overflow-hidden bg-muted'>
       <div className='h-full overflow-hidden'>
         <div className='flex flex-col h-full'>
-          <div className='p-6 border-b border-gray-200 bg-white'>
+          <div className='p-6 border-b border-border bg-background'>
             <div className='flex items-center justify-between mb-4'>
               <div>
-                <h2 className='text-lg font-bold text-gray-900'>User Groups</h2>
-                <p className='text-xs text-gray-600 mt-1'>
+                <h2 className='text-lg font-bold text-foreground'>User Groups</h2>
+                <p className='text-xs text-muted-foreground mt-1'>
                   Manage your organization user groups and teams
                 </p>
               </div>
@@ -166,7 +166,7 @@ const UserGroupsScreen = (): ReactElement => {
               {/* Search Input */}
               <div className='relative flex-1 max-w-md'>
                 <Search
-                  className='absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400'
+                  className='absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground'
                   size={18}
                 />
                 <Input
@@ -203,13 +203,13 @@ const UserGroupsScreen = (): ReactElement => {
               </div>
             ) : (
               <div className='text-center py-16'>
-                <div className='text-gray-400 text-5xl mb-4'>👥</div>
-                <h3 className='text-xl font-semibold text-gray-700 mb-2'>
+                <div className='text-muted-foreground text-5xl mb-4'>👥</div>
+                <h3 className='text-xl font-semibold text-foreground mb-2'>
                   {searchQuery || showManagedOnly
                     ? 'No matching user groups'
                     : 'No user groups yet'}
                 </h3>
-                <p className='text-gray-500'>
+                <p className='text-muted-foreground'>
                   {searchQuery || showManagedOnly
                     ? 'Try adjusting your search or filter'
                     : 'Get started by creating your first user group'}

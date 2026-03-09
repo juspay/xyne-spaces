@@ -72,14 +72,14 @@ export const CommandSelector: React.FC<CommandSelectorProps> = ({
         }`}
       >
         <div className='flex items-center gap-2'>
-          <span className='text-sm font-medium text-gray-800'>/{item.name}</span>
+          <span className='text-sm font-medium text-foreground'>/{item.name}</span>
           {item.category && (
-            <span className='text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full'>
+            <span className='text-xs px-2 py-0.5 bg-muted text-muted-foreground rounded-full'>
               {item.category}
             </span>
           )}
         </div>
-        <span className='text-xs text-gray-600'>{item.description}</span>
+        <span className='text-xs text-muted-foreground'>{item.description}</span>
       </div>
     ),
     [],
@@ -97,7 +97,7 @@ export const CommandSelector: React.FC<CommandSelectorProps> = ({
       emptyMessage='No commands found'
       loadingMessage={
         <div className='flex items-center gap-2'>
-          <div className='w-3 h-3 border-2 border-gray-200 border-t-blue-500 rounded-full animate-spin' />
+          <div className='w-3 h-3 border-2 border-muted border-t-primary rounded-full animate-spin' />
           <span>Loading commands...</span>
         </div>
       }

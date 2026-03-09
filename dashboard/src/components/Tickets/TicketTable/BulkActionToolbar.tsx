@@ -68,7 +68,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
         <div className='flex items-center gap-2 pb-2 sm:pb-0 sm:pr-4 flex-1 sm:flex-none min-w-0'>
           <button
             onClick={onClearSelection}
-            className='p-1 text-white hover:text-gray-400 transition-colors flex-shrink-0'
+            className='p-1 text-white hover:text-muted-foreground transition-colors flex-shrink-0'
             title='Clear selection'
             data-track-category='Tickets'
             data-track-name='ClearTicketSelection'
@@ -93,7 +93,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             variant='inline'
             isOpen={activeMenu === 'assignee'}
             onOpenChange={open => setActiveMenu(open ? 'assignee' : null)}
-            inputClassName='!bg-transparent placeholder:text-white text-white border-none hover:bg-white/5 text-xs sm:text-sm px-2 font-semibold'
+            inputClassName='!bg-transparent placeholder:text-white text-white border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
             inputIcon={<UserIcon className='size-4' />}
             showIndicator={false}
           />
@@ -111,7 +111,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             variant='inline'
             isOpen={activeMenu === 'status'}
             onOpenChange={open => setActiveMenu(open ? 'status' : null)}
-            inputClassName='!bg-transparent placeholder:text-white text-white border-none hover:bg-white/5 text-xs sm:text-sm px-2 font-semibold'
+            inputClassName='!bg-transparent placeholder:text-white text-white border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
             inputIcon={<CircleCheckBig className='size-4' />}
             showIndicator={false}
           />
@@ -129,7 +129,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             variant='inline'
             isOpen={activeMenu === 'priority'}
             onOpenChange={open => setActiveMenu(open ? 'priority' : null)}
-            inputClassName='!bg-transparent text-white placeholder:text-white border-none hover:bg-white/5 text-xs sm:text-sm px-2 font-semibold'
+            inputClassName='!bg-transparent text-white placeholder:text-white border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
             inputIcon={<Layers className='size-4' />}
             showIndicator={false}
           />
@@ -141,8 +141,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               className={cn(
                 'flex items-center gap-1 sm:gap-3 px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-colors whitespace-nowrap',
                 activeMenu === 'dueDate'
-                  ? 'bg-white/10 text-white'
-                  : 'text-gray-400 hover:bg-white/5 hover:text-white',
+                  ? 'bg-background/10 text-white'
+                  : 'text-muted-foreground hover:bg-background/5 hover:text-white',
               )}
               data-track-category='Tickets'
               data-track-name='ToggleDueDateMenu'
@@ -180,7 +180,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               variant='inline'
               isOpen={activeMenu === 'stage'}
               onOpenChange={open => setActiveMenu(open ? 'stage' : null)}
-              inputClassName='!bg-transparent text-white border-none placeholder:text-white hover:bg-white/5 text-xs sm:text-sm px-2'
+              inputClassName='!bg-transparent text-white border-none placeholder:text-white hover:bg-background/5 text-xs sm:text-sm px-2'
               inputIcon={<TicketStatusIcon size={14} />}
             />
           )}
@@ -192,8 +192,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               className={cn(
                 'flex items-center gap-1 sm:gap-3 px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-colors whitespace-nowrap',
                 activeMenu === 'tags'
-                  ? 'bg-white/10 text-white'
-                  : 'text-gray-400 hover:bg-white/5 hover:text-white',
+                  ? 'bg-background/10 text-white'
+                  : 'text-muted-foreground hover:bg-background/5 hover:text-white',
               )}
               data-track-category='Tickets'
               data-track-name='ToggleTagsMenu'
@@ -204,7 +204,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
 
             {activeMenu === 'tags' && (
               <div className='absolute bottom-full mb-4 left-0 z-50'>
-                <div className='bg-white rounded-lg shadow-lg border border-gray-200 p-2 min-w-[250px]'>
+                <div className='bg-background rounded-lg shadow-lg border border-border p-2 min-w-[250px]'>
                   <TagSelector
                     availableTags={availableTags}
                     selectedTags={[]}

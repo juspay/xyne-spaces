@@ -95,20 +95,20 @@ export const ToolMultiEditRenderer: React.FC<
     return (
       <div className='space-y-2 text-sm'>
         {/* File Card with Diff */}
-        <div className='rounded-lg border border-gray-200 overflow-hidden bg-white'>
+        <div className='rounded-lg border border-border overflow-hidden bg-background'>
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className='w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 transition-colors'
+            className='w-full flex items-center gap-2 px-3 py-2 hover:bg-muted transition-colors'
             data-track-category='Workflows'
             data-track-name='ToggleMultiFileEditExpand'
             data-track-metadata={JSON.stringify({ fileName, filePath })}
           >
-            <span className='text-gray-400'>
+            <span className='text-muted-foreground'>
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </span>
             <FileEdit size={16} className='text-amber-500 shrink-0' />
-            <span className='text-sm font-medium text-gray-800'>
+            <span className='text-sm font-medium text-foreground'>
               {filePath ? fileName : `${totalEdits || inputEdits.length} edits`}
             </span>
             <span className='ml-auto flex items-center gap-2 text-sm'>
@@ -127,15 +127,17 @@ export const ToolMultiEditRenderer: React.FC<
 
           {/* Expanded Content - Show Diffs */}
           {isExpanded && editsApplied.length > 0 && (
-            <div className='border-t border-gray-200 overflow-auto max-h-96'>
+            <div className='border-t border-border overflow-auto max-h-96'>
               {editsApplied.map((edit, index) => (
                 <div key={index}>
                   {/* Edit separator for multiple edits */}
                   {editsApplied.length > 1 && (
-                    <div className='flex items-center gap-2 px-3 py-1 bg-gray-100 border-t border-b border-gray-200 first:border-t-0'>
-                      <div className='flex-1 h-px bg-gray-300'></div>
-                      <span className='text-xs text-gray-500 font-medium'>Edit {index + 1}</span>
-                      <div className='flex-1 h-px bg-gray-300'></div>
+                    <div className='flex items-center gap-2 px-3 py-1 bg-muted border-t border-b border-border first:border-t-0'>
+                      <div className='flex-1 h-px bg-muted-foreground/50'></div>
+                      <span className='text-xs text-muted-foreground font-medium'>
+                        Edit {index + 1}
+                      </span>
+                      <div className='flex-1 h-px bg-muted-foreground/50'></div>
                     </div>
                   )}
                   {/* Diff View */}
@@ -156,14 +158,16 @@ export const ToolMultiEditRenderer: React.FC<
 
           {/* Fallback for old format - show input edits */}
           {isExpanded && editsApplied.length === 0 && inputEdits.length > 0 && (
-            <div className='border-t border-gray-200 overflow-auto max-h-96'>
+            <div className='border-t border-border overflow-auto max-h-96'>
               {inputEdits.map((edit, index) => (
                 <div key={index}>
                   {inputEdits.length > 1 && (
-                    <div className='flex items-center gap-2 px-3 py-1 bg-gray-100 border-t border-b border-gray-200 first:border-t-0'>
-                      <div className='flex-1 h-px bg-gray-300'></div>
-                      <span className='text-xs text-gray-500 font-medium'>Edit {index + 1}</span>
-                      <div className='flex-1 h-px bg-gray-300'></div>
+                    <div className='flex items-center gap-2 px-3 py-1 bg-muted border-t border-b border-border first:border-t-0'>
+                      <div className='flex-1 h-px bg-muted-foreground/50'></div>
+                      <span className='text-xs text-muted-foreground font-medium'>
+                        Edit {index + 1}
+                      </span>
+                      <div className='flex-1 h-px bg-muted-foreground/50'></div>
                     </div>
                   )}
                   <ReactDiffViewer
@@ -186,7 +190,7 @@ export const ToolMultiEditRenderer: React.FC<
             editsApplied.length === 0 &&
             inputEdits.length === 0 &&
             successfulEdits > 0 && (
-              <div className='px-3 py-2 text-sm text-gray-500 border-t border-gray-200'>
+              <div className='px-3 py-2 text-sm text-muted-foreground border-t border-border'>
                 {successfulEdits} edit{successfulEdits !== 1 ? 's' : ''} applied successfully
               </div>
             )}

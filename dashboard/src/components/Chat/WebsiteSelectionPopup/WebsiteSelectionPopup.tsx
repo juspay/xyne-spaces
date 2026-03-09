@@ -79,14 +79,14 @@ export const WebsiteSelectionPopup: React.FC<WebsiteSelectionPopupProps> = ({
   return (
     <div
       ref={popupRef}
-      className='fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-2'
+      className='fixed z-50 bg-popover border border-border rounded-lg shadow-lg p-2'
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
         minWidth: '200px',
       }}
     >
-      <div className='text-xs text-gray-500 mb-2 px-2 py-1 border-b'>
+      <div className='text-xs text-muted-foreground mb-2 px-2 py-1 border-b'>
         Open &ldquo;{selectedText.substring(0, 30)}
         {selectedText.length > 30 ? '...' : ''}&rdquo; with:
       </div>
@@ -96,7 +96,7 @@ export const WebsiteSelectionPopup: React.FC<WebsiteSelectionPopupProps> = ({
           <button
             key={website.id}
             onClick={() => handleWebsiteClick(website.id)}
-            className='w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-gray-100 rounded transition-colors'
+            className='w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-muted rounded transition-colors'
             data-track-category='CHAT_MESSAGE'
             data-track-name='OPEN_WITH_WEBSITE'
             data-track-metadata={JSON.stringify({
@@ -115,15 +115,15 @@ export const WebsiteSelectionPopup: React.FC<WebsiteSelectionPopupProps> = ({
                 <span className='text-sm'>{website.icon || '🌐'}</span>
               )}
             </div>
-            <span className='text-sm font-medium text-gray-700'>{website.name}</span>
+            <span className='text-sm font-medium text-foreground'>{website.name}</span>
           </button>
         ))}
       </div>
 
-      <div className='mt-2 pt-2 border-t border-gray-100'>
+      <div className='mt-2 pt-2 border-t border-border'>
         <button
           onClick={onClose}
-          className='w-full text-xs text-gray-400 hover:text-gray-600 text-center py-1'
+          className='w-full text-xs text-muted-foreground hover:text-foreground text-center py-1'
           data-track-category='CHAT_MESSAGE'
           data-track-name='CANCEL_WEBSITE_SELECTION'
         >

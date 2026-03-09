@@ -341,11 +341,11 @@ export const ImpactForm = ({
   if (!isImpactEnabled) {
     return (
       <div className='max-w-4xl mx-auto'>
-        <div className='bg-white shadow-sm border border-gray-200 rounded-xl overflow-hidden p-8'>
+        <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden p-8'>
           <div className='flex items-center gap-4 mb-4'>
-            <div className='h-12 w-12 rounded-xl bg-gray-100 flex items-center justify-center'>
+            <div className='h-12 w-12 rounded-xl bg-muted flex items-center justify-center'>
               <svg
-                className='h-6 w-6 text-gray-500'
+                className='h-6 w-6 text-muted-foreground'
                 fill='none'
                 viewBox='0 0 24 24'
                 stroke='currentColor'
@@ -359,8 +359,10 @@ export const ImpactForm = ({
               </svg>
             </div>
             <div>
-              <p className='text-lg font-semibold text-gray-900'>Impact Locked</p>
-              <p className='text-sm text-gray-500'>Submit RCA details to unlock Impact phase.</p>
+              <p className='text-lg font-semibold text-foreground'>Impact Locked</p>
+              <p className='text-sm text-muted-foreground'>
+                Submit RCA details to unlock Impact phase.
+              </p>
             </div>
           </div>
           <Button variant='outline' size='sm' onClick={() => onPhaseChange('rca' as Phase)}>
@@ -373,9 +375,9 @@ export const ImpactForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-white shadow-sm border border-gray-200 rounded-xl overflow-hidden'>
+      <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden'>
         {/* Header Section */}
-        <div className='px-8 py-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white'>
+        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-gray-50 to-white'>
           <div className='flex items-center justify-between'>
             <div className='flex items-center gap-3'>
               <div className='h-10 w-10 rounded-lg bg-orange-600 flex items-center justify-center'>
@@ -394,8 +396,10 @@ export const ImpactForm = ({
                 </svg>
               </div>
               <div>
-                <h2 className='text-xl font-bold text-gray-900'>Impact Details</h2>
-                <p className='text-sm text-gray-500'>Capture business and customer impact</p>
+                <h2 className='text-xl font-bold text-foreground'>Impact Details</h2>
+                <p className='text-sm text-muted-foreground'>
+                  Capture business and customer impact
+                </p>
               </div>
             </div>
           </div>
@@ -407,9 +411,9 @@ export const ImpactForm = ({
             ? selectedRecord.impacts?.map((impactEntry, index) => (
                 <div
                   key={impactEntry.id}
-                  className='space-y-6 pb-8 border-b border-gray-200 last:border-b-0 last:pb-0'
+                  className='space-y-6 pb-8 border-b border-border last:border-b-0 last:pb-0'
                 >
-                  <h4 className='text-sm font-semibold text-gray-900'>Impact {index + 1}</h4>
+                  <h4 className='text-sm font-semibold text-foreground'>Impact {index + 1}</h4>
                   <ReadOnlyField
                     label='Impact Type'
                     value={
@@ -421,10 +425,10 @@ export const ImpactForm = ({
                 </div>
               ))
             : (selectedRecord.impacts?.length ?? 0) > 0 && (
-                <div className='space-y-4 pb-8 border-b border-gray-200'>
+                <div className='space-y-4 pb-8 border-b border-border'>
                   <div className='flex items-center justify-between gap-3'>
-                    <h4 className='text-sm font-semibold text-gray-900'>Existing Impacts</h4>
-                    <p className='text-xs text-gray-500'>
+                    <h4 className='text-sm font-semibold text-foreground'>Existing Impacts</h4>
+                    <p className='text-xs text-muted-foreground'>
                       {selectedRecord.impacts?.length ?? 0} total
                     </p>
                   </div>
@@ -442,15 +446,15 @@ export const ImpactForm = ({
                           key={impactEntry.id}
                           className={cn(
                             'rounded-lg border p-4',
-                            isActive ? 'border-gray-300 bg-gray-50' : 'border-gray-200 bg-white',
+                            isActive ? 'border-input bg-muted' : 'border-border bg-background',
                           )}
                         >
                           <div className='flex items-center justify-between gap-3'>
                             <div className='min-w-0'>
-                              <p className='text-xs font-semibold text-gray-500 uppercase tracking-wide'>
+                              <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wide'>
                                 Impact {index + 1}
                               </p>
-                              <p className='text-sm font-semibold text-gray-900 truncate'>
+                              <p className='text-sm font-semibold text-foreground truncate'>
                                 {impactTypeLabel}
                               </p>
                             </div>
@@ -536,7 +540,7 @@ export const ImpactForm = ({
                                     <div className='space-y-1.5'>
                                       <label
                                         htmlFor='impact-summary'
-                                        className='text-sm font-medium text-gray-700'
+                                        className='text-sm font-medium text-foreground'
                                       >
                                         Impact Summary *
                                       </label>
@@ -580,16 +584,16 @@ export const ImpactForm = ({
                                   )}
                                 </impactForm.Field>
 
-                                <div className='pt-4 border-t border-gray-200'>
+                                <div className='pt-4 border-t border-border'>
                                   <div className='flex items-center justify-between gap-3'>
                                     <div>
-                                      <h4 className='text-sm font-semibold text-gray-900'>
+                                      <h4 className='text-sm font-semibold text-foreground'>
                                         Attachments
                                       </h4>
-                                      <p className='text-xs text-gray-500'>
+                                      <p className='text-xs text-muted-foreground'>
                                         Upload supporting graphs or files for this impact.
                                       </p>
-                                      <p className='text-xs text-gray-400'>
+                                      <p className='text-xs text-muted-foreground'>
                                         Files upload when you click Save Draft or submit COE.
                                       </p>
                                     </div>
@@ -646,7 +650,7 @@ export const ImpactForm = ({
                                 </div>
                               </div>
                             ) : (
-                              <div className='text-sm text-gray-600 whitespace-pre-wrap break-words'>
+                              <div className='text-sm text-muted-foreground whitespace-pre-wrap break-words'>
                                 {impactEntry.impact?.trim() || '-'}
                               </div>
                             )}
@@ -661,10 +665,10 @@ export const ImpactForm = ({
           {pendingImpacts.map(pendingImpact => (
             <div
               key={pendingImpact.tempId}
-              className='space-y-6 pb-8 border-b border-gray-200 last:border-b-0 last:pb-0'
+              className='space-y-6 pb-8 border-b border-border last:border-b-0 last:pb-0'
             >
               <div className='flex items-center justify-between'>
-                <h4 className='text-sm font-semibold text-gray-900'>Impact</h4>
+                <h4 className='text-sm font-semibold text-foreground'>Impact</h4>
                 <Button
                   type='button'
                   size='sm'
@@ -695,7 +699,7 @@ export const ImpactForm = ({
               <div className='space-y-1.5'>
                 <label
                   htmlFor={`impact-summary-${pendingImpact.tempId}`}
-                  className='text-sm font-medium text-gray-700'
+                  className='text-sm font-medium text-foreground'
                 >
                   Impact Summary *
                 </label>
@@ -723,11 +727,11 @@ export const ImpactForm = ({
               <div className='pt-2'>
                 <div className='flex items-center justify-between gap-3'>
                   <div>
-                    <h4 className='text-sm font-semibold text-gray-900'>Attachments</h4>
-                    <p className='text-xs text-gray-500'>
+                    <h4 className='text-sm font-semibold text-foreground'>Attachments</h4>
+                    <p className='text-xs text-muted-foreground'>
                       Upload supporting graphs or files for this impact.
                     </p>
-                    <p className='text-xs text-gray-400'>
+                    <p className='text-xs text-muted-foreground'>
                       Files upload when you click Save Draft or submit COE.
                     </p>
                   </div>
@@ -787,8 +791,8 @@ export const ImpactForm = ({
           )}
 
           {!isLocked && (
-            <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-gray-200 pt-4'>
-              <div className='text-xs text-gray-500'>
+            <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-border pt-4'>
+              <div className='text-xs text-muted-foreground'>
                 {pendingImpacts.length > 0
                   ? `${pendingImpacts.length} pending impact(s) to submit`
                   : selectedImpact
@@ -796,7 +800,7 @@ export const ImpactForm = ({
                     : ''}
               </div>
               {/* Footer */}
-              <div className='flex flex-wrap gap-2 justify-end border-t border-gray-200 pt-6'>
+              <div className='flex flex-wrap gap-2 justify-end border-t border-border pt-6'>
                 {pendingImpacts.length > 0 ? (
                   <>
                     <Button

@@ -133,10 +133,10 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
       disabled={disabled}
       className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg ${
         disabled
-          ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50'
+          ? 'text-muted-foreground cursor-not-allowed opacity-50'
           : variant === 'destructive'
             ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10'
-            : 'text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700'
+            : 'text-foreground hover:bg-accent'
       }`}
       data-track-category='MESSAGE'
       data-track-name='MESSAGE_ACTION'
@@ -158,7 +158,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
         {/* Add Reaction - Opens emoji picker in popover */}
         <Popover
           trigger={
-            <button className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700'>
+            <button className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-foreground hover:bg-accent'>
               <span className='flex-shrink-0 w-5 h-5 flex items-center justify-center'>
                 <SmilePlus className='w-5 h-5' />
               </span>
@@ -173,7 +173,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
           sideOffset={8}
           collisionPadding={16}
           avoidCollisions={true}
-          className='z-50 bg-white rounded-lg shadow-md p-0'
+          className='z-50 bg-popover rounded-lg shadow-md p-0'
         >
           <EmojiPicker
             style={{ width: '320px' }}
@@ -292,14 +292,14 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
           <ConversationSubscription
             conversationId={conversationId}
             variant='full'
-            className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700'
+            className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-foreground hover:bg-accent'
           />
         )}
 
         {/* Divider before edit actions */}
         {showEditAction && (onEditMessage || onEditInCanvas || onDeleteMessage) && (
           <div className='py-2'>
-            <div className='border-t border-gray-200 dark:border-gray-700' />
+            <div className='border-t border-border' />
           </div>
         )}
 

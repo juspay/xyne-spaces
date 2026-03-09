@@ -228,18 +228,18 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
     });
 
   return (
-    <div className='h-full bg-white text-gray-900 p-4 flex flex-col'>
+    <div className='h-full bg-card text-foreground p-4 flex flex-col'>
       {/* Search and Filter Section */}
       <div className='flex gap-3 mb-6'>
         {/* Search Input */}
         <div className='flex-1 relative'>
-          <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
+          <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
           <input
             type='text'
             placeholder='Find members'
             value={searchQuery}
             onChange={handleSearchChange}
-            className='w-full bg-white border border-gray-300 text-gray-900 rounded-lg pl-10 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+            className='w-full bg-background border border-border text-foreground rounded-lg pl-10 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring'
             data-track-event='blur'
             data-track-category='CHANNEL_INFORMATION'
             data-track-name='SEARCH_MEMBERS_INPUT'
@@ -251,7 +251,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
           <select
             value={selectedFilter}
             onChange={e => handleFilterChange(e.target.value as FilterType)}
-            className='w-full bg-white border border-gray-300 text-gray-900 rounded-lg px-3 py-2 pr-8 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500'
+            className='w-full bg-background border border-border text-foreground rounded-lg px-3 py-2 pr-8 appearance-none focus:outline-none focus:ring-2 focus:ring-ring'
             data-track-event='change'
             data-track-category='CHANNEL_INFORMATION'
             data-track-name='FILTER_MEMBERS_BY_ROLE'
@@ -260,7 +260,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
             <option value={ChannelRole.ADMIN}>Admin</option>
             <option value={ChannelRole.MEMBER}>Member</option>
           </select>
-          <ChevronDown className='absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none' />
+          <ChevronDown className='absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
         </div>
       </div>
 
@@ -276,7 +276,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
               <div className='mb-4'>
                 <button
                   onClick={handleAddPeople}
-                  className='flex items-center gap-3 w-full p-3 rounded-lg hover:bg-gray-100 transition-colors group'
+                  className='flex items-center gap-3 w-full p-3 rounded-lg hover:bg-accent transition-colors group'
                   data-track-category='CHANNEL_INFORMATION'
                   data-track-name='OPEN_ADD_PEOPLE_MODAL'
                   data-track-metadata={JSON.stringify({ channelId: channel?.id })}
@@ -293,7 +293,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
           {filteredParticipants.map(participant => (
             <div
               key={participant.id}
-              className='flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer'
+              className='flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors cursor-pointer'
             >
               <UserAvatar userId={participant.userId} size={AvatarSize.MD} />
 
@@ -301,13 +301,13 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
               <div className='flex-1 min-w-0 flex justify-between items-center'>
                 <div>
                   <div className='flex items-center gap-2'>
-                    <span className='font-medium text-gray-900 truncate'>
+                    <span className='font-medium text-foreground truncate'>
                       {usersById.get(participant.userId)?.name}
                     </span>
                   </div>
 
                   {/* User Role */}
-                  <div className='text-sm text-gray-500 truncate'>
+                  <div className='text-sm text-muted-foreground truncate'>
                     {usersById.get(participant.userId)?.email}
                   </div>
                 </div>
@@ -330,7 +330,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
 
           {/* No Results */}
           {filteredParticipants.length === 0 && (
-            <div className='text-center py-8 text-gray-500'>
+            <div className='text-center py-8 text-muted-foreground'>
               <Search className='w-8 h-8 mx-auto mb-2 opacity-50' />
               <p>No members found</p>
               <p className='text-sm mt-1'>
@@ -363,7 +363,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
 
             {/* Include History Checkbox - Only for GROUP_DM channels */}
             {channel.scopeType === ChannelScopeType.GROUP_DM && (
-              <div className='mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200'>
+              <div className='mt-4 p-3 bg-muted rounded-lg border border-border'>
                 <Checkbox
                   defaultChecked={includeHistory}
                   checked={includeHistory}
@@ -378,7 +378,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
             )}
 
             {/* Custom Footer Buttons */}
-            <div className='flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200'>
+            <div className='flex justify-end gap-3 mt-6 pt-4 border-t border-border'>
               <Button
                 text='Cancel'
                 buttonType={ButtonType.SECONDARY}

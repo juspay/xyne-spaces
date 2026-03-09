@@ -36,7 +36,7 @@ const ThreadRow = memo(
 
     const getIcon = (): ReactElement => {
       if (isDM && avatarUserId) {
-        return <div className='w-2.5 h-2.5 rounded-full border-2 border-gray-400' />;
+        return <div className='w-2.5 h-2.5 rounded-full border-2 border-border' />;
       }
       return isPrivate ? <ChatLock color={'#1D1E1F'} /> : <Hash size={16} />;
     };
@@ -50,7 +50,7 @@ const ThreadRow = memo(
               onClick={() =>
                 void navigate(`/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`)
               }
-              className='text-base font-semibold text-gray-900 hover:underline'
+              className='text-base font-semibold text-foreground hover:underline'
               data-track-category='USER_THREADS'
               data-track-name='OPEN_USER_THREAD'
               data-track-metadata={JSON.stringify({ channelId, conversationId })}
@@ -59,8 +59,8 @@ const ThreadRow = memo(
             </button>
           </div>
         </div>
-        <div className='border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm'>
-          <div className='bg-white'>
+        <div className='border border-border rounded-xl overflow-hidden bg-card shadow-sm'>
+          <div className='bg-card'>
             <ThreadMessages
               channelId={channelId}
               conversationId={conversationId}
@@ -145,7 +145,7 @@ const UserThreads = (): ReactElement => {
       List: ListContainer,
       Footer: () => (
         <div className='flex justify-center py-4 h-10'>
-          {hasMore && <Loader2 className='animate-spin text-gray-400' />}
+          {hasMore && <Loader2 className='animate-spin text-muted-foreground' />}
         </div>
       ),
     }),
@@ -153,12 +153,12 @@ const UserThreads = (): ReactElement => {
   );
 
   return (
-    <div className='flex-1 pt-8 h-full flex flex-col bg-slate-50'>
+    <div className='flex-1 pt-8 h-full flex flex-col bg-background'>
       <div className='flex-1'>
         {allConversations.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
-            <MessageCircle className='text-gray-300 mb-4' size={64} />
-            <p className='text-gray-500 text-xl font-semibold mb-2'>No threads yet</p>
+            <MessageCircle className='text-muted-foreground mb-4' size={64} />
+            <p className='text-muted-foreground text-xl font-semibold mb-2'>No threads yet</p>
           </div>
         ) : (
           <Virtuoso

@@ -142,11 +142,11 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
   };
 
   return (
-    <div className='bg-gray-50'>
+    <div className='bg-muted'>
       {/* Top Navigation */}
 
       {/* Main Workflow Header */}
-      <div className='bg-white border-b relative'>
+      <div className='bg-background border-b relative'>
         <div className='px-6 py-6'>
           {/* Breadcrumb */}
           <div className='mb-4'>
@@ -181,11 +181,11 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
     top-4 
     right-6 
     px-3 py-1.5 
-    border border-gray-300 
+    border border-input 
     rounded-md 
     text-sm 
-    bg-white 
-    hover:bg-gray-50 
+    bg-background 
+    hover:bg-muted 
     shadow-sm
     z-20
   '
@@ -201,7 +201,7 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
             <>
               <div className='flex justify-between items-center mb-2'>
                 <div className='flex items-center gap-4'>
-                  <h1 className='text-3xl font-bold text-gray-900'>{workflowTitle}</h1>
+                  <h1 className='text-3xl font-bold text-foreground'>{workflowTitle}</h1>
                 </div>
 
                 {/* Buttons */}
@@ -209,7 +209,7 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                 <div className='flex gap-3'>
                   <button
                     onClick={handleOpenAssignModal}
-                    className='bg-white border border-gray-300 px-3 py-2 rounded-md text-sm hover:bg-gray-50'
+                    className='bg-background border border-input px-3 py-2 rounded-md text-sm hover:bg-muted'
                     data-track-category='Workflows'
                     data-track-name='OpenAssignUserModal'
                     data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
@@ -220,7 +220,7 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                   <button
                     onClick={handleCancelWorkflow}
                     disabled={isCanceling || !executionId}
-                    className='bg-white border border-gray-300 px-3 py-2 rounded-md text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                    className='bg-background border border-input px-3 py-2 rounded-md text-sm hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
                     data-track-category='Workflows'
                     data-track-name='CancelWorkflow'
                     data-track-metadata={JSON.stringify({ executionId })}
@@ -231,7 +231,7 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                   <button
                     onClick={handlePauseWorkflow}
                     disabled={isPausing || !executionId}
-                    className='bg-white border border-gray-300 px-3 py-2 rounded-md text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                    className='bg-background border border-input px-3 py-2 rounded-md text-sm hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
                     data-track-category='Workflows'
                     data-track-name='PauseWorkflow'
                     data-track-metadata={JSON.stringify({ executionId })}
@@ -242,7 +242,7 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                   <button
                     onClick={handleResumeWorkflow}
                     disabled={isResuming || !executionId}
-                    className='bg-white border border-gray-300 px-3 py-2 rounded-md text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+                    className='bg-background border border-input px-3 py-2 rounded-md text-sm hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
                     data-track-category='Workflows'
                     data-track-name='ResumeWorkflow'
                     data-track-metadata={JSON.stringify({ executionId })}
@@ -266,7 +266,7 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
               <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8'>
                 {/* Description */}
                 <div
-                  className='bg-gray-50 rounded-xl p-4 border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors'
+                  className='bg-muted rounded-xl p-4 border border-border cursor-pointer hover:bg-muted transition-colors'
                   onClick={handleDescriptionClick}
                   onKeyDown={e => e.key === 'Enter' && handleDescriptionClick()}
                   role='button'
@@ -276,35 +276,43 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                   data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 >
                   <div className='flex items-center gap-2 mb-2'>
-                    {getWorkflowIcon('description', { size: 16, className: 'text-gray-600' })}
-                    <span className='text-sm font-medium text-gray-600'>Description</span>
+                    {getWorkflowIcon('description', {
+                      size: 16,
+                      className: 'text-muted-foreground',
+                    })}
+                    <span className='text-sm font-medium text-muted-foreground'>Description</span>
                   </div>
-                  <p className='text-sm text-gray-900'>{truncateDescription(workflowTitle, 50)}</p>
+                  <p className='text-sm text-foreground'>
+                    {truncateDescription(workflowTitle, 50)}
+                  </p>
                 </div>
 
                 {/* Current Node */}
-                <div className='bg-gray-50 rounded-xl p-4 border border-gray-200'>
+                <div className='bg-muted rounded-xl p-4 border border-border'>
                   <div className='flex items-center gap-2 mb-2'>
-                    {getWorkflowIcon('current-node', { size: 16, className: 'text-gray-600' })}
-                    <span className='text-sm font-medium text-gray-600'>Ticket Status</span>
+                    {getWorkflowIcon('current-node', {
+                      size: 16,
+                      className: 'text-muted-foreground',
+                    })}
+                    <span className='text-sm font-medium text-muted-foreground'>Ticket Status</span>
                   </div>
-                  <p className='text-sm text-gray-900'>{ticket?.statusV2}</p>
+                  <p className='text-sm text-foreground'>{ticket?.statusV2}</p>
                 </div>
 
                 {/* Elapsed Time */}
-                <div className='bg-gray-50 rounded-xl p-4 border border-gray-200'>
+                <div className='bg-muted rounded-xl p-4 border border-border'>
                   <div className='flex items-center gap-2 mb-2'>
-                    {getWorkflowIcon('clock', { size: 16, className: 'text-gray-600' })}
-                    <span className='text-sm font-medium text-gray-600'>Elapsed Time</span>
+                    {getWorkflowIcon('clock', { size: 16, className: 'text-muted-foreground' })}
+                    <span className='text-sm font-medium text-muted-foreground'>Elapsed Time</span>
                   </div>
-                  <p className='text-sm text-gray-900'>{elapsedTime}</p>
+                  <p className='text-sm text-foreground'>{elapsedTime}</p>
                 </div>
 
                 {/* Created By */}
-                <div className='bg-gray-50 rounded-xl p-4 border border-gray-200'>
+                <div className='bg-muted rounded-xl p-4 border border-border'>
                   <div className='flex items-center gap-2 mb-2'>
-                    {getWorkflowIcon('user', { size: 16, className: 'text-gray-600' })}
-                    <span className='text-sm font-medium text-gray-600'>Created By</span>
+                    {getWorkflowIcon('user', { size: 16, className: 'text-muted-foreground' })}
+                    <span className='text-sm font-medium text-muted-foreground'>Created By</span>
                   </div>
                   <div className='flex items-center gap-2'>
                     <div className='w-6 h-6 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center'>
@@ -317,7 +325,7 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
                         </UserHoverWrapper>
                       )}
                     </div>
-                    <span className='text-sm text-gray-900'>
+                    <span className='text-sm text-foreground'>
                       {createdByUser?.name || createdByUser?.email || 'Unknown'}
                     </span>
                   </div>
@@ -339,7 +347,7 @@ const WorkflowDetailsHeader: React.FC<WorkflowDetailsHeaderProps> = ({
         }}
       >
         <div className='p-4'>
-          <p className='text-gray-900 text-sm leading-relaxed'>{workflowTitle}</p>
+          <p className='text-foreground text-sm leading-relaxed'>{workflowTitle}</p>
         </div>
       </Modal>
 

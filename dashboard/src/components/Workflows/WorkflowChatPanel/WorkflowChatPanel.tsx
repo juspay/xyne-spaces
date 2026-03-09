@@ -79,18 +79,18 @@ type MainTabId = 'flow' | 'thread' | 'history' | 'errors';
 // }> = ({ title, icon, defaultExpanded = false, children, badge }) => {
 //   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 //   return (
-//     <div className='border border-gray-100 rounded-lg overflow-hidden bg-white mb-2 shadow-sm'>
+//     <div className='border border-border rounded-lg overflow-hidden bg-background mb-2 shadow-sm'>
 //       <button
 //         onClick={() => setIsExpanded(!isExpanded)}
-//         className='w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-gray-50/50 transition-colors'
+//         className='w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors'
 //       >
-//         <span className='text-gray-400'>
+//         <span className='text-muted-foreground'>
 //           {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
 //         </span>
-//         {icon && <span className='text-gray-400'>{icon}</span>}
-//         <span className='text-sm font-medium text-gray-700 flex-1'>{title}</span>
+//         {icon && <span className='text-muted-foreground'>{icon}</span>}
+//         <span className='text-sm font-medium text-foreground flex-1'>{title}</span>
 //         {badge && (
-//           <span className='px-1.5 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-500'>
+//           <span className='px-1.5 py-0.5 text-xs font-medium rounded bg-muted text-muted-foreground'>
 //             {badge}
 //           </span>
 //         )}
@@ -141,7 +141,7 @@ const StepItem: React.FC<{
         ? { bg: 'bg-red-50 text-red-700', text: 'failed' }
         : step.status === 'running'
           ? { bg: 'bg-blue-50 text-blue-700', text: 'running' }
-          : { bg: 'bg-gray-50 text-gray-600', text: step.status || 'pending' };
+          : { bg: 'bg-muted text-muted-foreground', text: step.status || 'pending' };
 
   return (
     <div className='py-2'>
@@ -150,19 +150,19 @@ const StepItem: React.FC<{
   );
 
   return (
-    <div className='border border-gray-100 rounded-lg overflow-hidden bg-white mb-1.5 hover:border-gray-200 transition-colors min-w-0 max-w-full'>
+    <div className='border border-border rounded-lg overflow-hidden bg-background mb-1.5 hover:border-border transition-colors min-w-0 max-w-full'>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className='w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-gray-50/50 transition-colors min-w-0'
+        className='w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors min-w-0'
         data-track-category='Workflows'
         data-track-name='ToggleStepExpand'
         data-track-metadata={JSON.stringify({ stepId: step.id })}
       >
-        <span className='text-gray-400'>
+        <span className='text-muted-foreground'>
           {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </span>
         <span
-          className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${stepType === 'llm' ? 'bg-violet-100' : stepType === 'tool' ? 'bg-blue-100' : 'bg-gray-100'}`}
+          className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${stepType === 'llm' ? 'bg-violet-100' : stepType === 'tool' ? 'bg-blue-100' : 'bg-muted'}`}
         >
           {stepType === 'llm' ? (
             <Sparkles size={10} className='text-violet-600' />
@@ -175,10 +175,10 @@ const StepItem: React.FC<{
           ) : step.status === 'running' ? (
             <Loader2 size={12} className='text-blue-500 animate-spin' />
           ) : (
-            <Circle size={12} className='text-gray-300' />
+            <Circle size={12} className='text-muted' />
           )}
         </span>
-        <span className='text-sm font-medium text-gray-700 flex-1 truncate capitalize'>
+        <span className='text-sm font-medium text-foreground flex-1 truncate capitalize'>
           {getStepLabel()}
         </span>
         <span className={`px-1.5 py-0.5 text-xs rounded ${statusBadge.bg}`}>
@@ -718,13 +718,13 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
   // );
 
   return (
-    <div className='h-full flex flex-col bg-white overflow-hidden min-w-0'>
+    <div className='h-full flex flex-col bg-background overflow-hidden min-w-0'>
       {/* Thread Tab Content */}
       {mainTab === 'thread' ? (
         conversationId && channelId ? (
           showThreadSummary ? (
             /* Thread Summary View */
-            <div className='flex-1 overflow-hidden bg-gray-50'>
+            <div className='flex-1 overflow-hidden bg-muted'>
               <ThreadSummary
                 conversationId={conversationId}
                 channelName={ticketTitle || 'Thread'}
@@ -744,20 +744,20 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
             />
           )
         ) : (
-          <div className='flex-1 flex items-center justify-center text-gray-500 text-sm'>
+          <div className='flex-1 flex items-center justify-center text-muted-foreground text-sm'>
             No thread available
           </div>
         )
       ) : mainTab === 'history' ? (
-        <div className='flex flex-col h-full bg-white'>
-          <div className='flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50/50'>
-            <h3 className='font-medium text-gray-900 flex items-center gap-2'>
+        <div className='flex flex-col h-full bg-background'>
+          <div className='flex items-center justify-between px-4 py-3 border-b border-border bg-muted/50'>
+            <h3 className='font-medium text-foreground flex items-center gap-2'>
               <History size={16} />
               Execution History
             </h3>
             <button
               onClick={() => setMainTab('flow')}
-              className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500 transition-colors'
+              className='p-1.5 rounded-md hover:bg-border text-muted-foreground transition-colors'
               data-track-category='Workflows'
               data-track-name='CloseHistoryTab'
               data-track-metadata={JSON.stringify({ executionId })}
@@ -765,13 +765,15 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
               <X size={16} />
             </button>
           </div>
-          <div className='flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/30'>
+          <div className='flex-1 overflow-y-auto p-3 space-y-2.5 bg-muted/30'>
             {((): React.ReactNode => {
               const metadata = combinedStepsData?.workflows?.[0]?.executionMetadata || [];
 
               if (metadata.length === 0) {
                 return (
-                  <div className='text-center p-4 text-gray-500 text-sm'>No history available</div>
+                  <div className='text-center p-4 text-muted-foreground text-sm'>
+                    No history available
+                  </div>
                 );
               }
 
@@ -807,7 +809,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     className={`p-3 rounded-lg border transition-all cursor-pointer hover:shadow-sm ${
                       isSelected
                         ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100'
-                        : 'bg-white border-gray-200 hover:border-blue-200 hover:bg-gray-50'
+                        : 'bg-background border-border hover:border-blue-200 hover:bg-muted'
                     }`}
                     data-track-category='Workflows'
                     data-track-name='SelectExecutionHistory'
@@ -818,14 +820,14 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   >
                     <div className='flex items-start justify-between mb-1'>
                       <span
-                        className={`font-medium text-sm ${isSelected ? 'text-blue-700' : 'text-gray-900'}`}
+                        className={`font-medium text-sm ${isSelected ? 'text-blue-700' : 'text-foreground'}`}
                       >
                         Attempt {attemptNumber} {exec.tag === 'root' ? '(Original)' : ''}
                       </span>
                       {isSelected && <Check size={14} className='text-blue-600' />}
                     </div>
 
-                    <div className='text-xs text-gray-500 flex flex-col gap-1'>
+                    <div className='text-xs text-muted-foreground flex flex-col gap-1'>
                       <div className='flex items-center gap-1.5'>
                         <Clock size={12} />
                         {format(new Date(exec.createdAt), 'PPpp')}
@@ -840,7 +842,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                                 ? 'bg-red-100 text-red-700'
                                 : (exec.executionStatus || '').toUpperCase() === 'RUNNING'
                                   ? 'bg-blue-100 text-blue-700'
-                                  : 'bg-gray-100 text-gray-600'
+                                  : 'bg-muted text-muted-foreground'
                           }`}
                         >
                           {exec.executionStatus}
@@ -848,7 +850,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       </div>
 
                       {exec.sourceStepName && parentAttemptNumber && (
-                        <div className='text-xs text-gray-600 flex items-start gap-1 mt-1 bg-gray-50 p-1.5 rounded'>
+                        <div className='text-xs text-muted-foreground flex items-start gap-1 mt-1 bg-muted p-1.5 rounded'>
                           <Route size={12} className='mt-0.5' />
                           <span>
                             Forked from Attempt {parentAttemptNumber} at step &apos;
@@ -868,7 +870,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
       ) : (
         /* Flow Tab Content - Original workflow view */
         <>
-          <div ref={headerRef} className='flex-shrink-0 border-b border-gray-100 px-3 py-2.5'>
+          <div ref={headerRef} className='flex-shrink-0 border-b border-border px-3 py-2.5'>
             <div className='flex items-center gap-2.5'>
               {/* Step Navigation Header */}
               {graphNodes.length > 0 ? (
@@ -877,7 +879,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   <button
                     onClick={handlePrevNode}
                     disabled={currentNodeIndex === 0}
-                    className='p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+                    className='p-1 rounded hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
                     title='Previous step'
                     data-track-category='Workflows'
                     data-track-name='NavigateToPreviousStep'
@@ -886,11 +888,11 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       totalSteps: graphNodes.length,
                     })}
                   >
-                    <ChevronLeft size={16} className='text-gray-600' />
+                    <ChevronLeft size={16} className='text-muted-foreground' />
                   </button>
 
                   <div
-                    className='flex-1 flex items-center gap-2.5 min-w-0 cursor-pointer hover:bg-gray-200/50 rounded px-1.5 py-1 -my-1 transition-colors'
+                    className='flex-1 flex items-center gap-2.5 min-w-0 cursor-pointer hover:bg-border/50 rounded px-1.5 py-1 -my-1 transition-colors'
                     onClick={() => setIsGraphViewOpen(!isGraphViewOpen)}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -913,7 +915,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                             ? 'bg-emerald-100'
                             : currentNode?.status === 'failed'
                               ? 'bg-red-100'
-                              : 'bg-gray-100'
+                              : 'bg-muted'
                       }`}
                     >
                       {currentNode?.status === 'running' ? (
@@ -923,17 +925,17 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       ) : currentNode?.status === 'failed' ? (
                         <AlertCircle size={12} className='text-red-600' />
                       ) : (
-                        <Clock size={12} className='text-gray-500' />
+                        <Clock size={12} className='text-muted-foreground' />
                       )}
                     </div>
 
                     {/* Step Name */}
-                    <span className='font-medium text-gray-800 flex-1 text-left text-sm truncate'>
+                    <span className='font-medium text-foreground flex-1 text-left text-sm truncate'>
                       {currentNode ? formatStepName(currentNode.stepName) : 'Loading...'}
                     </span>
 
                     {/* Position Indicator */}
-                    <span className='text-xs text-gray-400 flex-shrink-0'>
+                    <span className='text-xs text-muted-foreground flex-shrink-0'>
                       ({currentNodeIndex + 1}/{graphNodes.length})
                     </span>
                   </div>
@@ -957,7 +959,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   <button
                     onClick={handleNextNode}
                     disabled={currentNodeIndex >= graphNodes.length - 1}
-                    className='p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+                    className='p-1 rounded hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
                     title='Next step'
                     data-track-category='Workflows'
                     data-track-name='NavigateToNextStep'
@@ -966,16 +968,16 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       totalSteps: graphNodes.length,
                     })}
                   >
-                    <ChevronRight size={16} className='text-gray-600' />
+                    <ChevronRight size={16} className='text-muted-foreground' />
                   </button>
                 </div>
               ) : (
                 /* Fallback header when no graph nodes */
-                <div className='flex items-center gap-2.5 px-2.5 py-2 bg-gray-50 rounded-lg border border-gray-200 flex-1'>
+                <div className='flex items-center gap-2.5 px-2.5 py-2 bg-muted rounded-lg border border-border flex-1'>
                   <div className='w-6 h-6 rounded-md flex items-center justify-center shadow-sm'>
                     <Bot size={12} className='text-black' />
                   </div>
-                  <span className='font-medium text-gray-800 flex-1 text-left text-sm'>
+                  <span className='font-medium text-foreground flex-1 text-left text-sm'>
                     Workflow Steps
                   </span>
                 </div>
@@ -990,7 +992,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 className={`flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors ${
                   isSearchOpen
                     ? 'bg-blue-50 text-blue-600 border-blue-200'
-                    : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                    : 'bg-muted text-foreground border-border hover:bg-muted'
                 }`}
                 style={{ width: '42px', height: '42px' }}
                 title='Search'
@@ -1041,7 +1043,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 <button
                   onClick={() => setIsMenuOpen(!isMenuOpen)}
                   onBlur={() => setTimeout(() => setIsMenuOpen(false), 200)}
-                  className='flex items-center justify-center text-sm font-medium rounded-lg border bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100 transition-colors'
+                  className='flex items-center justify-center text-sm font-medium rounded-lg border bg-muted text-foreground border-border hover:bg-muted transition-colors'
                   style={{ width: '42px', height: '42px' }}
                   title='More Options'
                   data-track-category='Workflows'
@@ -1051,17 +1053,17 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 </button>
 
                 {isMenuOpen && (
-                  <div className='absolute right-0 top-full mt-1.5 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50 overflow-hidden'>
+                  <div className='absolute right-0 top-full mt-1.5 w-48 bg-background rounded-lg shadow-lg border border-border py-1 z-50 overflow-hidden'>
                     <button
                       onClick={() => {
                         setMainTab('history');
                         setIsMenuOpen(false);
                       }}
-                      className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left transition-colors'
+                      className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors'
                       data-track-category='Workflows'
                       data-track-name='OpenHistoryTab'
                     >
-                      <History size={16} className='text-gray-400' />
+                      <History size={16} className='text-muted-foreground' />
                       Attempts
                     </button>
                     {errorSteps.length > 0 && (
@@ -1089,15 +1091,15 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
             {/* Search Bar Input */}
             {isSearchOpen && (
               <div className='mt-2.5 mb-1 px-1'>
-                <div className='relative flex items-center bg-white border border-gray-200 rounded-lg focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 shadow-sm'>
-                  <Search size={14} className='absolute left-3 text-gray-400' />
+                <div className='relative flex items-center bg-background border border-border rounded-lg focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 shadow-sm'>
+                  <Search size={14} className='absolute left-3 text-muted-foreground' />
                   {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
                   <input
                     type='text'
                     placeholder='Search in steps, payloads, logs...'
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    className='w-full pl-9 pr-24 py-2 text-sm bg-transparent !outline-none border-none rounded-lg text-gray-700 focus:outline-none focus:ring-0 focus:border-transparent'
+                    className='w-full pl-9 pr-24 py-2 text-sm bg-transparent !outline-none border-none rounded-lg text-foreground focus:outline-none focus:ring-0 focus:border-transparent'
                     // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus
                     data-track-category='Workflows'
@@ -1105,12 +1107,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   />
                   {searchQuery && (
                     <div className='absolute right-2 flex items-center gap-1.5'>
-                      <span className='text-[10px] text-gray-400 font-medium px-1.5 py-0.5 bg-gray-50 border border-gray-100 rounded flex-shrink-0'>
+                      <span className='text-[10px] text-muted-foreground font-medium px-1.5 py-0.5 bg-muted border border-border rounded flex-shrink-0'>
                         {searchedSteps.length} result{searchedSteps.length !== 1 ? 's' : ''}
                       </span>
                       <button
                         onClick={() => setSearchQuery('')}
-                        className='p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0'
+                        className='p-1 rounded hover:bg-muted text-muted-foreground hover:text-muted-foreground transition-colors flex-shrink-0'
                         data-track-category='Workflows'
                         data-track-name='ClearSearch'
                       >
@@ -1145,13 +1147,13 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
           </div>
           {/* Only show tab bar if there are more than one tab */}
           {tabs.length > 1 && (
-            <div className='flex-shrink-0 border-b border-gray-100'>
+            <div className='flex-shrink-0 border-b border-border'>
               <div className='flex px-1'>
                 {tabs.map(tab => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${activeTab === tab.id ? 'text-blue-600 border-blue-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${activeTab === tab.id ? 'text-blue-600 border-blue-500' : 'text-muted-foreground border-transparent hover:text-foreground'}`}
                     data-track-category='Workflows'
                     data-track-name='SelectAutomationTab'
                     data-track-metadata={JSON.stringify({ tabId: tab.id, tabLabel: tab.label })}
@@ -1163,7 +1165,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
               </div>
             </div>
           )}
-          <div className='flex-1 flex flex-col min-h-0 p-3 bg-gray-50/50 min-w-0'>
+          <div className='flex-1 flex flex-col min-h-0 p-3 bg-muted/50 min-w-0'>
             <>
               {ticketTitle && (
                 <button
@@ -1177,7 +1179,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   })}
                 >
                   <div
-                    className={`text-sm text-gray-800 prose prose-sm max-w-none ${
+                    className={`text-sm text-foreground prose prose-sm max-w-none ${
                       !isDescriptionExpanded ? 'line-clamp-2' : 'ticket-description-scroll'
                     }`}
                     dangerouslySetInnerHTML={{
@@ -1232,18 +1234,18 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
               >
                 {searchedSteps.length === 0 && userMessages.length === 0 ? (
                   <div className='flex flex-col items-center justify-center py-16 text-center'>
-                    <div className='w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3'>
+                    <div className='w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-3'>
                       {searchQuery ? (
-                        <Search size={24} className='text-gray-300' />
+                        <Search size={24} className='text-muted' />
                       ) : currentNode?.status === 'pending' ? (
-                        <Circle size={24} className='text-gray-300' />
+                        <Circle size={24} className='text-muted' />
                       ) : currentNode?.status === 'running' ? (
                         <Loader2 size={24} className='text-blue-500 animate-spin' />
                       ) : (
-                        <Route size={24} className='text-gray-400' />
+                        <Route size={24} className='text-muted-foreground' />
                       )}
                     </div>
-                    <p className='text-gray-600 text-sm font-medium'>
+                    <p className='text-muted-foreground text-sm font-medium'>
                       {searchQuery
                         ? 'No steps match your search'
                         : currentNode?.status === 'pending'
@@ -1253,7 +1255,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                             : 'No steps yet'}
                     </p>
                     {currentNode && !searchQuery && (
-                      <p className='text-gray-400 text-xs mt-1'>
+                      <p className='text-muted-foreground text-xs mt-1'>
                         {formatStepName(currentNode.stepName)}
                       </p>
                     )}
@@ -1270,28 +1272,28 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
               </div>
             </>
           </div>
-          <div className='flex-shrink-0 bg-white border-t border-gray-100 p-3'>
+          <div className='flex-shrink-0 bg-background border-t border-border p-3'>
             {/* Show input box based on step status - only enable when completed/failed */}
             {currentNode?.status === 'pending' ? (
               // Pending state - waiting to start
-              <div className='flex items-center justify-center gap-2 py-3 px-4 bg-gray-50 rounded-lg border border-gray-200'>
-                <Clock size={16} className='text-gray-400' />
-                <span className='text-sm text-gray-600'>
+              <div className='flex items-center justify-center gap-2 py-3 px-4 bg-muted rounded-lg border border-border'>
+                <Clock size={16} className='text-muted-foreground' />
+                <span className='text-sm text-muted-foreground'>
                   Waiting for {formatStepName(currentNode.stepName)} to start...
                 </span>
               </div>
             ) : currentNode?.status === 'running' ? (
               // Running state - show disabled input with running indicator
-              <div className='flex items-center justify-center gap-2 py-3 px-4 bg-gray-50 rounded-lg border border-gray-200'>
+              <div className='flex items-center justify-center gap-2 py-3 px-4 bg-muted rounded-lg border border-border'>
                 <Loader2 size={16} className='text-blue-500 animate-spin' />
-                <span className='text-sm text-gray-600'>
+                <span className='text-sm text-muted-foreground'>
                   {formatStepName(currentNode.stepName)} is running...
                 </span>
               </div>
             ) : /* isAgentInputStep && 
               (currentNode?.status === 'completed' || currentNode?.status === 'failed') ? (
               // Completed/Failed state - allow sending new message
-              <div className='relative rounded-lg border bg-gray-50 border-gray-200 focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100'>
+              <div className='relative rounded-lg border bg-muted border-border focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100'>
                 <textarea
                   value={continuationMessage}
                   onChange={e => setContinuationMessage(e.target.value)}
@@ -1316,14 +1318,14 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     stepName: currentNode?.stepName,
                   })}
                 />
-                <div className='flex items-center justify-end px-2 py-1.5 border-t border-gray-100'>
+                <div className='flex items-center justify-end px-2 py-1.5 border-t border-border'>
                   <button
                     onClick={() => void handleSendMessage()}
                     disabled={isContinuing || !continuationMessage.trim()}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-sm font-medium ${
                       continuationMessage.trim() && !isContinuing
                         ? 'bg-blue-500 text-white hover:bg-blue-600'
-                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-border text-muted-foreground cursor-not-allowed'
                     }`}
                     data-track-category='Workflows'
                     data-track-name='SendContinuationMessage'
@@ -1351,7 +1353,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
           {isGraphViewOpen &&
             createPortal(
               <div
-                className='fixed bg-white z-50 shadow-lg border-t border-gray-200'
+                className='fixed bg-background z-50 shadow-lg border-t border-border'
                 style={{
                   left: graphPosition.left,
                   top: graphPosition.top - 64,

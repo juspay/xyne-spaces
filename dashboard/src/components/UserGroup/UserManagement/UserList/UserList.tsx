@@ -127,9 +127,9 @@ export const UserList = ({
   return (
     <div className='flex flex-col h-full'>
       {/* Search Bar */}
-      <div className='px-4 py-3 border-b border-gray-200'>
+      <div className='px-4 py-3 border-b border-border'>
         <div className='relative'>
-          <Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400 pointer-events-none z-10' />
+          <Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none z-10' />
           <Input
             ref={inputRef}
             type='text'
@@ -146,30 +146,32 @@ export const UserList = ({
       <div className='flex-1 overflow-y-auto'>
         {users.length === 0 && usersToAdd.length === 0 ? (
           <div className='text-center py-8 px-4'>
-            <p className='text-sm text-gray-500'>No members in this channel yet</p>
-            <p className='text-xs text-gray-400 mt-1'>Search to add people</p>
+            <p className='text-sm text-muted-foreground'>No members in this channel yet</p>
+            <p className='text-xs text-muted-foreground mt-1'>Search to add people</p>
           </div>
         ) : (
           <div>
             {/* Existing members */}
             {filteredUsers.length > 0 && (
               <div>
-                <div className='py-2 pl-6 text-xs font-semibold text-gray-500 uppercase bg-gray-50'>
+                <div className='py-2 pl-6 text-xs font-semibold text-muted-foreground uppercase bg-muted'>
                   Members
                 </div>
-                <div className='divide-y divide-gray-100'>
+                <div className='divide-y divide-border'>
                   {filteredUsers.map(user => (
                     <div
                       key={user.id}
-                      className='flex items-center justify-between px-6 py-2.5 hover:bg-gray-50 transition-colors group'
+                      className='flex items-center justify-between px-6 py-2.5 hover:bg-muted transition-colors group'
                     >
                       <div className='flex items-center gap-2.5 flex-1 min-w-0'>
                         <Avatar userId={user.id} size='sm' showActiveStatus={true} />
                         <div className='flex flex-col min-w-0'>
-                          <span className='text-sm font-medium text-gray-900 truncate'>
+                          <span className='text-sm font-medium text-foreground truncate'>
                             {user.name}
                           </span>
-                          <span className='text-xs text-gray-500 truncate'>{user.email}</span>
+                          <span className='text-xs text-muted-foreground truncate'>
+                            {user.email}
+                          </span>
                         </div>
                       </div>
 
@@ -180,7 +182,7 @@ export const UserList = ({
                             variant='ghost'
                             size='sm'
                             onClick={() => void handleRemoveUser(user.id)}
-                            className='shrink-0 h-7 w-7 p-0 text-gray-600 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity'
+                            className='shrink-0 h-7 w-7 p-0 text-muted-foreground hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity'
                             data-track-category='UserGroups'
                             data-track-name='RemoveUserFromGroup'
                             data-track-metadata={JSON.stringify({ userId: user.id })}
@@ -214,23 +216,25 @@ export const UserList = ({
             {usersToAdd.length > 0 && (
               <div>
                 {filteredUsers.length > 0 && (
-                  <div className='py-2 pl-6 text-xs font-semibold text-gray-500 uppercase bg-gray-50 border-t border-gray-200'>
+                  <div className='py-2 pl-6 text-xs font-semibold text-muted-foreground uppercase bg-muted border-t border-border'>
                     Not in this channel
                   </div>
                 )}
-                <div className='divide-y divide-gray-100'>
+                <div className='divide-y divide-border'>
                   {usersToAdd.map(user => (
                     <div
                       key={user.id}
-                      className='flex items-center justify-between px-6 py-2.5 hover:bg-gray-50 transition-colors group'
+                      className='flex items-center justify-between px-6 py-2.5 hover:bg-muted transition-colors group'
                     >
                       <div className='flex items-center gap-2.5 flex-1 min-w-0'>
                         <Avatar userId={user.id} size='sm' showActiveStatus={false} />
                         <div className='flex flex-col min-w-0'>
-                          <span className='text-sm font-medium text-gray-900 truncate'>
+                          <span className='text-sm font-medium text-foreground truncate'>
                             {user.name}
                           </span>
-                          <span className='text-xs text-gray-500 truncate'>{user.email}</span>
+                          <span className='text-xs text-muted-foreground truncate'>
+                            {user.email}
+                          </span>
                         </div>
                       </div>
                       <Button
@@ -253,7 +257,7 @@ export const UserList = ({
             {/* No results message */}
             {filteredUsers.length === 0 && usersToAdd.length === 0 && searchTerm.trim() && (
               <div className='text-center py-8 px-4'>
-                <p className='text-sm text-gray-500'>{`No results found for "${searchTerm}"`}</p>
+                <p className='text-sm text-muted-foreground'>{`No results found for "${searchTerm}"`}</p>
               </div>
             )}
           </div>

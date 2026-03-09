@@ -52,7 +52,7 @@ const CommonChannelItem: React.FC<CommonChannelItemProps> = ({ channel, currentU
         )}
       </div>
 
-      <span className='text-sm text-gray-700 truncate flex-1 group-hover:underline'>
+      <span className='text-sm text-foreground truncate flex-1 group-hover:underline'>
         {displayName}
       </span>
     </a>
@@ -95,7 +95,7 @@ export const CommonChannelsSection: React.FC<CommonChannelsSectionProps> = ({
 
   return (
     <div className={cn('pt-4', className)}>
-      <h3 className='text-sm font-semibold text-gray-900 mb-3'>Common Groups</h3>
+      <h3 className='text-sm font-semibold text-foreground mb-3'>Common Groups</h3>
       <div className='space-y-2'>
         {commonChannels.map(channel => (
           <CommonChannelItem key={channel.id} channel={channel} currentUserId={currentUserId} />

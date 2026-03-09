@@ -27,24 +27,24 @@ export function CalendarToolbar({
   };
 
   return (
-    <div className='flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200'>
+    <div className='flex items-center justify-between px-6 py-4 bg-background border-b border-border'>
       {/* Left side - Navigation */}
       <div className='flex items-center gap-3'>
-        <div className='flex items-center gap-1 bg-gray-50 rounded-lg p-1 border border-gray-200'>
+        <div className='flex items-center gap-1 bg-muted rounded-lg p-1 border border-border'>
           <button
             type='button'
             onClick={() => onNavigate('prev')}
-            className='p-2 hover:bg-white hover:shadow-sm rounded-md transition-all duration-200'
+            className='p-2 hover:bg-background hover:shadow-sm rounded-md transition-all duration-200'
             aria-label='Previous period'
             data-track-category='CALENDAR'
             data-track-name='NavigatePrevious'
           >
-            <ChevronLeft className='w-4 h-4 text-gray-600' />
+            <ChevronLeft className='w-4 h-4 text-muted-foreground' />
           </button>
           <button
             type='button'
             onClick={() => onNavigate('today')}
-            className='px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-white hover:shadow-sm rounded-md transition-all duration-200'
+            className='px-3 py-1.5 text-sm font-medium text-foreground hover:bg-background hover:shadow-sm rounded-md transition-all duration-200'
             data-track-category='CALENDAR'
             data-track-name='NavigateToday'
           >
@@ -53,23 +53,23 @@ export function CalendarToolbar({
           <button
             type='button'
             onClick={() => onNavigate('next')}
-            className='p-2 hover:bg-white hover:shadow-sm rounded-md transition-all duration-200'
+            className='p-2 hover:bg-background hover:shadow-sm rounded-md transition-all duration-200'
             aria-label='Next period'
             data-track-category='CALENDAR'
             data-track-name='NavigateNext'
           >
-            <ChevronRight className='w-4 h-4 text-gray-600' />
+            <ChevronRight className='w-4 h-4 text-muted-foreground' />
           </button>
         </div>
 
         <div className='flex items-center gap-2'>
-          <Calendar className='w-4 h-4 text-gray-400' />
-          <span className='text-base font-semibold text-gray-900'>{getDateRangeLabel()}</span>
+          <Calendar className='w-4 h-4 text-muted-foreground' />
+          <span className='text-base font-semibold text-foreground'>{getDateRangeLabel()}</span>
         </div>
       </div>
 
       {/* Right side - View mode toggle */}
-      <div className='flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200'>
+      <div className='flex items-center bg-muted rounded-xl p-1 border border-border'>
         {viewModes.map(mode => (
           <button
             type='button'
@@ -77,8 +77,8 @@ export function CalendarToolbar({
             onClick={() => onViewModeChange(mode.value)}
             className={`relative px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
               viewMode === mode.value
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
             data-track-category='CALENDAR'
             data-track-name='ChangeViewMode'

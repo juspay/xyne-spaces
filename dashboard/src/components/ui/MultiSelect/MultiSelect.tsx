@@ -134,10 +134,10 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
             type='button'
             disabled={disabled}
             className={cn(
-              'flex items-center w-full min-h-[40px] px-3 py-2 text-sm text-left border border-gray-300 rounded-md bg-white',
-              'transition-colors hover:bg-gray-50',
-              'focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none',
-              disabled ? 'bg-gray-50 cursor-not-allowed opacity-50' : 'cursor-pointer',
+              'flex items-center w-full min-h-[40px] px-3 py-2 text-sm text-left border border-input rounded-md bg-background',
+              'transition-colors hover:bg-accent',
+              'focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none',
+              disabled ? 'bg-muted cursor-not-allowed opacity-50' : 'cursor-pointer',
             )}
           >
             {/* Selected Pills Inside Trigger */}
@@ -147,8 +147,8 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                   <span
                     key={option.value}
                     className={cn(
-                      'inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800',
-                      'transition-colors hover:bg-gray-200',
+                      'inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-foreground',
+                      'transition-colors hover:bg-accent',
                     )}
                   >
                     {option.label}
@@ -157,9 +157,9 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                         type='button'
                         onClick={e => handleRemovePill(option.value, e)}
                         className={cn(
-                          'ml-0.5 rounded-full p-0.5 text-gray-500',
-                          'hover:bg-gray-300 hover:text-gray-800',
-                          'focus:outline-hidden focus:ring-2 focus:ring-gray-400',
+                          'ml-0.5 rounded-full p-0.5 text-muted-foreground',
+                          'hover:bg-accent hover:text-foreground',
+                          'focus:outline-hidden focus:ring-2 focus:ring-ring',
                         )}
                         aria-label={`Remove ${option.label}`}
                       >
@@ -182,7 +182,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                   </span>
                 ))
               ) : (
-                <span className='text-gray-400'>{placeholder}</span>
+                <span className='text-muted-foreground'>{placeholder}</span>
               )}
             </div>
             <svg
@@ -196,7 +196,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
               strokeLinecap='round'
               strokeLinejoin='round'
               className={cn(
-                'ml-2 flex-shrink-0 text-gray-400 transition-transform',
+                'ml-2 flex-shrink-0 text-muted-foreground transition-transform',
                 isOpen ? 'rotate-180' : '',
               )}
             >
@@ -211,7 +211,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
             side='bottom'
             align='start'
             sideOffset={4}
-            className='z-[100] w-full max-w-[350px] rounded-md border border-gray-200 bg-white shadow-lg'
+            className='z-[100] w-full max-w-[350px] rounded-md border border-border bg-background shadow-lg'
             onOpenAutoFocus={e => {
               e.preventDefault();
               searchInputRef.current?.focus();
@@ -219,7 +219,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
             onCloseAutoFocus={e => e.preventDefault()}
           >
             {/* Search Input */}
-            <div className='border-b border-gray-200 p-2'>
+            <div className='border-b border-border p-2'>
               <input
                 ref={searchInputRef}
                 type='text'
@@ -229,7 +229,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                   setFocusedIndex(-1);
                 }}
                 placeholder='Search options...'
-                className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-blue-500'
+                className='w-full px-2 py-1.5 text-sm border border-input rounded outline-none focus:border-ring'
               />
             </div>
 
@@ -248,7 +248,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
               onTouchMove={e => e.stopPropagation()}
             >
               {filteredOptions.length === 0 ? (
-                <div className='px-3 py-2 text-sm text-gray-500'>
+                <div className='px-3 py-2 text-sm text-muted-foreground'>
                   {searchValue ? 'No results found' : 'No options available'}
                 </div>
               ) : (
@@ -267,8 +267,8 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                       className={cn(
                         'flex w-full cursor-pointer select-none items-center gap-3 rounded-sm px-3 py-2 text-sm outline-none transition-colors',
                         isFocused
-                          ? 'bg-gray-100 text-gray-900'
-                          : 'hover:bg-gray-100 hover:text-gray-900',
+                          ? 'bg-accent text-foreground'
+                          : 'hover:bg-accent hover:text-foreground',
                       )}
                     >
                       {/* Optional Icon */}
@@ -282,14 +282,16 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                       <div className='flex flex-col items-start min-w-0 flex-1'>
                         <span
                           className={cn(
-                            'truncate text-left text-gray-900',
+                            'truncate text-left text-foreground',
                             isSelected ? 'font-medium' : '',
                           )}
                         >
                           {option.label}
                         </span>
                         {option.subtitle && (
-                          <span className='truncate text-xs text-gray-500'>{option.subtitle}</span>
+                          <span className='truncate text-xs text-muted-foreground'>
+                            {option.subtitle}
+                          </span>
                         )}
                       </div>
 
@@ -320,7 +322,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
       </Popover.Root>
 
       {(error || helperText) && (
-        <p className={cn('text-xs', error ? 'text-red-500' : 'text-gray-500')}>
+        <p className={cn('text-xs', error ? 'text-red-500' : 'text-muted-foreground')}>
           {error || helperText}
         </p>
       )}

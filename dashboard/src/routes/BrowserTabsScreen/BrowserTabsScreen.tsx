@@ -322,8 +322,8 @@ export function BrowserTabsScreen({
 
   if (!isElectronApp()) {
     return (
-      <div className='flex items-center justify-center h-full bg-gray-50'>
-        <div className='text-center text-gray-500'>
+      <div className='flex items-center justify-center h-full bg-muted'>
+        <div className='text-center text-muted-foreground'>
           <Globe size={48} className='mx-auto mb-4 opacity-50' />
           <p>Browser tabs are only available in the desktop app.</p>
         </div>
@@ -333,21 +333,21 @@ export function BrowserTabsScreen({
 
   return (
     <div
-      className={`flex flex-col h-full bg-white overflow-hidden ${
-        isPanel ? 'rounded-xl shadow-sm border border-gray-200' : 'rounded-lg'
+      className={`flex flex-col h-full bg-background overflow-hidden ${
+        isPanel ? 'rounded-xl shadow-sm border border-border' : 'rounded-lg'
       }`}
     >
       {/* Header with close button (panel mode only) */}
       {isPanel ? (
-        <div className='flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200'>
+        <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>
           <div className='flex items-center gap-2'>
-            <Globe size={16} className='text-gray-500' />
-            <span className='text-sm font-medium text-gray-700'>Browser</span>
+            <Globe size={16} className='text-muted-foreground' />
+            <span className='text-sm font-medium text-foreground'>Browser</span>
           </div>
           <div className='flex items-center gap-1'>
             <button
               onClick={handleOpenFullscreen}
-              className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
+              className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
               title='Open in fullscreen browser'
               data-track-category='BROWSER'
               data-track-name='OpenFullscreenBrowser'
@@ -358,7 +358,7 @@ export function BrowserTabsScreen({
             {activeTab && (
               <button
                 onClick={handleOpenExternal}
-                className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
+                className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
                 title='Open in system browser'
                 data-track-category='BROWSER'
                 data-track-name='OpenInSystemBrowser'
@@ -369,7 +369,7 @@ export function BrowserTabsScreen({
             )}
             <button
               onClick={handleClosePanel}
-              className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
+              className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
               title='Close browser panel'
               data-track-category='BROWSER'
               data-track-name='CloseBrowserPanel'
@@ -380,15 +380,15 @@ export function BrowserTabsScreen({
           </div>
         </div>
       ) : (
-        <div className='flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200'>
+        <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>
           <div className='flex items-center gap-2'>
-            <Globe size={18} className='text-gray-500' />
-            <span className='text-base font-medium text-gray-700'>Browser</span>
+            <Globe size={18} className='text-muted-foreground' />
+            <span className='text-base font-medium text-foreground'>Browser</span>
           </div>
           <div className='flex items-center gap-1'>
             <button
               onClick={handleMinimizeToPanel}
-              className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
+              className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
               title='Minimize to docked panel'
               data-track-category='BROWSER'
               data-track-name='MinimizeToDocked'
@@ -399,7 +399,7 @@ export function BrowserTabsScreen({
             {activeTab && (
               <button
                 onClick={handleOpenExternal}
-                className='p-1.5 rounded-md hover:bg-gray-200 text-gray-500'
+                className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
                 title='Open in system browser'
                 data-track-category='BROWSER'
                 data-track-name='OpenInSystemBrowser'
@@ -413,7 +413,7 @@ export function BrowserTabsScreen({
       )}
 
       {/* Tab Bar */}
-      <div className='flex items-center bg-gray-100 border-b border-gray-200 px-2 py-1 gap-1'>
+      <div className='flex items-center bg-muted border-b border-border px-2 py-1 gap-1'>
         <div className='flex-1 flex items-center gap-1 overflow-x-auto no-scrollbar'>
           {tabs.map(tab => (
             <button
@@ -425,8 +425,8 @@ export function BrowserTabsScreen({
                   : 'px-3 py-1.5 text-sm max-w-[200px] min-w-[120px]'
               } ${
                 tab.id === activeTabId
-                  ? 'bg-white shadow-sm text-gray-900'
-                  : 'text-gray-600 hover:bg-gray-200'
+                  ? 'bg-background shadow-sm text-foreground'
+                  : 'text-muted-foreground hover:bg-border'
               }`}
               data-track-category='BROWSER'
               data-track-name='SwitchTab'
@@ -444,12 +444,12 @@ export function BrowserTabsScreen({
                   }}
                 />
               ) : (
-                <Globe size={isPanel ? 12 : 14} className='flex-shrink-0 text-gray-400' />
+                <Globe size={isPanel ? 12 : 14} className='flex-shrink-0 text-muted-foreground' />
               )}
               <span className='truncate flex-1 text-left'>{tab.title}</span>
               <button
                 onClick={e => handleCloseTab(tab.id, e)}
-                className='opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-300 rounded transition-opacity'
+                className='opacity-0 group-hover:opacity-100 p-0.5 hover:bg-muted-foreground/50 rounded transition-opacity'
                 data-track-category='BROWSER'
                 data-track-name='CloseTab'
                 data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
@@ -461,7 +461,7 @@ export function BrowserTabsScreen({
         </div>
         <button
           onClick={() => handleCreateTab('https://www.google.com')}
-          className='p-1.5 rounded-md hover:bg-gray-200 text-gray-600'
+          className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
           title='New tab'
           data-track-category='BROWSER'
           data-track-name='CreateNewTab'
@@ -473,14 +473,14 @@ export function BrowserTabsScreen({
 
       {/* URL Bar */}
       <div
-        className={`flex items-center bg-gray-50 border-b border-gray-200 ${
+        className={`flex items-center bg-muted border-b border-border ${
           isPanel ? 'gap-1.5 px-2 py-1.5' : 'gap-2 px-3 py-2'
         }`}
       >
         <button
           onClick={handleGoBack}
           disabled={!activeTab?.canGoBack}
-          className='p-1 rounded-md hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed'
+          className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
           title='Go back'
           data-track-category='BROWSER'
           data-track-name='GoBack'
@@ -491,7 +491,7 @@ export function BrowserTabsScreen({
         <button
           onClick={handleGoForward}
           disabled={!activeTab?.canGoForward}
-          className='p-1 rounded-md hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed'
+          className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
           title='Go forward'
           data-track-category='BROWSER'
           data-track-name='GoForward'
@@ -502,7 +502,7 @@ export function BrowserTabsScreen({
         <button
           onClick={handleReload}
           disabled={!activeTabId}
-          className='p-1 rounded-md hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed'
+          className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
           title='Reload'
           data-track-category='BROWSER'
           data-track-name='ReloadPage'
@@ -521,7 +521,7 @@ export function BrowserTabsScreen({
             value={urlInput}
             onChange={e => setUrlInput(e.target.value)}
             placeholder='Enter a URL or search...'
-            className={`w-full bg-white border border-gray-300 rounded-md focus:outline-none focus:border-transparent ${
+            className={`w-full bg-background border border-input rounded-md focus:outline-none focus:border-transparent ${
               isPanel
                 ? 'px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500'
                 : 'px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500'
@@ -533,7 +533,7 @@ export function BrowserTabsScreen({
       </div>
 
       {/* Browser Content Area - webview elements render as real DOM */}
-      <div className='flex-1 bg-gray-100 relative overflow-hidden'>
+      <div className='flex-1 bg-muted relative overflow-hidden'>
         {tabs.map(tab => (
           <WebviewTab
             key={tab.id}
@@ -549,7 +549,7 @@ export function BrowserTabsScreen({
 
         {tabs.length === 0 && (
           <div
-            className={`absolute inset-0 flex flex-col items-center justify-center text-gray-500 ${
+            className={`absolute inset-0 flex flex-col items-center justify-center text-muted-foreground ${
               isPanel ? 'p-4' : ''
             }`}
           >

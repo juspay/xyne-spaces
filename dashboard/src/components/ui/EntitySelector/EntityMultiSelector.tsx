@@ -91,7 +91,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
         setIsOpen(false);
       }}
       className={cn(
-        'relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-gray-50 w-fit max-w-full overflow-hidden ',
+        'relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-muted w-fit max-w-full overflow-hidden ',
         inputClassName,
       )}
     >
@@ -102,7 +102,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
         type='text'
         ref={inputRef}
         className={cn(
-          'border-none focus-visible:ring-0 text-[13px] placeholder:text-gray-700 outline-none bg-gray-50 max-w-40 min-w-8 truncate',
+          'border-none focus-visible:ring-0 text-[13px] placeholder:text-foreground outline-none bg-muted max-w-40 min-w-8 truncate',
         )}
         style={{ fieldSizing: 'content' }}
         placeholder={placeholder}
@@ -151,17 +151,17 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
       {selectedOptions.map(opt => (
         <span
           key={opt.value}
-          className='flex items-center gap-1.5 rounded-md bg-white border px-2 text-xs h-7 cursor-default'
+          className='flex items-center gap-1.5 rounded-md bg-background border px-2 text-xs h-7 cursor-default'
         >
           {opt.icon && <span className='flex items-center justify-center'>{opt.icon}</span>}
-          <span className='max-w-32 text-xs font-medium text-gray-700 truncate'>{opt.label}</span>
+          <span className='max-w-32 text-xs font-medium text-foreground truncate'>{opt.label}</span>
           <button
             type='button'
             onClick={e => {
               e.stopPropagation();
               removeValue(opt.value);
             }}
-            className='text-gray-400 hover:text-gray-600'
+            className='text-muted-foreground hover:text-muted-foreground'
           >
             <X className='size-2.5' strokeWidth={2.5} />
           </button>
@@ -184,11 +184,11 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
             onTouchMove={e => {
               e.stopPropagation();
             }}
-            className='z-[100] max-w-52 w-auto max-h-48 overflow-y-auto no-scrollbar rounded-lg border border-gray-200 bg-white shadow-lg'
+            className='z-[100] max-w-52 w-auto max-h-48 overflow-y-auto no-scrollbar rounded-lg border border-border bg-background shadow-lg'
           >
             {/* Options */}
             {isLoading ? (
-              <div className='p-4 text-center text-sm text-gray-500'>Loading</div>
+              <div className='p-4 text-center text-sm text-muted-foreground'>Loading</div>
             ) : (
               <>
                 {filteredOptions.length > 0 && (
@@ -200,7 +200,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                         <li key={option.value}>
                           <button
                             type='button'
-                            className='flex w-full items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-gray-200'
+                            className='flex w-full items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-accent'
                             onClick={() => toggleValue(option.value)}
                           >
                             {option.icon && (
@@ -210,11 +210,11 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                             )}
 
                             <div className='flex-1 min-w-0 text-left'>
-                              <div className='truncate font-medium text-[#525866]'>
+                              <div className='truncate font-medium text-foreground'>
                                 {option.label}
                               </div>
                               {option.subtitle && (
-                                <div className='truncate text-xs text-gray-500'>
+                                <div className='truncate text-xs text-muted-foreground'>
                                   {option.subtitle}
                                 </div>
                               )}
@@ -232,10 +232,10 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                   !filteredOptions.some(
                     opt => opt.label.toLowerCase() === searchValue.toLowerCase(),
                   ) && (
-                    <div className='p-1 border-t border-gray-200'>
+                    <div className='p-1 border-t border-border'>
                       <button
                         type='button'
-                        className='flex w-full items-center gap-1.5 px-2 py-1.5 rounded hover:bg-gray-200 text-gray-500'
+                        className='flex w-full items-center gap-1.5 px-2 py-1.5 rounded hover:bg-accent text-muted-foreground'
                         onClick={() => {
                           onCreateOption?.(searchValue.trim());
                           setSearchValue('');
@@ -250,7 +250,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                   )}
 
                 {filteredOptions.length === 0 && (!allowCreate || !searchValue.trim()) && (
-                  <div className='px-3 py-2.5 text-center text-xs text-gray-500'>
+                  <div className='px-3 py-2.5 text-center text-xs text-muted-foreground'>
                     No results found
                   </div>
                 )}

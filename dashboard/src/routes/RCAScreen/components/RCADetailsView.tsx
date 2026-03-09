@@ -57,9 +57,9 @@ export const RCADetailsView = ({
     selectedRecord?.ownerId;
 
   const DetailRow = ({ label, value }: { label: string; value: string | null | undefined }) => (
-    <div className='grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-6 py-3 border-b border-gray-100 last:border-b-0'>
-      <p className='md:col-span-4 text-sm font-medium text-gray-800'>{label}</p>
-      <p className='md:col-span-8 text-sm text-gray-600 whitespace-pre-wrap break-words'>
+    <div className='grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-6 py-3 border-b border-border last:border-b-0'>
+      <p className='md:col-span-4 text-sm font-medium text-foreground'>{label}</p>
+      <p className='md:col-span-8 text-sm text-muted-foreground whitespace-pre-wrap break-words'>
         {value?.trim() || '-'}
       </p>
     </div>
@@ -156,13 +156,13 @@ export const RCADetailsView = ({
   }
   return (
     <div className='space-y-6'>
-      <section className='bg-white border border-gray-200 rounded-xl p-6'>
+      <section className='bg-background border border-border rounded-xl p-6'>
         <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
           <div>
-            <p className='text-xs font-medium uppercase tracking-wide text-gray-500'>
+            <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
               Root Cause Analysis
             </p>
-            <h3 className='text-xl font-semibold text-gray-900 mt-1 leading-snug'>
+            <h3 className='text-xl font-semibold text-foreground mt-1 leading-snug'>
               {selectedRecord.title || 'Untitled RCA'}
             </h3>
           </div>
@@ -170,24 +170,24 @@ export const RCADetailsView = ({
             Submitted
           </Badge>
         </div>
-        <div className='mt-4 flex flex-wrap items-center gap-2 text-xs text-gray-600'>
-          <span className='inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1'>
+        <div className='mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+          <span className='inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1'>
             <UserRound className='h-3.5 w-3.5' />
             Owner: {selectedOwnerLabel}
           </span>
-          <span className='inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1'>
+          <span className='inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1'>
             Severity: {selectedRecord.severity}
           </span>
-          <span className='inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1'>
+          <span className='inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1'>
             Created: {formatDate(selectedRecord.createdAt)}
           </span>
         </div>
       </section>
 
-      <section className='bg-white border border-gray-200 rounded-xl p-6'>
+      <section className='bg-background border border-border rounded-xl p-6'>
         <div className='flex items-center gap-2 mb-4'>
-          <AlertTriangle className='h-4 w-4 text-gray-600' />
-          <h4 className='text-base font-semibold text-gray-900'>Impact & Metrics</h4>
+          <AlertTriangle className='h-4 w-4 text-muted-foreground' />
+          <h4 className='text-base font-semibold text-foreground'>Impact & Metrics</h4>
         </div>
         <DetailRow label='Summary' value={selectedRecord.summary} />
         <DetailRow label='Root Cause' value={selectedRecord.rootCause} />
@@ -202,21 +202,21 @@ export const RCADetailsView = ({
         />
       </section>
 
-      <section className='bg-white border border-gray-200 rounded-xl p-6'>
+      <section className='bg-background border border-border rounded-xl p-6'>
         <div className='flex items-center gap-2 mb-4'>
-          <SearchCheck className='h-4 w-4 text-gray-600' />
-          <h4 className='text-base font-semibold text-gray-900'>Detection & Response</h4>
+          <SearchCheck className='h-4 w-4 text-muted-foreground' />
+          <h4 className='text-base font-semibold text-foreground'>Detection & Response</h4>
         </div>
         <DetailRow label='Issue Start Time' value={formatDate(selectedRecord.issueStartAt)} />
       </section>
 
-      <section className='bg-white border border-gray-200 rounded-xl p-6'>
+      <section className='bg-background border border-border rounded-xl p-6'>
         <div className='flex items-center gap-2 mb-4'>
-          <ClipboardList className='h-4 w-4 text-gray-600' />
-          <h4 className='text-base font-semibold text-gray-900'>Attribution</h4>
+          <ClipboardList className='h-4 w-4 text-muted-foreground' />
+          <h4 className='text-base font-semibold text-foreground'>Attribution</h4>
         </div>
         {releaseAttributions.length === 0 ? (
-          <p className='text-sm text-gray-500'>No release mappings.</p>
+          <p className='text-sm text-muted-foreground'>No release mappings.</p>
         ) : (
           <div className='space-y-3'>
             {releaseAttributions.map(attribution => {
@@ -240,9 +240,9 @@ export const RCADetailsView = ({
                 : 'Ticket';
 
               return (
-                <div key={attribution.id} className='rounded-lg border border-gray-200 p-4'>
-                  <p className='text-sm font-semibold text-gray-900'>{releaseLabel}</p>
-                  <div className='mt-2 space-y-1 text-sm text-gray-600'>
+                <div key={attribution.id} className='rounded-lg border border-border p-4'>
+                  <p className='text-sm font-semibold text-foreground'>{releaseLabel}</p>
+                  <div className='mt-2 space-y-1 text-sm text-muted-foreground'>
                     {appLabel && (
                       <div>
                         <span className='font-medium'>App Release:</span> {appLabel}
@@ -264,18 +264,18 @@ export const RCADetailsView = ({
         )}
       </section>
 
-      <section className='bg-white border border-gray-200 rounded-xl p-6'>
+      <section className='bg-background border border-border rounded-xl p-6'>
         <div className='flex items-center gap-2 mb-4'>
-          <Target className='h-4 w-4 text-gray-600' />
-          <h4 className='text-base font-semibold text-gray-900'>Impact Details</h4>
+          <Target className='h-4 w-4 text-muted-foreground' />
+          <h4 className='text-base font-semibold text-foreground'>Impact Details</h4>
         </div>
         {(selectedRecord.impacts?.length ?? 0) === 0 ? (
-          <p className='text-sm text-gray-500'>No impact details available.</p>
+          <p className='text-sm text-muted-foreground'>No impact details available.</p>
         ) : (
           <div className='space-y-4'>
             {(selectedRecord.impacts ?? []).map((impact, index) => (
-              <div key={impact.id} className='rounded-lg border border-gray-200 p-4'>
-                <p className='text-xs font-medium uppercase tracking-wide text-gray-500'>
+              <div key={impact.id} className='rounded-lg border border-border p-4'>
+                <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                   Impact {index + 1}
                 </p>
                 <div className='mt-2 space-y-2'>
@@ -283,8 +283,8 @@ export const RCADetailsView = ({
                   <DetailRow label='Impact Summary' value={impact.impact} />
                 </div>
                 {(attachmentsByImpactId.get(impact.id)?.length ?? 0) > 0 && (
-                  <div className='mt-4 border-t border-gray-100 pt-4'>
-                    <p className='text-sm font-medium text-gray-800'>Attachments</p>
+                  <div className='mt-4 border-t border-border pt-4'>
+                    <p className='text-sm font-medium text-foreground'>Attachments</p>
                     <div className='mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3'>
                       {(attachmentsByImpactId.get(impact.id) ?? []).map(file => (
                         <AttachmentPreview
@@ -303,18 +303,18 @@ export const RCADetailsView = ({
         )}
       </section>
 
-      <section className='bg-white border border-gray-200 rounded-xl p-6'>
+      <section className='bg-background border border-border rounded-xl p-6'>
         <div className='flex items-center gap-2 mb-4'>
-          <CheckSquare className='h-4 w-4 text-gray-600' />
-          <h4 className='text-base font-semibold text-gray-900'>COE Details</h4>
+          <CheckSquare className='h-4 w-4 text-muted-foreground' />
+          <h4 className='text-base font-semibold text-foreground'>COE Details</h4>
         </div>
         {(selectedRecord.coes?.length ?? 0) === 0 ? (
-          <p className='text-sm text-gray-500'>No COE details available.</p>
+          <p className='text-sm text-muted-foreground'>No COE details available.</p>
         ) : (
           <div className='space-y-4'>
             {(selectedRecord.coes ?? []).map((coe, index) => (
-              <div key={coe.id} className='rounded-lg border border-gray-200 p-4'>
-                <p className='text-xs font-medium uppercase tracking-wide text-gray-500'>
+              <div key={coe.id} className='rounded-lg border border-border p-4'>
+                <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                   COE {index + 1}
                 </p>
                 <div className='mt-2 space-y-2'>

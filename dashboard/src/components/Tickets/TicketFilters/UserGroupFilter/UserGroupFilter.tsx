@@ -91,7 +91,7 @@
 //         className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors min-w-0 ${
 //           hasSelection
 //             ? 'border-blue-200 bg-blue-50 text-blue-700'
-//             : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+//             : 'border-border bg-background text-foreground hover:bg-muted'
 //         }`}
 //       >
 //         <Users className='w-4 h-4 flex-shrink-0' />
@@ -114,27 +114,27 @@
 //           onClick={handleClear}
 //           variant='ghost'
 //           size='icon'
-//           className='absolute -top-1 -right-1 bg-gray-100 hover:bg-gray-200 rounded-full p-1 size-6'
+//           className='absolute -top-1 -right-1 bg-muted hover:bg-border rounded-full p-1 size-6'
 //           title='Clear group filter'
 //         >
-//           <X className='w-3 h-3 text-gray-600' />
+//           <X className='w-3 h-3 text-muted-foreground' />
 //         </Button>
 //       )}
 
 //       {/* Dropdown */}
 //       {isOpen && (
-//         <div className='absolute top-full left-0 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50'>
+//         <div className='absolute top-full left-0 mt-1 w-80 bg-background border border-border rounded-lg shadow-lg z-50'>
 //           {/* Search Input */}
 //           <div className='p-3 border-b border-gray-100'>
 //             <div className='relative'>
-//               <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
+//               <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
 //               <input
 //                 ref={searchInputRef}
 //                 type='text'
 //                 value={searchQuery}
 //                 onChange={e => setSearchQuery(e.target.value)}
 //                 placeholder={placeholder}
-//                 className='w-full pl-10 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+//                 className='w-full pl-10 pr-4 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 //               />
 //             </div>
 //           </div>
@@ -142,7 +142,7 @@
 //           {/* Selected Groups */}
 //           {selectedGroupsData.length > 0 && (
 //             <div className='p-3 border-b border-gray-100'>
-//               <div className='text-xs font-medium text-gray-500 mb-2'>Selected Groups</div>
+//               <div className='text-xs font-medium text-muted-foreground mb-2'>Selected Groups</div>
 //               <div className='space-y-1'>
 //                 {selectedGroupsData.map(group => (
 //                   <div
@@ -179,25 +179,25 @@
 //           <div className='max-h-64 overflow-y-auto'>
 //             {availableGroups.length > 0 ? (
 //               <div className='p-2'>
-//                 <div className='text-xs font-medium text-gray-500 mb-2'>Available Groups</div>
+//                 <div className='text-xs font-medium text-muted-foreground mb-2'>Available Groups</div>
 //                 <div className='space-y-1'>
 //                   {availableGroups.map(group => (
 //                     <button
 //                       key={group.id}
 //                       onClick={() => handleGroupToggle(group.id)}
-//                       className='flex items-center gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer transition-colors w-full text-left'
+//                       className='flex items-center gap-3 p-2 hover:bg-muted rounded cursor-pointer transition-colors w-full text-left'
 //                       type='button'
 //                     >
-//                       <div className='w-4 h-4 border-2 border-gray-300 rounded' />
+//                       <div className='w-4 h-4 border-2 border-input rounded' />
 //                       <div className='flex items-center gap-2 min-w-0 flex-1'>
-//                         <Users className='w-4 h-4 text-gray-600 flex-shrink-0' />
+//                         <Users className='w-4 h-4 text-muted-foreground flex-shrink-0' />
 //                         <div className='min-w-0 flex-1'>
-//                           <div className='text-sm font-medium text-gray-900 truncate'>
+//                           <div className='text-sm font-medium text-foreground truncate'>
 //                             {group.name}
 //                           </div>
 //                           <div className='flex items-center gap-2'>
 //                             {group.alias && (
-//                               <span className='text-xs text-gray-500'>@{group.alias}</span>
+//                               <span className='text-xs text-muted-foreground'>@{group.alias}</span>
 //                             )}
 //                           </div>
 //                         </div>
@@ -207,7 +207,7 @@
 //                 </div>
 //               </div>
 //             ) : (
-//               <div className='p-4 text-center text-sm text-gray-500'>
+//               <div className='p-4 text-center text-sm text-muted-foreground'>
 //                 {searchQuery.trim()
 //                   ? `No groups found matching "${searchQuery}"`
 //                   : 'All groups have been selected'}
@@ -220,7 +220,7 @@
 //             <div className='p-2 border-t border-gray-100'>
 //               <button
 //                 onClick={handleClear}
-//                 className='w-full text-xs text-gray-500 hover:text-gray-700 transition-colors py-1'
+//                 className='w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-1'
 //               >
 //                 Clear all selected groups
 //               </button>

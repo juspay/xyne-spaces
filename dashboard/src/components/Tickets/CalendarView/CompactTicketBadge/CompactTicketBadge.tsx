@@ -14,7 +14,7 @@ export function CompactTicketBadge({ ticket, onClick }: CompactTicketBadgeProps)
       data-track-name='OpenTicketFromCalendar'
       data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
     >
-      <div className='flex items-center gap-2 p-2 rounded-lg bg-gray-50 hover:bg-white border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200'>
+      <div className='flex items-center gap-2 p-2 rounded-lg bg-muted hover:bg-background border border-border hover:border-border hover:shadow-sm transition-all duration-200'>
         {/* Status indicator */}
         <div
           className='w-1.5 h-8 rounded-full flex-shrink-0'
@@ -24,9 +24,11 @@ export function CompactTicketBadge({ ticket, onClick }: CompactTicketBadgeProps)
         {/* Content */}
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-2 mb-0.5'>
-            <span className='text-[10px] font-medium text-gray-400 font-mono'>{ticket.xyneId}</span>
+            <span className='text-[10px] font-medium text-muted-foreground font-mono'>
+              {ticket.xyneId}
+            </span>
           </div>
-          <p className='text-xs font-medium text-gray-700 truncate group-hover:text-gray-900'>
+          <p className='text-xs font-medium text-foreground truncate group-hover:text-foreground'>
             {ticket.title}
           </p>
         </div>

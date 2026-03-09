@@ -48,7 +48,7 @@ export class MentionNode extends DecoratorNode<React.JSX.Element> {
   override createDOM(_config: EditorConfig): HTMLElement {
     const element = document.createElement('span');
     const baseClasses =
-      'mention-node inline-flex items-center gap-1.5 px-1.5 py-1 m-0.5 rounded bg-gray-100 text-gray-700 text-xs font-medium cursor-pointer select-all h-6';
+      'mention-node inline-flex items-center gap-1.5 px-1.5 py-1 m-0.5 rounded bg-muted text-foreground text-xs font-medium cursor-pointer select-all h-6';
     element.className = baseClasses;
     element.setAttribute('data-lexical-mention', 'true');
     element.setAttribute('data-lexical-decorator', 'true');
@@ -79,7 +79,7 @@ export class MentionNode extends DecoratorNode<React.JSX.Element> {
 
   override decorate(): React.JSX.Element {
     const baseClasses =
-      'mention-node inline-flex items-center gap-1.5 px-1.5 py-1 m-0.5 rounded bg-gray-100 text-gray-700 text-xs font-medium cursor-pointer h-6';
+      'mention-node inline-flex items-center gap-1.5 px-1.5 py-1 m-0.5 rounded bg-muted text-foreground text-xs font-medium cursor-pointer h-6';
 
     return (
       <span
@@ -97,7 +97,7 @@ export class MentionNode extends DecoratorNode<React.JSX.Element> {
           />
         ) : (
           <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-            <Hash size={12} className='text-gray-700' />
+            <Hash size={12} className='text-foreground' />
           </div>
         )}
         <span className='leading-tight'>{this.getTextContent()}</span>

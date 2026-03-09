@@ -91,7 +91,7 @@ const RCAListScreen = () => {
   };
 
   return (
-    <div className='h-full bg-gray-50' data-id='rca-list-screen'>
+    <div className='h-full bg-muted' data-id='rca-list-screen'>
       <section className='h-full flex flex-1 min-h-0 p-4 md:p-6'>
         <RCASidebar
           records={records}

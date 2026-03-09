@@ -28,23 +28,23 @@ const getResultIcon = (result: DisplaySearchResult): ReactElement => {
   const { type, searchContext } = result;
   switch (type) {
     case 'user':
-      return <User size={16} className='text-gray-500' />;
+      return <User size={16} className='text-muted-foreground' />;
     case 'channel':
-      return <Hash size={16} className='text-gray-500' />;
+      return <Hash size={16} className='text-muted-foreground' />;
     case 'conversation':
-      return <MessageCircle size={16} className='text-gray-500' />;
+      return <MessageCircle size={16} className='text-muted-foreground' />;
     case 'ticket':
-      return <Ticket size={16} className='text-gray-500' />;
+      return <Ticket size={16} className='text-muted-foreground' />;
     case 'attachment':
       if (searchContext?.subApp === 'canvas') {
-        return <FileText size={16} className='text-gray-500' />;
+        return <FileText size={16} className='text-muted-foreground' />;
       }
       if (searchContext?.subApp === 'transcript') {
-        return <Mic size={16} className='text-gray-500' />;
+        return <Mic size={16} className='text-muted-foreground' />;
       }
-      return <Paperclip size={16} className='text-gray-500' />;
+      return <Paperclip size={16} className='text-muted-foreground' />;
     default:
-      return <MessageCircle size={16} className='text-gray-500' />;
+      return <MessageCircle size={16} className='text-muted-foreground' />;
   }
 };
 
@@ -83,12 +83,12 @@ const SearchResultItem = ({
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
           onSelect={() => void onSelect(result)}
-          className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
+          className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
         >
           <Avatar userId={result.id} size='sm' />
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-xs text-gray-800 truncate'>{result.title}</div>
-            <div className='text-[11px] text-gray-500'>{result.subtitle}</div>
+            <div className='font-semibold text-xs text-foreground truncate'>{result.title}</div>
+            <div className='text-[11px] text-muted-foreground'>{result.subtitle}</div>
           </div>
           {isSelected && <SelectedBadge />}
         </Command.Item>
@@ -105,27 +105,27 @@ const SearchResultItem = ({
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
           onSelect={() => void onSelect(result)}
-          className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
+          className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
         >
           <div className='flex items-center gap-1.5'>
             {result.avatar ? <UserAvatar userId={result.avatar} /> : getResultIcon(result)}
             <div className='flex-1 min-w-0'>
               <div className='flex items-center gap-1.5 text-xs'>
-                <span className='font-semibold text-gray-900 truncate'>
+                <span className='font-semibold text-foreground truncate'>
                   {result.searchContext?.senderName}
                 </span>
-                <span className='text-[10px] text-gray-500'>{preposition}</span>
-                <span className='text-[10px] font-medium text-gray-700 truncate'>
+                <span className='text-[10px] text-muted-foreground'>{preposition}</span>
+                <span className='text-[10px] font-medium text-foreground truncate'>
                   {result.title}
                 </span>
-                <span className='text-[10px] text-gray-400'>
+                <span className='text-[10px] text-muted-foreground'>
                   {utcToIst(result.metadata.timestamp)}
                 </span>
               </div>
             </div>
             {isSelected && <SelectedBadge />}
           </div>
-          <div className='pl-6 text-xs text-gray-700'>
+          <div className='pl-6 text-xs text-foreground'>
             <SearchSnippetRenderer message={result.context || ''} wordLimit={40} />
           </div>
         </Command.Item>
@@ -138,16 +138,16 @@ const SearchResultItem = ({
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
           onSelect={() => void onSelect(result)}
-          className='flex flex-col gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
+          className='flex flex-col gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
         >
           <div className='flex items-center gap-2'>
             {getResultIcon(result)}
             <div className='flex-1 min-w-0'>
-              <div className='font-semibold text-xs text-gray-800 truncate'>
+              <div className='font-semibold text-xs text-foreground truncate'>
                 <RenderMessageWithHTML message={result.title} />
               </div>
               {result.subtitle && (
-                <div className='text-[11px] text-gray-500 line-clamp-2'>
+                <div className='text-[11px] text-muted-foreground line-clamp-2'>
                   <RenderMessageWithHTML message={result.subtitle} />
                 </div>
               )}
@@ -163,15 +163,15 @@ const SearchResultItem = ({
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
           onSelect={() => void onSelect(result)}
-          className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
+          className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
         >
           {getResultIcon(result)}
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-xs text-gray-800 truncate'>
+            <div className='font-semibold text-xs text-foreground truncate'>
               {' '}
               <RenderMessageWithHTML message={result.title} />
             </div>
-            <div className='text-[11px] text-gray-500'>
+            <div className='text-[11px] text-muted-foreground'>
               {' '}
               <RenderMessageWithHTML message={result.subtitle} />
             </div>
@@ -207,12 +207,12 @@ const SearchResultItem = ({
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
           onSelect={() => void onSelect(result)}
-          className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-gray-100 aria-selected:bg-gray-100 mt-1'
+          className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
         >
           {getResultIcon(result)}
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-xs text-gray-800 truncate'>{result.title}</div>
-            <div className='text-[11px] text-gray-500'>{result.subtitle}</div>
+            <div className='font-semibold text-xs text-foreground truncate'>{result.title}</div>
+            <div className='text-[11px] text-muted-foreground'>{result.subtitle}</div>
           </div>
           {isSelected && <SelectedBadge />}
         </Command.Item>

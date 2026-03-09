@@ -63,7 +63,7 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
     <div className='mt-1 pl-2 -ml-8'>
       {/* Section heading */}
       <div className='flex items-center gap-1.5 mb-2 ml-4'>
-        <span className='text-xs font-semibold text-gray-500 tracking-wide uppercase'>
+        <span className='text-xs font-semibold text-muted-foreground tracking-wide uppercase'>
           Pulse Actionables
         </span>
       </div>
@@ -84,7 +84,9 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
             {merchantSent.map(item => (
               <div key={item.itemId} className='flex items-start gap-2 py-1.5 opacity-50'>
                 <span className='mt-[5px] text-xs text-green-600'>✓</span>
-                <span className='text-sm text-gray-500 line-through flex-1'>{item.content}</span>
+                <span className='text-sm text-muted-foreground line-through flex-1'>
+                  {item.content}
+                </span>
               </div>
             ))}
 
@@ -100,13 +102,16 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
                     type='checkbox'
                     checked={isSelected}
                     onChange={() => toggleSelection(item.itemId)}
-                    className='mt-1 h-4 w-4 shrink-0 rounded border-gray-300 cursor-pointer'
+                    className='mt-1 h-4 w-4 shrink-0 rounded border-input cursor-pointer'
                   />
                   <label htmlFor={checkboxId} className='text-sm text-left flex-1 cursor-pointer'>
-                    <span className='font-medium text-gray-700'>{item.content}</span>
+                    <span className='font-medium text-foreground'>{item.content}</span>
                     {item.assignee && item.assignee !== 'unassigned' && (
                       <>
-                        <span className='text-gray-400 font-normal'> — {item.assignee}</span>
+                        <span className='text-muted-foreground font-normal'>
+                          {' '}
+                          — {item.assignee}
+                        </span>
                       </>
                     )}
                   </label>

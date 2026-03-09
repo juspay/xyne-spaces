@@ -90,9 +90,9 @@ const ProjectSidebar = ({
   }, [projectsSearch.searchQuery, projects]);
 
   return (
-    <div className='h-full flex flex-col bg-white'>
+    <div className='h-full flex flex-col bg-background'>
       {/* Header */}
-      <div className='sticky top-0 z-50 bg-white border-b border-gray-200'>
+      <div className='sticky top-0 z-50 bg-background border-b border-border'>
         <div className='px-4 py-3 flex items-center justify-between'>
           <h2 className='text-black font-inter text-base font-semibold leading-normal'>
             Projects Board
@@ -100,12 +100,12 @@ const ProjectSidebar = ({
           {onClose && (
             <button
               onClick={onClose}
-              className='p-2 hover:bg-gray-100 rounded-md transition-colors'
+              className='p-2 hover:bg-muted rounded-md transition-colors'
               aria-label='Close sidebar'
               data-track-category='Projects'
               data-track-name='CloseProjectSidebar'
             >
-              <ChevronLeft className='size-4 text-gray-600' />
+              <ChevronLeft className='size-4 text-muted-foreground' />
             </button>
           )}
         </div>
@@ -174,11 +174,11 @@ const ProjectSidebar = ({
                 </div>
                 <button
                   onClick={projectsSearch.openSearch}
-                  className='p-1 hover:bg-gray-100 rounded transition-colors'
+                  className='p-1 hover:bg-muted rounded transition-colors'
                   data-track-category='Projects'
                   data-track-name='OpenProjectSearch'
                 >
-                  <Search className='size-3 text-gray-500' />
+                  <Search className='size-3 text-muted-foreground' />
                 </button>
               </>
             )}
@@ -187,7 +187,7 @@ const ProjectSidebar = ({
           {isProjectsExpanded && (
             <div className='mt-1'>
               {projectsSearch.filteredItems.length === 0 ? (
-                <div className='px-2 py-3 text-[13px] text-gray-400 text-center'>
+                <div className='px-2 py-3 text-[13px] text-muted-foreground text-center'>
                   {projectsSearch.searchQuery ? 'No matching projects' : 'No projects found'}
                 </div>
               ) : (
@@ -242,11 +242,11 @@ const ProjectSidebar = ({
                 </div>
                 <button
                   onClick={groupsSearch.openSearch}
-                  className='p-1 hover:bg-gray-100 rounded transition-colors'
+                  className='p-1 hover:bg-muted rounded transition-colors'
                   data-track-category='Projects'
                   data-track-name='OpenGroupSearch'
                 >
-                  <Search className='size-3 text-gray-500' />
+                  <Search className='size-3 text-muted-foreground' />
                 </button>
               </>
             )}
@@ -255,7 +255,7 @@ const ProjectSidebar = ({
           {isGroupsExpanded && (
             <div className='mt-1'>
               {groupsSearch.filteredItems.length === 0 ? (
-                <div className='px-2 py-3 text-[13px] text-gray-400 text-center'>
+                <div className='px-2 py-3 text-[13px] text-muted-foreground text-center'>
                   {groupsSearch.searchQuery ? 'No matching groups' : 'No groups found'}
                 </div>
               ) : (
@@ -301,11 +301,11 @@ const ProjectSidebar = ({
                 </div>
                 <button
                   onClick={personsSearch.openSearch}
-                  className='p-1 hover:bg-gray-100 rounded transition-colors'
+                  className='p-1 hover:bg-muted rounded transition-colors'
                   data-track-category='Projects'
                   data-track-name='OpenPersonSearch'
                 >
-                  <Search className='size-3 text-gray-500' />
+                  <Search className='size-3 text-muted-foreground' />
                 </button>
               </>
             )}
@@ -314,7 +314,7 @@ const ProjectSidebar = ({
           {isPersonsExpanded && (
             <div className='mt-1'>
               {personsSearch.filteredItems.length === 0 ? (
-                <div className='px-2 py-3 text-[13px] text-gray-400 text-center'>
+                <div className='px-2 py-3 text-[13px] text-muted-foreground text-center'>
                   {personsSearch.searchQuery ? 'No matching persons' : 'No persons found'}
                 </div>
               ) : (
@@ -343,12 +343,12 @@ const ProjectSidebar = ({
                   {personsSearch.filteredItems.length > visiblePersonsCount && (
                     <button
                       onClick={() => setVisiblePersonsCount(prev => prev + 5)}
-                      className='w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors hover:bg-gray-100 group'
+                      className='w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors hover:bg-muted group'
                       data-track-category='Projects'
                       data-track-name='ShowMorePersons'
                     >
-                      <ChevronDown className='size-2 text-gray-400 group-hover:text-gray-500' />
-                      <span className='text-[10px] text-gray-400 group-hover:text-gray-600'>
+                      <ChevronDown className='size-2 text-muted-foreground group-hover:text-muted-foreground' />
+                      <span className='text-[10px] text-muted-foreground group-hover:text-muted-foreground'>
                         Show more ({personsSearch.filteredItems.length - visiblePersonsCount})
                       </span>
                     </button>

@@ -23,42 +23,42 @@ export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): Rea
   }
 
   return (
-    <div className='bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden'>
-      <table className='min-w-full divide-y divide-gray-200'>
-        <thead className='bg-gray-50'>
+    <div className='bg-background rounded-lg shadow-sm border border-border overflow-hidden'>
+      <table className='min-w-full divide-y divide-border'>
+        <thead className='bg-muted'>
           <tr>
-            <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
+            <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Board Name
             </th>
-            <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
+            <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Stages
             </th>
-            <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
+            <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Created Date
             </th>
-            <th className='px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider'>
+            <th className='px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Actions
             </th>
           </tr>
         </thead>
-        <tbody className='bg-white divide-y divide-gray-200'>
+        <tbody className='bg-background divide-y divide-border'>
           {boards?.map(board => {
             const stages = (
               board.stages && Array.isArray(board.stages) ? board.stages : []
             ) as readonly Stage[];
 
             return (
-              <tr key={board.id} className='hover:bg-gray-50 transition-colors cursor-pointer'>
+              <tr key={board.id} className='hover:bg-muted transition-colors cursor-pointer'>
                 <td className='px-6 py-4 whitespace-nowrap'>
-                  <span className='text-sm font-medium text-gray-600'>{board.name}</span>
+                  <span className='text-sm font-medium text-muted-foreground'>{board.name}</span>
                 </td>
                 <td className='px-6 py-4 whitespace-nowrap'>
-                  <div className='text-sm text-gray-600'>
+                  <div className='text-sm text-muted-foreground'>
                     {stages.length} {stages.length === 1 ? 'stage' : 'stages'}
                   </div>
                 </td>
                 <td className='px-6 py-4 whitespace-nowrap'>
-                  <div className='text-sm text-gray-600'>
+                  <div className='text-sm text-muted-foreground'>
                     {new Date(board.createdAt).toLocaleDateString()}
                   </div>
                 </td>

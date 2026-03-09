@@ -70,8 +70,8 @@ export const BoardFormSelector = ({
     <div className='space-y-4'>
       <div className='flex items-start justify-between gap-2'>
         <div className='flex-1'>
-          <h3 className='font-medium text-gray-900'>Associated Forms</h3>
-          <p className='text-sm text-gray-500'>
+          <h3 className='font-medium text-foreground'>Associated Forms</h3>
+          <p className='text-sm text-muted-foreground'>
             Select forms to use with this board (one form per entity type)
           </p>
         </div>
@@ -107,7 +107,7 @@ export const BoardFormSelector = ({
                     ? 'border-blue-500 bg-blue-50'
                     : hasConflict
                       ? 'border-yellow-400 bg-yellow-50'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
+                      : 'border-border bg-background hover:border-input'
                 } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {/* Header - Always Visible */}
@@ -122,7 +122,7 @@ export const BoardFormSelector = ({
                         e.stopPropagation();
                         handleCheckboxChange(form.id, e.target.checked);
                       }}
-                      className='flex-shrink-0 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer'
+                      className='flex-shrink-0 w-4 h-4 text-blue-600 border-input rounded focus:ring-ring cursor-pointer'
                       data-track-event='change'
                       data-track-category='Board'
                       data-track-name='ToggleFormSelection'
@@ -151,8 +151,8 @@ export const BoardFormSelector = ({
                       })}
                     >
                       <div className='flex items-center gap-2'>
-                        <span className='font-medium text-gray-900'>{form.formName}</span>
-                        <span className='text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full'>
+                        <span className='font-medium text-foreground'>{form.formName}</span>
+                        <span className='text-xs px-2 py-0.5 bg-muted text-muted-foreground rounded-full'>
                           {form.entityType}
                         </span>
                       </div>
@@ -187,34 +187,34 @@ export const BoardFormSelector = ({
                     })}
                   >
                     {isExpanded ? (
-                      <ChevronDown size={20} className='text-gray-500' />
+                      <ChevronDown size={20} className='text-muted-foreground' />
                     ) : (
-                      <ChevronRight size={20} className='text-gray-500' />
+                      <ChevronRight size={20} className='text-muted-foreground' />
                     )}
                   </div>
                 </div>
 
                 {/* Expanded Content - Description and Fields */}
                 {isExpanded && (
-                  <div className='px-4 pb-4 pt-0 border-t border-gray-100'>
+                  <div className='px-4 pb-4 pt-0 border-t border-border'>
                     {form.formDescription && (
                       <div className='mt-3'>
-                        <h4 className='text-sm font-medium text-gray-700 mb-1'>Description</h4>
-                        <p className='text-sm text-gray-600'>{form.formDescription}</p>
+                        <h4 className='text-sm font-medium text-foreground mb-1'>Description</h4>
+                        <p className='text-sm text-muted-foreground'>{form.formDescription}</p>
                       </div>
                     )}
 
                     {formFields.length > 0 && (
                       <div className='mt-4'>
-                        <h4 className='text-sm font-medium text-gray-700 mb-2'>Fields</h4>
+                        <h4 className='text-sm font-medium text-foreground mb-2'>Fields</h4>
                         <div className='grid grid-cols-2 gap-2'>
                           {formFields.map((field: FormFields) => (
                             <div
                               key={field.id}
-                              className='flex items-center gap-3 p-2 bg-gray-50 rounded text-sm'
+                              className='flex items-center gap-3 p-2 bg-muted rounded text-sm'
                             >
                               <div className='flex-1 min-w-0'>
-                                <span className='font-medium text-gray-900 truncate block'>
+                                <span className='font-medium text-foreground truncate block'>
                                   {field.fieldName}
                                 </span>
                               </div>
@@ -235,8 +235,8 @@ export const BoardFormSelector = ({
           })}
         </div>
       ) : (
-        <div className='text-center py-8 border-2 border-dashed border-gray-200 rounded-lg'>
-          <p className='text-gray-500 text-sm'>
+        <div className='text-center py-8 border-2 border-dashed border-border rounded-lg'>
+          <p className='text-muted-foreground text-sm'>
             No forms available. Create a new form to get started.
           </p>
         </div>

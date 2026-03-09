@@ -26,7 +26,7 @@ export const FinalResultRenderer: React.FC<FinalResultRendererProps> = ({
     const preview = needsTruncation ? jsonString.slice(0, previewLimit) + '…' : jsonString;
 
     return (
-      <div className='text-gray-800 dark:text-gray-200 border-0 px-1 py-2'>
+      <div className='text-foreground dark:text-gray-200 border-0 px-1 py-2'>
         <div className='mb-2 text-sm space-y-1'>
           <div>
             <a
@@ -108,8 +108,8 @@ export const FinalResultRenderer: React.FC<FinalResultRendererProps> = ({
   const preview = needsTruncation ? fallbackJson.slice(0, previewLimit) + '…' : fallbackJson;
 
   return (
-    <div className='text-gray-800 dark:text-gray-200 border-0 px-1 py-2'>
-      <div className='mb-2 text-sm text-gray-500'>Branch link not available</div>
+    <div className='text-foreground dark:text-gray-200 border-0 px-1 py-2'>
+      <div className='mb-2 text-sm text-muted-foreground'>Branch link not available</div>
 
       {isExpanded || showFullFallback ? (
         <MarkdownPreview

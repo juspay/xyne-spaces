@@ -200,13 +200,13 @@ export function RecordingOverlay(): React.ReactElement | null {
         data-track-category='RecordingOverlay'
         data-track-name='drag_handle'
       >
-        <div className='bg-gray-300 dark:bg-gray-600 rounded-full px-3 py-0.5 shadow-sm pointer-events-none'>
-          <GripVertical className='w-3 h-3 text-gray-600 dark:text-gray-300' />
+        <div className='bg-muted-foreground/50 dark:bg-gray-600 rounded-full px-3 py-0.5 shadow-sm pointer-events-none'>
+          <GripVertical className='w-3 h-3 text-muted-foreground dark:text-muted' />
         </div>
       </button>
 
       {/* Card */}
-      <div className='bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 p-4 w-[200px]'>
+      <div className='bg-background dark:bg-gray-800 rounded-lg shadow-2xl border border-border dark:border-gray-700 p-4 w-[200px]'>
         {/* Header */}
         <div className='flex items-center gap-3 mb-3'>
           <div className='relative'>
@@ -225,10 +225,10 @@ export function RecordingOverlay(): React.ReactElement | null {
           </div>
 
           <div className='flex-1'>
-            <div className='font-semibold text-sm text-gray-900 dark:text-gray-100'>
+            <div className='font-semibold text-sm text-foreground dark:text-gray-100'>
               {isStarting ? 'Starting...' : isPaused ? 'Paused' : 'Recording'}
             </div>
-            <div className='text-xs text-gray-500 dark:text-gray-400'>
+            <div className='text-xs text-muted-foreground dark:text-muted-foreground'>
               {isStarting ? 'Connecting...' : formatRecordingDuration(elapsedTime)}
             </div>
           </div>
@@ -254,7 +254,7 @@ export function RecordingOverlay(): React.ReactElement | null {
           <button
             onClick={handlePauseResume}
             disabled={isStarting}
-            className='flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700'
+            className='flex items-center justify-center w-10 h-10 rounded-full bg-muted dark:bg-gray-700'
             data-track-category='RecordingOverlay'
             data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
           >

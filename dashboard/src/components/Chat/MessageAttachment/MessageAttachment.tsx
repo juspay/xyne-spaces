@@ -187,7 +187,7 @@ const Preview: React.FC<{
     return (
       <div
         className={cn(
-          'bg-gray-200 animate-pulse flex items-center justify-center min-w-[256px] min-h-[256px]',
+          'bg-muted animate-pulse flex items-center justify-center min-w-[256px] min-h-[256px]',
           (isInGrid || fullSize) && 'w-full h-full',
         )}
         style={
@@ -218,16 +218,14 @@ const Preview: React.FC<{
         return (
           <div
             className={cn(
-              'bg-gray-100 flex flex-col items-center justify-center gap-2',
+              'bg-muted flex flex-col items-center justify-center gap-2',
               isInGrid ? 'w-full h-full' : 'w-full h-full min-h-[180px]',
             )}
           >
-            <div className='bg-white rounded-lg p-3 shadow-sm border border-gray-200'>
-              {docIcon}
-            </div>
+            <div className='bg-card rounded-lg p-3 shadow-sm border border-border'>{docIcon}</div>
             <div className='text-center'>
-              <div className='text-sm font-semibold text-gray-700'>{ext}</div>
-              <div className='text-xs text-gray-500'>{size}</div>
+              <div className='text-sm font-semibold text-foreground'>{ext}</div>
+              <div className='text-xs text-muted-foreground'>{size}</div>
             </div>
           </div>
         );
@@ -235,20 +233,20 @@ const Preview: React.FC<{
       return (
         <div
           className={cn(
-            'h-full w-full bg-gray-100 flex flex-col items-center justify-center gap-2 p-4',
+            'h-full w-full bg-muted flex flex-col items-center justify-center gap-2 p-4',
             !isMobile && 'min-w-64 min-h-[256px]',
             fullSize && 'min-h-[256px]',
           )}
         >
           {isVideo ? (
             <>
-              <Video size={32} className='text-gray-400' />
-              <span className='text-xs text-gray-500 text-center'>Preview unavailable</span>
+              <Video size={32} className='text-muted-foreground' />
+              <span className='text-xs text-muted-foreground text-center'>Preview unavailable</span>
             </>
           ) : (
             <>
-              <Image size={32} className='text-gray-400' />
-              <span className='text-xs text-gray-500 text-center'>No Preview</span>
+              <Image size={32} className='text-muted-foreground' />
+              <span className='text-xs text-muted-foreground text-center'>No Preview</span>
             </>
           )}
         </div>
@@ -302,15 +300,15 @@ const Preview: React.FC<{
       return (
         <div className='w-full h-full min-h-0 flex flex-col'>
           {/* File metadata header - Slack style */}
-          <div className='bg-gray-50 px-3 py-2.5 border-b border-gray-200 flex items-center gap-3 shrink-0'>
+          <div className='bg-muted px-3 py-2.5 border-b border-border flex items-center gap-3 shrink-0'>
             {/* File icon */}
             <div className='shrink-0 w-8 h-8'>
               <img src={config.icon} alt={extension} className='w-full h-full' />
             </div>
             {/* File info - truncate to prevent overflow on mobile */}
             <div className='flex flex-col min-w-0 flex-1 overflow-hidden'>
-              <span className='text-sm text-gray-900 font-medium'>{displayFileName}</span>
-              <span className='text-xs text-gray-500'>{config.label}</span>
+              <span className='text-sm text-foreground font-medium'>{displayFileName}</span>
+              <span className='text-xs text-muted-foreground'>{config.label}</span>
             </div>
           </div>
           {/* Document preview - fixed height area, content clipped */}
@@ -363,8 +361,8 @@ const Preview: React.FC<{
 
   if (compact) {
     return (
-      <div className='w-full h-full bg-gray-100 flex flex-col items-center justify-center gap-2 p-2'>
-        <div className='bg-white rounded-lg p-2 shadow-sm border border-gray-200'>{icon}</div>
+      <div className='w-full h-full bg-muted flex flex-col items-center justify-center gap-2 p-2'>
+        <div className='bg-card rounded-lg p-2 shadow-sm border border-border'>{icon}</div>
       </div>
     );
   }
@@ -372,14 +370,14 @@ const Preview: React.FC<{
   return (
     <div
       className={cn(
-        'bg-gray-100 flex flex-col items-center justify-center gap-2 w-full h-full',
+        'bg-muted flex flex-col items-center justify-center gap-2 w-full h-full',
         !isInGrid && 'min-h-[256px]',
       )}
     >
-      <div className='bg-white rounded-lg p-3 shadow-sm border border-gray-200'>{icon}</div>
+      <div className='bg-card rounded-lg p-3 shadow-sm border border-border'>{icon}</div>
       <div className='text-center'>
-        <div className='text-sm font-semibold text-gray-700'>{extension}</div>
-        <div className='text-xs text-gray-500'>{formattedSize}</div>
+        <div className='text-sm font-semibold text-foreground'>{extension}</div>
+        <div className='text-xs text-muted-foreground'>{formattedSize}</div>
       </div>
     </div>
   );
@@ -469,12 +467,12 @@ const InlineTextFile: React.FC<{
 
   if (isLoading) {
     return (
-      <div className='max-w-2xl p-4 bg-gray-50 rounded-lg border border-gray-200 animate-pulse'>
-        <div className='h-4 bg-gray-200 rounded w-1/3 mb-3'></div>
+      <div className='max-w-2xl p-4 bg-muted rounded-lg border border-border animate-pulse'>
+        <div className='h-4 bg-accent rounded w-1/3 mb-3'></div>
         <div className='space-y-2'>
-          <div className='h-3 bg-gray-200 rounded w-full'></div>
-          <div className='h-3 bg-gray-200 rounded w-full'></div>
-          <div className='h-3 bg-gray-200 rounded w-4/5'></div>
+          <div className='h-3 bg-accent rounded w-full'></div>
+          <div className='h-3 bg-accent rounded w-full'></div>
+          <div className='h-3 bg-accent rounded w-4/5'></div>
         </div>
       </div>
     );
@@ -482,9 +480,9 @@ const InlineTextFile: React.FC<{
 
   if (error || !fileData) {
     return (
-      <div className='w-full max-w-2xl p-4 bg-red-50 rounded-lg border border-red-200'>
-        <div className='text-sm text-red-800 font-medium mb-1'>Failed to load text file</div>
-        <div className='text-xs text-red-600'>{error || 'Unknown error'}</div>
+      <div className='w-full max-w-2xl p-4 bg-destructive/10 rounded-lg border border-destructive/30'>
+        <div className='text-sm text-destructive font-medium mb-1'>Failed to load text file</div>
+        <div className='text-xs text-destructive/80'>{error || 'Unknown error'}</div>
       </div>
     );
   }
@@ -511,14 +509,14 @@ const InlineTextFile: React.FC<{
           <button
             type='button'
             onClick={openLargeTextFile}
-            className='flex items-center gap-2 p-2 rounded-md transition-colors duration-150 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200'
+            className='flex items-center gap-2 p-2 rounded-md transition-colors duration-150 text-muted-foreground hover:bg-accent hover:text-foreground'
             data-track-category='MESSAGE'
             data-track-name='OPEN_TEXT_FILE'
             data-track-metadata={JSON.stringify({ fileName, attachmentId })}
           >
             <FileText className='h-4 w-4' />
             <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
-            <span className='ml-1 text-xs text-gray-500'>(click to view)</span>
+            <span className='ml-1 text-xs text-muted-foreground'>(click to view)</span>
           </button>
           <button
             type='button'
@@ -526,13 +524,13 @@ const InlineTextFile: React.FC<{
               e.stopPropagation();
               void downloadAttachment(attachmentId, fileName);
             }}
-            className='p-2 hover:bg-gray-100 rounded-lg transition-colors'
+            className='p-2 hover:bg-accent rounded-lg transition-colors'
             title='Download file'
             data-track-category='MESSAGE'
             data-track-name='DOWNLOAD_TEXT_FILE'
             data-track-metadata={JSON.stringify({ fileName, attachmentId })}
           >
-            <Download className='h-4 w-4 text-gray-600' />
+            <Download className='h-4 w-4 text-muted-foreground' />
           </button>
         </div>
       </div>
@@ -546,14 +544,16 @@ const InlineTextFile: React.FC<{
         <button
           type='button'
           onClick={() => setIsExpanded(!isExpanded)}
-          className='flex items-center gap-1 p-2 rounded-md transition-colors duration-150 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200'
+          className='flex items-center gap-1 p-2 rounded-md transition-colors duration-150 text-muted-foreground hover:bg-accent hover:text-foreground'
           data-track-category='MESSAGE'
           data-track-name='TOGGLE_TEXT_PREVIEW'
           data-track-metadata={JSON.stringify({ fileName, attachmentId, isExpanded })}
         >
           <FileText className='h-4 w-4' />
           <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
-          <span className='ml-1 text-xs text-gray-500'>{isExpanded ? '[Hide]' : '[View]'}</span>
+          <span className='ml-1 text-xs text-muted-foreground'>
+            {isExpanded ? '[Hide]' : '[View]'}
+          </span>
         </button>
         <button
           type='button'
@@ -561,13 +561,13 @@ const InlineTextFile: React.FC<{
             e.stopPropagation();
             void downloadAttachment(attachmentId, fileName);
           }}
-          className='p-2 hover:bg-gray-100 rounded-lg transition-colors'
+          className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
           data-track-category='MESSAGE'
           data-track-name='DOWNLOAD_TEXT_FILE_INLINE'
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
         >
-          <Download className='h-4 w-4 text-gray-600' />
+          <Download className='h-4 w-4 text-muted-foreground' />
         </button>
       </div>
 
@@ -743,10 +743,10 @@ const InlineVideoPlayer: React.FC<{
   return (
     <>
       <div className='h-full' style={{ contain: 'layout' }}>
-        <div className='relative bg-black rounded-lg overflow-hidden border border-gray-200 shadow-sm h-full w-full max-w-md'>
+        <div className='relative bg-black rounded-lg overflow-hidden border border-border shadow-sm h-full w-full max-w-md'>
           {/* Show thumbnail on mobile or until user clicks to play on desktop */}
           {loading ? (
-            <div className='bg-gray-200 animate-pulse flex items-center justify-center h-full' />
+            <div className='bg-muted animate-pulse flex items-center justify-center h-full' />
           ) : !hasClickedPlay || isMobile ? (
             <div className='relative h-full'>
               {thumbnailBlobUrl && !thumbnailError ? (
@@ -761,7 +761,7 @@ const InlineVideoPlayer: React.FC<{
               ) : (
                 // Show video icon if no thumbnail
                 <div className={cn('flex items-center justify-center bg-gray-900 h-64 min-w-64')}>
-                  {!isMobile && <Video size={64} className='text-gray-600' />}
+                  {!isMobile && <Video size={64} className='text-muted-foreground' />}
                 </div>
               )}
               <div className='absolute top-4 right-3'>{inlineMenuContent}</div>
@@ -948,7 +948,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     <>
       <div
         className={cn(
-          'message-attachment group/attachment relative flex flex-col bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
+          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
           compact
             ? 'w-16 h-16 '
             : isInGrid
@@ -973,9 +973,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         <div
           className={cn(
             'relative overflow-hidden',
-            compact && 'h-16 w-16 bg-gray-100 rounded-md',
-            !compact &&
-              (isInGrid ? 'w-full h-full bg-gray-50' : isMobile ? 'bg-gray-50' : 'bg-gray-100'),
+            compact && 'h-16 w-16 bg-muted rounded-md',
+            !compact && (isInGrid ? 'w-full h-full bg-muted' : isMobile ? 'bg-muted' : 'bg-muted'),
           )}
         >
           <Preview

@@ -52,7 +52,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
             className='focus:outline-none flex flex-col items-center gap-1 p-0 h-auto'
           >
             {hasStatus && (
-              <div className='h-4 flex items-center justify-center bg-gray-100 rounded-full px-2 min-w-[16px]'>
+              <div className='h-4 flex items-center justify-center bg-muted rounded-full px-2 min-w-[16px]'>
                 <StatusIndicator
                   statusEmoji={user?.presenceStatus?.statusEmoji}
                   statusContent={user?.presenceStatus?.statusContent}
@@ -70,7 +70,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
             side='right'
             align='end'
             sideOffset={8}
-            className='bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-80 z-50'
+            className='bg-background rounded-lg shadow-lg border border-border p-3 w-80 z-50'
           >
             {/* Single Interactive Area */}
             {hasStatus ? (
@@ -86,14 +86,16 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                 data-track-name='Edit_Status'
                 data-track-metadata={JSON.stringify({ hasStatus: true, statusContent })}
               >
-                <div className='flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 transition-colors'>
+                <div className='flex items-center gap-2 p-2 rounded-lg hover:bg-muted transition-colors'>
                   <div className='text-xl mt-0.5'>
-                    {isHovered ? <Pencil className='size-5 text-gray-600' /> : statusEmoji}
+                    {isHovered ? <Pencil className='size-5 text-muted-foreground' /> : statusEmoji}
                   </div>
                   <div className='flex-1 min-w-0'>
-                    <p className='text-sm font-medium text-gray-900 break-words'>{statusContent}</p>
+                    <p className='text-sm font-medium text-foreground break-words'>
+                      {statusContent}
+                    </p>
                     {statusExpiryAt && (
-                      <p className='text-xs text-gray-500 mt-1'>
+                      <p className='text-xs text-muted-foreground mt-1'>
                         {formatExpiryTime(statusExpiryAt, true)}
                       </p>
                     )}
@@ -108,7 +110,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                     data-track-name='Clear_Status'
                     data-track-metadata={JSON.stringify({ statusContent })}
                   >
-                    <X className='size-4 text-gray-600' />
+                    <X className='size-4 text-muted-foreground' />
                   </Button>
                 </div>
               </div>
@@ -116,7 +118,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
               <div
                 role='button'
                 tabIndex={0}
-                className='cursor-pointer p-2 rounded-lg hover:bg-gray-50 transition-colors'
+                className='cursor-pointer p-2 rounded-lg hover:bg-muted transition-colors'
                 onClick={handleStatusAreaClick}
                 onKeyDown={handleKeyDown}
                 data-track-category='App_Sidebar_Avatar_Popover'
@@ -124,8 +126,8 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                 data-track-metadata={JSON.stringify({ hasStatus: false })}
               >
                 <div className='flex items-center gap-2'>
-                  <Smile className='size-5 text-gray-500' />
-                  <span className='text-sm text-gray-600'>Update your status</span>
+                  <Smile className='size-5 text-muted-foreground' />
+                  <span className='text-sm text-muted-foreground'>Update your status</span>
                 </div>
               </div>
             )}

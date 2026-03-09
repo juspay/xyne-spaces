@@ -140,14 +140,16 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
       }}
       className='min-w-[300px] bg-transparent p-0 border-0 shadow-none'
     >
-      <div className='bg-white rounded-lg shadow-lg w-fit border border-muted-foreground/20'>
+      <div className='bg-popover rounded-lg shadow-lg w-fit border border-muted-foreground/20'>
         <div className='flex items-start gap-4 p-4'>
           <Avatar userId={user.id} size='xl' />
           <div className='flex-1'>
-            <div className='font-semibold text-lg text-gray-900 mb-1'>{user.name}</div>
-            {user.email && <div className='text-sm text-gray-500 truncate'>{user.email}</div>}
+            <div className='font-semibold text-lg text-foreground mb-1'>{user.name}</div>
+            {user.email && (
+              <div className='text-sm text-muted-foreground truncate'>{user.email}</div>
+            )}
             {hasValidStatus && (
-              <div className='flex items-center gap-2 mt-2 text-sm text-gray-700'>
+              <div className='flex items-center gap-2 mt-2 text-sm text-foreground'>
                 <StatusIndicator
                   statusEmoji={user.presenceStatus?.statusEmoji}
                   statusContent={user.presenceStatus?.statusContent}

@@ -488,7 +488,7 @@ export const CreateFormModal = ({
               Form Name {!isReadOnly && <span className='text-red-500'>*</span>}
             </label>
             {isReadOnly ? (
-              <div className='px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg'>
+              <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
                 {watch('formName') || '-'}
               </div>
             ) : (
@@ -519,7 +519,7 @@ export const CreateFormModal = ({
               Description
             </label>
             {isReadOnly ? (
-              <div className='px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg min-h-[80px]'>
+              <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg min-h-[80px]'>
                 {watch('formDescription') || '-'}
               </div>
             ) : (
@@ -549,7 +549,7 @@ export const CreateFormModal = ({
               Context Type {!isReadOnly && <span className='text-red-500'>*</span>}
             </label>
             {isReadOnly ? (
-              <div className='px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg'>
+              <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
                 {selectedContextType}
               </div>
             ) : (
@@ -562,7 +562,7 @@ export const CreateFormModal = ({
                     id='contextType'
                     value={value}
                     onChange={e => onChange(e.target.value as FormContextType)}
-                    className='w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100'
+                    className='w-full px-3 py-2 text-sm border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-muted'
                     disabled={isEditMode || createFormMutation.isPending}
                     data-track-event='change'
                     data-track-category='Forms'
@@ -588,7 +588,7 @@ export const CreateFormModal = ({
               Entity Type {!isReadOnly && <span className='text-red-500'>*</span>}
             </label>
             {isReadOnly ? (
-              <div className='px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg'>
+              <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
                 {watch('entityType')}
               </div>
             ) : (
@@ -601,7 +601,7 @@ export const CreateFormModal = ({
                     id='entityType'
                     value={value}
                     onChange={e => onChange(e.target.value)}
-                    className='w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100'
+                    className='w-full px-3 py-2 text-sm border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-muted'
                     disabled={isEditMode || createFormMutation.isPending}
                     data-track-event='change'
                     data-track-category='Forms'
@@ -620,11 +620,11 @@ export const CreateFormModal = ({
 
           {/* Fields Section - Disabled in view mode */}
           <div>
-            <hr className='border-gray-200 my-6' />
+            <hr className='border-border my-6' />
             <div className='flex items-center justify-between mb-4'>
               <div>
-                <h3 className='font-medium text-gray-900'>Form Fields</h3>
-                <p className='text-sm text-gray-500'>Add fields to your form</p>
+                <h3 className='font-medium text-foreground'>Form Fields</h3>
+                <p className='text-sm text-muted-foreground'>Add fields to your form</p>
               </div>
               {!isReadOnly && (
                 <Button
@@ -643,25 +643,25 @@ export const CreateFormModal = ({
             </div>
 
             {fields.length === 0 ? (
-              <div className='text-center py-8 border-2 border-dashed border-gray-200 rounded-lg'>
-                <p className='text-gray-500 text-sm'>
+              <div className='text-center py-8 border-2 border-dashed border-border rounded-lg'>
+                <p className='text-muted-foreground text-sm'>
                   No fields added yet. {!isReadOnly && ' Click "Add Field" to get started.'}
                 </p>
               </div>
             ) : (
               <div className='space-y-3'>
                 {fields.map((field, index) => (
-                  <div key={index} className='flex items-start gap-3 p-4 bg-gray-50 rounded-lg'>
+                  <div key={index} className='flex items-start gap-3 p-4 bg-muted rounded-lg'>
                     <div className='flex-1 space-y-3'>
                       <div>
                         <label
                           htmlFor={`fieldName-${index}`}
-                          className='block text-sm font-medium text-gray-700 mb-1'
+                          className='block text-sm font-medium text-foreground mb-1'
                         >
                           Field Name {!isReadOnly && <span className='text-red-500'>*</span>}
                         </label>
                         {isReadOnly ? (
-                          <div className='px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg'>
+                          <div className='px-3 py-2 text-sm bg-background border border-border rounded-lg'>
                             {field.fieldName || '-'}
                           </div>
                         ) : (
@@ -682,12 +682,12 @@ export const CreateFormModal = ({
                       <div>
                         <label
                           htmlFor={`fieldType-${index}`}
-                          className='block text-sm font-medium text-gray-700 mb-1'
+                          className='block text-sm font-medium text-foreground mb-1'
                         >
                           Field Type {!isReadOnly && <span className='text-red-500'>*</span>}
                         </label>
                         {isReadOnly ? (
-                          <div className='px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg'>
+                          <div className='px-3 py-2 text-sm bg-background border border-border rounded-lg'>
                             {field.fieldType}
                           </div>
                         ) : (
@@ -719,7 +719,7 @@ export const CreateFormModal = ({
                             }}
                             data-track-category='Form'
                             data-track-name='SelectFieldType'
-                            className='w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100'
+                            className='w-full px-3 py-2 text-sm border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-muted'
                             disabled={createFormMutation.isPending}
                           >
                             {Object.values(FormFieldType).map(type => (
@@ -748,13 +748,13 @@ export const CreateFormModal = ({
 
                       {/* Show optional status in read mode */}
                       {isReadOnly && field.isOptional && (
-                        <div className='text-xs text-gray-500 italic'>Optional field</div>
+                        <div className='text-xs text-muted-foreground italic'>Optional field</div>
                       )}
 
                       {/* Field Options - Only for SELECT types */}
                       {isSelectField(field.fieldType) && (
                         <div>
-                          <label className='block text-sm font-medium text-gray-700 mb-2'>
+                          <label className='block text-sm font-medium text-foreground mb-2'>
                             Field Options {!isReadOnly && <span className='text-red-500'>*</span>}
                           </label>
                           {isReadOnly ? (
@@ -763,13 +763,13 @@ export const CreateFormModal = ({
                                 field.fieldEnum.map((option, optIndex) => (
                                   <div
                                     key={optIndex}
-                                    className='px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg'
+                                    className='px-3 py-2 text-sm bg-background border border-border rounded-lg'
                                   >
                                     {option || '(empty)'}
                                   </div>
                                 ))
                               ) : (
-                                <div className='px-3 py-2 text-sm text-gray-400 italic'>
+                                <div className='px-3 py-2 text-sm text-muted-foreground italic'>
                                   No options
                                 </div>
                               )}
@@ -847,7 +847,7 @@ export const CreateFormModal = ({
 
         {/* Fixed actions footer */}
         {!isReadOnly && (
-          <div className='flex gap-2 justify-end p-6 border-t border-gray-200 bg-white'>
+          <div className='flex gap-2 justify-end p-6 border-t border-border bg-background'>
             <Button
               variant='outline'
               onClick={() => onOpenChange(false)}

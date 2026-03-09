@@ -110,14 +110,14 @@ export const DateRangeSubmenu = ({
   };
 
   return (
-    <div className='w-80 bg-white border border-gray-200 rounded-lg shadow-lg'>
+    <div className='w-80 bg-background border border-border rounded-lg shadow-lg'>
       <div className='p-4'>
         {/* Header */}
-        <div className='text-sm font-medium text-gray-900 mb-3'>{label}</div>
+        <div className='text-sm font-medium text-foreground mb-3'>{label}</div>
 
         {/* Quick Presets */}
         <div className='mb-4'>
-          <div className='text-xs font-medium text-gray-500 mb-2'>Quick presets</div>
+          <div className='text-xs font-medium text-muted-foreground mb-2'>Quick presets</div>
           <div className='flex gap-2'>
             <Button
               onClick={() => handlePresetClick('today')}
@@ -150,12 +150,15 @@ export const DateRangeSubmenu = ({
         </div>
 
         {/* Custom Date Range */}
-        <div className='border-t border-gray-100 pt-4'>
-          <div className='text-xs font-medium text-gray-500 mb-3'>Custom range</div>
+        <div className='border-t border-border pt-4'>
+          <div className='text-xs font-medium text-muted-foreground mb-3'>Custom range</div>
 
           <div className='space-y-3'>
             <div>
-              <label htmlFor='start-date' className='block text-xs font-medium text-gray-700 mb-1'>
+              <label
+                htmlFor='start-date'
+                className='block text-xs font-medium text-foreground mb-1'
+              >
                 Start date
               </label>
               <input
@@ -169,14 +172,14 @@ export const DateRangeSubmenu = ({
                   : !allowFutureDates
                     ? { max: new Date().toISOString().split('T')[0] }
                     : {})}
-                className='w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                 data-track-category='Tickets'
                 data-track-name='DateRangeStart'
               />
             </div>
 
             <div>
-              <label htmlFor='end-date' className='block text-xs font-medium text-gray-700 mb-1'>
+              <label htmlFor='end-date' className='block text-xs font-medium text-foreground mb-1'>
                 End date
               </label>
               <input
@@ -186,7 +189,7 @@ export const DateRangeSubmenu = ({
                 onChange={handleEndDateChange}
                 {...(startDate ? { min: startDate } : {})}
                 {...(!allowFutureDates ? { max: new Date().toISOString().split('T')[0] } : {})}
-                className='w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                 data-track-category='Tickets'
                 data-track-name='DateRangeEnd'
               />
@@ -196,7 +199,7 @@ export const DateRangeSubmenu = ({
 
         {/* Clear Button */}
         {(dateRange.start || dateRange.end) && (
-          <div className='border-t border-gray-100 pt-3 mt-4'>
+          <div className='border-t border-border pt-3 mt-4'>
             <Button
               onClick={handleClear}
               variant='ghost'

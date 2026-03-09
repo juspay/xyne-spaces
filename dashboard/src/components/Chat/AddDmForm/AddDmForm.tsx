@@ -65,7 +65,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
         void form.handleSubmit();
       }}
     >
-      <div className='space-y-6  mx-auto bg-white'>
+      <div className='space-y-6  mx-auto bg-background'>
         {/* Conversation Preview */}
         <div>
           <div className='text-base font-medium text-foreground mb-1'>{getConversationTitle()}</div>
@@ -111,7 +111,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
         >
           {field => (
             <div className='space-y-1.5'>
-              <label htmlFor='dm-message' className='text-sm font-medium text-gray-700'>
+              <label htmlFor='dm-message' className='text-sm font-medium text-foreground'>
                 Message (optional)
               </label>
               <Textarea
@@ -127,7 +127,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
                 aria-invalid={field.state.meta.errors.length > 0}
               />
               <div className='flex justify-end mt-1'>
-                <span className='text-sm text-gray-500'>{`${field.state.value.length}/1000 characters`}</span>
+                <span className='text-sm text-muted-foreground'>{`${field.state.value.length}/1000 characters`}</span>
               </div>
               {field.state.meta.errors.length > 0 && field.state.meta.errors[0] && (
                 <p className='text-sm text-red-600'>{field.state.meta.errors[0]}</p>

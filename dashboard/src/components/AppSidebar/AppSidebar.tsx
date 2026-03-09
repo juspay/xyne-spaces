@@ -344,7 +344,7 @@ const AppSidebar = (): ReactElement => {
                       data-track-name='Sidebar_Nav_Item'
                       data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                       className={`size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
-                        isActive ? 'text-white' : 'bg-transparent text-gray-700'
+                        isActive ? 'text-white' : 'bg-transparent text-foreground'
                       }`}
                     >
                       {item.icon}
@@ -368,7 +368,7 @@ const AppSidebar = (): ReactElement => {
             hasValidStatus ? (
               <div
                 className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90'
-                style={{ backgroundColor: '#CFD4E2' }}
+                style={{ backgroundColor: 'var(--sidebar-divider, #CFD4E2)' }}
               >
                 {/* Status Emoji at Top Center */}
                 <div
@@ -400,7 +400,7 @@ const AppSidebar = (): ReactElement => {
                   {user ? (
                     <Avatar userId={user.id} size='md' className='rounded-lg' />
                   ) : (
-                    <div className='size-9 rounded-xl flex items-center justify-center bg-gray-200'>
+                    <div className='size-9 rounded-xl flex items-center justify-center bg-border'>
                       <Settings size={14} color='var(--app-sidebar-active-foreground)' />
                     </div>
                   )}
@@ -413,7 +413,7 @@ const AppSidebar = (): ReactElement => {
                   {user ? (
                     <Avatar userId={user.id} size='md' className='rounded-md' />
                   ) : (
-                    <div className='size-9 rounded-xl flex items-center justify-center bg-gray-200'>
+                    <div className='size-9 rounded-xl flex items-center justify-center bg-border'>
                       <Settings size={14} color='var(--app-sidebar-active-foreground)' />
                     </div>
                   )}
@@ -549,7 +549,7 @@ const MobileNavbar = ({
                   </div>
                   <span
                     className={`font-medium text-[12px] leading-[1.2] text-center whitespace-nowrap font-['Geist',sans-serif] ${
-                      isActive ? 'text-white' : 'text-gray-300'
+                      isActive ? 'text-white' : 'text-muted'
                     }`}
                   >
                     {item.label}
@@ -578,7 +578,7 @@ const MobileNavbar = ({
               <div className='size-[24px] flex items-center justify-center'>
                 <MoreHorizontal size={20} className='text-[#c9cccf]' />
               </div>
-              <span className='font-medium text-[12px] leading-[1.2] text-center whitespace-nowrap font-Geist text-gray-300'>
+              <span className='font-medium text-[12px] leading-[1.2] text-center whitespace-nowrap font-Geist text-muted'>
                 More
               </span>
 

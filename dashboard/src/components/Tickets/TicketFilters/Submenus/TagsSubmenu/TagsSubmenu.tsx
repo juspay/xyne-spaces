@@ -59,11 +59,11 @@ export const TagsSubmenu = ({
 
   return (
     <div
-      className={`w-80 border border-gray-200 flex flex-col rounded-lg shadow-lg bg-white overflow-hidden ${className}`}
+      className={`w-80 border border-border flex flex-col rounded-lg shadow-lg bg-background overflow-hidden ${className}`}
     >
-      <div className='p-3 border-b sticky top-0 bg-white z-10'>
+      <div className='p-3 border-b sticky top-0 bg-background z-10'>
         <div className='relative'>
-          <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none' />
+          <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
           <Input
             ref={searchInputRef}
             type='text'
@@ -76,7 +76,7 @@ export const TagsSubmenu = ({
       </div>
       <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
         {!availableTags || availableTags.length === 0 ? (
-          <div className='p-8 text-center text-sm text-gray-400'>No tags available</div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>No tags available</div>
         ) : finalResults.length > 0 ? (
           <div className='space-y-0.5'>
             {finalResults.map(tag => {
@@ -88,7 +88,7 @@ export const TagsSubmenu = ({
                   onClick={() => handleTagToggle(tag)}
                   className={`
                     w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
-                    ${isSelected ? 'bg-[#F2F2F3] text-black' : 'hover:bg-gray-50 text-gray-700'}
+                    ${isSelected ? 'bg-accent text-black' : 'hover:bg-muted text-foreground'}
                     focus-visible:ring-2 focus-visible:ring-[#F2F2F3]
                   `}
                   data-track-category='Tickets'
@@ -96,7 +96,7 @@ export const TagsSubmenu = ({
                   data-track-metadata={JSON.stringify({ tag, selected: !isSelected })}
                 >
                   <div className='flex items-center justify-center w-5 h-5 shrink-0'>
-                    <Tag className='w-4 h-4 text-gray-400' />
+                    <Tag className='w-4 h-4 text-muted-foreground' />
                   </div>
                   <span className='flex-1 text-left text-sm truncate'>{tag}</span>
                   {isSelected && (
@@ -107,12 +107,12 @@ export const TagsSubmenu = ({
             })}
           </div>
         ) : (
-          <div className='p-8 text-center text-sm text-gray-400'>No tags found</div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>No tags found</div>
         )}
       </div>
       {selectedTags.length > 0 && (
-        <div className='p-3 border-t bg-gray-50'>
-          <div className='text-xs text-gray-500'>
+        <div className='p-3 border-t bg-muted'>
+          <div className='text-xs text-muted-foreground'>
             {selectedTags.length} tag{selectedTags.length !== 1 ? 's' : ''} selected
           </div>
         </div>

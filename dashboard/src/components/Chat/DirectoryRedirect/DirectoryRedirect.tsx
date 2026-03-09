@@ -29,7 +29,9 @@ const DirectoryRedirect = (): ReactElement => {
 
   // Return null while redirecting
   return (
-    <div className='flex items-center justify-center h-full text-gray-400'>Redirecting...</div>
+    <div className='flex items-center justify-center h-full text-muted-foreground'>
+      Redirecting...
+    </div>
   );
 };
 

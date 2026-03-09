@@ -14,8 +14,8 @@ export const CanvasDeleteModal: React.FC<CanvasDeleteModalProps> = ({
 }) => {
   return (
     <div className='p-6'>
-      <h2 className='text-lg font-semibold text-gray-900 mb-2'>Delete Canvas</h2>
-      <p className='text-gray-600 mb-6'>
+      <h2 className='text-lg font-semibold text-foreground mb-2'>Delete Canvas</h2>
+      <p className='text-muted-foreground mb-6'>
         Are you sure you want to delete{canvasTitle ? ` "${canvasTitle}"` : ' this canvas'}? This
         action cannot be undone.
       </p>

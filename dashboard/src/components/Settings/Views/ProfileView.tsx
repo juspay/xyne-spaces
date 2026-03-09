@@ -112,6 +112,11 @@ const ProfileView = ({
           #6274a6 100%
         )`,
       },
+      {
+        id: 'midnight',
+        label: 'Midnight',
+        bg: '#0a0a0a',
+      },
     ];
 
   return (
@@ -121,44 +126,44 @@ const ProfileView = ({
           <Avatar userId={user?.id || ''} size='lg' showActiveStatus={false} />
         </div>
         <div className='flex-1 min-w-0 space-y-1'>
-          <p className='text-sm font-medium text-gray-900 truncate'>{user?.name || 'User'}</p>
+          <p className='text-sm font-medium text-foreground truncate'>{user?.name || 'User'}</p>
 
           {/* Presence Status Dropdown - inline for mobile compatibility */}
           <div className='relative'>
             <button
               onClick={() => setIsPresenceDropdownOpen(!isPresenceDropdownOpen)}
-              className='flex items-center gap-1.5 hover:bg-gray-100 px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
+              className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
               data-track-category='PROFILE'
               data-track-name='TogglePresenceDropdown'
               data-track-metadata={JSON.stringify({ isOpen: !isPresenceDropdownOpen })}
             >
               {livePresenceStatus === 'ONLINE' ? (
-                <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-white' />
+                <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-background' />
               ) : (
-                <div className='w-2 h-2 rounded-full bg-gray-300 ring-2 ring-white'>
-                  <div className='w-full h-full rounded-full bg-white/50' />
+                <div className='w-2 h-2 rounded-full bg-muted-foreground/50 ring-2 ring-background'>
+                  <div className='w-full h-full rounded-full bg-background/50' />
                 </div>
               )}
-              <p className='text-xs text-gray-600'>
+              <p className='text-xs text-muted-foreground'>
                 {livePresenceStatus !== 'AWAY' ? 'Active' : 'Away'}
               </p>
               <ChevronDown
                 className={cn(
-                  'size-3 text-gray-400 transition-transform',
+                  'size-3 text-muted-foreground transition-transform',
                   isPresenceDropdownOpen && 'rotate-180',
                 )}
               />
             </button>
 
             {isPresenceDropdownOpen && (
-              <div className='absolute left-0 top-full mt-1 w-40 p-1 bg-white rounded-md border shadow-md z-10'>
+              <div className='absolute left-0 top-full mt-1 w-40 p-1 bg-background rounded-md border shadow-md z-10'>
                 <div className='space-y-0.5'>
                   <button
                     onClick={() => {
                       setLivePresenceStatus('ONLINE');
                       setIsPresenceDropdownOpen(false);
                     }}
-                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='SetPresenceOnline'
                     data-track-metadata={JSON.stringify({ newStatus: 'ONLINE' })}
@@ -166,7 +171,7 @@ const ProfileView = ({
                     <div className='w-2 h-2 rounded-full bg-green-500' />
                     <span>Active</span>
                     {livePresenceStatus !== 'AWAY' && (
-                      <Check className='size-3 ml-auto text-gray-500' />
+                      <Check className='size-3 ml-auto text-muted-foreground' />
                     )}
                   </button>
                   <button
@@ -174,15 +179,15 @@ const ProfileView = ({
                       setLivePresenceStatus('AWAY');
                       setIsPresenceDropdownOpen(false);
                     }}
-                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='SetPresenceAway'
                     data-track-metadata={JSON.stringify({ newStatus: 'AWAY' })}
                   >
-                    <div className='w-2 h-2 rounded-full border border-gray-400' />
+                    <div className='w-2 h-2 rounded-full border border-muted-foreground' />
                     <span>Away</span>
                     {livePresenceStatus === 'AWAY' && (
-                      <Check className='size-3 ml-auto text-gray-500' />
+                      <Check className='size-3 ml-auto text-muted-foreground' />
                     )}
                   </button>
                 </div>
@@ -196,10 +201,10 @@ const ProfileView = ({
       <div className='space-y-1'>
         <div
           className={cn(
-            'p-2 rounded-lg border cursor-pointer hover:bg-gray-200 transition-colors w-full',
+            'p-2 rounded-lg border cursor-pointer hover:bg-border transition-colors w-full',
             hasValidStatus
-              ? 'border-gray-200 bg-transparent hover:bg-gray-100'
-              : 'border-gray-200 bg-gray-50',
+              ? 'border-border bg-transparent hover:bg-muted'
+              : 'border-border bg-muted',
           )}
           onClick={handleStatusClick}
           onKeyDown={e => {
@@ -226,7 +231,7 @@ const ProfileView = ({
                     showOnHover={false}
                   />
                 </div>
-                <div className='text-sm font-medium text-gray-900 truncate'>
+                <div className='text-sm font-medium text-foreground truncate'>
                   {user?.presenceStatus?.statusContent}
                 </div>
               </div>
@@ -234,21 +239,21 @@ const ProfileView = ({
                 variant='ghost'
                 size='lg'
                 onClick={handleClearStatus}
-                className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
+                className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
               >
-                <X className='size-3 text-gray-600' />
+                <X className='size-3 text-muted-foreground' />
               </Button>
             </div>
           ) : (
-            <div className='flex items-center p-1 gap-2 text-gray-600'>
+            <div className='flex items-center p-1 gap-2 text-muted-foreground'>
               <SmilePlus className='size-4 flex-shrink-0' />
               <span className='text-xs truncate'>Set a status</span>
             </div>
           )}
         </div>
         {hasValidStatus && user?.presenceStatus?.statusExpiryAt && (
-          <div className='text-xs text-gray-500 px-2'>
+          <div className='text-xs text-muted-foreground px-2'>
             {formatExpiryTime(user.presenceStatus.statusExpiryAt, true)}
           </div>
         )}
@@ -261,8 +266,8 @@ const ProfileView = ({
             className={cn(
               'px-2 py-1 rounded-lg border transition-colors w-full flex items-center justify-between gap-2',
               isCurrentlyUnavailable
-                ? 'border-gray-200 bg-transparent hover:bg-gray-100'
-                : 'border-gray-200 bg-gray-50 hover:bg-gray-200 cursor-pointer',
+                ? 'border-border bg-transparent hover:bg-muted'
+                : 'border-border bg-muted hover:bg-border cursor-pointer',
             )}
             onClick={() => {
               if (!isCurrentlyUnavailable) {
@@ -285,13 +290,13 @@ const ProfileView = ({
           >
             {isCurrentlyUnavailable ? (
               <div className='flex items-center gap-2 min-w-0 flex-1'>
-                <PauseCircle className='size-4 flex-shrink-0 text-gray-600' />
-                <div className='text-sm font-medium text-gray-900 truncate'>
+                <PauseCircle className='size-4 flex-shrink-0 text-muted-foreground' />
+                <div className='text-sm font-medium text-foreground truncate'>
                   Paused from ticket assignment
                 </div>
               </div>
             ) : (
-              <div className='flex items-center p-1 gap-2 text-gray-600'>
+              <div className='flex items-center p-1 gap-2 text-muted-foreground'>
                 <PauseCircle className='size-4 flex-shrink-0' />
                 <span className='text-xs truncate'>Pause from ticket assignment</span>
               </div>
@@ -301,18 +306,18 @@ const ProfileView = ({
               <Button
                 variant='ghost'
                 size='lg'
-                className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
+                className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume ticket assignment'
                 onClick={handleResumeAssignment}
                 data-track-category='PROFILE'
                 data-track-name='ResumeAssignment'
               >
-                <X className='size-3 text-gray-600' />
+                <X className='size-3 text-muted-foreground' />
               </Button>
             )}
           </div>
           {isCurrentlyUnavailable && unavailableUntil && (
-            <div className='text-xs text-gray-500 px-2'>
+            <div className='text-xs text-muted-foreground px-2'>
               Until {new Date(unavailableUntil).toLocaleString()}
             </div>
           )}
@@ -321,11 +326,11 @@ const ProfileView = ({
 
       <div className='py-1'>
         <div className='flex items-center gap-3'>
-          <div className='p-2 bg-gray-50 rounded'>
+          <div className='p-2 bg-muted rounded'>
             <Mail className='size-5' />
           </div>
           <div>
-            <p className='text-sm text-gray-500'>Mail</p>
+            <p className='text-sm text-muted-foreground'>Mail</p>
             <Link to={`mailto:${user?.email}`} className='text-sm tracking-wide'>
               {user?.email}
             </Link>
@@ -333,11 +338,11 @@ const ProfileView = ({
         </div>
         {user?.createdAt && (
           <div className='mt-4 flex items-center gap-2'>
-            <div className='p-2 bg-gray-50 rounded'>
+            <div className='p-2 bg-muted rounded'>
               <Clock className='size-5' />
             </div>
             <div>
-              <p className='text-sm text-gray-500'>Joined On</p>
+              <p className='text-sm text-muted-foreground'>Joined On</p>
               <p className='text-sm tracking-wide'>
                 {format(user.createdAt, 'MMM d, yyyy')} (
                 {formatDistanceToNow(user.createdAt, { addSuffix: true })})
@@ -416,7 +421,7 @@ const ProfileView = ({
         </Button>
       </div>
 
-      <div className='text-xs flex flex-col gap-1 text-gray-400'>
+      <div className='text-xs flex flex-col gap-1 text-muted-foreground'>
         <div>Version: {__APP_VERSION__}</div>
         {logger.zeroClientID && (
           <button
@@ -430,7 +435,7 @@ const ProfileView = ({
                   toast.error('Failed to copy Client ID');
                 });
             }}
-            className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+            className='flex items-center gap-1 hover:text-muted-foreground transition-colors cursor-pointer text-left'
             data-track-category='PROFILE'
             data-track-name='CopyClientId'
           >
@@ -450,7 +455,7 @@ const ProfileView = ({
                   toast.error('Failed to copy Client Group ID');
                 });
             }}
-            className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+            className='flex items-center gap-1 hover:text-muted-foreground transition-colors cursor-pointer text-left'
             data-track-category='PROFILE'
             data-track-name='CopyClientGroupId'
           >

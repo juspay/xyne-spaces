@@ -248,15 +248,15 @@ export const QueryBuilderScreen: React.FC = () => {
   if (!currentDashboard) {
     return (
       <div className='flex items-center justify-center h-full'>
-        <p className='text-gray-500'>Loading dashboard...</p>
+        <p className='text-muted-foreground'>Loading dashboard...</p>
       </div>
     );
   }
 
   return (
-    <div className='flex flex-col h-full bg-white rounded-lg shadow-sm'>
+    <div className='flex flex-col h-full bg-background rounded-lg shadow-sm'>
       {/* Header */}
-      <div className='flex items-center justify-between px-4 py-3 border-b border-gray-200'>
+      <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
         <div className='flex items-center gap-3'>
           <Button
             variant='ghost'
@@ -267,7 +267,7 @@ export const QueryBuilderScreen: React.FC = () => {
           >
             <ChevronLeft className='w-5 h-5' />
           </Button>
-          <h2 className='text-lg font-semibold text-gray-900'>{currentDashboard.name}</h2>
+          <h2 className='text-lg font-semibold text-foreground'>{currentDashboard.name}</h2>
         </div>
         <Button
           variant='ghost'
@@ -282,10 +282,10 @@ export const QueryBuilderScreen: React.FC = () => {
 
       <div className='flex flex-1 overflow-hidden'>
         {/* Left side - Query Builder */}
-        <div className='w-[40%] flex flex-col overflow-auto border-r border-gray-200 p-4'>
+        <div className='w-[40%] flex flex-col overflow-auto border-r border-border p-4'>
           {/* Query Name */}
           <div className='mb-4'>
-            <label htmlFor='queryName' className='block text-sm font-medium text-gray-700 mb-1'>
+            <label htmlFor='queryName' className='block text-sm font-medium text-foreground mb-1'>
               Query Name
             </label>
             <Input
@@ -300,7 +300,10 @@ export const QueryBuilderScreen: React.FC = () => {
           {/* Entity Type & Limit/Offset */}
           <div className='mb-4 flex gap-4 items-end'>
             <div>
-              <label htmlFor='entityType' className='block text-sm font-medium text-gray-700 mb-1'>
+              <label
+                htmlFor='entityType'
+                className='block text-sm font-medium text-foreground mb-1'
+              >
                 Entity Type
               </label>
               <select
@@ -320,7 +323,7 @@ export const QueryBuilderScreen: React.FC = () => {
               </select>
             </div>
             <div>
-              <label htmlFor='limit' className='block text-sm font-medium text-gray-700 mb-1'>
+              <label htmlFor='limit' className='block text-sm font-medium text-foreground mb-1'>
                 Limit
               </label>
               <Input
@@ -334,7 +337,7 @@ export const QueryBuilderScreen: React.FC = () => {
               />
             </div>
             <div>
-              <label htmlFor='offset' className='block text-sm font-medium text-gray-700 mb-1'>
+              <label htmlFor='offset' className='block text-sm font-medium text-foreground mb-1'>
                 Offset
               </label>
               <Input
@@ -351,7 +354,7 @@ export const QueryBuilderScreen: React.FC = () => {
           {/* Order By */}
           <div className='mb-4'>
             <div className='flex items-center justify-between mb-2'>
-              <span className='block text-sm font-medium text-gray-700'>Order By</span>
+              <span className='block text-sm font-medium text-foreground'>Order By</span>
               <Button
                 variant='ghost'
                 size='sm'
@@ -425,7 +428,7 @@ export const QueryBuilderScreen: React.FC = () => {
           {/* Aggregations */}
           <div className='mb-4'>
             <div className='flex items-center justify-between mb-2'>
-              <span className='block text-sm font-medium text-gray-700'>Aggregations</span>
+              <span className='block text-sm font-medium text-foreground'>Aggregations</span>
               <Button
                 variant='ghost'
                 size='sm'
@@ -519,7 +522,7 @@ export const QueryBuilderScreen: React.FC = () => {
           {aggregations.length > 0 && (
             <div className='mb-4'>
               <div className='flex items-center justify-between mb-2'>
-                <span className='block text-sm font-medium text-gray-700'>Group By</span>
+                <span className='block text-sm font-medium text-foreground'>Group By</span>
                 <Button
                   variant='ghost'
                   size='sm'
@@ -579,7 +582,7 @@ export const QueryBuilderScreen: React.FC = () => {
           {/* Select Fields */}
           {fields && fields.length > 0 && (
             <div className='mb-4'>
-              <span className='block text-sm font-medium text-gray-700 mb-1'>Select Fields</span>
+              <span className='block text-sm font-medium text-foreground mb-1'>Select Fields</span>
               <div className='grid grid-cols-4 gap-2 p-2'>
                 {fields.map(field => (
                   <label key={field.name} className='flex items-center gap-2 cursor-pointer'>
@@ -590,12 +593,12 @@ export const QueryBuilderScreen: React.FC = () => {
                         if (e.target.checked) setSelectedFields(p => [...p, field.name]);
                         else setSelectedFields(p => p.filter(f => f !== field.name));
                       }}
-                      className='rounded border-gray-300'
+                      className='rounded border-input'
                       data-track-category='QueryBuilder'
                       data-track-name='ToggleField'
                       data-track-metadata={JSON.stringify({ fieldName: field.name })}
                     />
-                    <span className='text-sm text-gray-700'>{field.label}</span>
+                    <span className='text-sm text-foreground'>{field.label}</span>
                   </label>
                 ))}
               </div>
@@ -613,7 +616,7 @@ export const QueryBuilderScreen: React.FC = () => {
                 controlElements={{ valueEditor: CustomValueEditor }}
               />
             ) : (
-              <div className='flex items-center justify-center h-32 text-gray-500'>
+              <div className='flex items-center justify-center h-32 text-muted-foreground'>
                 {selectedEntityType
                   ? 'Loading query builder...'
                   : 'Select an entity type to start building a query'}
@@ -622,7 +625,7 @@ export const QueryBuilderScreen: React.FC = () => {
           </div>
 
           {/* Save/Cancel Buttons */}
-          <div className='mt-4 pt-4 border-t border-gray-200'>
+          <div className='mt-4 pt-4 border-t border-border'>
             <div className='flex gap-2'>
               {editingQueryId && (
                 <Button variant='secondary' className='flex-1' onClick={resetForm}>
@@ -651,7 +654,7 @@ export const QueryBuilderScreen: React.FC = () => {
 
         {/* Right side - Query Results */}
         <div className='flex-1 flex flex-col p-4 overflow-auto'>
-          <h3 className='text-sm font-medium text-gray-700 mb-3'>Query Results</h3>
+          <h3 className='text-sm font-medium text-foreground mb-3'>Query Results</h3>
           <QueryResults
             dashboardData={currentDashboard}
             onDeleteQuery={handleDeleteQuery}

@@ -441,11 +441,11 @@ export const COEForm = ({
   if (!isCoeEnabled) {
     return (
       <div className='max-w-4xl mx-auto'>
-        <div className='bg-white shadow-sm border border-gray-200 rounded-xl overflow-hidden p-8'>
+        <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden p-8'>
           <div className='flex items-center gap-4 mb-4'>
-            <div className='h-12 w-12 rounded-xl bg-gray-100 flex items-center justify-center'>
+            <div className='h-12 w-12 rounded-xl bg-muted flex items-center justify-center'>
               <svg
-                className='h-6 w-6 text-gray-500'
+                className='h-6 w-6 text-muted-foreground'
                 fill='none'
                 viewBox='0 0 24 24'
                 stroke='currentColor'
@@ -459,8 +459,10 @@ export const COEForm = ({
               </svg>
             </div>
             <div>
-              <p className='text-lg font-semibold text-gray-900'>COE Locked</p>
-              <p className='text-sm text-gray-500'>Submit Impact details to unlock COE phase.</p>
+              <p className='text-lg font-semibold text-foreground'>COE Locked</p>
+              <p className='text-sm text-muted-foreground'>
+                Submit Impact details to unlock COE phase.
+              </p>
             </div>
           </div>
           <Button variant='outline' size='sm' onClick={() => onPhaseChange('impact')}>
@@ -473,9 +475,9 @@ export const COEForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-white shadow-sm border border-gray-200 rounded-xl overflow-hidden'>
+      <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden'>
         {/* Header Section */}
-        <div className='px-8 py-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white'>
+        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-gray-50 to-white'>
           <div className='flex items-center justify-between'>
             <div className='flex items-center gap-3'>
               <div className='h-10 w-10 rounded-lg bg-purple-600 flex items-center justify-center'>
@@ -494,8 +496,10 @@ export const COEForm = ({
                 </svg>
               </div>
               <div>
-                <h2 className='text-xl font-bold text-gray-900'>COE Actions</h2>
-                <p className='text-sm text-gray-500'>Capture corrective and preventive actions</p>
+                <h2 className='text-xl font-bold text-foreground'>COE Actions</h2>
+                <p className='text-sm text-muted-foreground'>
+                  Capture corrective and preventive actions
+                </p>
               </div>
             </div>
           </div>
@@ -512,7 +516,7 @@ export const COEForm = ({
               )}
 
               <div className='p-1 space-y-2'>
-                <p className='text-sm font-semibold text-gray-900'>Quick Fixes Done</p>
+                <p className='text-sm font-semibold text-foreground'>Quick Fixes Done</p>
                 <MultiSelect
                   placeholder='Select quick fixes'
                   options={quickFixOptions}
@@ -527,9 +531,9 @@ export const COEForm = ({
             ? visibleCoeEntries.map((coeEntry, index) => (
                 <div
                   key={coeEntry.id}
-                  className='space-y-6 pb-8 border-b border-gray-200 last:border-b-0 last:pb-0'
+                  className='space-y-6 pb-8 border-b border-border last:border-b-0 last:pb-0'
                 >
-                  <h4 className='text-base font-semibold text-gray-900'>COE {index + 1}</h4>
+                  <h4 className='text-base font-semibold text-foreground'>COE {index + 1}</h4>
                   <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
                     <ReadOnlyField
                       label='Owner'
@@ -556,8 +560,8 @@ export const COEForm = ({
                 </div>
               ))
             : selectedCoe && (
-                <div className='space-y-6 pb-8 border-b border-gray-200'>
-                  <h4 className='text-base font-semibold text-gray-900'>COE</h4>
+                <div className='space-y-6 pb-8 border-b border-border'>
+                  <h4 className='text-base font-semibold text-foreground'>COE</h4>
 
                   <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
                     <coeForm.Field
@@ -676,7 +680,7 @@ export const COEForm = ({
                   >
                     {field => (
                       <div className='space-y-1.5'>
-                        <label htmlFor='coe-action' className='text-sm font-medium text-gray-700'>
+                        <label htmlFor='coe-action' className='text-sm font-medium text-foreground'>
                           Action *
                         </label>
                         <Textarea
@@ -711,10 +715,10 @@ export const COEForm = ({
           {pendingCOEs.map((pendingCoe, index) => (
             <div
               key={index}
-              className='space-y-6 pb-8 border-b border-gray-200 last:border-b-0 last:pb-0'
+              className='space-y-6 pb-8 border-b border-border last:border-b-0 last:pb-0'
             >
               <div className='flex items-center justify-between'>
-                <h4 className='text-sm font-semibold text-gray-900'>COE</h4>
+                <h4 className='text-sm font-semibold text-foreground'>COE</h4>
                 <Button
                   type='button'
                   size='sm'
@@ -771,7 +775,7 @@ export const COEForm = ({
               <div className='space-y-1.5'>
                 <label
                   htmlFor={`coe-action-${index}`}
-                  className='text-sm font-medium text-gray-700'
+                  className='text-sm font-medium text-foreground'
                 >
                   Action *
                 </label>
@@ -813,8 +817,8 @@ export const COEForm = ({
 
           {!isLocked && (
             /* Sticky Footer */
-            <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-white/95 backdrop-blur border-t border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
-              <div className='text-xs text-gray-500'>
+            <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
+              <div className='text-xs text-muted-foreground'>
                 {pendingCOEs.length > 0
                   ? `${pendingCOEs.length} pending COE(s) to submit`
                   : selectedCoe

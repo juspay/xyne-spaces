@@ -103,18 +103,14 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   return (
     <div
       key={`hover-actions-toolbar-${messageId}`}
-      className='absolute -top-7 right-4 z-50 p-1 flex items-center gap-1 rounded-lg border border-[var(--gray-300,#E4E6E7)] bg-[var(--gray-50,#FFF)] shadow-md'
+      className='absolute -top-7 right-4 z-50 p-1 flex items-center gap-1 rounded-lg border border-border bg-popover shadow-md'
     >
       {/* Reactions - CONDITIONAL CHECK ADDED HERE */}
       {onEmojiPickerOpenChange && (
         <Popover
           key={`emoji-picker-${messageId}`}
           trigger={
-            <Button
-              variant='ghost'
-              className='size-7 text-[rgba(120,129,135,1)]'
-              title='Add reaction'
-            >
+            <Button variant='ghost' className='size-7 text-muted-foreground' title='Add reaction'>
               <SmilePlus className='w-4 h-4' />
             </Button>
           }
@@ -126,7 +122,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
           sideOffset={8}
           collisionPadding={16}
           avoidCollisions={true}
-          className='z-50 bg-white rounded-lg shadow-md p-0'
+          className='z-50 bg-popover rounded-lg shadow-md p-0'
         >
           <EmojiPicker
             style={{ width: '320px' }}
@@ -157,7 +153,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Reply in thread' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={e => onReplyInThread(e)}
             title='Reply in thread'
             data-testid='hover-action-reply-in-thread'
@@ -176,7 +172,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
           <span className='inline-flex cursor-pointer'>
             <Button
               variant='ghost'
-              className='size-7 text-[rgba(120,129,135,1)]'
+              className='size-7 text-muted-foreground'
               onClick={onInitiateCall}
               disabled={isCallDisabled}
               title={isCallDisabled ? 'Call already in progress' : 'Start call'}
@@ -192,7 +188,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Send to channel' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onSendToChannel}
             title='Send to channel'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
@@ -209,7 +205,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Create ticket' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onCreateTicket}
             title='Create ticket'
             data-testid='hover-action-create-ticket'
@@ -227,7 +223,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Create subticket' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onCreateSubTicket}
             title='Create subticket'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
@@ -244,7 +240,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Copy link' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onCopyLink}
             title='Copy link'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
@@ -261,7 +257,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Copy message' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onCopyMessage}
             title='Copy message'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
@@ -278,7 +274,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Forward message' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onForwardMessage}
             title='Forward message'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
@@ -295,7 +291,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content={isPinned ? 'Unpin message' : 'Pin message'} side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onPinMessage}
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='TOGGLE_PIN_MESSAGE'
@@ -311,7 +307,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Ask AI' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onAskAI}
             title='Ask AI'
             data-testid='hover-action-ask-ai'
@@ -326,7 +322,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content={isBookmarked ? 'Remove bookmark' : 'Add Bookmark'} side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onBookmark}
             title={isBookmarked ? 'Remove bookmark' : 'Add Bookmark'}
             data-track-category='HOVER_ACTIONS_TOOLBAR'
@@ -348,7 +344,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
           <ConversationSubscription
             conversationId={conversationId}
             variant='icon-only'
-            className='size-7 flex items-center justify-center text-[rgba(120,129,135,1)] hover:bg-gray-100 rounded transition-colors'
+            className='size-7 flex items-center justify-center text-muted-foreground hover:bg-accent rounded transition-colors'
           />
         </Tooltip>
       )}
@@ -358,7 +354,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Mark as Unread' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onMarkAsUnread}
             title='Mark as Unread'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
@@ -377,7 +373,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <Tooltip content='Edit in Chat' side='top'>
           <Button
             variant='ghost'
-            className='size-7 text-[rgba(120,129,135,1)]'
+            className='size-7 text-muted-foreground'
             onClick={onEditMessage}
             title='Edit in Chat'
             data-track-category='HOVER_ACTIONS_TOOLBAR'

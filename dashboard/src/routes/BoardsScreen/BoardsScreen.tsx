@@ -130,14 +130,14 @@ const BoardsScreen = (): ReactElement => {
 
   if (loading) {
     return (
-      <div className='h-full bg-gray-50 flex items-center justify-center'>
-        <p className='text-gray-600'>Loading...</p>
+      <div className='h-full bg-muted flex items-center justify-center'>
+        <p className='text-muted-foreground'>Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className='h-full bg-gray-50 p-8'>
+    <div className='h-full bg-muted p-8'>
       <div className='max-w-7xl mx-auto'>
         <PageHeader
           title='Boards'

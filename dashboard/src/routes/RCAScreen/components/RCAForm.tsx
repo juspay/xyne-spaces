@@ -209,9 +209,9 @@ export const RCAForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-white shadow-sm border border-gray-200 rounded-xl overflow-hidden'>
+      <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden'>
         {/* Header Section */}
-        <div className='px-8 py-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white'>
+        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-gray-50 to-white'>
           <div className='flex items-center justify-between'>
             <div className='flex items-center gap-3'>
               <div className='h-10 w-10 rounded-lg bg-blue-600 flex items-center justify-center'>
@@ -230,8 +230,8 @@ export const RCAForm = ({
                 </svg>
               </div>
               <div>
-                <h2 className='text-xl font-bold text-gray-900'>RCA Details</h2>
-                <p className='text-sm text-gray-500'>Document the incident root cause</p>
+                <h2 className='text-xl font-bold text-foreground'>RCA Details</h2>
+                <p className='text-sm text-muted-foreground'>Document the incident root cause</p>
               </div>
             </div>
           </div>
@@ -310,7 +310,7 @@ export const RCAForm = ({
           >
             {field => (
               <div className='space-y-1.5'>
-                <label htmlFor='rca-title' className='text-sm font-medium text-gray-700'>
+                <label htmlFor='rca-title' className='text-sm font-medium text-foreground'>
                   Title *
                 </label>
                 <input
@@ -323,7 +323,7 @@ export const RCAForm = ({
                   data-track-name='RcaTitleInput'
                   placeholder='Short RCA title...'
                   readOnly={!isRcaEditable}
-                  className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
+                  className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
                 />
                 {renderFieldError(field.state.meta.errors[0] as string, field.state.meta.isTouched)}
               </div>
@@ -341,7 +341,7 @@ export const RCAForm = ({
           >
             {field => (
               <div className='space-y-1.5'>
-                <label htmlFor='rca-summary' className='text-sm font-medium text-gray-700'>
+                <label htmlFor='rca-summary' className='text-sm font-medium text-foreground'>
                   Summary *
                 </label>
                 <Textarea
@@ -376,7 +376,7 @@ export const RCAForm = ({
             >
               {field => (
                 <div className='space-y-1.5'>
-                  <label htmlFor='rca-root-cause' className='text-sm font-medium text-gray-700'>
+                  <label htmlFor='rca-root-cause' className='text-sm font-medium text-foreground'>
                     Root Cause *
                   </label>
                   <Textarea
@@ -413,7 +413,7 @@ export const RCAForm = ({
             >
               {field => (
                 <div className='space-y-1.5'>
-                  <label htmlFor='rca-severity' className='text-sm font-medium text-gray-700'>
+                  <label htmlFor='rca-severity' className='text-sm font-medium text-foreground'>
                     Severity *
                   </label>
                   <select
@@ -424,7 +424,7 @@ export const RCAForm = ({
                     data-track-category='RCA'
                     data-track-name='RcaSeveritySelect'
                     disabled={!isRcaEditable}
-                    className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white'
+                    className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
                   >
                     {severityOptions.map(option => (
                       <option key={option.value} value={option.value}>
@@ -455,7 +455,7 @@ export const RCAForm = ({
                 const bugTypeValueForSelect = selectedBugTypeId || field.state.value;
                 return (
                   <div className='space-y-1.5'>
-                    <label htmlFor='rca-bug-type' className='text-sm font-medium text-gray-700'>
+                    <label htmlFor='rca-bug-type' className='text-sm font-medium text-foreground'>
                       Bug Type *
                     </label>
                     <select
@@ -485,7 +485,7 @@ export const RCAForm = ({
                       data-track-category='RCA'
                       data-track-name='RcaBugTypeSelect'
                       disabled={!isRcaEditable}
-                      className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white'
+                      className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
                     >
                       <option value=''>Select bug type</option>
                       {bugTypeOptions.map(option => (
@@ -535,7 +535,7 @@ export const RCAForm = ({
                   <div className='space-y-1.5'>
                     <label
                       htmlFor='rca-category-type'
-                      className='text-sm font-medium text-gray-700'
+                      className='text-sm font-medium text-foreground'
                     >
                       Category Type *
                     </label>
@@ -547,7 +547,7 @@ export const RCAForm = ({
                       data-track-category='RCA'
                       data-track-name='RcaCategoryTypeSelect'
                       disabled={!isRcaEditable}
-                      className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white'
+                      className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
                     >
                       <option value=''>Select category</option>
                       {filteredCategories.map(option => (
@@ -582,7 +582,7 @@ export const RCAForm = ({
                   <div className='space-y-1.5'>
                     <label
                       htmlFor='rca-issue-category'
-                      className='text-sm font-medium text-gray-700'
+                      className='text-sm font-medium text-foreground'
                     >
                       Issue Category *
                     </label>
@@ -594,7 +594,7 @@ export const RCAForm = ({
                       data-track-category='RCA'
                       data-track-name='RcaIssueCategorySelect'
                       disabled={!isRcaEditable}
-                      className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white'
+                      className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
                     >
                       <option value=''>Select issue category</option>
                       {filteredIssueCategoryOptions.map(option => (
@@ -617,7 +617,7 @@ export const RCAForm = ({
             <rcaForm.Field name='issueStartAt'>
               {field => (
                 <div className='space-y-1.5'>
-                  <label htmlFor='rca-issue-start' className='text-sm font-medium text-gray-700'>
+                  <label htmlFor='rca-issue-start' className='text-sm font-medium text-foreground'>
                     Issue Start Time
                   </label>
                   <input
@@ -628,7 +628,7 @@ export const RCAForm = ({
                     data-track-category='RCA'
                     data-track-name='RcaIssueStartInput'
                     disabled={!isRcaEditable}
-                    className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white'
+                    className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
                   />
                 </div>
               )}
@@ -636,8 +636,8 @@ export const RCAForm = ({
           </div>
 
           {/* Footer */}
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-gray-200 pt-6'>
-            <div className='text-xs text-gray-500'>
+          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-border pt-6'>
+            <div className='text-xs text-muted-foreground'>
               Created {formatDate(selectedRecord.createdAt)} - Updated{' '}
               {formatDate(selectedRecord.updatedAt)}
             </div>

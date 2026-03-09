@@ -1292,7 +1292,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         )}
 
         <div className='w-full px-4 pt-4 pb-3 flex items-center justify-between'>
-          <h2 className='text-sm leading-5 font-medium text-gray-400 select-none'>
+          <h2 className='text-sm leading-5 font-medium text-muted-foreground select-none'>
             {ticketSequence
               ? `New Ticket (${ticketSequence.current}/${ticketSequence.total})`
               : 'New Ticket'}
@@ -1356,7 +1356,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     className={cn(
                       '!text-xl !leading-tight truncate',
                       'px-0 border-none focus-visible:ring-0',
-                      'font-bold text-gray-700 placeholder:text-xl placeholder:text-gray-400',
+                      'font-bold text-foreground placeholder:text-xl placeholder:text-muted-foreground',
                       field.state.meta.errors.length > 0 && 'text-red-600',
                     )}
                   />
@@ -1398,7 +1398,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   }}
                   className={cn(
                     'border-none focus-visible:ring-0 focus-visible:border-none rounded-none p-0 min-h-16',
-                    'placeholder:text-gray-400/80 !text-gray-600 leading-5 font-semibold',
+                    'placeholder:text-muted-foreground/80 !text-muted-foreground leading-5 font-semibold',
                     field.state.meta.errors.length > 0 && 'text-red-600',
                   )}
                 />
@@ -1408,8 +1408,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           </form.Field>
 
           {subTickets.length > 0 && (
-            <div className='mt-2 rounded-md border border-[#f0f0f0] bg-[#f9f9f9] p-3'>
-              <div className='mb-2 flex items-center gap-1.5 text-sm font-semibold text-gray-700'>
+            <div className='mt-2 rounded-md border border-border bg-muted p-3'>
+              <div className='mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground'>
                 <SubTicketCountIcon className='shrink-0 text-black' />
                 <span>{subTickets.length} Sub-tickets</span>
               </div>
@@ -1419,26 +1419,26 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   return (
                     <div
                       key={`subticket-${index}`}
-                      className='rounded-lg border border-[#f0f0f0] bg-white p-[11px]'
+                      className='rounded-lg border border-border bg-background p-[11px]'
                     >
                       {isEditing ? (
                         <div className='flex flex-col gap-2'>
                           <div className='flex items-center justify-between gap-2'>
                             <div className='flex min-w-0 items-center gap-2'>
-                              <span className='font-mono text-[12px] font-medium leading-[1.1] text-[#8d8d8d]'>
+                              <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
                                 {index + 1}
                               </span>
                               <Input
                                 value={editingSubTicketTitle}
                                 onChange={e => setEditingSubTicketTitle(e.target.value)}
                                 placeholder='Sub-ticket title'
-                                className='h-auto border-none p-0 text-[14px] font-medium leading-[18px] text-[#202020] focus-visible:ring-0'
+                                className='h-auto border-none p-0 text-[14px] font-medium leading-[18px] text-foreground focus-visible:ring-0'
                               />
                             </div>
                             <button
                               type='button'
                               onClick={saveEditedSubTicket}
-                              className='text-[14px] leading-[18px] text-[#8d8d8d] hover:text-[#707070]'
+                              className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
                               data-track-category='TICKETS'
                               data-track-name='SaveEditedSubTicket'
                               data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
@@ -1451,22 +1451,22 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             onChange={e => setEditingSubTicketDescription(e.target.value)}
                             placeholder='Sub-ticket description (optional)'
                             rows={2}
-                            className='min-h-0 resize-none border-none p-0 text-[14px] leading-[18px] text-[#8d8d8d] focus-visible:ring-0'
+                            className='min-h-0 resize-none border-none p-0 text-[14px] leading-[18px] text-muted-foreground focus-visible:ring-0'
                           />
                         </div>
                       ) : (
                         <div className='flex items-start justify-between gap-3'>
                           <div className='min-w-0 flex-1'>
                             <div className='flex min-w-0 items-center gap-2'>
-                              <span className='font-mono text-[12px] font-medium leading-[1.1] text-[#8d8d8d]'>
+                              <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
                                 {index + 1}
                               </span>
-                              <div className='truncate text-[14px] font-medium leading-[18px] text-[#202020]'>
+                              <div className='truncate text-[14px] font-medium leading-[18px] text-foreground'>
                                 {subTicket.title}
                               </div>
                             </div>
                             {subTicket.description && (
-                              <div className='mt-1 text-[14px] leading-[18px] text-[#8d8d8d]'>
+                              <div className='mt-1 text-[14px] leading-[18px] text-muted-foreground'>
                                 {subTicket.description}
                               </div>
                             )}
@@ -1475,7 +1475,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             <button
                               type='button'
                               onClick={() => beginEditSubTicket(index)}
-                              className='text-[14px] leading-[18px] text-[#adadad] hover:text-[#8d8d8d]'
+                              className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
                               data-track-category='TICKETS'
                               data-track-name='EditSubTicket'
                               data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
@@ -1486,7 +1486,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                               type='button'
                               onClick={() => deleteSubTicket(index)}
                               aria-label={`Delete subticket ${index + 1}`}
-                              className='text-[#adadad] hover:text-[#8d8d8d]'
+                              className='text-muted-foreground hover:text-muted-foreground'
                               data-track-category='TICKETS'
                               data-track-name='DeleteSubTicket'
                               data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
@@ -1569,7 +1569,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   <div className='flex items-center justify-between pb-0.5'>
                     <span className='flex items-center gap-2'>
                       <SquareKanban className='size-3' strokeWidth={2.5} />
-                      <p className='text-sm font-medium text-gray-800 leading-5'>Suggested board</p>
+                      <p className='text-sm font-medium text-foreground leading-5'>
+                        Suggested board
+                      </p>
                     </span>
                     <Button
                       variant='ghost'
@@ -1580,9 +1582,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       <X strokeWidth={2.33} className='size-3.5' />
                     </Button>
                   </div>
-                  <div className='border border-blue-100 rounded-lg p-2.5 flex items-center justify-between gap-2 bg-white group'>
+                  <div className='border border-blue-100 rounded-lg p-2.5 flex items-center justify-between gap-2 bg-background group'>
                     <span className='flex items-center gap-2 overflow-hidden cursor-default'>
-                      <p className='text-gray-900 text-sm font-medium truncate'>
+                      <p className='text-foreground text-sm font-medium truncate'>
                         {boardSuggestion.analysis.suggestedBoardName || 'Unknown Board'}
                       </p>
                     </span>
@@ -1618,7 +1620,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           {/* Dynamic Form Fields */}
           {requiredDynamicFields.length > 0 && (
             <div className='space-y-2'>
-              <div className='text-sm font-bold text-gray-700 pb-2'>Additional Information</div>
+              <div className='text-sm font-bold text-foreground pb-2'>Additional Information</div>
               <div className='space-y-2 h-full max-h-56 overflow-scroll -mx-4 px-4'>
                 {requiredDynamicFields.map(field => {
                   const fieldName = field.fieldName;
@@ -1636,7 +1638,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       {(fieldType === FormFieldType.STRING ||
                         fieldType === FormFieldType.NUMBER) && (
                         <>
-                          <label className='text-sm font-medium text-gray-700'>{`${fieldName}${!isOptional ? '*' : ''}`}</label>
+                          <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? '*' : ''}`}</label>
                           <Input
                             value={stringValue}
                             onChange={e => {
@@ -1657,7 +1659,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             placeholder={`Enter ${fieldName.toLowerCase()}`}
                             className={cn(
                               'px-0 border-none focus-visible:ring-0',
-                              'font-semibold text-gray-600 placeholder:text-gray-400/80',
+                              'font-semibold text-muted-foreground placeholder:text-muted-foreground/80',
                               error && 'text-red-600',
                             )}
                           />
@@ -1666,7 +1668,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       )}
                       {fieldType === FormFieldType.DATE && (
                         <>
-                          <label className='text-sm font-medium text-gray-700'>{fieldName} *</label>
+                          <label className='text-sm font-medium text-foreground'>
+                            {fieldName} *
+                          </label>
                           <Input
                             value={stringValue}
                             onChange={e => {
@@ -1686,7 +1690,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             type='date'
                             className={cn(
                               'px-0 border-none focus-visible:ring-0',
-                              'font-semibold text-gray-600',
+                              'font-semibold text-muted-foreground',
                               error && 'text-red-600',
                             )}
                           />
@@ -1788,8 +1792,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       )}
                       {fieldType === FormFieldType.USER && (
                         <>
-                          <label className='text-sm font-medium text-gray-700'>{`${fieldName}${!isOptional ? ' *' : ''}`}</label>
-                          <div className='border border-gray-300 rounded'>
+                          <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? ' *' : ''}`}</label>
+                          <div className='border border-input rounded'>
                             <SearchUserV2
                               options={allUsers || []}
                               selectedUsers={arrayValue
@@ -1845,18 +1849,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
           <div className='py-2'>
             {isCheckingDuplicate && (
-              <div className='flex items-center gap-2 text-sm text-gray-500'>
+              <div className='flex items-center gap-2 text-sm text-muted-foreground'>
                 <Loader2 className='h-4 w-4 animate-spin' />
                 <span>Checking for duplicates...</span>
               </div>
             )}
             {(duplicateCheck?.candidates?.length ?? 0) > 0 && (
-              <div className='rounded-lg border border-gray-200 bg-gray-50 p-4 mb-2 transition-all duration-200 ease-out'>
+              <div className='rounded-lg border border-border bg-muted p-4 mb-2 transition-all duration-200 ease-out'>
                 <div className='space-y-2'>
                   <div className='flex items-center justify-between pb-0.5'>
                     <span className='flex items-center gap-2'>
                       <Copy className='size-3' strokeWidth={2.5} />
-                      <p className='text-sm font-medium text-gray-800 leading-5'>
+                      <p className='text-sm font-medium text-foreground leading-5'>
                         Similar tickets found
                       </p>
                     </span>
@@ -1875,10 +1879,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     return (
                       <div
                         key={candidate.id}
-                        className='border border-gray-100 rounded-lg p-2.5 flex items-center justify-between gap-2 group bg-white'
+                        className='border border-border rounded-lg p-2.5 flex items-center justify-between gap-2 group bg-background'
                       >
                         <span className='flex items-center gap-2 overflow-hidden cursor-default'>
-                          <p className='text-gray-900 text-sm font-medium truncate'>
+                          <p className='text-foreground text-sm font-medium truncate'>
                             <RenderMessageWithHTML message={candidate.title} />
                           </p>
                         </span>
@@ -2087,7 +2091,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     searchPlaceholder={`status${mandatoryTodo ? ' *' : ''}`}
                     placeholder={`status${mandatoryTodo ? ' *' : ''}`}
                     inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7 bg-gray-50'
+                    inputClassName='rounded-md h-7 bg-muted'
                     showClearButton={true}
                     showIndicator={false}
                     testId='ticket-status-selector'
@@ -2110,7 +2114,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     searchPlaceholder='priority'
                     placeholder='priority'
                     inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7 bg-gray-50'
+                    inputClassName='rounded-md h-7 bg-muted'
                     showClearButton={true}
                     showIndicator={false}
                     testId='ticket-priority-selector'
@@ -2138,7 +2142,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       searchPlaceholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
                       placeholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
                       inputIcon={
-                        <WorkflowIcon strokeWidth={2.33} className='size-[14px] text-gray-700' />
+                        <WorkflowIcon strokeWidth={2.33} className='size-[14px] text-foreground' />
                       }
                       showIndicator={false}
                       testId='ticket-workflow-selector'
@@ -2191,7 +2195,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     searchPlaceholder='ticket type'
                     placeholder='ticket type'
                     inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7 bg-gray-50'
+                    inputClassName='rounded-md h-7 bg-muted'
                     showClearButton={true}
                     showIndicator={false}
                   />
@@ -2232,7 +2236,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 fileCount: allAttachments.length,
               })}
             >
-              <Paperclip strokeWidth={2.33} className='size-3.5 text-gray-500' />
+              <Paperclip strokeWidth={2.33} className='size-3.5 text-muted-foreground' />
             </Button>
             <div className='flex items-center gap-3'>
               <Button

@@ -39,7 +39,10 @@ export const MentionText: React.FC<MentionTextProps> = props => {
     if (channel && hasAccess) {
       if (channel.participantCount > 0) {
         metadata.push(
-          <div key='members' className='flex items-center gap-2 text-xs font-base text-gray-600'>
+          <div
+            key='members'
+            className='flex items-center gap-2 text-xs font-base text-muted-foreground'
+          >
             <Users className='h-3.5 w-3.5' />
             <span>{channel.participantCount} people in this channel</span>
           </div>,
@@ -66,7 +69,10 @@ export const MentionText: React.FC<MentionTextProps> = props => {
           lastActivity = `${diffDays}d ago`;
         }
         metadata.push(
-          <div key='activity' className='flex items-center gap-2 text-xs font-base text-gray-600'>
+          <div
+            key='activity'
+            className='flex items-center gap-2 text-xs font-base text-muted-foreground'
+          >
             <Clock className='h-3.5 w-3.5' />
             <span>Last message {lastActivity}</span>
           </div>,
@@ -76,7 +82,7 @@ export const MentionText: React.FC<MentionTextProps> = props => {
       // Show "Private channel" badge when user doesn't have access
       metadata.push(
         <div key='no-access' className='inline-flex items-center'>
-          <span className='text-xs px-2 py-0.5 bg-gray-200 text-gray-700 rounded'>
+          <span className='text-xs px-2 py-0.5 bg-muted text-foreground rounded'>
             Private channel
           </span>
         </div>,
@@ -90,9 +96,9 @@ export const MentionText: React.FC<MentionTextProps> = props => {
       meta?: React.ReactNode;
     } = {
       icon: props.isPrivate ? (
-        <Lock className='h-4 w-4 text-gray-700' />
+        <Lock className='h-4 w-4 text-foreground' />
       ) : (
-        <Hash className='h-4 w-4 text-gray-700' />
+        <Hash className='h-4 w-4 text-foreground' />
       ),
       title: props.channelName,
       ...(hasAccess && props.description && { description: props.description }),
@@ -106,7 +112,7 @@ export const MentionText: React.FC<MentionTextProps> = props => {
           tabIndex={0}
           onClick={handleChannelClick}
           onKeyDown={handleKeyDown}
-          className='text-[#1264A3] bg-[#1D9BD11A] hover:bg-[#04374d1a] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[#113F67]'
+          className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]'
         >
           {props.isPrivate ? <Lock className='h-3 w-3 inline-block mr-0.5 mb-1' /> : '#'}
           {props.channelName}
@@ -118,7 +124,7 @@ export const MentionText: React.FC<MentionTextProps> = props => {
   if (props.type === 'user') {
     if (!user) {
       return (
-        <span className='text-[#3D74B6] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[#113F67]'>
+        <span className='text-[color:var(--mention-group-color)] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]'>
           @{props.username}
         </span>
       );
@@ -127,7 +133,7 @@ export const MentionText: React.FC<MentionTextProps> = props => {
     return (
       <UserHoverWrapper userId={props.userId}>
         <span
-          className={`${isCurrentUser ? 'bg-[#fef3c7]' : 'bg-[#e5f1fe]'} px-1 py-[2px] text-[#1264a3] rounded-[4px] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[#113F67]`}
+          className={`${isCurrentUser ? 'bg-[var(--mention-current-user-bg)]' : 'bg-[var(--mention-bg)]'} px-1 py-[2px] text-[color:var(--mention-color)] rounded-[4px] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]`}
         >
           @{props.username}
         </span>
@@ -155,7 +161,7 @@ export const MentionText: React.FC<MentionTextProps> = props => {
         tabIndex={0}
         onClick={handleGroupClick}
         onKeyDown={handleKeyDown}
-        className='text-[#3D74B6] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[#113F67]'
+        className='text-[color:var(--mention-group-color)] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]'
       >
         @{props.groupAlias || props.groupName}
       </span>

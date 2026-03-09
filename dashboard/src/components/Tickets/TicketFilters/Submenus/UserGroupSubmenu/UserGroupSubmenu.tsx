@@ -97,11 +97,11 @@ export const UserGroupSubmenu = ({
   const availableGroups = searchResults.filter(group => !selectedGroups.includes(group.id));
 
   return (
-    <div className='w-80 bg-white border border-gray-200 rounded-lg shadow-lg'>
+    <div className='w-80 bg-background border border-border rounded-lg shadow-lg'>
       {/* Search Input */}
-      <div className='p-3 border-b border-gray-100'>
+      <div className='p-3 border-b border-border'>
         <div className='relative'>
-          <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none' />
+          <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
           <Input
             ref={searchInputRef}
             type='text'
@@ -115,8 +115,8 @@ export const UserGroupSubmenu = ({
 
       {/* Selected Groups */}
       {selectedGroupsData.length > 0 && (
-        <div className='p-3 border-b border-gray-100 max-h-40 overflow-y-auto'>
-          <div className='text-xs font-medium text-gray-500 mb-2'>Selected</div>
+        <div className='p-3 border-b border-border max-h-40 overflow-y-auto'>
+          <div className='text-xs font-medium text-muted-foreground mb-2'>Selected</div>
           <div className='space-y-1'>
             {selectedGroupsData.map(group => (
               <div
@@ -153,7 +153,9 @@ export const UserGroupSubmenu = ({
       {/* Available Groups */}
       <div className='max-h-64 overflow-y-auto'>
         {!allGroups || (allGroups.length === 0 && selectedGroups.length === 0) ? (
-          <div className='p-4 text-center text-sm text-gray-500'>Loading user groups...</div>
+          <div className='p-4 text-center text-sm text-muted-foreground'>
+            Loading user groups...
+          </div>
         ) : availableGroups.length > 0 ? (
           <div className='p-2'>
             <div className='space-y-1'>
@@ -162,17 +164,17 @@ export const UserGroupSubmenu = ({
                   key={group.id}
                   onClick={() => handleGroupToggle(group.id)}
                   variant='ghost'
-                  className='flex items-center gap-3 p-2 hover:bg-gray-50 rounded transition-colors w-full justify-start h-auto'
+                  className='flex items-center gap-3 p-2 hover:bg-muted rounded transition-colors w-full justify-start h-auto'
                   type='button'
                   data-track-category='Tickets'
                   data-track-name='ToggleUserGroupFilter'
                   data-track-metadata={JSON.stringify({ groupId: group.id, groupName: group.name })}
                 >
-                  <Users className='w-4 h-4 text-gray-600 flex-shrink-0' />
+                  <Users className='w-4 h-4 text-muted-foreground flex-shrink-0' />
                   <div className='min-w-0 flex-1 text-left'>
-                    <div className='text-sm font-medium text-gray-900 truncate'>{group.name}</div>
+                    <div className='text-sm font-medium text-foreground truncate'>{group.name}</div>
                     {group.alias && (
-                      <div className='text-xs text-gray-500 truncate'>@{group.alias}</div>
+                      <div className='text-xs text-muted-foreground truncate'>@{group.alias}</div>
                     )}
                   </div>
                 </Button>
@@ -180,7 +182,7 @@ export const UserGroupSubmenu = ({
             </div>
           </div>
         ) : (
-          <div className='p-4 text-center text-sm text-gray-500'>
+          <div className='p-4 text-center text-sm text-muted-foreground'>
             {searchQuery.trim()
               ? `No groups found matching "${searchQuery}"`
               : 'All groups have been selected'}

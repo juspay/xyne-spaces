@@ -40,7 +40,7 @@ export const PrioritySubmenu = ({
   };
 
   return (
-    <div className='w-56 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden'>
+    <div className='w-56 bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
       <div className='py-1.5 px-1 flex flex-col gap-1 max-h-80 overflow-y-auto'>
         {prioritiesToShow.length > 0 ? (
           prioritiesToShow.map(([priority, config]) => {
@@ -52,7 +52,7 @@ export const PrioritySubmenu = ({
                 onClick={() => handleToggle(priority as TicketPriority)}
                 type='button'
                 className={`flex items-center justify-between w-full px-3 py-2 transition-colors rounded-md
-                  ${isSelected ? 'bg-[#F2F2F3] text-gray-900' : 'hover:bg-gray-50 text-gray-900'}
+                  ${isSelected ? 'bg-accent text-foreground' : 'hover:bg-muted text-foreground'}
                 `}
                 data-track-category='Tickets'
                 data-track-name='TogglePriorityFilter'
@@ -65,12 +65,14 @@ export const PrioritySubmenu = ({
                   <span className='text-sm font-medium'>{config.label}</span>
                 </div>
 
-                {isSelected && <Check className='w-5 h-5 text-[#3B4145]' strokeWidth={2.5} />}
+                {isSelected && <Check className='w-5 h-5 text-foreground' strokeWidth={2.5} />}
               </button>
             );
           })
         ) : (
-          <div className='px-4 py-3 text-sm text-gray-500'>No priority options available</div>
+          <div className='px-4 py-3 text-sm text-muted-foreground'>
+            No priority options available
+          </div>
         )}
       </div>
     </div>

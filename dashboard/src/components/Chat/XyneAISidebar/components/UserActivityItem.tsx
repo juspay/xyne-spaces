@@ -58,7 +58,7 @@ const getActivityIcon = (activity: UserActivity): ReactNode => {
   }
 
   // Default icon
-  return <Activity className='w-4 h-3.5 text-gray-400' />;
+  return <Activity className='w-4 h-3.5 text-muted-foreground' />;
 };
 
 const formatEventName = (eventName: string): string => {
@@ -170,10 +170,10 @@ const getRedirection = (
       <button
         type='button'
         onClick={handleClick}
-        className='flex-shrink-0 p-1 hover:bg-gray-200 rounded transition-colors cursor-pointer'
+        className='flex-shrink-0 p-1 hover:bg-accent rounded transition-colors cursor-pointer'
         title={`Go to ${url}`}
       >
-        <ExternalLink className='w-4 h-3.5 text-gray-500' />
+        <ExternalLink className='w-4 h-3.5 text-muted-foreground' />
       </button>
     );
   }
@@ -209,7 +209,7 @@ const renderMessageIfAny = (activity: UserActivity): React.ReactNode => {
   }
 
   return (
-    <div className='text-sm text-gray-600 mt-1'>
+    <div className='text-sm text-muted-foreground mt-1'>
       <RenderMessageWithHTML message={message} />
     </div>
   );
@@ -249,8 +249,8 @@ export const UserActivityItem = ({
     <div
       className={`
         w-full transition-all outline-none
-        ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}
-        ${isExpanded ? 'bg-gray-50' : ''}
+        ${isSelected ? 'bg-blue-100' : 'hover:bg-accent'}
+        ${isExpanded ? 'bg-muted' : ''}
       `}
     >
       {/* Main Row */}
@@ -262,7 +262,7 @@ export const UserActivityItem = ({
         {/* Expand/Collapse Chevron */}
         <div
           onClick={handleToggleExpand}
-          className='flex-shrink-0 p-1.5 hover:bg-gray-200 rounded transition-colors cursor-pointer self-start'
+          className='flex-shrink-0 p-1.5 hover:bg-accent rounded transition-colors cursor-pointer self-start'
           role='button'
           tabIndex={0}
           onKeyDown={e => {
@@ -273,9 +273,9 @@ export const UserActivityItem = ({
           }}
         >
           {isExpanded ? (
-            <ChevronDown className='w-4 h-4 text-gray-500' />
+            <ChevronDown className='w-4 h-4 text-muted-foreground' />
           ) : (
-            <ChevronRight className='w-4 h-4 text-gray-400' />
+            <ChevronRight className='w-4 h-4 text-muted-foreground' />
           )}
         </div>
 
@@ -284,18 +284,18 @@ export const UserActivityItem = ({
           <div className='flex items-start gap-2'>
             <div className='mt-1'>{getActivityIcon(activity)}</div>
             <div className='flex-1 min-w-0'>
-              <div className='text-sm font-medium text-gray-900 truncate'>
+              <div className='text-sm font-medium text-foreground truncate'>
                 {toTitleCase(formatActivityHeading(activity))}
               </div>
-              <div className='text-sm font-medium text-gray-900 truncate'>
+              <div className='text-sm font-medium text-foreground truncate'>
                 {renderMessageIfAny(activity)}
               </div>
             </div>
           </div>
           {/* <div className='flex items-center gap-1.5'>  */}
-          {/* <span className='text-xs text-gray-500'>{activity.eventCategory}</span> */}
-          {/* <span className='text-xs text-gray-300'></span> */}
-          {/* // <span className='text-xs text-gray-500 truncate' title={activity.url}>
+          {/* <span className='text-xs text-muted-foreground'>{activity.eventCategory}</span> */}
+          {/* <span className='text-xs text-muted'></span> */}
+          {/* // <span className='text-xs text-muted-foreground truncate' title={activity.url}>
             //   {truncateUrl(activity.url)}
             // </span> */}
           {/* </div>  */}
@@ -314,42 +314,42 @@ export const UserActivityItem = ({
             title='Configure activity'
             type='button'
           >
-            <Settings className='w-3.5 h-3.5 text-gray-400 hover:text-gray-600' />
+            <Settings className='w-3.5 h-3.5 text-muted-foreground hover:text-muted-foreground' />
           </button>
         )}
 
         {/* Timestamp (when not selected, or always visible) */}
-        <span className='text-xs text-gray-400 shrink-0 ml-1'>
+        <span className='text-xs text-muted-foreground shrink-0 ml-1'>
           {formatTimestamp(activity.timestamp)}
         </span>
       </button>
 
       {/* Expanded Details */}
       {isExpanded && (
-        <div className='px-4 pb-3 pl-11 border-t border-gray-100'>
+        <div className='px-4 pb-3 pl-11 border-t border-border'>
           <div className='grid grid-cols-2 gap-x-4 gap-y-1 text-xs mt-2'>
             <div>
-              <span className='text-gray-500'>Session:</span>{' '}
-              <span className='font-mono text-gray-700'>{activity.sessionId.slice(0, 8)}...</span>
+              <span className='text-muted-foreground'>Session:</span>{' '}
+              <span className='font-mono text-foreground'>{activity.sessionId.slice(0, 8)}...</span>
             </div>
             <div>
-              <span className='text-gray-500'>Trigger:</span>{' '}
-              <span className='text-gray-700'>{activity.triggerType}</span>
+              <span className='text-muted-foreground'>Trigger:</span>{' '}
+              <span className='text-foreground'>{activity.triggerType}</span>
             </div>
             <div>
-              <span className='text-gray-500'>Platform:</span>{' '}
-              <span className='text-gray-700'>{activity.platform}</span>
+              <span className='text-muted-foreground'>Platform:</span>{' '}
+              <span className='text-foreground'>{activity.platform}</span>
             </div>
             <div>
-              <span className='text-gray-500'>ID:</span>{' '}
-              <span className='font-mono text-gray-700'>{activity.id.slice(0, 8)}...</span>
+              <span className='text-muted-foreground'>ID:</span>{' '}
+              <span className='font-mono text-foreground'>{activity.id.slice(0, 8)}...</span>
             </div>
           </div>
 
           {activity.contextMetadata && Object.keys(activity.contextMetadata).length > 0 && (
             <div className='mt-2'>
-              <span className='text-xs text-gray-500'>Metadata:</span>
-              <pre className='mt-1 text-xs text-gray-700 bg-gray-100 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed'>
+              <span className='text-xs text-muted-foreground'>Metadata:</span>
+              <pre className='mt-1 text-xs text-foreground bg-muted rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed'>
                 {JSON.stringify(activity.contextMetadata, null, 2)}
               </pre>
             </div>
@@ -357,8 +357,8 @@ export const UserActivityItem = ({
 
           {activity.eventLabel && (
             <div className='mt-2 text-xs'>
-              <span className='text-gray-500'>Label:</span>{' '}
-              <span className='text-gray-700'>{activity.eventLabel}</span>
+              <span className='text-muted-foreground'>Label:</span>{' '}
+              <span className='text-foreground'>{activity.eventLabel}</span>
             </div>
           )}
         </div>

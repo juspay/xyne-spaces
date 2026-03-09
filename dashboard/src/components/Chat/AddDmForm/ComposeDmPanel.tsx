@@ -201,7 +201,7 @@ export const ComposeDmPanel: React.FC = () => {
           void form.handleSubmit();
         }}
       >
-        <div className='mx-auto bg-white h-full flex flex-col'>
+        <div className='mx-auto bg-background h-full flex flex-col'>
           {/* Conversation Preview */}
           <div className='px-4'>
             <div className='text-base font-semibold text-foreground'>New Message</div>
@@ -320,7 +320,7 @@ export const ComposeDmPanel: React.FC = () => {
                         {field.state.meta.errors[0]}
                       </p>
                     )}
-                    <span className='text-xs text-gray-500 w-full text-end'>
+                    <span className='text-xs text-muted-foreground w-full text-end'>
                       {`${getTextLength(field.state.value)}/1000 characters`}
                     </span>
                   </div>

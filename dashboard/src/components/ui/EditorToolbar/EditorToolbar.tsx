@@ -178,14 +178,14 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
 
   const buttonClass = (active: boolean): string =>
     `p-1.5 rounded transition-all duration-200 ease-in-out ${
-      active ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-600'
+      active ? 'bg-blue-100 text-primary' : 'hover:bg-accent text-muted-foreground'
     }`;
 
   return (
     <>
       {/* Link Hover Tooltip */}
-      <div className='border-gray-200 p-1'>
-        <div className='flex items-center gap-1 px-3 py-2 bg-[#FAFAFA] rounded-xl'>
+      <div className='border-border p-1'>
+        <div className='flex items-center gap-1 px-3 py-2 bg-muted rounded-xl'>
           <Tooltip content='Bold (⌘B)'>
             <button
               type='button'
@@ -255,12 +255,12 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
           >
             <div className='space-y-3'>
               <div className='flex items-center justify-between'>
-                <h2 className='text-sm font-medium text-gray-700'>
+                <h2 className='text-sm font-medium text-foreground'>
                   {hasSelection ? 'Edit link' : 'Insert link'}
                 </h2>
                 <button
                   onClick={() => setOpen(false)}
-                  className='p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600'
+                  className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-muted-foreground'
                 >
                   <X className='h-4 w-4' />
                 </button>
@@ -273,7 +273,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
                   onChange={e => setLinkText(e.target.value)}
                   placeholder='Link text'
                   autoFocus // eslint-disable-line jsx-a11y/no-autofocus
-                  className='w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+                  className='w-full px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring'
                 />
               </div>
 
@@ -284,7 +284,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
                   onChange={e => setLinkUrl(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && applyLink()}
                   placeholder='https://example.com'
-                  className='w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+                  className='w-full px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring'
                 />
               </div>
 
@@ -302,7 +302,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
                   <Button
                     onClick={() => setOpen(false)}
                     variant='secondary'
-                    className='px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded'
+                    className='px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent rounded'
                   >
                     Cancel
                   </Button>

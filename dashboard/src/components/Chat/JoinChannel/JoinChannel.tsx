@@ -44,13 +44,13 @@ const JoinChannel = ({ channelId, channelTitle }: JoinChannelProps): ReactElemen
       data-track-category='CHAT_INFO'
       data-track-name='JOIN_CHANNEL_VIEW'
       data-track-metadata={JSON.stringify({ channelId, channelTitle })}
-      className='flex flex-col items-center justify-center p-8 bg-gray-50 rounded-lg border border-gray-200 mx-4 mb-4'
+      className='flex flex-col items-center justify-center p-8 bg-muted rounded-lg border border-border mx-4 mb-4'
     >
       <div className='text-center mb-6'>
-        <h3 className='text-lg font-semibold text-gray-900 mb-2'>
+        <h3 className='text-lg font-semibold text-foreground mb-2'>
           {channelTitle ? `Join #${channelTitle}` : 'Join Channel'}
         </h3>
-        <p className='text-sm text-gray-600'>
+        <p className='text-sm text-muted-foreground'>
           You&apos;re not a member of this channel yet. Join to start participating in
           conversations.
         </p>

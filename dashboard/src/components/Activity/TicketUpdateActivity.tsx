@@ -98,8 +98,8 @@ const getActivityConfig = (actorAction: string): ActivityConfig => {
       };
     default:
       return {
-        icon: <Ticket className='w-4 h-4 text-gray-600' />,
-        badgeColor: 'bg-gray-100',
+        icon: <Ticket className='w-4 h-4 text-muted-foreground' />,
+        badgeColor: 'bg-muted',
         description: 'updated ticket in',
         label: 'Ticket',
       };

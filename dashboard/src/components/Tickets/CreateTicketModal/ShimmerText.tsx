@@ -26,7 +26,7 @@ function TextShimmerComponent({
 
   const baseClasses = glassEffect
     ? `relative inline-block
-       backdrop-blur-xl bg-white/0 
+       backdrop-blur-xl bg-background/0 
        border border-white/20
        shadow-[0_8px_32px_0_rgba(255,255,255,0.1)]
        before:absolute before:inset-0 before:rounded-2xl

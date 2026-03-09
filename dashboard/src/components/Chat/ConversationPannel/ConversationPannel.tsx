@@ -131,7 +131,7 @@ const ExpandedTicketView = ({
         />
       </Panel>
       <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-        <div id='panel-resize-divider' className='w-[1px] h-full bg-gray-200'></div>
+        <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
       </PanelResizeHandle>
       <Panel minSize={40}>
         <ThreadMessages
@@ -376,11 +376,11 @@ const ConversationPannel = ({
                   skipScrollResetRef={skipScrollResetRef}
                 ></ChatListV2>
               ) : latestMessageDetails.type === 'complete' ? (
-                <div className='text-center text-gray-500 flex-1 flex items-center justify-center'>
-                  <p className='text-gray-500'>No conversations in this channel yet</p>
+                <div className='text-center text-muted-foreground flex-1 flex items-center justify-center'>
+                  <p className='text-muted-foreground'>No conversations in this channel yet</p>
                 </div>
               ) : (
-                <div className='absolute inset-0 flex items-center justify-center bg-white z-50'>
+                <div className='absolute inset-0 flex items-center justify-center bg-background z-50'>
                   <LoadingAnimation
                     source='ConversationPannel: channelLatestConversation'
                     url={location.pathname}
@@ -391,7 +391,7 @@ const ConversationPannel = ({
               {shouldShowJoinChannel ? (
                 <JoinChannel channelId={channelId} channelTitle={channel?.name} />
               ) : (
-                <div className='px-4 pt-4 pb-4 bg-white'>
+                <div className='px-4 pt-4 pb-4 bg-background'>
                   <ChatInput
                     autoFocus='end' // eslint-disable-line jsx-a11y/no-autofocus
                     ref={inputRef}

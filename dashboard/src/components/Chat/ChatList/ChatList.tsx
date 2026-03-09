@@ -292,8 +292,8 @@ const ChatList = ({
 
   if (!messagesWithDateSeparators || messagesWithDateSeparators.length === 0) {
     return (
-      <div className='text-center text-gray-500 flex-1 flex items-center justify-center'>
-        <p className='text-gray-500'>No conversations in this channel yet</p>
+      <div className='text-center text-muted-foreground flex-1 flex items-center justify-center'>
+        <p className='text-muted-foreground'>No conversations in this channel yet</p>
       </div>
     );
   }

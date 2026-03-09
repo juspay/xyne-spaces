@@ -161,10 +161,10 @@ const TicketIDEScreen: React.FC = () => {
   // Loading state
   if (ticketsLoading || !ticket) {
     return (
-      <div className='h-full flex items-center justify-center bg-gray-50'>
+      <div className='h-full flex items-center justify-center bg-muted'>
         <div className='text-center'>
           <Loader2 className='w-8 h-8 text-blue-500 animate-spin mx-auto mb-4' />
-          <p className='text-gray-600 text-sm'>Loading ticket...</p>
+          <p className='text-muted-foreground text-sm'>Loading ticket...</p>
         </div>
       </div>
     );
@@ -179,7 +179,7 @@ const TicketIDEScreen: React.FC = () => {
           <div className='flex items-center gap-3'>
             <button
               onClick={handleBack}
-              className='p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors'
+              className='p-1.5 text-muted-foreground hover:text-white hover:bg-gray-700 rounded transition-colors'
               data-track-category='TicketIDE'
               data-track-name='GoBack'
             >
@@ -192,12 +192,12 @@ const TicketIDEScreen: React.FC = () => {
             <div className='h-4 w-px bg-gray-600' />
             <div className='flex items-center gap-1.5'>
               <GitBranch className='w-4 h-4 text-green-400' />
-              <span className='text-sm text-gray-300 font-mono'>{activeBranchName}</span>
+              <span className='text-sm text-muted font-mono'>{activeBranchName}</span>
             </div>
           </div>
           <button
             onClick={handleRefresh}
-            className='flex items-center gap-1.5 px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors'
+            className='flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground hover:text-white hover:bg-gray-700 rounded transition-colors'
             data-track-category='TicketIDE'
             data-track-name='Refresh'
           >
@@ -222,20 +222,20 @@ const TicketIDEScreen: React.FC = () => {
 
   // Repo selector view
   return (
-    <div className='h-full flex flex-col bg-white rounded-lg overflow-hidden shadow-lg'>
+    <div className='h-full flex flex-col bg-background rounded-lg overflow-hidden shadow-lg'>
       {/* Header */}
-      <div className='flex items-center gap-3 px-4 py-3 bg-gray-50 border-b'>
+      <div className='flex items-center gap-3 px-4 py-3 bg-muted border-b'>
         <button
           onClick={handleBack}
-          className='p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded transition-colors'
+          className='p-1.5 text-muted-foreground hover:text-foreground hover:bg-border rounded transition-colors'
           data-track-category='TicketIDE'
           data-track-name='GoBackToSelector'
         >
           <ArrowLeft className='w-4 h-4' />
         </button>
         <div>
-          <h1 className='text-sm font-medium text-gray-900'>Open in VS Code</h1>
-          <p className='text-xs text-gray-500'>{ticket.title}</p>
+          <h1 className='text-sm font-medium text-foreground'>Open in VS Code</h1>
+          <p className='text-xs text-muted-foreground'>{ticket.title}</p>
         </div>
       </div>
 
@@ -248,14 +248,14 @@ const TicketIDEScreen: React.FC = () => {
               <Code2 className='w-5 h-5 text-white' />
             </div>
             <div className='min-w-0 flex-1'>
-              <p className='font-medium text-gray-900 truncate'>{ticket.title}</p>
+              <p className='font-medium text-foreground truncate'>{ticket.title}</p>
               <p className='text-sm text-blue-600 font-mono'>{ticket.xyneId}</p>
             </div>
           </div>
 
           {/* Repository Selector */}
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>Repository</span>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>Repository</span>
             <select
               value={selectedRepo?.id || ''}
               onChange={e => {
@@ -269,7 +269,7 @@ const TicketIDEScreen: React.FC = () => {
               data-track-event='change'
               data-track-category='TicketIDE'
               data-track-name='SelectRepository'
-              className='w-full px-3 py-2.5 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
+              className='w-full px-3 py-2.5 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
             >
               {!repos || repos.length === 0 ? (
                 <option value=''>No repositories configured</option>
@@ -286,14 +286,14 @@ const TicketIDEScreen: React.FC = () => {
           {/* Branch Selector */}
           {selectedRepo && (
             <div>
-              <span className='block text-sm font-medium text-gray-700 mb-1.5'>Base Branch</span>
+              <span className='block text-sm font-medium text-foreground mb-1.5'>Base Branch</span>
               <select
                 value={selectedBranch}
                 onChange={e => setSelectedBranch(e.target.value)}
                 data-track-event='change'
                 data-track-category='TicketIDE'
                 data-track-name='SelectBranch'
-                className='w-full px-3 py-2.5 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
+                className='w-full px-3 py-2.5 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
               >
                 {(selectedRepo.baseBranch || ['main']).map(branch => (
                   <option key={branch} value={branch}>

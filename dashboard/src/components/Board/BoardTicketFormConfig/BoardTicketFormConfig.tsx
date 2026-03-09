@@ -41,21 +41,21 @@ export const BoardTicketFormConfig = ({
   return (
     <div className='space-y-4'>
       <div>
-        <h3 className='text-sm font-medium text-gray-900 mb-1'>Ticket Form Configuration</h3>
-        <p className='text-xs text-gray-500'>
+        <h3 className='text-sm font-medium text-foreground mb-1'>Ticket Form Configuration</h3>
+        <p className='text-xs text-muted-foreground'>
           Configure which fields are shown when creating/editing tickets on this board
         </p>
       </div>
 
-      <div className='space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-4'>
+      <div className='space-y-3 bg-muted border border-border rounded-lg p-4'>
         {/* User Groups Only */}
         <div className='py-2'>
           <div className='flex items-center justify-between mb-2'>
             <div className='flex-1'>
-              <label htmlFor='userGroupsOnly' className='text-sm font-medium text-gray-700'>
+              <label htmlFor='userGroupsOnly' className='text-sm font-medium text-foreground'>
                 Show Only User Groups in Assignee
               </label>
-              <p className='text-xs text-gray-500 mt-0.5'>
+              <p className='text-xs text-muted-foreground mt-0.5'>
                 When enabled, assignee dropdown will only show user groups (hide individual users)
               </p>
             </div>
@@ -67,8 +67,8 @@ export const BoardTicketFormConfig = ({
             />
           </div>
           {config.userGroupsOnly.enabled && (
-            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-gray-300'>
-              <label htmlFor='userGroupsOnly-mandatory' className='text-xs text-gray-600'>
+            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-input'>
+              <label htmlFor='userGroupsOnly-mandatory' className='text-xs text-muted-foreground'>
                 Make mandatory
               </label>
               <Switch
@@ -82,13 +82,13 @@ export const BoardTicketFormConfig = ({
         </div>
 
         {/* Due Date */}
-        <div className='py-2 border-t border-gray-200'>
+        <div className='py-2 border-t border-border'>
           <div className='flex items-center justify-between mb-2'>
             <div className='flex-1'>
-              <label htmlFor='dueDate' className='text-sm font-medium text-gray-700'>
+              <label htmlFor='dueDate' className='text-sm font-medium text-foreground'>
                 Due Date Field
               </label>
-              <p className='text-xs text-gray-500 mt-0.5'>
+              <p className='text-xs text-muted-foreground mt-0.5'>
                 Show/hide due date field in ticket form
               </p>
             </div>
@@ -100,8 +100,8 @@ export const BoardTicketFormConfig = ({
             />
           </div>
           {config.dueDate.enabled && (
-            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-gray-300'>
-              <label htmlFor='dueDate-mandatory' className='text-xs text-gray-600'>
+            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-input'>
+              <label htmlFor='dueDate-mandatory' className='text-xs text-muted-foreground'>
                 Make mandatory
               </label>
               <Switch
@@ -115,13 +115,13 @@ export const BoardTicketFormConfig = ({
         </div>
 
         {/* Todo/Checklist */}
-        <div className='py-2 border-t border-gray-200'>
+        <div className='py-2 border-t border-border'>
           <div className='flex items-center justify-between mb-2'>
             <div className='flex-1'>
-              <label htmlFor='todo' className='text-sm font-medium text-gray-700'>
+              <label htmlFor='todo' className='text-sm font-medium text-foreground'>
                 Todo/Checklist Field
               </label>
-              <p className='text-xs text-gray-500 mt-0.5'>
+              <p className='text-xs text-muted-foreground mt-0.5'>
                 Show/hide todo/checklist field in ticket form
               </p>
             </div>
@@ -133,8 +133,8 @@ export const BoardTicketFormConfig = ({
             />
           </div>
           {config.todo.enabled && (
-            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-gray-300'>
-              <label htmlFor='todo-mandatory' className='text-xs text-gray-600'>
+            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-input'>
+              <label htmlFor='todo-mandatory' className='text-xs text-muted-foreground'>
                 Make mandatory
               </label>
               <Switch
@@ -148,13 +148,13 @@ export const BoardTicketFormConfig = ({
         </div>
 
         {/* Workflows */}
-        <div className='py-2 border-t border-gray-200'>
+        <div className='py-2 border-t border-border'>
           <div className='flex items-center justify-between mb-2'>
             <div className='flex-1'>
-              <label htmlFor='workflows' className='text-sm font-medium text-gray-700'>
+              <label htmlFor='workflows' className='text-sm font-medium text-foreground'>
                 Workflows Field
               </label>
-              <p className='text-xs text-gray-500 mt-0.5'>
+              <p className='text-xs text-muted-foreground mt-0.5'>
                 Show/hide workflows field in ticket form
               </p>
             </div>
@@ -166,8 +166,8 @@ export const BoardTicketFormConfig = ({
             />
           </div>
           {config.workflows.enabled && (
-            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-gray-300'>
-              <label htmlFor='workflows-mandatory' className='text-xs text-gray-600'>
+            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-input'>
+              <label htmlFor='workflows-mandatory' className='text-xs text-muted-foreground'>
                 Make mandatory
               </label>
               <Switch
@@ -181,13 +181,13 @@ export const BoardTicketFormConfig = ({
         </div>
 
         {/* Labels */}
-        <div className='py-2 border-t border-gray-200'>
+        <div className='py-2 border-t border-border'>
           <div className='flex items-center justify-between mb-2'>
             <div className='flex-1'>
-              <label htmlFor='labels' className='text-sm font-medium text-gray-700'>
+              <label htmlFor='labels' className='text-sm font-medium text-foreground'>
                 Labels/Tags Field
               </label>
-              <p className='text-xs text-gray-500 mt-0.5'>
+              <p className='text-xs text-muted-foreground mt-0.5'>
                 Show/hide labels/tags field in ticket form
               </p>
             </div>
@@ -199,8 +199,8 @@ export const BoardTicketFormConfig = ({
             />
           </div>
           {config.labels.enabled && (
-            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-gray-300'>
-              <label htmlFor='labels-mandatory' className='text-xs text-gray-600'>
+            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-input'>
+              <label htmlFor='labels-mandatory' className='text-xs text-muted-foreground'>
                 Make mandatory
               </label>
               <Switch
@@ -214,13 +214,13 @@ export const BoardTicketFormConfig = ({
         </div>
 
         {/* Merchant ID */}
-        <div className='py-2 border-t border-gray-200'>
+        <div className='py-2 border-t border-border'>
           <div className='flex items-center justify-between mb-2'>
             <div className='flex-1'>
-              <label htmlFor='merchantId' className='text-sm font-medium text-gray-700'>
+              <label htmlFor='merchantId' className='text-sm font-medium text-foreground'>
                 Merchant ID Field
               </label>
-              <p className='text-xs text-gray-500 mt-0.5'>
+              <p className='text-xs text-muted-foreground mt-0.5'>
                 Show/hide merchant ID field in ticket form
               </p>
             </div>
@@ -232,8 +232,8 @@ export const BoardTicketFormConfig = ({
             />
           </div>
           {config.merchantId.enabled && (
-            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-gray-300'>
-              <label htmlFor='merchantId-mandatory' className='text-xs text-gray-600'>
+            <div className='flex items-center justify-between ml-4 pl-4 border-l-2 border-input'>
+              <label htmlFor='merchantId-mandatory' className='text-xs text-muted-foreground'>
                 Make mandatory
               </label>
               <Switch
@@ -248,14 +248,14 @@ export const BoardTicketFormConfig = ({
       </div>
 
       {/* Ticket Transfer Configuration */}
-      <div className='space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-4'>
+      <div className='space-y-3 bg-muted border border-border rounded-lg p-4'>
         <div className='py-2'>
           <div className='flex items-center justify-between'>
             <div className='flex-1'>
-              <label htmlFor='isAllowedToTransfer' className='text-sm font-medium text-gray-700'>
+              <label htmlFor='isAllowedToTransfer' className='text-sm font-medium text-foreground'>
                 Allow Ticket Transfer
               </label>
-              <p className='text-xs text-gray-500 mt-0.5'>
+              <p className='text-xs text-muted-foreground mt-0.5'>
                 Only Manager and Team Lead can transfer tickets
               </p>
             </div>

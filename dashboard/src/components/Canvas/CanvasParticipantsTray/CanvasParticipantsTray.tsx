@@ -95,7 +95,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
     <>
       <div className='w-full max-w-md p-6'>
         <div className='flex items-center justify-between mb-4'>
-          <h2 className='text-lg font-semibold text-gray-900'>{title}</h2>
+          <h2 className='text-lg font-semibold text-foreground'>{title}</h2>
           <button
             onClick={onClose}
             className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
@@ -111,12 +111,12 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
         {/* Collaborative Mode Toggle - Only show for owners who haven't enabled it yet (one-way migration) */}
         {canvasId && isOwner && !isCollaborative && (
           <>
-            <div className='flex items-center justify-between py-3 px-3 bg-gray-50 rounded-lg mb-4'>
+            <div className='flex items-center justify-between py-3 px-3 bg-muted rounded-lg mb-4'>
               <div className='flex items-center gap-3'>
-                <Users size={18} className='text-gray-500' />
+                <Users size={18} className='text-muted-foreground' />
                 <div>
                   <span className='text-sm font-medium'>Collaborative mode</span>
-                  <p className='text-xs text-gray-500'>Enable real-time collaboration</p>
+                  <p className='text-xs text-muted-foreground'>Enable real-time collaboration</p>
                 </div>
               </div>
               <Button
@@ -126,14 +126,14 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
                 onClick={() => {
                   setShowCollaborativeWarning(true);
                 }}
-                className='relative w-12 h-6 rounded-full transition-all duration-200 bg-gray-300 cursor-pointer'
+                className='relative w-12 h-6 rounded-full transition-all duration-200 bg-muted cursor-pointer'
                 data-track-category='CANVAS'
                 data-track-name='Open_Collaborative_Mode_Warning'
                 data-track-metadata={JSON.stringify({ canvasId })}
               >
                 <span
                   aria-hidden='true'
-                  className='absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-200 left-1'
+                  className='absolute top-1 w-4 h-4 bg-background rounded-full shadow transition-all duration-200 left-1'
                 />
               </Button>
             </div>
@@ -141,7 +141,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
         )}
 
         <div className='relative mb-4'>
-          <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400' />
+          <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
           <Input
             type='text'
             placeholder='Find participants'
@@ -155,20 +155,20 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
           {filteredParticipants.map(participant => (
             <div
               key={participant.id}
-              className='flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 transition-colors'
+              className='flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors'
             >
               <Avatar userId={participant.userId} size='md' />
               <div className='flex-1 min-w-0'>
-                <div className='font-medium text-gray-900 truncate'>
+                <div className='font-medium text-foreground truncate'>
                   {usersById.get(participant.userId)?.name || 'Unknown'}
                 </div>
-                <div className='text-sm text-gray-500 truncate'>
+                <div className='text-sm text-muted-foreground truncate'>
                   {usersById.get(participant.userId)?.email || ''}
                 </div>
               </div>
               <div className='flex items-center gap-2'>
                 {showRole && participant.role && (
-                  <div className='text-xs text-gray-500 capitalize'>
+                  <div className='text-xs text-muted-foreground capitalize'>
                     {participant.role.toLowerCase()}
                   </div>
                 )}
@@ -184,7 +184,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
           ))}
 
           {filteredParticipants.length === 0 && (
-            <div className='text-center py-8 text-gray-500'>
+            <div className='text-center py-8 text-muted-foreground'>
               <Search className='w-8 h-8 mx-auto mb-2 opacity-50' />
               <p>No participants found</p>
               <p className='text-sm mt-1'>Try adjusting your search</p>
@@ -204,8 +204,10 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
             <div className='flex items-start gap-3 mb-4'>
               <AlertTriangle className='w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5' />
               <div>
-                <p className='text-gray-800 font-medium mb-2'>Before enabling collaborative mode</p>
-                <p className='text-gray-600 text-sm'>
+                <p className='text-foreground font-medium mb-2'>
+                  Before enabling collaborative mode
+                </p>
+                <p className='text-muted-foreground text-sm'>
                   Copy your content first. The collaborative editor will start fresh, and you can
                   paste your content there once the conversion is complete.
                 </p>

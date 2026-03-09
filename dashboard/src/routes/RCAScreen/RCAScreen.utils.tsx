@@ -65,7 +65,7 @@ export const renderFieldError = (
 /** Read-only field display for locked phases. */
 export const ReadOnlyField = ({ label, value }: ReadOnlyFieldProps): ReactElement => (
   <div className='space-y-1.5'>
-    <p className='text-sm font-medium text-gray-700'>{label}</p>
-    <div className='px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg'>{value}</div>
+    <p className='text-sm font-medium text-foreground'>{label}</p>
+    <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>{value}</div>
   </div>
 );

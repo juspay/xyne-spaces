@@ -142,31 +142,31 @@ const SimplePieChart = ({
         >
           {currentSlice ? (
             <>
-              <div className='text-3xl font-bold text-gray-800 dark:text-gray-100 leading-none mb-1'>
+              <div className='text-3xl font-bold text-foreground dark:text-gray-100 leading-none mb-1'>
                 {currentSlice.value}
               </div>
-              <div className='text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1'>
+              <div className='text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1'>
                 Clusters
               </div>
 
-              <div className='h-px w-12 bg-gray-200 dark:bg-gray-700 my-2' />
+              <div className='h-px w-12 bg-border dark:bg-gray-700 my-2' />
 
-              <div className='text-xl font-bold text-gray-800 dark:text-gray-100 leading-none mb-1'>
+              <div className='text-xl font-bold text-foreground dark:text-gray-100 leading-none mb-1'>
                 {currentSlice.metaTheme.impacted_clusters.reduce(
                   (acc, cid) => acc + (data.cluster_details[cid]?.length || 0),
                   0,
                 )}
               </div>
-              <div className='text-[10px] font-bold text-gray-400 uppercase tracking-widest'>
+              <div className='text-[10px] font-bold text-muted-foreground uppercase tracking-widest'>
                 Tickets
               </div>
             </>
           ) : (
             <>
-              <div className='text-4xl font-bold text-gray-800 dark:text-gray-100 leading-tight'>
+              <div className='text-4xl font-bold text-foreground dark:text-gray-100 leading-tight'>
                 {slices.length}
               </div>
-              <div className='text-xs font-bold text-gray-500 uppercase tracking-widest mt-1'>
+              <div className='text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1'>
                 Meta
                 <br />
                 Themes
@@ -205,7 +205,7 @@ const MetaThemeItem = ({
     className={`p-4 rounded-lg cursor-pointer transition-all duration-200 mb-2 group ${
       isSelected
         ? 'bg-blue-50/80 dark:bg-blue-900/10 shadow-sm ring-1 ring-blue-100 dark:ring-blue-800'
-        : 'hover:bg-gray-100/80 dark:hover:bg-[#2A2A2A]'
+        : 'hover:bg-muted/80 dark:hover:bg-[#2A2A2A]'
     }`}
     data-track-category='ProductInsights'
     data-track-name='SelectMetaTheme'
@@ -219,17 +219,17 @@ const MetaThemeItem = ({
       <div className='flex-1 min-w-0'>
         <div className='flex justify-between items-center mb-0.5'>
           <h3
-            className={`text-sm font-medium truncate pr-2 ${isSelected ? 'text-gray-900 dark:text-blue-100' : 'text-gray-700 dark:text-gray-300'}`}
+            className={`text-sm font-medium truncate pr-2 ${isSelected ? 'text-foreground dark:text-blue-100' : 'text-foreground dark:text-muted'}`}
           >
             {theme.meta_theme}
           </h3>
-          {isSelected && <ChevronRight size={14} className='text-gray-400' />}
+          {isSelected && <ChevronRight size={14} className='text-muted-foreground' />}
         </div>
         <div
           className={`transition-all duration-300 ease-in-out overflow-hidden ${isSelected ? 'max-h-40' : 'max-h-[1.4em]'}`}
         >
           <p
-            className={`text-xs leading-relaxed ${isSelected ? 'text-gray-600 dark:text-gray-400' : 'text-gray-500'}`}
+            className={`text-xs leading-relaxed ${isSelected ? 'text-muted-foreground dark:text-muted-foreground' : 'text-muted-foreground'}`}
           >
             {theme.description}
           </p>
@@ -272,18 +272,18 @@ const ClusterBarItem = ({
     >
       <div className='flex justify-between items-center mb-2'>
         <h4
-          className={`text-sm font-medium pr-3 truncate transition-colors ${isSelected ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-200'}`}
+          className={`text-sm font-medium pr-3 truncate transition-colors ${isSelected ? 'text-foreground dark:text-white' : 'text-muted-foreground dark:text-muted-foreground group-hover:text-foreground dark:group-hover:text-gray-200'}`}
         >
           {cluster.theme_title}
         </h4>
         <span
-          className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded transition-colors ${isSelected ? 'bg-gray-800 text-white dark:bg-white dark:text-black' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'}`}
+          className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded transition-colors ${isSelected ? 'bg-gray-800 text-white dark:bg-background dark:text-black' : 'bg-muted text-muted-foreground dark:bg-gray-800 dark:text-muted-foreground'}`}
         >
           {count}
         </span>
       </div>
 
-      <div className='relative h-2 w-full bg-gray-100 dark:bg-[#252525] rounded-full overflow-hidden'>
+      <div className='relative h-2 w-full bg-muted dark:bg-[#252525] rounded-full overflow-hidden'>
         <div
           className='h-full rounded-full transition-all duration-500 ease-out relative'
           style={{
@@ -295,7 +295,7 @@ const ClusterBarItem = ({
       </div>
 
       <p
-        className={`text-xs mt-2 text-gray-500 dark:text-gray-400 leading-relaxed overflow-hidden transition-all duration-300 ${
+        className={`text-xs mt-2 text-muted-foreground dark:text-muted-foreground leading-relaxed overflow-hidden transition-all duration-300 ${
           isSelected ? 'opacity-100 max-h-20 mb-4' : 'opacity-0 max-h-0'
         }`}
       >
@@ -340,7 +340,7 @@ const TicketItem = ({
           }
         }
       }}
-      className='p-5 rounded-lg bg-white dark:bg-[#1E1E1E] mb-3 border border-transparent shadow-sm hover:shadow-md hover:border-blue-100 dark:hover:border-blue-900 transition-all duration-200 group cursor-pointer'
+      className='p-5 rounded-lg bg-background dark:bg-[#1E1E1E] mb-3 border border-transparent shadow-sm hover:shadow-md hover:border-blue-100 dark:hover:border-blue-900 transition-all duration-200 group cursor-pointer'
       data-track-category='ProductInsights'
       data-track-name='NavigateToTicket'
       data-track-metadata={JSON.stringify({
@@ -352,12 +352,12 @@ const TicketItem = ({
         <div className='mt-0.5 p-1.5 rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity'>
           <TicketIcon size={14} />
         </div>
-        <h5 className='text-sm font-medium text-gray-900 dark:text-gray-100 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
+        <h5 className='text-sm font-medium text-foreground dark:text-gray-100 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
           {ticket.title}
         </h5>
       </div>
       <div className='pl-[38px]'>
-        <p className='text-xs text-gray-500 dark:text-gray-400 whitespace-pre-line leading-relaxed'>
+        <p className='text-xs text-muted-foreground dark:text-muted-foreground whitespace-pre-line leading-relaxed'>
           {ticket.description}
         </p>
       </div>
@@ -372,8 +372,8 @@ const EmptyState = ({
   icon: React.ComponentType<{ size: number }>;
   message: string;
 }): ReactElement => (
-  <div className='flex flex-col items-center justify-center h-64 text-gray-400'>
-    <div className='p-4 rounded-full bg-gray-50 dark:bg-gray-800 mb-3'>
+  <div className='flex flex-col items-center justify-center h-64 text-muted-foreground'>
+    <div className='p-4 rounded-full bg-muted dark:bg-gray-800 mb-3'>
       {createElement(icon, { size: 24 })}
     </div>
     <p className='text-sm'>{message}</p>
@@ -487,10 +487,10 @@ const ProductInsightsScreen = (): ReactElement => {
 
   if (projects === undefined || !projectId || loading) {
     return (
-      <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+      <div className='flex-1 bg-muted dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
         <div className='flex flex-col items-center gap-3'>
           <Loader2 size={32} className='animate-spin text-blue-500' />
-          <p className='text-sm text-gray-500'>Loading insights...</p>
+          <p className='text-sm text-muted-foreground'>Loading insights...</p>
         </div>
       </div>
     );
@@ -498,13 +498,13 @@ const ProductInsightsScreen = (): ReactElement => {
 
   if (!projects || projects.length === 0) {
     return (
-      <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+      <div className='flex-1 bg-muted dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
         <div className='flex flex-col items-center gap-3 max-w-md text-center p-6'>
           <AlertCircle size={32} className='text-red-500' />
-          <p className='text-sm text-gray-900 dark:text-gray-100 font-medium'>
+          <p className='text-sm text-foreground dark:text-gray-100 font-medium'>
             No projects available
           </p>
-          <p className='text-xs text-gray-500'>Create a project to view insights.</p>
+          <p className='text-xs text-muted-foreground'>Create a project to view insights.</p>
         </div>
       </div>
     );
@@ -512,39 +512,39 @@ const ProductInsightsScreen = (): ReactElement => {
 
   if ((error && !isNotFoundError) || (!data && !isNotFoundError)) {
     return (
-      <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+      <div className='flex-1 bg-muted dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
         <div className='flex flex-col items-center gap-3 max-w-md text-center p-6'>
           <AlertCircle size={32} className='text-red-500' />
-          <p className='text-sm text-gray-900 dark:text-gray-100 font-medium'>
+          <p className='text-sm text-foreground dark:text-gray-100 font-medium'>
             Failed to load insights
           </p>
-          <p className='text-xs text-gray-500'>{error || 'No data available'}</p>
+          <p className='text-xs text-muted-foreground'>{error || 'No data available'}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className='flex-1 bg-gray-50 dark:bg-[#1E1E1E] flex flex-col h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+    <div className='flex-1 bg-muted dark:bg-[#1E1E1E] flex flex-col h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
       {/* Header */}
-      <div className='px-6 py-5 bg-white dark:bg-[#1E1E1E] border-b border-gray-200 dark:border-gray-800'>
+      <div className='px-6 py-5 bg-background dark:bg-[#1E1E1E] border-b border-border dark:border-gray-800'>
         <div className='flex justify-between items-center mb-4'>
           <div className='flex items-center gap-3'>
             <div className='p-2 rounded-lg'>
               <PieChartIcon size={24} />
             </div>
             <div>
-              <h1 className='text-lg font-sf-pro-expanded font-bold text-gray-900 dark:text-white'>
+              <h1 className='text-lg font-sf-pro-expanded font-bold text-foreground dark:text-white'>
                 Product Insights
               </h1>
-              <p className='text-xs text-gray-500 dark:text-gray-400'>
+              <p className='text-xs text-muted-foreground dark:text-muted-foreground'>
                 Analyze feedback clusters and themes
               </p>
             </div>
           </div>
-          <div className='flex items-center gap-4 text-xs text-gray-500'>
+          <div className='flex items-center gap-4 text-xs text-muted-foreground'>
             <div className='flex items-center gap-1.5'>
-              <Circle size={8} className='fill-current text-gray-300' />
+              <Circle size={8} className='fill-current text-muted' />
               <span>{totalMetaThemes} Meta Themes</span>
             </div>
             <div className='flex items-center gap-1.5'>
@@ -561,7 +561,9 @@ const ProductInsightsScreen = (): ReactElement => {
         {/* Selectors */}
         <div className='flex items-center gap-4'>
           <div className='flex items-center gap-2'>
-            <span className='text-xs font-medium text-gray-600 dark:text-gray-400'>Project:</span>
+            <span className='text-xs font-medium text-muted-foreground dark:text-muted-foreground'>
+              Project:
+            </span>
             <EntitySelector
               options={projectOptions}
               selectedValue={projectId}
@@ -571,7 +573,7 @@ const ProductInsightsScreen = (): ReactElement => {
               placeholder='Select project'
               searchPlaceholder='Search projects...'
               showSearch={false}
-              inputClassName='px-1.5 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2A2A2A] text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500'
+              inputClassName='px-1.5 py-1.5 text-xs rounded-lg border border-input dark:border-gray-600 bg-background dark:bg-[#2A2A2A] text-foreground dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500'
               showIndicator={true}
               width='auto'
             />
@@ -582,13 +584,13 @@ const ProductInsightsScreen = (): ReactElement => {
       {/* 3-Column Layout */}
       <div className='flex-1 flex overflow-hidden'>
         {showInsightsUnavailable ? (
-          <div className='flex-1 flex items-center justify-center bg-white dark:bg-[#1E1E1E]'>
+          <div className='flex-1 flex items-center justify-center bg-background dark:bg-[#1E1E1E]'>
             <div className='flex flex-col items-center gap-3 max-w-md text-center p-6'>
-              <AlertCircle size={32} className='text-gray-400' />
-              <p className='text-sm text-gray-900 dark:text-gray-100 font-medium'>
+              <AlertCircle size={32} className='text-muted-foreground' />
+              <p className='text-sm text-foreground dark:text-gray-100 font-medium'>
                 Insights not available
               </p>
-              <p className='text-xs text-gray-500'>
+              <p className='text-xs text-muted-foreground'>
                 Not enough tickets found or insights not generated for this project.
               </p>
             </div>
@@ -597,8 +599,8 @@ const ProductInsightsScreen = (): ReactElement => {
           data && (
             <>
               {/* Column 1: Meta Themes (Fixed Width) */}
-              <div className='w-[420px] flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E]'>
-                <div className='p-6 border-b border-gray-100 dark:border-gray-800'>
+              <div className='w-[420px] flex-shrink-0 flex flex-col border-r border-border dark:border-gray-800 bg-background dark:bg-[#1E1E1E]'>
+                <div className='p-6 border-b border-border dark:border-gray-800'>
                   <SimplePieChart
                     slices={pieData}
                     onSelect={handleMetaThemeSelect}
@@ -606,12 +608,12 @@ const ProductInsightsScreen = (): ReactElement => {
                     data={data}
                   />
                   <div className='text-center mt-2'>
-                    <p className='text-xs font-medium text-gray-400 uppercase tracking-widest'>
+                    <p className='text-xs font-medium text-muted-foreground uppercase tracking-widest'>
                       Select a Theme
                     </p>
                   </div>
                 </div>
-                <div className='flex-1 overflow-y-auto p-4 scrollbar-sleek bg-gray-50/50 dark:bg-[#1E1E1E]'>
+                <div className='flex-1 overflow-y-auto p-4 scrollbar-sleek bg-muted/50 dark:bg-[#1E1E1E]'>
                   {data.meta_themes.map((theme, index) => (
                     <MetaThemeItem
                       key={index}
@@ -628,14 +630,14 @@ const ProductInsightsScreen = (): ReactElement => {
               </div>
 
               {/* Column 2: Clusters (Fixed Width) */}
-              <div className='w-[480px] flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#1a1a1a]'>
-                <div className='p-[18.5px] border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E] sticky top-0 z-10 flex justify-between items-center'>
-                  <h2 className='text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2'>
+              <div className='w-[480px] flex-shrink-0 flex flex-col border-r border-border dark:border-gray-800 bg-muted dark:bg-[#1a1a1a]'>
+                <div className='p-[18.5px] border-b border-border dark:border-gray-800 bg-background dark:bg-[#1E1E1E] sticky top-0 z-10 flex justify-between items-center'>
+                  <h2 className='text-xs font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2'>
                     <Layers size={14} />
                     <span>Impacted Clusters</span>
                   </h2>
                   {selectedMetaTheme && (
-                    <span className='text-[10px] bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-gray-500'>
+                    <span className='text-[10px] bg-muted dark:bg-gray-800 px-2 py-0.5 rounded-full text-muted-foreground'>
                       {selectedMetaTheme.impacted_clusters.length}
                     </span>
                   )}
@@ -682,9 +684,9 @@ const ProductInsightsScreen = (): ReactElement => {
               </div>
 
               {/* Column 3: Tickets (Flexible Width) */}
-              <div className='flex-1 flex flex-col bg-gray-100 dark:bg-[#141414]'>
-                <div className='p-5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1E1E1E] sticky top-0 z-10 min-h-[57px] flex items-center'>
-                  <h2 className='text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2'>
+              <div className='flex-1 flex flex-col bg-muted dark:bg-[#141414]'>
+                <div className='p-5 border-b border-border dark:border-gray-800 bg-background dark:bg-[#1E1E1E] sticky top-0 z-10 min-h-[57px] flex items-center'>
+                  <h2 className='text-xs font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2'>
                     <TicketIcon size={14} />
                     <span>Associated Tickets</span>
                   </h2>
@@ -701,7 +703,7 @@ const ProductInsightsScreen = (): ReactElement => {
                       ))}
                       {(!data.cluster_details[selectedClusterId] ||
                         data.cluster_details[selectedClusterId]?.length === 0) && (
-                        <div className='text-center p-8 text-gray-500'>
+                        <div className='text-center p-8 text-muted-foreground'>
                           No tickets found for this cluster.
                         </div>
                       )}

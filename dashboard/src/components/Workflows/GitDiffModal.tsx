@@ -66,7 +66,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
       case 'rename':
         return <GitBranch className='w-4 h-4 text-purple-600' />;
       default:
-        return <Edit className='w-4 h-4 text-gray-600' />;
+        return <Edit className='w-4 h-4 text-muted-foreground' />;
     }
   };
 
@@ -81,13 +81,13 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
 
   return (
     <div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'>
-      <div className='bg-white rounded-lg shadow-xl w-full h-full max-w-7xl max-h-[90vh] flex flex-col'>
+      <div className='bg-background rounded-lg shadow-xl w-full h-full max-w-7xl max-h-[90vh] flex flex-col'>
         {/* Header */}
-        <div className='flex items-center justify-between p-4 border-b border-gray-200'>
+        <div className='flex items-center justify-between p-4 border-b border-border'>
           <div className='flex items-center gap-4'>
-            <h2 className='text-lg font-semibold text-gray-900'>Git Diff</h2>
+            <h2 className='text-lg font-semibold text-foreground'>Git Diff</h2>
             {diffData && (
-              <div className='flex items-center gap-2 text-sm text-gray-600'>
+              <div className='flex items-center gap-2 text-sm text-muted-foreground'>
                 <GitBranch className='w-4 h-4' />
                 <span>{diffData.branch}</span>
                 {diffData.commitHash && (
@@ -102,7 +102,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
 
           <div className='flex items-center gap-2'>
             {diffData && (
-              <div className='flex items-center gap-4 mr-4 text-sm text-gray-600'>
+              <div className='flex items-center gap-4 mr-4 text-sm text-muted-foreground'>
                 <span className='text-green-600'>+{diffData.stats.additions}</span>
                 <span className='text-red-600'>-{diffData.stats.deletions}</span>
                 <span>{diffData.stats.files} files</span>
@@ -112,7 +112,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
             <select
               value={viewType}
               onChange={e => setViewType(e.target.value as 'split' | 'unified')}
-              className='px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+              className='px-3 py-1 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
               data-track-category='Workflows'
               data-track-name='ChangeGitDiffViewType'
               data-track-metadata={JSON.stringify({ viewType })}
@@ -123,11 +123,11 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
 
             <button
               onClick={onClose}
-              className='p-2 hover:bg-gray-100 rounded-md transition-colors'
+              className='p-2 hover:bg-muted rounded-md transition-colors'
               data-track-category='Workflows'
               data-track-name='CloseGitDiffModal'
             >
-              <X className='w-5 h-5 text-gray-500' />
+              <X className='w-5 h-5 text-muted-foreground' />
             </button>
           </div>
         </div>
@@ -136,9 +136,9 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
         <div className='flex-1 flex overflow-hidden'>
           {/* File List Sidebar */}
           {diffData && diffData.gitDiff.length > 0 && (
-            <div className='w-80 border-r border-gray-200 overflow-y-auto'>
+            <div className='w-80 border-r border-border overflow-y-auto'>
               <div className='p-2'>
-                <h3 className='text-sm font-medium text-gray-700 mb-2'>Changed Files</h3>
+                <h3 className='text-sm font-medium text-foreground mb-2'>Changed Files</h3>
                 <div className='space-y-1'>
                   {diffData.gitDiff.map((file, index) => {
                     const fileName = getFileName(file);
@@ -151,7 +151,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
                         className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors text-left ${
                           isSelected
                             ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                            : 'hover:bg-gray-50 text-gray-700'
+                            : 'hover:bg-muted text-foreground'
                         }`}
                         data-track-category='Workflows'
                         data-track-name='SelectDiffFile'
@@ -160,7 +160,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
                         {getFileIcon(file.type)}
                         <span className='truncate flex-1'>{fileName}</span>
                         {file.hunks.length > 0 && (
-                          <span className='text-xs text-gray-500'>
+                          <span className='text-xs text-muted-foreground'>
                             {file.hunks.reduce((acc, hunk) => acc + hunk.newLines, 0)} lines
                           </span>
                         )}
@@ -178,7 +178,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
               <div className='flex items-center justify-center h-full'>
                 <div className='text-center'>
                   <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4'></div>
-                  <p className='text-gray-600'>Loading git diff...</p>
+                  <p className='text-muted-foreground'>Loading git diff...</p>
                 </div>
               </div>
             )}
@@ -200,12 +200,12 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
               <div className='p-4'>
                 {diffData.gitDiff.length === 0 ? (
                   <div className='text-center py-8'>
-                    <GitBranch className='w-12 h-12 mx-auto text-gray-400 mb-4' />
-                    <p className='text-gray-600'>
+                    <GitBranch className='w-12 h-12 mx-auto text-muted-foreground mb-4' />
+                    <p className='text-muted-foreground'>
                       No changes detected on branch{' '}
                       <span className='font-semibold'>{diffData.branch}</span>
                     </p>
-                    <p className='text-sm text-gray-500 mt-2'>
+                    <p className='text-sm text-muted-foreground mt-2'>
                       The bot did not make any commits during this workflow execution.
                     </p>
                   </div>
@@ -215,7 +215,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
                       .filter(file => !selectedFile || getFileName(file) === selectedFile)
                       .map((file, index) => (
                         <div key={index} className='mb-6'>
-                          <div className='flex items-center gap-2 font-medium text-sm text-gray-700 mb-2 p-2 bg-gray-100 rounded'>
+                          <div className='flex items-center gap-2 font-medium text-sm text-foreground mb-2 p-2 bg-muted rounded'>
                             {getFileIcon(file.type)}
                             <span>{getFileName(file)}</span>
                           </div>
@@ -231,7 +231,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
                               }
                             </Diff>
                           ) : (
-                            <div className='text-sm text-gray-500 italic p-2'>
+                            <div className='text-sm text-muted-foreground italic p-2'>
                               No changes in this file
                             </div>
                           )}

@@ -128,12 +128,12 @@ const MobileChatDirectory = ({
         {/* Search Bar */}
         <button
           onClick={() => setIsCommandMenuOpen(true)}
-          className='w-full flex items-center gap-3 px-4 py-3 bg-white bg-opacity-70 rounded-full text-left border border-[#181B1D] border-opacity-[0.06]'
+          className='w-full flex items-center gap-3 px-4 py-3 bg-background/70 rounded-full text-left border border-[#181B1D] border-opacity-[0.06]'
           data-track-category='MOBILE_CHAT_DIRECTORY'
           data-track-name='OPEN_SEARCH_MOBILE'
         >
-          <Search className='size-5 text-gray-400 shrink-0' />
-          <span className='text-sm text-gray-400'>Search...</span>
+          <Search className='size-5 text-muted-foreground shrink-0' />
+          <span className='text-sm text-muted-foreground'>Search...</span>
         </button>
       </div>
 

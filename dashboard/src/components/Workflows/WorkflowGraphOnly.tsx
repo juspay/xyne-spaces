@@ -263,42 +263,42 @@ const GraphInner: React.FC<InnerProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`h-full w-full relative bg-white ${isFullscreen ? 'workflow-graph-fullscreen' : ''}`}
+      className={`h-full w-full relative bg-background ${isFullscreen ? 'workflow-graph-fullscreen' : ''}`}
     >
       <div className='absolute top-3 left-3 z-10 flex items-center gap-2'>
         <button
           onClick={onRefresh}
           disabled={!onRefresh || loadingStage < 5}
-          className='p-2 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 disabled:opacity-50 transition-all'
+          className='p-2 bg-background border border-border rounded-lg shadow-sm hover:bg-muted disabled:opacity-50 transition-all'
           title='Refresh'
           data-track-category='Workflows'
           data-track-name='RefreshWorkflow'
         >
           <RefreshCw
             size={16}
-            className={`text-gray-600 ${loadingStage < 5 ? 'animate-spin' : ''}`}
+            className={`text-muted-foreground ${loadingStage < 5 ? 'animate-spin' : ''}`}
           />
         </button>
         <button
           onClick={onExport}
-          className='p-2 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 transition-all'
+          className='p-2 bg-background border border-border rounded-lg shadow-sm hover:bg-muted transition-all'
           title='Export'
           data-track-category='Workflows'
           data-track-name='ExportWorkflow'
         >
-          <Download size={16} className='text-gray-600' />
+          <Download size={16} className='text-muted-foreground' />
         </button>
         <button
           onClick={toggleFs}
-          className='p-2 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 transition-all'
+          className='p-2 bg-background border border-border rounded-lg shadow-sm hover:bg-muted transition-all'
           title={isFullscreen ? 'Exit' : 'Fullscreen'}
           data-track-category='Workflows'
           data-track-name='ToggleWorkflowFullscreen'
         >
           {isFullscreen ? (
-            <Minimize2 size={16} className='text-gray-600' />
+            <Minimize2 size={16} className='text-muted-foreground' />
           ) : (
-            <Maximize2 size={16} className='text-gray-600' />
+            <Maximize2 size={16} className='text-muted-foreground' />
           )}
         </button>
       </div>
@@ -353,16 +353,18 @@ const GraphInner: React.FC<InnerProps> = ({
         }}
       >
         <div className='p-4'>
-          <p className='text-gray-900 mb-4'>
+          <p className='text-foreground mb-4'>
             This will create a new execution starting from the following step:
           </p>
-          <div className='bg-gray-50 rounded-lg p-3 border border-gray-200'>
-            <p className='font-medium text-gray-900'>{rerunStepInfo?.stepName || 'Unknown Step'}</p>
-            <p className='text-sm text-gray-600 mt-1'>
+          <div className='bg-muted rounded-lg p-3 border border-border'>
+            <p className='font-medium text-foreground'>
+              {rerunStepInfo?.stepName || 'Unknown Step'}
+            </p>
+            <p className='text-sm text-muted-foreground mt-1'>
               All steps including this point will be re-executed in the new attempt.
             </p>
           </div>
-          <p className='text-sm text-gray-500 mt-4'>
+          <p className='text-sm text-muted-foreground mt-4'>
             The new execution will appear as a new attempt in the dropdown.
           </p>
         </div>
@@ -412,13 +414,13 @@ export const WorkflowGraphOnly: React.FC<WorkflowGraphOnlyProps> = ({
 
   if (isLoading)
     return (
-      <div className='h-full flex items-center justify-center bg-white'>
+      <div className='h-full flex items-center justify-center bg-background'>
         <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500' />
       </div>
     );
   if (error)
     return (
-      <div className='h-full flex items-center justify-center bg-white text-sm text-red-500'>
+      <div className='h-full flex items-center justify-center bg-background text-sm text-red-500'>
         Failed to load graph
         {onRefresh && (
           <button

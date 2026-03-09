@@ -31,18 +31,18 @@ const ChannelAddDropdown = ({
           align='start'
           sideOffset={4}
           collisionPadding={8}
-          className='min-w-[160px] bg-white rounded-md shadow-lg border border-gray-200 p-1 z-50'
+          className='min-w-[160px] bg-popover rounded-md shadow-lg border border-border p-1 z-50'
         >
           <DropdownMenu.Item
             onSelect={onBrowseChannels}
-            className='flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer outline-none'
+            className='flex items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent rounded cursor-pointer outline-none'
           >
             <Search className='w-4 h-4' />
             Browse channels
           </DropdownMenu.Item>
           <DropdownMenu.Item
             onSelect={onCreateChannel}
-            className='flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer outline-none'
+            className='flex items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent rounded cursor-pointer outline-none'
           >
             <Hash className='w-4 h-4' />
             Create channel

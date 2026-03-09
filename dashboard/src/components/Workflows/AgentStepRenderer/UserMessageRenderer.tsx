@@ -44,7 +44,7 @@ export const UserMessageRenderer: React.FC<
 
   return (
     <div
-      className='text-gray-800 dark:text-gray-200 border-0 px-1 py-2 overflow-hidden max-w-full min-w-0'
+      className='text-foreground dark:text-gray-200 border-0 px-1 py-2 overflow-hidden max-w-full min-w-0'
       style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
     >
       <div className='flex items-start gap-3'>
@@ -53,13 +53,15 @@ export const UserMessageRenderer: React.FC<
         </div>
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-2 mb-1'>
-            <span className='text-sm font-medium text-gray-700 dark:text-gray-300'>User Input</span>
+            <span className='text-sm font-medium text-foreground dark:text-muted'>User Input</span>
             {timestamp && (
-              <span className='text-xs text-gray-500 dark:text-gray-400'>{timestamp}</span>
+              <span className='text-xs text-muted-foreground dark:text-muted-foreground'>
+                {timestamp}
+              </span>
             )}
           </div>
           <div className='bg-blue-50 dark:bg-blue-900/30 rounded-lg p-3 border border-blue-200 dark:border-blue-700'>
-            <p className='text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap'>
+            <p className='text-sm text-foreground dark:text-gray-200 whitespace-pre-wrap'>
               {message}
             </p>
           </div>

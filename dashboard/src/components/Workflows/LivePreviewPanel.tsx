@@ -87,10 +87,10 @@ const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({ url, userAgent, isA
   }, [previewUrl, userAgent, platform, isActive]);
 
   return (
-    <div className='h-full flex flex-col bg-white'>
+    <div className='h-full flex flex-col bg-background'>
       {/* Header */}
-      <div className='flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50'>
-        <div className='flex items-center gap-2 text-sm text-gray-600'>
+      <div className='flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-muted'>
+        <div className='flex items-center gap-2 text-sm text-muted-foreground'>
           <Globe className='w-4 h-4' />
           <span>Live Preview</span>
           <span className='px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono'>

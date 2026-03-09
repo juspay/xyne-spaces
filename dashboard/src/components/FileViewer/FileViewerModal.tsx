@@ -47,7 +47,7 @@ const LoadingState: React.FC<{ message?: string }> = ({ message = 'Loading previ
   <div className='flex items-center justify-center h-full'>
     <div className='flex flex-col items-center gap-3'>
       <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-white'></div>
-      <div className='text-gray-300 text-sm text-center max-w-xs'>{message}</div>
+      <div className='text-muted text-sm text-center max-w-xs'>{message}</div>
     </div>
   </div>
 );
@@ -130,7 +130,7 @@ const SlideContent: React.FC<{
 
   if (!fileType) {
     return (
-      <div className='text-gray-300 text-center'>
+      <div className='text-muted text-center'>
         <p>Preview not available</p>
       </div>
     );
@@ -199,7 +199,7 @@ const ErrorState: React.FC<{
     <div className='flex gap-2'>
       <button
         onClick={onRetry}
-        className='px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20 transition-colors text-sm backdrop-blur-sm'
+        className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 transition-colors text-sm backdrop-blur-sm'
         data-track-category='FileViewer'
         data-track-name='RETRY_LOAD_FILE'
         data-track-metadata={JSON.stringify({ error })}
@@ -208,7 +208,7 @@ const ErrorState: React.FC<{
       </button>
       <button
         onClick={onDownload}
-        className='px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20 flex items-center gap-2 transition-colors text-sm backdrop-blur-sm'
+        className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors text-sm backdrop-blur-sm'
         data-track-category='FileViewer'
         data-track-name='DOWNLOAD_FILE'
       >
@@ -224,14 +224,16 @@ const UnsupportedFileState: React.FC<{
   onDownload: () => void;
 }> = ({ onDownload }) => (
   <div className='flex flex-col items-center justify-center h-full gap-4'>
-    <div className='text-gray-300 text-center'>
+    <div className='text-muted text-center'>
       <div className='text-6xl mb-4'>📄</div>
       <p className='text-lg font-semibold mb-2 text-white'>Preview not available</p>
-      <p className='text-sm text-gray-400'>This file type cannot be previewed in the browser</p>
+      <p className='text-sm text-muted-foreground'>
+        This file type cannot be previewed in the browser
+      </p>
     </div>
     <button
       onClick={onDownload}
-      className='px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20 flex items-center gap-2 transition-colors backdrop-blur-sm'
+      className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors backdrop-blur-sm'
       data-track-category='FileViewer'
       data-track-name='DOWNLOAD_UNSUPPORTED_FILE'
     >
@@ -461,7 +463,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
       // Handle the case where it's a video but there's no attachmentId
       return (
         <div className='flex flex-col items-center justify-center h-full gap-3'>
-          <p className='text-gray-400'>Video cannot be streamed</p>
+          <p className='text-muted-foreground'>Video cannot be streamed</p>
           <button
             onClick={() => void handleDownload()}
             className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
@@ -611,7 +613,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
         <div className='flex items-center gap-3'>
           <button
             onClick={() => void handleDownload()}
-            className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+            className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
             data-track-category='FileViewer'
             data-track-name='DOWNLOAD_FILE_FROM_MODAL'
           >
@@ -620,7 +622,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
           {includeCloseButton && (
             <Dialog.Close asChild>
               <button
-                className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+                className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
                 aria-label='Close'
               >
                 <X className='h-5 w-5' />
@@ -707,14 +709,14 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
           onMouseLeave={() => setIsHovered(false)}
         >
           {/* Content - Full surface with padding for floating controls */}
-          <div className='absolute inset-0 bg-white'>
+          <div className='absolute inset-0 bg-background'>
             <div
               ref={constraintsRef}
               className={cn(
                 'relative w-full h-full',
                 isImage
                   ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
-                  : 'overflow-auto bg-white',
+                  : 'overflow-auto bg-background',
               )}
             >
               {/* Floating top bar */}

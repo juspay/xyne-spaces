@@ -97,8 +97,8 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
       disabled={!hasAccess}
       className={`flex items-center gap-1.5 text-xs mt-2 ${
         hasAccess
-          ? 'text-blue-600 hover:text-blue-700 hover:underline cursor-pointer'
-          : 'text-gray-400 cursor-not-allowed'
+          ? 'text-primary hover:text-primary/80 hover:underline cursor-pointer'
+          : 'text-muted-foreground cursor-not-allowed'
       }`}
     >
       <CornerUpRight className='w-3 h-3' />

@@ -26,14 +26,14 @@ const FileList: React.FC<FileListProps> = ({ chatMessages }) => {
 
   if (files.length === 0) {
     return (
-      <div className='text-center text-gray-500 py-8 flex-1 flex flex-col items-center justify-center select-none bg-[#FFFFFF]'>
+      <div className='text-center text-muted-foreground py-8 flex-1 flex flex-col items-center justify-center select-none bg-background'>
         <img
           src='/images/empty-attachments.png'
           alt='No files shared in this channel yet.'
           width={200}
           height={200}
         />
-        <p className='text-gray-500'>No files shared in this channel yet.</p>
+        <p className='text-muted-foreground'>No files shared in this channel yet.</p>
       </div>
     );
   }

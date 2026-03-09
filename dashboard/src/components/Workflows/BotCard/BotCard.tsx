@@ -42,7 +42,7 @@ export const BotCard: React.FC<BotCardProps> = ({
       case 'PAUSED':
         return 'text-yellow-600 bg-yellow-50';
       default:
-        return 'text-gray-600 bg-gray-50';
+        return 'text-muted-foreground bg-muted';
     }
   };
 
@@ -56,15 +56,15 @@ export const BotCard: React.FC<BotCardProps> = ({
       onKeyDown={handleKeyDown}
       role='button'
       tabIndex={0}
-      className='bg-white border border-gray-200 rounded-xl p-4 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer group'
+      className='bg-background border border-border rounded-xl p-4 hover:border-input hover:shadow-sm transition-all cursor-pointer group'
       data-track-category='Workflows'
       data-track-name='OpenWorkflow'
       data-track-metadata={JSON.stringify({ workflowId, workflowName, status })}
     >
       {/* Header: ID and Icons */}
       <div className='flex items-start justify-between mb-2'>
-        <span className='text-xs font-medium text-gray-400'>WF-{workflowId.slice(-8)}</span>
-        <div className='flex items-center gap-2 text-gray-400'>
+        <span className='text-xs font-medium text-muted-foreground'>WF-{workflowId.slice(-8)}</span>
+        <div className='flex items-center gap-2 text-muted-foreground'>
           <Bot className='w-3.5 h-3.5' />
           <span
             className={`text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded ${getStatusColor(status)}`}
@@ -75,7 +75,7 @@ export const BotCard: React.FC<BotCardProps> = ({
       </div>
 
       {/* Title */}
-      <h4 className='text-sm font-medium text-gray-900 mb-3 line-clamp-2 leading-snug'>
+      <h4 className='text-sm font-medium text-foreground mb-3 line-clamp-2 leading-snug'>
         {workflowName}
       </h4>
 
@@ -86,7 +86,7 @@ export const BotCard: React.FC<BotCardProps> = ({
           {getWorkflowTypeDisplay(workflowType)}
         </span>
         {ticketId && (
-          <span className='inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded-md text-xs font-medium'>
+          <span className='inline-flex items-center gap-1 px-2 py-1 bg-muted text-muted-foreground rounded-md text-xs font-medium'>
             Ticket: {ticketId.slice(-8)}
           </span>
         )}
@@ -95,13 +95,13 @@ export const BotCard: React.FC<BotCardProps> = ({
       {/* Footer: Status and Action */}
       <div className='flex items-center justify-between mt-auto'>
         {/* Status Indicator */}
-        <div className='flex items-center gap-1 text-xs text-gray-500'>
+        <div className='flex items-center gap-1 text-xs text-muted-foreground'>
           <ChevronRight className='w-3.5 h-3.5' />
           <span>View Workflow Details</span>
         </div>
 
         {/* Bot Indicator */}
-        <div className='flex items-center gap-1 text-xs text-gray-400'>
+        <div className='flex items-center gap-1 text-xs text-muted-foreground'>
           <Bot className='w-3 h-3' />
           <span>Bot</span>
         </div>

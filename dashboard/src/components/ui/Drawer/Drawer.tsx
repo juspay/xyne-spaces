@@ -55,12 +55,12 @@ export const Drawer = ({
           className={cn(
             'fixed z-50 flex flex-col',
             'bottom-0 left-0 right-0 max-h-[96%] rounded-t-[20px] ',
-            'bg-white dark:bg-gray-800',
+            'bg-popover',
             'focus:outline-none',
           )}
         >
           {/* Drag handle */}
-          <div className='mx-auto mt-4 h-2 w-[100px] rounded-full bg-gray-300 dark:bg-gray-600' />
+          <div className='mx-auto mt-4 h-2 w-[100px] rounded-full bg-muted-foreground/30' />
 
           <div className='overflow-auto flex-1'>
             {/* Hidden title and description for accessibility */}

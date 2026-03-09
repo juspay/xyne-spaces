@@ -123,7 +123,7 @@ const ChannelCommandItem = ({
       <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
         {getChannelIcon(channel)}
       </div>
-      <span className='flex-1 min-w-0 text-left text-xs font-medium text-gray-800 truncate'>
+      <span className='flex-1 min-w-0 text-left text-xs font-medium text-foreground truncate'>
         {displayName}
       </span>
       {isSelected ? (
@@ -960,9 +960,9 @@ const ChannelCommandMenu = ({
       }}
     >
       {/* Search Input with Bot Selection */}
-      <div className='flex items-center border-b border-gray-200'>
+      <div className='flex items-center border-b border-border'>
         {selectedBot && (
-          <div className='flex items-center gap-2 pl-4 pr-2 py-2 bg-blue-50 border-r border-gray-200'>
+          <div className='flex items-center gap-2 pl-4 pr-2 py-2 bg-blue-50 border-r border-border'>
             <Bot size={14} className='text-blue-600' />
             <span className='text-sm font-medium text-blue-700'>{selectedBot.name}</span>
           </div>
@@ -970,7 +970,7 @@ const ChannelCommandMenu = ({
         <div className='relative flex-1 flex items-center gap-2 px-4 py-[10px]'>
           <button
             onClick={() => onOpenChange(false)}
-            className='p-1 rounded-md text-gray-900 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200 sm:hidden'
+            className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200 sm:hidden'
             aria-label='Go back'
             data-track-category='CHANNEL_SEARCH'
             data-track-name='CLOSE_SEARCH_MENU`'
@@ -1028,7 +1028,7 @@ const ChannelCommandMenu = ({
                   }
                 }
               }}
-              className='p-1.5 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors flex-shrink-0 flex items-center justify-center'
+              className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex-shrink-0 flex items-center justify-center'
               aria-label={search.trim() || searchText.trim() ? 'Clear search' : 'Search'}
               data-track-category='CHANNEL_SEARCH'
               data-track-name={search.trim() || searchText.trim() ? 'ClearSearch' : 'OpenSearch'}
@@ -1061,7 +1061,7 @@ const ChannelCommandMenu = ({
                 <Sparkles className='w-4 h-4' />
               </button>
             )}
-          <kbd className='px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 border border-[#E1E4EA] rounded flex-shrink-0 hidden sm:block'>
+          <kbd className='px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground border border-border rounded flex-shrink-0 hidden sm:block'>
             Esc
           </kbd>
         </div>
@@ -1615,7 +1615,7 @@ const ChannelCommandMenu = ({
                                     {hasMore && (
                                       <button
                                         onClick={() => toggleCategoryExpansion(category)}
-                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                                         style={{
                                           WebkitTapHighlightColor: 'transparent',
                                           userSelect: 'none',
@@ -1858,16 +1858,16 @@ const ChannelCommandMenu = ({
             <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-end shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
               {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
-            <label htmlFor='vespa-toggle' className='text-xs text-gray-600 cursor-pointer'>
+            <label htmlFor='vespa-toggle' className='text-xs text-muted-foreground cursor-pointer'>
               Vespa Search
             </label>
             <Switch.Root
               id='vespa-toggle'
               checked={useVespaSearch}
               onCheckedChange={setUseVespaSearch}
-              className='w-9 h-5 bg-gray-300 rounded-full relative data-[state=checked]:bg-blue-500 transition-colors'
+              className='w-9 h-5 bg-muted-foreground/40 rounded-full relative data-[state=checked]:bg-blue-500 transition-colors'
             >
-              <Switch.Thumb className='block w-4 h-4 bg-white rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[18px]' />
+              <Switch.Thumb className='block w-4 h-4 bg-background rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[18px]' />
             </Switch.Root>
           </div>
           */}

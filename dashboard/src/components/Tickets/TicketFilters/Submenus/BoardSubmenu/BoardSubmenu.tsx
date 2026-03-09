@@ -56,12 +56,12 @@ export const BoardSubmenu = ({
           data-track-category='TicketFilters'
           data-track-name='SelectAllBoards'
           data-track-metadata={JSON.stringify({ filterType: 'board', projectId, selectedBoards })}
-          className={`w-full justify-between px-3 py-2 h-auto text-[#181B1D] ${
-            isAllBoardsSelected ? 'bg-[#F2F2F3]' : ''
+          className={`w-full justify-between px-3 py-2 h-auto text-foreground ${
+            isAllBoardsSelected ? 'bg-accent' : ''
           }`}
         >
           <span className='text-sm font-medium'>All Boards</span>
-          {isAllBoardsSelected && <Check className='w-5 h-5 text-[#3B4145]' strokeWidth={2.5} />}
+          {isAllBoardsSelected && <Check className='w-5 h-5 text-foreground' strokeWidth={2.5} />}
         </Button>
       )}
 
@@ -81,18 +81,18 @@ export const BoardSubmenu = ({
                 boardId: board.id,
                 selectedBoards,
               })}
-              className={`w-full justify-between px-3 py-2 h-auto text-[#181B1D] ${
-                isSelected ? 'bg-[#F2F2F3]' : ''
+              className={`w-full justify-between px-3 py-2 h-auto text-foreground ${
+                isSelected ? 'bg-accent' : ''
               }`}
             >
               <span className='text-sm font-medium'>{board.name}</span>
 
-              {isSelected && <Check className='w-5 h-5 text-[#3B4145]' strokeWidth={2.5} />}
+              {isSelected && <Check className='w-5 h-5 text-foreground' strokeWidth={2.5} />}
             </Button>
           );
         })
       ) : (
-        <div className='px-4 py-3 text-sm text-gray-500'>No boards available</div>
+        <div className='px-4 py-3 text-sm text-muted-foreground'>No boards available</div>
       )}
     </div>
   );

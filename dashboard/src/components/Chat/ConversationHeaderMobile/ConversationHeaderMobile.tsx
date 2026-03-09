@@ -91,7 +91,7 @@ const ConversationHeaderMobile = ({
   };
   return (
     <div className='relative w-full p-2 bg-transparent z-10'>
-      <div className='absolute top-0 left-0 right-0 z-0 h-16 bg-gradient-to-b from-white to-transparent touch-none' />
+      <div className='absolute top-0 left-0 right-0 z-0 h-16 bg-gradient-to-b from-background to-transparent touch-none' />
       <div className='relative flex items-center gap-x-2'>
         <button
           onClick={() => {
@@ -141,10 +141,12 @@ const ConversationHeaderMobile = ({
               <ChannelIcon channel={channel} />
             </div>
             <div style={{ height: ROOT_SIZE }} className='flex flex-col items-start justify-center'>
-              <p className='text-sm font-medium whitespace-nowrap overflow-hidden text-gray-900'>
+              <p className='text-sm font-medium whitespace-nowrap overflow-hidden text-foreground'>
                 {displayName}
               </p>
-              <small className='text-gray-400 text-xs'>{channel.participantCount} members</small>
+              <small className='text-muted-foreground text-xs'>
+                {channel.participantCount} members
+              </small>
             </div>
           </motion.div>
 
@@ -152,13 +154,13 @@ const ConversationHeaderMobile = ({
             <div className='flex items-center justify-between gap-2'>
               <button
                 onClick={() => setIsAddPeopleDrawerOpen(true)}
-                className='w-full border border-[#EBEBEB] flex items-center justify-center gap-2 rounded-lg py-1.5 px-2  h-[34px]'
+                className='w-full border border-border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2  h-[34px]'
                 data-track-category='CHANNELS_MOBILE_VIEW'
                 data-track-name='ADD_PEOPLE_MOBILE'
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <UserRoundPlus className='size-4' />
-                <span className='text-sm font-medium text-gray-900'>Add</span>
+                <span className='text-sm font-medium text-foreground'>Add</span>
               </button>
               <button
                 onClick={handleStarToggle}
@@ -166,7 +168,7 @@ const ConversationHeaderMobile = ({
                   'w-full border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2 h-[34px] transition-all duration-100',
                   channelUserStatus?.isStarred
                     ? 'bg-[#FBEFD9] border-[#FBEFD9]'
-                    : 'bg-white border-[#EBEBEB]',
+                    : 'bg-background border-border',
                 )}
                 data-track-category='CHANNELS_MOBILE_VIEW'
                 data-track-name='TOGGLE_STAR_MOBILE'
@@ -180,20 +182,20 @@ const ConversationHeaderMobile = ({
                   fill={(channelUserStatus?.isStarred ?? false) ? '#FACC14' : 'none'}
                   stroke={(channelUserStatus?.isStarred ?? false) ? '#FACC14' : '#3B4145'}
                 />
-                <span className='text-sm font-medium text-gray-900'>
+                <span className='text-sm font-medium text-foreground'>
                   {(channelUserStatus?.isStarred ?? false) ? 'Unstar' : 'Star'}
                 </span>
               </button>
               <button
                 onClick={(): void => void navigate('/chat/search')}
                 disabled={true}
-                className='w-full border border-[#EBEBEB] flex items-center justify-center gap-2 rounded-lg py-1.5 px-2 h-[34px] disabled:opacity-50 disabled:cursor-not-allowed'
+                className='w-full border border-border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2 h-[34px] disabled:opacity-50 disabled:cursor-not-allowed'
                 data-track-category='CHANNELS_MOBILE_VIEW'
                 data-track-name='SEARCH_MOBILE'
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <Search className='size-4' />
-                <span className='text-sm font-medium text-gray-900'>Search</span>
+                <span className='text-sm font-medium text-foreground'>Search</span>
               </button>
             </div>
             <div className='space-y-1 pt-2'>
@@ -217,7 +219,7 @@ const ConversationHeaderMobile = ({
                 </button>
               ))}
 
-              <hr className='my-2 border-gray-200' />
+              <hr className='my-2 border-border' />
 
               <button
                 onClick={() => {
@@ -232,10 +234,10 @@ const ConversationHeaderMobile = ({
                 <span className='size-4 flex items-center justify-center shrink-0'>
                   <Users className='size-4' />
                 </span>
-                <span className='text-sm font-medium text-gray-900'>
+                <span className='text-sm font-medium text-foreground'>
                   {channelScopeType === ChannelScopeType.DM ? 'Profile' : 'Members'}
                 </span>
-                <span className='text-sm font-medium text-gray-900 ml-auto'>
+                <span className='text-sm font-medium text-foreground ml-auto'>
                   {channel.participantCount}
                 </span>
                 <span>
@@ -255,7 +257,7 @@ const ConversationHeaderMobile = ({
                 <span className='size-4 flex items-center justify-center shrink-0'>
                   <Settings className='size-4' />
                 </span>
-                <span className='text-sm font-medium text-gray-900'>Settings</span>
+                <span className='text-sm font-medium text-foreground'>Settings</span>
               </button>
             </div>
           </div>

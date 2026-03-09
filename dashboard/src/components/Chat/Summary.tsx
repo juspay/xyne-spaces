@@ -195,8 +195,8 @@ export function parseStreamingContent(content: string): StreamingParsedContent {
 // Copy icon matching the provided design
 const CopyIcon = (): ReactElement => (
   <div className='w-3.5 h-3.5 relative overflow-hidden'>
-    <div className='w-2 h-2 left-[5px] top-[5px] absolute outline outline-1 outline-offset-[-0.58px] outline-gray-500 rounded-[1px]' />
-    <div className='w-2 h-2 left-[1.25px] top-[1.25px] absolute outline outline-1 outline-offset-[-0.58px] outline-gray-500 rounded-[1px] bg-gray-50' />
+    <div className='w-2 h-2 left-[5px] top-[5px] absolute outline outline-1 outline-offset-[-0.58px] outline-muted-foreground rounded-[1px]' />
+    <div className='w-2 h-2 left-[1.25px] top-[1.25px] absolute outline outline-1 outline-offset-[-0.58px] outline-muted-foreground rounded-[1px] bg-muted' />
   </div>
 );
 
@@ -652,14 +652,14 @@ export const Summary = (props: SummaryProps): ReactElement => {
       : 'Summarizing channel';
 
   return (
-    <div className='w-full h-full bg-white shadow-[-1px_0px_6px_0px_rgba(0,0,0,0.05)] border-l border-gray-300 flex flex-col overflow-hidden'>
+    <div className='w-full h-full bg-background shadow-[-1px_0px_6px_0px_rgba(0,0,0,0.05)] border-l border-border flex flex-col overflow-hidden'>
       <div
         className={
           isThread
             ? state === 'streaming' || state === 'complete'
-              ? 'h-[88px] px-4 py-[21px] flex items-start gap-2 self-stretch border-b border-gray-200'
+              ? 'h-[88px] px-4 py-[21px] flex items-start gap-2 self-stretch border-b border-border'
               : 'h-14 p-4 flex items-center gap-2 self-stretch'
-            : 'h-[88px] px-4 py-[21px] flex items-start gap-2 self-stretch border-b border-gray-200'
+            : 'h-[88px] px-4 py-[21px] flex items-start gap-2 self-stretch border-b border-border'
         }
       >
         <div
@@ -669,7 +669,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
               : 'pt-1 flex justify-start items-center gap-2.5'
           }
         >
-          <Sparkles className='w-4 h-4 text-gray-700' />
+          <Sparkles className='w-4 h-4 text-foreground' />
         </div>
         <div
           className={
@@ -678,7 +678,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
               : 'flex-1 flex flex-col justify-start items-start gap-1'
           }
         >
-          <div className="self-stretch justify-start text-gray-900 text-base font-semibold font-['Inter'] line-clamp-1">
+          <div className="self-stretch justify-start text-foreground text-base font-semibold font-['Inter'] line-clamp-1">
             {isThread ? 'Xyne AI' : title}
           </div>
           {/* Show metadata bar for both thread and channel when streaming/complete */}
@@ -693,7 +693,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
 
                 return (
                   <>
-                    <div className="justify-start text-gray-600 text-sm font-normal font-['Inter'] leading-4 line-clamp-1">
+                    <div className="justify-start text-muted-foreground text-sm font-normal font-['Inter'] leading-4 line-clamp-1">
                       {displayDateFrom && displayDateTo
                         ? (() => {
                             const fromDate = new Date(displayDateFrom);
@@ -713,22 +713,22 @@ export const Summary = (props: SummaryProps): ReactElement => {
                           ? `From ${new Date(displayDateFrom).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
                           : `Until ${new Date(displayDateTo!).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`}
                     </div>
-                    <div className='w-[3px] h-[3px] bg-gray-400 rounded-full' />
+                    <div className='w-[3px] h-[3px] bg-muted-foreground rounded-full' />
                   </>
                 );
               })()}
               {/* Message count */}
               <div className='flex justify-start items-center gap-1'>
-                <MessageSquare className='w-3.5 h-3.5 text-gray-600' />
-                <div className="justify-start text-gray-600 text-sm font-normal font-['Inter'] leading-4 line-clamp-1">
+                <MessageSquare className='w-3.5 h-3.5 text-muted-foreground' />
+                <div className="justify-start text-muted-foreground text-sm font-normal font-['Inter'] leading-4 line-clamp-1">
                   {metadata.messageCount || summary?.messageCount || 0}
                 </div>
               </div>
-              <div className='w-[3px] h-[3px] bg-gray-400 rounded-full' />
+              <div className='w-[3px] h-[3px] bg-muted-foreground rounded-full' />
               {/* Participant count */}
               <div className='flex justify-start items-center gap-1'>
-                <Users className='w-3.5 h-3.5 text-gray-600' />
-                <div className="justify-start text-gray-600 text-sm font-normal font-['Inter'] leading-4 line-clamp-1">
+                <Users className='w-3.5 h-3.5 text-muted-foreground' />
+                <div className="justify-start text-muted-foreground text-sm font-normal font-['Inter'] leading-4 line-clamp-1">
                   {metadata.participantCount || summary?.participantCount || 0}
                 </div>
               </div>
@@ -738,11 +738,11 @@ export const Summary = (props: SummaryProps): ReactElement => {
         <div className='flex justify-start items-center gap-2'>
           <button
             onClick={onClose}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-gray-300 flex justify-center items-center gap-2.5 overflow-hidden hover:bg-gray-100 transition-colors'
+            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             data-track-category='CHAT_SUMMARY'
             data-track-name='Close_Summary'
           >
-            <X className='w-4 h-4 text-gray-900' />
+            <X className='w-4 h-4 text-foreground' />
           </button>
         </div>
       </div>
@@ -755,21 +755,21 @@ export const Summary = (props: SummaryProps): ReactElement => {
             <div className='w-80 flex flex-col justify-start items-start gap-4'>
               <div className='w-full flex flex-col justify-start items-start gap-1.5'>
                 <div className='self-stretch flex flex-col justify-center items-start gap-1'>
-                  <div className="justify-start text-gray-900 text-base font-semibold font-['Inter'] line-clamp-1">
+                  <div className="justify-start text-foreground text-base font-semibold font-['Inter'] line-clamp-1">
                     {loadingText}
                   </div>
                   {!isDMType && (
                     <div className='inline-flex justify-start items-center gap-1'>
-                      <Hash className='w-4 h-4 text-gray-900' />
+                      <Hash className='w-4 h-4 text-foreground' />
                       <div className='flex justify-start items-center gap-2'>
-                        <div className="justify-start text-gray-900 text-base font-semibold font-['Inter'] line-clamp-1">
+                        <div className="justify-start text-foreground text-base font-semibold font-['Inter'] line-clamp-1">
                           {channelName}
                         </div>
                       </div>
                     </div>
                   )}
                 </div>
-                <div className="self-stretch justify-start text-gray-600 text-sm font-normal font-['Inter'] leading-5">
+                <div className="self-stretch justify-start text-muted-foreground text-sm font-normal font-['Inter'] leading-5">
                   Going through messages...
                 </div>
               </div>
@@ -782,18 +782,18 @@ export const Summary = (props: SummaryProps): ReactElement => {
         {/* Streaming content - show when we have visible characters to display */}
         {state === 'streaming' && visibleChars > 0 && !summary && (
           <div className='space-y-4 p-4'>
-            <div className='text-gray-700 leading-relaxed'>
+            <div className='text-foreground leading-relaxed'>
               <p className='whitespace-pre-wrap'>{displayStreamingContent}</p>
             </div>
             {streamingParsed.keypoints.length > 0 && (
               <div className='space-y-2 mt-4'>
-                <h3 className='text-sm font-semibold text-gray-600'>Key Points</h3>
+                <h3 className='text-sm font-semibold text-muted-foreground'>Key Points</h3>
                 <ul className='space-y-1.5'>
                   {streamingParsed.keypoints.map((point, index) => (
                     <li key={index} className='flex items-start gap-2'>
                       <span className='text-primary mt-0.5'>•</span>
                       <span
-                        className='text-gray-700 text-sm'
+                        className='text-foreground text-sm'
                         dangerouslySetInnerHTML={{
                           __html: point.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'),
                         }}
@@ -809,7 +809,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
         {/* Complete */}
         {state === 'complete' && (
           <div className='space-y-6 p-4'>
-            <div className='text-gray-700 leading-relaxed'>
+            <div className='text-foreground leading-relaxed'>
               {summary?.summary || streamingParsed.summary || 'No summary available'}
             </div>
 
@@ -825,7 +825,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
 
               return (
                 <div className='space-y-3'>
-                  <h3 className='text-sm font-semibold text-gray-600'>Key Points</h3>
+                  <h3 className='text-sm font-semibold text-muted-foreground'>Key Points</h3>
                   <ul className='space-y-2'>
                     {keypointsToRender.map((point, index) => {
                       const keypointNum = index + 1;
@@ -851,13 +851,13 @@ export const Summary = (props: SummaryProps): ReactElement => {
                       return (
                         <li key={index} className='flex items-start gap-2'>
                           <span className='text-primary'>•</span>
-                          <span className='text-gray-700'>
+                          <span className='text-foreground'>
                             <span dangerouslySetInnerHTML={{ __html: formattedPoint }} />
                             {hasValidCitation && messageNumber && (
                               <button
                                 type='button'
                                 onClick={(): void => handleCitationClick(messageNumber)}
-                                className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
+                                className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-muted-foreground/20 text-foreground font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-muted-foreground/30 transition-colors cursor-pointer align-middle"
                                 title={`Jump to message ${keypointNum}`}
                                 data-track-category='CHAT_SUMMARY'
                                 data-track-name='Jump_To_Citation'
@@ -875,12 +875,12 @@ export const Summary = (props: SummaryProps): ReactElement => {
               );
             })()}
 
-            <div className='flex items-center justify-between pt-4 border-t border-gray-100'>
-              <p className='text-xs text-gray-400'>AI-generated messages may be wrong.</p>
+            <div className='flex items-center justify-between pt-4 border-t border-border'>
+              <p className='text-xs text-muted-foreground'>AI-generated messages may be wrong.</p>
               <button
                 type='button'
                 onClick={handleCopy}
-                className='p-1.5 rounded hover:bg-gray-200 transition-colors cursor-pointer'
+                className='p-1.5 rounded hover:bg-muted-foreground/20 transition-colors cursor-pointer'
                 title={copied ? 'Copied!' : 'Copy summary'}
                 data-track-category='CHAT_SUMMARY'
                 data-track-name='Copy_Summary'
@@ -893,7 +893,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
 
         {/* Error */}
         {state === 'error' && (
-          <div className='flex flex-col items-center justify-center h-full gap-4 text-gray-500'>
+          <div className='flex flex-col items-center justify-center h-full gap-4 text-muted-foreground'>
             <p className='text-red-500'>{error}</p>
             <Button
               variant='secondary'
@@ -909,15 +909,15 @@ export const Summary = (props: SummaryProps): ReactElement => {
         {/* No messages */}
         {state === 'no_messages' && noMessagesInfo && (
           <div className='flex flex-col items-center justify-center h-full gap-4 text-center'>
-            <div className='w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center'>
-              <MessageSquare size={32} className='text-gray-400' />
+            <div className='w-16 h-16 rounded-full bg-muted flex items-center justify-center'>
+              <MessageSquare size={32} className='text-muted-foreground' />
             </div>
             <div className='space-y-2'>
-              <h3 className='text-lg font-semibold text-gray-700'>No Messages to Summarize</h3>
-              <p className='text-sm text-gray-500 max-w-xs'>{noMessagesInfo.message}</p>
+              <h3 className='text-lg font-semibold text-foreground'>No Messages to Summarize</h3>
+              <p className='text-sm text-muted-foreground max-w-xs'>{noMessagesInfo.message}</p>
             </div>
             {noMessagesInfo.totalMessages > 0 && (
-              <p className='text-xs text-gray-400'>Try selecting a different date range</p>
+              <p className='text-xs text-muted-foreground'>Try selecting a different date range</p>
             )}
           </div>
         )}

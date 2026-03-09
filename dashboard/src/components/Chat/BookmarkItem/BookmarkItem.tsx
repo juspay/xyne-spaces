@@ -284,7 +284,7 @@ export const BookmarkItem = ({
       }}
       onMouseEnter={(): void => setIsHovered(true)}
       onMouseLeave={(): void => setIsHovered(false)}
-      className='relative block p-4 hover:bg-gray-50 transition-colors duration-150 cursor-pointer border-b border-gray-200'
+      className='relative block p-4 hover:bg-accent transition-colors duration-150 cursor-pointer border-b border-border'
       role='button'
       tabIndex={0}
     >
@@ -297,11 +297,11 @@ export const BookmarkItem = ({
 
       {/* Action Toolbar - shown on hover, hidden on mobile */}
       {!isMobile && isHovered && (
-        <div className='absolute bottom-2 right-2 z-10 flex items-center gap-1 bg-white border border-gray-300 rounded-md shadow-[0px_0px_8px_0px_rgba(5,5,6,0.04)] p-1'>
+        <div className='absolute bottom-2 right-2 z-10 flex items-center gap-1 bg-card border border-border rounded-md shadow-[0px_0px_8px_0px_rgba(5,5,6,0.04)] p-1'>
           <Tooltip content='Mark as done'>
             <button
               onClick={handleRemoveBookmark}
-              className='p-1.5 rounded hover:bg-gray-200 transition-colors duration-150'
+              className='p-1.5 rounded hover:bg-accent transition-colors duration-150'
               aria-label='Mark as done'
               data-track-category='CHAT_BOOKMARK'
               data-track-name='Mark_Bookmark_Done'
@@ -314,7 +314,7 @@ export const BookmarkItem = ({
             <Tooltip content='Snooze'>
               <button
                 onClick={handleSnoozeClick}
-                className='p-1.5 rounded hover:bg-gray-200 transition-colors duration-150'
+                className='p-1.5 rounded hover:bg-accent transition-colors duration-150'
                 aria-label='Snooze'
                 data-track-category='CHAT_BOOKMARK'
                 data-track-name='Open_Snooze_Menu'
@@ -328,7 +328,7 @@ export const BookmarkItem = ({
             {showSnoozeDropdown && (
               <div
                 ref={dropdownRef}
-                className='absolute top-full right-0 mt-1 bg-white border border-[#F2F2F3] rounded-md shadow-[0px_1px_8px_0px_rgba(0,0,0,0.15)] py-1 min-w-[200px] z-20'
+                className='absolute top-full right-0 mt-1 bg-popover border border-border rounded-md shadow-[0px_1px_8px_0px_rgba(0,0,0,0.15)] py-1 min-w-[200px] z-20'
                 role='menu'
                 tabIndex={-1}
                 onKeyDown={(e): void => {
@@ -341,7 +341,7 @@ export const BookmarkItem = ({
                   onClick={(e): void => {
                     handleSnoozeOption(e, '30mins');
                   }}
-                  className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
                   data-track-category='CHAT_BOOKMARK'
                   data-track-name='Snooze_Bookmark_30_Mins'
                   data-track-metadata={JSON.stringify({ entityId })}
@@ -352,7 +352,7 @@ export const BookmarkItem = ({
                   onClick={(e): void => {
                     handleSnoozeOption(e, '1hour');
                   }}
-                  className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
                   data-track-category='CHAT_BOOKMARK'
                   data-track-name='Snooze_Bookmark_1_Hour'
                   data-track-metadata={JSON.stringify({ entityId })}
@@ -363,7 +363,7 @@ export const BookmarkItem = ({
                   onClick={(e): void => {
                     handleSnoozeOption(e, '3hours');
                   }}
-                  className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
                   data-track-category='CHAT_BOOKMARK'
                   data-track-name='Snooze_Bookmark_3_Hours'
                   data-track-metadata={JSON.stringify({ entityId })}
@@ -374,7 +374,7 @@ export const BookmarkItem = ({
                   onClick={(e): void => {
                     handleSnoozeOption(e, 'tomorrow');
                   }}
-                  className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
                   data-track-category='CHAT_BOOKMARK'
                   data-track-name='Snooze_Bookmark_Tomorrow'
                   data-track-metadata={JSON.stringify({ entityId })}
@@ -385,19 +385,19 @@ export const BookmarkItem = ({
                   onClick={(e): void => {
                     handleSnoozeOption(e, 'monday');
                   }}
-                  className='w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors'
+                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
                   data-track-category='CHAT_BOOKMARK'
                   data-track-name='Snooze_Bookmark_Monday'
                   data-track-metadata={JSON.stringify({ entityId })}
                 >
                   Monday at 9:00 AM
                 </button>
-                <div className='border-t border-gray-200 my-1'></div>
+                <div className='border-t border-border my-1'></div>
                 <button
                   onClick={(e): void => {
                     handleSnoozeOption(e, 'remove');
                   }}
-                  className='w-full text-left px-4 py-2 text-sm text-gray-900 hover:bg-gray-50 transition-colors'
+                  className='w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent transition-colors'
                   data-track-category='CHAT_BOOKMARK'
                   data-track-name='Remove_Bookmark_Snooze'
                   data-track-metadata={JSON.stringify({ entityId })}
@@ -458,7 +458,7 @@ export const BookmarkItem = ({
                 </div>
 
                 {/* Message preview */}
-                <div className='text-sm text-gray-700 whitespace-normal break-all'>
+                <div className='text-sm text-muted-foreground whitespace-normal break-all'>
                   <RenderMessageWithHTML message={message.content} />
                 </div>
               </div>
@@ -469,16 +469,16 @@ export const BookmarkItem = ({
             <>
               {/* Header */}
               <div className='flex items-baseline justify-between gap-2 mb-1'>
-                <span className='text-sm font-semibold text-gray-900 truncate'>
+                <span className='text-sm font-semibold text-foreground truncate'>
                   {sender?.name || 'Unknown User'}
                 </span>
-                <span className='text-xs text-gray-500 flex-shrink-0 ml-auto'>
+                <span className='text-xs text-muted-foreground flex-shrink-0 ml-auto'>
                   {formatDateWithTime(message.createdAt)}
                 </span>
               </div>
 
               {/* Message preview */}
-              <div className='text-sm text-gray-700 line-clamp-2'>
+              <div className='text-sm text-muted-foreground line-clamp-2'>
                 <RenderMessageWithHTML message={message.content} />
               </div>
             </>

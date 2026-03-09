@@ -203,44 +203,44 @@ export const ResourceAccessModal = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='bg-white rounded-lg shadow-xl w-full max-w-2xl h-[800px] max-h-[90vh] flex flex-col'>
+      <div className='bg-background rounded-lg shadow-xl w-full max-w-2xl h-[800px] max-h-[90vh] flex flex-col'>
         {/* Header */}
-        <div className='px-6 py-4 border-b border-gray-200 flex items-center justify-between'>
+        <div className='px-6 py-4 border-b border-border flex items-center justify-between'>
           <div className='flex items-center gap-3'>
             <div className='w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center'>
               <Shield className='w-5 h-5 text-primary' />
             </div>
             <div>
-              <h2 className='text-lg font-semibold text-gray-900'>Manage Resource Access</h2>
-              <p className='text-sm text-gray-500'>{userName}</p>
+              <h2 className='text-lg font-semibold text-foreground'>Manage Resource Access</h2>
+              <p className='text-sm text-muted-foreground'>{userName}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className='p-2 hover:bg-gray-100 rounded-lg transition-colors'
+            className='p-2 hover:bg-muted rounded-lg transition-colors'
             aria-label='Close'
             data-track-category='RESOURCE_ACCESS'
             data-track-name='CloseResourceAccessModal'
           >
-            <X className='w-5 h-5 text-gray-500' />
+            <X className='w-5 h-5 text-muted-foreground' />
           </button>
         </div>
 
         {/* User Info Card */}
-        <div className='px-6 py-4 bg-gray-50 border-b border-gray-200'>
+        <div className='px-6 py-4 bg-muted border-b border-border'>
           <div className='flex items-center gap-3'>
             <Avatar userId={userId} size='md' />
             <div>
-              <p className='font-medium text-gray-900'>{userName}</p>
-              <p className='text-sm text-gray-500'>{userEmail}</p>
+              <p className='font-medium text-foreground'>{userName}</p>
+              <p className='text-sm text-muted-foreground'>{userEmail}</p>
             </div>
           </div>
         </div>
 
         {/* Search Bar */}
-        <div className='px-6 py-3 border-b border-gray-200 bg-gray-50'>
+        <div className='px-6 py-3 border-b border-border bg-muted'>
           <div className='relative'>
-            <Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400 pointer-events-none z-10' />
+            <Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none z-10' />
             <Input
               type='text'
               placeholder='Search resources...'
@@ -255,23 +255,23 @@ export const ResourceAccessModal = ({
         <div className='flex-1 overflow-y-auto'>
           {resources && resources.length === 0 ? (
             <div className='text-center py-8'>
-              <p className='text-sm text-gray-500'>No resources found</p>
+              <p className='text-sm text-muted-foreground'>No resources found</p>
             </div>
           ) : filteredResources.length === 0 ? (
             <div className='text-center py-8 px-4'>
-              <p className='text-sm text-gray-500'>{`No resources found for "${searchTerm}"`}</p>
+              <p className='text-sm text-muted-foreground'>{`No resources found for "${searchTerm}"`}</p>
             </div>
           ) : (
-            <div className='divide-y divide-gray-100'>
+            <div className='divide-y divide-border'>
               {filteredResources.map((resource: Resource) => (
                 <div
                   key={resource.id}
-                  className='flex items-center justify-between px-6 py-3 hover:bg-gray-50 transition-colors'
+                  className='flex items-center justify-between px-6 py-3 hover:bg-muted transition-colors'
                 >
                   <div className='flex-1 min-w-0 pr-4'>
-                    <span className='text-sm font-medium text-gray-900'>{resource.name}</span>
+                    <span className='text-sm font-medium text-foreground'>{resource.name}</span>
                     {resource.description && (
-                      <p className='text-xs text-gray-500 mt-0.5 truncate'>
+                      <p className='text-xs text-muted-foreground mt-0.5 truncate'>
                         {resource.description}
                       </p>
                     )}
@@ -318,7 +318,7 @@ export const ResourceAccessModal = ({
         </div>
 
         {/* Footer */}
-        <div className='border-t border-gray-200 p-6 flex gap-3 justify-end bg-white'>
+        <div className='border-t border-border p-6 flex gap-3 justify-end bg-background'>
           <Button variant='outline' onClick={onClose} disabled={loading}>
             Cancel
           </Button>

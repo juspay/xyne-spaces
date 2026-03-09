@@ -63,7 +63,7 @@ export function MobileCallHeader({
   }, [participants]);
 
   return (
-    <div className='md:hidden fixed top-0 left-0 right-0 z-[60] bg-white border-b shadow-sm'>
+    <div className='md:hidden fixed top-0 left-0 right-0 z-[60] bg-background border-b shadow-sm'>
       <div className='flex items-center justify-between px-3 py-2.5'>
         {/* Left: Mic Toggle */}
         <Button
@@ -74,8 +74,8 @@ export function MobileCallHeader({
           variant='ghost'
           size='icon'
           className={cn(
-            'flex-shrink-0 hover:bg-gray-100 rounded-full',
-            isMicEnabled ? 'bg-gray-100' : 'bg-gray-200 hover:bg-gray-300',
+            'flex-shrink-0 hover:bg-muted rounded-full',
+            isMicEnabled ? 'bg-muted' : 'bg-border hover:bg-muted-foreground/50',
           )}
           title={isMicEnabled ? 'Mute' : 'Unmute'}
           data-track-category='CALLS'
@@ -83,7 +83,7 @@ export function MobileCallHeader({
           data-track-metadata={JSON.stringify({ enabled: isMicEnabled })}
         >
           {isMicEnabled ? (
-            <Mic size={18} className='text-gray-700' />
+            <Mic size={18} className='text-foreground' />
           ) : (
             <MicOff size={18} className='text-red-600' />
           )}
@@ -93,14 +93,14 @@ export function MobileCallHeader({
         <Button
           onClick={onExpand}
           variant='ghost'
-          className='flex flex-col items-center justify-center flex-1 min-w-0 mx-3 h-auto py-0 hover:bg-gray-50 rounded-full'
+          className='flex flex-col items-center justify-center flex-1 min-w-0 mx-3 h-auto py-0 hover:bg-muted rounded-full'
           data-track-category='CALLS'
           data-track-name='Mobile_Expand_Call'
         >
-          <span className='text-[15px] font-medium truncate leading-tight w-full text-center text-gray-900'>
+          <span className='text-[15px] font-medium truncate leading-tight w-full text-center text-foreground'>
             {participantName}
           </span>
-          <span className='text-[13px] text-gray-600 leading-tight'>{callDuration}</span>
+          <span className='text-[13px] text-muted-foreground leading-tight'>{callDuration}</span>
         </Button>
 
         {/* Right: End Call */}

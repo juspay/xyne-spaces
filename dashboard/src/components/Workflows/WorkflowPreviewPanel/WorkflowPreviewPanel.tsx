@@ -116,14 +116,14 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
   // Empty state - no tabs open (or browser mode)
   if (tabs.length === 0) {
     return (
-      <div className={`h-full flex flex-col bg-white ${className}`}>
-        <div className='flex-1 relative bg-gray-50'>
-          <div className='absolute inset-0 flex flex-col items-center justify-center text-center p-8 bg-white'>
+      <div className={`h-full flex flex-col bg-background ${className}`}>
+        <div className='flex-1 relative bg-muted'>
+          <div className='absolute inset-0 flex flex-col items-center justify-center text-center p-8 bg-background'>
             <div className='w-14 h-14 rounded-xl flex items-center justify-center mb-4 shadow-lg'>
               <Globe size={24} className='text-black' />
             </div>
-            <h3 className='text-base font-semibold text-gray-900 mb-1.5'>Preview Panel</h3>
-            <p className='text-sm text-gray-500 max-w-xs leading-relaxed'>
+            <h3 className='text-base font-semibold text-foreground mb-1.5'>Preview Panel</h3>
+            <p className='text-sm text-muted-foreground max-w-xs leading-relaxed'>
               {isElectron
                 ? 'This panel shows live previews of your application. URLs will be loaded here when the agent runs preview commands.'
                 : 'Preview URLs will open in a new browser tab. For embedded previews, use the Electron desktop app.'}
@@ -142,7 +142,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
               </button>
               <button
                 onClick={() => openUrl('https://example.com', 'Example')}
-                className='flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-xs'
+                className='flex items-center gap-2 px-3 py-1.5 bg-muted text-foreground rounded-lg hover:bg-border transition-colors text-xs'
                 data-track-category='Workflows'
                 data-track-name='OpenExampleDemo'
               >
@@ -152,7 +152,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
             </div>
 
             {!isElectron && (
-              <p className='text-xs text-gray-400 mt-4 max-w-xs'>
+              <p className='text-xs text-muted-foreground mt-4 max-w-xs'>
                 💡 Tip: Use the Electron desktop app for embedded preview support
               </p>
             )}
@@ -164,9 +164,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
 
   // Render tabs and webview content locally
   return (
-    <div className={`h-full flex flex-col bg-white ${className}`}>
+    <div className={`h-full flex flex-col bg-background ${className}`}>
       {/* Tab Bar */}
-      <div className='flex-shrink-0 bg-gray-100 border-b border-gray-200'>
+      <div className='flex-shrink-0 bg-muted border-b border-border'>
         <div className='flex items-center h-9'>
           {/* Tabs */}
           <div
@@ -176,10 +176,10 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
             {tabs.map(tab => (
               <div
                 key={tab.id}
-                className={`group relative flex items-center border-r border-gray-200 text-sm whitespace-nowrap transition-colors ${
+                className={`group relative flex items-center border-r border-border text-sm whitespace-nowrap transition-colors ${
                   activeTabId === tab.id
-                    ? 'bg-white text-gray-900'
-                    : 'bg-gray-100 hover:bg-gray-50 text-gray-600'
+                    ? 'bg-background text-foreground'
+                    : 'bg-muted hover:bg-muted text-muted-foreground'
                 }`}
               >
                 <button
@@ -189,20 +189,20 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
                   data-track-name='SelectPreviewTab'
                   data-track-metadata={JSON.stringify({ tabId: tab.id, tabTitle: tab.title })}
                 >
-                  <Globe size={12} className='flex-shrink-0 text-gray-400' />
+                  <Globe size={12} className='flex-shrink-0 text-muted-foreground' />
                   <span className='truncate max-w-[120px] text-xs font-medium'>
                     {tab.title || getDomainFromUrl(tab.url)}
                   </span>
                 </button>
                 <button
                   onClick={e => closeTab(tab.id, e)}
-                  className='px-2 py-2 opacity-0 group-hover:opacity-100 hover:bg-gray-200 transition-all'
+                  className='px-2 py-2 opacity-0 group-hover:opacity-100 hover:bg-border transition-all'
                   title='Close tab'
                   data-track-category='Workflows'
                   data-track-name='ClosePreviewTab'
                   data-track-metadata={JSON.stringify({ tabId: tab.id })}
                 >
-                  <X size={12} className='text-gray-400' />
+                  <X size={12} className='text-muted-foreground' />
                 </button>
                 {/* Active indicator */}
                 {activeTabId === tab.id && (
@@ -214,7 +214,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
             {/* Add Tab Button */}
             <button
               onClick={() => openUrl('about:blank', 'New Tab')}
-              className='flex items-center justify-center p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors'
+              className='flex items-center justify-center p-2 text-muted-foreground hover:text-muted-foreground hover:bg-muted transition-colors'
               title='New tab'
               data-track-category='Workflows'
               data-track-name='AddNewPreviewTab'
@@ -224,35 +224,38 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
           </div>
 
           {/* Tab Actions */}
-          <div className='flex-shrink-0 flex items-center gap-0.5 px-2 border-l border-gray-200'>
+          <div className='flex-shrink-0 flex items-center gap-0.5 px-2 border-l border-border'>
             <button
               onClick={refreshActiveTab}
               disabled={isLoading || !activeTab}
-              className='p-1.5 rounded hover:bg-gray-200 transition-colors disabled:opacity-50'
+              className='p-1.5 rounded hover:bg-border transition-colors disabled:opacity-50'
               title='Refresh'
               data-track-category='Workflows'
               data-track-name='RefreshPreviewTab'
               data-track-metadata={JSON.stringify({ tabId: activeTabId })}
             >
-              <RefreshCw size={14} className={`text-gray-500 ${isLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                size={14}
+                className={`text-muted-foreground ${isLoading ? 'animate-spin' : ''}`}
+              />
             </button>
             <button
               onClick={openExternal}
               disabled={!activeTab || activeTab.url === 'about:blank'}
-              className='p-1.5 rounded hover:bg-gray-200 transition-colors disabled:opacity-50'
+              className='p-1.5 rounded hover:bg-border transition-colors disabled:opacity-50'
               title='Open in browser'
               data-track-category='Workflows'
               data-track-name='OpenPreviewInExternalBrowser'
               data-track-metadata={JSON.stringify({ tabId: activeTabId, url: activeTab?.url })}
             >
-              <ExternalLink size={14} className='text-gray-500' />
+              <ExternalLink size={14} className='text-muted-foreground' />
             </button>
           </div>
         </div>
       </div>
 
       {/* Webview Content Area - renders locally, NOT in sidebar */}
-      <div className='flex-1 relative bg-white'>
+      <div className='flex-1 relative bg-background'>
         {tabs.map(tab => (
           <div
             key={tab.id}
@@ -260,8 +263,8 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
           >
             {tab.url === 'about:blank' ? (
               <div className='flex flex-col items-center justify-center h-full text-center p-8'>
-                <Globe size={32} className='text-gray-300 mb-3' />
-                <p className='text-gray-400 text-sm'>Enter a URL or wait for a preview</p>
+                <Globe size={32} className='text-muted mb-3' />
+                <p className='text-muted-foreground text-sm'>Enter a URL or wait for a preview</p>
               </div>
             ) : (
               <webview

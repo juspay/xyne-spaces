@@ -183,7 +183,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
       >
         <div className='flex items-start gap-0 py-1 relative w-full'>
           <span className='sticky left-2 top-1.5'>
-            <Search className='size-4 text-gray-300 z-20 pointer-events-none' />
+            <Search className='size-4 text-muted z-20 pointer-events-none' />
           </span>
           <div
             ref={pillsContainerRef}
@@ -207,7 +207,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
             onKeyDown={handleKeyDown}
             placeholder={selectedUsers.length === 0 ? 'Search user by email or name' : ''}
             className={cn(
-              'w-full text-[14px] min-w-[120px] text-gray-700 border-none font-normal bg-transparent relative placeholder:text-gray-500 outline-none focus:outline-none',
+              'w-full text-[14px] min-w-[120px] text-foreground border-none font-normal bg-transparent relative placeholder:text-muted-foreground outline-none focus:outline-none',
             )}
             style={{
               paddingLeft: `${pillsWidth + 24}px`,
@@ -225,11 +225,11 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
               <BaseCombobox.Popup
                 data-testid='user-search-results'
                 data-combobox-popup
-                className='border border-[#E1E4EA] min-w-[var(--anchor-width)] max-h-[14rem] rounded-lg bg-white text-gray-900 transition duration-100 origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 shadow-lg pointer-events-auto'
+                className='border border-border min-w-[var(--anchor-width)] max-h-[14rem] rounded-lg bg-background text-foreground transition duration-100 origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 shadow-lg pointer-events-auto'
               >
                 {filteredOptions.length === 0 ? (
                   <BaseCombobox.Empty>
-                    <p className='text-sm text-gray-600 px-4 py-3'>No options found</p>
+                    <p className='text-sm text-muted-foreground px-4 py-3'>No options found</p>
                   </BaseCombobox.Empty>
                 ) : (
                   <BaseCombobox.List
@@ -244,23 +244,23 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                         key={user.id}
                         value={user.id}
                         className={cn(
-                          'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-gray-100 data-[highlighted]:bg-gray-200',
+                          'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-[highlighted]:bg-accent',
                         )}
                       >
                         <Avatar
                           userId={user.id}
                           size={'sm'}
                           showActiveStatus={false}
-                          className='rounded-md size-[18px] flex items-center justify-center bg-white'
+                          className='rounded-md size-[18px] flex items-center justify-center bg-background'
                         />
                         <div className='flex-1 w-full flex items-center gap-2'>
                           <span className='text-sm'>{user.name.split(' ')[0]}</span>
                           {onlineUserIdsSet.has(user.id) ? (
                             <span className='w-1.5 h-1.5 bg-green-600 rounded-full'></span>
                           ) : (
-                            <span className='w-1.5 h-1.5 border border-gray-500 rounded-full'></span>
+                            <span className='w-1.5 h-1.5 border border-muted-foreground rounded-full'></span>
                           )}
-                          <span className='text-sm text-gray-500'>{user.name}</span>
+                          <span className='text-sm text-muted-foreground'>{user.name}</span>
                         </div>
                       </BaseCombobox.Item>
                     ))}
@@ -296,8 +296,8 @@ const UserPill = forwardRef<
     <div
       ref={ref}
       className={cn(
-        'flex items-center justify-center gap-1 px-2 py-1 bg-gray-100 rounded-md text-sm border border-gray-200 pointer-events-auto',
-        isFocused && 'bg-gray-200 border-gray-500',
+        'flex items-center justify-center gap-1 px-2 py-1 bg-muted rounded-md text-sm border border-border pointer-events-auto',
+        isFocused && 'bg-accent border-border',
       )}
     >
       <Avatar userId={user.id} size='sm' showActiveStatus={false} />
@@ -306,7 +306,7 @@ const UserPill = forwardRef<
         size='icon'
         variant='ghost'
         onClick={handleClick}
-        className='ml-1 hover:bg-gray-200 rounded p-0.5 size-4'
+        className='ml-1 hover:bg-accent rounded p-0.5 size-4'
         aria-label={`Remove ${user.name} from list`}
       >
         <X className='size-3' />

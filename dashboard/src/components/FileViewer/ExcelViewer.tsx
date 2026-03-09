@@ -229,7 +229,7 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
       <div className='pt-[65px] p-4 flex items-center justify-center h-full min-h-[200px]'>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3'></div>
-          <p className='text-gray-600 dark:text-gray-300 text-sm'>Loading Excel file...</p>
+          <p className='text-muted-foreground dark:text-muted text-sm'>Loading Excel file...</p>
         </div>
       </div>
     );
@@ -272,13 +272,13 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
       {/* Scrollable content */}
       <div ref={parentRef} className='overflow-auto' style={{ height: 'calc(100% - 40px)' }}>
         <div
-          className='border border-gray-300'
+          className='border border-input'
           style={{
             width: totalTableWidth,
           }}
         >
           {isSwitchingSheet ? (
-            <div className='p-4 text-sm text-gray-500'>Loading sheet…</div>
+            <div className='p-4 text-sm text-muted-foreground'>Loading sheet…</div>
           ) : shouldUse2DVirtualization && currentSheet && visibleCols ? (
             // 2-D Virtualization: Both rows and columns
             <div

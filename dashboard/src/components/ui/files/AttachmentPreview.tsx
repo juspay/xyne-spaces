@@ -188,8 +188,8 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
     // Show loading state
     if (isLoadingPreview && (category === 'image' || category === 'video')) {
       return (
-        <div className='w-full h-full bg-gray-100 flex items-center justify-center'>
-          <Loader2 className='h-8 w-8 text-gray-400 animate-spin' />
+        <div className='w-full h-full bg-muted flex items-center justify-center'>
+          <Loader2 className='h-8 w-8 text-muted-foreground animate-spin' />
         </div>
       );
     }
@@ -253,16 +253,16 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
         // Show text preview for .txt files
         if (isTextFile && textPreview) {
           return (
-            <div className='w-full h-full bg-white flex flex-col p-2 gap-1 overflow-hidden'>
+            <div className='w-full h-full bg-background flex flex-col p-2 gap-1 overflow-hidden'>
               <div className='flex items-center gap-1 mb-1'>
-                <FileText className='h-3 w-3 text-gray-600' />
+                <FileText className='h-3 w-3 text-muted-foreground' />
                 <div
                   className={`${getExtensionColor(getFileName(file))} text-white text-[8px] font-bold px-1 py-0.5 rounded`}
                 >
                   {getFileExtension(getFileName(file))}
                 </div>
               </div>
-              <div className='text-[9px] text-gray-700 font-mono leading-tight overflow-hidden whitespace-pre-wrap'>
+              <div className='text-[9px] text-foreground font-mono leading-tight overflow-hidden whitespace-pre-wrap'>
                 {textPreview}
                 {textPreview.length >= 150 && '...'}
               </div>
@@ -272,14 +272,14 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
 
         // Default file icon for other types
         return (
-          <div className='w-full h-full bg-gray-50 flex flex-col items-center justify-center p-2 gap-1'>
-            <FileText className='h-6 w-6 text-gray-600' />
+          <div className='w-full h-full bg-muted flex flex-col items-center justify-center p-2 gap-1'>
+            <FileText className='h-6 w-6 text-muted-foreground' />
             <div
               className={`${getExtensionColor(getFileName(file))} text-white text-[10px] font-bold px-1.5 py-0.5 rounded`}
             >
               {getFileExtension(getFileName(file))}
             </div>
-            <div className='text-[8px] text-gray-600 text-center w-full px-1 leading-tight'>
+            <div className='text-[8px] text-muted-foreground text-center w-full px-1 leading-tight'>
               {truncateFileName(getFileName(file))}
             </div>
           </div>
@@ -289,7 +289,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
 
   if (variant === 'detailed') {
     return (
-      <div className='flex items-center justify-between w-full p-3 rounded-lg border border-gray-300 bg-gray-100'>
+      <div className='flex items-center justify-between w-full p-3 rounded-lg border border-input bg-muted'>
         <div className='flex gap-3 items-center w-full'>
           <span className='size-8 flex-shrink-0 rounded-lg overflow-hidden'>
             {category === 'image' && imagePreviewUrl ? (
@@ -318,7 +318,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
           </span>
           <div className='flex flex-col w-full'>
             <span className='flex items-center justify-between'>
-              <p className='text-gray-900 text-sm font-medium overflow-hidden truncate max-w-64'>
+              <p className='text-foreground text-sm font-medium overflow-hidden truncate max-w-64'>
                 {getFileName(file)}
               </p>
               {!isUploading && (
@@ -335,7 +335,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
                 </button>
               )}
             </span>
-            <p className='text-gray-600 text-xs'>{getFileExtension(getFileName(file))}</p>
+            <p className='text-muted-foreground text-xs'>{getFileExtension(getFileName(file))}</p>
           </div>
         </div>
       </div>
@@ -344,7 +344,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
 
   return (
     <div
-      className='relative flex items-center justify-center bg-white cursor-pointer group rounded-xl border border-gray-200 hover:border-gray-300 shadow-sm hover:shadow-md transition-all duration-200'
+      className='relative flex items-center justify-center bg-background cursor-pointer group rounded-xl border border-border hover:border-input shadow-sm hover:shadow-md transition-all duration-200'
       style={{ width: '80px', height: '80px' }}
       onClick={() => onPreview?.()}
       onKeyDown={e => {
@@ -364,8 +364,8 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
 
       {/* Upload loading overlay */}
       {isUploading && (
-        <div className='absolute inset-0 flex items-center justify-center backdrop-blur-sm bg-white/80 rounded-xl z-10'>
-          <Loader2 className='h-8 w-8 text-gray-900 animate-spin' />
+        <div className='absolute inset-0 flex items-center justify-center backdrop-blur-sm bg-background/80 rounded-xl z-10'>
+          <Loader2 className='h-8 w-8 text-foreground animate-spin' />
         </div>
       )}
 
@@ -377,7 +377,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
             e.stopPropagation();
             onRemove();
           }}
-          className={`absolute -top-2 -right-2 p-1 bg-white hover:bg-red-50 rounded-full transition-colors shadow-md border border-gray-200 z-10 ${
+          className={`absolute -top-2 -right-2 p-1 bg-background hover:bg-destructive/10 rounded-full transition-colors shadow-md border border-border z-10 ${
             isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
           title='Remove attachment'

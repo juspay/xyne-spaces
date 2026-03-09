@@ -386,13 +386,13 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
       <button
         onClick={onRefresh}
         disabled={!onRefresh || loadingStage < 5}
-        className='flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200'
+        className='flex items-center justify-center w-8 h-8 bg-background border border-border rounded-lg shadow-sm hover:shadow hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200'
         title='Refresh workflow data'
         data-track-category='Workflows'
         data-track-name='RefreshWorkflowGraph'
       >
         <svg
-          className={`w-4 h-4 text-gray-500 ${loadingStage < 5 ? 'animate-spin' : ''}`}
+          className={`w-4 h-4 text-muted-foreground ${loadingStage < 5 ? 'animate-spin' : ''}`}
           fill='none'
           stroke='currentColor'
           viewBox='0 0 24 24'
@@ -409,13 +409,13 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
       {/* Export */}
       <button
         onClick={onExport}
-        className='flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200'
+        className='flex items-center justify-center w-8 h-8 bg-background border border-border rounded-lg shadow-sm hover:shadow hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200'
         title='Export workflow data'
         data-track-category='Workflows'
         data-track-name='ExportWorkflowData'
       >
         <svg
-          className='w-4 h-4 text-gray-500'
+          className='w-4 h-4 text-muted-foreground'
           fill='none'
           stroke='currentColor'
           viewBox='0 0 24 24'
@@ -434,13 +434,13 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
         onClick={() => {
           void containerRef.current?.requestFullscreen();
         }}
-        className='flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow hover:bg-gray-50 transition-all duration-200'
+        className='flex items-center justify-center w-8 h-8 bg-background border border-border rounded-lg shadow-sm hover:shadow hover:bg-muted transition-all duration-200'
         title='Fullscreen'
         data-track-category='Workflows'
         data-track-name='ToggleWorkflowFullscreen'
       >
         <svg
-          className='w-4 h-4 text-gray-500'
+          className='w-4 h-4 text-muted-foreground'
           fill='none'
           stroke='currentColor'
           viewBox='0 0 24 24'
@@ -480,12 +480,12 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
   );
 
   return (
-    <div className='bg-gray-50 h-full'>
+    <div className='bg-muted h-full'>
       {/* Clean container */}
-      <div className='h-full bg-white overflow-hidden'>
+      <div className='h-full bg-background overflow-hidden'>
         <div className='flex h-full'>
           {/* Step Details Panel - LEFT */}
-          <div className='w-4/5 border-r border-gray-100 bg-white flex flex-col min-w-0 overflow-hidden'>
+          <div className='w-4/5 border-r border-border bg-background flex flex-col min-w-0 overflow-hidden'>
             <div className='flex-1 overflow-y-auto overflow-x-hidden min-w-0'>
               <StepDetails step={selectedStep} onNavigateAttempt={handleNavigateAttempt} />
             </div>
@@ -497,7 +497,7 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
             ref={containerRef}
           >
             {loadingStage < 5 && (
-              <div className='absolute top-3 left-3 bg-white px-2.5 py-1.5 rounded-lg shadow-sm text-xs text-gray-500 z-10 border border-gray-100'>
+              <div className='absolute top-3 left-3 bg-background px-2.5 py-1.5 rounded-lg shadow-sm text-xs text-muted-foreground z-10 border border-border'>
                 Loading... {loadingStage}/5
               </div>
             )}
@@ -564,16 +564,18 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
         }}
       >
         <div className='p-4'>
-          <p className='text-gray-900 mb-4'>
+          <p className='text-foreground mb-4'>
             This will create a new execution starting from the following step:
           </p>
-          <div className='bg-gray-50 rounded-lg p-3 border border-gray-200'>
-            <p className='font-medium text-gray-900'>{rerunStepInfo?.stepName || 'Unknown Step'}</p>
-            <p className='text-sm text-gray-600 mt-1'>
+          <div className='bg-muted rounded-lg p-3 border border-border'>
+            <p className='font-medium text-foreground'>
+              {rerunStepInfo?.stepName || 'Unknown Step'}
+            </p>
+            <p className='text-sm text-muted-foreground mt-1'>
               All steps including this point will be re-executed in the new attempt.
             </p>
           </div>
-          <p className='text-sm text-gray-500 mt-4'>
+          <p className='text-sm text-muted-foreground mt-4'>
             The new execution will appear as a new attempt in the dropdown.
           </p>
         </div>
@@ -635,7 +637,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphComponentProps> = ({
       <div className='flex items-center justify-center h-96'>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4' />
-          <p className='text-gray-600'>Loading workflow graph...</p>
+          <p className='text-muted-foreground'>Loading workflow graph...</p>
         </div>
       </div>
     );
@@ -656,8 +658,10 @@ export const WorkflowGraph: React.FC<WorkflowGraphComponentProps> = ({
               />
             </svg>
           </div>
-          <h3 className='text-lg font-medium text-gray-900 mb-2'>Failed to load workflow graph</h3>
-          <p className='text-gray-600 mb-4'>
+          <h3 className='text-lg font-medium text-foreground mb-2'>
+            Failed to load workflow graph
+          </h3>
+          <p className='text-muted-foreground mb-4'>
             {graphError instanceof Error ? graphError.message : 'Unknown error occurred'}
           </p>
           {onRefresh && (

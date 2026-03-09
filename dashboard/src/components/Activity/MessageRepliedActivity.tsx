@@ -29,7 +29,7 @@ export const MessageRepliedActivity = ({
       channelId={message.conversation?.channelId}
       badgeIcon={<MessageCircleMore className='text-yellow-600' />}
       badgeColorClass='bg-[#FFFCF5]'
-      description={<span className='text-gray-500 text-sm'>replied in</span>}
+      description={<span className='text-muted-foreground text-sm'>replied in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
     >

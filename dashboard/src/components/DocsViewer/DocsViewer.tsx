@@ -305,13 +305,13 @@ const DocsViewer = ({
     <>
       <div
         ref={containerRef}
-        className={`flex flex-col bg-white overflow-hidden ${
+        className={`flex flex-col bg-background overflow-hidden ${
           isFullscreen ? 'fixed inset-0 z-50' : 'h-full w-full rounded-2xl'
         }`}
       >
         {/* Toolbar */}
         <div
-          className={`flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 ${
+          className={`flex items-center justify-between px-4 py-3 border-b border-border bg-muted ${
             isFullscreen ? '' : 'rounded-t-2xl'
           }`}
         >
@@ -331,7 +331,7 @@ const DocsViewer = ({
               </Button>
             )}
             <FileText className='h-5 w-5 text-blue-600' />
-            <span className='text-sm font-medium text-gray-900 truncate max-w-md'>
+            <span className='text-sm font-medium text-foreground truncate max-w-md'>
               {docTitle || 'Documentation'}
             </span>
           </div>
@@ -397,22 +397,22 @@ const DocsViewer = ({
         {/* Content Area */}
         <div className='flex-1 relative' ref={previewContainerRef}>
           {isLoading && (
-            <div className='absolute inset-0 flex items-center justify-center bg-white/80 z-10'>
+            <div className='absolute inset-0 flex items-center justify-center bg-background/80 z-10'>
               <div className='flex flex-col items-center gap-2'>
                 <Loader2 className='h-8 w-8 animate-spin text-blue-600' />
-                <span className='text-sm text-gray-500'>Loading documentation...</span>
+                <span className='text-sm text-muted-foreground'>Loading documentation...</span>
               </div>
             </div>
           )}
 
           {hasError && (
-            <div className='absolute inset-0 flex items-center justify-center bg-white z-10'>
+            <div className='absolute inset-0 flex items-center justify-center bg-background z-10'>
               <div className='flex flex-col items-center gap-4 text-center p-4'>
                 <div className='text-4xl'>😕</div>
-                <h3 className='text-lg font-semibold text-gray-900'>
+                <h3 className='text-lg font-semibold text-foreground'>
                   Failed to load documentation
                 </h3>
-                <p className='text-sm text-gray-500 max-w-sm'>
+                <p className='text-sm text-muted-foreground max-w-sm'>
                   The documentation could not be loaded.
                 </p>
                 <Button

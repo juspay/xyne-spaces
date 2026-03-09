@@ -291,11 +291,11 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
                 disabled={activeIndex === 0}
                 onClick={() => setActiveIndex(prev => prev - 1)}
                 className={cn(
-                  'flex items-center justify-center rounded-[6px] border border-[#eeeeee] bg-white p-1',
+                  'flex items-center justify-center rounded-[6px] border border-border bg-card p-1',
                   'transition-colors',
                   activeIndex === 0
                     ? 'cursor-not-allowed text-[#d5d7d9]'
-                    : 'text-[#9aa0a5] hover:bg-gray-50',
+                    : 'text-[#9aa0a5] hover:bg-accent',
                 )}
                 data-track-category='NUDGES'
                 data-track-name='PreviousNudge'
@@ -312,11 +312,11 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
                 disabled={activeIndex === entries.length - 1}
                 onClick={() => setActiveIndex(prev => prev + 1)}
                 className={cn(
-                  'flex items-center justify-center rounded-[6px] border border-[#eeeeee] bg-white p-1',
+                  'flex items-center justify-center rounded-[6px] border border-border bg-card p-1',
                   'transition-colors',
                   activeIndex === entries.length - 1
                     ? 'cursor-not-allowed text-[#d5d7d9]'
-                    : 'text-[#9aa0a5] hover:bg-gray-50',
+                    : 'text-[#9aa0a5] hover:bg-accent',
                 )}
                 data-track-category='NUDGES'
                 data-track-name='NextNudge'

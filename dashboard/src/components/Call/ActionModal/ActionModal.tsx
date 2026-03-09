@@ -53,15 +53,19 @@ export const ActionModal: React.FC<ActionModalProps> = ({
         )}
 
         {/* Title */}
-        <h2 className='text-[15px] font-semibold text-gray-900 mb-1'>{title}</h2>
+        <h2 className='text-[15px] font-semibold text-foreground mb-1'>{title}</h2>
 
         {/* Subtitle */}
         {subtitle && (
-          <p className='text-[13px] text-gray-600 leading-relaxed mb-5 break-words'>{subtitle}</p>
+          <p className='text-[13px] text-muted-foreground leading-relaxed mb-5 break-words'>
+            {subtitle}
+          </p>
         )}
 
         {/* Optional Description */}
-        {description && <p className='text-xs text-gray-500 mb-4 break-words'>{description}</p>}
+        {description && (
+          <p className='text-xs text-muted-foreground mb-4 break-words'>{description}</p>
+        )}
 
         {/* Buttons */}
         <div className='flex items-center justify-between gap-3'>

@@ -251,25 +251,25 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
     >
       <div className='p-6'>
         {/* Ticket Info Header */}
-        <div className='mb-6 pb-4 border-b border-gray-200 flex items-center justify-between gap-4'>
+        <div className='mb-6 pb-4 border-b border-border flex items-center justify-between gap-4'>
           <div className='flex items-center gap-3'>
-            <span className='px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded'>
+            <span className='px-2 py-0.5 bg-muted text-muted-foreground text-xs rounded'>
               {ticket.xyneId}
             </span>
-            <span className='text-sm text-gray-700'>
+            <span className='text-sm text-foreground'>
               <span className='font-medium'>{sourceStageName}</span>
-              <span className='mx-2 text-gray-400'>→</span>
+              <span className='mx-2 text-muted-foreground'>→</span>
               <span className='font-medium text-blue-600'>{targetStage.name}</span>
             </span>
           </div>
           <button
             onClick={onClose}
-            className='p-1 rounded-full hover:bg-gray-100 transition-colors'
+            className='p-1 rounded-full hover:bg-muted transition-colors'
             aria-label='Close'
             data-track-category='Tickets'
             data-track-name='CloseStageFormModal'
           >
-            <X className='w-4 h-4 text-gray-500' />
+            <X className='w-4 h-4 text-muted-foreground' />
           </button>
         </div>
 
@@ -277,22 +277,22 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
         {hasApprovers && (
           <>
             {isDraft && (
-              <div className='mb-4 px-3 py-1.5 bg-gray-100 rounded text-sm text-gray-700 inline-block'>
+              <div className='mb-4 px-3 py-1.5 bg-muted rounded text-sm text-foreground inline-block'>
                 Draft - Ready to submit
               </div>
             )}
             {isApproved && (
-              <div className='mb-4 px-3 py-1.5 bg-gray-100 rounded text-sm text-gray-700 inline-block'>
+              <div className='mb-4 px-3 py-1.5 bg-muted rounded text-sm text-foreground inline-block'>
                 Approved
               </div>
             )}
             {isRejected && (
-              <div className='mb-4 px-3 py-1.5 bg-gray-100 rounded text-sm text-gray-700 inline-block'>
+              <div className='mb-4 px-3 py-1.5 bg-muted rounded text-sm text-foreground inline-block'>
                 Rejected - Please resubmit
               </div>
             )}
             {isSubmitted && (
-              <div className='mb-4 px-3 py-1.5 bg-gray-100 rounded text-sm text-gray-700 inline-block'>
+              <div className='mb-4 px-3 py-1.5 bg-muted rounded text-sm text-foreground inline-block'>
                 Awaiting review
               </div>
             )}
@@ -301,7 +301,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
 
         {fields.map((field: FormFields) => (
           <div key={field.id} className='mb-4'>
-            <label className='block text-sm font-medium text-gray-700 mb-1'>
+            <label className='block text-sm font-medium text-foreground mb-1'>
               {field.fieldName}
               {!field.isOptional && <span className='text-red-500'>*</span>}
             </label>
@@ -311,7 +311,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 value={formData[field.id]?.[0] || ''}
                 onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
                 disabled={isApproved}
-                className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
                 data-track-category='Tickets'
                 data-track-name='StageFormStringInput'
                 data-track-metadata={JSON.stringify({
@@ -326,7 +326,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 value={formData[field.id]?.[0] || ''}
                 onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
                 disabled={isApproved}
-                className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
                 data-track-category='Tickets'
                 data-track-name='StageFormNumberInput'
                 data-track-metadata={JSON.stringify({
@@ -345,7 +345,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                     setFormData({ ...formData, [field.id]: [String(e.target.checked)] })
                   }
                   disabled={isApproved}
-                  className='h-4 w-4 text-blue-600 border-gray-300 rounded disabled:opacity-50'
+                  className='h-4 w-4 text-blue-600 border-input rounded disabled:opacity-50'
                   data-track-category='Tickets'
                   data-track-name='StageFormCheckbox'
                   data-track-metadata={JSON.stringify({
@@ -353,7 +353,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                     fieldName: field.fieldName,
                   })}
                 />
-                <label htmlFor={`field-${field.id}`} className='text-sm text-gray-600'>
+                <label htmlFor={`field-${field.id}`} className='text-sm text-muted-foreground'>
                   Yes
                 </label>
               </div>
@@ -364,7 +364,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 value={formData[field.id]?.[0] || ''}
                 onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
                 disabled={isApproved}
-                className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
                 data-track-category='Tickets'
                 data-track-name='StageFormDateInput'
                 data-track-metadata={JSON.stringify({
@@ -388,7 +388,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 }
                 disabled={isApproved}
                 multiple={field.fieldType === FormFieldType.MULTI_SELECT}
-                className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
                 data-track-category='Tickets'
                 data-track-name='StageFormSelect'
                 data-track-metadata={JSON.stringify({
@@ -410,7 +410,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 value={formData[field.id]?.[0] || ''}
                 onChange={e => setFormData({ ...formData, [field.id]: [e.target.value] })}
                 disabled={isApproved}
-                className='w-full px-3 py-2 border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-500'
+                className='w-full px-3 py-2 border border-input rounded-md disabled:bg-muted disabled:text-muted-foreground'
                 data-track-category='Tickets'
                 data-track-name='StageFormUserInput'
                 data-track-metadata={JSON.stringify({
@@ -423,7 +423,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
         ))}
 
         {/* Comment input and actions at bottom */}
-        <div className='mt-4 pt-4 border-t border-gray-200 flex justify-end gap-3'>
+        <div className='mt-4 pt-4 border-t border-border flex justify-end gap-3'>
           {showReviewButtons ? (
             <>
               <Button

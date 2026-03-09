@@ -46,8 +46,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ id, data, type }) => {
     },
     pending: {
       label: 'Pending',
-      icon: <PauseCircle size={12} className='text-gray-500' />,
-      style: 'bg-gray-50 text-gray-600 border-gray-200',
+      icon: <PauseCircle size={12} className='text-muted-foreground' />,
+      style: 'bg-muted text-muted-foreground border-border',
     },
   };
 
@@ -76,7 +76,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ id, data, type }) => {
           }
         }}
         className='
-          w-56 bg-white border border-gray-200 rounded-xl shadow-sm
+          w-56 bg-background border border-border rounded-xl shadow-sm
           px-3 py-2 cursor-pointer hover:shadow-md transition-all relative
         '
         data-track-category='Workflows'
@@ -84,7 +84,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ id, data, type }) => {
         data-track-metadata={JSON.stringify({ stepId: id, stepLabel: data.label })}
       >
         <div className='flex items-start justify-between gap-2'>
-          <div className='text-[13px] font-semibold text-gray-900 leading-snug whitespace-normal break-words flex-1'>
+          <div className='text-[13px] font-semibold text-foreground leading-snug whitespace-normal break-words flex-1'>
             {data.label}
           </div>
 
@@ -97,7 +97,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ id, data, type }) => {
         </div>
 
         {/* META */}
-        <div className='flex items-center text-[11px] text-gray-500 gap-1 mt-1'>
+        <div className='flex items-center text-[11px] text-muted-foreground gap-1 mt-1'>
           <Clock size={11} />
           {data.duration || '--'}
         </div>
@@ -111,7 +111,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ id, data, type }) => {
             }}
             className='
               absolute -bottom-3 left-1/2 -translate-x-1/2
-              bg-white shadow-md border border-gray-200 rounded-full p-1
+              bg-background shadow-md border border-border rounded-full p-1
               opacity-0 group-hover:opacity-100 transition
             '
             title='Restart this step'
@@ -119,7 +119,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ id, data, type }) => {
             data-track-name='RestartWorkflowStep'
             data-track-metadata={JSON.stringify({ stepId: id, stepLabel: data.label })}
           >
-            <RotateCcw size={12} className='text-gray-600' />
+            <RotateCcw size={12} className='text-muted-foreground' />
           </button>
         )}
       </div>

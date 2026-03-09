@@ -52,7 +52,7 @@ export const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
   return (
     <div
       ref={containerRef}
-      className='mermaid-diagram overflow-auto p-4 bg-white rounded-lg flex justify-center'
+      className='mermaid-diagram overflow-auto p-4 bg-background rounded-lg flex justify-center'
       // eslint-disable-next-line @typescript-eslint/naming-convention
       dangerouslySetInnerHTML={{ __html: svg }}
     />

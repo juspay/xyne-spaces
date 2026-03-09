@@ -114,17 +114,17 @@ export const ToolLsRenderer: React.FC<
     // return (
     //   <div className='space-y-3 text-sm overflow-safe word-break-safe debug m-2'>
     //     <div className='overflow-safe'>
-    //       <span className='font-semibold text-gray-900 dark:text-gray-100'>Input:</span>
+    //       <span className='font-semibold text-foreground dark:text-gray-100'>Input:</span>
     //       <div className='space-y-2 mt-2'>
     //         <div>
-    //           <span className='font-medium text-gray-900 dark:text-gray-100'>Path: </span>
-    //           <code className='bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300 text-wrap'>
+    //           <span className='font-medium text-foreground dark:text-gray-100'>Path: </span>
+    //           <code className='bg-muted dark:bg-gray-800 px-2 py-1 rounded text-xs text-foreground dark:text-muted text-wrap'>
     //             {path}
     //           </code>
     //         </div>
     //         {flags.length > 0 && (
     //           <div>
-    //             <span className='font-medium text-gray-900 dark:text-gray-100'>Flags: </span>
+    //             <span className='font-medium text-foreground dark:text-gray-100'>Flags: </span>
     //             <div className='inline-flex gap-1'>
     //               {flags.map((flag, index) => (
     //                 <span
@@ -141,7 +141,7 @@ export const ToolLsRenderer: React.FC<
     //     </div>
 
     //     <div>
-    //       <span className='font-semibold text-gray-900 dark:text-gray-100'>Output:</span>
+    //       <span className='font-semibold text-foreground dark:text-gray-100'>Output:</span>
     //       <div className='space-y-2 mt-2'>
     //         {error && (
     //           <div>
@@ -157,19 +157,19 @@ export const ToolLsRenderer: React.FC<
     //         {!error && (
     //           <>
     //             <div>
-    //               <span className='font-medium text-gray-900 dark:text-gray-100'>
+    //               <span className='font-medium text-foreground dark:text-gray-100'>
     //                 Entries Found:{' '}
     //               </span>
-    //               <span className='text-gray-700 dark:text-gray-300'>{entries.length}</span>
+    //               <span className='text-foreground dark:text-muted'>{entries.length}</span>
     //             </div>
 
     //             {entries.length > 0 && (
     //               <div>
-    //                 <span className='font-medium text-gray-900 dark:text-gray-100 block mb-2'>
+    //                 <span className='font-medium text-foreground dark:text-gray-100 block mb-2'>
     //                   Directory Listing:
     //                 </span>
-    //                 <div className='bg-gray-100 dark:bg-gray-800 rounded border max-h-64 scroll-safe'>
-    //                   <div className='p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 font-medium text-xs grid grid-cols-12 gap-2'>
+    //                 <div className='bg-muted dark:bg-gray-800 rounded border max-h-64 scroll-safe'>
+    //                   <div className='p-2 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-900 font-medium text-xs grid grid-cols-12 gap-2'>
     //                     <div className='col-span-1'>Type</div>
     //                     <div className='col-span-5'>Name</div>
     //                     <div className='col-span-2'>Size</div>
@@ -179,24 +179,24 @@ export const ToolLsRenderer: React.FC<
     //                   {entries.map((entry, index) => (
     //                     <div
     //                       key={index}
-    //                       className='p-2 border-b border-gray-200 dark:border-gray-700 last:border-b-0 text-xs grid grid-cols-12 gap-2 hover:bg-gray-50 dark:hover:bg-gray-750'
+    //                       className='p-2 border-b border-border dark:border-gray-700 last:border-b-0 text-xs grid grid-cols-12 gap-2 hover:bg-muted dark:hover:bg-gray-750'
     //                     >
     //                       <div className='col-span-1 flex items-center'>
     //                         <span className='mr-1'>{getTypeIcon(entry.type)}</span>
     //                       </div>
     //                       <div
-    //                         className='col-span-5 font-mono text-gray-700 dark:text-gray-300 truncate'
+    //                         className='col-span-5 font-mono text-foreground dark:text-muted truncate'
     //                         title={entry.name}
     //                       >
     //                         {entry.name}
     //                       </div>
-    //                       <div className='col-span-2 text-gray-600 dark:text-gray-400'>
+    //                       <div className='col-span-2 text-muted-foreground dark:text-muted-foreground'>
     //                         {entry.type === 'file' ? formatFileSize(entry.size) : '-'}
     //                       </div>
-    //                       <div className='col-span-2 font-mono text-gray-600 dark:text-gray-400'>
+    //                       <div className='col-span-2 font-mono text-muted-foreground dark:text-muted-foreground'>
     //                         {entry.permissions || '-'}
     //                       </div>
-    //                       <div className='col-span-2 text-gray-600 dark:text-gray-400'>
+    //                       <div className='col-span-2 text-muted-foreground dark:text-muted-foreground'>
     //                         {entry.modified ? new Date(entry.modified).toLocaleDateString() : '-'}
     //                       </div>
     //                     </div>
@@ -206,7 +206,7 @@ export const ToolLsRenderer: React.FC<
     //             )}
 
     //             {entries.length === 0 && !error && (
-    //               <div className='text-gray-500 dark:text-gray-400 italic'>Directory is empty</div>
+    //               <div className='text-muted-foreground dark:text-muted-foreground italic'>Directory is empty</div>
     //             )}
     //           </>
     //         )}

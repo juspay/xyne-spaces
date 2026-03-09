@@ -83,19 +83,19 @@ const ReplyLayout: React.FC<{
           />
         )}
         {!replies || replies.replyCount === 0 ? (
-          <div className='flex items-center gap-1 font-medium text-blue-600'>
+          <div className='flex items-center gap-1 font-medium text-primary'>
             <PencilIcon size={10} />
             {'1 draft'}
           </div>
         ) : (
-          <span className='font-medium text-blue-600'>
+          <span className='font-medium text-primary'>
             {replies.replyCount} {replies.replyCount === 1 ? 'reply' : 'replies'}{' '}
             {draft && !isThreadOpen && ' and 1 draft'}
           </span>
         )}
 
         {replies.lastActivityAt && (
-          <span className='relative inline-flex items-baseline text-gray-400 whitespace-nowrap w-[140px]'>
+          <span className='relative inline-flex items-baseline text-muted-foreground whitespace-nowrap w-[140px]'>
             <span
               className={`absolute left-0 top-0 ${isMe ? 'max-[500px]:right-0' : ''} transition-opacity duration-150 ${
                 hover ? 'opacity-0' : 'opacity-100'

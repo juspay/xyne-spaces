@@ -100,7 +100,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
       <Popover.Trigger asChild>
         <label
           className={cn(
-            'gap-1 p-1 min-h-[32px] w-full bg-white cursor-text rounded-md flex',
+            'gap-1 p-1 min-h-[32px] w-full bg-background cursor-text rounded-md flex',
             !inlineTags && 'flex-wrap',
             inlineTags && 'overflow-hidden',
           )}
@@ -110,7 +110,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
             <span
               key={tag}
               role='listitem'
-              className='flex items-center justify-between w-max gap-1.5 px-2 py-1 rounded-md text-sm font-medium border bg-[#FCFCFD] text-[#6B7280] border-[#F0F0F0]'
+              className='flex items-center justify-between w-max gap-1.5 px-2 py-1 rounded-md text-sm font-medium border bg-card text-muted-foreground border-border'
             >
               <span className='size-2 rounded-full bg-[#C27AFF]' />
               {tag}
@@ -121,7 +121,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                   e.stopPropagation();
                   toggle(tag);
                 }}
-                className='hover:bg-gray-200 rounded-full p-0.5'
+                className='hover:bg-border rounded-full p-0.5'
                 data-track-category='Tickets'
                 data-track-name='RemoveTag'
                 data-track-metadata={JSON.stringify({ tag })}
@@ -149,7 +149,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
           side='bottom'
           align='start'
           sideOffset={4}
-          className='z-[100] w-[var(--radix-popover-trigger-width)] bg-white border border-gray-200 rounded-lg shadow-lg mr-auto'
+          className='z-[100] w-[var(--radix-popover-trigger-width)] bg-background border border-border rounded-lg shadow-lg mr-auto'
           avoidCollisions={true}
           onOpenAutoFocus={e => e.preventDefault()}
         >
@@ -167,8 +167,8 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                     }}
                     onMouseEnter={() => setActiveIdx(i)}
                     className={`flex items-center justify-between w-full px-3 py-2 text-sm rounded text-left ${
-                      active ? 'bg-gray-100' : ''
-                    } ${selected ? 'text-blue-700 font-medium' : 'text-gray-700'}`}
+                      active ? 'bg-muted' : ''
+                    } ${selected ? 'text-blue-700 font-medium' : 'text-foreground'}`}
                     data-track-category='Tickets'
                     data-track-name='SelectTag'
                     data-track-metadata={JSON.stringify({ tag, selected: !selected })}
@@ -182,13 +182,13 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                 );
               })
             ) : search.trim() ? (
-              <div className='p-3 text-center text-sm text-gray-400'>No matching tags</div>
+              <div className='p-3 text-center text-sm text-muted-foreground'>No matching tags</div>
             ) : (
-              <div className='p-3 text-center text-sm text-gray-400'>No tags available</div>
+              <div className='p-3 text-center text-sm text-muted-foreground'>No tags available</div>
             )}
 
             {canCreate && (
-              <div className='border-t border-gray-200 mt-1 pt-1'>
+              <div className='border-t border-border mt-1 pt-1'>
                 <button
                   onClick={create}
                   onMouseEnter={() => setActiveIdx(filtered.length)}

@@ -27,8 +27,8 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
     <div className='w-full py-1.5'>
       <button
         type='button'
-        className='w-full text-left p-3 bg-white hover:bg-gray-50 
-           rounded-xl border border-gray-200 shadow-sm transition cursor-pointer'
+        className='w-full text-left p-3 bg-card hover:bg-accent
+           rounded-xl border border-border shadow-sm transition cursor-pointer'
         onClick={onClick}
       >
         {/* Attachment Preview */}
@@ -39,7 +39,7 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
             <div className='font-medium'>{attachment.originalFilename}</div>
 
             <Tooltip content={formatFullTimestamp(createdAt)} side={TooltipSide.TOP}>
-              <div className='text-xs text-gray-400'>
+              <div className='text-xs text-muted-foreground'>
                 Shared by {user?.name} on{' '}
                 {new Date(createdAt).toLocaleDateString(undefined, {
                   month: 'short',

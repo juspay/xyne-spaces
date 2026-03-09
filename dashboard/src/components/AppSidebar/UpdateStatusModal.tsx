@@ -251,7 +251,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             variant='ghost'
             size='sm'
             onClick={onClose}
-            className='size-7 p-0 text-gray-500 hover:text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-100'
+            className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
             data-track-category='Update_User_Status_Modal'
             data-track-name='Close_Status_Modal'
           >
@@ -266,7 +266,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             <div className='relative'>
               <Popover.Root open={emojiPickerOpen} modal={true} onOpenChange={setEmojiPickerOpen}>
                 <Popover.Trigger asChild>
-                  <button className='absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600'>
+                  <button className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground'>
                     {selectedEmoji ? (
                       <span className='text-lg'>{renderEmoji(selectedEmoji)}</span>
                     ) : (
@@ -279,7 +279,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                     side='bottom'
                     align='start'
                     sideOffset={5}
-                    className='z-50 bg-white rounded-lg shadow-lg'
+                    className='z-50 bg-background rounded-lg shadow-lg'
                   >
                     <div className='overflow-hidden rounded-lg'>
                       <EmojiPicker
@@ -311,7 +311,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             {/* Recent statuses */}
             {recentStatuses.length > 0 && (
               <div className='space-y-2'>
-                <p className='text-sm font-medium text-gray-700'>Recent</p>
+                <p className='text-sm font-medium text-foreground'>Recent</p>
                 <div className='space-y-0.5'>
                   {recentStatuses.map((status, index) => (
                     <button
@@ -319,7 +319,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                       onClick={() =>
                         handleSuggestionClick(status.emoji, status.text, status.expiry)
                       }
-                      className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-gray-100 transition-colors text-left'
+                      className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
                       data-track-category='Update_User_Status_Modal'
                       data-track-name='Select_Recent_Status'
                       data-track-metadata={JSON.stringify({
@@ -341,11 +341,11 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             )}
 
             {/* Divider */}
-            {recentStatuses.length > 0 && <div className='border-t border-gray-200' />}
+            {recentStatuses.length > 0 && <div className='border-t border-border' />}
 
             {/* Hardcoded suggestions */}
             <div className='space-y-2'>
-              <p className='text-sm font-medium text-gray-700'>For Juspay</p>
+              <p className='text-sm font-medium text-foreground'>For Juspay</p>
               <div className='space-y-0.5'>
                 {STATUS_SUGGESTIONS.map((suggestion, index) => (
                   <button
@@ -353,7 +353,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                     onClick={() =>
                       handleSuggestionClick(suggestion.emoji, suggestion.text, suggestion.expiry)
                     }
-                    className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-gray-100 transition-colors text-left'
+                    className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='Update_User_Status_Modal'
                     data-track-name='Select_Status_Suggestion'
                     data-track-metadata={JSON.stringify({
@@ -362,9 +362,9 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                     })}
                   >
                     <span className='text-lg'>{suggestion.emoji}</span>
-                    <span className='text-sm text-gray-900'>{suggestion.text}</span>
-                    <span className='text-xs text-gray-500'>-</span>
-                    <span className='text-xs text-gray-500'>
+                    <span className='text-sm text-foreground'>{suggestion.text}</span>
+                    <span className='text-xs text-muted-foreground'>-</span>
+                    <span className='text-xs text-muted-foreground'>
                       {EXPIRY_OPTIONS.find(opt => opt.value === suggestion.expiry)?.label ||
                         suggestion.expiry}
                     </span>
@@ -376,10 +376,10 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
         ) : (
           <div className='space-y-4'>
             {/* Input field with status */}
-            <div className='relative flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white'>
+            <div className='relative flex items-center gap-2 px-3 py-2 rounded-lg border border-input bg-background'>
               <Popover.Root open={emojiPickerOpen} modal={true} onOpenChange={setEmojiPickerOpen}>
                 <Popover.Trigger asChild>
-                  <button className='flex-shrink-0 text-gray-400 hover:text-gray-600'>
+                  <button className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'>
                     {selectedEmoji ? (
                       <span className='text-lg'>{renderEmoji(selectedEmoji)}</span>
                     ) : (
@@ -392,7 +392,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                     side='bottom'
                     align='start'
                     sideOffset={5}
-                    className='z-50 bg-white rounded-lg shadow-lg'
+                    className='z-50 bg-background rounded-lg shadow-lg'
                   >
                     <div className='overflow-hidden rounded-lg'>
                       <EmojiPicker
@@ -426,7 +426,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
               {isEditingMode && (
                 <button
                   onClick={handleClearStatus}
-                  className='flex-shrink-0 text-gray-400 hover:text-gray-600'
+                  className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'
                   data-track-category='Update_User_Status_Modal'
                   data-track-name='Clear_Status_In_Modal'
                 >
@@ -437,9 +437,9 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
 
             {/* Remove status after dropdown */}
             <div className='space-y-2'>
-              <span className='text-sm font-medium text-gray-700'>Remove status after</span>
+              <span className='text-sm font-medium text-foreground'>Remove status after</span>
               <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
-                <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500'>
+                <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500'>
                   <Select.Value />
                   <Select.Icon>
                     <ChevronDown className='size-4' />
@@ -447,13 +447,13 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 </Select.Trigger>
 
                 <Select.Portal>
-                  <Select.Content className='bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden z-50'>
+                  <Select.Content className='bg-background rounded-lg border border-border shadow-lg overflow-hidden z-50'>
                     <Select.Viewport className='p-1'>
                       {EXPIRY_OPTIONS.map(option => (
                         <Select.Item
                           key={option.value}
                           value={option.value}
-                          className='relative flex items-center px-3 py-2 rounded-md text-sm cursor-pointer hover:bg-gray-100 outline-none select-none data-[highlighted]:bg-gray-100'
+                          className='relative flex items-center px-3 py-2 rounded-md text-sm cursor-pointer hover:bg-muted outline-none select-none data-[highlighted]:bg-muted'
                         >
                           <Select.ItemText>{option.label}</Select.ItemText>
                           <Select.ItemIndicator className='absolute right-2'>
@@ -470,7 +470,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             {/* Custom Date/Time Picker */}
             {showDatePicker && (
               <div className='flex items-center gap-2'>
-                <div className='px-3 py-2 border border-gray-300 rounded-lg flex-1 bg-white'>
+                <div className='px-3 py-2 border border-input rounded-lg flex-1 bg-background'>
                   <Input
                     type='date'
                     value={customDate ? customDate.toISOString().split('T')[0] : ''}
@@ -483,7 +483,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                   />
                 </div>
 
-                <div className='px-3 py-2 border border-gray-300 rounded-lg bg-white'>
+                <div className='px-3 py-2 border border-input rounded-lg bg-background'>
                   <Input
                     id='status-time-picker'
                     type='time'
@@ -500,7 +500,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
               <Button
                 variant='ghost'
                 onClick={onClose}
-                className='text-gray-700 hover:bg-gray-100'
+                className='text-foreground hover:bg-muted'
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Cancel_Status_Update'
               >

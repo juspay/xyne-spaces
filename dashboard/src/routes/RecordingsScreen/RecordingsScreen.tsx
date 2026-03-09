@@ -133,7 +133,7 @@ export default function RecordingsScreen(): ReactElement {
       <div className='flex items-center justify-center h-full'>
         <div className='flex flex-col items-center gap-3'>
           <Loader2 className='w-8 h-8 animate-spin text-blue-500' />
-          <p className='text-sm text-gray-500'>Loading recordings...</p>
+          <p className='text-sm text-muted-foreground'>Loading recordings...</p>
         </div>
       </div>
     );
@@ -145,8 +145,8 @@ export default function RecordingsScreen(): ReactElement {
       <div className='flex items-center justify-center h-full'>
         <div className='flex flex-col items-center gap-3 max-w-md text-center'>
           <AlertCircle className='w-12 h-12 text-red-500' />
-          <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>Error</h3>
-          <p className='text-sm text-gray-600 dark:text-gray-400'>{error}</p>
+          <h3 className='text-lg font-semibold text-foreground dark:text-gray-100'>Error</h3>
+          <p className='text-sm text-muted-foreground dark:text-muted-foreground'>{error}</p>
           <button
             onClick={() => void loadRecordings()}
             className='mt-4 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors'
@@ -176,22 +176,22 @@ export default function RecordingsScreen(): ReactElement {
           {/* Header */}
           <div className='mb-8'>
             <div className='flex items-center justify-between mb-2'>
-              <h1 className='text-2xl font-bold text-gray-900 dark:text-gray-100'>Recordings</h1>
+              <h1 className='text-2xl font-bold text-foreground dark:text-gray-100'>Recordings</h1>
 
               {/* STT Model Picker */}
               <div className='relative'>
                 <button
                   onClick={() => !isActive && setShowSttPicker(!showSttPicker)}
                   disabled={isActive}
-                  className='flex items-center gap-2 px-3 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  className='flex items-center gap-2 px-3 py-1.5 text-sm bg-background dark:bg-gray-800 border border-border dark:border-gray-700 rounded-lg hover:bg-muted dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                   data-track-category='RecordingsScreen'
                   data-track-name='open_stt_picker'
                 >
-                  <span className='text-gray-500 dark:text-gray-400'>STT:</span>
-                  <span className='font-medium text-gray-900 dark:text-gray-100'>
+                  <span className='text-muted-foreground dark:text-muted-foreground'>STT:</span>
+                  <span className='font-medium text-foreground dark:text-gray-100'>
                     {sttModelLabels[sttModel]}
                   </span>
-                  <ChevronDown className='w-4 h-4 text-gray-500' />
+                  <ChevronDown className='w-4 h-4 text-muted-foreground' />
                 </button>
 
                 {/* Dropdown */}
@@ -205,7 +205,7 @@ export default function RecordingsScreen(): ReactElement {
                       data-track-category='RecordingsScreen'
                       data-track-name='close_stt_picker'
                     />
-                    <div className='absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50'>
+                    <div className='absolute right-0 top-full mt-1 w-40 bg-background dark:bg-gray-800 rounded-lg shadow-lg border border-border dark:border-gray-700 py-1 z-50'>
                       {(['google', 'azure', 'deepgram'] as const).map(model => (
                         <button
                           key={model}
@@ -213,7 +213,7 @@ export default function RecordingsScreen(): ReactElement {
                             setSttModel(model);
                             setShowSttPicker(false);
                           }}
-                          className='w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between'
+                          className='w-full px-4 py-2 text-left text-sm hover:bg-muted dark:hover:bg-gray-700 flex items-center justify-between'
                           data-track-category='RecordingsScreen'
                           data-track-name={`select_stt_model_${model}`}
                         >
@@ -221,7 +221,7 @@ export default function RecordingsScreen(): ReactElement {
                             className={
                               sttModel === model
                                 ? 'font-medium text-blue-600 dark:text-blue-400'
-                                : 'text-gray-900 dark:text-gray-100'
+                                : 'text-foreground dark:text-gray-100'
                             }
                           >
                             {sttModelLabels[model]}
@@ -236,7 +236,7 @@ export default function RecordingsScreen(): ReactElement {
                 )}
               </div>
             </div>
-            <p className='text-sm text-gray-600 dark:text-gray-400'>
+            <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
               Your audio recordings with automatic transcription
             </p>
           </div>
@@ -244,13 +244,13 @@ export default function RecordingsScreen(): ReactElement {
           {/* Empty State */}
           {recordings.length === 0 ? (
             <div className='flex flex-col items-center justify-center py-20 text-center'>
-              <div className='w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4'>
-                <Mic className='w-8 h-8 text-gray-400' />
+              <div className='w-16 h-16 rounded-full bg-muted dark:bg-gray-800 flex items-center justify-center mb-4'>
+                <Mic className='w-8 h-8 text-muted-foreground' />
               </div>
-              <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2'>
+              <h3 className='text-lg font-semibold text-foreground dark:text-gray-100 mb-2'>
                 No recordings yet
               </h3>
-              <p className='text-sm text-gray-600 dark:text-gray-400 max-w-sm'>
+              <p className='text-sm text-muted-foreground dark:text-muted-foreground max-w-sm'>
                 Tap the record button below to start your first recording with automatic
                 transcription.
               </p>
@@ -262,7 +262,7 @@ export default function RecordingsScreen(): ReactElement {
                 <button
                   key={recording.id}
                   onClick={() => handleRecordingClick(recording)}
-                  className='w-full text-left bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md transition-shadow cursor-pointer group'
+                  className='w-full text-left bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 p-4 hover:shadow-md transition-shadow cursor-pointer group'
                   data-track-category='RecordingsScreen'
                   data-track-name='view_recording'
                 >
@@ -274,11 +274,11 @@ export default function RecordingsScreen(): ReactElement {
 
                     {/* Content */}
                     <div className='flex-1 min-w-0'>
-                      <h3 className='font-semibold text-gray-900 dark:text-gray-100 mb-1 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
+                      <h3 className='font-semibold text-foreground dark:text-gray-100 mb-1 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
                         {recording.title}
                       </h3>
 
-                      <div className='flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400 mb-2'>
+                      <div className='flex items-center gap-4 text-xs text-muted-foreground dark:text-muted-foreground mb-2'>
                         <div className='flex items-center gap-1'>
                           <Clock className='w-3 h-3' />
                           <span>

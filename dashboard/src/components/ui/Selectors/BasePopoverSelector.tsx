@@ -170,7 +170,7 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
       <Popover.Anchor virtualRef={{ current: virtualAnchor }} />
       <Popover.Portal>
         <Popover.Content
-          className={`p-0 ${className} rounded-2xl bg-white border border-gray-200 shadow-lg z-50 animate-slide-in-up`}
+          className={`p-0 ${className} rounded-2xl bg-popover border border-border shadow-lg z-50 animate-slide-in-up`}
           side='top'
           align='start'
           sideOffset={8}
@@ -181,9 +181,11 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
           onCloseAutoFocus={e => e.preventDefault()}
         >
           {isLoading ? (
-            <div className='p-2 px-3 text-sm text-gray-500 text-center'>{loadingMessage}</div>
+            <div className='p-2 px-3 text-sm text-muted-foreground text-center'>
+              {loadingMessage}
+            </div>
           ) : items.length === 0 ? (
-            <div className='p-2 px-3 text-sm text-gray-500 text-center'>{emptyMessage}</div>
+            <div className='p-2 px-3 text-sm text-muted-foreground text-center'>{emptyMessage}</div>
           ) : (
             <div
               className={`max-h-80 overflow-y-auto scroll-smooth flex flex-col gap-1 ${mentionedBasedPadding}`}
@@ -194,7 +196,7 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
                   ref={index === selectedIndex ? selectedItemRef : null}
                   type='button'
                   className={`w-full text-left border-none cursor-pointer transition-all ${mentionedBasedRounding} ${
-                    index === selectedIndex ? 'bg-gray-200' : 'bg-transparent hover:bg-gray-100'
+                    index === selectedIndex ? 'bg-accent' : 'bg-transparent hover:bg-accent'
                   }`}
                   onMouseDown={e => {
                     e.preventDefault();

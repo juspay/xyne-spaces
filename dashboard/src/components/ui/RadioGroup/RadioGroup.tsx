@@ -59,7 +59,7 @@ const RadioGroup = ({
   return (
     <div className={cn('space-y-2', className)}>
       {label && (
-        <label className='text-sm font-medium text-gray-700' htmlFor={name}>
+        <label className='text-sm font-medium text-muted-foreground' htmlFor={name}>
           {label}
         </label>
       )}
@@ -88,11 +88,11 @@ const Radio = ({ value, subtext, children, className }: RadioProps): React.React
       <div className='flex-1 space-y-0.5 '>
         <label
           htmlFor={value}
-          className='text-sm font-medium text-gray-900 cursor-pointer leading-1'
+          className='text-sm font-medium text-foreground cursor-pointer leading-1'
         >
           {children}
         </label>
-        {subtext && <p className='text-xs text-gray-500  leading-none'>{subtext}</p>}
+        {subtext && <p className='text-xs text-muted-foreground  leading-none'>{subtext}</p>}
       </div>
     </div>
   );

@@ -612,7 +612,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
           </Button>
 
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>
               Name <span className='text-red-500'>*</span>
             </span>
             <Input
@@ -623,7 +623,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
           </div>
 
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>
               Git URL <span className='text-red-500'>*</span>
             </span>
             <Input
@@ -634,24 +634,26 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
           </div>
 
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>Base Branches</span>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>Base Branches</span>
             <Input
               value={newRepoBranches}
               onChange={e => setNewRepoBranches(e.target.value)}
               placeholder='main, develop'
             />
-            <p className='text-xs text-gray-500 mt-1'>Comma-separated branches to checkout from</p>
+            <p className='text-xs text-muted-foreground mt-1'>
+              Comma-separated branches to checkout from
+            </p>
           </div>
 
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>Branch Prefix</span>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>Branch Prefix</span>
             <Input
               value={newRepoPrefix}
               onChange={e => setNewRepoPrefix(e.target.value)}
               placeholder='feature'
             />
             {ticket && (
-              <p className='text-xs text-gray-500 mt-1'>
+              <p className='text-xs text-muted-foreground mt-1'>
                 Format: {newRepoPrefix || 'feature'}/{ticket.xyneId}
               </p>
             )}
@@ -714,7 +716,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
           </Button>
 
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>
               Name <span className='text-red-500'>*</span>
             </span>
             <Input
@@ -725,7 +727,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
           </div>
 
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>
               Git URL <span className='text-red-500'>*</span>
             </span>
             <Input
@@ -736,24 +738,26 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
           </div>
 
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>Base Branches</span>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>Base Branches</span>
             <Input
               value={editRepoBranches}
               onChange={e => setEditRepoBranches(e.target.value)}
               placeholder='main, develop'
             />
-            <p className='text-xs text-gray-500 mt-1'>Comma-separated branches to checkout from</p>
+            <p className='text-xs text-muted-foreground mt-1'>
+              Comma-separated branches to checkout from
+            </p>
           </div>
 
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>Branch Prefix</span>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>Branch Prefix</span>
             <Input
               value={editRepoPrefix}
               onChange={e => setEditRepoPrefix(e.target.value)}
               placeholder='feature'
             />
             {ticket && (
-              <p className='text-xs text-gray-500 mt-1'>
+              <p className='text-xs text-muted-foreground mt-1'>
                 Format: {editRepoPrefix || 'feature'}/{ticket.xyneId}
               </p>
             )}
@@ -805,15 +809,17 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
               <>
                 <Loader2 className='w-12 h-12 text-green-600 animate-spin' />
                 <div className='text-center'>
-                  <p className='font-medium text-gray-900'>Setting up Quarto workspace...</p>
-                  <p className='text-sm text-gray-500 mt-1'>Opening xyne-spaces-docs repository</p>
+                  <p className='font-medium text-foreground'>Setting up Quarto workspace...</p>
+                  <p className='text-sm text-muted-foreground mt-1'>
+                    Opening xyne-spaces-docs repository
+                  </p>
                 </div>
               </>
             ) : error ? (
               <>
                 <AlertCircle className='w-12 h-12 text-red-500' />
                 <div className='text-center'>
-                  <p className='font-medium text-gray-900'>Setup failed</p>
+                  <p className='font-medium text-foreground'>Setup failed</p>
                   <p className='text-sm text-red-600 mt-1'>{error}</p>
                 </div>
                 <div className='flex gap-3 pt-2 w-full'>
@@ -844,7 +850,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
               <>
                 <Loader2 className='w-12 h-12 text-green-600 animate-spin' />
                 <div className='text-center'>
-                  <p className='font-medium text-gray-900'>Preparing...</p>
+                  <p className='font-medium text-foreground'>Preparing...</p>
                 </div>
               </>
             )}
@@ -872,7 +878,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
               <Code2 className='w-5 h-5 text-white' />
             </div>
             <div className='min-w-0 flex-1'>
-              <p className='font-medium text-gray-900 truncate'>{ticket.title}</p>
+              <p className='font-medium text-foreground truncate'>{ticket.title}</p>
               <p className='text-sm text-blue-600 font-mono'>{ticket.xyneId}</p>
             </div>
           </div>
@@ -885,7 +891,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
               <Code2 className='w-5 h-5 text-white' />
             </div>
             <div className='min-w-0 flex-1'>
-              <p className='font-medium text-gray-900'>Create Quarto Document</p>
+              <p className='font-medium text-foreground'>Create Quarto Document</p>
               <p className='text-sm text-green-600'>Select a repository to create your document</p>
             </div>
           </div>
@@ -893,7 +899,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
 
         {/* Repository Selector */}
         <div>
-          <span className='block text-sm font-medium text-gray-700 mb-1.5'>Repository</span>
+          <span className='block text-sm font-medium text-foreground mb-1.5'>Repository</span>
           <div className='relative'>
             <Button
               variant='outline'
@@ -905,22 +911,22 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
               className='w-full flex items-center justify-between px-3 py-2.5'
             >
               <div className='flex items-center gap-2'>
-                <FolderGit2 className='w-4 h-4 text-gray-400' />
-                <span className='text-sm text-gray-900'>
+                <FolderGit2 className='w-4 h-4 text-muted-foreground' />
+                <span className='text-sm text-foreground'>
                   {selectedRepo?.name ?? 'Select repository...'}
                 </span>
               </div>
               <ChevronDown
-                className={`w-4 h-4 text-gray-400 transition-transform ${showRepoDropdown ? 'rotate-180' : ''}`}
+                className={`w-4 h-4 text-muted-foreground transition-transform ${showRepoDropdown ? 'rotate-180' : ''}`}
               />
             </Button>
 
             {showRepoDropdown && (
-              <div className='absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden'>
+              <div className='absolute z-20 mt-1 w-full bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
                 {/* Search Input */}
-                <div className='p-2 border-b border-gray-100'>
+                <div className='p-2 border-b border-border'>
                   <div className='relative'>
-                    <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 z-10' />
+                    <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10' />
                     <Input
                       ref={searchInputRef}
                       type='text'
@@ -938,7 +944,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                     filteredRepos.map(repo => (
                       <div
                         key={repo.id}
-                        className={`flex items-center justify-between px-3 py-2 hover:bg-gray-50 cursor-pointer ${
+                        className={`flex items-center justify-between px-3 py-2 hover:bg-muted cursor-pointer ${
                           selectedRepo?.id === repo.id ? 'bg-blue-50' : ''
                         }`}
                       >
@@ -950,11 +956,13 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                           data-track-metadata={JSON.stringify({ repoId: repo.id })}
                         >
                           <span
-                            className={`text-sm font-medium block truncate ${selectedRepo?.id === repo.id ? 'text-blue-700' : 'text-gray-900'}`}
+                            className={`text-sm font-medium block truncate ${selectedRepo?.id === repo.id ? 'text-blue-700' : 'text-foreground'}`}
                           >
                             {repo.name}
                           </span>
-                          <span className='text-xs text-gray-500 block truncate'>{repo.url}</span>
+                          <span className='text-xs text-muted-foreground block truncate'>
+                            {repo.url}
+                          </span>
                         </button>
                         <div className='flex items-center gap-1 ml-2 flex-shrink-0'>
                           <button
@@ -962,7 +970,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                               e.stopPropagation();
                               handleStartEditRepo(repo);
                             }}
-                            className='p-1 text-gray-400 hover:text-blue-500 rounded'
+                            className='p-1 text-muted-foreground hover:text-blue-500 rounded'
                             title='Edit repository'
                             data-track-category='Tickets'
                             data-track-name='EditRepo'
@@ -980,7 +988,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                                 handleDeleteRepo(repo.id);
                               }
                             }}
-                            className='p-1 text-gray-400 hover:text-red-500 rounded'
+                            className='p-1 text-muted-foreground hover:text-red-500 rounded'
                             title='Delete repository'
                             data-track-category='Tickets'
                             data-track-name='DeleteRepo'
@@ -995,11 +1003,11 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                       </div>
                     ))
                   ) : repoSearchQuery.trim() ? (
-                    <div className='px-3 py-4 text-center text-sm text-gray-500'>
+                    <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
                       No matching repositories
                     </div>
                   ) : (
-                    <div className='px-3 py-4 text-center text-sm text-gray-500'>
+                    <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
                       No repositories yet
                     </div>
                   )}
@@ -1010,7 +1018,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                   <Button
                     variant='ghost'
                     onClick={() => handleStartAddRepo(repoSearchQuery.trim())}
-                    className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-blue-600 hover:bg-blue-50 border-t border-gray-100 justify-start'
+                    className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-blue-600 hover:bg-accent border-t border-border justify-start'
                     data-track-category='Tickets'
                     data-track-name='AddNewRepoFromSearch'
                   >
@@ -1024,7 +1032,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                   <Button
                     variant='ghost'
                     onClick={() => handleStartAddRepo()}
-                    className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-gray-600 hover:bg-gray-50 border-t border-gray-100 justify-start'
+                    className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-muted-foreground hover:bg-muted border-t border-border justify-start'
                     data-track-category='Tickets'
                     data-track-name='AddNewRepo'
                   >
@@ -1037,7 +1045,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
           </div>
           {/* Show selected repo URL info */}
           {selectedRepo && !showRepoDropdown && (
-            <p className='text-xs text-gray-500 mt-1 truncate' title={selectedRepo.url}>
+            <p className='text-xs text-muted-foreground mt-1 truncate' title={selectedRepo.url}>
               {selectedRepo.url}
             </p>
           )}
@@ -1046,7 +1054,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
         {/* Branch Selector */}
         {selectedRepo && (
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>Base Branch</span>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>Base Branch</span>
             <div className='relative'>
               <Button
                 variant='outline'
@@ -1059,20 +1067,20 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                 className='w-full flex items-center justify-between px-3 py-2.5'
               >
                 <div className='flex items-center gap-2'>
-                  <GitBranch className='w-4 h-4 text-gray-400' />
-                  <span className='text-sm text-gray-900'>{selectedBranch}</span>
+                  <GitBranch className='w-4 h-4 text-muted-foreground' />
+                  <span className='text-sm text-foreground'>{selectedBranch}</span>
                 </div>
                 <ChevronDown
-                  className={`w-4 h-4 text-gray-400 transition-transform ${showBranchDropdown ? 'rotate-180' : ''}`}
+                  className={`w-4 h-4 text-muted-foreground transition-transform ${showBranchDropdown ? 'rotate-180' : ''}`}
                 />
               </Button>
 
               {showBranchDropdown && (
-                <div className='absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden'>
+                <div className='absolute z-20 mt-1 w-full bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
                   {/* Search/Add Input */}
-                  <div className='p-2 border-b border-gray-100'>
+                  <div className='p-2 border-b border-border'>
                     <div className='relative'>
-                      <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 z-10' />
+                      <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10' />
                       <Input
                         type='text'
                         value={branchSearchQuery}
@@ -1099,13 +1107,13 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                           className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 transition-colors justify-start ${
                             selectedBranch === branch
                               ? 'bg-blue-50 text-blue-700'
-                              : 'text-gray-900 hover:bg-gray-50'
+                              : 'text-foreground hover:bg-muted'
                           }`}
                           data-track-category='Tickets'
                           data-track-name='SelectBranch'
                           data-track-metadata={JSON.stringify({ branch })}
                         >
-                          <GitBranch className='w-4 h-4 text-gray-400' />
+                          <GitBranch className='w-4 h-4 text-muted-foreground' />
                           {branch}
                         </Button>
                       ))}
@@ -1117,7 +1125,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                           variant='ghost'
                           onClick={handleAddNewBranch}
                           disabled={isAddingBranch}
-                          className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-blue-600 hover:bg-blue-50 border-t border-gray-100 justify-start'
+                          className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-blue-600 hover:bg-accent border-t border-border justify-start'
                           data-track-category='Tickets'
                           data-track-name='AddNewBranch'
                         >
@@ -1131,7 +1139,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                       )}
                     {!branchSearchQuery.trim() &&
                       (!selectedRepoBranches || selectedRepoBranches.length === 0) && (
-                        <div className='px-3 py-4 text-center text-sm text-gray-500'>
+                        <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
                           No branches configured. Type to add one.
                         </div>
                       )}
@@ -1145,7 +1153,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
         {/* Prefix Selector - only for ticket mode */}
         {isTicketMode && selectedRepo && (
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>Branch Prefix</span>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>Branch Prefix</span>
             <div className='relative'>
               <Button
                 variant='outline'
@@ -1158,20 +1166,20 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                 className='w-full flex items-center justify-between px-3 py-2.5'
               >
                 <div className='flex items-center gap-2'>
-                  <Tag className='w-4 h-4 text-gray-400' />
-                  <span className='text-sm text-gray-900'>{selectedPrefix}</span>
+                  <Tag className='w-4 h-4 text-muted-foreground' />
+                  <span className='text-sm text-foreground'>{selectedPrefix}</span>
                 </div>
                 <ChevronDown
-                  className={`w-4 h-4 text-gray-400 transition-transform ${showPrefixDropdown ? 'rotate-180' : ''}`}
+                  className={`w-4 h-4 text-muted-foreground transition-transform ${showPrefixDropdown ? 'rotate-180' : ''}`}
                 />
               </Button>
 
               {showPrefixDropdown && (
-                <div className='absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden'>
+                <div className='absolute z-20 mt-1 w-full bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
                   {/* Search/Add Input */}
-                  <div className='p-2 border-b border-gray-100'>
+                  <div className='p-2 border-b border-border'>
                     <div className='relative'>
-                      <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 z-10' />
+                      <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10' />
                       <Input
                         type='text'
                         value={prefixSearchQuery}
@@ -1198,13 +1206,13 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                           className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 transition-colors justify-start ${
                             selectedPrefix === prefix
                               ? 'bg-blue-50 text-blue-700'
-                              : 'text-gray-900 hover:bg-gray-50'
+                              : 'text-foreground hover:bg-muted'
                           }`}
                           data-track-category='Tickets'
                           data-track-name='SelectPrefix'
                           data-track-metadata={JSON.stringify({ prefix })}
                         >
-                          <Tag className='w-4 h-4 text-gray-400' />
+                          <Tag className='w-4 h-4 text-muted-foreground' />
                           {prefix}
                         </Button>
                       ))}
@@ -1216,7 +1224,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
                           variant='ghost'
                           onClick={handleAddNewPrefix}
                           disabled={isAddingPrefix}
-                          className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-blue-600 hover:bg-blue-50 border-t border-gray-100 justify-start'
+                          className='w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-blue-600 hover:bg-accent border-t border-border justify-start'
                           data-track-category='Tickets'
                           data-track-name='AddNewPrefix'
                         >
@@ -1248,15 +1256,15 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
         {/* Checkout to Branch Input - only for quarto mode */}
         {!isTicketMode && selectedRepo && (
           <div>
-            <span className='block text-sm font-medium text-gray-700 mb-1.5'>
-              Checkout to Branch <span className='text-xs text-gray-400'>(optional)</span>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>
+              Checkout to Branch <span className='text-xs text-muted-foreground'>(optional)</span>
             </span>
             <Input
               value={quartoWorkingBranch}
               onChange={e => setQuartoWorkingBranch(e.target.value)}
               placeholder={`Leave empty to stay on ${selectedBranch}`}
             />
-            <p className='text-xs text-gray-500 mt-1'>
+            <p className='text-xs text-muted-foreground mt-1'>
               {quartoWorkingBranch.trim()
                 ? `Will checkout from ${selectedBranch} → ${quartoWorkingBranch.trim()} (create if not exists)`
                 : `Will checkout to ${selectedBranch}`}

@@ -112,7 +112,6 @@ const Settings = (): ReactElement => {
         label: 'Classic',
         bg: `linear-gradient(180deg, #E2EEFB 0%, #EAEFDB 100%)`,
       },
-      // { id: 'midnight', label: 'Midnight', bg: '#000000' },
       {
         id: 'summer_breeze',
         label: 'Summer Breeze',
@@ -125,6 +124,11 @@ const Settings = (): ReactElement => {
           #6274a6 100%
         )`,
       },
+      {
+        id: 'midnight',
+        label: 'Midnight (WIP)',
+        bg: '#0a0a0a',
+      },
     ];
 
   return (
@@ -134,22 +138,22 @@ const Settings = (): ReactElement => {
           <Avatar userId={user?.id || ''} size='lg' showActiveStatus={false} />
         </div>
         <div className='flex-1 min-w-0 space-y-1'>
-          <p className='text-sm font-medium text-gray-900 truncate'>{user?.name || 'User'}</p>
+          <p className='text-sm font-medium text-foreground truncate'>{user?.name || 'User'}</p>
 
           <Popover
             trigger={
-              <button className='flex items-center gap-1.5 hover:bg-gray-100 px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'>
+              <button className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'>
                 {livePresenceStatus === 'ONLINE' ? (
-                  <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-white' />
+                  <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-background' />
                 ) : (
-                  <div className='w-2 h-2 rounded-full bg-gray-300 ring-2 ring-white'>
-                    <div className='w-full h-full rounded-full bg-white/50' />
+                  <div className='w-2 h-2 rounded-full bg-muted-foreground/50 ring-2 ring-background'>
+                    <div className='w-full h-full rounded-full bg-background/50' />
                   </div>
                 )}
-                <p className='text-xs text-gray-600'>
+                <p className='text-xs text-muted-foreground'>
                   {livePresenceStatus !== 'AWAY' ? 'Active' : 'Away'}
                 </p>
-                <ChevronDown className='size-3 text-gray-400' />
+                <ChevronDown className='size-3 text-muted-foreground' />
               </button>
             }
             align='start'
@@ -160,28 +164,28 @@ const Settings = (): ReactElement => {
                 onClick={() => {
                   setLivePresenceStatus('ONLINE');
                 }}
-                className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='SETTINGS'
                 data-track-name='SetPresenceOnline'
               >
                 <div className='w-2 h-2 rounded-full bg-green-500' />
                 <span>Active</span>
                 {livePresenceStatus !== 'AWAY' && (
-                  <Check className='size-3 ml-auto text-gray-500' />
+                  <Check className='size-3 ml-auto text-muted-foreground' />
                 )}
               </button>
               <button
                 onClick={() => {
                   setLivePresenceStatus('AWAY');
                 }}
-                className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='SETTINGS'
                 data-track-name='SetPresenceAway'
               >
-                <div className='w-2 h-2 rounded-full border border-gray-400' />
+                <div className='w-2 h-2 rounded-full border border-muted-foreground' />
                 <span>Away</span>
                 {livePresenceStatus === 'AWAY' && (
-                  <Check className='size-3 ml-auto text-gray-500' />
+                  <Check className='size-3 ml-auto text-muted-foreground' />
                 )}
               </button>
             </div>
@@ -193,10 +197,10 @@ const Settings = (): ReactElement => {
       <div className='mt-2 space-y-1'>
         <div
           className={cn(
-            'px-2 py-1 rounded-lg border cursor-pointer hover:bg-gray-200 transition-colors w-full',
+            'px-2 py-1 rounded-lg border cursor-pointer hover:bg-border transition-colors w-full',
             hasValidStatus
-              ? 'border-gray-200 bg-transparent hover:bg-gray-100'
-              : 'border-gray-200 bg-gray-50',
+              ? 'border-border bg-transparent hover:bg-muted'
+              : 'border-border bg-muted',
           )}
           onClick={handleStatusClick}
           data-track-category='Settings'
@@ -223,7 +227,7 @@ const Settings = (): ReactElement => {
                     showOnHover={false}
                   />
                 </div>
-                <div className='text-sm font-medium text-gray-900 truncate'>
+                <div className='text-sm font-medium text-foreground truncate'>
                   {user?.presenceStatus?.statusContent}
                 </div>
               </div>
@@ -231,23 +235,23 @@ const Settings = (): ReactElement => {
                 variant='ghost'
                 size='lg'
                 onClick={handleClearStatus}
-                className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
+                className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
                 data-track-category='Settings'
                 data-track-name='ClearUserStatus'
               >
-                <X className='size-3 text-gray-600' />
+                <X className='size-3 text-muted-foreground' />
               </Button>
             </div>
           ) : (
-            <div className='flex items-center p-1 gap-2 text-gray-600'>
+            <div className='flex items-center p-1 gap-2 text-muted-foreground'>
               <SmilePlus className='size-4 flex-shrink-0' />
               <span className='text-xs truncate'>Set a status</span>
             </div>
           )}
         </div>
         {hasValidStatus && user?.presenceStatus?.statusExpiryAt && (
-          <div className='text-xs text-gray-500'>
+          <div className='text-xs text-muted-foreground'>
             {formatExpiryTime(user.presenceStatus.statusExpiryAt, true)}
           </div>
         )}
@@ -260,8 +264,8 @@ const Settings = (): ReactElement => {
             className={cn(
               'px-2 py-1 rounded-lg border transition-colors w-full flex items-center justify-between gap-2',
               isCurrentlyUnavailable
-                ? 'border-gray-200 bg-transparent hover:bg-gray-100'
-                : 'border-gray-200 bg-gray-50 hover:bg-gray-200 cursor-pointer',
+                ? 'border-border bg-transparent hover:bg-muted'
+                : 'border-border bg-muted hover:bg-border cursor-pointer',
             )}
             onClick={() => {
               if (!isCurrentlyUnavailable) {
@@ -284,13 +288,13 @@ const Settings = (): ReactElement => {
           >
             {isCurrentlyUnavailable ? (
               <div className='flex items-center gap-2 min-w-0 flex-1'>
-                <PauseCircle className='size-4 flex-shrink-0 text-gray-600' />
-                <div className='text-sm font-medium text-gray-900 truncate'>
+                <PauseCircle className='size-4 flex-shrink-0 text-muted-foreground' />
+                <div className='text-sm font-medium text-foreground truncate'>
                   Paused from ticket assignment
                 </div>
               </div>
             ) : (
-              <div className='flex items-center p-1 gap-2 text-gray-600'>
+              <div className='flex items-center p-1 gap-2 text-muted-foreground'>
                 <PauseCircle className='size-4 flex-shrink-0' />
                 <span className='text-xs truncate'>Pause from ticket assignment</span>
               </div>
@@ -300,18 +304,18 @@ const Settings = (): ReactElement => {
               <Button
                 variant='ghost'
                 size='lg'
-                className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
+                className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume ticket assignment'
                 onClick={handleResumeAssignment}
                 data-track-category='Settings'
                 data-track-name='ResumeAssignment'
               >
-                <X className='size-3 text-gray-600' />
+                <X className='size-3 text-muted-foreground' />
               </Button>
             )}
           </div>
           {isCurrentlyUnavailable && unavailableUntil && (
-            <div className='text-xs text-gray-500'>
+            <div className='text-xs text-muted-foreground'>
               Until {new Date(unavailableUntil).toLocaleString()}
             </div>
           )}
@@ -321,7 +325,7 @@ const Settings = (): ReactElement => {
       <Button
         type='button'
         variant='ghost'
-        className='w-full text-left hover:bg-gray-100 rounded-md justify-start gap-2'
+        className='w-full text-left hover:bg-muted rounded-md justify-start gap-2'
         onClick={handleProfileClick}
         data-track-category='Settings'
         data-track-name='OpenProfile'
@@ -361,7 +365,7 @@ const Settings = (): ReactElement => {
               </div>
               <div
                 className={cn(
-                  'text-xs text-center',
+                  'text-xs text-center whitespace-nowrap',
                   theme === themeOption.id ? 'text-primary' : 'text-muted-foreground',
                 )}
               >
@@ -387,7 +391,7 @@ const Settings = (): ReactElement => {
 
       <hr className='border-border w-full' />
 
-      <div className='text-xs flex flex-col gap-1 text-gray-400'>
+      <div className='text-xs flex flex-col gap-1 text-muted-foreground'>
         <div>Version: {__APP_VERSION__}</div>
         {logger.zeroClientID && (
           <button
@@ -401,7 +405,7 @@ const Settings = (): ReactElement => {
                   toast.error('Failed to copy Client ID');
                 });
             }}
-            className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+            className='flex items-center gap-1 hover:text-muted-foreground transition-colors cursor-pointer text-left'
             data-track-category='Settings'
             data-track-name='CopyClientId'
           >
@@ -421,7 +425,7 @@ const Settings = (): ReactElement => {
                   toast.error('Failed to copy Client Group ID');
                 });
             }}
-            className='flex items-center gap-1 hover:text-gray-600 transition-colors cursor-pointer text-left'
+            className='flex items-center gap-1 hover:text-muted-foreground transition-colors cursor-pointer text-left'
             data-track-category='Settings'
             data-track-name='CopyClientGroupId'
           >

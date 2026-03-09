@@ -94,13 +94,13 @@ export const DynamicFieldSubmenu = ({
 
     return (
       <div
-        className={`w-64 flex flex-col bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden ${className}`}
+        className={`w-64 flex flex-col bg-background border border-border rounded-lg shadow-lg overflow-hidden ${className}`}
       >
-        <div className='p-3 border-b sticky top-0 bg-white z-10'>
-          <div className='text-sm font-medium text-gray-900 mb-2'>{fieldName}</div>
+        <div className='p-3 border-b sticky top-0 bg-background z-10'>
+          <div className='text-sm font-medium text-foreground mb-2'>{fieldName}</div>
           {options.length > 5 && (
             <div className='relative'>
-              <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400' />
+              <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
               <Input
                 ref={searchInputRef}
                 type='text'
@@ -124,7 +124,7 @@ export const DynamicFieldSubmenu = ({
                     onClick={() => handleToggle(option)}
                     className={`
                       w-full flex items-center justify-between px-3 py-2 rounded-md transition-all
-                      ${isSelected ? 'bg-[#F2F2F3] text-black' : 'hover:bg-gray-50 text-gray-700'}
+                      ${isSelected ? 'bg-accent text-black' : 'hover:bg-muted text-foreground'}
                     `}
                     data-track-category='Tickets'
                     data-track-name='ToggleDynamicFieldFilter'
@@ -137,7 +137,7 @@ export const DynamicFieldSubmenu = ({
               })}
             </div>
           ) : (
-            <div className='p-4 text-center text-sm text-gray-400'>No options found</div>
+            <div className='p-4 text-center text-sm text-muted-foreground'>No options found</div>
           )}
         </div>
       </div>
@@ -171,15 +171,15 @@ export const DynamicFieldSubmenu = ({
     };
 
     return (
-      <div className={`w-80 bg-white border border-gray-200 rounded-lg shadow-lg ${className}`}>
+      <div className={`w-80 bg-background border border-border rounded-lg shadow-lg ${className}`}>
         <div className='p-4'>
-          <div className='text-sm font-medium text-gray-900 mb-3'>{fieldName}</div>
+          <div className='text-sm font-medium text-foreground mb-3'>{fieldName}</div>
 
           <div className='space-y-3'>
             <div>
               <label
                 htmlFor='dynamic-start-date'
-                className='block text-xs font-medium text-gray-700 mb-1'
+                className='block text-xs font-medium text-foreground mb-1'
               >
                 Start date
               </label>
@@ -197,7 +197,7 @@ export const DynamicFieldSubmenu = ({
             <div>
               <label
                 htmlFor='dynamic-end-date'
-                className='block text-xs font-medium text-gray-700 mb-1'
+                className='block text-xs font-medium text-foreground mb-1'
               >
                 End date
               </label>
@@ -214,7 +214,7 @@ export const DynamicFieldSubmenu = ({
           </div>
 
           {(dateRange.start || dateRange.end) && (
-            <div className='border-t border-gray-100 pt-3 mt-4'>
+            <div className='border-t border-border pt-3 mt-4'>
               <Button
                 onClick={() => {
                   setDateRange({});
@@ -248,9 +248,9 @@ export const DynamicFieldSubmenu = ({
 
     return (
       <div
-        className={`w-64 flex flex-col bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden p-4 ${className}`}
+        className={`w-64 flex flex-col bg-background border border-border rounded-lg shadow-lg overflow-hidden p-4 ${className}`}
       >
-        <div className='text-sm font-medium text-gray-900 mb-3'>{fieldName}</div>
+        <div className='text-sm font-medium text-foreground mb-3'>{fieldName}</div>
         <Input
           ref={stringInputRef}
           type={fieldType === FormFieldType.NUMBER ? 'number' : 'text'}
@@ -310,15 +310,15 @@ export const DynamicFieldSubmenu = ({
 
     return (
       <div
-        className={`w-48 flex flex-col bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden p-3 ${className}`}
+        className={`w-48 flex flex-col bg-background border border-border rounded-lg shadow-lg overflow-hidden p-3 ${className}`}
       >
-        <div className='text-sm font-medium text-gray-900 mb-3'>{fieldName}</div>
+        <div className='text-sm font-medium text-foreground mb-3'>{fieldName}</div>
         <div className='space-y-2'>
           <button
             onClick={() => handleBooleanToggle('true')}
             className={`
               w-full flex items-center justify-between px-3 py-2 rounded-md transition-all border
-              ${isTrueSelected ? 'bg-[#F2F2F3] text-black border-gray-300' : 'hover:bg-gray-50 text-gray-700 border-gray-200'}
+              ${isTrueSelected ? 'bg-accent text-black border-input' : 'hover:bg-muted text-foreground border-border'}
             `}
             data-track-category='Tickets'
             data-track-name='FilterBooleanTrue'
@@ -331,7 +331,7 @@ export const DynamicFieldSubmenu = ({
             onClick={() => handleBooleanToggle('false')}
             className={`
               w-full flex items-center justify-between px-3 py-2 rounded-md transition-all border
-              ${isFalseSelected ? 'bg-[#F2F2F3] text-black border-gray-300' : 'hover:bg-gray-50 text-gray-700 border-gray-200'}
+              ${isFalseSelected ? 'bg-accent text-black border-input' : 'hover:bg-muted text-foreground border-border'}
             `}
             data-track-category='Tickets'
             data-track-name='FilterBooleanFalse'

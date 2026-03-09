@@ -296,14 +296,14 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
           {isDM && isHovered && (
             <button
               onClick={handleCloseDm}
-              className='p-1 rounded hover:bg-gray-300 transition-colors shrink-0'
+              className='p-1 rounded hover:bg-accent transition-colors shrink-0'
               aria-label='Close conversation'
               title='Close conversation'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'
               data-track-metadata={JSON.stringify({ channelId: channel.id })}
             >
-              <X size={14} className='text-gray-500 hover:text-gray-700' />
+              <X size={14} className='text-muted-foreground hover:text-foreground' />
             </button>
           )}
         </div>

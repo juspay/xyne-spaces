@@ -222,7 +222,7 @@ const ChatView = (): ReactElement => {
             // Thread Summary Mode: Show thread in main view, summary overlays with slide animation
             <>
               <ThreadMessages channelId={channelId} conversationId={conversationId} />
-              <div className='absolute inset-0 bg-white z-10 rounded-lg animate-slide-in-from-right'>
+              <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
                 <ThreadSummary
                   conversationId={conversationId}
                   channelName={channel?.['name'] || 'thread'}
@@ -244,7 +244,7 @@ const ChatView = (): ReactElement => {
                 />
               )}
               {showSecondaryPanel && !shouldStackThreadFromParent && (
-                <div className='absolute inset-0 bg-white z-10 rounded-lg animate-slide-in-from-right'>
+                <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
                   {isCanvasActive ? (
                     <CanvasScreen
                       canvasId={canvasId}
@@ -287,7 +287,7 @@ const ChatView = (): ReactElement => {
                 </div>
               </Panel>
               <Panel defaultSize={defaultSecondaryPanelSize} minSize={minSecondaryPanelSize}>
-                <div className='h-full bg-gray-50 animate-slide-in-from-right'>
+                <div className='h-full bg-muted animate-slide-in-from-right'>
                   <ThreadSummary
                     conversationId={conversationId}
                     channelName={channel?.['name'] || 'thread'}
@@ -310,7 +310,7 @@ const ChatView = (): ReactElement => {
                 <ConversationPannel channelId={channelId} previousChannelId={previousChannelId} />
               </Panel>
               <Panel defaultSize={defaultSecondaryPanelSize} minSize={minSecondaryPanelSize}>
-                <div className='h-full bg-gray-50 animate-slide-in-from-right'>
+                <div className='h-full bg-muted animate-slide-in-from-right'>
                   <ChannelSummary
                     channelId={channelId}
                     channelName={channel?.['name'] || 'channel'}
@@ -351,7 +351,7 @@ const ChatView = (): ReactElement => {
                   {/* Resize handle - hidden when fullscreen */}
                   {!isCanvasFullscreen && (
                     <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                      <div id='panel-resize-divider' className='w-[1px] h-full bg-gray-200'></div>
+                      <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
                     </PanelResizeHandle>
                   )}
                   <Panel

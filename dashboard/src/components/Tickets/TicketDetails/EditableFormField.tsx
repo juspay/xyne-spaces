@@ -154,7 +154,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-gray-500 w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
             title={fieldName}
           >
             {fieldName}
@@ -182,7 +182,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-gray-500 w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
             title={fieldName}
           >
             {fieldName}
@@ -195,7 +195,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               onChange={e => setEditValue(e.target.value)}
               onBlur={() => handleSave()}
               onKeyDown={handleKeyDown}
-              className='w-full text-sm text-gray-900 border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+              className='w-full text-sm text-foreground border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
               data-track-category='Tickets'
               data-track-name='EditDateField'
               data-track-metadata={JSON.stringify({ fieldName })}
@@ -211,7 +211,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-gray-500 w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
             title={fieldName}
           >
             {fieldName}
@@ -242,7 +242,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-gray-500 w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
             title={fieldName}
           >
             {fieldName}
@@ -269,12 +269,12 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-start gap-2 w-full'>
           <span
-            className='text-sm text-gray-500 w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
             title={fieldName}
           >
             {fieldName}
           </span>
-          <div className='flex-1 border border-gray-300 rounded outline-none focus:border-blue-500 focus-within:border-blue-500'>
+          <div className='flex-1 border border-input rounded outline-none focus:border-blue-500 focus-within:border-blue-500'>
             <SearchUserV2
               options={usersSearchResults || []}
               selectedUsers={selectedUsers}
@@ -295,7 +295,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     return (
       <div className='flex items-center gap-2 w-full'>
         <span
-          className='text-sm text-gray-500 w-[120px] flex-shrink-0 truncate overflow-hidden'
+          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
           title={fieldName}
         >
           {fieldName}
@@ -308,7 +308,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             onChange={e => setEditValue(e.target.value)}
             onBlur={() => handleSave()}
             onKeyDown={handleKeyDown}
-            className='w-full text-sm text-gray-900 border border-gray-300 rounded px-2 py-1 outline-none focus:border-blue-500'
+            className='w-full text-sm text-foreground border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
             data-track-category='Tickets'
             data-track-name='EditTextField'
             data-track-metadata={JSON.stringify({ fieldName, fieldType })}
@@ -324,7 +324,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     return (
       <div className='flex items-start gap-2 w-full'>
         <span
-          className='text-sm text-gray-500 w-[120px] flex-shrink-0 pt-0.5 truncate overflow-hidden'
+          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 pt-0.5 truncate overflow-hidden'
           title={fieldName}
         >
           {fieldName}
@@ -332,7 +332,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
         <div
           role='button'
           tabIndex={0}
-          className='flex-1 flex flex-wrap gap-2 cursor-text hover:bg-gray-100 rounded px-1 py-0.5 -mx-1'
+          className='flex-1 flex flex-wrap gap-2 cursor-text hover:bg-muted rounded px-1 py-0.5 -mx-1'
           onClick={() => setIsEditing(true)}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -353,14 +353,14 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             selectedUsers.map(user => (
               <div
                 key={user.id}
-                className='flex items-center gap-1.5 bg-gray-50 rounded-full px-2 py-0.5 border border-gray-200'
+                className='flex items-center gap-1.5 bg-muted rounded-full px-2 py-0.5 border border-border'
               >
                 <UserAvatar userId={user.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />
-                <span className='text-sm text-[#525866]'>{user.name || 'Unknown'}</span>
+                <span className='text-sm text-muted-foreground'>{user.name || 'Unknown'}</span>
               </div>
             ))
           ) : (
-            <span className='text-sm text-gray-400'>—</span>
+            <span className='text-sm text-muted-foreground'>—</span>
           )}
         </div>
       </div>
@@ -371,7 +371,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   return (
     <div className='flex items-center gap-2 w-full'>
       <span
-        className='text-sm text-gray-500 w-[120px] flex-shrink-0 truncate overflow-hidden'
+        className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
         title={fieldName}
       >
         {fieldName}
@@ -379,7 +379,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       <div
         role='button'
         tabIndex={0}
-        className='flex-1 text-sm text-[#525866] break-all cursor-text hover:bg-gray-100 rounded px-1 py-0.5 -mx-1'
+        className='flex-1 text-sm text-muted-foreground break-all cursor-text hover:bg-muted rounded px-1 py-0.5 -mx-1'
         onClick={() => setIsEditing(true)}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {

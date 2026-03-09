@@ -40,15 +40,15 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
       case 'running':
         return 'bg-yellow-100 text-yellow-800';
       case 'pending':
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-muted text-foreground';
       case 'paused':
         return 'bg-purple-100 text-purple-800';
       case 'skipped':
         return 'bg-blue-100 text-blue-800';
       case 'not_executed':
-        return 'bg-gray-100 text-gray-600';
+        return 'bg-muted text-muted-foreground';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-muted text-foreground';
     }
   };
 
@@ -78,23 +78,23 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
       <div className='flex items-center justify-center h-96'>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4' />
-          <p className='text-gray-600'>Loading workflow steps...</p>
+          <p className='text-muted-foreground'>Loading workflow steps...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className='px-4 py-6 bg-gray-50'>
-      <div className='mx-auto bg-white rounded-lg shadow-sm border border-gray-200'>
+    <div className='px-4 py-6 bg-muted'>
+      <div className='mx-auto bg-background rounded-lg shadow-sm border border-border'>
         {/* Header */}
-        <div className='p-6 border-b border-gray-200'>
+        <div className='p-6 border-b border-border'>
           <div className='flex items-center justify-between'>
             <div>
-              <h3 className='text-lg font-semibold text-gray-900'>
+              <h3 className='text-lg font-semibold text-foreground'>
                 Workflow Steps ({steps.length})
               </h3>
-              <p className='text-sm text-gray-600 mt-1'>
+              <p className='text-sm text-muted-foreground mt-1'>
                 Click on any step to expand and view its details
               </p>
             </div>
@@ -103,7 +103,7 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
               {/* Refresh Button */}
               <button
                 onClick={handleRefreshClick}
-                className='flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 hover:border-gray-400 transition-colors'
+                className='flex items-center gap-2 px-4 py-2 bg-background border border-input rounded-lg shadow-sm hover:bg-muted hover:border-muted-foreground transition-colors'
                 title='Refresh workflow data'
                 data-track-category='Workflows'
                 data-track-name='RefreshTableData'
@@ -149,9 +149,9 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
         {/* Steps List */}
         <div className='max-h-[calc(100vh-300px)] min-h-[600px] overflow-y-auto'>
           {steps.length === 0 ? (
-            <div className='p-8 text-center text-gray-500'>
+            <div className='p-8 text-center text-muted-foreground'>
               <svg
-                className='w-12 h-12 mx-auto mb-4 text-gray-300'
+                className='w-12 h-12 mx-auto mb-4 text-muted'
                 fill='none'
                 stroke='currentColor'
                 viewBox='0 0 24 24'
@@ -169,7 +169,7 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
               </p>
             </div>
           ) : (
-            <div className='divide-y divide-gray-200'>
+            <div className='divide-y divide-border'>
               {steps.map((step, index) => {
                 const isExpanded = expandedSteps.has(step.id);
                 const isSubCall =
@@ -184,7 +184,7 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
                 const statusColor = getStatusColor(status);
 
                 return (
-                  <div key={step.id} className='p-6 hover:bg-gray-50 transition-colors'>
+                  <div key={step.id} className='p-6 hover:bg-muted transition-colors'>
                     {/* Step Header */}
                     <button
                       className='flex items-center justify-between w-full text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-lg p-2 -m-2'
@@ -206,7 +206,7 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
                         {/* Step Info */}
                         <div className='flex-1'>
                           <div className='flex items-center gap-3 mb-1'>
-                            <h4 className='text-lg font-semibold text-gray-900'>
+                            <h4 className='text-lg font-semibold text-foreground'>
                               {step.stepName || 'Unknown Step'}
                             </h4>
                             <span
@@ -216,7 +216,7 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
                             </span>
                           </div>
 
-                          <div className='flex items-center gap-6 text-sm text-gray-600'>
+                          <div className='flex items-center gap-6 text-sm text-muted-foreground'>
                             <span>
                               <span className='font-medium'>Type:</span>{' '}
                               {step.stepExecutorType || 'Unknown'}
@@ -235,11 +235,11 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
 
                       {/* Expand/Collapse Icon */}
                       <div className='flex items-center gap-2'>
-                        <span className='text-sm text-gray-500'>
+                        <span className='text-sm text-muted-foreground'>
                           {isExpanded ? 'Collapse' : 'Expand'}
                         </span>
                         <svg
-                          className={`w-5 h-5 text-gray-400 transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                          className={`w-5 h-5 text-muted-foreground transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}
                           fill='none'
                           stroke='currentColor'
                           viewBox='0 0 24 24'
@@ -260,38 +260,40 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
                         <div className='space-y-6'>
                           {/* Basic Information */}
                           <div>
-                            <h5 className='text-sm font-semibold text-gray-700 mb-3'>
+                            <h5 className='text-sm font-semibold text-foreground mb-3'>
                               Basic Information
                             </h5>
                             <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm'>
                               <div>
-                                <span className='font-medium text-gray-600'>Step ID:</span>
-                                <p className='mt-1 font-mono text-xs bg-gray-100 p-2 rounded break-all'>
+                                <span className='font-medium text-muted-foreground'>Step ID:</span>
+                                <p className='mt-1 font-mono text-xs bg-muted p-2 rounded break-all'>
                                   {step.id}
                                 </p>
                               </div>
                               <div>
-                                <span className='font-medium text-gray-600'>
+                                <span className='font-medium text-muted-foreground'>
                                   Workflow Execution ID:
                                 </span>
-                                <p className='mt-1 font-mono text-xs bg-gray-100 p-2 rounded break-all'>
+                                <p className='mt-1 font-mono text-xs bg-muted p-2 rounded break-all'>
                                   {step.workflowExecutionId || 'N/A'}
                                 </p>
                               </div>
                               <div>
-                                <span className='font-medium text-gray-600'>Step Type:</span>
+                                <span className='font-medium text-muted-foreground'>
+                                  Step Type:
+                                </span>
                                 <p className='mt-1'>{step.type || 'N/A'}</p>
                               </div>
                               <div>
-                                <span className='font-medium text-gray-600'>Created:</span>
+                                <span className='font-medium text-muted-foreground'>Created:</span>
                                 <p className='mt-1'>{formatTimestamp(step.createdAt)}</p>
                               </div>
                               <div>
-                                <span className='font-medium text-gray-600'>Updated:</span>
+                                <span className='font-medium text-muted-foreground'>Updated:</span>
                                 <p className='mt-1'>{formatTimestamp(step.updatedAt)}</p>
                               </div>
                               <div>
-                                <span className='font-medium text-gray-600'>Duration:</span>
+                                <span className='font-medium text-muted-foreground'>Duration:</span>
                                 <p className='mt-1'>{formatDuration(step.duration)}</p>
                               </div>
                             </div>
@@ -300,7 +302,7 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
                           {/* Step Data */}
                           {step.data && (
                             <div>
-                              <h5 className='text-sm font-semibold text-gray-700 mb-3'>
+                              <h5 className='text-sm font-semibold text-foreground mb-3'>
                                 Step Data
                               </h5>
                               <CodeBlock
@@ -319,7 +321,7 @@ const WorkflowTableView: React.FC<WorkflowTableViewProps> = ({
 
                           {/* Complete Step JSON */}
                           <div>
-                            <h5 className='text-sm font-semibold text-gray-700 mb-3'>
+                            <h5 className='text-sm font-semibold text-foreground mb-3'>
                               Complete Step JSON
                             </h5>
                             <CodeBlock

@@ -80,7 +80,7 @@ function getStatusStyle(status: string): string {
   if (lowerStatus.includes('running')) {
     return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
   }
-  return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+  return 'bg-muted text-foreground dark:bg-gray-800 dark:text-muted';
 }
 
 function getToolStatusDisplay(status: string): { icon: string; color: string } {
@@ -122,30 +122,30 @@ export const ToolBackgroundTaskRenderer: React.FC<
       <div className='space-y-3 text-sm'>
         {(description || agent || input.prompt) && (
           <div>
-            <span className='font-semibold text-gray-900 dark:text-gray-100'>Input:</span>
+            <span className='font-semibold text-foreground dark:text-gray-100'>Input:</span>
             <div className='space-y-2 mt-2'>
               {description && (
                 <div>
-                  <span className='font-medium text-gray-900 dark:text-gray-100'>
+                  <span className='font-medium text-foreground dark:text-gray-100'>
                     Description:{' '}
                   </span>
-                  <span className='text-gray-700 dark:text-gray-300'>{description}</span>
+                  <span className='text-foreground dark:text-muted'>{description}</span>
                 </div>
               )}
               {agent && (
                 <div>
-                  <span className='font-medium text-gray-900 dark:text-gray-100'>Agent: </span>
-                  <code className='bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300'>
+                  <span className='font-medium text-foreground dark:text-gray-100'>Agent: </span>
+                  <code className='bg-muted dark:bg-gray-800 px-2 py-1 rounded text-xs text-foreground dark:text-muted'>
                     {agent}
                   </code>
                 </div>
               )}
               {input.prompt && (
                 <div>
-                  <span className='font-medium text-gray-900 dark:text-gray-100 block mb-1'>
+                  <span className='font-medium text-foreground dark:text-gray-100 block mb-1'>
                     Prompt:
                   </span>
-                  <div className='bg-gray-100 dark:bg-gray-800 p-3 rounded text-xs max-h-32 overflow-auto border'>
+                  <div className='bg-muted dark:bg-gray-800 p-3 rounded text-xs max-h-32 overflow-auto border'>
                     {input.prompt}
                   </div>
                 </div>
@@ -155,11 +155,11 @@ export const ToolBackgroundTaskRenderer: React.FC<
         )}
 
         <div>
-          <span className='font-semibold text-gray-900 dark:text-gray-100'>Output:</span>
+          <span className='font-semibold text-foreground dark:text-gray-100'>Output:</span>
           <div className='space-y-2 mt-2'>
             {status && (
               <div>
-                <span className='font-medium text-gray-900 dark:text-gray-100'>Status: </span>
+                <span className='font-medium text-foreground dark:text-gray-100'>Status: </span>
                 <span
                   className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusStyle(status)}`}
                 >
@@ -170,8 +170,8 @@ export const ToolBackgroundTaskRenderer: React.FC<
 
             {sessionId && (
               <div>
-                <span className='font-medium text-gray-900 dark:text-gray-100'>Session ID: </span>
-                <code className='bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300'>
+                <span className='font-medium text-foreground dark:text-gray-100'>Session ID: </span>
+                <code className='bg-muted dark:bg-gray-800 px-2 py-1 rounded text-xs text-foreground dark:text-muted'>
                   {sessionId}
                 </code>
               </div>
@@ -179,28 +179,28 @@ export const ToolBackgroundTaskRenderer: React.FC<
 
             {duration && (
               <div>
-                <span className='font-medium text-gray-900 dark:text-gray-100'>Duration: </span>
-                <span className='text-gray-700 dark:text-gray-300'>{duration}</span>
+                <span className='font-medium text-foreground dark:text-gray-100'>Duration: </span>
+                <span className='text-foreground dark:text-muted'>{duration}</span>
               </div>
             )}
 
             {summary && summary.length > 0 && (
               <div>
-                <span className='font-medium text-gray-900 dark:text-gray-100 block mb-2'>
+                <span className='font-medium text-foreground dark:text-gray-100 block mb-2'>
                   Tools Executed ({summary.length}):
                 </span>
-                <div className='bg-gray-100 dark:bg-gray-800 p-3 rounded text-xs max-h-48 overflow-auto border'>
+                <div className='bg-muted dark:bg-gray-800 p-3 rounded text-xs max-h-48 overflow-auto border'>
                   {summary.map((tool, idx) => {
                     const { icon, color } = getToolStatusDisplay(tool.state.status);
                     return (
                       <div
                         key={tool.id || idx}
-                        className='font-mono text-gray-700 dark:text-gray-300 py-0.5 flex items-center gap-2'
+                        className='font-mono text-foreground dark:text-muted py-0.5 flex items-center gap-2'
                       >
                         <span className={color}>{icon}</span>
                         <span>{tool.tool}</span>
                         {tool.state.title && (
-                          <span className='text-gray-500 dark:text-gray-400 truncate'>
+                          <span className='text-muted-foreground dark:text-muted-foreground truncate'>
                             - {tool.state.title}
                           </span>
                         )}
@@ -213,10 +213,10 @@ export const ToolBackgroundTaskRenderer: React.FC<
 
             {!summary && toolCallsSummary && (
               <div>
-                <span className='font-medium text-gray-900 dark:text-gray-100 block mb-2'>
+                <span className='font-medium text-foreground dark:text-gray-100 block mb-2'>
                   Tools Executed:
                 </span>
-                <pre className='bg-gray-100 dark:bg-gray-800 p-3 rounded text-xs max-h-48 overflow-auto border whitespace-pre-wrap'>
+                <pre className='bg-muted dark:bg-gray-800 p-3 rounded text-xs max-h-48 overflow-auto border whitespace-pre-wrap'>
                   {toolCallsSummary}
                 </pre>
               </div>
@@ -224,17 +224,19 @@ export const ToolBackgroundTaskRenderer: React.FC<
 
             {content && (
               <div>
-                <span className='font-medium text-gray-900 dark:text-gray-100 block mb-2'>
+                <span className='font-medium text-foreground dark:text-gray-100 block mb-2'>
                   {isLaunch ? 'Task Launched:' : 'Result:'}
                 </span>
-                <div className='bg-gray-100 dark:bg-gray-800 p-3 rounded text-xs max-h-64 overflow-auto border prose prose-sm prose-gray dark:prose-invert max-w-none'>
+                <div className='bg-muted dark:bg-gray-800 p-3 rounded text-xs max-h-64 overflow-auto border prose prose-sm prose-gray dark:prose-invert max-w-none'>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
                 </div>
               </div>
             )}
 
             {!status && !sessionId && !content && !summary && !toolCallsSummary && (
-              <div className='text-gray-500 dark:text-gray-400 italic'>No output available</div>
+              <div className='text-muted-foreground dark:text-muted-foreground italic'>
+                No output available
+              </div>
             )}
           </div>
         </div>

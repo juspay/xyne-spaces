@@ -288,9 +288,9 @@ export const ReleaseMappingForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-white shadow-sm border border-gray-200 rounded-xl overflow-hidden'>
+      <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden'>
         {/* Header Section */}
-        <div className='px-8 py-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white'>
+        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-gray-50 to-white'>
           <div className='flex items-center justify-between'>
             <div className='flex items-center gap-3'>
               <div className='h-10 w-10 rounded-lg bg-indigo-600 flex items-center justify-center'>
@@ -309,8 +309,10 @@ export const ReleaseMappingForm = ({
                 </svg>
               </div>
               <div>
-                <h2 className='text-xl font-bold text-gray-900'>Attribution</h2>
-                <p className='text-sm text-gray-500'>Optional: Add release tickets to this issue</p>
+                <h2 className='text-xl font-bold text-foreground'>Attribution</h2>
+                <p className='text-sm text-muted-foreground'>
+                  Optional: Add release tickets to this issue
+                </p>
               </div>
             </div>
           </div>
@@ -411,12 +413,12 @@ export const ReleaseMappingForm = ({
           </Button>
 
           {/* Linked Releases Section */}
-          <div className='pt-6 border-t border-gray-100'>
-            <h4 className='text-base font-semibold text-gray-900 mb-4'>Linked Releases</h4>
+          <div className='pt-6 border-t border-border'>
+            <h4 className='text-base font-semibold text-foreground mb-4'>Linked Releases</h4>
             {releaseAttributions.length === 0 ? (
-              <div className='text-center py-8 bg-gray-50 rounded-lg border border-dashed border-gray-200'>
+              <div className='text-center py-8 bg-muted rounded-lg border border-dashed border-border'>
                 <svg
-                  className='h-10 w-10 text-gray-300 mx-auto mb-2'
+                  className='h-10 w-10 text-muted mx-auto mb-2'
                   fill='none'
                   viewBox='0 0 24 24'
                   stroke='currentColor'
@@ -428,7 +430,7 @@ export const ReleaseMappingForm = ({
                     d='M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12'
                   />
                 </svg>
-                <p className='text-sm text-gray-500'>No releases linked yet.</p>
+                <p className='text-sm text-muted-foreground'>No releases linked yet.</p>
               </div>
             ) : (
               <div className='space-y-3'>
@@ -453,11 +455,11 @@ export const ReleaseMappingForm = ({
                     : 'Ticket';
 
                   return (
-                    <div key={attribution.id} className='border border-gray-200 rounded-lg p-4'>
+                    <div key={attribution.id} className='border border-border rounded-lg p-4'>
                       <div className='flex items-start justify-between gap-3'>
                         <div className='space-y-2'>
-                          <p className='text-sm font-semibold text-gray-900'>{releaseLabel}</p>
-                          <div className='text-xs text-gray-600 space-y-1'>
+                          <p className='text-sm font-semibold text-foreground'>{releaseLabel}</p>
+                          <div className='text-xs text-muted-foreground space-y-1'>
                             {appLabel && (
                               <div>
                                 <span className='font-medium'>App Release:</span> {appLabel}
@@ -496,7 +498,7 @@ export const ReleaseMappingForm = ({
           </div>
 
           {/* Footer */}
-          <div className='flex justify-end border-t border-gray-200 pt-6'>
+          <div className='flex justify-end border-t border-border pt-6'>
             <Button type='button' onClick={handleContinue} disabled={isSubmitting}>
               Next
             </Button>

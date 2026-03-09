@@ -119,7 +119,7 @@ const OnboardingScreen: React.FC = () => {
           <div className='w-full h-screen relative bg-[#faf9f7] overflow-hidden flex items-center justify-center p-4 animate-in fade-in duration-500'>
             <div className='absolute inset-0 opacity-20 bg-gradient-to-br from-orange-100 to-orange-200 blur-3xl animate-pulse-slow' />
             <div className='relative z-10 w-full max-w-4xl mx-auto text-center'>
-              <h1 className='text-center text-gray-800 font-medium text-lg sm:text-xl md:text-2xl lg:text-3xl leading-relaxed'>
+              <h1 className='text-center text-foreground font-medium text-lg sm:text-xl md:text-2xl lg:text-3xl leading-relaxed'>
                 Welcome to a smarter workspace made
                 <br />
                 {/* FOR (anchor) */}
@@ -183,12 +183,12 @@ const OnboardingScreen: React.FC = () => {
 
       case 'channels':
         return (
-          <div className='w-full h-screen flex items-center justify-center bg-white'>
+          <div className='w-full h-screen flex items-center justify-center bg-background'>
             <div className='flex flex-col items-center text-center gap-10'>
               {/* Title */}
               <div
                 className='
-            text-3xl font-medium text-gray-800 max-w-3xl
+            text-3xl font-medium text-foreground max-w-3xl
             opacity-0 translate-y-6
             animate-[fadeUp_.6s_ease-out_forwards]
           '
@@ -210,7 +210,7 @@ const OnboardingScreen: React.FC = () => {
                       </div>
                       {/* Channel Name */}
                       <div className='flex-1 py-0.5'>
-                        <div className='text-gray-900 text-base font-semibold font-sans leading-5'>
+                        <div className='text-foreground text-base font-semibold font-sans leading-5'>
                           {channel.name}
                         </div>
                       </div>
@@ -237,7 +237,7 @@ const OnboardingScreen: React.FC = () => {
 
       case 'profile':
         return (
-          <div className='relative w-full min-h-screen bg-white overflow-hidden flex items-center justify-center px-4 sm:px-8'>
+          <div className='relative w-full min-h-screen bg-background overflow-hidden flex items-center justify-center px-4 sm:px-8'>
             {/* Confetti */}
             {showConfetti && (
               <Confetti
@@ -250,7 +250,7 @@ const OnboardingScreen: React.FC = () => {
             )}
 
             {/* soft background glow */}
-            <div className='absolute top-[-20rem] left-1/2 -translate-x-1/2 w-[60vw] h-[60vw] bg-white rounded-full blur-[90px] pointer-events-none' />
+            <div className='absolute top-[-20rem] left-1/2 -translate-x-1/2 w-[60vw] h-[60vw] bg-background rounded-full blur-[90px] pointer-events-none' />
 
             <div className='relative w-full mx-auto flex flex-col items-center gap-12'>
               {/* TITLE & BUTTON */}
@@ -261,7 +261,7 @@ const OnboardingScreen: React.FC = () => {
             ${profileAnim ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0'}
           `}
               >
-                <h1 className='text-2xl sm:text-3xl font-medium text-gray-800'>{step.title}</h1>
+                <h1 className='text-2xl sm:text-3xl font-medium text-foreground'>{step.title}</h1>
 
                 <button
                   onClick={handleCompleteOnboarding}
@@ -295,7 +295,7 @@ const OnboardingScreen: React.FC = () => {
               }
             `}
                 >
-                  <div className='bg-white/60 backdrop-blur rounded-[30px] shadow-xl overflow-hidden rotate-[-2deg]'>
+                  <div className='bg-background/60 backdrop-blur rounded-[30px] shadow-xl overflow-hidden rotate-[-2deg]'>
                     {/* Avatar */}
                     <div className='relative w-full aspect-square overflow-hidden rounded-t-[30px]'>
                       {user?.picture ? (
@@ -313,7 +313,7 @@ const OnboardingScreen: React.FC = () => {
                       )}
 
                       {/* Joined badge */}
-                      <div className='absolute top-4 right-4 px-3 py-1 bg-white/70 backdrop-blur rounded-full text-xs font-medium text-gray-700'>
+                      <div className='absolute top-4 right-4 px-3 py-1 bg-background/70 backdrop-blur rounded-full text-xs font-medium text-foreground'>
                         {user?.createdAt
                           ? `Joined ${new Date(user.createdAt).toLocaleDateString('en-US', {
                               month: 'short',
@@ -325,15 +325,15 @@ const OnboardingScreen: React.FC = () => {
 
                     {/* User info */}
                     <div className='px-4 py-5 text-center space-y-1'>
-                      <div className='text-base font-semibold text-gray-900 truncate'>
+                      <div className='text-base font-semibold text-foreground truncate'>
                         {user?.name || 'User'}
                       </div>
-                      <div className='text-xs text-gray-600 break-all'>
+                      <div className='text-xs text-muted-foreground break-all'>
                         {user?.email || 'user@example.com'}
                       </div>
                     </div>
 
-                    <div className='h-px bg-gray-200 mx-4' />
+                    <div className='h-px bg-border mx-4' />
                   </div>
                 </div>
               </div>
@@ -345,12 +345,12 @@ const OnboardingScreen: React.FC = () => {
         return (
           <div
             key={currentStep}
-            className='w-full h-screen flex items-center justify-center bg-white'
+            className='w-full h-screen flex items-center justify-center bg-background'
           >
             <div className='flex flex-col items-center text-center gap-10'>
               <div
                 className={`
-            text-3xl font-medium text-gray-800 max-w-2xl
+            text-3xl font-medium text-foreground max-w-2xl
             opacity-0
             ${step.animation === 'fadeLeft' ? 'translate-x-8 animate-[fadeLeft_.6s_ease-out_forwards]' : 'translate-y-6 animate-[fadeUp_.6s_ease-out_forwards]'}
           `}
@@ -377,7 +377,7 @@ const OnboardingScreen: React.FC = () => {
   };
 
   return (
-    <div className='relative w-full h-screen bg-white overflow-hidden flex items-center justify-center'>
+    <div className='relative w-full h-screen bg-background overflow-hidden flex items-center justify-center'>
       {renderStep()}
     </div>
   );

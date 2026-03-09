@@ -62,16 +62,18 @@ export function DeviceSelector({
         >
           <div className='flex items-center px-3 py-2 gap-3 hover:bg-gray-700 rounded-lg'>
             {icon &&
-              React.createElement(icon, { className: 'w-4 h-4 flex-shrink-0 text-gray-400' })}
+              React.createElement(icon, {
+                className: 'w-4 h-4 flex-shrink-0 text-muted-foreground',
+              })}
             <div className='flex-1 min-w-0'>
-              <div className='text-xs text-gray-400 mb-0.5'>{label}</div>
+              <div className='text-xs text-muted-foreground mb-0.5'>{label}</div>
               <div className='text-sm text-white truncate'>
                 {currentDevice?.label || `No ${label.toLowerCase()}`}
               </div>
             </div>
             <ChevronDown
               className={cn(
-                'w-4 h-4 text-gray-400 transition-transform duration-300',
+                'w-4 h-4 text-muted-foreground transition-transform duration-300',
                 showDeviceList && 'rotate-180',
               )}
             />
@@ -109,7 +111,7 @@ export function DeviceSelector({
                   </button>
                 ))
               ) : (
-                <div className='px-4 py-2 text-sm text-gray-500'>
+                <div className='px-4 py-2 text-sm text-muted-foreground'>
                   No {label.toLowerCase()}s found
                 </div>
               )}
@@ -171,7 +173,9 @@ export function DeviceSelector({
                 </button>
               ))
             ) : (
-              <div className='px-4 py-2 text-sm text-gray-500'>No {label.toLowerCase()}s found</div>
+              <div className='px-4 py-2 text-sm text-muted-foreground'>
+                No {label.toLowerCase()}s found
+              </div>
             )}
           </div>
         </div>

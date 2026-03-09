@@ -19,7 +19,7 @@ interface DownloadButtonProps {
 
 const VARIANT_STYLES: Record<DownloadButtonVariant, string> = {
   default: 'text-gray-200 flex-shrink-0 disabled:cursor-not-allowed',
-  overlay: 'hover:bg-white/20 text-white',
+  overlay: 'hover:bg-background/20 text-white',
 } as const;
 
 const ICON_SIZES: Record<DownloadButtonVariant, number> = {

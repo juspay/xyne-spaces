@@ -48,7 +48,7 @@ export function RecordingControlBar({
   }, [isRecording, isPaused, startTime]);
 
   return (
-    <div className='sticky bottom-0 z-10 border-t border-gray-200 dark:border-gray-700 dark:bg-gray-900 px-6 py-4'>
+    <div className='sticky bottom-0 z-10 border-t border-border dark:border-gray-700 dark:bg-gray-900 px-6 py-4'>
       <div className='max-w-4xl mx-auto flex items-center justify-center gap-4'>
         {/* Waveform bars (left side, visible when recording) */}
         {isRecording && (
@@ -68,7 +68,7 @@ export function RecordingControlBar({
 
         {/* Elapsed time */}
         {isRecording && (
-          <span className='text-sm font-mono text-gray-600 dark:text-gray-400 min-w-[52px] text-center'>
+          <span className='text-sm font-mono text-muted-foreground dark:text-muted-foreground min-w-[52px] text-center'>
             {formatElapsedTime(elapsed)}
           </span>
         )}
@@ -79,27 +79,27 @@ export function RecordingControlBar({
             <button
               onClick={isPaused ? onResume : onPause}
               disabled={isStarting}
-              className='flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50'
+              className='flex items-center justify-center w-10 h-10 rounded-full bg-muted dark:bg-gray-700 hover:bg-border dark:hover:bg-gray-600 transition-colors disabled:opacity-50'
               title={isPaused ? 'Resume recording' : 'Pause recording'}
               data-track-category='RecordingControlBar'
               data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
             >
               {isPaused ? (
-                <Play className='w-5 h-5 text-gray-700 dark:text-gray-200' />
+                <Play className='w-5 h-5 text-foreground dark:text-gray-200' />
               ) : (
-                <Pause className='w-5 h-5 text-gray-700 dark:text-gray-200' />
+                <Pause className='w-5 h-5 text-foreground dark:text-gray-200' />
               )}
             </button>
 
             <button
               onClick={onStop}
-              className='flex items-center justify-center w-12 h-12 rounded-xl bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors'
+              className='flex items-center justify-center w-12 h-12 rounded-xl bg-border dark:bg-gray-700 hover:bg-muted-foreground/50 dark:hover:bg-gray-600 transition-colors'
               title='Stop recording'
               data-track-category='RecordingControlBar'
               data-track-name='stop_recording'
             >
               {/* Square stop icon */}
-              <div className='w-5 h-5 rounded-sm bg-gray-600 dark:bg-gray-300' />
+              <div className='w-5 h-5 rounded-sm bg-gray-600 dark:bg-muted-foreground/50' />
             </button>
           </>
         ) : (
@@ -115,7 +115,7 @@ export function RecordingControlBar({
               <Loader2 className='w-6 h-6 text-white animate-spin' />
             ) : (
               /* Circle record icon */
-              <div className='w-6 h-6 rounded-full bg-white' />
+              <div className='w-6 h-6 rounded-full bg-background' />
             )}
           </button>
         )}

@@ -7,7 +7,7 @@ const LoadingSpinner: React.FC = () => (
   <div className='flex items-center justify-center h-full min-h-[200px]'>
     <div className='text-center'>
       <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3'></div>
-      <p className='text-gray-600 dark:text-gray-300 text-sm'>Loading JSON file...</p>
+      <p className='text-muted-foreground dark:text-muted text-sm'>Loading JSON file...</p>
     </div>
   </div>
 );
@@ -172,7 +172,7 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   // Render loading state
   if (loading) {
     return (
-      <div className='relative h-full bg-white dark:bg-[#1E1E1E]'>
+      <div className='relative h-full bg-background dark:bg-[#1E1E1E]'>
         <LoadingSpinner />
       </div>
     );
@@ -181,7 +181,7 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   // Render error state
   if (error) {
     return (
-      <div className='relative h-full bg-white dark:bg-[#1E1E1E]'>
+      <div className='relative h-full bg-background dark:bg-[#1E1E1E]'>
         <ErrorDisplay error={error} canRetry onRetry={handleRetry} />
       </div>
     );
@@ -190,7 +190,7 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   // Render content
   return (
     <div
-      className='font-mono text-sm bg-white dark:bg-[#1E1E1E] text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-lg mt-[65px]'
+      className='font-mono text-sm bg-background dark:bg-[#1E1E1E] text-foreground dark:text-gray-100 border border-border dark:border-gray-700 rounded-lg mt-[65px]'
       style={{
         height: '100%',
         width: '100%',
@@ -199,10 +199,10 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
       }}
     >
       {/* Header with file info */}
-      <div className='flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 rounded-t-lg flex-shrink-0'>
+      <div className='flex items-center justify-between p-3 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-t-lg flex-shrink-0'>
         <div className='flex items-center gap-2 min-w-0 flex-1'>
           <svg
-            className='w-4 h-4 text-gray-500 flex-shrink-0'
+            className='w-4 h-4 text-muted-foreground flex-shrink-0'
             fill='currentColor'
             viewBox='0 0 20 20'
           >
@@ -212,7 +212,7 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
               clipRule='evenodd'
             />
           </svg>
-          <span className='text-xs text-gray-600 dark:text-gray-400 truncate'>
+          <span className='text-xs text-muted-foreground dark:text-muted-foreground truncate'>
             {lines.length.toLocaleString()} lines • {fileSizeMB.toFixed(2)}MB
           </span>
         </div>
@@ -263,7 +263,7 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
                   data-index={virtualRow.index}
                   className='flex w-full'
                 >
-                  <span className='text-gray-400 dark:text-gray-600 text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
+                  <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
                     {virtualRow.index + 1}
                   </span>
                   <span
@@ -286,7 +286,7 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
           <div>
             {lines.map((line, index) => (
               <div key={index} className='flex min-h-[20px]'>
-                <span className='text-gray-400 dark:text-gray-600 text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
+                <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
                   {index + 1}
                 </span>
                 <span

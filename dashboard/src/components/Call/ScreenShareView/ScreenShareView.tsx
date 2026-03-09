@@ -129,7 +129,7 @@ export function ScreenShareView({
           >
             {focusedScreenShare.name}&apos;s Screen
             {screenSharingCount > 1 && (
-              <span className={cn(compact ? 'ml-1' : 'ml-2', 'text-gray-300')}>
+              <span className={cn(compact ? 'ml-1' : 'ml-2', 'text-muted')}>
                 ({screenSharingCount} {compact ? '' : 'sharing'})
               </span>
             )}

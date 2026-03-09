@@ -13,7 +13,7 @@ export const highlightText = (text: string, query: string): ReactNode => {
   return parts.map((part, index) => {
     if (part.toLowerCase() === query.toLowerCase()) {
       return (
-        <mark key={index} className='bg-yellow-200 text-gray-900 roundedm'>
+        <mark key={index} className='bg-yellow-200 text-foreground roundedm'>
           {part}
         </mark>
       );

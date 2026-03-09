@@ -127,7 +127,7 @@ const ConversationHeader = ({
                 'flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary',
                 channelUserStatus?.isStarred
                   ? 'bg-[#FBEFD9] border-[#FBEFD9]'
-                  : 'bg-white border-gray-200',
+                  : 'bg-background border-border',
               )}
               data-track-category='CHANNELS'
               data-track-name='TOGGLE_STAR_CHANNEL'
@@ -137,7 +137,7 @@ const ConversationHeader = ({
               })}
             >
               <Star
-                className='w-4 h-4 text-gray-800'
+                className='w-4 h-4 text-foreground'
                 fill={(channelUserStatus?.isStarred ?? false) ? '#FACC14' : 'none'}
                 stroke={(channelUserStatus?.isStarred ?? false) ? '#FACC14' : '#3B4145'}
               />
@@ -174,7 +174,7 @@ const ConversationHeader = ({
                 // Trigger xstate machine to open XyneAI
                 xyneAIActor.send({ type: 'OPEN', channelId });
               }}
-              className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
+              className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-background border-border'
               data-track-category='CHANNELS'
               data-track-name='OPEN_XYNE_AI'
               data-track-metadata={JSON.stringify({ channelId })}
@@ -187,7 +187,7 @@ const ConversationHeader = ({
               <Button
                 variant='outline'
                 onClick={handleOpenAllLinks}
-                className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-white border-gray-200'
+                className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary bg-background border-border'
               >
                 <ExternalLink className='w-4 h-4' />
               </Button>

@@ -273,8 +273,8 @@ export default function CreateTicket({
 
         case 'object':
           return (
-            <div key={name} className='space-y-2 border rounded p-3 bg-gray-50'>
-              <p className='font-semibold text-sm text-gray-700'>{name}</p>
+            <div key={name} className='space-y-2 border rounded p-3 bg-muted'>
+              <p className='font-semibold text-sm text-foreground'>{name}</p>
               {field.nestedFields?.map(nf => {
                 const nestedFieldName = `${name}.${nf.name}`;
 
@@ -316,11 +316,11 @@ export default function CreateTicket({
   // Show loading state for workflow types
   if (workflowTypesLoading) {
     return (
-      <div className='w-[45vw] max-w-2xl p-4 bg-white shadow rounded-lg max-h-[80vh] overflow-y-auto'>
+      <div className='w-[45vw] max-w-2xl p-4 bg-background shadow rounded-lg max-h-[80vh] overflow-y-auto'>
         <div className='flex items-center justify-center h-48'>
           <div className='text-center'>
             <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4' />
-            <p className='text-gray-600'>Loading workflow types...</p>
+            <p className='text-muted-foreground'>Loading workflow types...</p>
           </div>
         </div>
       </div>
@@ -330,7 +330,7 @@ export default function CreateTicket({
   // Show error state for workflow types
   if (workflowTypesError) {
     return (
-      <div className='w-[45vw] max-w-2xl p-4 bg-white shadow rounded-lg max-h-[80vh] overflow-y-auto'>
+      <div className='w-[45vw] max-w-2xl p-4 bg-background shadow rounded-lg max-h-[80vh] overflow-y-auto'>
         <div className='flex items-center justify-center h-48'>
           <div className='text-center'>
             <div className='mx-auto mb-4 w-12 h-12 text-red-500'>
@@ -343,10 +343,10 @@ export default function CreateTicket({
                 />
               </svg>
             </div>
-            <h3 className='text-lg font-medium text-gray-900 mb-2'>
+            <h3 className='text-lg font-medium text-foreground mb-2'>
               Failed to load workflow types
             </h3>
-            <p className='text-gray-600 mb-4'>
+            <p className='text-muted-foreground mb-4'>
               {workflowTypesError instanceof Error ? workflowTypesError.message : 'Unknown error'}
             </p>
             <button
@@ -364,7 +364,7 @@ export default function CreateTicket({
   }
 
   return (
-    <div className='w-[45vw] max-w-2xl p-4 bg-white shadow rounded-lg max-h-[80vh] overflow-y-auto'>
+    <div className='w-[45vw] max-w-2xl p-4 bg-background shadow rounded-lg max-h-[80vh] overflow-y-auto'>
       <form onSubmit={handleFormSubmit} className='space-y-6'>
         <Controller
           name='title'

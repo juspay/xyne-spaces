@@ -77,12 +77,12 @@ export const TicketFilters = ({
   }, [filters.createdDateStart, filters.createdDateEnd]);
 
   return (
-    <div className={`bg-white border border-gray-200 rounded-lg p-4 ${className}`}>
+    <div className={`bg-background border border-border rounded-lg p-4 ${className}`}>
       {/* Header */}
       <div className='flex items-center justify-between mb-4'>
         <div className='flex items-center gap-2'>
-          <Filter className='w-4 h-4 text-gray-600' />
-          <h3 className='text-sm font-medium text-gray-900'>Filters</h3>
+          <Filter className='w-4 h-4 text-muted-foreground' />
+          <h3 className='text-sm font-medium text-foreground'>Filters</h3>
           {hasActiveFilters && (
             <span className='bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full'>
               {getActiveFilterCount()} active
@@ -95,7 +95,7 @@ export const TicketFilters = ({
             onClick={handleClearAll}
             variant='ghost'
             size='sm'
-            className='flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700'
+            className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground'
             title='Clear all filters'
             data-track-category='Tickets'
             data-track-name='ClearAllFilters'
@@ -154,8 +154,8 @@ export const TicketFilters = ({
 
       {/* Active Filters Summary */}
       {hasActiveFilters && (
-        <div className='mt-4 pt-4 border-t border-gray-100'>
-          <div className='text-xs font-medium text-gray-500 mb-2'>Active filters:</div>
+        <div className='mt-4 pt-4 border-t border-border'>
+          <div className='text-xs font-medium text-muted-foreground mb-2'>Active filters:</div>
           <div className='flex flex-wrap gap-2'>
             {filters.priority?.length && (
               <div className='inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded border border-blue-200'>

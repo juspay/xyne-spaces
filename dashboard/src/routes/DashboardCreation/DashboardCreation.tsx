@@ -51,16 +51,16 @@ export const DashboardCreation: React.FC = () => {
   const dashboardList = dashboards || [];
 
   return (
-    <div className='flex h-full bg-white rounded-lg shadow-sm'>
+    <div className='flex h-full bg-background rounded-lg shadow-sm'>
       {/* Left Panel - Create Dashboard Form */}
-      <div className='w-80 border-r border-gray-200 bg-gray-50 flex flex-col'>
-        <div className='p-4 border-b border-gray-200'>
-          <h2 className='text-lg font-semibold text-gray-900'>Create Dashboard</h2>
+      <div className='w-80 border-r border-border bg-muted flex flex-col'>
+        <div className='p-4 border-b border-border'>
+          <h2 className='text-lg font-semibold text-foreground'>Create Dashboard</h2>
         </div>
         <div className='flex-1 overflow-auto p-4'>
           <div className='space-y-4'>
             <div>
-              <label htmlFor='name' className='block text-sm font-medium text-gray-700 mb-1'>
+              <label htmlFor='name' className='block text-sm font-medium text-foreground mb-1'>
                 Name *
               </label>
               <Input
@@ -73,7 +73,10 @@ export const DashboardCreation: React.FC = () => {
               />
             </div>
             <div>
-              <label htmlFor='description' className='block text-sm font-medium text-gray-700 mb-1'>
+              <label
+                htmlFor='description'
+                className='block text-sm font-medium text-foreground mb-1'
+              >
                 Description
               </label>
               <Textarea
@@ -103,18 +106,20 @@ export const DashboardCreation: React.FC = () => {
       <div className='flex-1 overflow-auto p-6'>
         {dashboardList.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-64 text-center'>
-            <div className='bg-gray-100 p-4 rounded-full mb-4'>
-              <LayoutDashboard className='w-12 h-12 text-gray-400' />
+            <div className='bg-muted p-4 rounded-full mb-4'>
+              <LayoutDashboard className='w-12 h-12 text-muted-foreground' />
             </div>
-            <h3 className='text-lg font-medium text-gray-900 mb-2'>No Dashboards Created</h3>
-            <p className='text-gray-500'>Create your first dashboard to start building queries</p>
+            <h3 className='text-lg font-medium text-foreground mb-2'>No Dashboards Created</h3>
+            <p className='text-muted-foreground'>
+              Create your first dashboard to start building queries
+            </p>
           </div>
         ) : (
           <div className='space-y-4'>
-            <h3 className='text-md font-medium text-gray-900 mb-3 flex items-center gap-2'>
+            <h3 className='text-md font-medium text-foreground mb-3 flex items-center gap-2'>
               <span className='w-2 h-2 bg-blue-500 rounded-full' />
               All Dashboards
-              <span className='text-sm text-gray-400 font-normal'>
+              <span className='text-sm text-muted-foreground font-normal'>
                 ({dashboardList.length} dashboard{dashboardList.length !== 1 ? 's' : ''})
               </span>
             </h3>
@@ -122,7 +127,7 @@ export const DashboardCreation: React.FC = () => {
               {dashboardList.map(dashboard => (
                 <div
                   key={dashboard.id}
-                  className='p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors'
+                  className='p-4 bg-muted rounded-lg hover:bg-muted transition-colors'
                 >
                   <div className='flex items-start justify-between mb-2'>
                     <button
@@ -135,11 +140,11 @@ export const DashboardCreation: React.FC = () => {
                         dashboardName: dashboard.name,
                       })}
                     >
-                      <h3 className='text-md font-medium text-gray-900'>{dashboard.name}</h3>
+                      <h3 className='text-md font-medium text-foreground'>{dashboard.name}</h3>
                     </button>
                     <button
                       onClick={() => void handleDeleteDashboard(dashboard.id)}
-                      className='p-1 text-gray-400 hover:text-red-500'
+                      className='p-1 text-muted-foreground hover:text-red-500'
                       data-track-category='Dashboards'
                       data-track-name='DeleteDashboard'
                       data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
@@ -147,7 +152,7 @@ export const DashboardCreation: React.FC = () => {
                       <Trash2 className='w-4 h-4' />
                     </button>
                   </div>
-                  <p className='text-sm text-gray-500 mb-3'>
+                  <p className='text-sm text-muted-foreground mb-3'>
                     {dashboard.description || 'No description'}
                   </p>
                   <button

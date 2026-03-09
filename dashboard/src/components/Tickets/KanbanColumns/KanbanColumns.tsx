@@ -76,13 +76,13 @@ interface KanbanColumnsProps {
 
 export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) => {
   if (!status) {
-    return <Circle className='w-4 h-4 text-gray-400' />;
+    return <Circle className='w-4 h-4 text-muted-foreground' />;
   }
   const statusOption = StatusOptions.find(opt => (opt.value as TicketStatusV2) === status);
   if (statusOption) {
     return <>{statusOption.icon}</>;
   }
-  return <Circle className='w-4 h-4 text-gray-400' />;
+  return <Circle className='w-4 h-4 text-muted-foreground' />;
 };
 
 export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
@@ -106,7 +106,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   return (
     <div
       className={cn(
-        'flex gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-white overflow-x-auto min-w-screen no-scrollbar',
+        'flex gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-background overflow-x-auto min-w-screen no-scrollbar',
         containerClassName,
       )}
     >
@@ -119,7 +119,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
           <DroppableStage key={`${keyPrefix}${stage.id}`} id={stage.id}>
             <div
               className={cn(
-                'flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-[#FAFAFA] h-full',
+                'flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-muted h-full',
                 isCollapsed ? 'w-12 sm:w-14' : 'w-72 sm:w-96',
               )}
             >
@@ -134,8 +134,10 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                   <>
                     <div className='flex items-center gap-2 min-w-0'>
                       <KanbanIcon status={stage.defaultTicketStatusV2} />
-                      <h3 className='text-xs font-medium truncate  uppercase'>{stage.name}</h3>
-                      <span className='text-xs px-2 py-0.5 rounded-full'>
+                      <h3 className='text-xs font-medium truncate uppercase text-foreground'>
+                        {stage.name}
+                      </h3>
+                      <span className='text-xs px-2 py-0.5 rounded-full text-muted-foreground bg-muted-foreground/10'>
                         {stageTickets.length}
                       </span>
                     </div>
@@ -180,7 +182,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       <KanbanIcon status={stage.defaultTicketStatusV2} />
                       <h3
                         className={cn(
-                          'text-sm font-medium whitespace-nowrap w-fit',
+                          'text-sm font-medium whitespace-nowrap w-fit text-foreground',
                           '[transform-origin:center] [writing-mode:vertical-rl] [text-orientation:mixed]',
                         )}
                       >
@@ -188,7 +190,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       </h3>
                       <span
                         className={cn(
-                          'text-sm py-2 px-0.5 rounded-full',
+                          'text-sm py-2 px-0.5 rounded-full text-muted-foreground bg-muted-foreground/10',
                           '[transform-origin:center] [writing-mode:vertical-rl] [text-orientation:mixed]',
                         )}
                       >

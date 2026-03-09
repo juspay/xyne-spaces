@@ -156,7 +156,7 @@ function renderCallItem({
       ? 'text-green-600 dark:text-green-500'
       : isMissedCall
         ? 'text-red-500 dark:text-red-400'
-        : 'text-gray-400 dark:text-gray-500';
+        : 'text-muted-foreground dark:text-muted-foreground';
 
   // Get status text and color
   const statusText = isScheduled
@@ -174,13 +174,13 @@ function renderCallItem({
       ? 'text-green-600 dark:text-green-500 font-medium'
       : isMissedCall || didNotAnswer
         ? 'text-red-600 dark:text-red-400'
-        : 'text-gray-500 dark:text-gray-400';
+        : 'text-muted-foreground dark:text-muted-foreground';
 
   return (
     <div
       role='button'
       tabIndex={0}
-      className='px-6 py-3 hover:bg-gray-50 dark:hover:bg-[#2A2A2A] transition-colors cursor-pointer group'
+      className='px-6 py-3 hover:bg-muted dark:hover:bg-[#2A2A2A] transition-colors cursor-pointer group'
       onClick={onCallClick}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -234,13 +234,13 @@ function renderCallItem({
             </h3>
             <div className='flex items-center gap-2 mt-0.5 flex-wrap visual-regression-hide'>
               <span
-                className={`text-xs ${isMissedCall ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}
+                className={`text-xs ${isMissedCall ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground dark:text-muted-foreground'}`}
               >
                 {isScheduled && call.startsAt
                   ? formatRelativeTimestamp(call.startsAt)
                   : formatRelativeTimestamp(call.startedAt)}
               </span>
-              <span className='text-xs text-gray-400'>•</span>
+              <span className='text-xs text-muted-foreground'>•</span>
               <span className={`text-xs ${statusColorClass}`}>{statusText}</span>
             </div>
           </div>
@@ -298,8 +298,8 @@ function renderCallItem({
               }}
               className={`p-2 rounded-full ${
                 isUserChannelMember
-                  ? 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer'
-                  : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                  ? 'hover:bg-border dark:hover:bg-gray-700 text-muted-foreground hover:text-muted-foreground dark:text-muted-foreground dark:hover:text-muted cursor-pointer'
+                  : 'text-muted dark:text-muted-foreground cursor-not-allowed'
               }`}
             >
               <Captions size={16} />
@@ -332,8 +332,8 @@ function renderCallItem({
               }}
               className={`p-2 rounded-full ${
                 hasTranscript
-                  ? 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer'
-                  : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                  ? 'hover:bg-border dark:hover:bg-gray-700 text-muted-foreground hover:text-muted-foreground dark:text-muted-foreground dark:hover:text-muted cursor-pointer'
+                  : 'text-muted dark:text-muted-foreground cursor-not-allowed'
               }`}
             >
               <Download size={16} />

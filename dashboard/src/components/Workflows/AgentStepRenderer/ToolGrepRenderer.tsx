@@ -82,24 +82,24 @@ export const ToolGrepRenderer: React.FC<
     // return (
     //   <div className='space-y-3 text-sm overflow-safe word-break-safe'>
     //     <div className='overflow-safe'>
-    //       <span className='font-semibold text-gray-900 dark:text-gray-100'>Input:</span>
+    //       <span className='font-semibold text-foreground dark:text-gray-100'>Input:</span>
     //       <div className='space-y-2 mt-2'>
     //         <div>
-    //           <span className='font-medium text-gray-900 dark:text-gray-100'>Pattern: </span>
-    //           <code className='bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300 text-wrap'>
+    //           <span className='font-medium text-foreground dark:text-gray-100'>Pattern: </span>
+    //           <code className='bg-muted dark:bg-gray-800 px-2 py-1 rounded text-xs text-foreground dark:text-muted text-wrap'>
     //             {pattern}
     //           </code>
     //         </div>
     //         {searchPath && (
     //           <div>
-    //             <span className='font-medium text-gray-900 dark:text-gray-100'>Search Path: </span>
-    //             <code className='bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs text-gray-700 dark:text-gray-300 text-wrap'>
+    //             <span className='font-medium text-foreground dark:text-gray-100'>Search Path: </span>
+    //             <code className='bg-muted dark:bg-gray-800 px-2 py-1 rounded text-xs text-foreground dark:text-muted text-wrap'>
     //               {searchPath}
     //             </code>
     //           </div>
     //         )}
     //         <div>
-    //           <span className='font-medium text-gray-900 dark:text-gray-100'>Output Mode: </span>
+    //           <span className='font-medium text-foreground dark:text-gray-100'>Output Mode: </span>
     //           <span className='px-2 py-1 bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 rounded text-xs'>
     //             {outputMode}
     //           </span>
@@ -108,7 +108,7 @@ export const ToolGrepRenderer: React.FC<
     //     </div>
 
     //     <div>
-    //       <span className='font-semibold text-gray-900 dark:text-gray-100'>Output:</span>
+    //       <span className='font-semibold text-foreground dark:text-gray-100'>Output:</span>
     //       <div className='space-y-2 mt-2'>
     //         {error && (
     //           <div>
@@ -125,23 +125,23 @@ export const ToolGrepRenderer: React.FC<
     //           <>
     //             {outputMode === 'count' && count !== undefined && (
     //               <div>
-    //                 <span className='font-medium text-gray-900 dark:text-gray-100'>
+    //                 <span className='font-medium text-foreground dark:text-gray-100'>
     //                   Match Count:{' '}
     //                 </span>
-    //                 <span className='text-gray-700 dark:text-gray-300'>{count}</span>
+    //                 <span className='text-foreground dark:text-muted'>{count}</span>
     //               </div>
     //             )}
 
     //             {outputMode === 'files_with_matches' && files.length > 0 && (
     //               <div>
-    //                 <span className='font-medium text-gray-900 dark:text-gray-100 block mb-2'>
+    //                 <span className='font-medium text-foreground dark:text-gray-100 block mb-2'>
     //                   Files with Matches ({files.length}):
     //                 </span>
-    //                 <div className='bg-gray-100 dark:bg-gray-800 p-3 rounded text-xs max-h-64 scroll-safe border'>
+    //                 <div className='bg-muted dark:bg-gray-800 p-3 rounded text-xs max-h-64 scroll-safe border'>
     //                   {files.map((file, _index) => (
     //                     <div
     //                       key={file}
-    //                       className='font-mono text-gray-700 dark:text-gray-300 py-0.5 text-wrap'
+    //                       className='font-mono text-foreground dark:text-muted py-0.5 text-wrap'
     //                     >
     //                       {file}
     //                     </div>
@@ -152,14 +152,14 @@ export const ToolGrepRenderer: React.FC<
 
     //             {outputMode === 'content' && matches.length > 0 && (
     //               <div>
-    //                 <span className='font-medium text-gray-900 dark:text-gray-100 block mb-2'>
+    //                 <span className='font-medium text-foreground dark:text-gray-100 block mb-2'>
     //                   Matches ({matches.length}):
     //                 </span>
-    //                 <div className='bg-gray-100 dark:bg-gray-800 p-3 rounded text-xs max-h-64 scroll-safe border'>
+    //                 <div className='bg-muted dark:bg-gray-800 p-3 rounded text-xs max-h-64 scroll-safe border'>
     //                   {matches.map((match, index) => (
     //                     <div
     //                       key={index}
-    //                       className='font-mono text-gray-700 dark:text-gray-300 py-0.5 border-b border-gray-200 dark:border-gray-700 last:border-b-0 text-wrap'
+    //                       className='font-mono text-foreground dark:text-muted py-0.5 border-b border-border dark:border-gray-700 last:border-b-0 text-wrap'
     //                     >
     //                       {match}
     //                     </div>
@@ -169,7 +169,7 @@ export const ToolGrepRenderer: React.FC<
     //             )}
 
     //             {!error && matches.length === 0 && files.length === 0 && count === 0 && (
-    //               <div className='text-gray-500 dark:text-gray-400 italic'>No matches found</div>
+    //               <div className='text-muted-foreground dark:text-muted-foreground italic'>No matches found</div>
     //             )}
     //           </>
     //         )}

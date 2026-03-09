@@ -40,21 +40,21 @@ export const AliasManager = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='bg-white rounded-lg shadow-lg w-fit min-w-[56rem] max-w-[90vw] mx-4 overflow-hidden flex flex-col max-h-[80vh]'>
+      <div className='bg-popover rounded-lg shadow-lg w-fit min-w-[56rem] max-w-[90vw] mx-4 overflow-hidden flex flex-col max-h-[80vh]'>
         {/* Header */}
-        <div className='flex items-center justify-between px-4 py-3 border-b border-gray-200 flex-shrink-0'>
+        <div className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
           <div>
-            <h2 className='text-lg font-semibold text-gray-900'>Activity Aliases</h2>
-            <p className='text-sm text-gray-500 mt-0.5'>
+            <h2 className='text-lg font-semibold text-foreground'>Activity Aliases</h2>
+            <p className='text-sm text-muted-foreground mt-0.5'>
               Manage how activity events are displayed and filtered
             </p>
           </div>
           <button
             onClick={onClose}
-            className='p-1 hover:bg-gray-100 rounded transition-colors'
+            className='p-1 hover:bg-accent rounded transition-colors'
             type='button'
           >
-            <X className='w-5 h-5 text-gray-500' />
+            <X className='w-5 h-5 text-muted-foreground' />
           </button>
         </div>
 
@@ -62,35 +62,49 @@ export const AliasManager = ({
         <div className='flex-1 overflow-auto p-4'>
           {aliases.length === 0 ? (
             <div className='text-center py-12'>
-              <h3 className='text-sm font-medium text-gray-900'>No aliases yet</h3>
-              <p className='text-sm text-gray-500 mt-1 max-w-sm mx-auto'>
+              <h3 className='text-sm font-medium text-foreground'>No aliases yet</h3>
+              <p className='text-sm text-muted-foreground mt-1 max-w-sm mx-auto'>
                 Click the settings icon on any activity to create an alias or blacklist it.
               </p>
             </div>
           ) : (
-            <div className='border border-gray-200 rounded-lg overflow-x-auto'>
+            <div className='border border-border rounded-lg overflow-x-auto'>
               <table className='w-full min-w-max text-sm'>
-                <thead className='bg-gray-50 border-b border-gray-200'>
+                <thead className='bg-muted border-b border-border'>
                   <tr>
-                    <th className='px-4 py-3 text-left font-medium text-gray-700'>Key Name</th>
-                    <th className='px-4 py-3 text-left font-medium text-gray-700'>→ Alias Name</th>
-                    <th className='px-4 py-3 text-left font-medium text-gray-700'>Key Category</th>
-                    <th className='px-4 py-3 text-left font-medium text-gray-700'>
+                    <th className='px-4 py-3 text-left font-medium text-muted-foreground'>
+                      Key Name
+                    </th>
+                    <th className='px-4 py-3 text-left font-medium text-muted-foreground'>
+                      → Alias Name
+                    </th>
+                    <th className='px-4 py-3 text-left font-medium text-muted-foreground'>
+                      Key Category
+                    </th>
+                    <th className='px-4 py-3 text-left font-medium text-muted-foreground'>
                       → Alias Category
                     </th>
-                    <th className='px-4 py-3 text-center font-medium text-gray-700'>Status</th>
-                    <th className='px-4 py-3 text-right font-medium text-gray-700'>Actions</th>
+                    <th className='px-4 py-3 text-center font-medium text-muted-foreground'>
+                      Status
+                    </th>
+                    <th className='px-4 py-3 text-right font-medium text-muted-foreground'>
+                      Actions
+                    </th>
                   </tr>
                 </thead>
-                <tbody className='divide-y divide-gray-200'>
+                <tbody className='divide-y divide-border'>
                   {aliases.map(alias => (
-                    <tr key={alias.id} className='hover:bg-gray-50'>
-                      <td className='px-4 py-3 text-gray-900 font-mono text-xs'>
+                    <tr key={alias.id} className='hover:bg-muted'>
+                      <td className='px-4 py-3 text-foreground font-mono text-xs'>
                         {alias.eventName}
                       </td>
-                      <td className='px-4 py-3 text-gray-700'>{alias.aliasEventName || '-'}</td>
-                      <td className='px-4 py-3 text-gray-500 text-xs'>{alias.eventCategory}</td>
-                      <td className='px-4 py-3 text-gray-500 text-xs'>
+                      <td className='px-4 py-3 text-muted-foreground'>
+                        {alias.aliasEventName || '-'}
+                      </td>
+                      <td className='px-4 py-3 text-muted-foreground text-xs'>
+                        {alias.eventCategory}
+                      </td>
+                      <td className='px-4 py-3 text-muted-foreground text-xs'>
                         {alias.aliasEventCategory || '-'}
                       </td>
                       <td className='px-4 py-3 text-center'>
@@ -109,7 +123,7 @@ export const AliasManager = ({
                         <div className='flex items-center justify-end gap-2'>
                           <button
                             onClick={() => onEdit(alias)}
-                            className='p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors'
+                            className='p-1.5 text-muted-foreground hover:text-blue-600 hover:bg-blue-50 rounded transition-colors'
                             title='Edit alias'
                             type='button'
                           >
@@ -126,7 +140,7 @@ export const AliasManager = ({
                               </button>
                               <button
                                 onClick={handleCancelDelete}
-                                className='px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 transition-colors'
+                                className='px-2 py-1 text-xs font-medium text-muted-foreground bg-muted rounded hover:bg-accent transition-colors'
                                 type='button'
                               >
                                 Cancel
@@ -135,7 +149,7 @@ export const AliasManager = ({
                           ) : (
                             <button
                               onClick={() => handleDeleteClick(alias.id)}
-                              className='p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors'
+                              className='p-1.5 text-muted-foreground hover:text-red-600 hover:bg-red-50 rounded transition-colors'
                               title='Delete alias'
                               type='button'
                             >
@@ -153,10 +167,10 @@ export const AliasManager = ({
         </div>
 
         {/* Footer */}
-        <div className='flex justify-end px-4 py-3 border-t border-gray-200 bg-gray-50 flex-shrink-0'>
+        <div className='flex justify-end px-4 py-3 border-t border-border bg-muted flex-shrink-0'>
           <button
             onClick={onClose}
-            className='px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors'
+            className='px-4 py-2 text-sm font-medium text-muted-foreground bg-background border border-border rounded-md hover:bg-muted transition-colors'
             type='button'
           >
             Close

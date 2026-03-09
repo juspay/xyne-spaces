@@ -121,7 +121,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
       <Dialog.Root open={showAll} onOpenChange={handleClose}>
         <Dialog.Portal>
           <Dialog.Backdrop
-            className='fixed inset-0 bg-white z-50'
+            className='fixed inset-0 bg-background z-50'
             style={{ touchAction: 'none' }}
             onPointerDown={e => e.stopPropagation()}
             onTouchStart={e => e.stopPropagation()}

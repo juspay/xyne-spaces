@@ -27,10 +27,10 @@ const Search = (): ReactElement => {
 
   // Default fallback - could be a search mode selector or default search view
   return (
-    <div className='h-full flex flex-col items-center justify-center bg-white'>
+    <div className='h-full flex flex-col items-center justify-center bg-background'>
       <div className='text-center'>
-        <h2 className='text-lg font-semibold text-gray-900 mb-2'>Search</h2>
-        <p className='text-gray-500'>Select a search mode to continue</p>
+        <h2 className='text-lg font-semibold text-foreground mb-2'>Search</h2>
+        <p className='text-muted-foreground'>Select a search mode to continue</p>
       </div>
     </div>
   );
