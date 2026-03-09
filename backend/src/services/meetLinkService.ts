@@ -165,6 +165,14 @@ export async function sendMeetMetadataToSam(metadata: MeetLinkMetadata): Promise
       meetCode: metadata.meetCode,
       endpoint,
       xyneTicketId: metadata.xyneTicketId,
+      threadId: metadata.threadId,
+      zohoTicketId: metadata.zohoTicketId,
+      notificationUrl,
+    });
+
+    logger.info('[MeetLinkService] SAM request payload', {
+      meetCode: metadata.meetCode,
+      payload,
     });
 
     const response = await withRetry(
@@ -182,16 +190,32 @@ export async function sendMeetMetadataToSam(metadata: MeetLinkMetadata): Promise
     logger.info('[MeetLinkService] Successfully sent meet metadata to SAM', {
       meetCode: metadata.meetCode,
       status: response.status,
+      statusText: response.statusText,
       xyneTicketId: metadata.xyneTicketId,
+      responseData: response.data,
     });
 
     return true;
   } catch (error) {
-    logger.error('[MeetLinkService] Failed to send meet metadata to SAM after retries', {
+    const errorDetails: Record<string, unknown> = {
       meetCode: metadata.meetCode,
       endpoint,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+      xyneTicketId: metadata.xyneTicketId,
+      threadId: metadata.threadId,
+      zohoTicketId: metadata.zohoTicketId,
+    };
+
+    if (axios.isAxiosError(error)) {
+      errorDetails.status = error.response?.status;
+      errorDetails.statusText = error.response?.statusText;
+      errorDetails.responseData = error.response?.data;
+      errorDetails.errorCode = error.code;
+      errorDetails.errorMessage = error.message;
+    } else {
+      errorDetails.error = error instanceof Error ? error.message : 'Unknown error';
+    }
+
+    logger.error('[MeetLinkService] Failed to send meet metadata to SAM after retries', errorDetails);
     // Don't throw - we don't want meet extraction failure to block email processing
     return false;
   }
