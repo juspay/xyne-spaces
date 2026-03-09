@@ -17,6 +17,8 @@ import {
   X,
   Circle,
 } from 'lucide-react';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { Button } from '../../ui/Button';
 import {
   PrioritySubmenu,
@@ -36,6 +38,7 @@ import { cn } from '../../../utils/classNames';
 import * as Popover from '@radix-ui/react-popover';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { TabType } from '../../Chat/ChatDirectory/ChannelCommandMenu.types';
+import { logger, Event } from '../../../utils/logger';
 
 interface FilterMenuItem {
   id: string;
@@ -69,16 +72,92 @@ export const TicketFiltersDropdown = ({
   availableUsers,
   availableUserGroups,
   availableBoards,
-  allBoardsList,
   showBoardsFilter = false,
-  selectedBoard,
   availableTags,
   availableStages,
   hideAssigneeFilter = false,
   formMappings,
   onSearchChange,
+  selectedBoardName,
 }: TicketFiltersProps & { onSearchChange?: (searchTerm: string) => void }): ReactElement => {
   const [boardOpen, setBoardOpen] = useState(false);
+  const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
+
+  // Latency tracking for boards loading
+  const boardsLoadStartRef = useRef<number | null>(null);
+  const boardsLoggedRef = useRef(false);
+
+  // Start timing when dropdown first opens
+  useEffect(() => {
+    if (hasBoardDropdownOpened && boardsLoadStartRef.current === null) {
+      boardsLoadStartRef.current = performance.now();
+      boardsLoggedRef.current = false;
+    }
+  }, [hasBoardDropdownOpened]);
+
+  // When availableBoards is provided (my-tickets/user-tickets/group-tickets), we already know
+  // exactly which board IDs the user has tickets in — fetch only those instead of loading all
+  // boards globally or by project.
+  const isMyTicketsMode = availableBoards !== undefined;
+
+  // my-tickets path: fetch only the boards the user actually has tickets in, lazily when the
+  // dropdown opens. Skip the query entirely when availableBoards is empty (no tickets loaded yet).
+  const [boardsByIdsResult, boardsByIdsDetails] = useCachedQuery(
+    queries.boardsByIds({ boardIds: availableBoards ?? [] }),
+    {
+      enabled: isMyTicketsMode && hasBoardDropdownOpened && (availableBoards?.length ?? 0) > 0,
+    },
+  );
+
+  // project/channel path: lazily fetch boards scoped to the project (always project-scoped).
+  const [allBoardsProject, allBoardsProjectDetails] = useCachedQuery(
+    queries.boardsListByProject({ projectId: projectId || '' }),
+    {
+      enabled: !isMyTicketsMode && hasBoardDropdownOpened && !!projectId,
+    },
+  );
+
+  const allBoardsRaw = isMyTicketsMode ? boardsByIdsResult : allBoardsProject;
+  const boardsDetails = isMyTicketsMode ? boardsByIdsDetails : allBoardsProjectDetails;
+
+  // Log boards loading latency when complete
+  useEffect(() => {
+    if (
+      boardsDetails.type === 'complete' &&
+      boardsLoadStartRef.current !== null &&
+      !boardsLoggedRef.current
+    ) {
+      const latency = performance.now() - boardsLoadStartRef.current;
+      boardsLoggedRef.current = true;
+
+      logger.info(Event.KANBAN_ENTITY_LOADED, {
+        entity: 'boards',
+        latency,
+        context: 'TicketFiltersDropdown',
+        projectId: projectId || 'global',
+      });
+    }
+  }, [boardsDetails, projectId]);
+
+  // In my-tickets mode the boardsByIds query is already scoped to the user's boards, so no
+  // further filtering is needed. In project/channel modes, allBoardsRaw is already correct.
+  const allBoardsList = useMemo(() => {
+    if (isMyTicketsMode) {
+      // If tickets haven't loaded yet (availableBoards is empty), show no boards in dropdown
+      if (!availableBoards || availableBoards.length === 0) return [];
+      return allBoardsRaw ?? [];
+    }
+    return allBoardsRaw;
+  }, [allBoardsRaw, availableBoards, isMyTicketsMode]);
+
+  // Derive selectedBoard from fetched boards
+  const selectedBoard = useMemo(() => {
+    const selectedBoards = filters.boards || [];
+    if (selectedBoards.length === 1 && allBoardsList) {
+      return allBoardsList.find(b => b.id === selectedBoards[0]) ?? null;
+    }
+    return null;
+  }, [filters.boards, allBoardsList]);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -136,14 +215,26 @@ export const TicketFiltersDropdown = ({
   }, [setActiveTab, setUseVespaSearch]);
 
   const totalBoardCount = allBoardsList?.length || 0;
+  // In my-tickets mode, totalBoardCount reflects only boards for which the user has tickets.
+  // We must NOT auto-collapse to a single board name when there's only 1 available board,
+  // because the user may have "All Boards" selected and we don't want to hide that intent.
+  // In project/channel modes, auto-showing the single board name is fine (project has 1 board).
   const boardLabel =
-    totalBoardCount === 1 && allBoardsList?.[0]
+    !isMyTicketsMode && totalBoardCount === 1 && allBoardsList?.[0]
       ? allBoardsList[0].name
       : selectedBoards.length === 0
         ? 'All Boards'
-        : selectedBoards.length === 1 && selectedBoard
-          ? selectedBoard.name
+        : selectedBoards.length === 1
+          ? (selectedBoard?.name ?? selectedBoardName ?? 'Board')
           : `${selectedBoards.length} Boards`;
+
+  // Track when board dropdown is opened for lazy loading
+  const handleBoardDropdownOpenChange = (open: boolean): void => {
+    setBoardOpen(open);
+    if (open && !hasBoardDropdownOpened) {
+      setHasBoardDropdownOpened(true);
+    }
+  };
 
   // Helper to get icon for field type
   const getIconForFieldType = (fieldType: FormFieldType): typeof BarChart3 => {
@@ -343,8 +434,7 @@ export const TicketFiltersDropdown = ({
             selectedBoards={filters.boards || []}
             onChange={(boards: string[]) => handleFilterChange('boards', boards)}
             onClose={() => setActiveSubmenu(null)}
-            availableBoards={availableBoards}
-            projectId={projectId}
+            boards={allBoardsList ?? []}
           />
         );
       case 'priority':
@@ -488,11 +578,11 @@ export const TicketFiltersDropdown = ({
   return (
     <div className={`relative flex  flex-col w-full ${className}`}>
       <div className='w-max'>
-        <Popover.Root open={boardOpen} onOpenChange={setBoardOpen}>
+        <Popover.Root open={boardOpen} onOpenChange={handleBoardDropdownOpenChange}>
           <Popover.Trigger asChild>
             <Button
               variant='ghost'
-              onClick={() => setBoardOpen(!boardOpen)}
+              onClick={() => handleBoardDropdownOpenChange(!boardOpen)}
               className={cn('rounded-[10px] mb-3')}
               data-track-category='Tickets'
               data-track-name='ToggleBoardDropdown'
@@ -517,8 +607,7 @@ export const TicketFiltersDropdown = ({
               selectedBoards={filters.boards || []}
               onChange={(boards: string[]) => handleFilterChange('boards', boards)}
               onClose={() => setBoardOpen(false)}
-              availableBoards={availableBoards}
-              projectId={projectId}
+              boards={allBoardsList ?? []}
             />
           </Popover.Content>
         </Popover.Root>

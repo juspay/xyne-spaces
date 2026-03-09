@@ -316,9 +316,6 @@ export const applyTicketFilters = (
         return false;
       }
     }
-    if (filters.userGroups && filters.userGroups.length > 0) {
-      if (!ticket.userGroupId || !filters.userGroups.includes(ticket.userGroupId)) return false;
-    }
 
     // PR Reviewer filter (from ticket_assignments with responsibility PR_REVIEWER)
     if (filters.prReviewers && filters.prReviewers.length > 0) {
