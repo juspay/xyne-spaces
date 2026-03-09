@@ -313,4 +313,12 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
     });
     return stitchExecutionStateMany(executions);
   }
+
+  async getCreatedBy(executionId: string): Promise<string | null> {
+    const execution = await this.db.workflowExecution.findUnique({
+      where: { id: executionId },
+      select: { createdBy: true },
+    });
+    return execution?.createdBy ?? null;
+  }
 }

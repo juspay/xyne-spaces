@@ -20,6 +20,7 @@ export enum WorkflowType {
   GENIUS_QUERY_WORKFLOW = 'GENIUS_QUERY_WORKFLOW',
   NETWORK_DOCUMENT_PROCESSING = 'NETWORK_DOCUMENT_PROCESSING',
   INTEGRITY_DEBUG_WORKFLOW = 'INTEGRITY_DEBUG_WORKFLOW',
+  XYNE_AUTO_RCA_WORKFLOW = 'XYNE_AUTO_RCA_WORKFLOW',
 }
 
 export enum WorkflowExecutionStatus {
@@ -570,6 +571,7 @@ export function getWorkflowTypeDisplayName(workflowType: WorkflowType): string {
     [WorkflowType.STAGE_APPROVAL_WORKFLOW]: 'Stage Approval Workflow',
     [WorkflowType.NETWORK_DOCUMENT_PROCESSING]: 'Network Document Processing',
     [WorkflowType.INTEGRITY_DEBUG_WORKFLOW]: 'Integrity Debug Workflow',
+    [WorkflowType.XYNE_AUTO_RCA_WORKFLOW]: 'Xyne Auto RCA Workflow',
   };
   return displayNames[workflowType]
 }
