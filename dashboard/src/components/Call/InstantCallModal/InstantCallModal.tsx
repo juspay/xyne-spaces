@@ -1,6 +1,6 @@
 import { ChannelScopeType, ChannelVisibility, UserStatus } from '@xyne/shared';
 import { Hash, Lock, X } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useSelf, useUserSearch } from '../../../hooks/useUsers';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
@@ -20,10 +20,20 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   onSubmit,
 }) => {
   const user = useSelf();
-  const [searchQuery, setsearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const users = useUserSearch(searchQuery, 15);
+
+  // Focus on Search Participant Input when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+    }
+  }, [isOpen]);
 
   const allVisibleChannels = useAllVisibleChannels();
 
@@ -89,14 +99,14 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const handleSubmit = () => {
     onSubmit(selectedParticipants);
     setSelectedParticipants([]);
-    setsearchQuery('');
+    setSearchQuery('');
     onClose();
   };
 
   const handleClose = () => {
     // Reset state when closing
     setSelectedParticipants([]);
-    setsearchQuery('');
+    setSearchQuery('');
     onClose();
   };
 
@@ -115,6 +125,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             <Button
               variant='outline'
               size='icon'
+              tabIndex={-1}
               className='size-7 rounded-lg'
               onClick={handleClose}
             >
@@ -128,6 +139,9 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 options={inviteUserOrChannelOptions}
                 selectedValues={selectedParticipants}
                 onMultiSelect={setSelectedParticipants}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                ref={inputRef}
               />
             </div>
             <div className='flex items-center justify-between'>
@@ -141,6 +155,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               </Button>
               <Button
                 size='sm'
+                type='submit'
                 onClick={handleSubmit}
                 disabled={selectedParticipants.length === 0}
                 className='rounded-lg text-[13px] text-white bg-sidebar-badge-accent hover:bg-sidebar-badge-accent hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'

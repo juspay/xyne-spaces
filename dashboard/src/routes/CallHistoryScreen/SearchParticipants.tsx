@@ -13,24 +13,47 @@ interface SearchParticipantsProps {
   options: ParticipantOptions[];
   selectedValues: string[];
   onMultiSelect: (tags: string[]) => void;
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
+  ref?: React.RefObject<HTMLInputElement | null>;
 }
 
 export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   options,
   selectedValues,
   onMultiSelect,
+  searchQuery,
+  setSearchQuery,
+  ref,
 }) => {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
+    new Map(),
+  );
   const [isOpen, setIsOpen] = useState(false);
   const [index, setIndex] = useState(0);
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  const internalRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = ref ?? internalRef;
   const inputContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
   const hasUserSelected = useMemo(() => {
     return selectedValues.some(v => v.startsWith('user:'));
   }, [selectedValues]);
+
+  // Cache selected options so they remain visible even when filtered out of options
+  useEffect(() => {
+    setSelectedOptionsMap(prev => {
+      const next = new Map(prev);
+      selectedValues.forEach(value => {
+        const option = options.find(opt => opt.value === value);
+        if (option) {
+          next.set(value, option);
+        }
+      });
+      return next;
+    });
+  }, [selectedValues, options]);
 
   // Filter options based on search query
   const filteredOptions = useMemo(() => {
@@ -52,9 +75,15 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
 
   const selectedOptions = useMemo(() => {
     return selectedValues
-      .map(value => options.find(opt => opt.value === value))
+      .map(value => {
+        const currentOption = options.find(opt => opt.value === value);
+        if (currentOption) return currentOption;
+
+        // Fallback to cached option
+        return selectedOptionsMap.get(value);
+      })
       .filter((opt): opt is ParticipantOptions => opt !== undefined);
-  }, [options, selectedValues]);
+  }, [options, selectedValues, selectedOptionsMap]);
 
   const hasChannelSelected = useMemo(() => {
     return selectedValues.some(v => v.startsWith('channel:'));
@@ -180,16 +209,16 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           }
         }}
         role='button'
-        tabIndex={hasChannelSelected ? -1 : 0}
+        tabIndex={0}
         className='relative flex items-center h-10 border border-gray-200 rounded-lg focus-within:border-gray-800 duration-300 ease-in-out'
         data-track-category='calls'
         data-track-name='search-participants-input'
       >
         {/* Render selected options as chips */}
-        <span className='p-2 bg-white'>
-          <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 size-4 text-gray-300 z-20 pointer-events-none bg-white' />
+        <span className='px-2 bg-white'>
+          <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 size-4 text-gray-300 z-50 pointer-events-none bg-white ' />
         </span>
-        <span className='bg-gradient-to-r from-white via-white to-transparent absolute left-4 top-0 h-full w-7 pointer-events-none z-10 rounded-lg' />
+        <span className='bg-gradient-to-r from-white via-white to-transparent absolute left-3 top-0 h-full w-8 pointer-events-none z-10 rounded-lg' />
         <div className='flex overflow-x-scroll no-scrollbar items-center gap-1 pl-5 flex-1'>
           {selectedOptions.map(option => (
             <div
@@ -219,7 +248,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               type='text'
               role='combobox'
               maxLength={56}
-              ref={inputRef}
+              ref={ref}
               placeholder={selectedValues.length === 0 ? 'Search by user or channel name' : ''}
               value={!hasChannelSelected ? searchQuery : ''}
               disabled={hasChannelSelected}

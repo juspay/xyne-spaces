@@ -270,6 +270,7 @@ export const roomMachine = setup({
         livekitUrl: result.livekitUrl,
         callId: callId, // Pass through the externalId for DB writes
         roomLink: result.roomLink,
+        channelId: result.channelId,
       };
     }),
 
@@ -1276,10 +1277,7 @@ export const roomMachine = setup({
               callType: () => CallType.AUDIO,
               callId: ({ event }) => event.output.callId,
               roomLink: ({ event }) => event.output.roomLink,
-              channelId: ({ context }) => {
-                const call = context.activeCalls.find(c => c.externalId === context.callId);
-                return call?.channelId || null;
-              },
+              channelId: ({ event }) => event.output.channelId || null,
             }),
             'createRoom',
             'clearError',

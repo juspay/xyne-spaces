@@ -54,6 +54,7 @@ export function getTodayISTDateRange(): { startDate: Date; endDate: Date } {
  */
 export function formatDateTimeShort(date: Date): string {
   return date.toLocaleString('en-US', {
+    timeZone: 'Asia/Kolkata',
     weekday: 'short',
     month: 'short',
     day: 'numeric',

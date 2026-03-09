@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { useMemo, useCallback, useEffect } from 'react';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import { ChannelScopeType, UserStatus, ChannelVisibility } from '@xyne/shared';
@@ -31,7 +31,6 @@ interface ScheduleCallFormData {
 export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({ isOpen, onClose }) => {
   const user = useSelf();
   const allVisibleChannels = useAllVisibleChannels();
-  const titleInit = useRef(false);
 
   const getDefaultScheduledStartTime = (): Date => {
     const now = new Date();
@@ -294,7 +293,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({ isOpen, on
 
   // Reset form and close modal
   const handleClose = useCallback((): void => {
-    titleInit.current = false;
     reset({
       title: user?.name ? `${user.name.split(' ')[0]}'s Call` : '',
       startsAt: defaultStart,
@@ -320,7 +318,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({ isOpen, on
               Schedule call with people, groups or channel
             </p>
           </span>
-          <Button variant='outline' size='icon' className='size-7 rounded-lg' onClick={handleClose}>
+          <Button
+            variant='outline'
+            size='icon'
+            tabIndex={-1}
+            className='size-7 rounded-lg'
+            onClick={handleClose}
+          >
             <X className='size-4' />
           </Button>
         </div>
@@ -336,6 +340,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({ isOpen, on
                   id='call-title'
                   type='text'
                   placeholder='Enter call title'
+                  tabIndex={0}
                   className={cn(
                     '!text-[22px] truncate',
                     'px-0 border-none focus-visible:ring-0 rounded-none',
@@ -468,6 +473,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({ isOpen, on
                   options={inviteUserOrChannelOptions}
                   selectedValues={field.value}
                   onMultiSelect={field.onChange}
+                  searchQuery={searchQuery}
+                  setSearchQuery={setSearchQuery}
                 />
               )}
               rules={{
