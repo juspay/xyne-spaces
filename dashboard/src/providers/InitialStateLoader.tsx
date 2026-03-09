@@ -321,12 +321,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
         handlePostErrorReset(previousState);
         break;
       case 'disconnected':
-        if (!modalTimerRef.current) {
-          modalTimerRef.current = setTimeout(() => {
-            setShowModal(true);
-            modalTimerRef.current = null;
-          }, MODAL_DELAY_MS);
-        }
+        // Don't show modal for disconnected state, only for error state
         handlePostErrorReset(previousState);
         break;
       default:
@@ -450,7 +445,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   if (areAllQueriesCompleted) {
     return (
       <>
-        {showModal && <ZeroConnectionFailureModal />}
+        {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
         {children}
       </>
     );
