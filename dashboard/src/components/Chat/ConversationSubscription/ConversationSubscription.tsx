@@ -1,28 +1,26 @@
 import React from 'react';
 import { Bell, BellOff } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
-import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
-import { useQuery } from '../../../hooks/useQuery';
 import { useAuthContext } from '../../../providers/AuthProvider';
+import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 
 interface ConversationSubscriptionProps {
   conversationId: string;
-  variant?: 'icon-only' | 'full';
+  conversation?: ConversationWithTicket;
+  variant?: 'icon-only' | 'full' | 'dropdown';
   className?: string;
 }
 
 export const ConversationSubscription: React.FC<ConversationSubscriptionProps> = ({
   conversationId,
+  conversation: conversation,
   variant = 'icon-only',
   className = '',
 }) => {
   const zero = useZero();
   const { user } = useAuthContext();
-
-  // Query conversation with all participants
-  const [conversation] = useQuery(queries.getConversationById({ conversationId }));
 
   // Find current user's participant record
   const participant = conversation?.participants?.find(p => p.userId === user?.id);
@@ -79,6 +77,24 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
         ) : (
           <BellOff className='w-4 h-4 stroke-gray-400' />
         )}
+      </button>
+    );
+  }
+
+  if (variant === 'dropdown') {
+    return (
+      <button
+        onClick={handleToggleSubscription}
+        className={`flex items-center w-full ${className}`}
+        title={isSubscribed ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}
+        aria-label={isSubscribed ? 'Unsubscribe from conversation' : 'Subscribe to conversation'}
+        data-track-category='CONVERSATION_SUBSCRIPTION'
+        data-track-name='TOGGLE_SUBSCRIPTION_DROPDOWN'
+      >
+        <span className='w-4 h-4 mr-2 flex items-center justify-center text-[rgba(120,129,135,1)]'>
+          {isSubscribed ? <BellOff className='w-4 h-4' /> : <Bell className='w-4 h-4' />}
+        </span>
+        {isSubscribed ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}
       </button>
     );
   }

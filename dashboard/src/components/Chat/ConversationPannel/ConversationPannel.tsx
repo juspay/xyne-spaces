@@ -36,7 +36,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../../../machines/stateMachine';
-import { useDraft } from '../../../hooks/useDraft';
+import { getDraft } from '../../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 
 interface NavigationState {
@@ -191,12 +191,6 @@ const ConversationPannel = ({
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const draft = useDraft(channelId, null);
-  const draftRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
-
   // Get dynamic tabs based on permissions and channel scope type
   const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(channel?.scopeType);
 
@@ -241,6 +235,8 @@ const ConversationPannel = ({
 
       hasBeenViewedRef.current = false;
 
+      const draft = getDraft(channelId, null);
+
       const payload = {
         channelId,
         ...(latestMessageRef.current?.conversationId && {
@@ -248,7 +244,7 @@ const ConversationPannel = ({
         }),
         timestamp: Date.now(),
         draftMessageId: uuidv4(),
-        draftMessage: draftRef.current || '',
+        draftMessage: draft || '',
       };
 
       void zero.mutate(mutators.channel.markChannelAsViewed(payload));

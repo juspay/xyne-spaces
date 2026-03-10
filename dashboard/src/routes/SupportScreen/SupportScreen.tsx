@@ -15,7 +15,7 @@ import {
   Split,
 } from 'lucide-react';
 import { EmailType } from '@xyne/shared';
-import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import React, { ReactElement, useMemo, useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
@@ -66,7 +66,7 @@ import type { Ticket } from '@xyne/shared';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
 import { Hash } from 'lucide-react';
-import { useDraft } from '../../hooks/useDraft';
+import { getDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { useUsers } from '../../hooks/useUsers';
 import { EmailTagWithAvatar } from '../../components/xyne-desk/EmailTagWithAvatar/EmailTagWithAvatar';
@@ -565,12 +565,6 @@ const SupportTicketDetail = (): ReactElement => {
   // Subscribe to channel for real-time updates
   useChannelSubscription(channelId, conversationId ? [conversationId] : []);
 
-  const draft = useDraft(channelId, conversationId ?? null);
-  const draftRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
-
   // Drag and drop functionality
   const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(conversationId || '');
 
@@ -579,11 +573,12 @@ const SupportTicketDetail = (): ReactElement => {
   useEffect(() => {
     return (): void => {
       if (conversationId) {
+        const draft = getDraft(channelId, conversationId);
         void zero.mutate(
           mutators.activities.markThreadActivitiesAsRead({
             conversationId,
             timestamp: Date.now(),
-            draftMessage: draftRef.current || '',
+            draftMessage: draft || '',
             draftMessageId: uuidv4(),
           }),
         );

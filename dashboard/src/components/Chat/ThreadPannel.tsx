@@ -57,7 +57,7 @@ import { useZero } from '../../hooks/useZero';
 import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
-import { useDraft } from '../../hooks/useDraft';
+import { getDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { useSelf, useUser } from '../../hooks/useUsers';
@@ -337,19 +337,15 @@ export const ThreadMessages = ({
   const isUserMember = !!channelParticipation;
 
   const zero = useZero();
-  const draft = useDraft(derivedChannelId, derivedConversationId);
-  const draftRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
 
   useEffect(() => {
     return () => {
       if (derivedConversationId) {
+        const draft = getDraft(derivedChannelId, derivedConversationId);
         void zero.mutate(
           mutators.activities.markThreadActivitiesAsRead({
             conversationId: derivedConversationId,
-            draftMessage: draftRef.current || '',
+            draftMessage: draft || '',
             draftMessageId: uuidv4(),
             timestamp: Date.now(),
           }),
@@ -749,6 +745,7 @@ export const ThreadMessages = ({
                       <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
                         <ConversationSubscription
                           conversationId={derivedConversationId}
+                          {...(conversation && { conversation })}
                           variant='icon-only'
                           className='flex items-center justify-center'
                         />
@@ -915,6 +912,7 @@ export const ThreadMessages = ({
               <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
                 <ConversationSubscription
                   conversationId={derivedConversationId}
+                  {...(conversation && { conversation })}
                   variant='icon-only'
                   className='flex items-center justify-center'
                 />
@@ -940,6 +938,7 @@ export const ThreadMessages = ({
                 <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
                   <ConversationSubscription
                     conversationId={derivedConversationId}
+                    {...(conversation && { conversation })}
                     variant='icon-only'
                     className='flex items-center justify-center'
                   />
@@ -1308,6 +1307,7 @@ export const ThreadMessages = ({
                         <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
                           <ConversationSubscription
                             conversationId={derivedConversationId}
+                            {...(conversation && { conversation })}
                             variant='icon-only'
                             className='flex items-center justify-center'
                           />
@@ -1388,6 +1388,7 @@ export const ThreadMessages = ({
                     <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
                       <ConversationSubscription
                         conversationId={derivedConversationId}
+                        {...(conversation && { conversation })}
                         variant='icon-only'
                         className='flex items-center justify-center'
                       />

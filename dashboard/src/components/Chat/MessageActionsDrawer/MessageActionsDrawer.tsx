@@ -27,6 +27,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { ConversationSubscription } from '../ConversationSubscription';
+import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 
 type ReactionWithUser = QueryResultType<
   typeof queries.conversationMessages
@@ -37,6 +38,7 @@ export interface MessageActionsDrawerProps {
   onOpenChange: (open: boolean) => void;
   messageId: string;
   conversationId?: string;
+  conversation?: ConversationWithTicket;
   initialMessageId?: string;
   showEditAction?: boolean;
   reactions?: readonly ReactionWithUser[];
@@ -64,6 +66,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   onOpenChange,
   messageId,
   conversationId,
+  conversation,
   initialMessageId,
   showEditAction = false,
   reactions = [],
@@ -291,6 +294,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
         {onReplyInThread && conversationId && (
           <ConversationSubscription
             conversationId={conversationId}
+            {...(conversation && { conversation })}
             variant='full'
             className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-foreground hover:bg-accent'
           />

@@ -81,6 +81,21 @@ export function useDraft(channelId: string, conversationId: string | null) {
     return draftFromDB?.content ?? draftFromLocal?.html;
   }, [draftFromLocal, draftFromDB]);
 }
+
+export function getDraft(channelId: string, conversationId: string | null) {
+  const state = stateMachineActor.getSnapshot();
+
+  const draftFromLocal = state.context.drafts[conversationId ?? channelId];
+
+  const draftFromDB = state.context.draftMessages.find(
+    draft => draft.channelId === channelId && draft.conversationId === conversationId,
+  );
+
+  return draftFromDB && draftFromLocal && draftFromDB.updatedAt > draftFromLocal.updatedAt
+    ? draftFromDB.content
+    : draftFromLocal?.html;
+}
+
 export function useDraftAttachments() {
   const zero = useZero();
   const draftMessages = useSelector(stateMachineActor, state => state.context.draftMessages);

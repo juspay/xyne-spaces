@@ -169,6 +169,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isScrollingRef = useRef(false);
@@ -696,7 +697,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         }
       }}
       onMouseLeave={() => {
-        if (!isEmojiPickerOpen) {
+        if (!isEmojiPickerOpen && !isDropdownOpen) {
           setShowHoverActions(false);
         }
       }}
@@ -753,6 +754,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               showEditAction={canEditMessage}
               messageId={message.messageId}
               conversationId={conversation?.conversationId || message.conversationId}
+              {...(conversation && { conversation })}
               {...(conversation?.initialMessageId && {
                 initialMessageId: conversation.initialMessageId,
               })}
@@ -762,6 +764,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 shouldShowCopyButton && { onCopyMessage: handleCopyMessage })}
               {...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen })}
               {...(!isMessageDeleted && !hasTicket && { onEditInCanvas: handleEditInCanvas })}
+              onDropdownOpenChange={setIsDropdownOpen}
               {...(context === 'channel' &&
                 !isSystemMessage &&
                 !isMessageDeleted &&
@@ -819,6 +822,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...(conversation?.initialMessageId && {
                 initialMessageId: conversation.initialMessageId,
               })}
+              {...(conversation && { conversation })}
               reactions={isMessageDeleted ? [] : (message.reactions ?? [])}
               showEditAction={canEditMessage}
               isBookmarked={isBookmarked}
