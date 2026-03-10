@@ -996,7 +996,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                     (() => {
                       const forwardedData = parseForwardedMessageXml(message.content);
                       return forwardedData ? (
-                        <div className='flex flex-col gap-2'>
+                        <div className='flex flex-col gap-2 overflow-auto max-h-[350px]'>
                           {forwardedData.optionalText && (
                             <div
                               className={`text-foreground ${getEmojiFontSizeClass(forwardedData.optionalText)}`}
