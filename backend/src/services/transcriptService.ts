@@ -10,7 +10,7 @@ import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
 import { GCSService } from '../services/gcsService';
-import { type PulseActionItem } from '@/services/pulseService';
+import { pulseService, type PulseActionItem } from '@/services/pulseService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 
@@ -135,11 +135,22 @@ CRITICAL RULES:
 - Only include tasks that are clearly merchant-related (not internal team tasks)
 - If no merchants are identifiable, return an empty array for "merchants"
 
+MERCHANT NAME MATCHING:
+- Use the REFERENCE_MERCHANTS list below to match merchant names
+- Transcripts are lossy and may have errors (e.g., "Zypto" instead of "Zepto")
+- If you detect a merchant name similar to one in the reference list, use the EXACT name from the list
+- Common errors: phonetic errors, abbreviations, partial names
+- Examples: "Zypto" → "Zepto", "Swiggy Insta" → "Swiggy"
+- Make sure the surrounding context is about merchant only
+
+REFERENCE_MERCHANTS:
+{merchantList}
+
 JSON STRUCTURE (FOLLOW EXACTLY):
 {
   "merchants": [
     {
-      "merchantName": "[Company or merchant name]",
+      "merchantName": "[Company or merchant name - use EXACT match from REFERENCE_MERCHANTS if similar]",
       "actionItems": [
         {
           "content": "[Clear description of what needs to be done for this specific merchant]",
@@ -155,7 +166,8 @@ No explanations.
 
 TRANSCRIPT:
 {transcript}
-`;
+`
+
 
 export interface TicketSuggestion {
   id: string;
@@ -1011,7 +1023,16 @@ Output ONLY the processed transcript, nothing else.`;
       return [];
     }
 
-    const prompt = PULSE_DATA_PROMPT.replace('{transcript}', transcript);
+    // Fetch merchant list for LLM reference
+    const merchantList = await pulseService.fetchOrgList();
+    const merchantNames = merchantList
+      .map(org => org.name ?? org.orgName)
+      .filter(name => name)
+      .join(', ');
+
+    const prompt = PULSE_DATA_PROMPT
+      .replace('{merchantList}', merchantNames || 'No reference list available')
+      .replace('{transcript}', transcript);
 
     try {
       const result = await agent.execute({ messages: [createUserMessage(prompt)] });
