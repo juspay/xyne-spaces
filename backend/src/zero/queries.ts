@@ -966,7 +966,12 @@ export const queries = defineQueries({
         .related('parentMessage')
         .related('participants', (participantQuery) =>
           participantQuery
-            .where('participationType', ConversationParticipation.AUTHOR)
+            .where(helpers =>
+              helpers.or(
+                helpers.cmp('participationType', ConversationParticipation.AUTHOR),
+                helpers.cmp('userId', ctx.userID),
+              ),
+            )
             .orderBy('joinedAt', 'asc')
         )
         .related('ticket');
@@ -1012,8 +1017,13 @@ export const queries = defineQueries({
         .related('parentMessage')
         .related('participants', participantQuery =>
           participantQuery
-            .where('participationType', ConversationParticipation.AUTHOR)
-            .orderBy('joinedAt', 'asc'),
+            .where(helpers =>
+              helpers.or(
+                helpers.cmp('participationType', ConversationParticipation.AUTHOR),
+                helpers.cmp('userId', ctx.userID),
+              ),
+            )
+            .orderBy('joinedAt', 'asc')
         )
         .related('ticket');
 
