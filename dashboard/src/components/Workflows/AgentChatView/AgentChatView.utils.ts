@@ -44,7 +44,6 @@ export interface AgentInfo {
   avatarText: string;
   initials: string;
   labelColor: string;
-  bubbleBorder: string;
   bubbleBg: string;
   icon:
     | 'brain'
@@ -70,7 +69,6 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
       avatarText: 'text-amber-500',
       initials: 'RV',
       labelColor: 'text-gray-700',
-      bubbleBorder: 'border-gray-200',
       bubbleBg: 'bg-gray-50/80',
       icon: 'twitch',
     };
@@ -83,7 +81,6 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
       avatarText: 'text-violet-500',
       initials: 'PL',
       labelColor: 'text-gray-700',
-      bubbleBorder: 'border-gray-200',
       bubbleBg: 'bg-gray-50/80',
       icon: 'ghost',
     };
@@ -102,7 +99,6 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
       avatarText: 'text-sky-500',
       initials: 'IM',
       labelColor: 'text-gray-700',
-      bubbleBorder: 'border-gray-200',
       bubbleBg: 'bg-gray-50/80',
       icon: 'laugh',
     };
@@ -120,7 +116,6 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
       avatarText: 'text-emerald-500',
       initials: 'VA',
       labelColor: 'text-gray-700',
-      bubbleBorder: 'border-gray-200',
       bubbleBg: 'bg-gray-50/80',
       icon: 'skull',
     };
@@ -138,7 +133,6 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
       avatarText: 'text-orange-500',
       initials: 'GT',
       labelColor: 'text-gray-700',
-      bubbleBorder: 'border-gray-200',
       bubbleBg: 'bg-gray-50/80',
       icon: 'git',
     };
@@ -156,7 +150,6 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
       avatarText: 'text-rose-500',
       initials: 'RC',
       labelColor: 'text-gray-700',
-      bubbleBorder: 'border-gray-200',
       bubbleBg: 'bg-gray-50/80',
       icon: 'bug',
     };
@@ -168,7 +161,6 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
     avatarText: 'text-slate-500',
     initials: 'AG',
     labelColor: 'text-gray-700',
-    bubbleBorder: 'border-gray-200',
     bubbleBg: 'bg-gray-50/80',
     icon: 'bot',
   };
