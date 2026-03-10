@@ -446,7 +446,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 width={32}
                 height={32}
               />
-            ) : showAvatar && isCallMessage ? (
+            ) : showAvatar && isCallMessage && !isForwardedMessage ? (
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-green-100' : 'bg-muted'}`}
               >
@@ -580,7 +580,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         <div className='flex-1 flex flex-col gap-1 min-w-0'>
           {showAvatar && !isWorkflowMessage && (
             <div className='w-full flex items-baseline gap-2 min-h-4 '>
-              {isCallMessage ? (
+              {isCallMessage && !isForwardedMessage ? (
                 <h3 className='text-sm font-medium text-foreground'>
                   {isActiveCall ? 'A call is going on' : 'A call happened'}
                 </h3>
