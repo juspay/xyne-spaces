@@ -569,4 +569,14 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
       },
     });
   }
+  async findLastMessage(filters: MessageFilters): Promise<Message | null> {
+  return await this.db.message.findFirst({
+    where: {
+      conversationId: filters.conversationId,
+      senderId: filters.senderId,
+      
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+}
 }

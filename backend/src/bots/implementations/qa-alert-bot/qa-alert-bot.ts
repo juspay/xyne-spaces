@@ -7,6 +7,8 @@ import type { BotExecutionContext, InternalBotDefinition, BotEvent } from '@/bot
 import { logger } from '@/utils/logger';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { ConversationService } from '@/services/conversationService';
+import { MessageRepository } from '@/database/repositories/messageRepository';
+import { ConversationRepository } from '@/database/repositories/conversationRepository';
 
 import { unifiedBotUserService } from '@/bots/unified/index.js';
 import { UserGroupRepository } from '@/database/repositories/userGroups';
@@ -179,6 +181,8 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
   private ticketRepository = new TicketRepository();
   private conversationService = new ConversationService();
   private userGroupRepository = new UserGroupRepository();
+  private messageRepository = new MessageRepository();
+  private conversationRepository = new ConversationRepository();
 
 
   protected async *executeInternal(
@@ -247,6 +251,34 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
       
 
       payload.groupMention = groupMention;
+   const lastMessage = await this.messageRepository.findLastMessage({
+  conversationId: ticket.conversationId,
+  senderId: qaAlertBot.id,
+
+});
+
+      const handler = new MessagesSideEffectHandler({ userID: qaAlertBot.id });
+
+      if (lastMessage) {
+        try {
+          await this.messageRepository.delete(lastMessage.messageId);
+    
+          await this.conversationRepository.decrementReplyCount(ticket.conversationId).catch((err) => {
+            logger.error(`[QaAlertBot] Failed to decrement reply count:`, err);
+          });
+          
+         await handler
+            .onDelete({
+              entityId: lastMessage.messageId,
+              entityType: 'messages',
+              operation: 'delete',
+            })
+            
+        } catch (err) {
+          logger.error(`[QaAlertBot] Failed to delete message ${lastMessage.messageId}:`, err);
+        }
+      }
+
       const alertMessage = formatJenkinsAlertMessage(payload);
 
        const result = await this.conversationService.addMessageToConversation({
@@ -264,7 +296,6 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
       
 
       
-      const handler = new MessagesSideEffectHandler({ userID: qaAlertBot.id });
       handler
         .onInsert({
           entityId: result.message.messageId,

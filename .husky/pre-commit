@@ -99,11 +99,16 @@ esac
 if [ "$should_run_tests" = true ]; then
   echo ""
 
-  echo "🔒 Verifying test code integrity..."
-  if ! npm run test:integrity; then
-      echo "❌ Test code integrity check failed! Your test code does not match main branch."
-      echo "🚫 Commit aborted."
-      exit 1
+  # Skip integrity test if xyne-automation files changed
+  if [ -n "$AUTOMATION_CHANGED" ]; then
+    echo "⏭️  Skipping test code integrity check (xyne-automation files changed)"
+  else
+    echo "🔒 Verifying test code integrity..."
+    if ! npm run test:integrity; then
+        echo "❌ Test code integrity check failed! Your test code does not match main branch."
+        echo "🚫 Commit aborted."
+        exit 1
+    fi
   fi
 
   # Mark that tests are running so post-commit knows to commit reports

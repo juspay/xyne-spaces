@@ -130,6 +130,17 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     });
   }
 
+  async decrementReplyCount(conversationId: string): Promise<Conversation> {
+    const conversation = await this.findById(conversationId);
+    if (!conversation) {
+      throw new Error('Conversation not found');
+    }
+    const newReplyCount = Math.max(0, conversation.replyCount - 1);
+    return await this.update(conversationId, {
+      replyCount: newReplyCount,
+    });
+  }
+
   async updateLastActivity(conversationId: string): Promise<void> {
     await this.update(conversationId, {
       lastActivityAt: new Date(),
