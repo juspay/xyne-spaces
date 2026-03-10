@@ -1,13 +1,19 @@
-import { Workflow, WorkflowExecution, WorkflowStep } from '@prisma/client';
+import { Workflow, WorkflowExecution, WorkflowStep, AttachmentEntityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import {logger} from '@/utils/logger';
 import { getExecutionState } from './workflowExecutionStateUtils';
+import { redisService } from '@/services/redisService';
+import { buildWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
+import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { config } from '@/config/env';
 
 const prisma = DatabaseClient.getInstance();
 
 export class WorkflowRepository {
   // Existing methods
   async getWorkflowStepsByExecutionId(workflowExecutionId: string) {
+
+    // Fallback to DB query
     return await prisma.workflowStep.findMany({
       where: { workflowExecutionId },
       orderBy: { createdAt: 'asc' }
@@ -195,9 +201,65 @@ export class WorkflowRepository {
     });
   }
 
+  // Get execution mode
+  async getExecutionMode(executionId: string): Promise<string> {
+    const execution = await prisma.workflowExecution.findUnique({
+      where: { id: executionId },
+      select: { mode: true }
+    });
+    return execution?.mode || 'AUTOMATIC';
+  }
+
+  // Set execution mode
+  async setExecutionMode(executionId: string, mode: 'AUTOMATIC' | 'MANUAL'): Promise<void> {
+    await prisma.workflowExecution.update({
+      where: { id: executionId },
+      data: { mode }
+    });
+  }
+
+  // Get the most recent agent INPUT step for an execution
+  async getAgentStepForExecution(executionId: string): Promise<WorkflowStep | null> {
+    const step = await prisma.workflowStep.findFirst({
+      where: {
+        workflowExecutionId: executionId,
+        stepExecutorType: 'agent',
+        type: 'INPUT'
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    return step;
+  }
+
+  // Check if an agent INPUT step has a corresponding OUTPUT step
+  async agentStepHasOutput(stepId: string): Promise<boolean> {
+    // First get the input step to find its stepName and workflowExecutionId
+    const inputStep = await prisma.workflowStep.findFirst({
+      where: {
+        id: stepId,
+        type: 'input'
+      }
+    });
+
+    if (!inputStep) {
+      return false;
+    }
+
+    // Check if there's an OUTPUT step with the same stepName and workflowExecutionId
+    const outputStep = await prisma.workflowStep.findFirst({
+      where: {
+        stepName: inputStep.stepName,
+        workflowExecutionId: inputStep.workflowExecutionId,
+        type: 'output'
+      }
+    });
+    return !!outputStep;
+  }
+
   // NEW: Get single execution's steps (for execution switching)
   async getSingleExecutionSteps(ticketId: string, executionId: string) {
-    // Fetch ONLY this execution with full step data
+
+    // Fetch execution data (with or without steps from DB)
     const execution = await prisma.workflowExecution.findFirst({
       where: {
         id: executionId,
@@ -259,7 +321,7 @@ export class WorkflowRepository {
     });
 
     // Process steps with full expansion
-    const processedSteps = this.processStepsOptimized(
+    const processedSteps = await this.processStepsOptimized(
       execution.workflowSteps,
       execution,
       allExecutions,
@@ -298,7 +360,8 @@ export class WorkflowRepository {
         sourceStepsId: exec.sourceStepsId,
         sourceStepName: sourceStepName,
         createdAt: exec.createdAt,
-        updatedAt: exec.updatedAt
+        updatedAt: exec.updatedAt,
+        mode: exec.mode
       };
     });
 
@@ -425,8 +488,9 @@ export class WorkflowRepository {
     const stepsByExecution = new Map();
     const executionsBySourceStep = new Map();
 
-    workflows.forEach(workflow => {
-      workflow.workflowExecutions.forEach((execution: any) => {
+    // Fetch steps from Redis/GCS for each execution
+    for (const workflow of workflows) {
+      for (const execution of workflow.workflowExecutions) {
         const state = stateMap.get(execution.id);
         const executionWithState = {
           ...execution,
@@ -442,8 +506,8 @@ export class WorkflowRepository {
           }
           executionsBySourceStep.get(execution.sourceStepsId).push(executionWithState);
         }
-      });
-    });
+      }
+    }
 
     // Create a ticket-like object for compatibility with the existing processing function
     const ticketLikeObject = {
@@ -451,7 +515,7 @@ export class WorkflowRepository {
       workflows: workflows
     };
 
-    return this.processWorkflowsWithMetadata(ticketLikeObject, allExecutions, stepsByExecution, executionsBySourceStep);
+    return await this.processWorkflowsWithMetadata(ticketLikeObject, allExecutions, stepsByExecution, executionsBySourceStep);
   }
 
   // Returns combined workflow steps for a specific workflow ID
@@ -470,6 +534,7 @@ export class WorkflowRepository {
             updatedAt: true,
             workflowId: true,
             createdBy: true,
+            mode: true,
             workflowSteps: {
               select: {
                 id: true,
@@ -530,7 +595,9 @@ export class WorkflowRepository {
     const stepsByExecution = new Map();
     const executionsBySourceStep = new Map();
 
-    workflow.workflowExecutions.forEach((execution: any) => {
+    // Fetch steps from Redis/GCS for each execution
+    for (const execution of workflow.workflowExecutions) {
+
       const state = stateMap.get(execution.id);
       const executionWithState = {
         ...execution,
@@ -546,7 +613,7 @@ export class WorkflowRepository {
         }
         executionsBySourceStep.get(execution.sourceStepsId).push(executionWithState);
       }
-    });
+    }
 
     // Create a ticket-like object for compatibility with the existing processing function
     const ticketLikeObject = {
@@ -554,7 +621,7 @@ export class WorkflowRepository {
       workflows: [workflow]
     };
 
-    return this.processWorkflowsWithMetadata(ticketLikeObject, allExecutions, stepsByExecution, executionsBySourceStep);
+    return await this.processWorkflowsWithMetadata(ticketLikeObject, allExecutions, stepsByExecution, executionsBySourceStep);
   }
 
   async getWorkflowStepDetails(stepId: string) {
@@ -741,7 +808,7 @@ export class WorkflowRepository {
   }
 
   // NEW: Process workflows with metadata - returns latest execution + metadata for all
-  private processWorkflowsWithMetadata(
+  private async processWorkflowsWithMetadata(
     ticket: any,
     allExecutions: Map<any, any>,
     stepsByExecution: Map<any, any>,
@@ -765,7 +832,7 @@ export class WorkflowRepository {
       const latestExecution = sortedExecutions[0];
 
       // Process ONLY latest execution's steps (full expansion)
-      const latestSteps = this.processStepsOptimized(
+      const latestSteps = await this.processStepsOptimized(
         latestExecution.workflowSteps,
         latestExecution,
         allExecutions,
@@ -798,7 +865,8 @@ export class WorkflowRepository {
           sourceStepsId: exec.sourceStepsId,
           sourceStepName: sourceStepName,
           createdAt: exec.createdAt,
-          updatedAt: exec.updatedAt
+          updatedAt: exec.updatedAt,
+          mode: exec.mode
         };
       });
 
@@ -910,13 +978,13 @@ export class WorkflowRepository {
   }
 
   // OPTIMIZED: Process steps in memory using lookup maps
-  private processStepsOptimized(
+  private async processStepsOptimized(
     steps: any[],
     parentExecution: any,
     _allExecutions: Map<any, any>,
     stepsByExecution: Map<any, any>,
     executionsBySourceStep: Map<any, any>
-  ): any[] {
+  ): Promise<any[]> {
     let stepsToProcess = steps;
     const stepToExecutionMap = new Map<string, string>(); // Map step.id to executionId
 
@@ -996,7 +1064,8 @@ export class WorkflowRepository {
           parallelChildrenCount: expandedWorkflows.length
         });
       } else if (step.stepExecutorType === 'agent' && step.stepName) {
-        const expandedExecutions = this.expandAgentExecutionsOptimized(
+        // NEW: Agent steps now fetched asynchronously from messageAttachment -> Redis/GCS
+        const expandedExecutions = await this.expandAgentExecutionsOptimized(
           step.id,
           step.stepName,
           parentExecution.id,
@@ -1073,14 +1142,57 @@ export class WorkflowRepository {
   }
 
   // OPTIMIZED: Agent executions expansion using in-memory lookup
-  private expandAgentExecutionsOptimized(
+  // NEW: Fetches agent step data from messageAttachment -> Redis/GCS instead of child executions
+  private async expandAgentExecutionsOptimized(
     stepId: string,
     stepName: string,
-    _parentExecutionId: string,
+    parentExecutionId: string,
     _allExecutions: Map<any, any>,
     stepsByExecution: Map<any, any>,
     executionsBySourceStep: Map<any, any>
-  ): any[] {
+  ): Promise<any[]> {
+    // Fetch agent step data from messageAttachment linked to the input step (Redis/GCS)
+    const agentSteps = await this.fetchAgentStepsFromAttachment(stepId, parentExecutionId, stepName);
+
+    if (agentSteps && agentSteps.length > 0) {
+      // Compute status and duration for each step from Redis/GCS
+      const executionSteps = agentSteps.map((step: any) => {
+        const { status: computedStatus, duration } = this.computeStepStatus(
+          step,
+          agentSteps,
+          'SUCCESS', // Agent steps are considered successful if data exists
+          []
+        );
+
+        return {
+          id: step.id,
+          workflowExecutionId: step.workflowExecutionId,
+          stepExecutorType: step.stepExecutorType,
+          stepName: step.stepName,
+          type: step.type,
+          previousStepId: step.previousStepId,
+          status: step.status,
+          data: step.data,
+          createdAt: step.createdAt,
+          updatedAt: step.updatedAt,
+          computedStatus,
+          duration,
+        };
+      });
+
+      // Return in same format as before, but with parentExecutionId as executionId
+      return [{
+        executionId: parentExecutionId,
+        status: 'SUCCESS',
+        steps: executionSteps,
+        isFromAgentExecution: true,
+        parentStepName: stepName
+      }];
+    }
+
+    // BACKWARD COMPATIBILITY: If no steps found in Redis/GCS, fallback to DB query
+    logger.info(`[WORKFLOW-REPO] No agent steps in Redis/GCS for ${stepName}, falling back to DB query`);
+
     const childExecutions = executionsBySourceStep.get(stepId) || [];
     const expandedExecutions: any[] = [];
 
@@ -1120,6 +1232,83 @@ export class WorkflowRepository {
     });
 
     return expandedExecutions;
+  }
+
+  /**
+   * Fetch agent step data from messageAttachment -> Redis/GCS
+   * Looks up by input step ID, then fetches from Redis or GCS
+   */
+   async fetchAgentStepsFromAttachment(
+    inputStepId: string,
+    parentExecutionId: string,
+    stepName: string
+  ): Promise<any[] | null> {
+    try {
+      // Look up messageAttachment by input step ID
+      const attachment = await prisma.messageAttachment.findFirst({
+        where: {
+          entityId: inputStepId,
+          entityType: AttachmentEntityType.WORKFLOW_STEPS
+        }
+      });
+
+      if (!attachment) {
+        logger.info(`[WORKFLOW-REPO] No messageAttachment found for agent step ${stepName} (stepId: ${inputStepId})`);
+        return null;
+      }
+
+      // Try Redis first with key format: workflow:{executionId}:{stepName}
+      const redisKey = buildWorkflowStepKey(parentExecutionId, stepName);
+      const redisData = await redisService.lrange(redisKey, 0, -1);
+
+      if (redisData && redisData.length > 0) {
+        logger.info(`[WORKFLOW-REPO] Found ${redisData.length} agent steps in Redis for ${redisKey}`);
+        return redisData.map(item => JSON.parse(item)).filter(s => s.stepId).map((step: any) => ({
+          stepId: step.stepId,
+          workflowExecutionId: parentExecutionId,
+          stepExecutorType: step.stepExecutorType || 'agent',
+          stepName: step.stepName,
+          type: step.type,
+          previousStepId: null,
+          data: step.data,
+          status: step.status,
+          createdAt: new Date(step.createdAt),
+          updatedAt: new Date(step.updatedAt),
+        }));
+      }
+      // Fallback to GCS if URL is available
+      else if (attachment.url && attachment.url.startsWith('gs://')) {
+        logger.info(`[WORKFLOW-REPO] Redis empty, fetching agent steps from GCS for ${redisKey}`);
+        const gcsService = GCSServiceFactory.getService(config.gcs.workflowStepsBucketName);
+        // Extract the file path from gs:// URL
+        const gcsPath = attachment.url.replace('gs://', '').split('/').slice(1).join('/');
+        const fileBuffer = await gcsService.getFileBuffer(gcsPath);
+
+        if (fileBuffer) {
+          const parsedContent = JSON.parse(fileBuffer.toString());
+          // GCS file may contain an array of steps
+          const steps = Array.isArray(parsedContent) ? parsedContent : [parsedContent];
+          return steps.map((step: any) => ({
+            stepId: step.stepId,
+            workflowExecutionId: parentExecutionId,
+            stepExecutorType: step.stepExecutorType || 'agent',
+            stepName: step.stepName,
+            type: step.type,
+            previousStepId: null,
+            data: step.data,
+            status: step.status,
+            createdAt: new Date(step.createdAt),
+            updatedAt: new Date(step.updatedAt),
+          }));
+        }
+      }
+
+      logger.warn(`[WORKFLOW-REPO] No agent step data found in Redis or GCS for ${redisKey}`);
+      return null;
+    } catch (error) {
+      logger.error(`[WORKFLOW-REPO] Error fetching agent steps from attachment:`, error);
+      return null;
+    }
   }
 
   private computeStepStatus(

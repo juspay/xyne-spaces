@@ -176,6 +176,16 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findByEntityIdAndType(entityId: string, entityType: AttachmentEntityType): Promise<MessageAttachment[]> {
+    return await this.db.messageAttachment.findMany({
+      where: {
+        entityId,
+        entityType
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+  }
+
   async updateVersion(id: string, metadata: Record<string, any>): Promise<MessageAttachment> { // eslint-disable-line @typescript-eslint/no-explicit-any
     // Increment version in metadata
     const currentVersion = (metadata.version as number) || 0;

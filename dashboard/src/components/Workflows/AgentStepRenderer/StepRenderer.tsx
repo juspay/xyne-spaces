@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Accordion, AccordionItem, AccordionType } from '@juspay/blend-design-system';
 import { WorkflowStep } from '../../../services/Workflow/workflowGraphService.types';
 import { LLMCallRenderer } from './LLMCallRenderer';
@@ -24,11 +24,38 @@ interface AgentStepRendererProps {
   hideHeader?: boolean;
 }
 
+/**
+ * Extracts a stable ID from step data when step.id is missing.
+ * This handles cases where backend doesn't provide step.id at the top level.
+ */
+const extractStepId = (step: WorkflowStep): string => {
+  if (step.id) return step.id;
+
+  try {
+    const parsedData: unknown = typeof step.data === 'string' ? JSON.parse(step.data) : step.data;
+    if (parsedData && typeof parsedData === 'object' && 'id' in parsedData) {
+      const id = (parsedData as { id: unknown }).id;
+      if (typeof id === 'string') {
+        return id;
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+
+  // Fallback to a combination of stepName and status for stability
+  return `${step.stepName || 'unknown'}-${step.status || 'unknown'}`;
+};
+
 export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
   step,
   defaultOpen = true,
   hideHeader = false,
 }) => {
+  // Use step.id or extract from data as fallback
+  const stepId = extractStepId(step);
+  const [accordionValue, setAccordionValue] = useState<string[]>(defaultOpen ? [stepId] : []);
+
   if (!step?.stepName) return null;
 
   if (step.stepName === 'final_result' && !step.data?.['gitInfo']) {
@@ -122,7 +149,6 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
   };
 
   const stepName = step.stepName.toLowerCase();
-  // console.log('stepName', JSON.parse(JSON.stringify(stepName)), stepName);
 
   const matchedType = Object.entries(stepTypeMap).find(([pattern]) =>
     stepName.startsWith(pattern),
@@ -183,9 +209,14 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
 
   return (
     <div className='overflow-safe w-full word-break-safe' data-step-name={step.stepName}>
-      <Accordion {...accordionProps}>
+      <Accordion
+        accordionType={AccordionType.BORDER}
+        isMultiple={true}
+        value={accordionValue}
+        onValueChange={val => setAccordionValue(Array.isArray(val) ? val : [val])}
+      >
         <AccordionItem
-          value={step.id}
+          value={stepId}
           title={step.stepName ?? 'Unknown Step'}
           subtext={`Status: ${step.status ?? 'unknown'}`}
         >

@@ -44,6 +44,12 @@ enum WorkflowCategory {
   @@schema("public")
 }
 
+enum WorkflowExecutionMode {
+  AUTOMATIC
+  MANUAL
+  @@schema("public")
+}
+
 enum TicketStatus {      // Deprecated
   NEW                    // Ticket created, awaiting triage or auto-assignment
   IN_PROGRESS            // Work actively ongoing
@@ -125,6 +131,7 @@ enum AttachmentEntityType {
   CANVAS
   EMAIL
   DRAFT
+  WORKFLOW_STEPS
   IMPACT
   @@schema("public")
 }
@@ -562,6 +569,7 @@ model WorkflowExecution {
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
   ignoreDuration            Int      @default(0) // ~22 days max (PAUSED or Waiting for external input)
+  mode                      WorkflowExecutionMode @default(AUTOMATIC) // for agent step continuation control
   createdBy                 String?  // User ID of who created/triggered this execution
 
   // Relations

@@ -8,9 +8,10 @@ import {
   ChildWorkflowExecution
 } from '../workflow-storage'
 import { WorkflowState, ParallelWorkflowConfig, BaseWorkflowContext, ValidatedWorkflowTask, AgenticCheckpointConfig, AgenticCheckpointResult } from '../workflow-types'
-import { WorkflowStepRepository, WorkflowExecutionRepository, ExternalStepResponseRepository } from '@/database/repositories'
+import { WorkflowStepRepository, WorkflowExecutionRepository, ExternalStepResponseRepository, MessageAttachmentRepository } from '@/database/repositories'
 import { repositories } from '@/database/repositories'
 import { WorkflowExecutionStatus } from '../types/workflow-enums'
+import { AttachmentEntityType } from '@prisma/client'
 // import { WorkflowPausedException } from '../exceptions/workflow-exceptions' // Unused for now
 import {
   DeserializationError,
@@ -31,6 +32,9 @@ import type { KnowledgeLearning } from '../utils/knowledge-generator'
 import { websocketService } from '@/services/websocketService'
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service'
 import {logger} from '@/utils/logger';
+import { v4 as uuidv4 } from 'uuid';
+import { buildWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
+import { config } from '@/config/env';
 
 const prisma = DatabaseClient.getInstance()
 function normalizeToolName(toolName: string): string {
@@ -56,6 +60,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
   private workflowStepRepo: WorkflowStepRepository
   private workflowExecutionRepo: WorkflowExecutionRepository
   private externalStepResponseRepo: ExternalStepResponseRepository
+  private messageAttachmentRepo: MessageAttachmentRepository
   
   // In-memory storage for pending agentic results (per execution)
   // Used for consolidated knowledge generation at workflow completion
@@ -65,6 +70,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
     this.workflowStepRepo = repositories.workflowSteps
     this.workflowExecutionRepo = repositories.workflowExecutions
     this.externalStepResponseRepo = repositories.externalStepResponses
+    this.messageAttachmentRepo = repositories.messageAttachments
   }
   
   // Add pending agentic result for a workflow execution
@@ -86,13 +92,24 @@ export class DBWorkflowStorage implements WorkflowStorage {
     logger.info(`🧹 [STORAGE] Cleared pending agentic results for ${workflowExecutionId}`)
   }
 
+  // ========== Execution Mode Management (Manual/Automatic) ==========
+
+  async getExecutionMode(workflowExecutionId: string): Promise<string> {
+    const execution = await this.workflowExecutionRepo.findById(workflowExecutionId)
+    return execution?.mode || 'AUTOMATIC'
+  }
+
+  async setExecutionMode(workflowExecutionId: string, mode: 'AUTOMATIC' | 'MANUAL'): Promise<void> {
+    await this.workflowExecutionRepo.update(workflowExecutionId, { mode })
+    logger.info(`🎛️ [STORAGE] Set execution mode for ${workflowExecutionId} to: ${mode}`)
+  }
+
   // Helper method to create workflow step and emit real-time event
   private async createStepAndNotify(
     workflowExecutionId: string,
     data: Parameters<WorkflowStepRepository['create']>[0]
   ): Promise<WorkflowStep> {
     const createdStep = await this.workflowStepRepo.create(data)
-    
     // Get parent execution ID if this is a child execution
     // Frontend subscribes to parent execution ID, so we need to broadcast to both
     let parentExecutionId: string | null = null
@@ -145,6 +162,165 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
     return createdStep
   }
+
+  /**
+   * Ensures aggregate WorkflowStep exists for agentic steps with per-step Redis storage.
+   * Uses inputStepDbId to link to existing INPUT step and creates MessageAttachment.
+   * This is the new method for agentic checkpoints that don't create child executions.
+   */
+  private async ensureAggregateWorkflowStepWithInputStep(
+    workflowExecutionId: string,
+    inputStepDbId: string,
+    stepName: string,
+    stepData: {
+      stepId: string;
+      stepName: string;
+      type: 'input' | 'output';
+      data: string;
+      status: string;
+      stepExecutorType: string;
+    }
+  ): Promise<string> {
+    const now = new Date();
+
+    // For agentic steps, use per-step Redis key format: workflow:{executionId}:{stepName}
+    const redisKey = buildWorkflowStepKey(workflowExecutionId, stepName);
+
+    // Check if Redis key exists
+    const redisExists = await redisService.exists(redisKey);
+
+    if (redisExists) {
+      // Already exists, store step data in Redis and broadcast
+      const redisStepData = { ...stepData, createdAt: now, updatedAt: now };
+      await redisService.rpush(redisKey, JSON.stringify(redisStepData));
+      await this.broadcastAgentStepEvent(workflowExecutionId, redisStepData);
+
+      return inputStepDbId;
+    }
+
+    // Need to create - use lock to prevent race condition
+    const lockKey = `lock:workflow:${workflowExecutionId}:${stepName}`;
+    const lockAcquired = await redisService.set(lockKey, '1', 10, true);
+
+    if (!lockAcquired) {
+      // Another process is creating, wait and retry
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return this.ensureAggregateWorkflowStepWithInputStep(workflowExecutionId, inputStepDbId, stepName, stepData);
+    }
+
+    try {
+      // Double-check after acquiring lock
+      const redisExistsAfterLock = await redisService.exists(redisKey);
+      if (redisExistsAfterLock) {
+        return this.ensureAggregateWorkflowStepWithInputStep(workflowExecutionId, inputStepDbId, stepName, stepData);
+      }
+
+      // AGENTIC STEP: Create MessageAttachment entry ONCE
+      const gcsPath = `workflows/${workflowExecutionId}/${stepName}.json`;
+      const gcsUrl = `gs://${config.gcs.workflowStepsBucketName}/${gcsPath}`;
+
+      // Check if MessageAttachment already exists for this step
+      const existingAttachments = await this.messageAttachmentRepo.findByEntityIdAndType(
+        inputStepDbId,
+        AttachmentEntityType.WORKFLOW_STEPS
+      );
+
+      if (existingAttachments.length === 0) {
+        // Create MessageAttachment entry linking to the existing INPUT step
+        await this.messageAttachmentRepo.create({
+          entityType: AttachmentEntityType.WORKFLOW_STEPS,
+          entityId: inputStepDbId,
+          storageProvider: 'gcs',
+          url: gcsUrl,
+          originalFilename: `${stepName}.json`,
+          mimetype: 'application/json',
+          size: Buffer.byteLength(stepData.data, 'utf-8'),
+          uploadedByUserId: 'system',
+          createdBy: 'system',
+          conversationId: null,
+          metadata: {
+            workflowExecutionId,
+            checkpointId: stepName,
+            workflowStepId: inputStepDbId
+          }
+        });
+        logger.info(`[DB-STORAGE] Created MessageAttachment for agentic step ${stepName}`);
+      }
+
+      // Initialize Redis key with 5-hour TTL
+      const redisStepData = { ...stepData, createdAt: now, updatedAt: now };
+      await redisService.rpush(redisKey, JSON.stringify(redisStepData));
+      await redisService.expire(redisKey, 18000);
+
+      // Broadcast event
+      await this.broadcastAgentStepEvent(workflowExecutionId, redisStepData);
+
+      return inputStepDbId;
+    } finally {
+      // Release the lock
+      await redisService.del(lockKey);
+    }
+  }
+
+  /**
+   * Broadcast agent step event for real-time UI updates
+   * (Same pattern as createStepAndNotify)
+   */
+  private async broadcastAgentStepEvent(
+    workflowExecutionId: string,
+    stepData: {
+      stepId: string;
+      stepName: string | null;
+      type: string | null;
+      stepExecutorType: string | null;
+      createdAt?: Date;
+      updatedAt?: Date;
+    }
+  ): Promise<void> {
+    // Get parent execution ID if this is a child execution
+    let parentExecutionId: string | null = null;
+    try {
+      const execution = await this.workflowExecutionRepo.findById(workflowExecutionId);
+      parentExecutionId = execution?.parentWorkflowExecutionId || null;
+    } catch (error) {
+      logger.error(`❌ [DB-STORAGE] Failed to get parent execution ID:`, error);
+    }
+
+    const eventData = {
+      type: 'step_added' as const,
+      executionId: workflowExecutionId,
+      data: {
+        stepId: stepData.stepId,
+        stepName: stepData.stepName,
+        type: stepData.type,
+        stepExecutorType: stepData.stepExecutorType || undefined
+      },
+      timestamp: new Date()
+    };
+
+    // Broadcast to websocket
+    redisService.broadcastWorkflowEvent(workflowExecutionId, eventData).catch((error) => {
+      logger.error(`❌ [DB-STORAGE] Failed to broadcast workflow step event:`, error);
+    });
+
+    if (parentExecutionId) {
+      redisService.broadcastWorkflowEvent(parentExecutionId, {
+        ...eventData,
+        executionId: parentExecutionId,
+        data: { ...eventData.data, childExecutionId: workflowExecutionId }
+      }).catch((error) => {
+        logger.error(`❌ [DB-STORAGE] Failed to broadcast to parent execution:`, error);
+      });
+    }
+
+    // Update conversation progress
+    try {
+      await this.updateConversationMessageWithProgress(workflowExecutionId);
+    } catch (error) {
+      logger.error(`[WorkflowStorage] Failed to update conversation message for ${workflowExecutionId}:`, error);
+    }
+  }
+
 
   // Context and output storage (NEW)
   async saveInitialContext<TContext extends BaseWorkflowContext>(
@@ -523,6 +699,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
       await this.ensureWorkflowExecution(workflowExecutionId)
 
       // Create input step and return its DB ID
+      // Input step starts as RUNNING (not PENDING) since it's actively being processed
       const createdStep = await this.createStepAndNotify(workflowExecutionId, {
         workflowExecution: { connect: { id: workflowExecutionId } },
         stepExecutorType: STEP_TYPES.AGENT,
@@ -530,8 +707,36 @@ export class DBWorkflowStorage implements WorkflowStorage {
         type: 'input',
         data: safeSerialize(config),
         previousStepId: parentStepId,
-        status: WorkflowStepStatus.PENDING
+        status: WorkflowStepStatus.RUNNING
       })
+
+      // If there's an initialUserMessage, store it as a user_message step in Redis/GCS
+      // This ensures it's automatically included in conversation history reconstruction
+      if (config.conversationContext?.initialUserMessage) {
+        const stepId = uuidv4();
+        const userMessageData = safeSerialize({
+          content: config.conversationContext.initialUserMessage,
+          role: 'user'
+        });
+
+        // Store in Redis/GCS using the same pattern as createUserMessageStep
+        // This stores it with stepName='user_message' so it's reconstructed as a user message
+        await this.ensureAggregateWorkflowStepWithInputStep(
+          workflowExecutionId,
+          createdStep.id,
+          checkpointId,
+          {
+            stepId,
+            stepName: 'user_message',
+            type: 'input',
+            data: userMessageData,
+            status: 'completed',
+            stepExecutorType: STEP_TYPES.AGENT
+          }
+        );
+
+        logger.info(`[DB-STORAGE] Stored initialUserMessage as user_message step for ${workflowExecutionId}:${checkpointId}`);
+      }
 
       return createdStep.id
     } catch (error) {
@@ -544,6 +749,21 @@ export class DBWorkflowStorage implements WorkflowStorage {
   async saveAgenticCheckpointState(workflowExecutionId: string, checkpointId: string, output: AgenticCheckpointResult, parentStepId?: string): Promise<void> {
     try {
       await this.ensureWorkflowExecution(workflowExecutionId)
+
+      // Update INPUT step status to COMPLETED
+      const inputSteps = await this.workflowStepRepo.findMany({
+        where: {
+          stepName: checkpointId,
+          type: 'input',
+          stepExecutorType: STEP_TYPES.AGENT,
+          workflowExecutionId: workflowExecutionId
+        }
+      })
+
+      if (inputSteps.length > 0) {
+        await this.workflowStepRepo.updateStepStatus(inputSteps[0].id, WorkflowStepStatus.COMPLETED)
+        logger.info(`[DB-STORAGE] Updated INPUT step ${checkpointId} to COMPLETED`)
+      }
 
       // Create output step
       await this.createStepAndNotify(workflowExecutionId, {
@@ -1101,6 +1321,42 @@ export class DBWorkflowStorage implements WorkflowStorage {
     }
   }
 
+  async getParentExecutionInputStepId(workflowExecutionId: string, stepName: string): Promise<string | null> {
+    try {
+      const executionInfo = await this.getExecutionInfo(workflowExecutionId)
+      if (!executionInfo) return null
+
+      const parentExecutionId = executionInfo.parentExecutionId
+      if (!parentExecutionId) return null
+
+      const parentSteps = await this.getChildWorkflowStepsWithDetails(parentExecutionId)
+      const matchingStep = parentSteps.find(s => s.stepName === stepName && s.type === 'input')
+
+      if (matchingStep) return matchingStep.id
+      return null
+    } catch (error) {
+      logger.error(`Error getting parent execution input step ID for ${workflowExecutionId}:${stepName}:`, error)
+      return null
+    }
+  }
+
+  async getChildWorkflowStepsWithDetails(childExecutionId: string): Promise<Array<{id: string, stepName: string | null, type: string | null, data: string | null, createdAt: Date}>> {
+    try {
+      const steps = await this.workflowStepRepo.findByWorkflowExecutionId(childExecutionId)
+
+      return steps.map(step => ({
+        id: step.id,
+        stepName: step.stepName,
+        type: step.type,
+        data: step.data,
+        createdAt: step.createdAt
+      }))
+    } catch (error) {
+      logger.error(`Error getting child workflow steps with details for ${childExecutionId}:`, error)
+      return []
+    }
+  }
+
   async getCompletedExecutionResult(childExecutionId: string): Promise<FrameworkExecutionResult | null> {
     try {
       const steps = await this.workflowStepRepo.findByWorkflowExecutionId(childExecutionId)
@@ -1129,7 +1385,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
         output: safeSerialize(result)  // Save the full result including gitInfo
       })
 
-      // Save final result as a workflow step
+       // Save final result as a workflow step
       await this.createStepAndNotify(childExecutionId, {
         workflowExecution: { connect: { id: childExecutionId } },
         stepExecutorType: STEP_TYPES.AGENT,
@@ -1166,48 +1422,77 @@ export class DBWorkflowStorage implements WorkflowStorage {
   }
 
   // Framework step creation methods
+  // These methods now use inputStepDbId to get stepName and use parent execution directly
 
-  async createToolExecutionStep(childExecutionId: string, toolExecution: any): Promise<void> {
+  async getStepById(stepId: string): Promise<WorkflowStep | null> {
     try {
-      const normalizedToolName = normalizeToolName(toolExecution.name)
-      const workflowStep = await this.createStepAndNotify(childExecutionId, {
-        workflowExecution: { connect: { id: childExecutionId } },
-        stepExecutorType: STEP_TYPES.AGENT,
-        stepName: `tool_${normalizedToolName}`,
-        type: 'output',
-        data: safeSerialize({
-          id: toolExecution.id,
-          input: toolExecution.input,
-          output: toolExecution.output,
-          duration: toolExecution.duration
-        }),
-        status: toolExecution.success ? 'completed' : 'failed'
-      })
-
-      // Create linked AgentStep
-      await repositories.agentSteps.create({
-        stepsId: workflowStep.id,
-        toolCallId: toolExecution.id,
-        stepType: 'tool',
-        toolName: normalizedToolName
-      })
+      const steps = await this.workflowStepRepo.findMany({
+        where: { id: stepId }
+      });
+      return steps.length > 0 ? steps[0] : null;
     } catch (error) {
-      throw new Error(`Failed to create tool execution step: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      logger.error(`Failed to get step by ID ${stepId}:`, error);
+      return null;
     }
   }
 
-  async updateToolExecutionAgentStep(toolExecutionId: string, agentData: UpdateAgentInput): Promise<AgentStep> {
+  async createToolExecutionStep(workflowExecutionId: string, inputStepDbId: string, toolExecution: any): Promise<void> {
+    try {
+      // Get the INPUT step to retrieve its stepName
+      const inputStep = await this.getStepById(inputStepDbId);
+      if (!inputStep) {
+        throw new Error(`Input step not found: ${inputStepDbId}`);
+      }
+
+      const normalizedToolName = normalizeToolName(toolExecution.name);
+      const stepId = uuidv4();
+      const stepData = safeSerialize({
+        id: toolExecution.id,
+        input: toolExecution.input,
+        output: toolExecution.output,
+        duration: toolExecution.duration
+      });
+
+      await this.ensureAggregateWorkflowStepWithInputStep(
+        workflowExecutionId,
+        inputStepDbId,
+        inputStep.stepName || 'unknown',
+        {
+          stepId,
+          stepName: `tool_${normalizedToolName}`,
+          type: 'output',
+          data: stepData,
+          status: toolExecution.success ? 'completed' : 'failed',
+          stepExecutorType: STEP_TYPES.AGENT
+        }
+      );
+
+      // Create AgentStep linking to the INPUT step
+      await repositories.agentSteps.create({
+        stepsId: inputStepDbId,
+        toolCallId: toolExecution.id,
+        stepType: 'tool',
+        toolName: normalizedToolName
+      });
+    } catch (error) {
+      throw new Error(`Failed to create tool execution step: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  async updateToolExecutionAgentStep(inputStepDbId: string, toolCallId: string, agentData: UpdateAgentInput): Promise<AgentStep> {
     const maxRetries = 5;
     const baseDelay = 100; // ms
-    
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
+        // Look up agent step by stepsId (inputStepDbId) and toolCallId
         const agentSteps = await repositories.agentSteps.findMany({
           where: {
-            toolCallId: toolExecutionId
+            stepsId: inputStepDbId,
+            toolCallId: toolCallId
           }
         })
-        
+
         if (agentSteps && agentSteps.length > 0) {
           return await repositories.agentSteps.update(agentSteps[0].id, {...agentData})
         }
@@ -1217,93 +1502,150 @@ export class DBWorkflowStorage implements WorkflowStorage {
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
-        
+
         throw new Error(
-          `Failed to update tool execution agent step for ${toolExecutionId}: Agent step not found after ${maxRetries} attempts`
+          `Failed to update tool execution agent step for inputStepDbId=${inputStepDbId}, toolCallId=${toolCallId}: Agent step not found after ${maxRetries} attempts`
         )
       } catch (error) {
         throw new Error(
-          `Failed to update tool execution agent step for ${toolExecutionId}: ${error instanceof Error ? error.message : 'Unknown error'}`
+          `Failed to update tool execution agent step for inputStepDbId=${inputStepDbId}, toolCallId=${toolCallId}: ${error instanceof Error ? error.message : 'Unknown error'}`
         )
       }
     }
-    
+
     // This should never be reached, but TypeScript needs it
     throw new Error(
-      `Failed to update tool execution agent step for ${toolExecutionId}: Unexpected error in retry loop`
+      `Failed to update tool execution agent step for inputStepDbId=${inputStepDbId}, toolCallId=${toolCallId}: Unexpected error in retry loop`
     )
   }
 
-  async updateToolExecutionStep(workflowStep: string, toolData: any, toolCallStatus: string, toolInput?: Record<string, unknown>): Promise<void> {
+  async updateToolExecutionStep(workflowStep: string, toolCallId: string, toolData: any, toolCallStatus: string, toolInput?: Record<string, unknown>): Promise<void> {
     try {
+      // Get workflow step from DB to find executionId and stepName (needed for Redis key)
+      // Note: The actual step data is stored in Redis, not in the DB's data field
       const workflowStepList = await repositories.workflowSteps.findMany({
-        where: {
-          id: workflowStep
+        where: { id: workflowStep }
+      });
+
+      if (!workflowStepList || workflowStepList.length === 0) {
+        return;
+      }
+
+      const workflowStepDB = workflowStepList[0];
+
+      // Read the current step data from Redis (source of truth)
+      const redisKey = buildWorkflowStepKey(workflowStepDB.workflowExecutionId, workflowStepDB.stepName || 'unknown');
+      const redisData = await redisService.lrange(redisKey, 0, -1);
+
+      // Find the entry matching the toolCallId
+      const entryIndex = redisData.findIndex((item) => {
+        try {
+          const parsed = JSON.parse(item);
+          const stepData = safeDeserialize(parsed.data || '{}') as { id?: string };
+          return stepData.id === toolCallId;
+        } catch {
+          return false;
         }
       });
-      if (workflowStepList && workflowStepList.length > 0){
-        const workflowStepDB = workflowStepList[0];
-        const prevData: any = safeDeserialize(workflowStepDB.data || "{}");
-        prevData["output"] = toolData;
-        
-        if (toolInput && Object.keys(toolInput).length > 0) {
-          prevData["input"] = toolInput;
-        }
 
-        await repositories.workflowSteps.update(workflowStep, {
-          data: safeSerialize(prevData),
-          status: toolCallStatus
-        })
+      if (entryIndex >= 0) {
+        try {
+          const stepEntry = JSON.parse(redisData[entryIndex]);
+
+          // Deserialize the existing data from Redis, update it, and re-serialize
+          const prevData: any = safeDeserialize(stepEntry.data || '{}');
+          prevData['output'] = toolData;
+
+          if (toolInput && Object.keys(toolInput).length > 0) {
+            prevData['input'] = toolInput;
+          }
+
+          const serializedData = safeSerialize(prevData);
+
+          const updatedEntry = JSON.stringify({
+            ...stepEntry,
+            data: serializedData,
+            status: toolCallStatus,
+            updatedAt: new Date()
+          });
+
+          // Use LSET to atomically update the specific index (no race condition)
+          await redisService.lset(redisKey, entryIndex, updatedEntry);
+          await redisService.expire(redisKey, 18000); // Reset TTL
+        } catch {
+          // Skip if entry can't be parsed
+        }
       }
     } catch (error) {
       throw new Error(
-        `Failed to workflow step for id ${workflowStep}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to update tool execution step for id ${workflowStep}: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
     }
   }
 
-  async createLLMCallStep(childExecutionId: string, llmCall: any): Promise<void> {
+  async createLLMCallStep(workflowExecutionId: string, inputStepDbId: string, llmCall: any): Promise<void> {
     try {
-      const stepData: Record<string, unknown> = {
+      // Get the INPUT step to retrieve its stepName
+      const inputStep = await this.getStepById(inputStepDbId);
+      if (!inputStep) {
+        throw new Error(`Input step not found: ${inputStepDbId}`);
+      }
+
+      const llmStepData: Record<string, unknown> = {
         messages: llmCall.messages || [],
         response: llmCall.content,
         tokens: llmCall.tokens
-      }
-      
-      if (llmCall.thinking) {
-        stepData.thinking = llmCall.thinking
-      }
-      
-      if (llmCall.toolCalls && llmCall.toolCalls.length > 0) {
-        stepData.toolCalls = llmCall.toolCalls
-      }
-      
-      const workflowStep = await this.createStepAndNotify(childExecutionId, {
-        workflowExecution: { connect: { id: childExecutionId } },
-        stepExecutorType: STEP_TYPES.AGENT,
-        stepName: `llm_call_${Date.now()}`,
-        type: 'output',
-        data: safeSerialize(stepData),
-        status: 'completed'
-      })
+      };
 
-      // Create linked AgentStep
+      if (llmCall.thinking) {
+        llmStepData.thinking = llmCall.thinking;
+      }
+
+      if (llmCall.toolCalls && llmCall.toolCalls.length > 0) {
+        llmStepData.toolCalls = llmCall.toolCalls;
+      }
+
+      const stepId = uuidv4();
+      const serializedData = safeSerialize(llmStepData);
+
+      // Use ensureAggregateWorkflowStepWithInputStep for agentic steps
+      await this.ensureAggregateWorkflowStepWithInputStep(
+        workflowExecutionId,
+        inputStepDbId,
+        inputStep.stepName || 'unknown',
+        {
+          stepId,
+          stepName: `llm_call_${Date.now()}`,
+          type: 'output',
+          data: serializedData,
+          status: 'completed',
+          stepExecutorType: STEP_TYPES.AGENT
+        }
+      );
+
+      // Create AgentStep linking to the INPUT step
       await repositories.agentSteps.create({
-        stepsId: workflowStep.id,
+        stepsId: inputStepDbId,
         stepType: 'llm-call'
-      })
+      });
     } catch (error) {
-      throw new Error(`Failed to create LLM call step: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      throw new Error(`Failed to create LLM call step: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  async createAssistantMessageStep(childExecutionId: string, message: any): Promise<void> {
+  async createAssistantMessageStep(workflowExecutionId: string, inputStepDbId: string, message: any): Promise<void> {
     try {
-      let stepData: Record<string, unknown>
-      const stepName = 'assistant_message'
-      
+      // Get the INPUT step to retrieve its stepName
+      const inputStep = await this.getStepById(inputStepDbId);
+      if (!inputStep) {
+        throw new Error(`Input step not found: ${inputStepDbId}`);
+      }
+
+      let msgStepData: Record<string, unknown>;
+      const stepName = 'assistant_message';
+
       if (message.turn !== undefined && message.result) {
-        stepData = {
+        msgStepData = {
           turn: message.turn,
           content: message.result.content,
           thinking: message.result.thinking,
@@ -1311,72 +1653,266 @@ export class DBWorkflowStorage implements WorkflowStorage {
           tokens: message.result.tokens,
           cost: message.result.cost,
           role: 'assistant'
-        }
+        };
       } else {
-        stepData = {
+        msgStepData = {
           content: message.content,
           role: message.role || 'assistant'
-        }
+        };
       }
-      
-      const workflowStep = await this.createStepAndNotify(childExecutionId, {
-        workflowExecution: { connect: { id: childExecutionId } },
-        stepExecutorType: STEP_TYPES.AGENT,
-        stepName,
-        type: 'output',
-        data: safeSerialize(stepData),
-        status: 'completed'
-      })
 
+      const stepId = uuidv4();
+      const serializedData = safeSerialize(msgStepData);
+
+      // Use ensureAggregateWorkflowStepWithInputStep for agentic steps
+      await this.ensureAggregateWorkflowStepWithInputStep(
+        workflowExecutionId,
+        inputStepDbId,
+        inputStep.stepName || 'unknown',
+        {
+          stepId,
+          stepName,
+          type: 'output',
+          data: serializedData,
+          status: 'completed',
+          stepExecutorType: STEP_TYPES.AGENT
+        }
+      );
+
+      // Create AgentStep linking to the INPUT step
       await repositories.agentSteps.create({
-        stepsId: workflowStep.id,
+        stepsId: inputStepDbId,
         stepType: 'assistant-message'
-      })
+      });
     } catch (error) {
-      throw new Error(`Failed to create assistant message step: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      throw new Error(`Failed to create assistant message step: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  async createUserMessageStep(childExecutionId: string, userMessage: string): Promise<void> {
+  async createUserMessageStep(workflowExecutionId: string, inputStepDbId: string, userMessage: string): Promise<void> {
     try {
-      await this.createStepAndNotify(childExecutionId, {
-        workflowExecution: { connect: { id: childExecutionId } },
-        stepExecutorType: STEP_TYPES.AGENT,
-        stepName: 'user_message',
-        type: 'input',
-        data: safeSerialize({
-          content: userMessage,
-          role: 'user'
-        }),
-        status: 'completed'
-      })
+      // Get the INPUT step to retrieve its stepName
+      const inputStep = await this.getStepById(inputStepDbId);
+      if (!inputStep) {
+        throw new Error(`Input step not found: ${inputStepDbId}`);
+      }
+
+      const stepId = uuidv4();
+      const stepData = safeSerialize({
+        content: userMessage,
+        role: 'user'
+      });
+
+      // Use ensureAggregateWorkflowStepWithInputStep for agentic steps
+      await this.ensureAggregateWorkflowStepWithInputStep(
+        workflowExecutionId,
+        inputStepDbId,
+        inputStep.stepName || 'unknown',
+        {
+          stepId,
+          stepName: 'user_message',
+          type: 'input',
+          data: stepData,
+          status: 'completed',
+          stepExecutorType: STEP_TYPES.AGENT
+        }
+      );
+
+      // Create AgentStep linking to the INPUT step
+      await repositories.agentSteps.create({
+        stepsId: inputStepDbId,
+        stepType: 'user-message'
+      });
     } catch (error) {
       throw new Error(`Failed to create user message step: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
-  async createErrorStep(childExecutionId: string, error: Error): Promise<void> {
+  async createErrorStep(workflowExecutionId: string, inputStepDbId: string, error: Error): Promise<void> {
     try {
-      const workflowStep = await this.createStepAndNotify(childExecutionId, {
-        workflowExecution: { connect: { id: childExecutionId } },
-        stepExecutorType: STEP_TYPES.AGENT,
-        stepName: 'framework_error',
-        type: 'output',
-        data: safeSerialize({
-          error: error.message,
-          stack: error.stack,
-          timestamp: new Date().toISOString()
-        }),
-        status: 'failed'
-      })
+      // Get the INPUT step to retrieve its stepName
+      const inputStep = await this.getStepById(inputStepDbId);
+      if (!inputStep) {
+        throw new Error(`Input step not found: ${inputStepDbId}`);
+      }
 
-      // Create linked AgentStep
+      const stepId = uuidv4();
+      const stepData = safeSerialize({
+        error: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      });
+
+      // Use ensureAggregateWorkflowStepWithInputStep for agentic steps
+      await this.ensureAggregateWorkflowStepWithInputStep(
+        workflowExecutionId,
+        inputStepDbId,
+        inputStep.stepName || 'unknown',
+        {
+          stepId,
+          stepName: 'framework_error',
+          type: 'output',
+          data: stepData,
+          status: 'failed',
+          stepExecutorType: STEP_TYPES.AGENT
+        }
+      );
+
+      // Create AgentStep linking to the INPUT step
       await repositories.agentSteps.create({
-        stepsId: workflowStep.id,
+        stepsId: inputStepDbId,
         stepType: 'hooks'
-      })
+      });
+    } catch (err) {
+      throw new Error(`Failed to create error step: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+  }
+
+  // Get agentic steps from Redis (new per-step storage format)
+  // Falls back to GCS if Redis data is not available
+  async getAgenticStepsFromRedis(
+    workflowExecutionId: string,
+    checkpointId: string
+  ): Promise<Array<{ stepName: string; data: string; createdAt: Date }>> {
+    try {
+      const redisKey = buildWorkflowStepKey(workflowExecutionId, checkpointId);
+      const redisData = await redisService.lrange(redisKey, 0, -1);
+
+      if (redisData.length === 0) {
+        // Fallback to GCS - try to load from the execution's steps file
+        logger.info(`[DB-STORAGE] Redis empty for ${workflowExecutionId}:${checkpointId}, trying GCS`);
+        return await this.getAgenticStepsFromGCSByExecution(workflowExecutionId, checkpointId);
+      }
+
+      return redisData.map(item => {
+        try {
+          const parsed = JSON.parse(item);
+          return {
+            stepName: parsed.stepName || 'unknown',
+            data: parsed.data || '{}',
+            createdAt: new Date(parsed.createdAt || Date.now())
+          };
+        } catch {
+          return { stepName: 'unknown', data: item, createdAt: new Date() };
+        }
+      });
     } catch (error) {
-      throw new Error(`Failed to create error step: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      logger.error(`[DB-STORAGE] Failed to get agentic steps from Redis for ${workflowExecutionId}:${checkpointId}:`, error);
+      // Try GCS as fallback on error too
+      return await this.getAgenticStepsFromGCSByExecution(workflowExecutionId, checkpointId);
+    }
+  }
+
+  // Helper: Get agentic steps directly from GCS by execution and checkpoint
+  private async getAgenticStepsFromGCSByExecution(
+    workflowExecutionId: string,
+    checkpointId: string
+  ): Promise<Array<{ stepName: string; data: string; createdAt: Date }>> {
+    try {
+      // Import GCS service factory and config
+      const GCSServiceFactory = (await import('@/services/gcsServiceFactory')).default;
+      const { config } = await import('@/config/env');
+      const gcsService = GCSServiceFactory.getService(config.gcs.workflowStepsBucketName);
+
+      // Try per-step file only: workflows/{executionId}/{checkpointId}.json
+      const gcsPath = `workflows/${workflowExecutionId}/${checkpointId}.json`;
+      let fileContent: Buffer | null = null;
+      try {
+        fileContent = await gcsService.getFileBuffer(gcsPath);
+        if (!fileContent) {
+          logger.warn(`[DB-STORAGE] No per-step GCS file found at ${gcsPath} for ${workflowExecutionId}:${checkpointId}`);
+          return [];
+        }
+        logger.info(`[DB-STORAGE] Loaded per-step GCS file ${gcsPath} for ${workflowExecutionId}:${checkpointId}`);
+      } catch (e) {
+        logger.warn(`[DB-STORAGE] Failed to fetch per-step GCS file ${gcsPath} for ${workflowExecutionId}:${checkpointId}:`, e instanceof Error ? e.message : String(e));
+        return [];
+      }
+
+      const gcsSteps = JSON.parse(fileContent.toString('utf-8'));
+      if (!Array.isArray(gcsSteps) || gcsSteps.length === 0) {
+        logger.warn(`[DB-STORAGE] GCS file empty or invalid for ${workflowExecutionId}`);
+        return [];
+      }
+
+      return gcsSteps.map((step: any) => ({
+        stepName: step.stepName || 'unknown',
+        data: typeof step.data === 'string' ? step.data : JSON.stringify(step.data),
+        createdAt: new Date(step.createdAt || Date.now())
+      }));
+    } catch (error) {
+      logger.error(`[DB-STORAGE] Failed to get agentic steps from GCS for ${workflowExecutionId}:${checkpointId}:`, error);
+      return [];
+    }
+  }
+
+  // Get agentic steps from GCS (fallback when Redis TTL expires)
+  async getAgenticStepsFromGCS(
+    _workflowExecutionId: string,
+    inputStepDbId: string
+  ): Promise<WorkflowStepData[]> {
+    try {
+      // Get the INPUT step to find the stepName and MessageAttachment
+      const inputStep = await this.getStepById(inputStepDbId);
+      if (!inputStep || !inputStep.stepName) {
+        logger.warn(`[DB-STORAGE] Input step not found or missing stepName for ${inputStepDbId}`);
+        return [];
+      }
+
+      // Try to get steps from MessageAttachment (linked to the INPUT step)
+      const attachments = await this.messageAttachmentRepo.findByEntityIdAndType(
+        inputStepDbId,
+        AttachmentEntityType.WORKFLOW_STEPS
+      );
+
+      if (attachments.length === 0) {
+        logger.warn(`[DB-STORAGE] No MessageAttachment found for step ${inputStepDbId}`);
+        return [];
+      }
+
+      const stepData: WorkflowStepData[] = [];
+
+      // Fetch from GCS using the attachment URL
+      const GCSServiceFactory = (await import('@/services/gcsServiceFactory')).default;
+      const gcsService = GCSServiceFactory.getService(config.gcs.workflowStepsBucketName);
+
+      for (const attachment of attachments) {
+        if (attachment.url && attachment.url.startsWith('gs://')) {
+          try {
+            const gcsPath = attachment.url.replace('gs://', '').split('/').slice(1).join('/');
+            const fileBuffer = await gcsService.getFileBuffer(gcsPath);
+
+            if (fileBuffer) {
+              const parsedContent = JSON.parse(fileBuffer.toString());
+              const steps = Array.isArray(parsedContent) ? parsedContent : [parsedContent];
+
+              for (const step of steps) {
+                stepData.push({
+                  stepName: step.stepName || inputStep.stepName,
+                  data: typeof step.data === 'string' ? step.data : JSON.stringify(step.data || {}),
+                  createdAt: step.createdAt ? new Date(step.createdAt) : new Date()
+                });
+              }
+            }
+          } catch (gcsError) {
+            logger.warn(`[DB-STORAGE] Failed to fetch GCS data from ${attachment.url}:`, gcsError);
+          }
+        }
+      }
+
+      // Also include the INPUT step itself if no GCS data was found
+      if (stepData.length === 0) {
+        stepData.push({
+          stepName: inputStep.stepName,
+          data: inputStep.data || '{}',
+          createdAt: inputStep.createdAt
+        });
+      }
+
+      return stepData;
+    } catch (error) {
+      logger.error(`[DB-STORAGE] Failed to get agentic steps from GCS for ${inputStepDbId}:`, error);
+      return [];
     }
   }
 
@@ -2926,3 +3462,11 @@ export class DBWorkflowStorage implements WorkflowStorage {
     }
   }
 }
+
+
+
+
+
+
+
+

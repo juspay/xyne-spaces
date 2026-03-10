@@ -6,7 +6,7 @@ import { bugWorkflowEvalInnerSteps } from './bug-workflow/bugWorkflowEvalInnerSt
 import { bugWorkflowEvalInnerStepsExperimental } from './bugWorkflowEvalInnerStepsExperimental'
 import { featureImplementationWorkflow } from './featureImplementationWorkflow'
 import { featurePlanningWorkflow } from './featurePlanningWorkflow'
-import { xyneSpacesFeatureImplementationWorkflow } from './xyne-spaces-workflows'
+import { xyneSpacesFeatureImplementationWorkflow} from './xyne-spaces-workflows'
 import { xyneSpacesPlanReviewLoopWorkflow } from './plan-review-loop'
 import { fidoServerWorkflow } from './fido-workflow/fidoWorkflow'
 import { connectorMigrationWorkflow } from './connectorMigration'

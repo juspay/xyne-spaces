@@ -92,19 +92,30 @@ export interface WorkflowStorage {
   findExistingChildExecution(parentExecutionId: string, checkpointId: string): Promise<ChildWorkflowExecution | null>
   createChildWorkflowExecution(parentExecutionId: string, workflowId: string, checkpointId: string): Promise<string>
   getChildWorkflowSteps(childExecutionId: string): Promise<WorkflowStepData[]>
+  getParentExecutionInputStepId(workflowExecutionId: string, stepName: string): Promise<string | null>
   getCompletedExecutionResult(childExecutionId: string): Promise<FrameworkExecutionResult | null>
   markChildExecutionCompleted(childExecutionId: string, result: FrameworkExecutionResult): Promise<void>
   markChildExecutionFailed(childExecutionId: string, reason: string): Promise<void>
   markChildExecutionCancelled(childExecutionId: string, reason: string): Promise<void>
 
   // Framework step creation methods
-  createToolExecutionStep(childExecutionId: string, toolExecution: any): Promise<void>
-  updateToolExecutionStep(childExecutionId: string, toolData: any, toolCallStatus: string, toolInput?: Record<string, unknown>): Promise<void>
-  updateToolExecutionAgentStep(toolExecutionId: string, updateData: UpdateAgentStepInput): Promise<AgentStep>
-  createLLMCallStep(childExecutionId: string, llmCall: any): Promise<void>
-  createAssistantMessageStep(childExecutionId: string, message: any): Promise<void>
-  createUserMessageStep(childExecutionId: string, userMessage: string): Promise<void>
-  createErrorStep(childExecutionId: string, error: Error): Promise<void>
+  // Modified to use inputStepDbId (existing INPUT step) instead of childExecutionId
+  createToolExecutionStep(workflowExecutionId: string, inputStepDbId: string, toolExecution: any): Promise<void>
+  updateToolExecutionStep(inputStepDbId: string, toolCallId: string, toolData: any, toolCallStatus: string, toolInput?: Record<string, unknown>): Promise<void>
+  updateToolExecutionAgentStep(inputStepDbId: string, toolCallId: string, updateData: UpdateAgentStepInput): Promise<AgentStep>
+  createLLMCallStep(workflowExecutionId: string, inputStepDbId: string, llmCall: any): Promise<void>
+  createAssistantMessageStep(workflowExecutionId: string, inputStepDbId: string, message: any): Promise<void>
+  createUserMessageStep(workflowExecutionId: string, inputStepDbId: string, userMessage: string): Promise<void>
+  createErrorStep(workflowExecutionId: string, inputStepDbId: string, error: Error): Promise<void>
+
+  // Get step by ID (to retrieve stepName from inputStepDbId)
+  getStepById(stepId: string): Promise<WorkflowStep | null>
+
+  // Get agentic steps from Redis (new per-step storage)
+  getAgenticStepsFromRedis(workflowExecutionId: string, checkpointId: string): Promise<Array<{ stepName: string; data: string; createdAt: Date }>>
+
+  // Get agentic steps from GCS (fallback when Redis TTL expires)
+  getAgenticStepsFromGCS(workflowExecutionId: string, inputStepDbId: string): Promise<WorkflowStepData[]>
 
   // Pause and cancel status checking
   checkWorkflowPauseOrCancelStatus(childExecutionId: string): Promise<{ isPaused: boolean; isCancelled: boolean; parentExecutionId?: string }>
@@ -223,4 +234,8 @@ export interface WorkflowStorage {
     gitInfo: import('./workflow-types').GitInfo
   }>
   clearPendingAgenticResults(workflowExecutionId: string): void
+
+  // Execution mode management (MANUAL/AUTOMATIC)
+  getExecutionMode(workflowExecutionId: string): Promise<string>
+  setExecutionMode(workflowExecutionId: string, mode: 'AUTOMATIC' | 'MANUAL'): Promise<void>
 }

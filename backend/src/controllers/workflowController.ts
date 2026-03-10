@@ -6,19 +6,145 @@ import { workflowDataService } from '../workflows/services/workflow-data-service
 import { workflowRerunService } from '../workflows/services/workflowRerunService';
 import { randomUUID } from 'crypto';
 import { DBWorkflowStorage } from '../workflows';
+import { createUserMessage } from '@framework';
 import { ticketService } from '../services/ticketService';
-import { AI_STAGES } from '@/workflows/types/workflow-enums';
+import { AI_STAGES, WorkflowExecutionStatus } from '@/workflows/types/workflow-enums';
 import { logger } from '@/utils/logger';
 import { config as appConfig } from '@/config/env';
 import { bitbucketManager } from '../bitbucket/apis';
 import { extractWorkspace } from '../workflows/framework/agent-executor';
 import { calculateDiffStats } from '@/utils/diffUtils';
+import { redisService } from '@/services/redisService';
+import { buildWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
+import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { v4 as uuidv4 } from 'uuid';
+import { safeSerialize } from '../workflows/storage/serialization';
+import { STEP_TYPES } from '../workflows/storage/step-types';
+import { AttachmentEntityType } from '@prisma/client';
+import { config } from '@/config/env';
 
 export class WorkflowController {
   private workflowRepository: WorkflowRepository;
 
   constructor() {
     this.workflowRepository = new WorkflowRepository();
+  }
+
+  /**
+   * Copy parent execution's agentic step data to new execution for rerun scenarios.
+   * Loads from parent's Redis/GCS storage and copies to new execution's storage.
+   * Optionally appends a user continuation message.
+   */
+  private async copyParentAgentStepsToExecution(
+    parentExecutionId: string,
+    parentInputStepId: string,
+    newExecutionId: string,
+    newInputStepDbId: string,
+    stepName: string,
+    continuationMessage?: string
+  ): Promise<void> {
+    const now = new Date();
+
+    try {
+      // 1. Load parent steps from Redis or GCS
+      const parentRedisKey = buildWorkflowStepKey(parentExecutionId, stepName);
+      let parentSteps: any[] = [];
+
+      // Try Redis first
+      const redisData = await redisService.lrange(parentRedisKey, 0, -1);
+      if (redisData && redisData.length > 0) {
+        parentSteps = redisData.map(item => JSON.parse(item));
+        logger.info(`[WORKFLOW-CONTROLLER] Loaded ${parentSteps.length} steps from parent Redis for ${parentRedisKey}`);
+      } else {
+        // Fallback to GCS via MessageAttachment
+        const { repositories } = await import('@/database/repositories');
+        const attachments = await repositories.messageAttachments.findByEntityIdAndType(
+          parentInputStepId,
+          AttachmentEntityType.WORKFLOW_STEPS
+        );
+
+        if (attachments.length > 0 && attachments[0].url?.startsWith('gs://')) {
+          const gcsService = GCSServiceFactory.getService(config.gcs.workflowStepsBucketName);
+          const gcsPath = attachments[0].url.replace('gs://', '').split('/').slice(1).join('/');
+
+          try {
+            const fileBuffer = await gcsService.getFileBuffer(gcsPath);
+            if (fileBuffer) {
+              const parsedContent = JSON.parse(fileBuffer.toString());
+              parentSteps = Array.isArray(parsedContent) ? parsedContent : [parsedContent];
+              logger.info(`[WORKFLOW-CONTROLLER] Loaded ${parentSteps.length} steps from parent GCS for ${stepName}`);
+            }
+          } catch (gcsError) {
+            logger.warn(`[WORKFLOW-CONTROLLER] Failed to load from GCS ${gcsPath}:`, gcsError);
+          }
+        }
+      }
+
+      if (parentSteps.length === 0) {
+        logger.warn(`[WORKFLOW-CONTROLLER] No parent steps found for ${parentExecutionId}:${stepName}`);
+        return;
+      }
+
+      // 2. Create new Redis key and MessageAttachment for new execution
+      const newRedisKey = buildWorkflowStepKey(newExecutionId, stepName);
+      const newGcsPath = `workflows/${newExecutionId}/${stepName}.json`;
+      const newGcsUrl = `gs://${config.gcs.workflowStepsBucketName}/${newGcsPath}`;
+
+      // Create MessageAttachment for new execution's step
+      const { repositories } = await import('@/database/repositories');
+      await repositories.messageAttachments.create({
+        entityType: AttachmentEntityType.WORKFLOW_STEPS,
+        entityId: newInputStepDbId,
+        storageProvider: 'gcs',
+        url: newGcsUrl,
+        originalFilename: `${stepName}.json`,
+        mimetype: 'application/json',
+        size: 0,
+        uploadedByUserId: 'system',
+        createdBy: 'system',
+        conversationId: null,
+        metadata: {
+          workflowExecutionId: newExecutionId,
+          checkpointId: stepName,
+          workflowStepId: newInputStepDbId,
+          copiedFromExecution: parentExecutionId
+        }
+      });
+
+      // 3. Copy parent steps to new Redis key
+      for (const step of parentSteps) {
+        const stepWithTimestamp = { ...step, copiedAt: now.toISOString() };
+        await redisService.rpush(newRedisKey, JSON.stringify(stepWithTimestamp));
+      }
+
+      // 4. Append continuation message if provided
+      if (continuationMessage) {
+        const userStepId = uuidv4();
+        const userStep = {
+          stepId: userStepId,
+          stepName: 'user_message',
+          type: 'input',
+          data: safeSerialize({
+            content: continuationMessage,
+            role: 'user'
+          }),
+          status: 'completed',
+          stepExecutorType: STEP_TYPES.AGENT,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString()
+        };
+        await redisService.rpush(newRedisKey, JSON.stringify(userStep));
+        logger.info(`[WORKFLOW-CONTROLLER] Appended continuation message to ${newRedisKey}`);
+      }
+
+      // Set TTL (5 hours)
+      await redisService.expire(newRedisKey, 18000);
+
+      logger.info(`[WORKFLOW-CONTROLLER] Copied ${parentSteps.length} steps from parent ${parentExecutionId} to ${newExecutionId} for step ${stepName}`);
+    } catch (error) {
+      logger.error(`[WORKFLOW-CONTROLLER] Failed to copy parent agent steps: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw error;
+    }
   }
 
   // ========== EXISTING METHODS ==========
@@ -34,22 +160,29 @@ export class WorkflowController {
         return;
       }
 
+      // If we have GCS steps, use those instead of DB steps
+      let responseSteps;
+        // Use DB steps (original behavior)
+        responseSteps = workflowSteps 
+          .map((step) => ({
+            id: step.id,
+            workflowExecutionId: step.workflowExecutionId,
+            stepExecutorType: step.stepExecutorType,
+            stepName: step.stepName,
+            type: step.type,
+            previousStepId: step.previousStepId,
+            data: step.data ? JSON.parse(step.data) : null,
+            status: step.status,
+            createdAt: step.createdAt,
+            updatedAt: step.updatedAt,
+          }));
+      
+
       // Format the response with parsed JSON data
       const response = {
         workflowExecutionId: executionId,
-        totalSteps: workflowSteps.length,
-        steps: workflowSteps.map((step) => ({
-          id: step.id,
-          workflowExecutionId: step.workflowExecutionId,
-          stepExecutorType: step.stepExecutorType,
-          stepName: step.stepName,
-          type: step.type,
-          previousStepId: step.previousStepId,
-          data: step.data ? JSON.parse(step.data) : null,
-          status: step.status,
-          createdAt: step.createdAt,
-          updatedAt: step.updatedAt,
-        })),
+        totalSteps: responseSteps.length,
+        steps: responseSteps,
       };
 
       res.status(200).json(response);
@@ -740,6 +873,8 @@ export class WorkflowController {
   };
 
   // POST: Continue an agentic step with user input (preserves conversation history)
+  // NEW: Uses Redis pub/sub to signal the running agent to abort and continue
+  // UPDATED: Handles PAUSED state for external wait (MANUAL mode completion)
   continueAgenticStep = async (req: Request, res: Response): Promise<void> => {
     try {
       const { executionId } = req.params;
@@ -751,43 +886,204 @@ export class WorkflowController {
         return;
       }
 
-      if (!message || typeof message !== 'string' || message.trim() === '') {
-        res
-          .status(400)
-          .json({ error: 'message is required (user input to continue the conversation)' });
+      // Get the step to find its stepName for the Redis channel
+      const step = await this.workflowRepository.getWorkflowStepById(stepId);
+      if (!step) {
+        res.status(404).json({ error: 'Step not found' });
         return;
       }
 
-      // Create continuation rerun
-      const result = await workflowRestoreService.createContinuationRerun({
-        sourceExecutionId: executionId,
-        agenticStepId: stepId,
-        continuationMessage: message.trim(),
-      });
+      if (step.stepExecutorType !== 'agent') {
+        res.status(400).json({ error: 'Step is not an agentic step' });
+        return;
+      }
 
-      res.status(201).json({
-        rerunExecutionId: result.rerunExecutionId,
-        actualRestoreStepId: result.actualRestoreStepId,
-        actualRestoreStepName: result.actualRestoreStepName,
-        liftedToParallel: result.liftedToParallel,
-        liftChain: result.liftChain,
-        sourceRootExecutionId: result.sourceRootExecutionId,
-        message: `Continuation created for agentic step: ${result.actualRestoreStepName}. The agent will resume with your message appended to the conversation history.`,
+      // Get execution status and mode
+      const execution = await this.workflowRepository.getWorkflowExecutionByIdSimple(executionId);
+      const mode = await this.workflowRepository.getExecutionMode(executionId);
+      const hasOutput = await this.workflowRepository.agentStepHasOutput(stepId);
+
+      // If step already has output, create a rerun execution instead of continuing
+      if (hasOutput) {
+        if (!execution) {
+          res.status(404).json({ error: 'Execution not found' });
+          return;
+        }
+
+        // Validate message is provided for rerun
+        if (!message || typeof message !== 'string' || message.trim() === '') {
+          res.status(400).json({ error: 'message is required for rerun (user input to continue the conversation)' });
+          return;
+        }
+
+        // Create rerun execution with:
+        // - parentWorkflowExecutionId: current executionId
+        // - status: PENDING (for worker to pick up)
+        // - sourceStepsId: the INPUT step ID
+        // - tag: 'rerun'
+        // - stepInputOverrideData: contains continuation info for workflow-engine
+        const rerunExecution = await this.workflowRepository.createWorkflowExecution({
+          workflowId: execution.workflowId,
+          workflowType: execution.workflowType || null,
+          context: execution.context || null,
+          output: null,
+          status: WorkflowExecutionStatus.PENDING,
+          tag: 'rerun',
+          parentWorkflowExecutionId: executionId,
+          sourceStepsId: stepId,
+          stepInputOverrideData: JSON.stringify({
+            continuationUserMessage: message.trim(),
+            sourceChildExecutionId: executionId,
+            targetStepId: step.stepName
+          }),
+          ignoreDuration: 0,
+          mode: 'AUTOMATIC',
+          createdBy: execution.createdBy || null,
+        });
+
+        logger.info(`[WORKFLOW-CONTROLLER] Created rerun execution ${rerunExecution.id} for step ${stepId} with existing output`);
+
+        // Create INPUT step for the new execution by copying parent's input step
+        const newInputStep = await this.workflowRepository.createWorkflowStep({
+          workflowExecutionId: rerunExecution.id,
+          stepExecutorType: step.stepExecutorType,
+          stepName: step.stepName,
+          type: step.type,
+          data: step.data,
+          status: step.status,
+          previousStepId: step.previousStepId,
+          stepSubType: step.stepSubType,
+          markdownSummary: step.markdownSummary,
+          attachment: step.attachment,
+        });
+
+        // Copy parent agent steps to new execution
+        await this.copyParentAgentStepsToExecution(
+          executionId,           // Parent execution ID
+          stepId,                // Parent's INPUT step ID
+          rerunExecution.id,     // New execution ID
+          newInputStep.id,       // New INPUT step ID
+          step.stepName!,        // Step name
+          message.trim()         // User's continuation message
+        );
+
+        logger.info(`[WORKFLOW-CONTROLLER] Created INPUT step ${newInputStep.id} and copied parent steps for rerun ${rerunExecution.id}`);
+
+        res.status(201).json({
+          rerunExecutionId: rerunExecution.id,
+          sourceExecutionId: executionId,
+          sourceStepId: stepId,
+          stepName: step.stepName,
+          message: 'Created rerun execution for step with existing output'
+        });
+        return;
+      }
+
+      // If execution is WAIT_FOR_EVENT in MANUAL mode (external wait state)
+      if (execution?.status === 'WAIT_FOR_EVENT' && mode === 'MANUAL') {
+        if(!message)
+        {
+          // this is for continuation or go to next steps
+
+          // just mark the execution as pending to trigger the agent to continue with the next steps (if any)
+          await this.workflowRepository.updateWorkflowExecution(executionId, { status: 'PENDING' });
+          // change mode to AUTOMATIC
+          await this.workflowRepository.setExecutionMode(executionId, 'AUTOMATIC');
+          res.status(200).json({
+            executionId,
+            stepId,
+            stepName: step.stepName,
+            message: `Execution marked as pending`,
+          });
+          return;
+        }
+        else
+        {
+          if (!message || typeof message !== 'string' || message.trim() === '') {
+        res.status(400).json({ error: 'message is required (user input to continue the conversation)' });
+        return;
+      }
+          try {
+            const perStepKey = buildWorkflowStepKey(executionId, step.stepName || 'unknown');
+            const exists = await redisService.exists(perStepKey);
+
+            // Build redis representation of the user message using framework helper
+            const userMsg = createUserMessage(message.trim());
+            const userStepId = randomUUID();
+            const nowIso = new Date().toISOString();
+            const redisUserStep = {
+              stepId: userStepId,
+              stepName: 'user_message',
+              type: 'input',
+              data: typeof userMsg === 'string' ? userMsg : JSON.stringify(userMsg),
+              status: 'completed',
+              stepExecutorType: 'agent',
+              createdAt: nowIso,
+              updatedAt: nowIso
+            };
+
+            if (exists) {
+              // Redis already has data, just append the user message
+              await redisService.rpush(perStepKey, JSON.stringify(redisUserStep));
+              await redisService.expire(perStepKey, 18000); // 5 hours
+            } else {
+              // Fetch from GCS and append user message at the end
+              try {
+                const gcsSteps = await this.workflowRepository.fetchAgentStepsFromAttachment(step.id, executionId!, step.stepName || 'unknown');
+
+                if (Array.isArray(gcsSteps) && gcsSteps.length > 0) {
+                  // Push GCS steps as-is since they're already in the correct format
+                  for (const s of gcsSteps) {
+                    await redisService.rpush(perStepKey, JSON.stringify(s));
+                  }
+                }
+              } catch (innerErr) {
+                logger.warn(`[WORKFLOW-CONTROLLER] Failed to fetch agentic steps from storage for ${executionId}:${step.stepName}:`, innerErr);
+              }
+
+              // Always push the user message at the end
+              await redisService.rpush(perStepKey, JSON.stringify(redisUserStep));
+              await redisService.expire(perStepKey, 18000); // 5 hours
+            }
+          } catch (redisErr) {
+            logger.error(`[WORKFLOW-CONTROLLER] Failed to push user message into per-step Redis for ${executionId}:${step.stepName}:`, redisErr);
+          }
+
+
+          // Resume execution
+          await this.workflowRepository.updateWorkflowExecution(executionId, { status: 'PENDING' });
+
+          res.status(200).json({
+            executionId,
+            stepId,
+            stepName: step.stepName,
+            message: `Message stored for next agent iteration. Execution resumed.`,
+          });
+          return;
+        }
+        }
+         else {
+          // Normal continuation (agent is running, not in external wait)
+      await redisService.publishAgentContinuation(executionId, step.stepName || 'unknown', message.trim());
+
+      res.status(202).json({
+        executionId,
+        stepId,
+        stepName: step.stepName,
       });
+      }
+
+      
     } catch (error) {
       logger.error('Error continuing agentic step:', error);
 
       if (error instanceof Error && error.message.includes('not found')) {
-        res.status(404).json({
-          error: error.message,
-        });
+        res.status(404).json({ error: error.message });
         return;
       }
 
       if (error instanceof Error && error.message.includes('not an agentic')) {
-        res.status(400).json({
-          error: error.message,
-        });
+        res.status(400).json({ error: error.message });
         return;
       }
 
@@ -1037,14 +1333,14 @@ export class WorkflowController {
     try {
       const { ticketId } = req.params;
       const { executionId, workflowId } = req.query;
-
       let combinedSteps;
       if (executionId && typeof executionId === 'string') {
         combinedSteps = await this.workflowRepository.getSingleExecutionSteps(
           ticketId,
           executionId
         );
-      } else if (workflowId && typeof workflowId === 'string') {
+      } else 
+        if (workflowId && typeof workflowId === 'string') {
         combinedSteps = await this.workflowRepository.getCombinedWorkflowStepsByWorkflowId(
           ticketId,
           workflowId
@@ -1203,6 +1499,95 @@ export class WorkflowController {
       res.status(500).json({
         error: 'Failed to get git diff',
         message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
+  // PUT: Set execution mode (MANUAL/AUTOMATIC) for workflow execution
+  // This is used to switch between MANUAL mode (agent stays in executor) and AUTOMATIC mode (return to workflow-engine)
+  setExecutionMode = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { executionId } = req.params;
+      const { mode } = req.body;
+
+      // Validate required fields
+      if (!mode || !['MANUAL', 'AUTOMATIC'].includes(mode)) {
+        res.status(400).json({
+          error: 'mode is required and must be either "MANUAL" or "AUTOMATIC"'
+        });
+        return;
+      }
+
+      // Get the current execution to verify it exists
+      const execution = await this.workflowRepository.getWorkflowExecutionByIdSimple(executionId);
+      if (!execution) {
+        res.status(404).json({ error: 'Workflow execution not found' });
+        return;
+      }
+
+      // Update mode in database
+      await this.workflowRepository.setExecutionMode(executionId, mode);
+
+      // Publish mode change event via Redis pub/sub
+      await redisService.publishModeChange(executionId, mode);
+
+      logger.info(`🎛️ [WORKFLOW-CONTROLLER] Set execution mode to ${mode} for ${executionId}`);
+
+      res.status(200).json({
+        success: true,
+        executionId,
+        mode,
+        message: `Execution mode set to ${mode}. ${mode === 'AUTOMATIC' ? 'Agent will proceed to workflow-engine on next completion.' : 'Agent will stay in executor on completion.'}`
+      });
+    } catch (error) {
+      logger.error('Error setting execution mode:', error);
+
+      if (error instanceof Error && error.message.includes('not found')) {
+        res.status(404).json({
+          error: error.message
+        });
+        return;
+      }
+
+      res.status(500).json({
+        error: 'Failed to set execution mode',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  };
+
+  // GET: Get execution mode for workflow execution
+  getExecutionMode = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { executionId } = req.params;
+
+      // Get the current execution to verify it exists
+      const execution = await this.workflowRepository.getWorkflowExecutionByIdSimple(executionId);
+      if (!execution) {
+        res.status(404).json({ error: 'Workflow execution not found' });
+        return;
+      }
+
+      // Get mode from database (defaults to 'AUTOMATIC' if not set)
+      const mode = await this.workflowRepository.getExecutionMode(executionId);
+
+      res.status(200).json({
+        executionId,
+        mode
+      });
+    } catch (error) {
+      logger.error('Error getting execution mode:', error);
+
+      if (error instanceof Error && error.message.includes('not found')) {
+        res.status(404).json({
+          error: error.message
+        });
+        return;
+      }
+
+      res.status(500).json({
+        error: 'Failed to get execution mode',
+        message: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   };

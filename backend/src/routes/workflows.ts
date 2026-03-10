@@ -130,6 +130,13 @@ router.put('/executions/:executionId/cancel', workflowController.cancelWorkflowE
 // GET /api/workflows/executions/:executionId/is-locked - Check if workflow execution is locked
 router.get('/executions/:executionId/is-locked', workflowController.isWorkflowExecutionLocked);
 
+// ========== EXECUTION MODE ROUTES ==========
+// PUT /api/workflows/executions/:executionId/mode - Set execution mode (manual/automatic)
+router.put('/executions/:executionId/mode', workflowController.setExecutionMode);
+
+// GET /api/workflows/executions/:executionId/mode - Get execution mode
+router.get('/executions/:executionId/mode', workflowController.getExecutionMode);
+
 // ========== EXISTING ROUTES ==========
 // Get workflow steps by execution ID (most specific first)
 router.get('/executions/:executionId/steps', workflowController.getWorkflowStepsByExecutionId);

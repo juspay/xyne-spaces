@@ -1,6 +1,5 @@
 import { WorkflowStorage, FrameworkExecutionResult } from '../../workflow-storage'
 import { FullAgenticCheckpointConfig, WorkflowState, BaseWorkflowContext, GitInfo, GitDiffFile, GitDiffStats, AgenticContinuationOverride } from '../../workflow-types'
-import { WorkflowExecutionStatus } from '../../types/workflow-enums'
 import { WorkflowPausedException, WorkflowCancelledException, WorkflowExternalWaitException } from '../../exceptions/workflow-exceptions'
 import { BitbucketManager } from '@/bitbucket/apis'
 import { repositories } from '@/database/repositories'
@@ -63,46 +62,59 @@ export class OpenCodeExecutor {
     return OpenCodeClient.forDirectory(this.baseUrl, directory)
   }
 
+  /**
+   * NEW: No longer creates child executions. Uses parent execution directly with
+   * per-step Redis storage (workflow:{executionId}:{stepName}) and MessageAttachment.
+   */
   async executeWithWorkflowTracking<T extends BaseWorkflowContext>(
     parentExecutionId: string,
     workflowId: string,
     agentChkConfig: FullAgenticCheckpointConfig,
     conversationRequest: ConversationRequest,
     parentState: WorkflowState<T>,
-    checkpointId: string,
-    continuationOverride?: AgenticContinuationOverride
+    inputStepDbId: string,  // This is the existing INPUT step ID
+    _continuationOverride?: AgenticContinuationOverride
   ): Promise<{ result: ConversationResult; updatedState: WorkflowState<T>; gitInfo: GitInfo }> {
-    if (continuationOverride) {
-      return await this.startContinuationExecution(
-        parentExecutionId,
-        workflowId,
-        agentChkConfig,
-        conversationRequest,
-        parentState,
-        checkpointId,
-        continuationOverride
-      )
-    }
+    // Get the step info to retrieve the checkpointId (stepName)
+    const inputStep = await this.storage.getStepById(inputStepDbId)
+    const checkpointId = inputStep?.stepName || inputStepDbId
 
-    const existingChildExecution = await this.storage.findExistingChildExecution(parentExecutionId, checkpointId)
+    // Handle continuation mode - reconstruct history and append user message
+    // if (continuationOverride) {
+    //   return await this.startContinuationExecution(
+    //     parentExecutionId,
+    //     workflowId,
+    //     agentChkConfig,
+    //     conversationRequest,
+    //     parentState,
+    //     inputStepDbId,
+    //     checkpointId,
+    //     continuationOverride
+    //   )
+    // }
 
-    if (existingChildExecution) {
-      if (existingChildExecution.status === WorkflowExecutionStatus.SUCCESS) {
-        const result = await this.storage.getCompletedExecutionResult(existingChildExecution.id)
-        if (result) {
-          const updatedState = this.buildStateFromCompletedExecution(parentState, result)
-          const gitInfo: GitInfo = {
-            branch: agentChkConfig.repoInfo?.repoBranch || 'main',
-            repoUrl: agentChkConfig.repoInfo?.repoUrl,
-            hasCommits: false
-          }
-          return { result: result as ConversationResult, updatedState, gitInfo }
+    // Check if this checkpoint is already completed
+    const isCompleted = await this.storage.isAgenticCheckpointCompleted(parentExecutionId, checkpointId)
+
+    if (isCompleted) {
+      const savedState = await this.storage.loadAgenticCheckpointState(parentExecutionId, checkpointId)
+      if (savedState) {
+        const updatedState = this.buildStateFromCompletedExecution(parentState, savedState.result as FrameworkExecutionResult)
+        return { 
+          result: savedState.result as ConversationResult, 
+          updatedState, 
+          gitInfo: savedState.gitInfo 
         }
       }
+    }
 
+    // Check if there are existing steps in Redis/GCS to resume from
+    const existingSteps = await this.storage.getChildWorkflowSteps(parentExecutionId)
+    if (existingSteps.length > 0) {
       return await this.resumeExistingExecution(
         parentExecutionId,
-        existingChildExecution.id,
+        inputStepDbId,
+        checkpointId,
         agentChkConfig,
         conversationRequest,
         parentState
@@ -115,24 +127,62 @@ export class OpenCodeExecutor {
       agentChkConfig,
       conversationRequest,
       parentState,
+      inputStepDbId,
       checkpointId
     )
   }
 
+  /**
+   * NEW: Resume from existing state using parent execution and inputStepDbId
+   * Loads steps from Redis first, then falls back to GCS for older executions
+   */
   private async resumeExistingExecution<T extends BaseWorkflowContext>(
     parentExecutionId: string,
-    childExecutionId: string,
+    inputStepDbId: string,
+    checkpointId: string,
     agentChkConfig: FullAgenticCheckpointConfig,
     conversationRequest: ConversationRequest,
     parentState: WorkflowState<T>
   ): Promise<{ result: ConversationResult; updatedState: WorkflowState<T>; gitInfo: GitInfo }> {
 
-    const existingSteps = await this.storage.getChildWorkflowSteps(childExecutionId)
+    // 1. Try to load steps from Redis first, then fall back to GCS
+    let redisSteps: Array<{ stepName: string; data: string; createdAt: Date }> = []
+
+    try {
+      // Try Redis first (new per-step storage format)
+      redisSteps = await this.storage.getAgenticStepsFromRedis(parentExecutionId, checkpointId)
+      logger.info(`🔄 [OPENCODE-EXECUTOR] Loaded ${redisSteps.length} steps from Redis for ${checkpointId}`)
+    } catch (redisError) {
+      logger.warn(`⚠️ [OPENCODE-EXECUTOR] Failed to load from Redis, will try GCS:`, redisError)
+    }
+
+    let existingSteps: any[] = []
+
+    if (redisSteps.length > 0) {
+      // Use Redis steps - convert format for replay
+      existingSteps = redisSteps.map(step => ({
+        stepName: step.stepName,
+        data: step.data,
+        createdAt: step.createdAt
+      }))
+    } else {
+      // Fall back to GCS via MessageAttachment (for old executions or after Redis TTL)
+      logger.info(`🔄 [OPENCODE-EXECUTOR] No Redis steps found, trying GCS for ${checkpointId}`)
+      const gcsSteps = await this.storage.getAgenticStepsFromGCS(parentExecutionId, inputStepDbId)
+      existingSteps = gcsSteps.map(step => ({
+        stepName: step.stepName,
+        data: JSON.stringify(step.data),
+        createdAt: step.createdAt
+      }))
+    }
+
+    logger.info(`🔄 [OPENCODE-EXECUTOR] Resuming execution with ${existingSteps.length} steps from storage`)
 
     try {
       const { result, gitInfo } = await this.executeOpenCodeWithPauseCheck(
         parentExecutionId,
-        childExecutionId,
+        inputStepDbId,
+        checkpointId,
         agentChkConfig,
         conversationRequest,
         parentState,
@@ -140,121 +190,133 @@ export class OpenCodeExecutor {
         existingSteps
       )
 
-      const resultWithGitInfo = { ...result, gitInfo } as FrameworkExecutionResult
-      await this.storage.markChildExecutionCompleted(childExecutionId, resultWithGitInfo)
+      await this.storage.saveAgenticCheckpointState(
+        parentExecutionId,
+        checkpointId,
+        { result, gitInfo }
+      )
 
       const updatedState = this.buildStateFromCompletedExecution(parentState, result as FrameworkExecutionResult)
       return { result, updatedState, gitInfo }
 
     } catch (error) {
-      await this.handleExecutionError(childExecutionId, error)
+      await this.storage.createErrorStep(parentExecutionId, inputStepDbId, error as Error)
       throw error
     }
   }
 
+  /**
+   * NEW: Start fresh execution directly on parent, no child execution creation
+   */
   private async startFreshExecution<T extends BaseWorkflowContext>(
     parentExecutionId: string,
-    workflowId: string,
+    _workflowId: string,
     agentChkConfig: FullAgenticCheckpointConfig,
     conversationRequest: ConversationRequest,
     parentState: WorkflowState<T>,
+    inputStepDbId: string,
     checkpointId: string
   ): Promise<{ result: ConversationResult; updatedState: WorkflowState<T>; gitInfo: GitInfo }> {
-
-    const childExecutionId = await this.storage.createChildWorkflowExecution(
-      parentExecutionId,
-      workflowId,
-      checkpointId
-    )
 
     try {
       const { result, gitInfo } = await this.executeOpenCodeWithPauseCheck(
         parentExecutionId,
-        childExecutionId,
+        inputStepDbId,
+        checkpointId,
         agentChkConfig,
         conversationRequest,
         parentState
       )
 
-      const resultWithGitInfo = { ...result, gitInfo } as FrameworkExecutionResult
-      await this.storage.markChildExecutionCompleted(childExecutionId, resultWithGitInfo)
-
-      const updatedState = this.buildStateFromCompletedExecution(parentState, result as FrameworkExecutionResult)
-      return { result, updatedState, gitInfo }
-
-    } catch (error) {
-      await this.handleExecutionError(childExecutionId, error)
-      throw error
-    }
-  }
-
-  private async startContinuationExecution<T extends BaseWorkflowContext>(
-    parentExecutionId: string,
-    workflowId: string,
-    agentChkConfig: FullAgenticCheckpointConfig,
-    originalConversationRequest: ConversationRequest,
-    parentState: WorkflowState<T>,
-    checkpointId: string,
-    continuationOverride: AgenticContinuationOverride
-  ): Promise<{ result: ConversationResult; updatedState: WorkflowState<T>; gitInfo: GitInfo }> {
-
-    const sourceGitInfo = await this.storage.getChildExecutionGitInfo(continuationOverride.sourceChildExecutionId)
-    
-    if (sourceGitInfo) {
-      logger.info(`🔄 [OPENCODE-EXECUTOR] Source execution git info:`)
-      logger.info(`   Branch: ${sourceGitInfo.branch}`)
-      logger.info(`   Commit: ${sourceGitInfo.commitHash || 'N/A'}`)
-      
-      if (agentChkConfig.repoInfo) {
-        agentChkConfig = {
-          ...agentChkConfig,
-          repoInfo: {
-            ...agentChkConfig.repoInfo,
-            repoBranch: sourceGitInfo.branch,
-            continuationCommitHash: sourceGitInfo.commitHash,
-            existingPrLink: sourceGitInfo.pr_link || sourceGitInfo.pullRequestUrl
-          }
-        }
-      }
-    }
-
-    const sourceSteps = await this.storage.getChildWorkflowSteps(continuationOverride.sourceChildExecutionId)
-
-    const childExecutionId = await this.storage.createChildWorkflowExecution(
-      parentExecutionId,
-      workflowId,
-      checkpointId
-    )
-
-    await this.storage.createUserMessageStep(childExecutionId, continuationOverride.continuationUserMessage)
-
-    try {
-      const { result, gitInfo } = await this.executeOpenCodeWithPauseCheck(
+      await this.storage.saveAgenticCheckpointState(
         parentExecutionId,
-        childExecutionId,
-        agentChkConfig,
-        originalConversationRequest,
-        parentState,
-        true,
-        sourceSteps,
-        continuationOverride.continuationUserMessage
+        checkpointId,
+        { result, gitInfo }
       )
 
-      const resultWithGitInfo = { ...result, gitInfo } as FrameworkExecutionResult
-      await this.storage.markChildExecutionCompleted(childExecutionId, resultWithGitInfo)
-
       const updatedState = this.buildStateFromCompletedExecution(parentState, result as FrameworkExecutionResult)
       return { result, updatedState, gitInfo }
 
     } catch (error) {
-      await this.handleExecutionError(childExecutionId, error)
+      await this.storage.createErrorStep(parentExecutionId, inputStepDbId, error as Error)
       throw error
     }
   }
 
+  /**
+   * NEW: Continuation execution using parent execution and inputStepDbId
+   */
+  // private async startContinuationExecution<T extends BaseWorkflowContext>(
+  //   parentExecutionId: string,
+  //   _workflowId: string,
+  //   agentChkConfig: FullAgenticCheckpointConfig,
+  //   originalConversationRequest: ConversationRequest,
+  //   parentState: WorkflowState<T>,
+  //   inputStepDbId: string,
+  //   checkpointId: string,
+  //   continuationOverride: AgenticContinuationOverride
+  // ): Promise<{ result: ConversationResult; updatedState: WorkflowState<T>; gitInfo: GitInfo }> {
+
+  //   const sourceGitInfo = await this.storage.getChildExecutionGitInfo(continuationOverride.sourceChildExecutionId)
+
+  //   if (sourceGitInfo) {
+  //     logger.info(`🔄 [OPENCODE-EXECUTOR] Source execution git info:`)
+  //     logger.info(`   Branch: ${sourceGitInfo.branch}`)
+  //     logger.info(`   Commit: ${sourceGitInfo.commitHash || 'N/A'}`)
+
+  //     if (agentChkConfig.repoInfo) {
+  //       agentChkConfig = {
+  //         ...agentChkConfig,
+  //         repoInfo: {
+  //           ...agentChkConfig.repoInfo,
+  //           repoBranch: sourceGitInfo.branch,
+  //           continuationCommitHash: sourceGitInfo.commitHash,
+  //           existingPrLink: sourceGitInfo.pr_link || sourceGitInfo.pullRequestUrl
+  //         }
+  //       }
+  //     }
+  //   }
+
+  //   const sourceSteps = await this.storage.getChildWorkflowSteps(continuationOverride.sourceChildExecutionId)
+
+  //   // Note: user_message step is already created by copyParentAgentStepsToExecution() in workflow-engine.ts
+  //   // No need to create it again here to avoid duplicate user messages in the UI
+
+  //   try {
+  //     const { result, gitInfo } = await this.executeOpenCodeWithPauseCheck(
+  //       parentExecutionId,
+  //       inputStepDbId,
+  //       checkpointId,
+  //       agentChkConfig,
+  //       originalConversationRequest,
+  //       parentState,
+  //       true,
+  //       sourceSteps,
+  //       continuationOverride.continuationUserMessage
+  //     )
+
+  //     await this.storage.saveAgenticCheckpointState(
+  //       parentExecutionId,
+  //       checkpointId,
+  //       { result, gitInfo }
+  //     )
+
+  //     const updatedState = this.buildStateFromCompletedExecution(parentState, result as FrameworkExecutionResult)
+  //     return { result, updatedState, gitInfo }
+
+  //   } catch (error) {
+  //     await this.storage.createErrorStep(parentExecutionId, inputStepDbId, error as Error)
+  //     throw error
+  //   }
+  // }
+
+  /**
+   * NEW: Uses inputStepDbId instead of childExecutionId for step storage
+   */
   private async executeOpenCodeWithPauseCheck<T extends BaseWorkflowContext>(
     parentExecutionId: string,
-    childExecutionId: string,
+    inputStepDbId: string,
+    _checkpointId: string,
     agentChkConfig: FullAgenticCheckpointConfig,
     conversationRequest: ConversationRequest,
     parentState: WorkflowState<T>,
@@ -274,7 +336,8 @@ export class OpenCodeExecutor {
     let repoName: string | undefined
 
     if (repoUrl) {
-      await workspaceEventService.publishCloningStarted(parentExecutionId, childExecutionId)
+      // Use inputStepDbId for workspace events
+      await workspaceEventService.publishCloningStarted(parentExecutionId, inputStepDbId)
 
       const cloneResult = await cloneRepository(
         repoUrl,
@@ -287,7 +350,7 @@ export class OpenCodeExecutor {
 
       logger.info(`🔧 [OPENCODE-EXECUTOR] Workspace at: ${cloneResult.repoPath}`)
       logger.info(`🔧 [OPENCODE-EXECUTOR] Parent execution ID: ${parentExecutionId}`)
-      logger.info(`🔧 [OPENCODE-EXECUTOR] Child execution ID: ${childExecutionId}`)
+      logger.info(`🔧 [OPENCODE-EXECUTOR] Input step ID: ${inputStepDbId}`)
       
       repoPath = cloneResult.repoPath
       branchName = cloneResult.branchName
@@ -295,7 +358,7 @@ export class OpenCodeExecutor {
       projectName = extractedData.projectName
       repoName = extractedData.repoName
 
-      await workspaceEventService.publishWorkspaceReady(parentExecutionId, childExecutionId, repoUrl, branchName, baseBranch)
+      await workspaceEventService.publishWorkspaceReady(parentExecutionId, inputStepDbId, repoUrl, branchName, baseBranch)
       
       if (agentChkConfig.repoInfo?.postCloneSetup) {
         await agentChkConfig.repoInfo.postCloneSetup(repoPath, repoName || 'unknown')
@@ -355,13 +418,13 @@ export class OpenCodeExecutor {
       hasCommits: false,
       branchName: branchName || '',
       repoUrl,
-      childExecutionId,
+      inputStepDbId,
       parentExecutionId,
       latestCommitHash: undefined,
       commitCount: 0
     }
 
-    const abortController = new AbortController()
+    let abortController = new AbortController()
     let savedExternalWaitException: WorkflowExternalWaitException | undefined
 
     const lspInstructions = `
@@ -458,7 +521,7 @@ Do NOT ask the user any questions. Proceed directly with the task.
 
     let session = await client.createSession({
       directory: workingDir,
-      title: `workflow-${parentExecutionId}-${childExecutionId}`
+      title: `workflow-${parentExecutionId}-${inputStepDbId}`
     })
 
     logger.info(`[OPENCODE-EXECUTOR] Created session ${session.id} for ${workingDir}`)
@@ -480,8 +543,8 @@ Do NOT ask the user any questions. Proceed directly with the task.
     // Allows the handleQuestion callback to force-resolve the current promptWithStreaming call
     const forceResolveRef: { resolve?: () => void } = {}
 
-    // Check if there's already a stored answer from a prior question round (after WAIT_FOR_EVENT promotion)
-    const storedQuestionAnswer = await getStoredQuestionAnswer(childExecutionId)
+    // Check if there's already a stored answer from a prior question round
+    const storedQuestionAnswer = await getStoredQuestionAnswer(inputStepDbId)
     let resumeAfterQuestionInit = false
     if (storedQuestionAnswer) {
       lastQuestionContext = {
@@ -492,12 +555,12 @@ Do NOT ask the user any questions. Proceed directly with the task.
       logger.info(`[OPENCODE-EXECUTOR] Found stored question answer from prior round — will include Q&A context in first message`)
 
       const existingOutputSteps = await repositories.workflowSteps.findMany({
-        where: { workflowExecutionId: childExecutionId, stepName: storedQuestionAnswer.stepName, type: 'output' }
+        where: { workflowExecutionId: inputStepDbId, stepName: storedQuestionAnswer.stepName, type: 'output' }
       })
       if (existingOutputSteps.length === 0) {
         try {
           await this.storage.saveExternalStepData(
-            childExecutionId,
+            inputStepDbId,
             storedQuestionAnswer.stepName,
             { answers: storedQuestionAnswer.answers, questionTexts: storedQuestionAnswer.questionTexts }
           )
@@ -511,7 +574,7 @@ Do NOT ask the user any questions. Proceed directly with the task.
     }
 
     const { handleEvent, getStats } = createOpenCodeEventHandler({
-      childExecutionId,
+      inputStepDbId,
       parentExecutionId,
       commitTracker,
       repoPath: workingDir,
@@ -520,7 +583,7 @@ Do NOT ask the user any questions. Proceed directly with the task.
       abortController,
       processedToolCalls: new Set(),
       processedToolResults: new Set(),
-      checkPauseOrCancel: () => this.checkWorkflowPauseOrCancelStatusAndThrow(childExecutionId, abortController),
+      checkPauseOrCancel: () => this.checkWorkflowPauseOrCancelStatusAndThrow(inputStepDbId, abortController),
       grantPermission: async (sessionId: string, permissionId: string) => {
         await client.grantPermission(sessionId, permissionId)
       },
@@ -537,17 +600,17 @@ Do NOT ask the user any questions. Proceed directly with the task.
         }
 
         // Check for stored answer (resume after WAIT_FOR_EVENT — replay the user's answer)
-        const stored = await getStoredQuestionAnswer(childExecutionId)
+        const stored = await getStoredQuestionAnswer(inputStepDbId)
         if (stored) {
           logger.info(`[OPENCODE-EXECUTOR] Replaying stored answer for question ${requestId}`)
           try {
             await client.answerQuestion(requestId, stored.answers ?? [['Proceed with your best judgment']])
             const existingOutputSteps = await repositories.workflowSteps.findMany({
-              where: { workflowExecutionId: childExecutionId, stepName: stored.stepName, type: 'output' }
+              where: { workflowExecutionId: inputStepDbId, stepName: stored.stepName, type: 'output' }
             })
             if (existingOutputSteps.length === 0) {
               await this.storage.saveExternalStepData(
-                childExecutionId,
+                inputStepDbId,
                 stored.stepName,
                 { answers: stored.answers, questionTexts: stored.questionTexts }
               )
@@ -563,7 +626,7 @@ Do NOT ask the user any questions. Proceed directly with the task.
         }
 
         // New question — create external step, mark child WAIT_FOR_EVENT
-        const stepName = await handleOpenCodeQuestion(this.storage, childExecutionId, parentExecutionId, requestId, sessionId, questions)
+        const stepName = await handleOpenCodeQuestion(this.storage, inputStepDbId, parentExecutionId, requestId, sessionId, questions)
 
         pendingExternalWait = { stepName }
         logger.info(`[OPENCODE-EXECUTOR] pendingExternalWait set: ${stepName}, force-resolving prompt`)
@@ -583,9 +646,21 @@ Do NOT ask the user any questions. Proceed directly with the task.
 
     let unsubscribe = client.subscribeToSessionEvents(session.id, handleEvent)
 
+    // Setup continuation listener via Redis pub/sub
+    let continuationMessage: string | null = null;
+    let cleanupContinuationListener = await this.setupContinuationListener(
+      parentExecutionId,
+      _checkpointId,
+      abortController,
+      (event) => {
+        continuationMessage = event.message;
+        logger.info(`[OPENCODE-EXECUTOR] Continuation message received: "${event.message?.substring(0, 100)}..."`);
+      }
+    );
+
     let result!: ConversationResult
     let promptResponse: SDKPromptResponse | undefined
-    
+
     try {
       const userMessage = promptOverride || this.extractUserMessage(conversationRequest)
       const MAX_CONTINUATION_ATTEMPTS = isPlanningEnabled ? 8 : 5
@@ -594,6 +669,11 @@ Do NOT ask the user any questions. Proceed directly with the task.
       let resumeAfterQuestion = resumeAfterQuestionInit
       
       while (!isComplete && continuationAttempt < MAX_CONTINUATION_ATTEMPTS) {
+        // Check if this is a continuation restart (new abort controller after Redis continuation event)
+        if (continuationAttempt === 0 && abortController.signal.aborted && continuationMessage) {
+          logger.info(`[OPENCODE-EXECUTOR] Detected continuation restart - will process with new session`);
+        }
+
         const isFirstAttempt = continuationAttempt === 0
         const isResumingAfterQuestion = resumeAfterQuestion
         let messageToSend: string
@@ -711,7 +791,7 @@ Do NOT ask the user any questions. Proceed directly with the task.
 
         await this.processPromptResponse(
           promptResponse,
-          childExecutionId,
+          inputStepDbId,
           parentExecutionId,
           commitTracker,
           workingDir,
@@ -740,8 +820,89 @@ Do NOT ask the user any questions. Proceed directly with the task.
         } else {
           isComplete = true
         }
+
+        // Check if this was a continuation abort (continuation message received via Redis)
+        if (continuationMessage && abortController.signal.aborted) {
+          logger.info(`[OPENCODE-EXECUTOR] Execution aborted for continuation with message`);
+
+          // Store current cleanup listener for cleanup
+          const oldCleanupListener = cleanupContinuationListener;
+
+          // Set execution mode to MANUAL when continuation is received
+          await this.storage.setExecutionMode(parentExecutionId, 'MANUAL');
+          logger.info(`🎛️ [OPENCODE-EXECUTOR] Execution mode set to MANUAL for ${parentExecutionId}`);
+
+          // Fetch full conversation history from Redis/GCS
+          const newConversationRequest = await this.buildContinuationConversationRequest(
+            parentExecutionId,
+            _checkpointId,
+            inputStepDbId,
+            conversationRequest,
+            continuationMessage
+          );
+
+          // Create new abort controller for the next execution
+          const newAbortController = new AbortController();
+
+          // Re-setup continuation listener for the next potential abort
+          await oldCleanupListener();
+          const newCleanupContinuationListener = await this.setupContinuationListener(
+            parentExecutionId,
+            _checkpointId,
+            newAbortController,
+            (event) => {
+              continuationMessage = event.message;
+              logger.info(`[OPENCODE-EXECUTOR] Continuation message received: "${event.message?.substring(0, 100)}..."`);
+            }
+          );
+
+          // Reset session and unsubscribe from old session
+          unsubscribe();
+
+          // Create new session for continuation
+          session = await client.createSession({
+            directory: workingDir,
+            title: `workflow-continue-${parentExecutionId}-${inputStepDbId}`
+          });
+
+          logger.info(`[OPENCODE-EXECUTOR] Created new session ${session.id} for continuation`);
+
+          // Subscribe to new session events
+          unsubscribe = client.subscribeToSessionEvents(session.id, handleEvent);
+
+          // Replay steps from history into new session
+          if (newConversationRequest.messages && newConversationRequest.messages.length > 0) {
+            // Convert messages to steps format for replay
+            const stepsToReplayFromHistory: Array<{stepName: string; data: string; createdAt: Date}> = [];
+            for (let idx = 0; idx < newConversationRequest.messages.length; idx++) {
+              const msg = newConversationRequest.messages[idx];
+              if ('content' in msg && msg.content) {
+                const stepName: string = idx === 0 && 'role' in msg && msg.role === 'user'
+                  ? 'user_message'
+                  : ('role' in msg && msg.role === 'user' ? 'user_continue' : 'assistant_message');
+                stepsToReplayFromHistory.push({
+                  stepName,
+                  data: JSON.stringify({ content: msg.content }),
+                  createdAt: new Date(Date.now() + idx)
+                });
+              }
+            }
+            await this.replayStepsIntoSession(client, session.id, stepsToReplayFromHistory);
+          }
+
+          // Update variables for next iteration
+          conversationRequest = newConversationRequest;
+          abortController = newAbortController;
+          cleanupContinuationListener = newCleanupContinuationListener;
+          continuationMessage = null;
+
+          // Reset completion flag to continue the loop
+          isComplete = false;
+          continuationAttempt = 0;
+          continue;
+        }
       }
-      
+
       if (continuationAttempt >= MAX_CONTINUATION_ATTEMPTS) {
         logger.warn(`[OPENCODE-EXECUTOR] Reached max continuation attempts (${MAX_CONTINUATION_ATTEMPTS}), stopping`)
       }
@@ -794,7 +955,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
               try {
                 const resumeSession = await client.createSession({
                   directory: workingDir,
-                  title: `resume-${parentExecutionId}-${childExecutionId}`
+                  title: `resume-${parentExecutionId}-${inputStepDbId}`
                 })
                 
                 // Use streaming prompt to avoid headers timeout
@@ -807,7 +968,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
                 )
                 await this.processPromptResponse(
                   promptResponse,
-                  childExecutionId,
+                  inputStepDbId,
                   parentExecutionId,
                   commitTracker,
                   workingDir,
@@ -847,7 +1008,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
           result = this.buildErrorResultWithCommits(openCodeError, commitTracker)
         }
       } else {
-        await this.handleExecutionError(childExecutionId, openCodeError)
+        await this.storage.createErrorStep(parentExecutionId, inputStepDbId, openCodeError as Error)
         throw openCodeError
       }
 
@@ -906,7 +1067,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
       if (commitTracker.latestCommitHash) {
         await workspaceEventService.publishFileTreeUpdate(
           parentExecutionId,
-          childExecutionId,
+          inputStepDbId,
           commitTracker.latestCommitHash
         )
       }
@@ -927,7 +1088,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
 
         try {
           const prTargetBranch = baseBranch || 'main'
-          await this.bitbucketManager.raisePr(repoUrl, childExecutionId, prTargetBranch, branchName, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId)
+          await this.bitbucketManager.raisePr(repoUrl, inputStepDbId, prTargetBranch, branchName, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId)
         } catch (error) {
           logger.error(`[OPENCODE-EXECUTOR] Failed to create PR:`, error)
         }
@@ -979,7 +1140,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     }
 
     if (repoPath) {
-      await workspaceEventService.publishWorkspaceClosed(parentExecutionId, childExecutionId)
+      await workspaceEventService.publishWorkspaceClosed(parentExecutionId, inputStepDbId)
     }
 
     if (result.error && !commitTracker.hasCommits) {
@@ -1009,9 +1170,12 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     return ''
   }
 
+  /**
+   * NEW: Uses inputStepDbId instead of childExecutionId
+   */
   private async processPromptResponse(
     response: SDKPromptResponse,
-    childExecutionId: string,
+    inputStepDbId: string,
     parentExecutionId: string,
     commitTracker: OpenCodeCommitTracker,
     repoPath: string,
@@ -1034,7 +1198,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     let stepNumber = 0
 
     for (const part of response.parts) {
-      await this.checkWorkflowPauseOrCancelStatusAndThrow(childExecutionId, abortController)
+      await this.checkWorkflowPauseOrCancelStatusAndThrow(inputStepDbId, abortController)
 
       switch (part.type) {
         case 'tool': {
@@ -1048,9 +1212,9 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
           }
           await this.processToolPart(
             toolPart,
-            childExecutionId,
-            commitTracker,
+            inputStepDbId,
             parentExecutionId,
+            commitTracker,
             repoPath,
             agentChkConfig,
             processedToolCalls
@@ -1077,7 +1241,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
 
         case 'step-finish': {
           const stepFinish = part as StepFinishPart
-          await this.storage.createAssistantMessageStep(childExecutionId, {
+          await this.storage.createAssistantMessageStep(parentExecutionId, inputStepDbId, {
             turn: stepNumber,
             result: {
               content: textContent,
@@ -1096,7 +1260,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     }
 
     if (textContent || reasoningContent || toolCallsInResponse.length > 0) {
-      await this.storage.createLLMCallStep(childExecutionId, {
+      await this.storage.createLLMCallStep(parentExecutionId, inputStepDbId, {
         messages: [],
         content: textContent,
         thinking: reasoningContent || undefined,
@@ -1111,7 +1275,8 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
         ? error.data.message 
         : ('name' in error ? error.name : 'Unknown error')
       await this.storage.createErrorStep(
-        childExecutionId, 
+        parentExecutionId,
+        inputStepDbId, 
         new Error(`OpenCode error: ${errorMessage}`)
       )
       logger.error(`[OPENCODE-EXECUTOR] Error in response: ${errorMessage}`)
@@ -1120,11 +1285,14 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     return { textContent }
   }
 
+  /**
+   * NEW: Uses inputStepDbId instead of childExecutionId
+   */
   private async processToolPart(
     toolPart: ToolPart,
-    childExecutionId: string,
-    commitTracker: OpenCodeCommitTracker,
+    inputStepDbId: string,
     parentExecutionId: string,
+    commitTracker: OpenCodeCommitTracker,
     repoPath: string,
     agentChkConfig: FullAgenticCheckpointConfig,
     processedToolCalls: Set<string>
@@ -1138,7 +1306,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     const toolName = toolPart.tool
     const state = toolPart.state
 
-    await this.storage.createToolExecutionStep(childExecutionId, {
+    await this.storage.createToolExecutionStep(parentExecutionId, inputStepDbId, {
       id: callId,
       name: toolName,
       input: state.input,
@@ -1181,11 +1349,11 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
             try {
               await pushCommits(repoPath, commitTracker.branchName, commitTracker.repoUrl)
 
-              await workspaceEventService.publishFileTreeUpdate(
-                parentExecutionId,
-                childExecutionId,
-                commitHash
-              )
+          await workspaceEventService.publishFileTreeUpdate(
+            parentExecutionId,
+            inputStepDbId,
+            commitHash
+          )
             } catch (pushError) {
               logger.error(`[OPENCODE-EXECUTOR] Failed to push commit:`, pushError)
             }
@@ -1193,7 +1361,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
         }
       }
 
-      const agentStep = await this.storage.updateToolExecutionAgentStep(callId, updateAgentData)
+      await this.storage.updateToolExecutionAgentStep(inputStepDbId, callId, updateAgentData)
       let parsedOutput: unknown
       try {
         parsedOutput = JSON.parse(state.output)
@@ -1214,88 +1382,30 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
         }
       }
 
-      const transformedInput = this.transformToolInput(toolName, state.input as Record<string, unknown>)
       const transformedOutput = this.transformToolOutput(toolName, parsedOutput)
 
       await this.storage.updateToolExecutionStep(
-        agentStep.stepsId || '',
-        transformedOutput,
-        'completed',
-        transformedInput
+        inputStepDbId,
+        callId,
+        JSON.stringify(transformedOutput),
+        'completed'
       )
 
     } else if (state.status === 'error') {
       await this.storage.createErrorStep(
-        childExecutionId,
+        parentExecutionId,
+        inputStepDbId,
         new Error(`Tool ${toolName} failed: ${state.error}`)
       )
 
-      const agentStep = await this.storage.updateToolExecutionAgentStep(callId, {
-        repositoryURL: commitTracker.repoUrl,
-        branch: commitTracker.branchName
-      })
-
       await this.storage.updateToolExecutionStep(
-        agentStep.stepsId || '',
-        { error: state.error },
-        'failed',
-        state.input as Record<string, unknown>
+        inputStepDbId,
+        callId,
+        JSON.stringify({ error: state.error }),
+        'failed'
       )
 
       logger.error(`[OPENCODE-EXECUTOR] Tool ${toolName} failed: ${state.error}`)
-    }
-  }
-
-  private transformToolInput(toolName: string, rawInput: Record<string, unknown>): Record<string, unknown> {
-    if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
-      logger.warn(`[OPENCODE-EXECUTOR] Invalid tool input for ${toolName}:`, rawInput)
-      return {}
-    }
-
-    if (
-      Object.prototype.hasOwnProperty.call(rawInput, '__proto__') ||
-      Object.prototype.hasOwnProperty.call(rawInput, 'constructor') ||
-      Object.prototype.hasOwnProperty.call(rawInput, 'prototype')
-    ) {
-      logger.warn(`[OPENCODE-EXECUTOR] Potentially malicious input detected for ${toolName}`)
-      return {}
-    }
-
-    const validateString = (value: unknown, fallback: string = ''): string => {
-      return typeof value === 'string' ? value : fallback
-    }
-
-    switch (toolName) {
-      case 'read':
-        return {
-          file_path: validateString(rawInput.filePath || rawInput.file_path || rawInput.path),
-          ...rawInput
-        }
-
-      case 'write':
-        return {
-          file_path: validateString(rawInput.filePath || rawInput.file_path),
-          content: validateString(rawInput.content),
-          ...rawInput
-        }
-
-      case 'edit':
-        return {
-          file_path: validateString(rawInput.filePath || rawInput.file_path),
-          old_string: validateString(rawInput.oldString || rawInput.old_string),
-          new_string: validateString(rawInput.newString || rawInput.new_string),
-          ...rawInput
-        }
-
-      case 'glob':
-        return {
-          pattern: validateString(rawInput.pattern),
-          path: validateString(rawInput.path || rawInput.directory),
-          ...rawInput
-        }
-
-      default:
-        return rawInput
     }
   }
 
@@ -1535,57 +1645,28 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
   }
 
   private async checkWorkflowPauseOrCancelStatusAndThrow(
-    childExecutionId: string,
+    inputStepDbId: string,
     abortController: AbortController
   ): Promise<void> {
-    const pauseStatus = await this.storage.checkWorkflowPauseOrCancelStatus(childExecutionId)
+    const pauseStatus = await this.storage.checkWorkflowPauseOrCancelStatus(inputStepDbId)
 
     if (pauseStatus.isCancelled) {
       abortController.abort()
       throw new WorkflowCancelledException(
-        pauseStatus.parentExecutionId || childExecutionId,
+        pauseStatus.parentExecutionId || inputStepDbId,
         'opencode_step_cancelled'
       )
     }
 
     if (pauseStatus.isPaused) {
       throw new WorkflowPausedException(
-        pauseStatus.parentExecutionId || childExecutionId,
+        pauseStatus.parentExecutionId || inputStepDbId,
         'opencode_step_paused'
       )
     }
   }
 
-  private async handleExecutionError(childExecutionId: string, error: unknown): Promise<void> {
-    if (error instanceof WorkflowCancelledException) {
-      await this.storage.markChildExecutionCancelled(childExecutionId, 'workflow_cancelled')
-      return
-    }
-
-    if (error instanceof Error && error.message === 'Execution aborted') {
-      await this.storage.markChildExecutionCancelled(childExecutionId, 'execution_aborted')
-      throw new WorkflowCancelledException(childExecutionId, 'opencode_step_cancelled')
-    }
-
-    if (error instanceof WorkflowPausedException) {
-      throw error
-    }
-
-    if (error instanceof WorkflowExternalWaitException) {
-      throw error
-    }
-
-    await this.storage.markChildExecutionFailed(childExecutionId, this.serializeError(error as Error))
-  }
-
-  private serializeError(err: Error): string {
-    return JSON.stringify({
-      name: err.name,
-      message: err.message,
-      stack: err.stack,
-    })
-  }
-
+  
   private buildStateFromCompletedExecution<T extends BaseWorkflowContext>(
     parentState: WorkflowState<T>,
     result: FrameworkExecutionResult
@@ -1755,5 +1836,153 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     }
 
     return files
+  }
+
+  /**
+   * Setup Redis pub/sub listener for agent continuation events
+   */
+  private async setupContinuationListener(
+    parentExecutionId: string,
+    checkpointId: string,
+    abortController: AbortController,
+    onContinuationEvent: (event: { message: string; type: string; executionId: string; stepName: string; timestamp: string }) => void
+  ): Promise<() => Promise<void>> {
+    const { redisService } = await import('@/services/redisService')
+    const channel = `workflow:${parentExecutionId}:${checkpointId}:continue`;
+    logger.info(`[OPENCODE-EXECUTOR] Setting up continuation listener for channel: ${channel}`);
+
+    const continuationCallback = (event: { message: string; type: string; executionId: string; stepName: string; timestamp: string }) => {
+      logger.info(`[OPENCODE-EXECUTOR] Received continuation message via Redis pub/sub on channel: ${channel}`);
+      onContinuationEvent(event);
+      abortController.abort();
+    };
+
+    // Subscribe to continuation channel and wait for it to complete
+    try {
+      await redisService.subscribeToAgentContinuation(
+        parentExecutionId,
+        checkpointId,
+        continuationCallback
+      );
+      logger.info(`[OPENCODE-EXECUTOR] Successfully subscribed to channel: ${channel}`);
+    } catch (error) {
+      logger.error(`[OPENCODE-EXECUTOR] Failed to subscribe to continuation channel:`, error);
+      throw error;
+    }
+
+    // Return cleanup function
+    return async () => {
+      logger.info(`[OPENCODE-EXECUTOR] Cleaning up continuation listener for channel: ${channel}`);
+      try {
+        await redisService.unsubscribeFromAgentContinuation(
+          parentExecutionId,
+          checkpointId,
+          continuationCallback
+        );
+        logger.info(`[OPENCODE-EXECUTOR] Successfully unsubscribed from channel: ${channel}`);
+      } catch (error) {
+        logger.error(`[OPENCODE-EXECUTOR] Failed to unsubscribe from continuation channel:`, error);
+      }
+    };
+  }
+
+  /**
+   * Build a conversation request for continuation by fetching full history from Redis/GCS
+   */
+  private async buildContinuationConversationRequest(
+    parentExecutionId: string,
+    checkpointId: string,
+    inputStepDbId: string,
+    originalRequest: ConversationRequest,
+    continuationMessage: string
+  ): Promise<ConversationRequest> {
+    logger.info(`🔄 [OPENCODE-EXECUTOR] Building continuation conversation request`);
+
+    // 1. Fetch all steps from Redis first
+    let redisSteps: Array<{ stepName: string; data: string; createdAt: Date }> = [];
+
+    try {
+      redisSteps = await this.storage.getAgenticStepsFromRedis(parentExecutionId, checkpointId);
+      logger.info(`🔄 [OPENCODE-EXECUTOR] Loaded ${redisSteps.length} steps from Redis for continuation`);
+    } catch (redisError) {
+      logger.warn(`⚠️ [OPENCODE-EXECUTOR] Failed to load from Redis for continuation:`, redisError);
+    }
+
+    let steps: Array<{ stepName: string; data: string; createdAt: Date }> = [] ;
+
+    if (redisSteps.length > 0) {
+      steps = redisSteps;
+    } else {
+      // Fall back to GCS
+      try {
+        const gcsSteps = await this.storage.getAgenticStepsFromGCS(parentExecutionId, inputStepDbId);
+         steps = gcsSteps
+          .filter((step): step is typeof step & { stepName: string } => !!step.stepName).map(step => ({
+          stepName: step.stepName,
+          data: JSON.stringify(step.data),
+          createdAt: step.createdAt
+        }));
+        logger.info(`🔄 [OPENCODE-EXECUTOR] Loaded ${steps.length} steps from GCS for continuation`);
+      } catch (gcsError) {
+        logger.error(`❌ [OPENCODE-EXECUTOR] Failed to load steps from GCS:`, gcsError);
+      }
+    }
+
+    // 2. Sort steps by creation time
+    const sortedSteps = steps.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+    // 3. Build conversation history from steps
+    // Build as simple objects first, then cast to Message[] for the ConversationRequest
+    const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+    for (const step of sortedSteps) {
+      if (!step.data) continue;
+
+      try {
+        const stepData = JSON.parse(step.data);
+
+        if (step.stepName === 'user_message') {
+          conversationHistory.push({
+            role: 'user',
+            content: stepData.content || ''
+          });
+        } else if (step.stepName.startsWith('llm_call_') || step.stepName === 'assistant_message') {
+          const content = stepData.response || stepData.content || stepData.turn?.result?.content || '';
+          if (content) {
+            conversationHistory.push({
+              role: 'assistant',
+              content
+            });
+          }
+        } else if (step.stepName.startsWith('tool_')) {
+          // Include tool results as assistant context
+          const toolName = step.stepName.replace('tool_', '');
+          const outputSummary = stepData.output != null ? JSON.stringify(stepData.output).substring(0, 1000) : 'null';
+          conversationHistory.push({
+            role: 'assistant',
+            content: `[Tool result: ${toolName}] ${outputSummary}`
+          });
+        }
+      } catch (error) {
+        logger.warn(`[OPENCODE-EXECUTOR] Failed to parse step ${step.stepName} for continuation:`, error);
+      }
+    }
+
+    // 4. Add the continuation message as the final user message
+    conversationHistory.push({
+      role: 'user',
+      content: continuationMessage
+    });
+
+    // 5. Create user message step in storage so it shows in UI
+    await this.storage.createUserMessageStep(parentExecutionId, inputStepDbId, continuationMessage);
+    logger.info(`✅ [OPENCODE-EXECUTOR] Created user message step for continuation: "${continuationMessage.substring(0, 100)}..."`);
+
+    logger.info(`🔄 [OPENCODE-EXECUTOR] Built conversation request with ${conversationHistory.length} messages for continuation`);
+
+    return {
+      ...originalRequest,
+      messages: conversationHistory as any
+    };
   }
 }

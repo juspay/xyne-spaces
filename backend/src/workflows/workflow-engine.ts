@@ -189,9 +189,15 @@ export class WorkflowEngineImpl<
       lookupParent  // Lookup parent's INPUT if inheriting
     )
 
+    // Get parent execution's input step ID for rerun scenarios
+    const parentInputStepId = await this.storage.getParentExecutionInputStepId(this.currentState.workflowExecutionId, String(id))
+    if (parentInputStepId) {
+      logger.info(`[WORKFLOW-ENGINE] Found parent input step ${parentInputStepId} for step ${String(id)}`)
+    }
+
     // Check if this INPUT step is the restore point
     if (inputStepDbId && this.shouldInheritFromParent &&
-        !this.reachedRestorePoint && inputStepDbId === this.restoreStepDbId) {
+        !this.reachedRestorePoint && parentInputStepId === this.restoreStepDbId) {
       this.reachedRestorePoint = true
       // Now create INPUT for this step (the restore point)
       // Always save ORIGINAL config from function call
@@ -228,6 +234,7 @@ export class WorkflowEngineImpl<
       if ('continuationUserMessage' in override && 'sourceChildExecutionId' in override) {
         if (!override.targetStepId || override.targetStepId === String(id)) {
           continuationOverride = override
+          logger.info(`[WORKFLOW-ENGINE] Using continuation override for rerun at step ${String(id)}`)
         }
       }
     }

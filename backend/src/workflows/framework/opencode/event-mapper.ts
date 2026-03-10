@@ -56,7 +56,7 @@ interface SDKToolPartRaw {
 }
 
 export interface OpenCodeEventHandlerContext {
-  childExecutionId: string
+  inputStepDbId: string
   parentExecutionId: string
   commitTracker: OpenCodeCommitTracker
   repoPath: string
@@ -389,7 +389,7 @@ async function handleSDKToolPart(
 
       await context.checkPauseOrCancel()
 
-      await context.storage.createToolExecutionStep(context.childExecutionId, {
+      await context.storage.createToolExecutionStep(context.parentExecutionId, context.inputStepDbId, {
         id: callId,
         name: toolName,
         input: state.input,
@@ -436,7 +436,8 @@ async function handleSDKToolPart(
         }
       }
 
-      const agentStep = await context.storage.updateToolExecutionAgentStep(
+      await context.storage.updateToolExecutionAgentStep(
+        context.inputStepDbId,
         callId,
         updateAgentData
       )
@@ -446,62 +447,17 @@ async function handleSDKToolPart(
         ? { error: state.error }
         : (state.output ? tryParseJSON(state.output) : { success: true })
 
-      const transformedInput = transformToolInput(toolName, state.input)
       const output = transformToolOutput(toolName, rawOutput)
 
       await context.storage.updateToolExecutionStep(
-        agentStep.stepsId || '',
-        output,
-        toolCallStatus,
-        transformedInput
+        context.inputStepDbId,
+        callId,
+        JSON.stringify(output),
+        toolCallStatus
       )
 
       stats.toolResultsProcessed++
     }
-  }
-}
-
-function transformToolInput(toolName: string, rawInput: Record<string, unknown>): Record<string, unknown> {
-  if (!rawInput || typeof rawInput !== 'object') {
-    return rawInput
-  }
-
-  switch (toolName) {
-    case 'read':
-      return {
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        file_path: rawInput.filePath || rawInput.file_path || rawInput.path || '',
-        ...rawInput
-      }
-
-    case 'write':
-      return {
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        file_path: rawInput.filePath || rawInput.file_path || '',
-        content: rawInput.content || '',
-        ...rawInput
-      }
-
-    case 'edit':
-      return {
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        file_path: rawInput.filePath || rawInput.file_path || '',
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        old_string: rawInput.oldString || rawInput.old_string || '',
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        new_string: rawInput.newString || rawInput.new_string || '',
-        ...rawInput
-      }
-
-    case 'glob':
-      return {
-        pattern: rawInput.pattern || '',
-        path: rawInput.path || rawInput.directory || '',
-        ...rawInput
-      }
-
-    default:
-      return rawInput
   }
 }
 
@@ -904,7 +860,7 @@ async function handleToolInvocation(
 
   await context.checkPauseOrCancel()
 
-  await context.storage.createToolExecutionStep(context.childExecutionId, {
+  await context.storage.createToolExecutionStep(context.parentExecutionId, context.inputStepDbId, {
     id: toolCall.toolCallId,
     name: toolCall.toolName,
     input: toolCall.args,
@@ -980,15 +936,17 @@ async function handleToolResult(
     }
   }
 
-  const agentStep = await context.storage.updateToolExecutionAgentStep(
+  await context.storage.updateToolExecutionAgentStep(
+    context.inputStepDbId,
     toolResult.toolCallId,
     updateAgentData
   )
 
   const toolCallStatus = toolResult.isError ? 'failed' : 'completed'
   await context.storage.updateToolExecutionStep(
-    agentStep.stepsId || '',
-    toolResult.result,
+    context.inputStepDbId,
+    toolResult.toolCallId,
+    typeof toolResult.result === 'string' ? toolResult.result : JSON.stringify(toolResult.result),
     toolCallStatus
   )
 
@@ -1001,7 +959,7 @@ async function handlePartError(
   context: OpenCodeEventHandlerContext,
   stats: EventProcessingStats
 ): Promise<void> {
-  await context.storage.createErrorStep(context.childExecutionId, new Error(part.error))
+  await context.storage.createErrorStep(context.parentExecutionId, context.inputStepDbId, new Error(part.error))
   stats.errorsProcessed++
   logger.error(`[OpenCode] Error in message: ${part.error}`)
 }
@@ -1019,7 +977,8 @@ async function handleDoomLoop(
   logger.warn(`[OpenCode] DOOM LOOP DETECTED: Tool "${toolName}" called ${consecutiveCount} times (threshold: ${threshold})`)
 
   await context.storage.createErrorStep(
-    context.childExecutionId,
+    context.parentExecutionId,
+    context.inputStepDbId,
     new Error(`Doom loop detected: ${errorMessage}`)
   )
 
@@ -1041,7 +1000,7 @@ async function handleSessionCompacted(
   logger.info(`📦 [OpenCode] Context compacted: ${previousTokenCount} → ${newTokenCount} tokens`)
   logger.info(`   Summarized ${summarizedMessages} messages`)
 
-  await context.storage.createAssistantMessageStep(context.childExecutionId, {
+  await context.storage.createAssistantMessageStep(context.parentExecutionId, context.inputStepDbId, {
     compaction: {
       previousTokenCount,
       newTokenCount,
@@ -1085,7 +1044,7 @@ async function handleSessionError(
   }
 
   logger.error(`[OpenCode] Session error: ${errorMessage}`)
-  await context.storage.createErrorStep(context.childExecutionId, new Error(errorMessage))
+  await context.storage.createErrorStep(context.parentExecutionId, context.inputStepDbId, new Error(errorMessage))
 }
 
 async function handleSessionStatus(
@@ -1116,7 +1075,7 @@ async function handleSessionDiff(
     const additions = diff.reduce((sum: number, d) => sum + d.additions, 0)
     const deletions = diff.reduce((sum: number, d) => sum + d.deletions, 0)
     
-    await context.storage.createAssistantMessageStep(context.childExecutionId, {
+    await context.storage.createAssistantMessageStep(context.parentExecutionId, context.inputStepDbId, {
       diff: {
         files: diff.map(d => ({
           path: d.file,
@@ -1227,7 +1186,8 @@ async function handleWorktreeFailed(
   logger.error(`[OpenCode] Worktree failed: ${message}`)
   
   await context.storage.createErrorStep(
-    context.childExecutionId,
+    context.parentExecutionId,
+    context.inputStepDbId,
     new Error(`Worktree failed: ${message}`)
   )
 }
@@ -1241,7 +1201,7 @@ async function handleCommandExecuted(
   
   logger.info(`[OpenCode] Command executed: ${name} with args: ${args}`)
   
-  await context.storage.createAssistantMessageStep(context.childExecutionId, {
+  await context.storage.createAssistantMessageStep(context.parentExecutionId, context.inputStepDbId, {
     command: {
       name,
       arguments: args,
@@ -1272,7 +1232,7 @@ export async function handleError(
   stats.errorsProcessed++
 
   const error = new Error(event.properties.error)
-  await context.storage.createErrorStep(context.childExecutionId, error)
+  await context.storage.createErrorStep(context.parentExecutionId, context.inputStepDbId, error)
 
   logger.error(`[OpenCode] Error event: ${event.properties.error}`)
 
