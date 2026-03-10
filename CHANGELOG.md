@@ -1,3 +1,10 @@
+## [1.75.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.75.0...v1.75.1) (2026-03-10)
+
+
+### Bug Fixes
+
+* make new workflow instead of rerun when triggering workflow from bitbucket. ([0f07bd9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0f07bd92e4cceeb5a1b8a030c9428ddd096d5a78)), closes [#3930](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3930)
+
 ## [1.75.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.74.0...v1.75.0) (2026-03-09)
 
 
