@@ -1,3 +1,15 @@
+## [1.76.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.75.1...v1.76.0) (2026-03-10)
+
+
+### Features
+
+* Register Electron deep-link handler before app ready ([2416e90](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2416e9034072943952e70ff4673c0919023e8ff5)), closes [#3953](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3953)
+
+
+### Bug Fixes
+
+* added affected user's email in xyne-auto rca workflow trigger ([a5d698f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a5d698f848ab774935ba1d8fdd2ed84b8892b098)), closes [#3960](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3960)
+
 ## [1.75.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.75.0...v1.75.1) (2026-03-10)
 
 
