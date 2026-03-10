@@ -5,4 +5,8 @@ export { CanvasPreview } from './CanvasPreview';
 export { CanvasShareModal } from './CanvasShareModal';
 export { CanvasDeleteModal } from './CanvasDeleteModal';
 export { QuartoDocModal } from './QuartoDocModal';
+export { CanvasAttachmentModal } from './CanvasAttachmentModal';
+export { CanvasLinkPreview } from './CanvasLinkPreview';
 export * from './Canvas.types';
+export type { CanvasAttachmentModalProps } from './CanvasAttachmentModal';
+export type { CanvasLinkPreviewProps } from './CanvasLinkPreview';
