@@ -487,7 +487,9 @@ export default function WorkflowTriggerModal({
                         ? 'Enter a number'
                         : field.type === 'boolean'
                           ? 'Enter true or false'
-                          : `Enter ${field.name}`
+                          : field.name === 'repositoryUrl'
+                            ? 'Enter in SSH format (e.g., ssh://git@github.com/example-org/xyne-spaces.git)'
+                            : `Enter ${field.name}`
                 }
               />
             )}

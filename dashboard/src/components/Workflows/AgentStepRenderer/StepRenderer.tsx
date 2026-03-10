@@ -21,11 +21,13 @@ import { ExternalStepApprovalRenderer, ExternalStepOutputRenderer } from './Exte
 interface AgentStepRendererProps {
   step: WorkflowStep;
   defaultOpen?: boolean;
+  hideHeader?: boolean;
 }
 
 export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
   step,
   defaultOpen = true,
+  hideHeader = false,
 }) => {
   if (!step?.stepName) return null;
 
@@ -135,6 +137,14 @@ export const AgentStepRenderer: React.FC<AgentStepRendererProps> = ({
       <code className='text-wrap'>{formatStepData(step.data)}</code>
     </pre>
   );
+
+  if (hideHeader) {
+    return (
+      <div className='overflow-safe w-full word-break-safe' data-step-name={step.stepName}>
+        {content}
+      </div>
+    );
+  }
 
   const accordionProps: {
     accordionType: typeof AccordionType.BORDER;

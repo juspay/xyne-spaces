@@ -4,7 +4,7 @@ import {
   WorkflowStep,
 } from '../../services/Workflow/workflowGraphService.types';
 import { AgentStepRenderer } from './AgentStepRenderer/StepRenderer';
-import { Code, FileX2 } from 'lucide-react';
+import { FileX2 } from 'lucide-react';
 import { CodeGenerationLoader } from './CodeGenerationLoader/CodeGenerationLoader';
 
 interface LiveEditsPanelProps {
@@ -85,23 +85,13 @@ const LiveEditsPanel: React.FC<LiveEditsPanelProps> = ({ combinedStepsData }) =>
 
   return (
     <div className='h-full flex flex-col bg-background overflow-hidden'>
-      <div className='flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-muted/80'>
-        <div className='flex items-center gap-2'>
-          <Code className='w-4 h-4 text-blue-500' />
-          <h3 className='font-medium text-foreground text-sm'>Live Edits</h3>
-          <span className='px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium ml-2'>
-            {editSteps.length}
-          </span>
-        </div>
-      </div>
-
       <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-muted/30'>
         {editSteps.map((step, index) => (
           <div
             key={step.id || index}
-            className='animate-in fade-in slide-in-from-bottom-2 duration-300 bg-background rounded-lg shadow-sm border border-border overflow-hidden'
+            className='animate-in fade-in slide-in-from-bottom-2 duration-300'
           >
-            <AgentStepRenderer step={step} defaultOpen={true} />
+            <AgentStepRenderer step={step} defaultOpen={true} hideHeader={true} />
           </div>
         ))}
         <div ref={scrollRef} />

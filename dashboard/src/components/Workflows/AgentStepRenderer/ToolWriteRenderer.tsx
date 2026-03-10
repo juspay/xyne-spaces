@@ -27,8 +27,11 @@ export const ToolWriteRenderer: React.FC<
       (input['file_path'] as string) ??
       (output['file_path'] as string) ??
       (record['file_path'] as string) ??
-      'Unknown file';
-    const fileName = filePath.split('/').pop() || 'Unknown File';
+      '';
+
+    const pathParts = filePath.split('/');
+    const fileName = pathParts.pop() || 'Unknown File';
+    const directoryPath = pathParts.join('/');
 
     // Content
     const content = (input['content'] as string) ?? '';
@@ -42,55 +45,93 @@ export const ToolWriteRenderer: React.FC<
 
     return (
       <div className='space-y-2 text-sm'>
-        <div className='rounded-lg border border-border overflow-hidden bg-background'>
+        <div className='rounded-xl border border-border overflow-hidden bg-background'>
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className='w-full flex items-center gap-2 px-3 py-2 hover:bg-muted transition-colors'
+            className='w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left'
             data-track-category='Workflows'
             data-track-name='ToggleFileWriteExpand'
-            data-track-metadata={JSON.stringify({ fileName })}
+            data-track-metadata={JSON.stringify({ fileName, filePath })}
           >
-            <span className='text-muted-foreground'>
-              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            </span>
-            <FileEdit size={16} className='text-blue-500 shrink-0' />
-            <span className='text-sm font-medium text-foreground'>{fileName}</span>
-            <span className='ml-auto flex items-center gap-1 text-sm'>
-              {success && !error ? (
-                <span className='flex items-center gap-1 text-green-600'>
-                  <Check size={14} strokeWidth={2.5} />
-                  {bytesWritten > 0 ? `${bytesWritten}B` : '1'}
-                </span>
-              ) : (
-                <span className='flex items-center gap-1 text-red-600'>
-                  <X size={14} strokeWidth={2.5} />1
+            <div className='p-2 rounded-lg bg-blue-500/10 text-blue-500'>
+              <FileEdit size={18} />
+            </div>
+
+            <div className='flex flex-col min-w-0'>
+              <div className='flex items-center gap-2'>
+                <span className='text-sm font-semibold text-foreground truncate'>{fileName}</span>
+                {success && !error ? (
+                  <span className='inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-500/10 text-green-600 uppercase tracking-wider'>
+                    Success
+                  </span>
+                ) : (
+                  <span className='inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-600 uppercase tracking-wider'>
+                    Failed
+                  </span>
+                )}
+              </div>
+              {directoryPath && (
+                <span className='text-[11px] text-muted-foreground truncate font-mono'>
+                  {directoryPath}/
                 </span>
               )}
-            </span>
+            </div>
+
+            <div className='ml-auto flex items-center gap-3'>
+              <div className='hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/50 text-[10px] font-medium text-muted-foreground border border-border/50'>
+                {success && !error ? (
+                  <>
+                    <Check size={12} className='text-green-600' strokeWidth={3} />
+                    <span>{bytesWritten > 0 ? `${bytesWritten}B` : 'Written'}</span>
+                  </>
+                ) : (
+                  <>
+                    <X size={12} className='text-red-600' strokeWidth={3} />
+                    <span>Failed</span>
+                  </>
+                )}
+              </div>
+              <span className='text-muted-foreground/60 transition-transform duration-200'>
+                {isExpanded ? (
+                  <ChevronDown size={18} className='rotate-0' />
+                ) : (
+                  <ChevronRight size={18} className='-rotate-90' />
+                )}
+              </span>
+            </div>
           </button>
 
           {/* Expanded Content */}
           {isExpanded && (
-            <div className='border-t border-border overflow-auto max-h-96'>
+            <div className='border-t border-border bg-slate-50/30 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200'>
               {/* Error message */}
               {error && (
-                <div className='p-3 bg-red-50 border-b border-red-200'>
-                  <p className='text-sm font-semibold text-red-700 mb-1'>Error:</p>
-                  <p className='text-xs text-red-700 font-mono whitespace-pre-wrap'>{error}</p>
+                <div className='p-3 bg-red-500/5 border-b border-red-200/50'>
+                  <p className='text-xs font-semibold text-red-600 mb-1 flex items-center gap-1.5'>
+                    <X size={14} strokeWidth={3} />
+                    Error Detail:
+                  </p>
+                  <p className='text-xs text-red-700/80 font-mono whitespace-pre-wrap pl-5'>
+                    {error}
+                  </p>
                 </div>
               )}
 
               {/* Content stats */}
-              <div className='px-3 py-2 bg-muted border-b border-border text-xs text-muted-foreground'>
-                {charCount} characters, {lineCount} lines
+              <div className='px-4 py-2 bg-muted/30 border-b border-border text-[10px] font-medium text-muted-foreground uppercase tracking-tight flex items-center gap-3'>
+                <span>{charCount.toLocaleString()} characters</span>
+                <span className='w-1 h-1 rounded-full bg-muted-foreground/30'></span>
+                <span>{lineCount.toLocaleString()} lines</span>
               </div>
 
               {/* File content preview */}
               {content && (
-                <pre className='p-3 text-xs font-mono text-foreground whitespace-pre-wrap break-words'>
-                  {content.length > 2000 ? `${content.substring(0, 2000)}...` : content}
-                </pre>
+                <div className='max-h-[400px] overflow-auto'>
+                  <pre className='p-4 text-xs font-mono text-foreground/90 whitespace-pre-wrap break-words leading-relaxed'>
+                    {content.length > 2000 ? `${content.substring(0, 2000)}...` : content}
+                  </pre>
+                </div>
               )}
             </div>
           )}

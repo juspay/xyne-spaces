@@ -48,10 +48,10 @@ const diffStyles = {
   gutter: {
     backgroundColor: 'transparent',
     color: '#9ca3af', // gray-400
-    width: '20px',
-    minWidth: '20px',
-    padding: '0 8px 0 0',
-    textAlign: 'left' as const,
+    minWidth: '36px',
+    padding: '0 8px',
+    textAlign: 'right' as const,
+    userSelect: 'none' as const,
   },
   contentText: {
     color: '#374151', // gray-700
@@ -79,7 +79,10 @@ export const ToolMultiEditRenderer: React.FC<
       (output['file_path'] as string) ??
       (record['file_path'] as string) ??
       '';
-    const fileName = filePath.split('/').pop() || 'Unknown File';
+
+    const pathParts = filePath.split('/');
+    const fileName = pathParts.pop() || 'Unknown File';
+    const directoryPath = pathParts.join('/');
 
     const totalEdits = (output['total_edits'] as number) ?? 0;
     const successfulEdits = (output['successful_edits'] as number) ?? totalEdits;
@@ -92,108 +95,117 @@ export const ToolMultiEditRenderer: React.FC<
       (input['edits'] as Array<{ file_path?: string; old_string?: string; new_string?: string }>) ??
       [];
 
+    const hasAnyEdits = editsApplied.length > 0 || inputEdits.length > 0;
+
     return (
       <div className='space-y-2 text-sm'>
-        {/* File Card with Diff */}
-        <div className='rounded-lg border border-border overflow-hidden bg-background'>
+        <div className='rounded-xl border border-border overflow-hidden bg-background'>
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className='w-full flex items-center gap-2 px-3 py-2 hover:bg-muted transition-colors'
+            className='w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left'
             data-track-category='Workflows'
             data-track-name='ToggleMultiFileEditExpand'
             data-track-metadata={JSON.stringify({ fileName, filePath })}
           >
-            <span className='text-muted-foreground'>
-              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            </span>
-            <FileEdit size={16} className='text-amber-500 shrink-0' />
-            <span className='text-sm font-medium text-foreground'>
-              {filePath ? fileName : `${totalEdits || inputEdits.length} edits`}
-            </span>
-            <span className='ml-auto flex items-center gap-2 text-sm'>
-              <span className='flex items-center gap-1 text-green-600'>
-                <Check size={14} strokeWidth={2.5} />
-                {successfulEdits}
-              </span>
-              {failedEdits > 0 && (
-                <span className='flex items-center gap-1 text-red-600'>
-                  <X size={14} strokeWidth={2.5} />
-                  {failedEdits}
+            <div className='p-2 rounded-lg bg-amber-500/10 text-amber-500'>
+              <FileEdit size={18} />
+            </div>
+
+            <div className='flex flex-col min-w-0'>
+              <div className='flex items-center gap-2'>
+                <span className='text-sm font-semibold text-foreground truncate'>
+                  {filePath ? fileName : `${totalEdits || inputEdits.length} Edits`}
+                </span>
+                {totalEdits > 0 && (
+                  <span className='inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 uppercase tracking-wider'>
+                    {totalEdits} {totalEdits === 1 ? 'Edit' : 'Edits'}
+                  </span>
+                )}
+              </div>
+              {directoryPath && (
+                <span className='text-[11px] text-muted-foreground truncate font-mono'>
+                  {directoryPath}/
                 </span>
               )}
-            </span>
+            </div>
+
+            <div className='ml-auto flex items-center gap-3'>
+              <div className='hidden sm:flex items-center gap-2 px-2 py-1 rounded-md bg-muted/50 text-[10px] font-medium border border-border/50'>
+                <div className='flex items-center gap-1 text-green-600'>
+                  <Check size={12} strokeWidth={3} />
+                  <span>{successfulEdits}</span>
+                </div>
+                {failedEdits > 0 && (
+                  <>
+                    <div className='w-px h-3 bg-border mx-1'></div>
+                    <div className='flex items-center gap-1 text-red-600'>
+                      <X size={12} strokeWidth={3} />
+                      <span>{failedEdits}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+              <span className='text-muted-foreground/60 transition-transform duration-200'>
+                {isExpanded ? (
+                  <ChevronDown size={18} className='rotate-0' />
+                ) : (
+                  <ChevronRight size={18} className='-rotate-90' />
+                )}
+              </span>
+            </div>
           </button>
 
           {/* Expanded Content - Show Diffs */}
-          {isExpanded && editsApplied.length > 0 && (
-            <div className='border-t border-border overflow-auto max-h-96'>
-              {editsApplied.map((edit, index) => (
-                <div key={index}>
-                  {/* Edit separator for multiple edits */}
-                  {editsApplied.length > 1 && (
-                    <div className='flex items-center gap-2 px-3 py-1 bg-muted border-t border-b border-border first:border-t-0'>
-                      <div className='flex-1 h-px bg-muted-foreground/50'></div>
-                      <span className='text-xs text-muted-foreground font-medium'>
-                        Edit {index + 1}
-                      </span>
-                      <div className='flex-1 h-px bg-muted-foreground/50'></div>
+          {isExpanded && (
+            <div className='border-t border-border bg-slate-50/30 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200'>
+              {/* Diff Container */}
+              {(editsApplied.length > 0 || inputEdits.length > 0) && (
+                <div className='overflow-auto max-h-[500px] divide-y divide-border/40'>
+                  {(editsApplied.length > 0 ? editsApplied : inputEdits).map((edit, index) => (
+                    <div key={index} className='group'>
+                      {/* Edit Header for Multi-edit */}
+                      <div className='px-4 py-1.5 bg-muted/20 border-b border-border/30 flex items-center gap-2'>
+                        <span className='text-[10px] font-bold text-muted-foreground/70 uppercase tracking-widest'>
+                          Edit {index + 1}
+                        </span>
+                        <div className='h-px flex-1 bg-border/40'></div>
+                      </div>
+                      {/* Diff View */}
+                      <ReactDiffViewer
+                        styles={diffStyles}
+                        oldValue={edit.old_string || ''}
+                        newValue={edit.new_string || ''}
+                        splitView={false}
+                        showDiffOnly={false}
+                        useDarkTheme={false}
+                        hideLineNumbers={false}
+                        compareMethod={DiffMethod.WORDS}
+                      />
                     </div>
-                  )}
-                  {/* Diff View */}
-                  <ReactDiffViewer
-                    styles={diffStyles}
-                    oldValue={edit.old_string || ''}
-                    newValue={edit.new_string || ''}
-                    splitView={false}
-                    showDiffOnly={false}
-                    useDarkTheme={false}
-                    hideLineNumbers={false}
-                    compareMethod={DiffMethod.WORDS}
-                  />
+                  ))}
                 </div>
-              ))}
+              )}
+
+              {/* Status Message when no specific applied edits are listed */}
+              {!hasAnyEdits && successfulEdits > 0 && (
+                <div className='px-4 py-3 text-xs text-muted-foreground italic flex items-center gap-2 bg-muted/10'>
+                  <Check size={14} className='text-green-500' />
+                  {successfulEdits} edit{successfulEdits !== 1 ? 's' : ''} applied successfully to
+                  the file.
+                </div>
+              )}
+
+              {/* Error Summary if any */}
+              {failedEdits > 0 && (
+                <div className='px-4 py-2 bg-red-500/5 border-t border-red-200/50 text-[10px] text-red-600 font-medium flex items-center gap-1.5'>
+                  <X size={12} strokeWidth={3} />
+                  {failedEdits} edit{failedEdits !== 1 ? 's' : ''} encountered issues during
+                  application.
+                </div>
+              )}
             </div>
           )}
-
-          {/* Fallback for old format - show input edits */}
-          {isExpanded && editsApplied.length === 0 && inputEdits.length > 0 && (
-            <div className='border-t border-border overflow-auto max-h-96'>
-              {inputEdits.map((edit, index) => (
-                <div key={index}>
-                  {inputEdits.length > 1 && (
-                    <div className='flex items-center gap-2 px-3 py-1 bg-muted border-t border-b border-border first:border-t-0'>
-                      <div className='flex-1 h-px bg-muted-foreground/50'></div>
-                      <span className='text-xs text-muted-foreground font-medium'>
-                        Edit {index + 1}
-                      </span>
-                      <div className='flex-1 h-px bg-muted-foreground/50'></div>
-                    </div>
-                  )}
-                  <ReactDiffViewer
-                    styles={diffStyles}
-                    oldValue={edit.old_string || ''}
-                    newValue={edit.new_string || ''}
-                    splitView={false}
-                    showDiffOnly={false}
-                    useDarkTheme={false}
-                    hideLineNumbers={false}
-                    compareMethod={DiffMethod.WORDS}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Message when no edits to show */}
-          {isExpanded &&
-            editsApplied.length === 0 &&
-            inputEdits.length === 0 &&
-            successfulEdits > 0 && (
-              <div className='px-3 py-2 text-sm text-muted-foreground border-t border-border'>
-                {successfulEdits} edit{successfulEdits !== 1 ? 's' : ''} applied successfully
-              </div>
-            )}
         </div>
       </div>
     );

@@ -343,7 +343,6 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
       {!hideTabs && (
         <div className='flex-shrink-0 px-3 py-2 border-b border-border bg-background shadow-sm z-20'>
           <div className='flex items-center justify-center md:justify-between gap-3'>
-            {/* Left: Section Title - Hidden on mobile */}
             <div className='hidden md:flex items-center gap-2 px-1'>
               <div className='w-8 h-8 rounded-lg bg-muted border border-border flex items-center justify-center'>
                 <Bot size={16} className='text-foreground/70' />
@@ -361,7 +360,6 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
               </div>
             </div>
 
-            {/* Middle: Premium Tab Switcher */}
             <div className='flex bg-muted/80 backdrop-blur-md p-1 rounded-xl border border-border w-full md:w-auto md:min-w-[260px] shadow-inner'>
               <button
                 onClick={() => setActiveTab('chat')}
@@ -409,17 +407,14 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
               </button>
             </div>
 
-            {/* Right: Close/Action Button (Optional or spacer) */}
-            <div className='w-[100px] hidden md:flex justify-end'>
-              {/* Optional actions or just a spacer to balance the header */}
-            </div>
+            <div className='w-[100px] hidden md:flex justify-end'></div>
           </div>
         </div>
       )}
 
-      <div className='flex-1 overflow-y-auto px-3 md:px-6 lg:px-8 py-4 space-y-4 no-scrollbar'>
+      <div className='flex-1 overflow-y-auto px-3 md:px-4 py-4 space-y-4 no-scrollbar'>
         {!hideTabs && activeTab === 'diff' ? (
-          <div className='h-full -mx-3 md:-mx-6 lg:-mx-8 -my-4'>
+          <div className='h-full -mx-3 md:-mx-4 -my-4'>
             <LiveEditsPanel combinedStepsData={combinedStepsData} />
           </div>
         ) : visibleMessages.length === 0 ? (
@@ -515,7 +510,7 @@ const AgentMessageBubble: React.FC<{
 
         {(summary || isRunning || canShowTurns) && (
           <div
-            className={`rounded-xl md:rounded-2xl rounded-tl-sm border px-3 md:px-4 py-2 md:py-2.5 ${agentInfo.bubbleBg} ${agentInfo.bubbleBorder} transition-shadow ${isLatest && isRunning ? 'shadow-sm ring-1 ring-sky-100' : ''}`}
+            className={`rounded-xl md:rounded-2xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 ${agentInfo.bubbleBg} transition-shadow ${isLatest && isRunning ? 'shadow-sm ring-1 ring-sky-100' : ''}`}
           >
             {summary ? (
               <TruncatableMarkdownContent
