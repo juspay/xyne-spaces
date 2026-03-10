@@ -57,6 +57,11 @@ import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
 import { EmojiClickData } from 'emoji-picker-react';
 import { InlineEmoji } from '../EditorToolbar/InlineEmoji';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { CanvasAttachmentModal, CanvasLinkPreview } from '../../Canvas';
+import type { Canvas } from '../../Canvas';
+import { CanvasVisibility } from '@xyne/shared';
+import { canvasService } from '../../../services/Canvas/canvasService';
+import { v4 as uuidv4 } from 'uuid';
 
 const lowlight = createLowlight(common);
 
@@ -158,6 +163,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(false);
 
     const [ticketCreated, setTicketCreated] = useState(false);
+
+    // Canvas attachment state
+    const [attachedCanvas, setAttachedCanvas] = useState<Canvas | null>(null);
+    const [isCanvasAttachmentModalOpen, setIsCanvasAttachmentModalOpen] = useState(false);
 
     const { isMobile } = usePlatform();
     const { notifyTyping } = useTypingState();
@@ -646,14 +655,76 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         const filesToSend = allAttachments
           .map(a => a.file)
           .filter((f): f is File => f instanceof File);
-        await onSendMessage(plainText, htmlContent, filesToSend);
+
+        // Insert canvas link into editor if attached
+        if (attachedCanvas) {
+          const canvasLink = `${window.location.origin}/chat/canvas/${attachedCanvas.viewAccessId || attachedCanvas.id}`;
+          // Insert as plain link - platform will unfurl to show preview
+          editor?.commands.insertContent(` ${canvasLink}`);
+        }
+
+        // Get fresh content after inserting link
+        const finalHtmlContent = editor?.getHTML() || htmlContent;
+        const finalPlainText = editor?.getText().trim() || plainText;
+
+        await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
         editor.commands.setContent('');
         setContent('');
+        setAttachedCanvas(null);
         editor.commands.focus();
       } finally {
         setIsSending(false);
       }
-    }, [editor, allAttachments, onSendMessage, isSending]);
+    }, [editor, allAttachments, onSendMessage, isSending, attachedCanvas]);
+
+    // Canvas attachment handlers
+    const handleCanvasSelect = useCallback((canvas: Canvas) => {
+      setAttachedCanvas(canvas);
+      setIsCanvasAttachmentModalOpen(false);
+    }, []);
+
+    const handleCreateNewCanvas = useCallback(async () => {
+      // Create canvas immediately, attach to composer, then open canvas editor
+      const newCanvasId = uuidv4();
+      const viewAccessId = uuidv4();
+      const now = Date.now();
+
+      try {
+        // Create the canvas via API
+        await canvasService.createCollaborativeCanvas({
+          id: newCanvasId,
+          title: 'Untitled Canvas',
+          viewAccessId,
+          ...(channelId ? { channelId } : {}),
+        });
+
+        // Create canvas object and attach to composer
+        const newCanvas: Canvas = {
+          id: newCanvasId,
+          title: 'Untitled Canvas',
+          viewAccessId,
+          createdBy: '',
+          visibility: CanvasVisibility.PRIVATE,
+          isTemplate: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        setAttachedCanvas(newCanvas);
+        setIsCanvasAttachmentModalOpen(false);
+
+        // Open canvas editor in new tab for editing
+        const canvasUrl = `/chat/canvas/${newCanvasId}`;
+        window.open(canvasUrl, '_blank');
+      } catch {
+        toast.error('Failed to create canvas', {
+          description: 'Please try again.',
+        });
+      }
+    }, [channelId]);
+
+    const handleRemoveAttachedCanvas = useCallback(() => {
+      setAttachedCanvas(null);
+    }, [setAttachedCanvas]);
 
     const handleFileSelect = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -829,7 +900,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               hideSendButton={hideSendButton}
               showAttachButton={!!features.fileAttachments}
               attachmentPreviewComponent={
-                features.fileAttachments && allAttachments.length > 0 ? (
+                (features.fileAttachments && allAttachments.length > 0) || attachedCanvas ? (
                   <div className='px-3 pb-2 flex flex-wrap gap-3'>
                     {allAttachments.map(({ attachmentId, file }, index) => (
                       <AttachmentPreview
@@ -840,6 +911,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         isUploading={false}
                       />
                     ))}
+                    {attachedCanvas && (
+                      <CanvasLinkPreview
+                        canvas={attachedCanvas}
+                        onRemove={handleRemoveAttachedCanvas}
+                      />
+                    )}
                   </div>
                 ) : undefined
               }
@@ -875,6 +952,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   isUploading={false}
                 />
               ))}
+            </div>
+          )}
+
+          {/* Attached Canvas Preview */}
+          {attachedCanvas && (
+            <div className='px-3 pb-2'>
+              <CanvasLinkPreview canvas={attachedCanvas} onRemove={handleRemoveAttachedCanvas} />
             </div>
           )}
 
@@ -972,6 +1056,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             slot1: <FileText className='h-4 w-4' />,
                             onClick: () => {
                               setIsTranscriptSelectorOpen(true);
+                              setIsPlusMenuOpen(false);
+                            },
+                          },
+                          {
+                            label: 'Canvas',
+                            slot1: <FileText className='h-4 w-4' />,
+                            onClick: () => {
+                              setIsCanvasAttachmentModalOpen(true);
                               setIsPlusMenuOpen(false);
                             },
                           },
@@ -1224,6 +1316,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             </small>
           )}
         </div>
+
+        {/* Canvas Attachment Modal */}
+        <CanvasAttachmentModal
+          isOpen={isCanvasAttachmentModalOpen}
+          onClose={() => setIsCanvasAttachmentModalOpen(false)}
+          onSelectCanvas={handleCanvasSelect}
+          onCreateNewCanvas={handleCreateNewCanvas}
+        />
       </div>
     );
   },
