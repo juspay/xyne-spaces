@@ -117,7 +117,8 @@ export const initiateRcaInvestigationAndWaitForWebhook = async (
   workflowExecutionId: string,
   workflowStepId: string,
   query: string,
-  userContext: RcaUserContext
+  userContext: RcaUserContext,
+  affectedUserEmail: string
 ): Promise<ExternalStepRequestResult<never>> => {
   // Build webhook URL for callback
   const webhookUrl = `${BACKEND_URL}/api/external-step-response?workflowExecutionId=${encodeURIComponent(workflowExecutionId)}&workflowStepId=${encodeURIComponent(workflowStepId)}`;
@@ -127,14 +128,17 @@ export const initiateRcaInvestigationAndWaitForWebhook = async (
     'Content-Type': 'application/json',
   });
 
+  // Append affected user email to the query
+  const queryWithEmail = `${query}\n\nAffected User Email: ${affectedUserEmail}`;
+
   // Create FormData for multipart/form-data request
   const formData = new FormData();
-  formData.append('query', query);
+  formData.append('query', queryWithEmail);
   formData.append('stream', 'false');
   formData.append('notification_webhook', webhookUrl);
   formData.append('notification_webhook_headers', webhookHeaders);
 
-  logger.info(`[XyneAutoRCA] Initiating investigation with query: ${query.substring(0, 100)}...`);
+  logger.info(`[XyneAutoRCA] Initiating investigation with query: ${query.substring(0, 100)}..., affected user: ${affectedUserEmail}`);
 
   const response = await axios.post(
     `${config.genius.apiUrl}/api/v3/investigation/`,
@@ -142,7 +146,7 @@ export const initiateRcaInvestigationAndWaitForWebhook = async (
     {
       headers: {
         ...formData.getHeaders(),
-        'Authorization': `Basic ${config.genius.apiKey}`,
+        'Authorization': `Basic ${config.xyne.apiKey}`,
         'x-source-config': 'xyne_rca',
         'X-Xyne-User-Email': userContext.email,
         'X-Xyne-User-Id': userContext.userId,
@@ -218,7 +222,7 @@ export const fetchCompletedInvestigation = async (
     {
       headers: {
         ...formData.getHeaders(),
-        'Authorization': `Basic ${config.genius.apiKey}`,
+        'Authorization': `Basic ${config.xyne.apiKey}`,
         'x-source-config': 'xyne_rca',
         'X-Xyne-User-Email': userContext.email,
         'X-Xyne-User-Id': userContext.userId,

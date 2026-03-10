@@ -28,9 +28,7 @@ export interface RcaWebhookPayload {
  */
 export interface RcaInvestigationResponse {
   session_id: string;
-  status: 'success' | 'invoked' | 'merchant_id_mismatch' | string;
-  merchant_id?: string;
-  merchant_id_options?: string[];
+  status: 'success' | 'invoked' | string;
 }
 
 /**
@@ -87,10 +85,11 @@ export interface TicketDetails {
 }
 
 /**
- * Workflow context - only contains ticketId
+ * Workflow context - contains ticketId and affected user email
  */
 export interface XyneAutoRcaWorkflowContext extends BaseWorkflowContext {
   ticketId: string;
+  affectedUserEmail: string;
 }
 
 /**
