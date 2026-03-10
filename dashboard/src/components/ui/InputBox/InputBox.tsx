@@ -7,7 +7,7 @@ import React, {
   useEffect,
 } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
-import { DOMParser as PMDOMParser } from '@tiptap/pm/model';
+import { NodeType as PMNodeType } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
@@ -473,13 +473,54 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             void addFilesWithLimit(files);
           }
 
-          /** Helper: insert arbitrary HTML into the editor via ProseMirror directly */
-          const insertHtmlAtCursor = (html: string): void => {
-            const container = document.createElement('div');
-            container.innerHTML = html;
-            const pmParser = PMDOMParser.fromSchema(view.state.schema);
-            const slice = pmParser.parseSlice(container);
-            view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
+          /** Insert a table at the cursor by building ProseMirror nodes programmatically.
+           *
+           * Bypasses PMDOMParser entirely — creates table/tableRow/tableCell nodes
+           * directly from schema node types, the same way TipTap's own `insertTable`
+           * command does.  This guarantees correct node structure without any risk of
+           * HTML parsing flattening the table into bare paragraphs.
+           */
+          const insertTableAtCursor = (rows: string[][], hasHeader: boolean): void => {
+            const { state, dispatch } = view;
+            const { schema } = state;
+
+            // Resolve table node types by their tableRole spec property (mirrors
+            // TipTap's internal getTableNodeTypes helper).
+            const byRole: Record<string, PMNodeType> = {};
+            Object.keys(schema.nodes).forEach(type => {
+              const node = schema.nodes[type];
+              if (!node) return;
+              const spec = node.spec as { tableRole?: string };
+              if (spec.tableRole) byRole[spec.tableRole] = node;
+            });
+
+            const tableType = byRole['table'];
+            const rowType = byRole['row'];
+            const cellType = byRole['cell'];
+            const headerType = byRole['header_cell'] ?? cellType;
+
+            if (!tableType || !rowType || !cellType) return;
+
+            const makeCell = (text: string, isHeader: boolean) => {
+              const t = isHeader ? headerType : cellType;
+              const para = text
+                ? schema.nodes['paragraph']!.create(null, schema.text(text))
+                : schema.nodes['paragraph']!.create();
+              return t!.createChecked(null, para);
+            };
+
+            const pmRows = rows.map((cellTexts, rowIndex) => {
+              const isHeaderRow = hasHeader && rowIndex === 0;
+              return rowType.createChecked(
+                null,
+                cellTexts.map(text => makeCell(text, isHeaderRow)),
+              );
+            });
+
+            const tableNode = tableType.createChecked(null, pmRows);
+            const prevScrollTop = view.dom.scrollTop;
+            dispatch(state.tr.replaceSelectionWith(tableNode));
+            view.dom.scrollTop = prevScrollTop;
           };
 
           const htmlContent = clipboard?.getData('text/html');
@@ -487,16 +528,27 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             event.preventDefault();
             const parser = new DOMParser();
             const doc = parser.parseFromString(htmlContent, 'text/html');
-            const tables = Array.from(doc.querySelectorAll('table'));
-            if (tables.length > 0) {
-              const tableHtml = tables.map(t => t.outerHTML).join('');
-              if (tableHtml.length > 11500) {
+            const firstTable = doc.querySelector('table');
+            if (firstTable) {
+              const hasHeader =
+                !!firstTable.querySelector('thead') || !!firstTable.querySelector('th');
+              const rows = Array.from(firstTable.querySelectorAll('tr'))
+                .map(tr =>
+                  Array.from(tr.querySelectorAll('td, th')).map(
+                    cell => cell.textContent?.trim() ?? '',
+                  ),
+                )
+                .filter(row => row.length > 0);
+
+              if (rows.length === 0 || rows[0]?.length === 0) return false;
+
+              if (rows.reduce((sum, row) => sum + row.length, 0) > 500) {
                 toast.error('Table content is too large', {
                   description: 'Please paste a smaller table or copy the data as text.',
                 });
                 return true;
               }
-              insertHtmlAtCursor(tableHtml);
+              insertTableAtCursor(rows, hasHeader);
               return true;
             }
           }
@@ -508,17 +560,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             const lines = pastedText.split('\n').filter(l => l.trim() !== '');
             if (lines.length >= 2 && lines.every(l => l.includes('\t'))) {
               event.preventDefault();
-              const rows = lines.map(l => l.split('\t'));
-              const [headerRow, ...bodyRows] = rows;
-              if (!headerRow) return false;
-              const thead = `<thead><tr>${headerRow.map(c => `<th>${c.trim()}</th>`).join('')}</tr></thead>`;
-              const tbody =
-                bodyRows.length > 0
-                  ? `<tbody>${bodyRows
-                      .map(r => `<tr>${r.map(c => `<td>${c.trim()}</td>`).join('')}</tr>`)
-                      .join('')}</tbody>`
-                  : '';
-              insertHtmlAtCursor(`<table>${thead}${tbody}</table>`);
+              const rows = lines.map(l => l.split('\t').map(c => c.trim()));
+              if (!rows[0] || rows[0].length === 0) return false;
+              insertTableAtCursor(rows, true);
               return true;
             }
           }
