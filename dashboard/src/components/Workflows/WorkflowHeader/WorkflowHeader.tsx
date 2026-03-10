@@ -73,6 +73,9 @@ export interface WorkflowHeaderProps {
   model?: string | undefined;
   prLink?: string | undefined;
   createdBy?: string | undefined;
+  workflowNumber?: number | undefined;
+  workflowTitle?: string | undefined;
+  repositoryUrl?: string | undefined;
 }
 
 type StatusConfig = { bg: string; text: string; dot: string; label: string };
@@ -170,16 +173,19 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   model,
   prLink,
   createdBy,
+  workflowNumber,
+  workflowTitle,
+  repositoryUrl,
 }) => {
   const navigate = useNavigate();
   // const [showDesc, setShowDesc] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showJenkinsPanel, setShowJenkinsPanel] = useState(false);
-  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  const [showMetadataDropdown, setShowMetadataDropdown] = useState(false);
   const [isTriggering, setIsTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const jenkinsPanelRef = useRef<HTMLDivElement>(null);
-  const statusDropdownRef = useRef<HTMLDivElement>(null);
+  const metadataDropdownRef = useRef<HTMLDivElement>(null);
 
   const { cancelExecution, isCanceling } = useWorkflowControl();
 
@@ -223,10 +229,10 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
 
   const closeMenu = useCallback(() => setShowMenu(false), []);
   const closeJenkinsPanel = useCallback(() => setShowJenkinsPanel(false), []);
-  const closeStatusDropdown = useCallback(() => setShowStatusDropdown(false), []);
+  const closeMetadataDropdown = useCallback(() => setShowMetadataDropdown(false), []);
   useClickOutside(menuRef, closeMenu, showMenu);
   useClickOutside(jenkinsPanelRef, closeJenkinsPanel, showJenkinsPanel);
-  useClickOutside(statusDropdownRef, closeStatusDropdown, showStatusDropdown);
+  useClickOutside(metadataDropdownRef, closeMetadataDropdown, showMetadataDropdown);
 
   const status = executionStatus?.toLowerCase() || '';
   const isRunning = ['running', 'in_progress'].includes(status);
@@ -253,32 +259,21 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           </span>
           {workflowType && (
             <>
-              <ChevronRight size={14} className='text-gray-300 flex-shrink-0 hidden sm:block' />
-              <span className='text-gray-600 truncate hidden sm:block max-w-[120px] md:max-w-none'>
-                {workflowType.length > 15 ? `${workflowType.slice(0, 15)}...` : workflowType}
-              </span>
-            </>
-          )}
-          {executionStatus && (
-            <>
-              <ChevronRight size={14} className='text-gray-300 flex-shrink-0 hidden sm:block' />
-              <div className='relative' ref={statusDropdownRef}>
+              <ChevronRight size={14} className='text-gray-300 flex-shrink-0' />
+              <div className='relative' ref={metadataDropdownRef}>
                 <button
-                  onClick={() => setShowStatusDropdown(!showStatusDropdown)}
-                  className={`inline-flex items-center gap-1 px-1.5 md:px-2 py-0.5 rounded-md ${statusConfig.bg} cursor-pointer hover:opacity-80 transition-opacity`}
+                  onClick={() => setShowMetadataDropdown(!showMetadataDropdown)}
+                  className='text-gray-600 truncate cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-none p-0 inline-flex items-center gap-0.5'
                   data-track-category='Workflows'
                   data-track-name='ToggleStatusDropdown'
                   data-track-metadata={JSON.stringify({ executionStatus, ticketId: ticket.id })}
                 >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot} ${isRunning ? 'animate-pulse' : ''}`}
-                  />
-                  <span className={`text-[10px] md:text-xs font-medium ${statusConfig.text}`}>
-                    {statusConfig.label}
+                  <span>
+                    {workflowType.length > 20 ? `${workflowType.slice(0, 20)}...` : workflowType}
                   </span>
-                  <ChevronDown size={10} className={`${statusConfig.text} hidden sm:block`} />
+                  <ChevronDown size={14} className='text-gray-400 flex-shrink-0' />
                 </button>
-                {showStatusDropdown && (
+                {showMetadataDropdown && (
                   <div className='absolute left-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-[60]'>
                     {executorType && (
                       <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
@@ -288,6 +283,13 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                     {model && (
                       <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
                         <span className='font-medium text-gray-900'>Model: {model}</span>
+                      </div>
+                    )}
+                    {repositoryUrl && (
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
+                        <span className='font-medium text-gray-900'>
+                          Repository Url: {repositoryUrl}
+                        </span>
                       </div>
                     )}
                     {prLink && (
@@ -314,7 +316,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                     {createdByUser?.id && (
                       <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
                         <span className='font-medium text-gray-900'>
-                          Created By: {createdByUser.name || createdByUser.email || 'Unknown'}
+                          Ran By: {createdByUser.name || createdByUser.email || 'Unknown'}
                         </span>
                       </div>
                     )}
@@ -329,6 +331,21 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                       )}
                   </div>
                 )}
+              </div>
+            </>
+          )}
+          {executionStatus && (
+            <>
+              <ChevronRight size={14} className='text-gray-300 flex-shrink-0' />
+              <div
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md ${statusConfig.bg}`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot} ${isRunning ? 'animate-pulse' : ''}`}
+                />
+                <span className={`text-xs font-medium ${statusConfig.text}`}>
+                  {statusConfig.label}
+                </span>
               </div>
             </>
           )}
@@ -515,10 +532,28 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           </div>
         </div>
       </div>
-      <div className='px-3 md:px-4 pb-2 md:pb-3'>
-        <h1 className='text-sm md:text-base font-semibold text-gray-900 leading-tight line-clamp-2'>
-          {ticket.title}
+      <div className='px-4 pb-3'>
+        <h1 className='text-base font-semibold text-gray-900 leading-tight flex items-center gap-2'>
+          {workflowNumber !== undefined && (
+            <span className='inline-flex items-center justify-center flex-shrink-0 min-w-[28px] h-6 px-2 bg-blue-100 text-blue-700 text-xs font-bold rounded-full border border-blue-200'>
+              #{workflowNumber}
+            </span>
+          )}
+          <span className='truncate'>{workflowTitle ?? ticket.title}</span>
         </h1>
+        {/* {desc && (
+          <div className='mt-1.5 flex items-start gap-2'>
+            <p className='text-sm text-gray-500 leading-relaxed flex-1'>{displayDesc}</p>
+            {desc.length > 150 && (
+              <button
+                onClick={() => setShowDesc(!showDesc)}
+                className='text-xs font-medium text-blue-500 hover:text-blue-600 whitespace-nowrap flex-shrink-0 mt-0.5'
+              >
+                {showDesc ? 'View Less' : 'View More'}
+              </button>
+            )}
+          </div>
+        )} */}
       </div>
     </div>
   );

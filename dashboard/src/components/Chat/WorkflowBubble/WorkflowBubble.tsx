@@ -151,35 +151,10 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
             cursor={'pointer'}
             onClick={e => {
               e.stopPropagation();
-              const params = new URLSearchParams();
-              if (metadata?.executorType) {
-                params.append('executorType', metadata.executorType);
-              }
-              if (metadata?.['model']) {
-                const modelValue = metadata['model'];
-                if (typeof modelValue === 'string') {
-                  params.append('model', modelValue);
-                } else if (typeof modelValue === 'object' && modelValue !== null) {
-                  params.append('model', JSON.stringify(modelValue));
-                } else if (
-                  typeof modelValue === 'number' ||
-                  typeof modelValue === 'boolean' ||
-                  typeof modelValue === 'bigint'
-                ) {
-                  params.append('model', String(modelValue));
-                } else {
-                  // Skip other types (symbol, function, etc.)
-                  params.append('model', '');
-                }
-              }
-              if (metadata?.useQuestioningMode) {
-                params.append('useQuestioningMode', String(metadata.useQuestioningMode));
-              }
-              const queryString = params.toString();
-              const baseUrl = metadata?.workflowId
-                ? `/tickets/${ticketId}/workflow/${metadata.workflowId}`
-                : `/tickets/${ticketId}/workflow`;
-              const workflowUrl = queryString ? `${baseUrl}?${queryString}` : baseUrl;
+              const workflowNumberParam = workflowNumber ? `?workflowNumber=${workflowNumber}` : '';
+              const workflowUrl = metadata?.workflowId
+                ? `/tickets/${ticketId}/workflow/${metadata.workflowId}${workflowNumberParam}`
+                : `/tickets/${ticketId}/workflow${workflowNumberParam}`;
               void navigate(workflowUrl);
             }}
             color='#788187'

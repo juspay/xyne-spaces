@@ -217,6 +217,9 @@ export class WorkflowRepository {
             ticketId: true,
             metadata: true,
           }
+        },
+        pullRequests: {
+          orderBy: { updatedAt: 'desc' }
         }
       }
     });
@@ -231,6 +234,9 @@ export class WorkflowRepository {
       include: {
         workflowSteps: {
           orderBy: { createdAt: 'asc' }
+        },
+        pullRequests: {
+          orderBy: { updatedAt: 'desc' }
         }
       }
     });
@@ -302,6 +308,21 @@ export class WorkflowRepository {
     const executionState = await getExecutionState(execution.id);
     const gitInfoFromOutput = executionState.output ? this.extractGitInfoFromSteps([JSON.parse(executionState.output)]) : null;;
 
+    // Parse metadata once for reuse
+    let parsedMetadata = null;
+    if (execution.workflow.metadata) {
+      try {
+        parsedMetadata = JSON.parse(execution.workflow.metadata);
+      } catch (error) {
+        logger.warn(`Failed to parse workflow metadata for execution ${execution.id}:`, error);
+        parsedMetadata = null;
+      }
+    }
+    const originalRequest = parsedMetadata?.originalRequest || {};
+
+    // Ensure useQuestioningMode is a proper boolean (handle string "false" case)
+    const useQuestioningModeBool = originalRequest.useQuestioningMode === true || originalRequest.useQuestioningMode === 'true';
+
     // Return in same format as getCombinedWorkflowStepsLightWithMetadata (with workflows array)
     // This ensures frontend can use the same parsing logic
     return {
@@ -322,7 +343,10 @@ export class WorkflowRepository {
         executionMetadata: executionMetadata,
         // Git info for diff view (only available if baseCommitHash exists)
         gitInfo: gitInfoFromOutput,
-        metadata: execution.workflow.metadata ? JSON.parse(execution.workflow.metadata) : null,
+        metadata: parsedMetadata,
+        executorType: originalRequest.executorType,
+        model: originalRequest.modelName,
+        useQuestioningMode: useQuestioningModeBool,
       }]
     };
   }
@@ -365,6 +389,22 @@ export class WorkflowRepository {
                 workflowName: true,
                 workflowType: true
               }
+            },
+            pullRequests: {
+              select: {
+                id: true,
+                prId: true,
+                prUrl: true,
+                repoName: true,
+                sourceBranchName: true,
+                destinationBranchName: true,
+                status: true,
+                date: true,
+                numberOfComments: true,
+                repositoryUrl: true,
+                updatedAt: true
+              },
+              orderBy: { updatedAt: 'desc' }
             }
           }
         }
@@ -451,6 +491,22 @@ export class WorkflowRepository {
                 workflowName: true,
                 workflowType: true
               }
+            },
+            pullRequests: {
+              select: {
+                id: true,
+                prId: true,
+                prUrl: true,
+                repoName: true,
+                sourceBranchName: true,
+                destinationBranchName: true,
+                status: true,
+                date: true,
+                numberOfComments: true,
+                repositoryUrl: true,
+                updatedAt: true
+              },
+              orderBy: { updatedAt: 'desc' }
             }
           }
         }
@@ -750,6 +806,21 @@ export class WorkflowRepository {
       // const gitInfo = this.extractGitInfoFromSteps(latestExecution.workflowSteps);
       const gitInfoFromOutput = latestExecution.output ? this.extractGitInfoFromSteps([JSON.parse(latestExecution.output)]) : null;
 
+      // Parse metadata once for reuse
+      let parsedMetadata = null;
+      if (workflow.metadata) {
+        try {
+          parsedMetadata = JSON.parse(workflow.metadata);
+        } catch (error) {
+          logger.warn(`Failed to parse workflow metadata for workflow ${workflow.id}:`, error);
+          parsedMetadata = null;
+        }
+      }
+      const originalRequest = parsedMetadata?.originalRequest || {};
+
+      // Ensure useQuestioningMode is a proper boolean (handle string "false" case)
+      const useQuestioningModeBool = originalRequest.useQuestioningMode === true || originalRequest.useQuestioningMode === 'true';
+
       processedWorkflows.push({
         workflowId: workflow.id,
         status: workflow.status,
@@ -770,7 +841,11 @@ export class WorkflowRepository {
         executionMetadata: executionMetadata,
         // Git info for diff view (only available if baseCommitHash exists)
         gitInfo: gitInfoFromOutput,
-        metadata: workflow.metadata ? JSON.parse(workflow.metadata) : null,
+        metadata: parsedMetadata,
+        executorType: originalRequest.executorType,
+        model: originalRequest.modelName,
+        useQuestioningMode: useQuestioningModeBool,
+        pullRequests: latestExecution.pullRequests || [],
       });
     }
 

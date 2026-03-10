@@ -95,6 +95,21 @@ export interface ExecutionMetadata {
   updatedAt: string;
 }
 
+// Pull request data from workflow execution
+export interface PullRequestData {
+  id: string;
+  prId: number;
+  prUrl: string;
+  repoName: string;
+  sourceBranchName: string;
+  destinationBranchName: string;
+  status: string;
+  date: string;
+  numberOfComments: number;
+  repositoryUrl: string;
+  updatedAt: string;
+}
+
 // Combined workflow data structure from API
 export interface CombinedWorkflowData {
   workflows: Array<{
@@ -146,6 +161,8 @@ export interface CombinedWorkflowData {
     useQuestioningMode?: boolean;
     model?: string;
     createdBy?: string | null;
+    // Pull requests created by this workflow execution
+    pullRequests?: PullRequestData[];
   }>;
 }
 
