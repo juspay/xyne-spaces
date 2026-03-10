@@ -135,6 +135,81 @@ export class GCSService {
   }
 
   /**
+   * Upload file buffer to GCS at an exact path without any modifications
+   * Use this when you need full control over the file path
+   */
+  async uploadFileV2(
+    buffer: Buffer,
+    options: {
+      path: string;
+      contentType: string;
+      metadata?: Record<string, string>;
+    }
+  ): Promise<GCSUploadResult> {
+    try {
+      // Validate inputs
+      if (!buffer || buffer.length === 0) {
+        throw new Error('File buffer is empty or invalid');
+      }
+
+      if (!options.path) {
+        throw new Error('Path is required');
+      }
+
+      if (!options.contentType) {
+        throw new Error('Content type is required');
+      }
+
+      // Use the exact path provided, no modifications
+      const filePath = options.path;
+
+      logger.info(`Uploading file to GCS at exact path: ${filePath}`, {
+        contentType: options.contentType,
+        size: buffer.length,
+      });
+
+      // Create file object in bucket
+      const file = this.bucket.file(filePath);
+
+      // Upload with metadata
+      const uploadOptions = {
+        metadata: {
+          contentType: options.contentType,
+          cacheControl: 'public, max-age=31536000', // 1 year cache
+          ...options.metadata,
+        },
+        resumable: false, // Use simple upload for files under 5MB
+      };
+
+      await file.save(buffer, uploadOptions);
+
+      // Get file metadata for size
+      const [metadata] = await file.getMetadata();
+      const fileSize = parseInt(String(metadata.size || '0'), 10);
+
+      const result: GCSUploadResult = {
+        filename: filePath,
+        gcsPath: filePath,
+        size: fileSize,
+      };
+
+      logger.info(`File uploaded successfully to GCS: ${filePath}`, {
+        size: fileSize,
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Failed to upload file to GCS:', error);
+
+      if (error instanceof Error) {
+        throw new Error(`GCS upload failed: ${error.message}`);
+      }
+
+      throw new Error('GCS upload failed: Unknown error');
+    }
+  }
+
+  /**
    * Delete file from GCS
    */
   async deleteFile(filename: string): Promise<GCSDeleteResult> {

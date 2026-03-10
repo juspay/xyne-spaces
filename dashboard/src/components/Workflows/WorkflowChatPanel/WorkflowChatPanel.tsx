@@ -5,7 +5,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import DOMPurify from 'dompurify';
 import {
-  // Send,
+  Send,
   Loader2,
   ChevronDown,
   ChevronRight,
@@ -35,7 +35,7 @@ import {
   WorkflowStep,
 } from '../../../services/Workflow/workflowGraphService.types';
 import { useWorkflowControl } from '../../../services/Workflow/workflowGraphService';
-// import { toast } from 'sonner'; // unused until continuation input is re-enabled
+import { toast } from 'sonner';
 import { WorkflowGraphOnly } from '../WorkflowGraphOnly';
 import { createPortal } from 'react-dom';
 import { ThreadMessages } from '../../Chat/ThreadPannel';
@@ -243,11 +243,11 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const { isMobile } = usePlatform();
-  // const [continuationMessage, setContinuationMessage] = useState(''); // unused until continuation input is re-enabled
+  const [continuationMessage, setContinuationMessage] = useState(''); // unused until continuation input is re-enabled
   const [activeTab, setActiveTab] = useState<TabId>('automation');
   const [mainTab, setMainTab] = useState<MainTabId>('flow');
   const [showThreadSummary, setShowThreadSummary] = useState(false);
-  const [userMessages] = useState<UserMessage[]>([]); // setUserMessages unused until continuation input is re-enabled
+  const [userMessages, setUserMessages] = useState<UserMessage[]>([]);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [internalIsGraphViewOpen, setInternalIsGraphViewOpen] = useState(false);
@@ -282,7 +282,8 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
     height: 0,
   });
   const headerRef = useRef<HTMLDivElement>(null);
-  useWorkflowControl();
+  const { continueAgenticStepAsync, isContinuing, resetContinue } = useWorkflowControl();
+  const [isSettingMode, setIsSettingMode] = useState(false);
 
   useEffect(() => {
     const updateGraphPosition = (): void => {
@@ -650,74 +651,86 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
     });
   }, [filteredSteps, searchQuery]);
 
-  // const handleSendMessage = async (): Promise<void> => {
-  //   if (!continuationMessage.trim() || !executionId) {
-  //     toast.error('Cannot send', {
-  //       description: 'Please provide a message',
-  //       duration: 3000,
-  //     });
-  //     return;
-  //   }
+  const handleSendMessage = async (): Promise<void> => {
+    if (!continuationMessage.trim() || !executionId) {
+      toast.error('Cannot send', {
+        description: 'Please provide a message',
+        duration: 3000,
+      });
+      return;
+    }
 
-  //   // Use continue API for completed/failed steps
-  //   // Find agent INPUT steps from the parent workflow steps (not expanded child steps)
-  //   // We need to look in the original combinedStepsData workflows
-  //   let lastAgentInputStep: WorkflowStep | null = null;
+    // Find the INPUT step from the current node's stepIds
+    // The current node represents the phase the user is viewing
+    let targetStep: WorkflowStep | null = null;
 
-  //   if (combinedStepsData?.workflows?.length) {
-  //     for (const workflow of combinedStepsData.workflows) {
-  //       for (const step of workflow.steps) {
-  //         // Look for agent steps that are INPUT type
-  //         if (step.stepExecutorType?.toLowerCase() === 'agent' && step.type === 'input') {
-  //           lastAgentInputStep = step;
-  //         }
-  //       }
-  //     }
-  //   }
+    if (combinedStepsData?.workflows?.length && currentNode?.stepIds?.length) {
+      for (const workflow of combinedStepsData.workflows) {
+        for (const step of workflow.steps) {
+          // Find the INPUT step from the current node's stepIds
+          if (currentNode.stepIds.includes(step.id) && step.type === 'input') {
+            targetStep = step;
+            break;
+          }
+        }
+        if (targetStep) break;
+      }
+    }
 
-  //   if (!lastAgentInputStep) {
-  //     toast.error('Cannot send', {
-  //       description: 'No agent checkpoint found to continue',
-  //       duration: 3000,
-  //     });
-  //     return;
-  //   }
+    // Fallback: find last agent INPUT step if no current node step found
+    if (!targetStep && combinedStepsData?.workflows?.length) {
+      for (const workflow of combinedStepsData.workflows) {
+        for (const step of workflow.steps) {
+          if (step.stepExecutorType?.toLowerCase() === 'agent' && step.type === 'input') {
+            targetStep = step;
+          }
+        }
+      }
+    }
 
-  //   // Add user message to display in chat
-  //   const userMessage: UserMessage = {
-  //     id: `user-msg-${Date.now()}`,
-  //     text: continuationMessage.trim(),
-  //     timestamp: new Date(),
-  //   };
-  //   setUserMessages(prev => [...prev, userMessage]);
+    if (!targetStep) {
+      toast.error('Cannot send', {
+        description: 'No agent checkpoint found to continue',
+        duration: 3000,
+      });
+      return;
+    }
 
-  //   resetContinue();
-  //   const targetExecutionId = lastAgentInputStep.workflowExecutionId || executionId;
-  //   if (!targetExecutionId) {
-  //     toast.error('Error', { description: 'No execution ID available', duration: 3000 });
-  //     return;
-  //   }
+    // Add user message to display in chat
+    const userMessage: UserMessage = {
+      id: `user-msg-${Date.now()}`,
+      text: continuationMessage.trim(),
+      timestamp: new Date(),
+    };
+    setUserMessages(prev => [...prev, userMessage]);
 
-  //   try {
-  //     const result = await continueAgenticStepAsync({
-  //       executionId: targetExecutionId,
-  //       stepId: lastAgentInputStep.id,
-  //       message: continuationMessage.trim(),
-  //     });
-  //     setContinuationMessage('');
-  //     toast.info('Sent', { description: 'Agent processing...', duration: 3000 });
+    resetContinue();
+    const targetExecutionId = targetStep.workflowExecutionId || executionId;
+    if (!targetExecutionId) {
+      toast.error('Error', { description: 'No execution ID available', duration: 3000 });
+      return;
+    }
 
-  //     // Switch to the new rerun execution
-  //     if (result.rerunExecutionId && onExecutionChange) {
-  //       onExecutionChange(result.rerunExecutionId);
-  //     }
-  //   } catch (error: unknown) {
-  //     toast.error('Failed to continue', {
-  //       description: error instanceof Error ? error.message : 'Unknown error',
-  //       duration: 4000,
-  //     });
-  //   }
-  // };
+    try {
+      const result = await continueAgenticStepAsync({
+        executionId: targetExecutionId,
+        stepId: targetStep.id,
+        message: continuationMessage.trim(),
+      });
+      setContinuationMessage('');
+      toast.info('Sent', { description: 'Agent processing...', duration: 3000 });
+
+      // Switch to the new rerun execution
+      if (result.rerunExecutionId && onExecutionChange) {
+        onExecutionChange(result.rerunExecutionId);
+      }
+    } catch (error: unknown) {
+      toast.error('Failed to continue', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+        duration: 4000,
+      });
+    }
+  };
 
   const tabs = [{ id: 'automation' as TabId, label: 'Automation', icon: <Sparkles size={12} /> }];
 
@@ -731,9 +744,75 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
       .join(' ');
   };
 
-  // const isAgentInputStep = filteredSteps.some(
-  //   step => step.stepExecutorType?.toLowerCase() === 'agent',
-  // );
+  const isAgentInputStep = filteredSteps.some(
+    step => step.stepExecutorType?.toLowerCase() === 'agent',
+  );
+
+  // Get current execution mode and status from combinedStepsData
+  const currentExecutionMetadata = combinedStepsData?.workflows?.[0]?.executionMetadata?.find(
+    meta => meta.executionId === executionId,
+  );
+  const executionMode = currentExecutionMetadata?.mode;
+  const executionStatus = currentExecutionMetadata?.executionStatus;
+
+  // Debug logging
+  console.log('[WorkflowChatPanel] Debug:', {
+    executionId,
+    executionMode,
+    executionStatus,
+    showGoToAutomaticButton: executionMode === 'MANUAL' && executionStatus === 'WAIT_FOR_EVENT',
+    executionMetadata: combinedStepsData?.workflows?.[0]?.executionMetadata,
+  });
+
+  // Handler for "Go to Automatic" button - uses continue API without a message
+  const handleGoToAutomatic = async (): Promise<void> => {
+    if (!executionId) return;
+
+    // Find agent INPUT step (same logic as handleSendMessage)
+    let lastAgentInputStep: WorkflowStep | null = null;
+    if (combinedStepsData?.workflows?.length) {
+      for (const workflow of combinedStepsData.workflows) {
+        for (const step of workflow.steps) {
+          if (step.stepExecutorType?.toLowerCase() === 'agent' && step.type === 'input') {
+            lastAgentInputStep = step;
+          }
+        }
+      }
+    }
+
+    if (!lastAgentInputStep) {
+      toast.error('Cannot switch mode', {
+        description: 'No agent checkpoint found',
+        duration: 3000,
+      });
+      return;
+    }
+
+    setIsSettingMode(true);
+    try {
+      // Call continue API without a message to trigger mode switch and resume
+      await continueAgenticStepAsync({
+        executionId: lastAgentInputStep.workflowExecutionId || executionId,
+        stepId: lastAgentInputStep.id,
+        message: '', // Empty message for go to automatic
+      });
+      toast.success('Mode switched', {
+        description: 'Execution will proceed automatically',
+        duration: 3000,
+      });
+    } catch (error: unknown) {
+      toast.error('Failed to switch mode', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+        duration: 4000,
+      });
+    } finally {
+      setIsSettingMode(false);
+    }
+  };
+
+  // Check if we should show the "Go to Automatic" button
+  const showGoToAutomaticButton =
+    executionMode === 'MANUAL' && executionStatus === 'WAIT_FOR_EVENT';
 
   return (
     <div className='h-full flex flex-col bg-background overflow-hidden min-w-0'>
@@ -1592,80 +1671,91 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   </div>
                 </>
               </div>
-              <div className='flex-shrink-0 bg-background border-t border-border p-3'>
-                {/* Show input box based on step status - only enable when completed/failed */}
-                {currentNode?.status === 'pending' ? (
-                  // Pending state - waiting to start
-                  <div className='flex items-center justify-center gap-2 py-3 px-4 bg-muted rounded-lg border border-border'>
-                    <Clock size={16} className='text-muted-foreground' />
-                    <span className='text-sm text-muted-foreground'>
-                      Waiting for {formatStepName(currentNode.stepName)} to start...
-                    </span>
+              <div className='flex-shrink-0 bg-white border-t border-gray-100 p-3'>
+                {/* Show "Go to Automatic" button when in manual mode and PAUSED */}
+                {showGoToAutomaticButton && (
+                  <div className='mb-3 flex justify-end'>
+                    <button
+                      onClick={() => void handleGoToAutomatic()}
+                      disabled={isSettingMode}
+                      className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50'
+                      data-track-category='Workflows'
+                      data-track-name='GoToAutomatic'
+                      data-track-metadata={JSON.stringify({ executionId })}
+                    >
+                      {isSettingMode ? (
+                        <Loader2 size={14} className='animate-spin' />
+                      ) : (
+                        <Zap size={14} />
+                      )}
+                      Go to Automatic
+                    </button>
                   </div>
-                ) : currentNode?.status === 'running' ? (
-                  // Running state - show disabled input with running indicator
-                  <div className='flex items-center justify-center gap-2 py-3 px-4 bg-muted rounded-lg border border-border'>
-                    <Loader2 size={16} className='text-blue-500 animate-spin' />
-                    <span className='text-sm text-muted-foreground'>
-                      {formatStepName(currentNode.stepName)} is running...
-                    </span>
+                )}
+                {/* Show input box for agent steps - always visible and enabled */}
+                {isAgentInputStep ? (
+                  // Agent step - always show input box, allow sending even when running
+                  <div className='relative rounded-lg border bg-gray-50 border-gray-200 focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100'>
+                    <textarea
+                      value={continuationMessage}
+                      onChange={e => setContinuationMessage(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          void handleSendMessage();
+                        }
+                      }}
+                      placeholder={
+                        currentNode?.status === 'completed'
+                          ? 'Type your query to rerun...'
+                          : currentNode?.status === 'failed'
+                            ? 'Type your query to continue...'
+                            : `Type your message to ${formatStepName(currentNode?.stepName || '')}...`
+                      }
+                      disabled={isContinuing}
+                      className='w-full px-3 py-2.5 text-sm bg-transparent resize-none focus:outline-none disabled:opacity-50'
+                      rows={2}
+                      data-track-category='Workflows'
+                      data-track-name='WorkflowContinuationInput'
+                      data-track-metadata={JSON.stringify({
+                        executionId,
+                        stepName: currentNode?.stepName,
+                      })}
+                    />
+                    <div className='flex items-center justify-end px-2 py-1.5 border-t border-gray-100'>
+                      {currentNode?.status === 'running' && (
+                        <div className='flex items-center gap-2 mr-auto text-sm text-gray-500'>
+                          <Loader2 size={14} className='text-blue-500 animate-spin' />
+                          <span>Running...</span>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => void handleSendMessage()}
+                        disabled={isContinuing || !continuationMessage.trim()}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-sm font-medium ${
+                          continuationMessage.trim() && !isContinuing
+                            ? 'bg-blue-500 text-white hover:bg-blue-600'
+                            : 'bg-border text-muted-foreground cursor-not-allowed'
+                        }`}
+                        data-track-category='Workflows'
+                        data-track-name='SendContinuationMessage'
+                        data-track-metadata={JSON.stringify({ executionId })}
+                      >
+                        {isContinuing ? (
+                          <Loader2 size={14} className='animate-spin' />
+                        ) : (
+                          <>
+                            <Send size={14} />
+                            Send
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
-                ) : /* isAgentInputStep && 
-              (currentNode?.status === 'completed' || currentNode?.status === 'failed') ? (
-              // Completed/Failed state - allow sending new message
-              <div className='relative rounded-lg border bg-muted border-border focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100'>
-                <textarea
-                  value={continuationMessage}
-                  onChange={e => setContinuationMessage(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      void handleSendMessage();
-                    }
-                  }}
-                  placeholder={
-                    currentNode?.status === 'completed'
-                      ? 'Type your query to rerun...'
-                      : 'Type your query to continue...'
-                  }
-                  disabled={isContinuing}
-                  className='w-full px-3 py-2.5 text-sm bg-transparent resize-none focus:outline-none disabled:opacity-50'
-                  rows={2}
-                  data-track-category='Workflows'
-                  data-track-name='WorkflowContinuationInput'
-                  data-track-metadata={JSON.stringify({
-                    executionId,
-                    stepName: currentNode?.stepName,
-                  })}
-                />
-                <div className='flex items-center justify-end px-2 py-1.5 border-t border-border'>
-                  <button
-                    onClick={() => void handleSendMessage()}
-                    disabled={isContinuing || !continuationMessage.trim()}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-sm font-medium ${
-                      continuationMessage.trim() && !isContinuing
-                        ? 'bg-blue-500 text-white hover:bg-blue-600'
-                        : 'bg-border text-muted-foreground cursor-not-allowed'
-                    }`}
-                    data-track-category='Workflows'
-                    data-track-name='SendContinuationMessage'
-                    data-track-metadata={JSON.stringify({ executionId })}
-                  >
-                    {isContinuing ? (
-                      <Loader2 size={14} className='animate-spin' />
-                    ) : (
-                      <>
-                        <Send size={14} />
-                        Send
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            ) : */ !currentNode ? (
-                  <div className='flex items-center justify-center gap-2 py-3 px-4 bg-muted rounded-lg border border-border'>
-                    <Circle size={16} className='text-muted' />
-                    <span className='text-sm text-muted-foreground'>No step selected</span>
+                ) : !currentNode ? (
+                  <div className='flex items-center justify-center gap-2 py-3 px-4 bg-gray-50 rounded-lg border border-gray-200'>
+                    <Circle size={16} className='text-gray-300' />
+                    <span className='text-sm text-gray-500'>No step selected</span>
                   </div>
                 ) : null}
               </div>

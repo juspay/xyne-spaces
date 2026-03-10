@@ -768,15 +768,72 @@ class RedisService {
   }
 
   /**
+   * Append a value to a Redis list using RPUSH.
+   * Creates the list if it doesn't exist.
+   */
+  async rpush(key: string, value: string): Promise<void> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot rpush - Redis not initialized');
+      return;
+    }
+    await this.redis.rpush(key, value);
+  }
+
+  /**
+   * Prepend a value to a Redis list using LPUSH.
+   * Creates the list if it doesn't exist.
+   */
+  async lpush(key: string, value: string): Promise<void> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot lpush - Redis not initialized');
+      return;
+    }
+    await this.redis.lpush(key, value);
+  }
+
+  /**
+   * Get all values from a Redis list.
+   * Returns empty array if key doesn't exist.
+   */
+  async lrange(key: string, start: number = 0, end: number = -1): Promise<string[]> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot lrange - Redis not initialized');
+      return [];
+    }
+    return await this.redis.lrange(key, start, end);
+  }
+
+  /**
+   * Set a value at a specific index in a Redis list.
+   * Returns 'OK' on success.
+   */
+  async lset(key: string, index: number, value: string): Promise<'OK'> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    return await this.redis.lset(key, index, value);
+  }
+
+  /**
    * Set a key with optional TTL - does NOT modify the key (unlike cacheSessionData)
    * Use this for user status keys where we need to check existence later
+   * Returns true if key was set, false if it already existed (when nx is true)
    */
-  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+  async set(key: string, value: string, ttlSeconds?: number, nx?: boolean): Promise<boolean> {
     if (!this.redis) throw new Error('Redis not initialized');
-    if (ttlSeconds !== undefined) {
-      await this.redis.setex(key, ttlSeconds, value);
+    if (nx) {
+      // NX: only set if key does not exist
+      if (ttlSeconds !== undefined) {
+        const result = await this.redis.set(key, value, 'EX', ttlSeconds, 'NX');
+        return result === 'OK';
+      }
+      const result = await this.redis.set(key, value, 'NX');
+      return result === 'OK';
     } else {
-      await this.redis.set(key, value);
+      if (ttlSeconds !== undefined) {
+        await this.redis.setex(key, ttlSeconds, value);
+      } else {
+        await this.redis.set(key, value);
+      }
+      return true;
     }
   }
 
@@ -815,6 +872,176 @@ class RedisService {
     }
     
     return await this.redis.hdel(key, field);
+  }
+
+  // ============== AGENT STEP CONTINUATION PUB/SUB ==============
+
+  /**
+   * Publish a continuation event for an agent step
+   * Used to signal a running agent to abort and continue with a new message
+   */
+  async publishAgentContinuation(
+    executionId: string,
+    stepName: string,
+    message: string
+  ): Promise<void> {
+    if (!this.publisher) {
+      logger.warn('[REDIS-AGENT-CONTINUATION] Redis publisher not initialized');
+      return;
+    }
+
+    const channel = `workflow:${executionId}:${stepName}:continue`;
+    const event = {
+      type: 'agent_continuation',
+      executionId,
+      stepName,
+      message,
+      timestamp: new Date().toISOString()
+    };
+
+    try {
+      await this.publisher.publish(channel, JSON.stringify(event));
+      logger.info(`[REDIS-AGENT-CONTINUATION] Published continuation event to ${channel}`);
+    } catch (error) {
+      logger.error('[REDIS-AGENT-CONTINUATION] Failed to publish continuation event:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Subscribe to agent continuation events
+   * Called by the agent executor to listen for continuation signals
+   */
+  async subscribeToAgentContinuation(
+    executionId: string,
+    stepName: string,
+    callback: (event: { message: string; type: string; executionId: string; stepName: string; timestamp: string }) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = `workflow:${executionId}:${stepName}:continue`;
+
+    // Add callback to the list for this channel
+    if (!this.subscriptionCallbacks.has(channel)) {
+      this.subscriptionCallbacks.set(channel, []);
+    }
+    this.subscriptionCallbacks.get(channel)!.push(callback);
+
+    // Ensure global message handler is set up
+    this.setupGlobalMessageHandler();
+
+    // Only subscribe to Redis if we haven't already
+    if (!this.activeSubscriptions.has(channel)) {
+      logger.info(`[REDIS-AGENT-CONTINUATION] Subscribing to channel: ${channel}`);
+      await this.subscriber.subscribe(channel);
+      this.activeSubscriptions.add(channel);
+    }
+  }
+
+  /**
+   * Unsubscribe from agent continuation events
+   */
+  async unsubscribeFromAgentContinuation(
+    executionId: string,
+    stepName: string,
+    callback?: (event: { message: string; type: string; executionId: string; stepName: string; timestamp: string }) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = `workflow:${executionId}:${stepName}:continue`;
+
+    if (callback) {
+      // Remove specific callback
+      const callbacks = this.subscriptionCallbacks.get(channel) || [];
+      const index = callbacks.indexOf(callback);
+      if (index > -1) {
+        callbacks.splice(index, 1);
+        logger.info(`[REDIS-AGENT-CONTINUATION] Removed callback from channel: ${channel}`);
+      }
+
+      // If no more callbacks, unsubscribe from Redis
+      if (callbacks.length === 0) {
+        await this.unsubscribeFromChannel(channel);
+      }
+    } else {
+      // Remove all callbacks and unsubscribe
+      await this.unsubscribeFromChannel(channel);
+      logger.info(`[REDIS-AGENT-CONTINUATION] Unsubscribed from channel: ${channel}`);
+    }
+  }
+
+  // Mode Change Pub/Sub for Agent Executor
+  async subscribeToModeChange(
+    executionId: string,
+    callback: (event: { mode: string; executionId: string; timestamp: string }) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = `workflow:${executionId}:mode`;
+
+    const wrapperCallback = (message: string) => {
+      try {
+        const event = JSON.parse(message);
+        callback(event);
+      } catch (error) {
+        logger.error('[REDIS-MODE] Failed to parse mode change message:', error);
+      }
+    };
+
+    if (!this.subscriptionCallbacks.has(channel)) {
+      this.subscriptionCallbacks.set(channel, []);
+    }
+    this.subscriptionCallbacks.get(channel)!.push(wrapperCallback);
+
+    this.setupGlobalMessageHandler();
+
+    if (!this.activeSubscriptions.has(channel)) {
+      await this.subscriber.subscribe(channel);
+      this.activeSubscriptions.add(channel);
+    }
+  }
+
+  async unsubscribeFromModeChange(
+    executionId: string,
+    callback?: (event: { mode: string; executionId: string; timestamp: string }) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = `workflow:${executionId}:mode`;
+
+    if (callback) {
+      const callbacks = this.subscriptionCallbacks.get(channel) || [];
+      const index = callbacks.indexOf(callback);
+      if (index > -1) {
+        callbacks.splice(index, 1);
+      }
+      if (callbacks.length === 0) {
+        await this.subscriber.unsubscribe(channel);
+        this.activeSubscriptions.delete(channel);
+        this.subscriptionCallbacks.delete(channel);
+      }
+    } else {
+      await this.subscriber.unsubscribe(channel);
+      this.activeSubscriptions.delete(channel);
+      this.subscriptionCallbacks.delete(channel);
+    }
+  }
+
+  async publishModeChange(
+    executionId: string,
+    mode: string
+  ): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const channel = `workflow:${executionId}:mode`;
+    const message = JSON.stringify({
+      executionId,
+      mode,
+      timestamp: new Date().toISOString()
+    });
+
+    await this.redis.publish(channel, message);
+    logger.info(`[REDIS-MODE] Published mode change for ${executionId}: ${mode}`);
   }
 
   // Zero Fallback Configuration

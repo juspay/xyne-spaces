@@ -316,7 +316,7 @@ export interface OpenCodeCommitTracker {
   hasCommits: boolean
   branchName: string
   repoUrl?: string
-  childExecutionId: string
+  inputStepDbId: string
   parentExecutionId: string
   latestCommitHash?: string
   commitCount: number

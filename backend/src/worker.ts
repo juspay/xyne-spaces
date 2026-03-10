@@ -19,6 +19,7 @@ import { initializeOpenCode, shutdownOpenCode } from '@/workflows/framework/open
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
+import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 
 config()
 
@@ -106,6 +107,12 @@ class WorkerService {
         await callValidationWorker.start();
       }
 
+      // Initialize workflow step GCS sync queue
+      if (appConfig.enableWorkflowStepGcsSync) {
+        logger.info('Initializing workflow step GCS sync queue...');
+        await workflowStepGcsSyncQueue.initialize();
+      }
+
       process.on('SIGINT', () => this.shutdown())
       process.on('SIGTERM', () => this.shutdown())
 
@@ -168,6 +175,12 @@ class WorkerService {
 
       if (callValidationEnabled) {
         await callValidationWorker.stop();
+      }
+
+      // Close workflow step GCS sync queue
+      if (appConfig.enableWorkflowStepGcsSync) {
+        logger.info('Closing workflow step GCS sync queue...');
+        await workflowStepGcsSyncQueue.close();
       }
 
       await DatabaseClient.disconnect()

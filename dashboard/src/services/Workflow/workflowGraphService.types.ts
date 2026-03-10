@@ -93,6 +93,7 @@ export interface ExecutionMetadata {
   sourceStepName: string | null;
   createdAt: string;
   updatedAt: string;
+  mode?: 'MANUAL' | 'AUTOMATIC';
 }
 
 // Pull request data from workflow execution
