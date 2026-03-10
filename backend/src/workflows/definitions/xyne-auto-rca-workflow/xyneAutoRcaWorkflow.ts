@@ -32,17 +32,19 @@ export enum XyneAutoRcaWorkflowSteps {
   SHARE_CANVAS_LINK = 'share_canvas_link',
 }
 
-// Input Schema - Only ticketId is required from user
+// Input Schema - ticketId and affectedUserEmail required
 // userId is auto-injected by workflowController from authenticated session (req.user.id)
 export const xyneAutoRcaWorkflowInputSchema = z.object({
   ticketId: z.string(),
+  affectedUserEmail: z.string().email(),
 });
 
 // Context Mapper - userId is fetched from WorkflowExecution.createdBy at runtime
 export const xyneAutoRcaWorkflowContextMapper = (
-  payload: { ticketId: string }
+  payload: { ticketId: string; affectedUserEmail: string }
 ): XyneAutoRcaWorkflowContext => ({
   ticketId: payload.ticketId,
+  affectedUserEmail: payload.affectedUserEmail,
 });
 
 // Workflow Definition
@@ -63,7 +65,7 @@ export const xyneAutoRcaWorkflow: WorkflowDefinition<
   async execute(
     engine: WorkflowEngine<XyneAutoRcaWorkflowContext, typeof XyneAutoRcaWorkflowSteps>
   ): Promise<XyneAutoRcaWorkflowOutput> {
-    const { ticketId } = engine.getContext();
+    const { ticketId, affectedUserEmail } = engine.getContext();
 
     // Step 1: Fetch ticket details
     const ticketDetails = await engine.createCheckpoint(
@@ -95,7 +97,7 @@ export const xyneAutoRcaWorkflow: WorkflowDefinition<
     // Step 3: Initiate RCA investigation with webhook
     const investigationResult = await engine.createExternalStep<
       RcaInvestigationStepResult,
-      [string, RcaUserContext]
+      [string, RcaUserContext, string]
     >(
       XyneAutoRcaWorkflowSteps.INITIATE_RCA_INVESTIGATION,
       {
@@ -105,7 +107,8 @@ export const xyneAutoRcaWorkflow: WorkflowDefinition<
       initiateRcaInvestigationAndWaitForWebhook,
       processRcaWebhookResponse,
       query,
-      userContext
+      userContext,
+      affectedUserEmail
     );
 
     const sessionId = investigationResult.sessionId;
