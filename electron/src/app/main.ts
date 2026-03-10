@@ -56,6 +56,17 @@ if (config.useBundledUI) {
   registerProtocolScheme();
 }
 
+// Set userData path BEFORE requesting single-instance lock
+// This ensures each flavor has its own lock, session storage, and electron-store data
+if (config.USER_DATA_SUFFIX) {
+  const currentUserData = app.getPath('userData');
+  app.setPath('userData', `${currentUserData}${config.USER_DATA_SUFFIX}`);
+}
+
+// Register deep links BEFORE app is ready (required for Windows/Linux)
+// This must be called before app.whenReady() for proper protocol handling
+const gotTheLock = setupDeepLinks(createMainWindow);
+
 // Track if app is quitting (for Cmd+Q support on macOS)
 let isQuitting = false;
 
@@ -103,19 +114,6 @@ app.on('before-quit', async () => {
 
 
 async function initializeApp(): Promise<void> {
-  // Isolate userData per flavor so each has its own single-instance lock,
-  // session storage, and electron-store data. Prod keeps the original path
-  if (config.USER_DATA_SUFFIX) {
-    const currentUserData = app.getPath('userData');
-    app.setPath('userData', `${currentUserData}${config.USER_DATA_SUFFIX}`);
-  }
-
-  // Register deep links BEFORE app is ready
-  const gotTheLock = setupDeepLinks(createMainWindow);
-  if (!gotTheLock) {
-    app.quit();
-  }
-
   // Setup custom protocol for bundled UI (must be after app.whenReady())
   if (config.useBundledUI) {
     setupCustomProtocol();
@@ -249,7 +247,11 @@ app.on('web-contents-created', (_event, webContents) => {
   }
 });
 
-void app.whenReady().then(initializeApp);
+// Only initialize if we have the single-instance lock
+// setupDeepLinks() already calls app.quit() if lock fails
+if (gotTheLock) {
+  void app.whenReady().then(initializeApp);
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

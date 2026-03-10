@@ -305,6 +305,21 @@ export enum NudgeType {
   WAITING_ON_BLOCKED_BY = "WAITING_ON_BLOCKED_BY",
 }
 
+export enum NudgeKind {
+  CREATE_TICKET_FROM_MESSAGE = "CREATE_TICKET_FROM_MESSAGE",
+  FIND_RELATED_TICKET_FROM_MESSAGE = "FIND_RELATED_TICKET_FROM_MESSAGE",
+  FIND_RELATED_MESSAGE_FROM_MESSAGE = "FIND_RELATED_MESSAGE_FROM_MESSAGE",
+  LINK_PASTE_TO_SURFACE = "LINK_PASTE_TO_SURFACE",
+  FORWARD_MESSAGE_LINK = "FORWARD_MESSAGE_LINK",
+  DELETE_MESSAGE_CLEANUP = "DELETE_MESSAGE_CLEANUP",
+}
+
+export enum NudgeState {
+  ACTIVE = "ACTIVE",
+  DISMISSED = "DISMISSED",
+  ACTED_ON = "ACTED_ON",
+}
+
 export enum NotificationType {
   TICKET_STATUS_CHANGE = "TICKET_STATUS_CHANGE",
   TICKET_ASSIGNMENT = "TICKET_ASSIGNMENT",
@@ -317,6 +332,8 @@ export enum NotificationType {
   INCOMING_CALL = "INCOMING_CALL",
   MISSED_CALL = "MISSED_CALL",
   CALL_DISMISS = "CALL_DISMISS",
+  CALL_REMINDER = "CALL_REMINDER",
+  CALL_SCHEDULED = "CALL_SCHEDULED",
 }
 
 export enum NotificationStatus {
@@ -479,6 +496,18 @@ export enum AttributionConfidence {
   LOW = "LOW",
   MEDIUM = "MEDIUM",
   HIGH = "HIGH",
+}
+
+export enum SurfaceAreaType {
+  MESSAGE = "MESSAGE",
+  TICKET = "TICKET",
+  CANVAS = "CANVAS",
+  CALL = "CALL",
+  CONVERSATION = "CONVERSATION",
+}
+
+export enum SurfaceLinkKind {
+  RELATES_TO = "RELATES_TO",
 }
 
 // Define tables
@@ -1353,6 +1382,23 @@ export const proactiveNudgeTable = table("proactive_nudges")
   })
   .primaryKey("id");
 
+export const surfaceNudgeTable = table("surface_nudges")
+  .columns({
+    id: string(),
+    nudgeKind: enumeration<NudgeKind>(),
+    sourceId: string(),
+    title: string(),
+    description: string(),
+    priority: string().optional(),
+    actions: json().optional(),
+    state: enumeration<NudgeState>(),
+    visibleTo: string().optional(),
+    projectId: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const notificationTable = table("notifications")
   .columns({
     id: string(),
@@ -1842,6 +1888,20 @@ export const releaseAttributionTable = table("release_attributions")
   })
   .primaryKey("id");
 
+export const surfaceLinkTable = table("surface_links")
+  .columns({
+    id: string(),
+    sourceType: enumeration<SurfaceAreaType>(),
+    sourceId: string(),
+    targetType: enumeration<SurfaceAreaType>(),
+    targetId: string(),
+    linkKind: enumeration<SurfaceLinkKind>(),
+    createdBy: string(),
+    projectId: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 
 // Define relationships
 
@@ -1892,11 +1952,208 @@ export const agentToolsMappingTableRelationships = relationships(agentToolsMappi
   })
 }));
 
-export const workflowTableRelationships = relationships(workflowTable, ({ many }) => ({
+export const ticketTableRelationships = relationships(ticketTable, ({ one, many }) => ({
+  createdByUser: one({
+    sourceField: ["createdBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  updatedByUser: one({
+    sourceField: ["updatedBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  assignedToUser: one({
+    sourceField: ["assignedTo"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  closedByUser: one({
+    sourceField: ["closedBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  }),
+  project: one({
+    sourceField: ["projectId"],
+    destField: ["id"],
+    destSchema: projectTable,
+  }),
+  board: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
+  }),
+  tags: many({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: ticketTagTable,
+  }),
+  referencesOut: many({
+    sourceField: ["id"],
+    destField: ["sourceTicketId"],
+    destSchema: ticketReferenceMappingTable,
+  }),
+  referencesIn: many({
+    sourceField: ["id"],
+    destField: ["targetTicketId"],
+    destSchema: ticketReferenceMappingTable,
+  }),
+  entity: many({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: ticketEntityMappingTable,
+  }),
+  activities: many({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: ticketActivityTable,
+  }),
+  subTicketMappings: many({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: ticketSubTicketMappingTable,
+  }),
+  subTickets: many({
+    sourceField: ["id"],
+    destField: ["mappedTicketId"],
+    destSchema: subTicketTable,
+  }),
+  workflows: many({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: workflowTable,
+  }),
+  stageEtaEntries: many({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: ticketStageEtaTable,
+  }),
+  assignments: many({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: ticketAssignmentTable,
+  })
+}));
+
+export const subTicketTableRelationships = relationships(subTicketTable, ({ one, many }) => ({
+  createdByUser: one({
+    sourceField: ["createdBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  updatedByUser: one({
+    sourceField: ["updatedBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  assignedToUser: one({
+    sourceField: ["assignedTo"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  mappedTicket: one({
+    sourceField: ["mappedTicketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  }),
+  ticketMappings: many({
+    sourceField: ["id"],
+    destField: ["subTicketId"],
+    destSchema: ticketSubTicketMappingTable,
+  })
+}));
+
+export const ticketSubTicketMappingTableRelationships = relationships(ticketSubTicketMappingTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  }),
+  subTicket: one({
+    sourceField: ["subTicketId"],
+    destField: ["id"],
+    destSchema: subTicketTable,
+  })
+}));
+
+export const ticketAssignmentTableRelationships = relationships(ticketAssignmentTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  })
+}));
+
+export const ticketActivityTableRelationships = relationships(ticketActivityTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  }),
+  updatedByUser: one({
+    sourceField: ["updatedBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  })
+}));
+
+export const ticketEntityMappingTableRelationships = relationships(ticketEntityMappingTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  })
+}));
+
+export const ticketTagTableRelationships = relationships(ticketTagTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  })
+}));
+
+export const ticketReferenceMappingTableRelationships = relationships(ticketReferenceMappingTable, ({ one }) => ({
+  sourceTicket: one({
+    sourceField: ["sourceTicketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  }),
+  targetTicket: one({
+    sourceField: ["targetTicketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  })
+}));
+
+export const ticketStageEtaTableRelationships = relationships(ticketStageEtaTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  }),
+  stage: one({
+    sourceField: ["stageId"],
+    destField: ["id"],
+    destSchema: stageTable,
+  })
+}));
+
+export const workflowTableRelationships = relationships(workflowTable, ({ one, many }) => ({
   workflowExecutions: many({
     sourceField: ["id"],
     destField: ["workflowId"],
     destSchema: workflowExecutionTable,
+  }),
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
   })
 }));
 
@@ -1930,6 +2187,11 @@ export const workflowExecutionTableRelationships = relationships(workflowExecuti
     sourceField: ["id"],
     destField: ["workflowExecutionId"],
     destSchema: externalStepResponseTable,
+  }),
+  pullRequests: many({
+    sourceField: ["id"],
+    destField: ["workflowExecutionId"],
+    destSchema: pullRequestsTable,
   })
 }));
 
@@ -1988,6 +2250,31 @@ export const userGroupTableRelationships = relationships(userGroupTable, ({ many
     sourceField: ["id"],
     destField: ["groupId"],
     destSchema: resourceAccessTable,
+  }),
+  userGroupMappings: many({
+    sourceField: ["id"],
+    destField: ["userGroupId"],
+    destSchema: userGroupMappingTable,
+  }),
+  assignmentStates: many({
+    sourceField: ["id"],
+    destField: ["userGroupId"],
+    destSchema: userAssignmentStateTable,
+  }),
+  boardComplexityScores: many({
+    sourceField: ["id"],
+    destField: ["userGroupId"],
+    destSchema: boardComplexityScoreTable,
+  }),
+  workloadMappings: many({
+    sourceField: ["id"],
+    destField: ["userGroupId"],
+    destSchema: userWorkloadMappingTable,
+  }),
+  expertiseMappings: many({
+    sourceField: ["id"],
+    destField: ["userGroupId"],
+    destSchema: userExpertiseMappingTable,
   })
 }));
 
@@ -2024,6 +2311,171 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["userId"],
     destSchema: userPresenceTable,
+  }),
+  createdTickets: many({
+    sourceField: ["id"],
+    destField: ["createdBy"],
+    destSchema: ticketTable,
+  }),
+  updatedTickets: many({
+    sourceField: ["id"],
+    destField: ["updatedBy"],
+    destSchema: ticketTable,
+  }),
+  assignedTickets: many({
+    sourceField: ["id"],
+    destField: ["assignedTo"],
+    destSchema: ticketTable,
+  }),
+  closedTickets: many({
+    sourceField: ["id"],
+    destField: ["closedBy"],
+    destSchema: ticketTable,
+  }),
+  createdSubTickets: many({
+    sourceField: ["id"],
+    destField: ["createdBy"],
+    destSchema: subTicketTable,
+  }),
+  updatedSubTickets: many({
+    sourceField: ["id"],
+    destField: ["updatedBy"],
+    destSchema: subTicketTable,
+  }),
+  assignedSubTickets: many({
+    sourceField: ["id"],
+    destField: ["assignedTo"],
+    destSchema: subTicketTable,
+  }),
+  userGroupMappings: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: userGroupMappingTable,
+  }),
+  channelParticipations: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: channelParticipantTable,
+  }),
+  channelUserStatuses: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: channelUserStatusTable,
+  }),
+  sentMessages: many({
+    sourceField: ["id"],
+    destField: ["senderId"],
+    destSchema: messageTable,
+  }),
+  createdConversations: many({
+    sourceField: ["id"],
+    destField: ["createdBy"],
+    destSchema: conversationTable,
+  }),
+  createdChannels: many({
+    sourceField: ["id"],
+    destField: ["createdBy"],
+    destSchema: channelTable,
+  }),
+  ticketActivities: many({
+    sourceField: ["id"],
+    destField: ["updatedBy"],
+    destSchema: ticketActivityTable,
+  }),
+  conversationParticipations: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: conversationParticipantTable,
+  }),
+  userAssignmentStates: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: userAssignmentStateTable,
+  }),
+  workloadMappings: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: userWorkloadMappingTable,
+  }),
+  expertiseMappings: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: userExpertiseMappingTable,
+  })
+}));
+
+export const userGroupMappingTableRelationships = relationships(userGroupMappingTable, ({ one }) => ({
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  userGroup: one({
+    sourceField: ["userGroupId"],
+    destField: ["id"],
+    destSchema: userGroupTable,
+  })
+}));
+
+export const userAssignmentStateTableRelationships = relationships(userAssignmentStateTable, ({ one }) => ({
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  userGroup: one({
+    sourceField: ["userGroupId"],
+    destField: ["id"],
+    destSchema: userGroupTable,
+  })
+}));
+
+export const boardComplexityScoreTableRelationships = relationships(boardComplexityScoreTable, ({ one }) => ({
+  userGroup: one({
+    sourceField: ["userGroupId"],
+    destField: ["id"],
+    destSchema: userGroupTable,
+  }),
+  board: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
+  })
+}));
+
+export const userWorkloadMappingTableRelationships = relationships(userWorkloadMappingTable, ({ one }) => ({
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  userGroup: one({
+    sourceField: ["userGroupId"],
+    destField: ["id"],
+    destSchema: userGroupTable,
+  }),
+  board: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
+  })
+}));
+
+export const userExpertiseMappingTableRelationships = relationships(userExpertiseMappingTable, ({ one }) => ({
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  userGroup: one({
+    sourceField: ["userGroupId"],
+    destField: ["id"],
+    destSchema: userGroupTable,
+  }),
+  board: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
   })
 }));
 
@@ -2069,11 +2521,219 @@ export const aclAuditLogTableRelationships = relationships(aclAuditLogTable, ({ 
   })
 }));
 
-export const messageTableRelationships = relationships(messageTable, ({ one }) => ({
+export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({
+  workflowExecution: one({
+    sourceField: ["workflowExecutionId"],
+    destField: ["id"],
+    destSchema: workflowExecutionTable,
+  })
+}));
+
+export const organizationTableRelationships = relationships(organizationTable, ({ many }) => ({
+  members: many({
+    sourceField: ["orgId"],
+    destField: ["orgId"],
+    destSchema: orgMemberTable,
+  })
+}));
+
+export const orgMemberTableRelationships = relationships(orgMemberTable, ({ one }) => ({
+  organization: one({
+    sourceField: ["orgId"],
+    destField: ["orgId"],
+    destSchema: organizationTable,
+  })
+}));
+
+export const projectTableRelationships = relationships(projectTable, ({ many }) => ({
+  tickets: many({
+    sourceField: ["id"],
+    destField: ["projectId"],
+    destSchema: ticketTable,
+  }),
+  channels: many({
+    sourceField: ["id"],
+    destField: ["projectId"],
+    destSchema: channelTable,
+  }),
+  boards: many({
+    sourceField: ["id"],
+    destField: ["projectId"],
+    destSchema: boardTable,
+  })
+}));
+
+export const boardTableRelationships = relationships(boardTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ["projectId"],
+    destField: ["id"],
+    destSchema: projectTable,
+  }),
+  tickets: many({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: ticketTable,
+  }),
+  stages: many({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: stageTable,
+  }),
+  boardComplexityScores: many({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: boardComplexityScoreTable,
+  }),
+  workloadMappings: many({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: userWorkloadMappingTable,
+  }),
+  expertiseMappings: many({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: userExpertiseMappingTable,
+  })
+}));
+
+export const stageTableRelationships = relationships(stageTable, ({ one, many }) => ({
+  board: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
+  }),
+  ticketStageEtas: many({
+    sourceField: ["id"],
+    destField: ["stageId"],
+    destSchema: ticketStageEtaTable,
+  })
+}));
+
+export const channelTableRelationships = relationships(channelTable, ({ one, many }) => ({
+  conversations: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: conversationTable,
+  }),
+  participants: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: channelParticipantTable,
+  }),
+  participantsStatus: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: channelUserStatusTable,
+  }),
+  createdByUser: one({
+    sourceField: ["createdBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  project: one({
+    sourceField: ["projectId"],
+    destField: ["id"],
+    destSchema: projectTable,
+  }),
+  tickets: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: ticketTable,
+  }),
+  calls: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: callTable,
+  })
+}));
+
+export const channelParticipantTableRelationships = relationships(channelParticipantTable, ({ one }) => ({
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  }),
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  })
+}));
+
+export const channelUserStatusTableRelationships = relationships(channelUserStatusTable, ({ one }) => ({
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  }),
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  })
+}));
+
+export const conversationTableRelationships = relationships(conversationTable, ({ one, many }) => ({
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  }),
+  messages: many({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: messageTable,
+  }),
+  createdByUser: one({
+    sourceField: ["createdBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  participants: many({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationParticipantTable,
+  })
+}));
+
+export const conversationParticipantTableRelationships = relationships(conversationParticipantTable, ({ one }) => ({
+  conversation: one({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationTable,
+  }),
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  })
+}));
+
+export const messageTableRelationships = relationships(messageTable, ({ one, many }) => ({
   messageSearch: one({
     sourceField: ["messageId"],
     destField: ["messageId"],
     destSchema: messageSearchTable,
+  }),
+  conversation: one({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationTable,
+  }),
+  sender: one({
+    sourceField: ["senderId"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  reactions: many({
+    sourceField: ["messageId"],
+    destField: ["messageId"],
+    destSchema: reactionTable,
+  }),
+  reactionCounts: many({
+    sourceField: ["messageId"],
+    destField: ["messageId"],
+    destSchema: reactionCountTable,
   })
 }));
 
@@ -2082,6 +2742,59 @@ export const messageSearchTableRelationships = relationships(messageSearchTable,
     sourceField: ["messageId"],
     destField: ["messageId"],
     destSchema: messageTable,
+  })
+}));
+
+export const reactionTableRelationships = relationships(reactionTable, ({ one }) => ({
+  message: one({
+    sourceField: ["messageId"],
+    destField: ["messageId"],
+    destSchema: messageTable,
+  })
+}));
+
+export const reactionCountTableRelationships = relationships(reactionCountTable, ({ one }) => ({
+  message: one({
+    sourceField: ["messageId"],
+    destField: ["messageId"],
+    destSchema: messageTable,
+  })
+}));
+
+export const callTableRelationships = relationships(callTable, ({ one, many }) => ({
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  }),
+  participants: many({
+    sourceField: ["id"],
+    destField: ["callId"],
+    destSchema: callParticipantTable,
+  })
+}));
+
+export const callParticipantTableRelationships = relationships(callParticipantTable, ({ one }) => ({
+  call: one({
+    sourceField: ["callId"],
+    destField: ["id"],
+    destSchema: callTable,
+  })
+}));
+
+export const canvasTableRelationships = relationships(canvasTable, ({ many }) => ({
+  participants: many({
+    sourceField: ["id"],
+    destField: ["canvasId"],
+    destSchema: canvasParticipantTable,
+  })
+}));
+
+export const canvasParticipantTableRelationships = relationships(canvasParticipantTable, ({ one }) => ({
+  canvas: one({
+    sourceField: ["canvasId"],
+    destField: ["id"],
+    destSchema: canvasTable,
   })
 }));
 
@@ -2152,6 +2865,7 @@ export const schema = createSchema(
       externalSourceTable,
       externalMessageTable,
       proactiveNudgeTable,
+      surfaceNudgeTable,
       notificationTable,
       notificationPreferenceTable,
       browserNotificationSubscriptionTable,
@@ -2187,12 +2901,22 @@ export const schema = createSchema(
       impactTable,
       coeTable,
       releaseAttributionTable,
+      surfaceLinkTable,
     ],
     relationships: [
       agentTableRelationships,
       modelTableRelationships,
       toolTableRelationships,
       agentToolsMappingTableRelationships,
+      ticketTableRelationships,
+      subTicketTableRelationships,
+      ticketSubTicketMappingTableRelationships,
+      ticketAssignmentTableRelationships,
+      ticketActivityTableRelationships,
+      ticketEntityMappingTableRelationships,
+      ticketTagTableRelationships,
+      ticketReferenceMappingTableRelationships,
+      ticketStageEtaTableRelationships,
       workflowTableRelationships,
       workflowExecutionTableRelationships,
       workflowExecutionLockTableRelationships,
@@ -2203,12 +2927,34 @@ export const schema = createSchema(
       userGroupTableRelationships,
       userSessionTableRelationships,
       userTableRelationships,
+      userGroupMappingTableRelationships,
+      userAssignmentStateTableRelationships,
+      boardComplexityScoreTableRelationships,
+      userWorkloadMappingTableRelationships,
+      userExpertiseMappingTableRelationships,
       userPresenceTableRelationships,
       resourceTableRelationships,
       resourceAccessTableRelationships,
       aclAuditLogTableRelationships,
+      pullRequestsTableRelationships,
+      organizationTableRelationships,
+      orgMemberTableRelationships,
+      projectTableRelationships,
+      boardTableRelationships,
+      stageTableRelationships,
+      channelTableRelationships,
+      channelParticipantTableRelationships,
+      channelUserStatusTableRelationships,
+      conversationTableRelationships,
+      conversationParticipantTableRelationships,
       messageTableRelationships,
       messageSearchTableRelationships,
+      reactionTableRelationships,
+      reactionCountTableRelationships,
+      callTableRelationships,
+      callParticipantTableRelationships,
+      canvasTableRelationships,
+      canvasParticipantTableRelationships,
     ],
   }
 );
@@ -2277,6 +3023,7 @@ export type Activity = Row<typeof schema.tables.activities>;
 export type ExternalSource = Row<typeof schema.tables.external_sources>;
 export type ExternalMessage = Row<typeof schema.tables.external_messages>;
 export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
+export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;
 export type Notification = Row<typeof schema.tables.notifications>;
 export type NotificationPreference = Row<typeof schema.tables.notification_preferences>;
 export type BrowserNotificationSubscription = Row<typeof schema.tables.browser_notification_subscriptions>;
@@ -2312,3 +3059,4 @@ export type RCA = Row<typeof schema.tables.rcas>;
 export type Impact = Row<typeof schema.tables.impacts>;
 export type COE = Row<typeof schema.tables.coes>;
 export type ReleaseAttribution = Row<typeof schema.tables.release_attributions>;
+export type SurfaceLink = Row<typeof schema.tables.surface_links>;
