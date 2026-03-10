@@ -33,6 +33,8 @@ const LAST_WORKFLOW_PATH_KEY = 'last-viewed-workflow-path';
 const WorkflowScreen: React.FC = () => {
   const { ticketId, workflowId } = useParams<{ ticketId: string; workflowId?: string }>();
   const [searchParams] = useSearchParams();
+  const workflowNumber = searchParams.get('workflowNumber');
+
   const [ticketData, ticketQueryDetails] = useCachedQuery(
     queries.ticketById({ ticketId: ticketId ?? '' }),
     { enabled: !!ticketId },
@@ -46,14 +48,24 @@ const WorkflowScreen: React.FC = () => {
   // Initialize state machine for persistent state management
   const [state, send] = useMachine(workflowScreenMachine);
 
-  // Initialize machine when ticketId is available and save current path
+  // Initialize machine when ticketId is available
   useEffect(() => {
     if (ticketId) {
       send({ type: 'INIT', ticketId, defaultAgentChatOpen: isMobile });
-      // Save the full path to restore later
-      sessionStorage.setItem(LAST_WORKFLOW_PATH_KEY, window.location.pathname);
     }
   }, [ticketId, send, isMobile]);
+
+  // Save the full path (including workflowNumber query param) to sessionStorage whenever
+  // the ticket or search params (e.g. workflowNumber) change, so navigating away and
+  // back to /tickets restores the exact workflow the user was viewing.
+  useEffect(() => {
+    if (ticketId) {
+      sessionStorage.setItem(
+        LAST_WORKFLOW_PATH_KEY,
+        window.location.pathname + window.location.search,
+      );
+    }
+  }, [ticketId, searchParams]);
 
   // State from machine
   const selectedExecutionId = state.context.selectedExecutionId;
@@ -124,32 +136,42 @@ const WorkflowScreen: React.FC = () => {
     return combinedStepsData?.workflows?.[0]?.gitInfo;
   }, [combinedStepsData]);
 
-  // Extract PR link from gitInfo
+  // Extract PR link from pullRequests array (preferred) or gitInfo (fallback)
   const prLink = useMemo(() => {
+    // First check pullRequests array from the latest execution
+    const pullRequests = combinedStepsData?.workflows?.[0]?.pullRequests;
+    if (pullRequests && pullRequests.length > 0) {
+      // pullRequests are already ordered by updatedAt desc, so first one is latest
+      return pullRequests[0]?.prUrl;
+    }
+    // Fallback to gitInfo.pr_link for backward compatibility
     return combinedStepsData?.workflows?.[0]?.gitInfo?.pr_link;
   }, [combinedStepsData]);
 
-  // Extract executor type, questioning mode, and model from URL params (passed from WorkflowBubble) or workflow data
+  // Extract executor type, questioning mode, and model from workflow API data
   const executorType = useMemo(() => {
-    const urlExecutorType = searchParams.get('executorType');
-    return urlExecutorType ?? combinedStepsData?.workflows?.[0]?.executorType;
-  }, [searchParams, combinedStepsData]);
+    return combinedStepsData?.workflows?.[0]?.executorType;
+  }, [combinedStepsData]);
 
   const useQuestioningMode = useMemo(() => {
-    const urlUseQuestioningMode = searchParams.get('useQuestioningMode');
-    if (urlUseQuestioningMode !== null) {
-      return urlUseQuestioningMode === 'true';
-    }
     return combinedStepsData?.workflows?.[0]?.useQuestioningMode;
-  }, [searchParams, combinedStepsData]);
+  }, [combinedStepsData]);
 
   const model = useMemo(() => {
-    const urlModel = searchParams.get('model');
-    return urlModel ?? combinedStepsData?.workflows?.[0]?.model;
-  }, [searchParams, combinedStepsData]);
+    return combinedStepsData?.workflows?.[0]?.model;
+  }, [combinedStepsData]);
 
   const createdBy = useMemo(() => {
     return combinedStepsData?.workflows?.[0]?.createdBy ?? undefined;
+  }, [combinedStepsData]);
+
+  const workflowTitle = useMemo(() => {
+    return combinedStepsData?.workflows?.[0]?.metadata?.originalRequest?.title ?? undefined;
+  }, [combinedStepsData]);
+
+  const repositoryUrl = useMemo(() => {
+    const url = combinedStepsData?.workflows?.[0]?.metadata?.originalRequest?.['repositoryUrl'];
+    return typeof url === 'string' ? url : undefined;
   }, [combinedStepsData]);
 
   // Check if preview tab should be enabled
@@ -637,6 +659,9 @@ const WorkflowScreen: React.FC = () => {
         model={model}
         prLink={prLink}
         createdBy={createdBy}
+        {...(workflowNumber && { workflowNumber: parseInt(workflowNumber, 10) })}
+        {...(workflowTitle && { workflowTitle })}
+        {...(repositoryUrl && { repositoryUrl })}
       />
 
       {ticket && (
