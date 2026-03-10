@@ -520,7 +520,12 @@ const ActivityListView = (): ReactElement => {
               <ArrowLeft size={20} />
             </Link>
           )}
-          <h2 className='text-xl font-semibold text-foreground truncate'>Activity</h2>
+          <h2
+            className='text-xl font-semibold text-foreground truncate'
+            data-testid='activity-heading'
+          >
+            Activity
+          </h2>
         </div>
         <div className='flex items-center gap-4'>
           {/* Unread Toggle */}
@@ -542,6 +547,7 @@ const ActivityListView = (): ReactElement => {
                 filter_type: 'unread_only',
                 filter_value: !showUnreadOnly,
               })}
+              data-testid='activity-unread-toggle'
               className={cn(
                 'relative inline-flex h-5 w-9 items-center rounded-full',
                 'bg-muted transition-colors duration-200',
@@ -583,6 +589,7 @@ const ActivityListView = (): ReactElement => {
               data-track-category='ACTIVITY'
               data-track-name='TOGGLE_MOBILE_MENU'
               data-track-metadata={JSON.stringify({ menuState: !showMobileMenu })}
+              data-testid='activity-more-options-btn'
             >
               <MoreVertical size={20} className='text-muted-foreground' />
             </button>
@@ -600,6 +607,7 @@ const ActivityListView = (): ReactElement => {
                     data-track-metadata={JSON.stringify({
                       filter_value: !actionableToggle,
                     })}
+                    data-testid='activity-actionable-toggle'
                     className={cn(
                       'relative inline-flex h-5 w-9 items-center rounded-full',
                       'bg-muted transition-colors duration-200',
@@ -632,6 +640,7 @@ const ActivityListView = (): ReactElement => {
                   )}
                   data-track-category='ACTIVITY'
                   data-track-name='CHANGE_VIEW_CONDENSED'
+                  data-testid='activity-view-condensed-btn'
                 >
                   <FoldVertical className='h-4 w-4' />
                   <span>Condensed</span>
@@ -649,6 +658,7 @@ const ActivityListView = (): ReactElement => {
                   )}
                   data-track-category='ACTIVITY'
                   data-track-name='CHANGE_VIEW_DETAILED'
+                  data-testid='activity-view-detailed-btn'
                 >
                   <Fullscreen className='h-4 w-4' />
                   <span>Detailed</span>
@@ -674,7 +684,10 @@ const ActivityListView = (): ReactElement => {
           style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
         >
           <div className='overflow-x-auto border-b border-border no-scrollbar'>
-            <Tabs.List className='flex items-center sm:justify-start min-w-max'>
+            <Tabs.List
+              className='flex items-center sm:justify-start min-w-max'
+              data-testid='activity-tabs-list'
+            >
               {visibleTabs.map(tab => {
                 const count = activityCounts[tab.value];
                 const IconComponent = tab.Icon;
@@ -785,7 +798,12 @@ const ActivityListView = (): ReactElement => {
               {isOnIndexRoute ? (
                 <div className='flex flex-col items-center justify-center p-8 text-center'>
                   <Bell className='text-muted-foreground mb-4' size={64} />
-                  <h3 className='text-xl font-medium text-foreground mb-2'>Select an activity</h3>
+                  <h3
+                    className='text-xl font-medium text-foreground mb-2'
+                    data-testid='select-activity-heading'
+                  >
+                    Select an activity
+                  </h3>
                   <p className='text-muted-foreground max-w-md'>
                     Choose an activity from the list to view its details
                   </p>

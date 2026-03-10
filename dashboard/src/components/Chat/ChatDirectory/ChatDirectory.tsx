@@ -240,7 +240,9 @@ const ChatDirectory = ({
           <span className='size-5 flex items-center justify-center shrink-0'>
             <Megaphone className='size-4' />
           </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>Activity</span>
+          <span className='flex-1 min-w-0 text-left truncate block' data-testid='nav-activity'>
+            Activity
+          </span>
           {activityCount > 0 && (
             <span className='size-5 flex items-center justify-center shrink-0'>
               <Badge
