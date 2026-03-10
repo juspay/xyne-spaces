@@ -160,7 +160,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     new Set(['assignee', 'dueDate', 'status', 'priority', 'tags']),
   );
   const [isComfortView, setIsComfortView] = useState(false);
-  const [searchTerm, setSearchTerm] = useState<string>('');
   const [showOverdueOnly, setShowOverdueOnly] = useState(false);
 
   // Stage form modal state
@@ -266,6 +265,23 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const [state, send] = useMachine(ticketFiltersMachine);
   const layoutView = searchParams.get('layout') ?? 'kanban';
+
+  const searchTerm = searchParams.get('search') ?? '';
+
+  const setSearchTerm = (value: string) => {
+    setSearchParams(
+      prev => {
+        const next = new URLSearchParams(prev);
+        if (value) {
+          next.set('search', value);
+        } else {
+          next.delete('search');
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   // Initialize machine on mount or when dependencies change
   useEffect(() => {
@@ -1213,6 +1229,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   : []
               }
               selectedBoardName={selectedBoardDetail?.name ?? undefined}
+              searchValue={searchTerm}
               onSearchChange={setSearchTerm}
             />
           </div>
