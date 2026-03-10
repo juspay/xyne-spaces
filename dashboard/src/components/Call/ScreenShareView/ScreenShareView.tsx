@@ -1,12 +1,14 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Track } from 'livekit-client';
 import { useSelector } from '@xstate/react';
+import { Maximize2 } from 'lucide-react';
 import { roomActor } from '../../../machines/roomMachine';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
 import { ParticipantTile } from '../ParticipantTile/ParticipantTile';
 import { VideoTrack } from '@livekit/components-react';
 import { logger, Event } from '../../../utils/logger';
+import { ScreenShareFullscreenModal } from '../ScreenShareFullscreenModal';
 
 interface ScreenShareViewProps {
   focusedScreenShare: ParticipantInfo;
@@ -33,19 +35,37 @@ export function ScreenShareView({
 }: ScreenShareViewProps): React.ReactElement {
   const callId = useSelector(roomActor, state => state.context.callId);
 
+  // Fullscreen modal state
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+
   // Create track reference for the focused screen share
   const screenSharePublication = focusedScreenShare.participant?.getTrackPublication(
     Track.Source.ScreenShare,
   );
 
-  const screenShareTrackRef =
-    screenSharePublication && focusedScreenShare.participant
-      ? {
-          participant: focusedScreenShare.participant,
-          source: Track.Source.ScreenShare,
-          publication: screenSharePublication,
-        }
-      : undefined;
+  const screenShareTrackRef = useMemo(
+    () =>
+      screenSharePublication && focusedScreenShare.participant
+        ? {
+            participant: focusedScreenShare.participant,
+            source: Track.Source.ScreenShare,
+            publication: screenSharePublication,
+          }
+        : undefined,
+    [screenSharePublication, focusedScreenShare.participant],
+  );
+
+  // Handle screen share video click to open fullscreen
+  const handleScreenShareClick = useCallback((): void => {
+    if (screenShareTrackRef) {
+      setIsFullscreenOpen(true);
+    }
+  }, [screenShareTrackRef]);
+
+  // Handle fullscreen modal close
+  const handleFullscreenClose = useCallback((): void => {
+    setIsFullscreenOpen(false);
+  }, []);
 
   // Log screen share rendering diagnostics for debugging invisible screen shares
   useEffect(() => {
@@ -118,6 +138,7 @@ export function ScreenShareView({
           {screenShareTrackRef && (
             <VideoTrack trackRef={screenShareTrackRef} className='w-full h-full object-contain' />
           )}
+
           {/* Screen Share Label */}
           <div
             className={cn(
@@ -134,6 +155,32 @@ export function ScreenShareView({
               </span>
             )}
           </div>
+
+          {/* Fullscreen Expand Button - Bottom Right */}
+          {screenShareTrackRef && (
+            <button
+              onClick={handleScreenShareClick}
+              className={cn(
+                'absolute z-10 flex items-center justify-center',
+                'bg-black/50 hover:bg-black/70 backdrop-blur-sm',
+                'border border-white/20 rounded-lg',
+                'text-white/90 hover:text-white',
+                'transition-all duration-200',
+                'focus:outline-none focus:ring-2 focus:ring-white/30',
+                compact
+                  ? 'bottom-2 right-2 w-8 h-8'
+                  : 'bottom-2 right-2 sm:bottom-4 sm:right-4 w-10 h-10',
+              )}
+              aria-label={`View ${focusedScreenShare.name}'s screen in fullscreen`}
+              data-track-category='CALLS'
+              data-track-name='Open_ScreenShare_Fullscreen'
+              data-track-metadata={JSON.stringify({
+                participantIdentity: focusedScreenShare.identity,
+              })}
+            >
+              <Maximize2 className={cn(compact ? 'w-4 h-4' : 'w-5 h-5')} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -198,6 +245,14 @@ export function ScreenShareView({
           })}
         </aside>
       )}
+
+      {/* Fullscreen Modal */}
+      <ScreenShareFullscreenModal
+        trackRef={screenShareTrackRef}
+        isOpen={isFullscreenOpen}
+        onClose={handleFullscreenClose}
+        participantName={focusedScreenShare.name || 'Unknown'}
+      />
     </div>
   );
 }

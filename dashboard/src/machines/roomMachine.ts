@@ -81,6 +81,7 @@ export interface RoomContext {
   viewMode: 'mini' | 'full';
   callId: string | null;
   channelId: string | null;
+  scopeType: string | null; // Channel scope type (DM, GROUP_DM, DEFAULT, etc.)
   invitedUserId: string | null;
   conversationId: string | null;
   targetUserIds: string[];
@@ -127,6 +128,7 @@ export type RoomMachineEvent =
   | {
       type: 'INITIATE_CALL';
       channelId?: string;
+      scopeType?: string; // Channel scope type for CallKit filtering (DM, GROUP_DM, DEFAULT, etc.)
       callType: CallType;
       targetUserIds?: string[];
       zero: Zero | null;
@@ -251,6 +253,7 @@ export const roomMachine = setup({
           roomLink: result.roomLink,
           channelId: result.channelId, // Use channelId from backend response (may be resolved from invitedUserId)
           targetUserIds,
+          scopeType: result.scopeType, // Channel scope type for CallKit filtering
         };
       },
     ),
@@ -271,6 +274,7 @@ export const roomMachine = setup({
         callId: callId, // Pass through the externalId for DB writes
         roomLink: result.roomLink,
         channelId: result.channelId,
+        scopeType: result.scopeType, // Channel scope type for CallKit filtering
       };
     }),
 
@@ -609,6 +613,7 @@ export const roomMachine = setup({
           channelId?: string | null;
           conversationId?: string | null;
           callDisplayName?: string | null;
+          scopeType?: string | null; // Channel scope type for CallKit filtering
         };
       }) => {
         const {
@@ -622,6 +627,7 @@ export const roomMachine = setup({
           channelId,
           conversationId,
           callDisplayName,
+          scopeType,
         } = input;
 
         // If in native mode, send connect command to React Native bridge and wait for connection
@@ -646,6 +652,7 @@ export const roomMachine = setup({
             ...(callerName && { callerName }),
             ...(channelId && { channelId }),
             ...(conversationId && { conversationId }),
+            ...(scopeType && { scopeType }),
           });
 
           // Wait for native connection state to become 'connected'
@@ -1076,6 +1083,7 @@ export const roomMachine = setup({
     viewMode: 'mini',
     callId: null,
     channelId: null,
+    scopeType: null,
     invitedUserId: null,
     conversationId: null,
     targetUserIds: [],
@@ -1133,6 +1141,8 @@ export const roomMachine = setup({
           actions: assign({
             channelId: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.channelId ?? null) : null,
+            scopeType: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.scopeType ?? null) : null,
             callType: ({ event }) =>
               event.type === 'INITIATE_CALL' ? event.callType : CallType.VIDEO,
             targetUserIds: ({ event }) =>
@@ -1171,11 +1181,19 @@ export const roomMachine = setup({
         // Send CALL_INITIATING to native app before API call (only if native calls are enabled)
         ({ context }): void => {
           if (isNativeCallSupported() && reactNativeBridge.isAvailable()) {
-            const payload: { channelId?: string; callType?: 'AUDIO' | 'VIDEO' } = {
+            const payload: {
+              channelId?: string;
+              scopeType?: string | null;
+              callType?: 'AUDIO' | 'VIDEO';
+            } = {
               callType: context.callType as 'AUDIO' | 'VIDEO',
             };
             if (context.channelId) {
               payload.channelId = context.channelId;
+            }
+            // Use scopeType from context (already set from INITIATE_CALL event)
+            if (context.scopeType) {
+              payload.scopeType = context.scopeType;
             }
             reactNativeBridge.send('CALL_INITIATING', payload);
           } else {
@@ -1226,6 +1244,7 @@ export const roomMachine = setup({
               roomLink: ({ event }) => event.output.roomLink,
               channelId: ({ event }) => event.output.channelId,
               targetUserIds: ({ event }) => event.output.targetUserIds || [],
+              scopeType: ({ event }) => event.output.scopeType ?? null, // Store scopeType from API response
             }),
             'createRoom',
             'clearError',
@@ -1278,6 +1297,7 @@ export const roomMachine = setup({
               callId: ({ event }) => event.output.callId,
               roomLink: ({ event }) => event.output.roomLink,
               channelId: ({ event }) => event.output.channelId || null,
+              scopeType: ({ event }) => event.output.scopeType ?? null,
             }),
             'createRoom',
             'clearError',
@@ -1312,6 +1332,7 @@ export const roomMachine = setup({
           channelId: context.channelId,
           conversationId: context.conversationId,
           callDisplayName: context.callDisplayName,
+          scopeType: context.scopeType,
         }),
         onDone: {
           target: 'connected',

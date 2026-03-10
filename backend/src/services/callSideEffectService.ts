@@ -193,6 +193,7 @@ class CallSideEffectService {
                 metadata: {
                     callId: call.externalId,
                     channelId: call.channelId,
+                    scopeType: channel?.scopeType, // Channel type for CallKit filtering
                     callerId: invitedBy,
                     callerName: callerName,
                     callType: call.callType,

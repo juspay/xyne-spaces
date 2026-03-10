@@ -35,6 +35,7 @@ import { IncomingCallModal } from '../components/Call/CallModals/IncomingCallMod
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
+import { CallFromRecentsHandler } from '../components/CallFromRecentsHandler/CallFromRecentsHandler';
 import { usePlatform } from '../hooks/usePlatform';
 import { roomActor } from '../machines/roomMachine';
 import ChatView from '../components/Chat/ChatView/ChatView';
@@ -435,6 +436,7 @@ const AppRoot = (): ReactElement => {
             <GlobalCallOverlay />
             <RecordingOverlay />
             <NotificationHandler />
+            <CallFromRecentsHandler />
             <BrowserPanelHandler />
             <AttachmentGalleryModal />
             <GlobalCommandMenu />

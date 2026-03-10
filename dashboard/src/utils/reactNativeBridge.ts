@@ -95,6 +95,8 @@ const nativeInboundMessageTypeValues = {
   KEYBOARD_HIDDEN: 'KEYBOARD_HIDDEN',
   // Share recording from native RecordingDetailScreen
   SHARE_RECORDING: 'SHARE_RECORDING',
+  // Call from Phone app Recents
+  START_CALL_FROM_RECENTS: 'START_CALL_FROM_RECENTS',
 } as const;
 
 export type NativeInboundMessageType = keyof typeof nativeInboundMessageTypeValues;
@@ -197,6 +199,7 @@ export interface LiveKitConnectPayload {
   roomName?: string;
   channelId?: string;
   conversationId?: string;
+  scopeType?: string | null; // Channel scope type for CallKit filtering
 }
 
 export interface LiveKitTogglePayload {
@@ -289,8 +292,13 @@ type ReactNativeInboundPayloadMap = {
   KEYBOARD_HIDDEN: undefined;
   // Share recording from native RecordingDetailScreen
   SHARE_RECORDING: { messageId: string };
+  // Call from Phone app Recents
+  START_CALL_FROM_RECENTS: {
+    channelId: string;
+    callType?: 'AUDIO' | 'VIDEO';
+    source?: string;
+  };
 };
-
 type ReactNativeOutboundPayloadMap = {
   WEB_APP_READY: {
     path: string;
@@ -321,6 +329,7 @@ type ReactNativeOutboundPayloadMap = {
   // LiveKit native bridge commands
   CALL_INITIATING: {
     channelId?: string;
+    scopeType?: string | null; // Channel scope type for CallKit filtering (DM, GROUP_DM, DEFAULT, etc.)
     callType?: 'AUDIO' | 'VIDEO';
   };
   CALL_FAILED: {
@@ -380,11 +389,13 @@ class ReactNativeBridge {
   // Queue for messages that arrive before listeners subscribe (critical for cold start)
   private pendingMessages = new Map<NativeInboundMessageType, ReactNativeInboundMessage>();
   // Message types that should be queued for late listeners
-  private readonly queueableMessageTypes: Set<NativeInboundMessageType> = new Set([
-    'NATIVE_PENDING_CALL_STATE',
-    'NATIVE_CALL_JOINED',
-    'NATIVE_REQUEST_CALLBACK',
-  ]);
+  private readonly queueableMessageTypes: Set<NativeInboundMessageType> =
+    new Set<NativeInboundMessageType>([
+      'NATIVE_PENDING_CALL_STATE',
+      'NATIVE_CALL_JOINED',
+      'NATIVE_REQUEST_CALLBACK',
+      'START_CALL_FROM_RECENTS', // Queued for cold start safety (Recents tap before NotificationHandler ready)
+    ]);
   private readonly messageHandler = (event: MessageEvent): void => {
     const message = this.parseInboundMessage(event.data);
     if (!message) {

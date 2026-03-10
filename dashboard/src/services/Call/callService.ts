@@ -21,6 +21,7 @@ export interface InitiateCallResponse {
   externalId: string;
   roomLink: string;
   channelId: string;
+  scopeType?: string | null; // Channel scope type for CallKit filtering
 }
 
 export interface JoinCallRequest {
@@ -33,6 +34,7 @@ export interface JoinCallResponse {
   externalId: string;
   roomLink: string;
   channelId?: string;
+  scopeType?: string | null; // Channel scope type for CallKit filtering
 }
 
 export interface ValidateRoomsRequest {

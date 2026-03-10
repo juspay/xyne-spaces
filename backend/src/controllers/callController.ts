@@ -95,6 +95,13 @@ export class CallController {
           ? await repositories.calls.findActiveCallByChannelIdAndConversationId(finalChannelId, conversationId)
           : await repositories.calls.findActiveCallByChannelId(finalChannelId);
 
+      // Fetch channel to get scopeType (needed for existing call path)
+      const channel = await repositories.channels.findById(finalChannelId);
+      if (!channel) {
+        res.status(404).json({ success: false, error: 'Channel not found' });
+        return;
+      }
+
       if (existingCall) {
         // Verify the LiveKit room still exists
         const roomInfo = await livekitService.getRoomInfo(existingCall.externalId);
@@ -122,6 +129,7 @@ export class CallController {
             externalId: existingCall.externalId,
             roomLink: existingCall.roomLink || `${livekitService.getClientUrl()}/call/${existingCall.externalId}?type=${callType}`,
             channelId: finalChannelId,
+            scopeType: channel.scopeType, // Add scopeType for CallKit filtering
           });
           return;
         } else {
@@ -140,11 +148,14 @@ export class CallController {
       callExternalId = uuidv4();
       logger.info(`[${callExternalId}] creating_new_livekit_room | user_id=${userId}, channel_id=${finalChannelId}, call_type=${callType}, correlation_id=${correlationId}`);
 
-      // Fetch channel to get projectId and boardId for room metadata
-      const channel = await repositories.channels.findById(finalChannelId);
+      // Fetch channel to get projectId and boardId for room metadata (only if not already fetched)
       if (!channel) {
-        res.status(404).json({ success: false, error: 'Channel not found' });
-        return;
+        const channelData = await repositories.channels.findById(finalChannelId);
+        if (!channelData) {
+          res.status(404).json({ success: false, error: 'Channel not found' });
+          return;
+        }
+        // This path should never execute since we already fetched channel above
       }
       // Generate room link
       const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
@@ -192,6 +203,7 @@ export class CallController {
         externalId: callExternalId,
         roomLink,
         channelId: finalChannelId,
+        scopeType: channel.scopeType, // Add scopeType for CallKit filtering
       });
     } catch (error) {
       logger.error(`[${callExternalId || 'unknown'}] call_initiation_failed | error=${error}`);
@@ -222,7 +234,14 @@ export class CallController {
         return;
       }
 
-      // Check if LiveKit room exists
+      // Fetch channel to get scopeType for CallKit filtering
+      let scopeType = null;
+      if (call?.channelId) {
+        const channel = await repositories.channels.findById(call.channelId);
+        scopeType = channel?.scopeType || null;
+      }
+
+      // Verify room exists in LiveKit
       const roomInfo = await livekitService.getRoomInfo(callId);
 
       if (!roomInfo || (call && call.status === CallStatus.SCHEDULED)) {
@@ -288,6 +307,7 @@ export class CallController {
         externalId: callId,
         roomLink: call?.roomLink,
         channelId: call?.channelId,
+        scopeType, // Channel scope type for CallKit filtering
       });
     } catch (error) {
       logger.error('Failed to join call:', error);
