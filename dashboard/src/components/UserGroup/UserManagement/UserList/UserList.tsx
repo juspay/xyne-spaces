@@ -138,6 +138,7 @@ export const UserList = ({
             onChange={e => setSearchTerm(e.target.value)}
             className='w-full pl-10 pr-4 h-9 text-sm'
             disabled={disabled}
+            data-testid='search-members-input'
           />
         </div>
       </div>

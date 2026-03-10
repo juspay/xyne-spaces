@@ -207,6 +207,7 @@ export const UserGroupForm = ({
             }`}
             data-track-category='UserGroups'
             data-track-name='SwitchToMembersTab'
+            data-testid='members-tab-btn'
           >
             Members
           </Button>
@@ -233,6 +234,7 @@ export const UserGroupForm = ({
                     placeholder='Enter user group name'
                     required
                     disabled={isLoading}
+                    data-testid='user-group-name-input'
                   />
                 )}
               />
@@ -312,7 +314,12 @@ export const UserGroupForm = ({
         >
           Cancel
         </Button>
-        <Button variant='default' type='submit' disabled={isLoading}>
+        <Button
+          variant='default'
+          type='submit'
+          disabled={isLoading}
+          data-testid='submit-user-group-btn'
+        >
           {isLoading
             ? isEdit
               ? 'Updating...'
