@@ -77,9 +77,13 @@ export const TicketFiltersDropdown = ({
   availableStages,
   hideAssigneeFilter = false,
   formMappings,
+  searchValue,
   onSearchChange,
   selectedBoardName,
-}: TicketFiltersProps & { onSearchChange?: (searchTerm: string) => void }): ReactElement => {
+}: TicketFiltersProps & {
+  searchValue?: string;
+  onSearchChange?: (searchTerm: string) => void;
+}): ReactElement => {
   const [boardOpen, setBoardOpen] = useState(false);
   const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
 
@@ -159,7 +163,6 @@ export const TicketFiltersDropdown = ({
     return null;
   }, [filters.boards, allBoardsList]);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
@@ -771,12 +774,10 @@ export const TicketFiltersDropdown = ({
               ref={inputRef}
               type='text'
               placeholder='Search Tickets'
-              value={searchTerm}
+              value={searchValue ?? ''}
               onChange={e => {
-                const value = e.target.value;
-                setSearchTerm(value);
                 if (onSearchChange) {
-                  onSearchChange(value);
+                  onSearchChange(e.target.value);
                 }
               }}
               className='w-full text-sm bg-background border border-border text-foreground rounded-lg pl-10 pr-3 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
