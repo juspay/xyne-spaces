@@ -366,7 +366,8 @@
   }
 
   .chat-input-field .ProseMirror {
-    @apply overflow-y-auto overflow-x-hidden w-full;
+    @apply overflow-y-auto w-full;
+    overflow-x: auto;
     min-height: 50px;
     max-height: 500px;
     white-space: pre-wrap;
@@ -410,6 +411,34 @@
 
   .chat-input-field .ProseMirror::-webkit-scrollbar-thumb:hover {
     @apply bg-gray-400;
+  }
+
+  /* Table rendering in TipTap chat input editor.
+   * TipTap's NodeView creates div.tableWrapper > table > tbody without any
+   * CSS classes on the table itself — these rules make it visible. */
+  .chat-input-field .ProseMirror .tableWrapper {
+    overflow-x: auto;
+    max-width: 100%;
+    margin: 0.5rem 0;
+  }
+
+  .chat-input-field .ProseMirror .tableWrapper table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .chat-input-field .ProseMirror .tableWrapper table td,
+  .chat-input-field .ProseMirror .tableWrapper table th {
+    border: 1px solid #d1d5db;
+    padding: 0.375rem 0.625rem;
+    text-align: left;
+    min-width: 50px;
+    white-space: normal;
+  }
+
+  .chat-input-field .ProseMirror .tableWrapper table th {
+    background-color: #f9fafb;
+    font-weight: 600;
   }
 
   /* ============================================================================
