@@ -3,7 +3,10 @@ import { DatabaseClient } from '@/database/client';
 import { BitbucketService } from '@/services/bitbucketService';
 import { CommentData } from '@/types/bitbucket';
 import { config } from '@/config/env';
-import { workflowRestoreService } from '@/workflows/services/workflow-restore-service';
+import { workflowManager } from '@/workflows/services/workflowManager';
+import { WorkflowType } from '@/workflows/types/workflow-enums';
+import { buildPRWorkflowContext } from './prWorkflowContextBuilder';
+import { randomUUID } from 'crypto';
 
 export class XyneCommentService {
   private db: ReturnType<typeof DatabaseClient.getInstance>;
@@ -164,6 +167,8 @@ export class XyneCommentService {
       select: { 
         conversationId: true, 
         createdBy: true,
+        title: true,
+        description: true,
       },
     });
 
@@ -176,7 +181,7 @@ export class XyneCommentService {
 
     const pr = await this.db.pullRequests.findFirst({
       where: { prId: prId },
-      select: { workflowExecutionId: true },
+      select: { workflowExecutionId: true, sourceBranchName: true, repositoryUrl: true },
     });
 
     if (!pr?.workflowExecutionId) {
@@ -186,47 +191,34 @@ export class XyneCommentService {
       return;
     }
 
-    let sourceExecutionId = pr.workflowExecutionId;
-    logger.info(`[Xyne-Comment] Found workflow execution ${sourceExecutionId}, initiating rerun with PR comments`, {
-      version: '1.0',
-    });
-
     try {
-      // Step 1: Get the source execution and traverse up if it's a child execution
-      let sourceExecution = await this.db.workflowExecution.findUnique({
-        where: { id: sourceExecutionId },
+      // Step 1: Find the original workflow execution and its workflow
+      const originalExecution = await this.db.workflowExecution.findUnique({
+        where: { id: pr.workflowExecutionId },
+        include: { workflow: true },
       });
 
-      if (!sourceExecution) {
-        throw new Error(`Workflow execution ${sourceExecutionId} not found`);
+      if (!originalExecution) {
+        throw new Error(`Original workflow execution ${pr.workflowExecutionId} not found`);
       }
 
-      let currentExec = sourceExecution;
-      while (currentExec && !currentExec.workflowType && currentExec.parentWorkflowExecutionId) {
-        logger.info(`[Xyne-Comment] Execution ${currentExec.id} is a child, traversing to parent ${currentExec.parentWorkflowExecutionId}`, {
-          version: '1.0',
-        });
-        
-        const parentExecution = await this.db.workflowExecution.findUnique({
-          where: { id: currentExec.parentWorkflowExecutionId },
-        });
+      const originalWorkflowContext = originalExecution.workflow?.context
+        ? JSON.parse(originalExecution.workflow.context as string)
+        : {};
 
-        if (!parentExecution) break;
-        
-        currentExec = parentExecution;
-        sourceExecution = parentExecution;
-        sourceExecutionId = parentExecution.id;
+      // Step 2: Get the branch from the PR (the PR's source branch has the code)
+      const workflowBranch = pr.sourceBranchName;
+
+      if (!workflowBranch) {
+        throw new Error(`PR #${prId} does not have a source branch`);
       }
 
-      if (!sourceExecution || !sourceExecution.workflowType) {
-        throw new Error(`Could not find workflow type for execution chain starting at ${pr.workflowExecutionId}`);
-      }
-
-      logger.info(`[Xyne-Comment] Source execution workflow type: ${sourceExecution.workflowType}`, {
+      logger.info(`[Xyne-Comment] Using branch ${workflowBranch} for PR #${prId} workflow`, {
         version: '1.0',
+        originalExecutionId: originalExecution.id,
       });
 
-      // Step 2: Format PR comments with details
+      // Step 3: Format PR comments as the description
       const commentsWithDetails = comments.map(c => ({
         id: c.id,
         text: c.text,
@@ -238,57 +230,83 @@ export class XyneCommentService {
         createdDate: c.createdDate,
       }));
 
-      logger.info(`[Xyne-Comment] Formatted ${commentsWithDetails.length} PR comments`, {
-        version: '1.0',
-      });
+      const prCommentsDescription = this.formatPRCommentsForDescription(commentsWithDetails, prId, prUrl);
 
-      // Step 3: Format PR comments as modified input
-      const continuationMessage = this.formatPRCommentsForDescription(commentsWithDetails, prId, prUrl);
-
-      logger.info(`[Xyne-Comment] Creating continuation rerun for PR comments`, {
-        version: '1.0',
-        workflowType: sourceExecution.workflowType,
-        messageLength: continuationMessage.length,
-      });
-
-      // Step 4: Find the agentic step using the webhook mapper
-      const stepName = await workflowRestoreService.getStepNameForWebhook('bitbucket', sourceExecution.workflowType);
-      
-      const agenticSteps = await this.db.workflowStep.findMany({
-        where: {
-          workflowExecutionId: sourceExecutionId,
-          stepName: stepName,
-          type: 'input',
-          stepExecutorType: 'agent'
-        },
-        orderBy: { createdAt: 'asc' }
-      });
-
-      if (agenticSteps.length === 0) {
-        throw new Error(`No agentic step '${stepName}' found in workflow execution ${sourceExecutionId}`);
+      // Step 4: Build workflow context based on workflow type
+      let workflowContext: Record<string, unknown>;
+      try {
+        workflowContext = buildPRWorkflowContext(
+          originalExecution.workflowType as WorkflowType,
+          {
+            title: `PR Review Fixes: ${ticket.title}`,
+            description: prCommentsDescription,
+            repoBranch: workflowBranch,
+            originalContext: originalWorkflowContext,
+          }
+        );
+      } catch (error) {
+        logger.error(`[Xyne-Comment] Failed to build workflow context: ${error instanceof Error ? error.message : String(error)}`, {
+          version: '1.0',
+          workflowType: originalExecution.workflowType,
+        });
+        return;
       }
 
-      const agenticStepId = agenticSteps[0].id;
-
-      logger.info(`[Xyne-Comment] Found agentic step: ${agenticStepId} (${stepName})`, {
-        version: '1.0',
+      const result = await workflowManager.startWorkflow({
+        ticketId: ticketId,
+        workflowType: originalExecution.workflowType as WorkflowType,
+        context: workflowContext,
+        createdBy: originalExecution.createdBy ?? undefined,
+        metadata: {
+          originalRequest: {
+            title: `PR Review Fixes: ${ticket.title}`,
+            description: prCommentsDescription,
+          },
+        },
       });
 
-      // Step 5: Use createContinuationRerun to continue from the agentic step with PR comments
-      const rerunResult = await workflowRestoreService.createContinuationRerun({
-        sourceExecutionId,
-        agenticStepId,
-        continuationMessage,
-      });
+      // Step 5: Create SYSTEM message in conversation so workflow appears in ticket thread
+      try {
+        const messageMetadata = {
+          workflowId: result.workflowId,
+          workflowName: `PR Review Fixes: ${ticket.title}`,
+          workflowType: originalExecution.workflowType,
+          ticketId: ticketId,
+          xyneId: ticketId,
+          source: 'pr_comment',
+        };
 
-      logger.info(`[Xyne-Comment] Created continuation rerun: ${rerunResult.rerunExecutionId}`, {
+        await this.db.message.create({
+          data: {
+            messageId: randomUUID(),
+            conversationId: ticket.conversationId,
+            senderId: ticket.createdBy || 'system',
+            content: ``,
+            msgType: 'SYSTEM',
+            metadata: messageMetadata,
+          },
+        });
+        logger.info(`[Xyne-Comment] Created SYSTEM message for workflow in conversation`, {
+          version: '1.0',
+          workflowId: result.workflowId,
+          conversationId: ticket.conversationId,
+        });
+      } catch (messageError) {
+        logger.error('[Xyne-Comment] Failed to create SYSTEM message for workflow:', messageError);
+      }
+
+      logger.info(`[Xyne-Comment] Created new workflow execution for PR comments`, {
         version: '1.0',
+        newExecutionId: result.executionId,
+        workflowId: result.workflowId,
+        ticketId,
         prId,
+        workflowBranch,
+        workflowType: originalExecution.workflowType,
         commentsProcessed: commentsWithDetails.length,
-        actualStepName: rerunResult.actualRestoreStepName,
       });
     } catch (error) {
-      logger.error(`[Xyne-Comment] Failed to trigger workflow rerun:`, {
+      logger.error(`[Xyne-Comment] Failed to create workflow for PR comments:`, {
         version: '1.0',
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
