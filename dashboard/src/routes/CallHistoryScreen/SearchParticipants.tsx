@@ -97,6 +97,10 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     }
 
     if (isChannel && !selectedValues.includes(value)) {
+      const option = options.find(opt => opt.value === value);
+      if (option) {
+        setSelectedOptionsMap(prev => new Map(prev).set(value, option));
+      }
       onMultiSelect([value]);
       setSearchQuery('');
       setIsOpen(false);
@@ -106,6 +110,10 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     if (selectedValues.includes(value)) {
       onMultiSelect(selectedValues.filter(v => v !== value));
     } else {
+      const option = options.find(opt => opt.value === value);
+      if (option) {
+        setSelectedOptionsMap(prev => new Map(prev).set(value, option));
+      }
       onMultiSelect([...selectedValues, value]);
       setSearchQuery('');
     }
