@@ -157,8 +157,9 @@ export class PulseService {
 
     // Fuzzy match: org name contains merchant name OR merchant name contains org name
     const matched = orgs.find(o => {
-      const orgName = (o.name ?? o.orgName ?? '').toLowerCase();
-      return orgName.includes(needle) || needle.includes(orgName);
+      const orgName = (o.name ?? o.orgName ?? '').toLowerCase().trim();
+      if (!orgName) return false;
+      return orgName === needle;
     });
 
     if (!matched) {
