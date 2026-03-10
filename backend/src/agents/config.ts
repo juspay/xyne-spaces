@@ -31,9 +31,9 @@ const DEFAULT_XYNE_AI_MODEL_NAME = 'private-large';
 const DEFAULT_XYNE_AI_VISION_MODEL_NAME = 'private-large';
 
 // Other agents defaults
-const DEFAULT_TICKET_DUPLICATE_MODEL = 'glm-flash';
-const DEFAULT_TITLE_GENERATOR_MODEL = 'glm-flash';
-const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash';
+const DEFAULT_TICKET_DUPLICATE_MODEL = 'glm-flash-experimental';
+const DEFAULT_TITLE_GENERATOR_MODEL = 'glm-flash-experimental';
+const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash-experimental';
 
 // ============================================================================
 // CAC Keys
