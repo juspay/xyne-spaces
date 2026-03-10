@@ -230,7 +230,7 @@ export const Popover = ({
             'data-[side=left]:slide-in-from-right-2',
             'data-[side=right]:slide-in-from-left-2',
             'data-[side=top]:slide-in-from-bottom-2',
-            'z-60 w-fit origin-[--radix-popover-content-transform-origin]',
+            'z-[60] w-fit origin-[--radix-popover-content-transform-origin]',
             'rounded-md border p-4 shadow-md outline-hidden',
             className,
           )}
