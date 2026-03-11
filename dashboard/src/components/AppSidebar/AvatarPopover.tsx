@@ -127,7 +127,9 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
               >
                 <div className='flex items-center gap-2'>
                   <Smile className='size-5 text-muted-foreground' />
-                  <span className='text-sm text-muted-foreground'>Update your status</span>
+                  <span className='text-sm text-muted-foreground' data-testid='set-status-btn'>
+                    Update your status
+                  </span>
                 </div>
               </div>
             )}
