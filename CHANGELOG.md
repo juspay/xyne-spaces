@@ -1,3 +1,10 @@
+## [1.77.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.77.0...v1.77.1) (2026-03-11)
+
+
+### Bug Fixes
+
+* - revoke any session with same voip token during login ([2981c70](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2981c706e89c11d3f3320379b866158f31363b80)), closes [#3869](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3869)
+
 ## [1.77.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.76.0...v1.77.0) (2026-03-11)
 
 
