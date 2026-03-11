@@ -359,6 +359,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {onBookmark && (
                     <DropdownMenuItem
                       onClick={onBookmark}
+                      data-testid={
+                        isBookmarked ? 'hover-action-remove-bookmark' : 'hover-action-add-bookmark'
+                      }
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='TOGGLE_BOOKMARK'
                       data-track-metadata={JSON.stringify({ isBookmarked, messageId })}

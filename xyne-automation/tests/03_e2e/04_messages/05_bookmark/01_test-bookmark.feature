@@ -14,9 +14,11 @@ Feature: Bookmark functionality for messages
     And I click on "[data-testid='send-message-button']"
     And I wait for "text=\"hellooo pls bookmark this\"" to appear
     And I hover on the text "hellooo pls bookmark this" at index 1
+    And I click on "[data-testid='hover-action-more']"
     And I click on "[data-testid='hover-action-add-bookmark']"
     And I click on "[data-testid='open-bookmarks-button']"
     And I click on "[data-testid='bookmark-mark-as-done-btn']"
     And I click on "[data-testid='bookmarks-go-back-link']"
     And I hover on the text "hellooo pls bookmark this" at index 1
+    And I click on "[data-testid='hover-action-more']"
     And I click on "[data-testid='hover-action-add-bookmark']"
