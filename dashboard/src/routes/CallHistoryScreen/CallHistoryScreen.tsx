@@ -271,17 +271,17 @@ const CallHistoryScreen = (): ReactElement => {
   }
 
   return (
-    <div className='bg-white dark:bg-[#1E1E1E] flex flex-col w-full h-full md:rounded-2xl overflow-y-auto shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border relative '>
+    <div className='bg-background dark:bg-background flex flex-col w-full h-full md:rounded-2xl overflow-y-auto shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border border-border relative '>
       <div className='w-full flex flex-col items-center px-4'>
-        <div className='max-w-[810px] w-full sticky top-0 bg-white z-50 '>
+        <div className='max-w-[810px] w-full sticky top-0 bg-background z-50 '>
           {/* Header */}
           <div className='flex items-center justify-between py-3'>
-            <h1 className='text-lg font-semibold text-[#181B1D]'>Calls</h1>
+            <h1 className='text-lg font-semibold text-foreground'>Calls</h1>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button className='bg-sidebar-badge-accent hover:opacity-90 duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8'>
+                <Button className='bg-primary hover:opacity-90 duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8'>
                   <span className='text-white text-sm leading-5 font-semibold'>New Call</span>
-                  <ChevronDown className='size-4' strokeWidth={2.3} />
+                  <ChevronDown className='size-4 text-white' strokeWidth={2.3} />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align='end' sideOffset={8} className='rounded-xl'>
@@ -306,7 +306,7 @@ const CallHistoryScreen = (): ReactElement => {
           </div>
 
           {/* Tabs Options */}
-          <div className='overflow-x-auto border-b border-gray-200 dark:border-gray-700 shrink-0'>
+          <div className='overflow-x-auto border-b border-border shrink-0'>
             <Tabs.Root value={activeTab} onValueChange={handleTabChange}>
               <Tabs.List className='flex items-center justify-start'>
                 {tabs.map(tab => (
@@ -315,8 +315,8 @@ const CallHistoryScreen = (): ReactElement => {
                       className={cn(
                         'flex items-center p-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2 cursor-pointer',
                         activeTab === tab.id
-                          ? 'border-black text-gray-900'
-                          : 'border-transparent text-[#788187]',
+                          ? 'border-foreground text-foreground'
+                          : 'border-transparent text-muted-foreground',
                       )}
                     >
                       {tab.label}
@@ -329,14 +329,14 @@ const CallHistoryScreen = (): ReactElement => {
 
           {/* Search Input */}
           <div className='my-4 relative'>
-            <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-300  size-4' />
+            <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 text-muted-foreground dark:text-muted-foreground size-4' />
             <Input
               type='text'
               placeholder='Search calls'
               value={searchQuery}
               maxLength={56}
               onChange={e => setSearchQuery(e.target.value)}
-              className='pl-8 w-full placeholder:text-[#C9CCCF] max-w-full md:max-w-[350px] rounded-xl focus-visible:border-sidebar-badge-accent focus-visible:ring-0 duration-300 ease-in-out'
+              className='pl-8 w-full placeholder:text-muted-foreground max-w-full md:max-w-[350px] rounded-xl focus-visible:ring-0 duration-300 ease-in-out'
               data-testid='user-search-input'
             />
           </div>
@@ -347,15 +347,13 @@ const CallHistoryScreen = (): ReactElement => {
               {selectedUsers.map(selectedUser => (
                 <div
                   key={selectedUser.id}
-                  className='flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-full'
+                  className='flex items-center gap-2 px-3 py-1.5 bg-primary/20 dark:bg-primary/20 rounded-full'
                 >
                   <Avatar userId={selectedUser.id} size='sm' />
-                  <span className='text-sm font-medium text-blue-900 dark:text-blue-100'>
-                    {selectedUser.name}
-                  </span>
+                  <span className='text-sm font-medium text-primary'>{selectedUser.name}</span>
                   <button
                     onClick={() => handleRemoveUser(selectedUser.id)}
-                    className='text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100'
+                    className='text-primary hover:text-primary/80'
                     data-track-category='Calls'
                     data-track-name='RemoveUserFilter'
                     data-track-metadata={JSON.stringify({ userId: selectedUser.id })}
@@ -380,7 +378,7 @@ const CallHistoryScreen = (): ReactElement => {
                 scheduledCalls.length > 0 && (
                   <div className='flex flex-col gap-4 mt-3 w-full'>
                     <div className='flex items-center justify-between'>
-                      <span className='font-mono text-black/40 text-sm leading-5 font-medium uppercase cursor-default'>
+                      <span className='font-mono text-muted-foreground text-sm leading-5 font-medium uppercase cursor-default'>
                         upcoming calls
                       </span>
                       {!searchQuery.trim() && scheduledCalls.length > 3 && (
@@ -395,7 +393,7 @@ const CallHistoryScreen = (): ReactElement => {
                       )}
                     </div>
 
-                    <div className='grid grid-cols-1 md:grid-cols-3 md:gap-4 border md:border-none border-gray-100 rounded-xl'>
+                    <div className='grid grid-cols-1 md:grid-cols-3 md:gap-4 border md:border-none border-border rounded-xl'>
                       {displayScheduledCalls &&
                         displayScheduledCalls.length > 0 &&
                         displayScheduledCalls.map((call, i) => (
@@ -420,10 +418,10 @@ const CallHistoryScreen = (): ReactElement => {
               {/* Recent Calls */}
               {filteredRecentCalls && filteredRecentCalls.length > 0 && (
                 <div className='flex flex-col gap-4 w-full pb-20 md:pb-4'>
-                  <span className='font-mono text-black/40 text-sm leading-5 font-medium uppercase cursor-default'>
+                  <span className='font-mono text-muted-foreground text-sm leading-5 font-medium uppercase cursor-default'>
                     recents
                   </span>
-                  <div className='border border-gray-100 rounded-xl overflow-hidden'>
+                  <div className='border border-border rounded-xl overflow-hidden'>
                     {filteredRecentCalls.map((call, i) => (
                       <CallCard
                         key={call.id}
@@ -495,7 +493,7 @@ const CallHistoryScreen = (): ReactElement => {
           {activeTab === 'missed' && (
             <div className='flex flex-col gap-4 w-full pb-20 md:pb-4 '>
               {tabContent && tabContent.length > 0 && (
-                <div className='border border-gray-100 rounded-xl'>
+                <div className='border border-border rounded-xl'>
                   {tabContent.map((call, i) => (
                     <CallCard
                       key={call.id}
@@ -562,13 +560,13 @@ const CallHistoryScreen = (): ReactElement => {
 const EmptyState = ({ icon: Icon, title, description }: EmptyStateProps): ReactElement => {
   return (
     <div className='flex flex-col items-center justify-center h-full px-6 py-12'>
-      <div className='size-12 rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 mb-4'>
-        <Icon size={20} strokeWidth={1.5} className='text-slate-400 dark:text-slate-500' />
+      <div className='size-12 rounded-xl bg-card border border-border flex items-center justify-center mb-4'>
+        <Icon size={20} strokeWidth={1.5} className='text-muted-foreground' />
       </div>
 
-      <h2 className='text-xl text-gray-900 dark:text-white font-light mb-4'>{title}</h2>
+      <h2 className='text-xl text-foreground font-light mb-4'>{title}</h2>
 
-      <p className='text-sm text-gray-500 text-center dark:text-gray-400 max-w-sm'>{description}</p>
+      <p className='text-sm text-muted-foreground text-center max-w-sm'>{description}</p>
     </div>
   );
 };
@@ -576,13 +574,11 @@ const EmptyState = ({ icon: Icon, title, description }: EmptyStateProps): ReactE
 const NoFiltredCalls = ({ searchQuery }: { searchQuery: string }): ReactElement => {
   return (
     <div className='flex flex-col items-center justify-center h-full px-6 py-12'>
-      <p className='text-xs font-mono text-gray-400 dark:text-gray-600 mb-6 tracking-widest'>
-        [0 RESULTS]
-      </p>
+      <p className='text-xs font-mono text-muted-foreground mb-6 tracking-widest'>[0 RESULTS]</p>
 
-      <h2 className='text-xl text-gray-900 dark:text-white font-light mb-4'>Nothing matches</h2>
+      <h2 className='text-xl text-foreground font-light mb-4'>Nothing matches</h2>
 
-      <p className='text-sm text-gray-500 text-center dark:text-gray-400 max-w-sm'>
+      <p className='text-sm text-muted-foreground text-center max-w-sm'>
         &quot;{searchQuery}&quot; didn&apos;t return any calls
       </p>
     </div>

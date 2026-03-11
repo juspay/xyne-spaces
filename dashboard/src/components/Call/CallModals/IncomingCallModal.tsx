@@ -1,4 +1,4 @@
-import { Phone, Video, PhoneOff } from 'lucide-react';
+import { Phone, Video, PhoneOff, X } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -20,10 +20,10 @@ import {
   Avatar,
   AvatarShape,
   AvatarSize,
-  Modal,
 } from '@juspay/blend-design-system';
 import { useUsers } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
+import { Dialog } from '../../ui/Dialog/Dialog';
 
 type CallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
 
@@ -399,106 +399,130 @@ function CallNotificationUI({
   }, [conversationId, channelId, callOrigin, navigate, onReject]);
 
   return (
-    <Modal
-      isOpen={true}
-      onClose={onReject}
+    <Dialog
+      open={true}
+      onOpenChange={open => !open && onReject()}
       title={`Incoming ${callType === CallType.VIDEO ? 'Video' : 'Audio'} Call`}
     >
-      <div className='p-6 text-center space-y-6'>
-        {isInActiveCall && (
-          <div className='bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 px-3 py-2 rounded-md text-sm font-medium'>
-            ⚠️ This will end your current call
-          </div>
-        )}
-
-        {queuedCallsCount > 0 && (
-          <div className='bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 px-3 py-2 rounded-md text-sm'>
-            {queuedCallsCount === 1
-              ? 'You have another incoming call'
-              : `You have ${queuedCallsCount} incoming calls waiting`}
-          </div>
-        )}
-
-        {/* Call Title */}
-        <div className='min-h-[1.75rem] flex items-center justify-center'>
-          {hasTitle && notification.title && (
-            <button
-              type='button'
-              className={cn(
-                'text-lg font-medium text-foreground dark:text-muted bg-transparent border-none p-0',
-                conversationId && channelId ? 'cursor-pointer hover:underline' : 'cursor-default',
-              )}
-              onClick={handleTitleClick}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') handleTitleClick();
-              }}
-              data-track-category='CALLS_NOTIFICATIONS'
-              data-track-name='CALL_TITLE_CLICK'
-            >
-              {notification.title}
-            </button>
-          )}
+      <div className='space-y-6'>
+        {/* Visible Title Header */}
+        <div className='relative px-6 pt-6 pb-4 border-b border-border dark:border-border'>
+          <h2 className='text-lg font-semibold text-foreground dark:text-foreground text-left'>
+            Incoming {callType === CallType.VIDEO ? 'Video' : 'Audio'} Call
+          </h2>
+          {/* Close button */}
+          <button
+            type='button'
+            onClick={onReject}
+            className='absolute right-6 top-6 rounded-sm transition-opacity hover:opacity-70 focus:outline-none disabled:pointer-events-none'
+            aria-label='Close'
+            data-track-category='CALLS'
+            data-track-name='incoming-call-modal-close'
+          >
+            <X className='h-4 w-4 text-muted-foreground dark:text-muted-foreground' />
+          </button>
         </div>
 
-        {/* Caller Avatar */}
-        <div className='flex justify-center'>
-          <div className='[&_*]:!rounded-full'>
-            <Avatar
-              src={caller.picture || ''}
-              alt={caller.name}
-              shape={AvatarShape.ROUNDED}
-              size={AvatarSize.LG}
-              fallback={caller.name
-                .split(' ')
-                .map(n => n[0])
-                .join('')
-                .toUpperCase()
-                .slice(0, 2)}
+        <div className='px-6 pb-6 space-y-6 text-center'>
+          {isInActiveCall && (
+            <div className='bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 px-3 py-2 rounded-md text-sm font-medium'>
+              ⚠️ This will end your current call
+            </div>
+          )}
+
+          {queuedCallsCount > 0 && (
+            <div className='bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 px-3 py-2 rounded-md text-sm'>
+              {queuedCallsCount === 1
+                ? 'You have another incoming call'
+                : `You have ${queuedCallsCount} incoming calls waiting`}
+            </div>
+          )}
+
+          {/* Call Title */}
+          <div className='min-h-[1.75rem] flex items-center justify-center'>
+            {hasTitle && notification.title && (
+              <button
+                type='button'
+                className={cn(
+                  'text-lg font-medium text-foreground dark:text-foreground bg-transparent border-none p-0',
+                  conversationId && channelId ? 'cursor-pointer hover:underline' : 'cursor-default',
+                )}
+                onClick={handleTitleClick}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') handleTitleClick();
+                }}
+                data-track-category='CALLS_NOTIFICATIONS'
+                data-track-name='CALL_TITLE_CLICK'
+              >
+                {notification.title}
+              </button>
+            )}
+          </div>
+
+          {/* Caller Avatar */}
+          <div className='flex justify-center'>
+            <div className='[&_*]:!rounded-full'>
+              <Avatar
+                src={caller.picture || ''}
+                alt={caller.name}
+                shape={AvatarShape.ROUNDED}
+                size={AvatarSize.LG}
+                fallback={caller.name
+                  .split(' ')
+                  .map(n => n[0])
+                  .join('')
+                  .toUpperCase()
+                  .slice(0, 2)}
+              />
+            </div>
+          </div>
+
+          {/* Call Info */}
+          <div className='space-y-2'>
+            <p className='text-lg font-medium text-foreground dark:text-foreground'>
+              {caller.name}
+            </p>
+            <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
+              {caller.email}
+            </p>
+          </div>
+
+          {/* Call Type Icon */}
+          <div className='flex justify-center'>
+            {callType === CallType.VIDEO ? (
+              <Video className='h-8 w-8 text-blue-500 dark:text-blue-400 animate-pulse' />
+            ) : (
+              <Phone className='h-8 w-8 text-green-500 dark:text-green-400 animate-pulse' />
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div className='flex gap-4 justify-center'>
+            <Button
+              onClick={onReject}
+              buttonType={ButtonType.DANGER}
+              size={ButtonSize.LARGE}
+              subType={ButtonSubType.ICON_ONLY}
+              leadingIcon={<PhoneOff className='h-6 w-6' />}
+              data-track-category='CALLS_NOTIFICATIONS'
+              data-track-name='REJECT_INCOMING_CALL'
+              data-track-metadata={JSON.stringify({ isInActiveCall, callId: notification.callId })}
+            />
+
+            <Button
+              onClick={onAccept}
+              buttonType={ButtonType.SUCCESS}
+              size={ButtonSize.LARGE}
+              text={isInActiveCall ? 'Switch Call' : ''}
+              subType={isInActiveCall ? ButtonSubType.DEFAULT : ButtonSubType.ICON_ONLY}
+              leadingIcon={<Phone className='h-6 w-6' />}
+              data-track-category='CALLS_NOTIFICATIONS'
+              data-track-name='ACCEPT_INCOMING_CALL'
+              data-track-metadata={JSON.stringify({ isInActiveCall, callId: notification.callId })}
             />
           </div>
         </div>
-
-        {/* Call Info */}
-        <div className='space-y-2'>
-          <p className='text-lg font-medium text-foreground dark:text-muted'>{caller.name}</p>
-          <p className='text-sm text-muted-foreground dark:text-muted-foreground'>{caller.email}</p>
-        </div>
-
-        {/* Call Type Icon */}
-        <div className='flex justify-center'>
-          {callType === CallType.VIDEO ? (
-            <Video className='h-8 w-8 text-blue-500 animate-pulse' />
-          ) : (
-            <Phone className='h-8 w-8 text-green-500 animate-pulse' />
-          )}
-        </div>
-
-        {/* Action Buttons */}
-        <div className='flex gap-4 justify-center'>
-          <Button
-            onClick={onReject}
-            buttonType={ButtonType.DANGER}
-            size={ButtonSize.LARGE}
-            subType={ButtonSubType.ICON_ONLY}
-            leadingIcon={<PhoneOff className='h-6 w-6' />}
-            data-track-category='CALLS_NOTIFICATIONS'
-            data-track-name='REJECT_INCOMING_CALL'
-            data-track-metadata={JSON.stringify({ isInActiveCall, callId: notification.callId })}
-          />
-
-          <Button
-            onClick={onAccept}
-            buttonType={ButtonType.SUCCESS}
-            size={ButtonSize.LARGE}
-            text={isInActiveCall ? 'Switch Call' : ''}
-            subType={isInActiveCall ? ButtonSubType.DEFAULT : ButtonSubType.ICON_ONLY}
-            leadingIcon={<Phone className='h-6 w-6' />}
-            data-track-category='CALLS_NOTIFICATIONS'
-            data-track-name='ACCEPT_INCOMING_CALL'
-            data-track-metadata={JSON.stringify({ isInActiveCall, callId: notification.callId })}
-          />
-        </div>
       </div>
-    </Modal>
+    </Dialog>
   );
 }

@@ -219,7 +219,7 @@ const getMessageBubbleClassName = (
       !isPrivateSystemNotice &&
       !isShowInChannel &&
       'bg-muted/50',
-    isActiveCall && 'bg-green-50 rounded-md',
+    isActiveCall && 'bg-green-50 active-call-highlight rounded-md',
     isShowInChannel &&
       variant !== 'pinned' && [
         'bg-green-50 rounded-sm',
@@ -620,7 +620,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <Button
                       variant='ghost'
                       onClick={() => handleUserClick(sender.id)}
-                      className={`text-sm font-medium text-[#1D1E1F] hover:underline p-0 h-auto min-w-0`}
+                      className={`text-sm font-medium text-foreground hover:underline p-0 h-auto min-w-0`}
                       aria-label={`View ${sender?.name || 'user'} profile`}
                     >
                       {sender.name}

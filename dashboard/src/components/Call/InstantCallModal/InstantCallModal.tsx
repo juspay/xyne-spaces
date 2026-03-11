@@ -118,8 +118,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     >
       <div className='flex flex-col w-full'>
         <div className=''>
-          <div className='flex items-start justify-between px-5 py-3.5 border-b border-gray-200 h-14'>
-            <h2 className='text-[15px] font-semibold text-gray-900 leading-5'>
+          <div className='flex items-start justify-between px-5 py-3.5 border-b border-border h-14'>
+            <h2 className='text-[15px] font-semibold text-foreground leading-5'>
               Start an Instant Call
             </h2>
             <Button
@@ -134,7 +134,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
           </div>
           <div className='p-5 space-y-5'>
             <div className='space-y-2'>
-              <p className='text-[#788187] text-[13px] leading-5'>Add Participants</p>
+              <p className='text-muted-foreground text-[13px] leading-5'>Add Participants</p>
               <SearchParticipants
                 options={inviteUserOrChannelOptions}
                 selectedValues={selectedParticipants}
@@ -158,7 +158,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 type='submit'
                 onClick={handleSubmit}
                 disabled={selectedParticipants.length === 0}
-                className='rounded-lg text-[13px] text-white bg-sidebar-badge-accent hover:bg-sidebar-badge-accent hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
+                className='rounded-lg text-[13px] text-white bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
               >
                 Start Call
               </Button>

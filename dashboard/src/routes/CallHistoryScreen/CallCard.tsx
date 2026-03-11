@@ -99,18 +99,18 @@ export const UpcomingCallCard = ({
   return (
     <div
       className={cn(
-        'relative md:border border-gray-200 md:rounded-lg md:shadow-sm p-4 md:p-0',
+        'relative md:border border-border md:rounded-lg md:shadow-sm p-4 md:p-0',
         !isLastItem && 'border-b ',
       )}
     >
-      <div className='relative md:py-8 flex md:flex-col gap-4 items-center justify-start md:justify-center md:bg-gray-50 rounded-lg '>
+      <div className='relative md:py-8 flex md:flex-col gap-4 items-center justify-start md:justify-center md:bg-card rounded-lg '>
         <div className='hidden md:block absolute top-3 right-3'>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant='ghost'
                 size='icon'
-                className='h-6 w-6 p-0.5 text-gray-400 hover:text-gray-600'
+                className='h-6 w-6 p-0.5 text-muted-foreground hover:text-foreground'
               >
                 <MoreVertical className='size-4' />
               </Button>
@@ -133,26 +133,26 @@ export const UpcomingCallCard = ({
           </DropdownMenu>
         </div>
         {/* Headphones Icon */}
-        <div className='w-10 h-10 flex flex-shrink-0 items-center justify-center rounded-[10px] border border-[#E4E6E7] relative'>
-          <HuddleIcon color='#3B4145' size={20} />
-          <span className='bg-[#F2F2F3] rounded-full w-[18px] h-[18px] flex items-center justify-center absolute bottom-0 right-0 translate-x-1/4 translate-y-1/4'>
+        <div className='w-10 h-10 flex flex-shrink-0 items-center justify-center rounded-[10px] border border-border relative'>
+          <HuddleIcon color='hsl(var(--muted-foreground))' size={20} />
+          <span className='bg-card rounded-full w-[18px] h-[18px] flex items-center justify-center absolute bottom-0 right-0 translate-x-1/4 translate-y-1/4 border border-border'>
             <CalendarDays className='size-2.5' />
           </span>
         </div>
         <div className='flex items-start justify-center w-full gap-2 overflow-hidden'>
           <div className='block md:hidden flex-1 min-w-0 overflow-hidden'>
-            <p className='text-black font-medium text-sm truncate'>
+            <p className='text-foreground font-medium text-sm truncate'>
               {call.title ?? channel?.name ?? 'Scheduled Call'}
             </p>
             {call.startsAt && (
-              <p className={cn('text-[#868686] truncate', isMobile ? 'text-xs' : 'text-sm')}>
+              <p className={cn('text-muted-foreground truncate', isMobile ? 'text-xs' : 'text-sm')}>
                 {formatRelativeTimestamp(call.startsAt)}
               </p>
             )}
           </div>
 
           <div className='flex items-center gap-1.5 flex-shrink-0'>
-            <p className='text-[#788187] text-sm font-medium leading-5 hidden md:block'>
+            <p className='text-muted-foreground text-sm font-medium leading-5 hidden md:block'>
               {userIds.length} Participants
             </p>
             <div
@@ -178,7 +178,7 @@ export const UpcomingCallCard = ({
                     key={`${userId}-${index}`}
                     size={isMobile ? 24 : 22}
                     className={cn(
-                      'flex items-center justify-center ring-[2px] ring-white z-10',
+                      'flex items-center justify-center ring-[2px] ring-background z-10',
                       isMobile ? 'rounded-md' : 'rounded-full',
                     )}
                     data-slot='avatar-stack-item'
@@ -230,13 +230,15 @@ export const UpcomingCallCard = ({
           </div>
         </div>
       </div>
-      <div className='space-y-1 px-4 pt-4 pb-5 border-t border-gray-200 text-start hidden md:flex gap-2 items-center justify-between'>
+      <div className='space-y-1 px-4 pt-4 pb-5 border-t border-border text-start hidden md:flex gap-2 items-center justify-between'>
         <div className='overflow-hidden'>
-          <p className='text-black font-medium text-sm text-nowrap truncate'>
+          <p className='text-foreground font-medium text-sm text-nowrap truncate'>
             {call.title ?? channel?.name ?? 'Scheduled Call'}
           </p>
           {call.startsAt && (
-            <p className='text-[#868686] text-sm'>{formatRelativeTimestamp(call.startsAt)}</p>
+            <p className='text-muted-foreground text-sm'>
+              {formatRelativeTimestamp(call.startsAt)}
+            </p>
           )}
         </div>
         <div className='flex gap-2 items-center'>
@@ -313,7 +315,7 @@ export const CallCard = ({
     ? 'text-green-600 dark:text-green-500'
     : isMissedCall
       ? 'text-red-500 dark:text-red-400'
-      : 'text-[#868686] dark:text-gray-500';
+      : 'text-muted-foreground dark:text-muted-foreground';
 
   // Get status text and color
   const statusText = getStatusText(
@@ -363,20 +365,22 @@ export const CallCard = ({
   return (
     <div
       className={cn(
-        'flex items-center justify-between p-4 hover:bg-gray-50',
-        !isLastItem && 'border-b border-gray-200',
-        isActiveState && 'bg-green-50 hover:bg-green-100',
+        'flex items-center justify-between p-4 hover:bg-card',
+        !isLastItem && 'border-b border-border',
+        isActiveState && 'bg-primary/10 hover:bg-primary/20',
       )}
     >
       {/* Huddle Icon with Indication */}
       <div className='flex items-center justify-start gap-4 w-full'>
         {/* Headphones Icon */}
-        <div className='w-10 h-10 flex items-center justify-center rounded-[10px] border border-[#E4E6E7] relative bg-white'>
+        <div className='w-10 h-10 flex items-center justify-center rounded-[10px] border border-border relative bg-background'>
           <HuddleIcon
-            color={isActiveState ? '#229C10' : isMissedCall ? '#D75850' : '#3B4145'}
+            color={
+              isActiveState ? '#229C10' : isMissedCall ? '#D75850' : 'hsl(var(--muted-foreground))'
+            }
             size={20}
           />
-          <span className='bg-[#F2F2F3] rounded-full w-[18px] h-[18px] flex items-center justify-center absolute bottom-0 right-0 translate-x-1/4 translate-y-1/4'>
+          <span className='bg-card rounded-full w-[18px] h-[18px] flex items-center justify-center absolute bottom-0 right-0 translate-x-1/4 translate-y-1/4 border border-border'>
             {getCallIcon()}
           </span>
         </div>
@@ -384,8 +388,12 @@ export const CallCard = ({
           <div className='flex flex-col min-w-0 flex-1 overflow-hidden'>
             <span
               className={cn(
-                'text-black font-medium text-sm truncate max-w-full',
-                isActiveState ? 'text-green-600' : isMissedCall ? 'text-red-600' : 'text-gray-800',
+                'text-foreground font-medium text-sm truncate max-w-full',
+                isActiveState
+                  ? 'text-green-600'
+                  : isMissedCall
+                    ? 'text-red-600'
+                    : 'text-foreground',
               )}
             >
               {getCallTitle()}
@@ -427,7 +435,7 @@ export const CallCard = ({
                   <AvatarStackItem
                     key={`${userId}-${index}`}
                     size={24}
-                    className='rounded-md flex items-center justify-center ring-[2px] ring-white z-10'
+                    className='rounded-md flex items-center justify-center ring-[1px] ring-white z-10'
                     data-slot='avatar-stack-item'
                     data-index={index}
                   >
@@ -443,7 +451,7 @@ export const CallCard = ({
                   size='icon'
                   className='size-7'
                 >
-                  <ScrollText className='size-3.5 text-[#3B4145]' />
+                  <ScrollText className='size-3.5 text-muted-foreground' />
                 </Button>
                 <Button
                   onClick={handleDownloadTranscript}
@@ -451,7 +459,7 @@ export const CallCard = ({
                   size='icon'
                   className='size-7'
                 >
-                  <Download className='size-3.5 text-[#3B4145]' />
+                  <Download className='size-3.5 text-muted-foreground' />
                 </Button>
               </>
             )}
@@ -460,21 +468,24 @@ export const CallCard = ({
               variant='outline'
               className={cn(
                 isActiveState && !hasCurrentUserJoined
-                  ? 'ring ring-green-200 border-green-600 hover:bg-gray-50 rounded-lg h-8'
+                  ? 'ring ring-green-200 border-green-600 hover:bg-card rounded-lg h-8'
                   : isCallJoinable && !hasCurrentUserJoined
-                    ? 'border-gray-300 hover:bg-gray-50 rounded-lg h-8'
+                    ? 'border-border hover:bg-card rounded-lg h-8'
                     : (isActiveState || isCallJoinable) && hasCurrentUserJoined
                       ? 'hidden'
                       : 'size-7',
                 'gap-1.5 items-center',
               )}
             >
-              <HuddleIcon color={isActiveState ? '#229C10' : '#3B4145'} size={12} />
+              <HuddleIcon
+                color={isActiveState ? '#229C10' : 'hsl(var(--muted-foreground))'}
+                size={12}
+              />
               {(isActiveState || isCallJoinable) && !hasCurrentUserJoined && (
                 <span
                   className={cn(
                     'font-medium text-sm',
-                    isActiveState ? 'text-green-600 hover:text-green-600' : 'text-gray-700',
+                    isActiveState ? 'text-green-600 hover:text-green-600' : 'text-foreground',
                   )}
                 >
                   Join Call

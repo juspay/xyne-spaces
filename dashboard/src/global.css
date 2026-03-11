@@ -1875,3 +1875,12 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-theme="midnight"] tr:hover {
   background-color: #222530 !important;
 }
+
+/* Active call message highlight - midnight theme */
+[data-theme="midnight"] .active-call-highlight {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+}
+
+[data-theme="midnight"] .active-call-highlight * {
+  color: #e5e7eb !important;
+}
