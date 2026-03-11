@@ -170,6 +170,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
       onClick={() => setEmojiOpen(true)}
       className={`p-1.5 rounded hover:bg-accent ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       aria-label='Insert emoji'
+      data-testid='insert-emoji-btn'
     >
       <Smile className='w-5 h-5 text-muted-foreground' />
     </button>
