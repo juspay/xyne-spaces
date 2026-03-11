@@ -872,7 +872,8 @@ export class WorkflowRepository {
 
       // Extract gitInfo from the processed steps
       // const gitInfo = this.extractGitInfoFromSteps(latestExecution.workflowSteps);
-      const gitInfoFromOutput = latestExecution.output ? this.extractGitInfoFromSteps([JSON.parse(latestExecution.output)]) : null;
+      const latestExecutionWithState = allExecutions.get(latestExecution.id);
+      const gitInfoFromOutput = latestExecutionWithState?.output ? this.extractGitInfoFromSteps([JSON.parse(latestExecutionWithState.output)]) : null;
 
       // Parse metadata once for reuse
       let parsedMetadata = null;
@@ -904,7 +905,7 @@ export class WorkflowRepository {
         updatedAt: latestExecution.updatedAt,
         createdBy: latestExecution.createdBy,
         steps: latestSteps,
-        output: latestExecution.output ? JSON.parse(latestExecution.output) : null,
+        output: latestExecutionWithState?.output ? JSON.parse(latestExecutionWithState.output) : null,
         // Metadata for ALL executions
         executionMetadata: executionMetadata,
         // Git info for diff view (only available if baseCommitHash exists)

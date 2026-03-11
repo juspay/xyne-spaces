@@ -18,6 +18,11 @@ import {
   type TicketData,
 } from './utils';
 
+/** Allowed model names for workflow trigger modal */
+const ALLOWED_MODEL_NAMES = import.meta.env.DEV
+  ? ['glm-private', 'private-large', 'glm-latest', 'kimi-latest']
+  : ['glm-private', 'private-large'];
+
 interface WorkflowTriggerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -208,6 +213,12 @@ export default function WorkflowTriggerModal({
           ticketDataForUtils,
           wf,
         );
+
+        // Set default modelName if the workflow has this field
+        const modelNameField = wf.schema?.find(f => f.name === 'modelName');
+        if (modelNameField) {
+          setValue('customFields.modelName' as Path<TriggerWorkflowFormData>, 'glm-private');
+        }
       }
     },
     [workflowTypes, ticketData, form, setValue],
@@ -220,6 +231,8 @@ export default function WorkflowTriggerModal({
 
       // Restore custom fields from saved values
       for (const [fieldName, fieldValue] of Object.entries(savedValues.customFields)) {
+        if (fieldName === 'modelName') continue;
+
         const fieldExists = selectedWorkflow.schema.some(f => f.name === fieldName);
         if (fieldExists && fieldValue !== undefined && fieldValue !== null && fieldValue !== '') {
           setValue(`customFields.${fieldName}` as Path<TriggerWorkflowFormData>, fieldValue);
@@ -235,6 +248,15 @@ export default function WorkflowTriggerModal({
       setPersistedFields(persistedFieldNames);
     }
   }, [savedValues, selectedWorkflow, setValue]);
+
+  useEffect(() => {
+    if (selectedWorkflow?.schema) {
+      const modelNameField = selectedWorkflow.schema.find(f => f.name === 'modelName');
+      if (modelNameField) {
+        setValue('customFields.modelName' as Path<TriggerWorkflowFormData>, 'glm-private');
+      }
+    }
+  }, [selectedWorkflow, setValue]);
 
   // Handle reset to defaults
   const handleResetToDefaults = useCallback(() => {
@@ -397,7 +419,10 @@ export default function WorkflowTriggerModal({
                 placeholder={`Select ${field.name}`}
                 items={[
                   {
-                    items: field.enumValues.map(enumValue => ({
+                    items: (field.name === 'modelName'
+                      ? field.enumValues.filter(v => ALLOWED_MODEL_NAMES.includes(v))
+                      : field.enumValues
+                    ).map(enumValue => ({
                       label: enumValue,
                       value: enumValue,
                     })),

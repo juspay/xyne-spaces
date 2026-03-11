@@ -28,6 +28,10 @@ export interface AgentMessage {
   subMessages: SubMessage[];
   editSteps: WorkflowStep[];
   createdAt: string | undefined;
+  iteration?: {
+    baseName: string;
+    index: number;
+  };
 }
 
 export interface GraphNodeInfo {
@@ -60,7 +64,14 @@ export interface AgentInfo {
 }
 
 export const getAgentInfo = (stepName: string): AgentInfo => {
-  const lower = stepName.toLowerCase();
+  let nameToCheck = stepName;
+
+  const match = stepName.match(/iter[._\s]?\d+[._\s]+(.*)/i);
+  if (match && match[1]) {
+    nameToCheck = match[1];
+  }
+
+  const lower = nameToCheck.toLowerCase();
 
   if (lower.includes('review') || lower.includes('audit')) {
     return {
@@ -74,7 +85,7 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
     };
   }
 
-  if (lower.includes('plan')) {
+  if (lower.includes('plan') || lower.includes('requirement') || lower.includes('analy')) {
     return {
       name: 'Planner',
       avatarBg: 'bg-white border-2 border-violet-300',
@@ -83,6 +94,18 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
       labelColor: 'text-gray-700',
       bubbleBg: 'bg-gray-50/80',
       icon: 'ghost',
+    };
+  }
+
+  if (lower.includes('build') || lower.includes('compile')) {
+    return {
+      name: 'Builder',
+      avatarBg: 'bg-white border-2 border-indigo-300',
+      avatarText: 'text-indigo-500',
+      initials: 'BD',
+      labelColor: 'text-gray-700',
+      bubbleBg: 'bg-gray-50/80',
+      icon: 'code',
     };
   }
 
@@ -253,12 +276,35 @@ export const parseLLMResponse = (data: SafeRecord | string | null | undefined): 
 // ─── Formatting Helpers ───────────────────────────────────────────────────────
 
 /** Format a step name for display (remove underscores, title-case) */
-export const formatStepName = (name: string): string =>
-  name
+export const formatStepName = (name: string): string => {
+  let displayName = name;
+  const match = name.match(/iter[._\s]?\d+[._\s]+(.*)/i);
+  if (match && match[1]) {
+    displayName = match[1];
+  }
+
+  return displayName
     .replace(/_/g, ' ')
     .split(' ')
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
+};
+
+/**
+ * we need to detect if a step name belongs to a loop
+ */
+export const parseIteration = (
+  stepName: string,
+): { baseName: string; index: number } | undefined => {
+  const match = stepName.match(/(.+?)[._\s]iter[._\s]?(\d+)/i);
+  if (match) {
+    return {
+      baseName: match[1]!.trim(),
+      index: parseInt(match[2]!, 10),
+    };
+  }
+  return undefined;
+};
 
 /** Format timestamp for display */
 export const formatTime = (iso?: string): string => {
@@ -287,9 +333,9 @@ export const extractEditSteps = (
     const stepName = step.stepName?.toLowerCase() || '';
 
     if (
-      stepName.startsWith('tool_edit') ||
-      stepName.startsWith('tool_multiedit') ||
-      stepName.startsWith('tool_write')
+      stepName.includes('tool_edit') ||
+      stepName.includes('tool_multiedit') ||
+      stepName.includes('tool_write')
     ) {
       editSteps.push(step);
     }
@@ -330,11 +376,17 @@ export const extractAllSubMessages = (
 
   const processSubStep = (subStep: WorkflowStep): void => {
     const name = (subStep.stepName ?? '').toLowerCase();
+    let nameToCheck = name;
+    const match = name.match(/iter[._\s]?\d+[._\s]+(.*)/i);
+    if (match && match[1]) {
+      nameToCheck = match[1];
+    }
+
     const isLLMStep =
-      name.startsWith('llm_call') ||
-      name === 'assistant_message' ||
-      name.includes('llm') ||
-      name.includes('chat_completion');
+      nameToCheck.startsWith('llm_call') ||
+      nameToCheck === 'assistant_message' ||
+      nameToCheck.includes('llm') ||
+      nameToCheck.includes('chat_completion');
 
     if (isLLMStep) {
       const content = parseLLMResponse(subStep.data as SafeRecord);

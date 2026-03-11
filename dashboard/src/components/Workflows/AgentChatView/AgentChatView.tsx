@@ -11,10 +11,12 @@ import {
   MessageSquare,
   FileEdit,
   Bot,
+  Repeat,
 } from 'lucide-react';
 import { CombinedWorkflowData } from '../../../services/Workflow/workflowGraphService.types';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AgentAvatar } from './AgentAvatar';
+import { ReviewerFeedback, parseReviewerFeedback } from './ReviewerFeedback';
 import {
   GraphNodeInfo,
   AgentInfo,
@@ -27,6 +29,8 @@ import {
   extractEditSteps,
   extractAllSubMessages,
   getNodeCreatedAt,
+  parseIteration,
+  parseLLMResponse,
 } from './AgentChatView.utils';
 import { ResponseModal } from './ResponseModal';
 import LiveEditsPanel from '../LiveEditsPanel';
@@ -218,7 +222,14 @@ const SubMessageRow: React.FC<{
           </span>
         )}
       </div>
-      <MarkdownContent content={subMsg.content} small />
+      {((): React.ReactNode => {
+        const parsed = parseReviewerFeedback(subMsg.content);
+        return parsed ? (
+          <ReviewerFeedback issues={parsed} />
+        ) : (
+          <MarkdownContent content={subMsg.content} small />
+        );
+      })()}
     </div>
   </div>
 );
@@ -241,6 +252,19 @@ export interface AgentChatViewProps {
   onClose?: () => void;
   hideTabs?: boolean;
 }
+
+const LoopRunningLoader: React.FC = () => (
+  <div className='flex items-center gap-1.5 ml-11 py-2'>
+    <div className='flex gap-0.5'>
+      <div className='w-1 h-1 rounded-full bg-slate-400 animate-[bounce_1s_infinite_0ms]' />
+      <div className='w-1 h-1 rounded-full bg-slate-300 animate-[bounce_1s_infinite_150ms]' />
+      <div className='w-1 h-1 rounded-full bg-slate-400 animate-[bounce_1s_infinite_300ms]' />
+    </div>
+    <span className='text-[10px] font-medium text-slate-500 uppercase tracking-wider'>
+      Cycling...
+    </span>
+  </div>
+);
 
 export const AgentChatView: React.FC<AgentChatViewProps> = ({
   combinedStepsData,
@@ -287,22 +311,43 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
               for (const workflow of combinedStepsData.workflows) {
                 for (const step of workflow.steps) {
                   if (!stepIdSet.has(step.id)) continue;
-                  const record: SafeRecord =
-                    typeof step.data === 'string'
-                      ? (JSON.parse(step.data) as SafeRecord)
-                      : (step.data as SafeRecord);
-                  const turn = record['turn'] as SafeRecord | undefined;
-                  const turnResult = turn?.['result'] as SafeRecord | undefined;
-                  const turnContent = turnResult?.['content'];
-                  if (typeof turnContent === 'string' && turnContent.trim())
-                    return turnContent.trim();
-                  const response = record['response'];
-                  if (typeof response === 'string' && response.trim()) return response.trim();
+                  try {
+                    const record: SafeRecord =
+                      typeof step.data === 'string'
+                        ? (JSON.parse(step.data) as SafeRecord)
+                        : (step.data as SafeRecord);
+
+                    const content = parseLLMResponse(record);
+
+                    if (step.stepExecutorType === 'deterministic') {
+                      const success = record['success'];
+                      const error = record['error'];
+                      const output = record['output'];
+
+                      const displayContent =
+                        typeof error === 'string' && error
+                          ? error
+                          : typeof output === 'string' && output
+                            ? output
+                            : content;
+
+                      if (displayContent) {
+                        const isError = success === false || !!error;
+                        const prefix = isError ? '**Failed**\\n' : '**Success**\\n';
+                        return `${prefix}\`\`\`bash\\n${displayContent.trim()}\\n\`\`\``;
+                      }
+                    } else if (content) {
+                      return content;
+                    }
+                  } catch {
+                    // Ignore parse errors
+                  }
                 }
               }
               return '';
             })();
       const createdAt = getNodeCreatedAt(node.stepIds, combinedStepsData);
+      const iteration = parseIteration(node.stepName);
 
       return {
         nodeIndex: node.index,
@@ -313,17 +358,10 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
         subMessages,
         editSteps,
         createdAt: createdAt ?? undefined,
+        ...(iteration ? { iteration } : {}),
       };
     });
   }, [combinedStepsData, graphNodes]);
-
-  useEffect(() => {
-    const currentCount = agentMessages.filter(m => m.summary || m.status === 'running').length;
-    if (currentCount > prevMessageCountRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-    prevMessageCountRef.current = currentCount;
-  }, [agentMessages]);
 
   const visibleMessages = agentMessages.filter(
     m =>
@@ -333,6 +371,36 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
       m.status === 'running' ||
       m.status === 'failed',
   );
+
+  const groupedContent = useMemo(() => {
+    const result: (AgentMessage | { type: 'loop'; baseName: string; messages: AgentMessage[] })[] =
+      [];
+    let currentLoop: { type: 'loop'; baseName: string; messages: AgentMessage[] } | null = null;
+
+    visibleMessages.forEach(msg => {
+      if (msg.iteration) {
+        if (currentLoop && currentLoop.baseName === msg.iteration.baseName) {
+          currentLoop.messages.push(msg);
+        } else {
+          currentLoop = { type: 'loop', baseName: msg.iteration.baseName, messages: [msg] };
+          result.push(currentLoop);
+        }
+      } else {
+        currentLoop = null;
+        result.push(msg);
+      }
+    });
+
+    return result;
+  }, [visibleMessages]);
+
+  useEffect(() => {
+    const currentCount = agentMessages.filter(m => m.summary || m.status === 'running').length;
+    if (currentCount > prevMessageCountRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    prevMessageCountRef.current = currentCount;
+  }, [agentMessages]);
 
   const allEditSteps = useMemo(() => {
     return visibleMessages.flatMap(m => m.editSteps);
@@ -420,16 +488,64 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
         ) : visibleMessages.length === 0 ? (
           <EmptyState />
         ) : (
-          <>
-            {visibleMessages.map((msg, i) => (
-              <AgentMessageBubble
-                key={`${msg.stepName}-${msg.nodeIndex}`}
-                message={msg}
-                isLatest={i === visibleMessages.length - 1}
-                onViewMore={openModal}
-              />
-            ))}
-          </>
+          <div className='flex flex-col gap-4'>
+            {groupedContent.map((item, i) => {
+              if ('type' in item && item.type === 'loop') {
+                return (
+                  <div key={`loop-${item.baseName}-${i}`} className='relative'>
+                    {/* Loop Header */}
+                    <div className='flex items-center gap-2 mb-3 ml-2'>
+                      <div className='flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100/80 border border-slate-200/60'>
+                        <Repeat size={11} className='text-slate-500' strokeWidth={2.5} />
+                        <span className='text-[10px] font-semibold uppercase tracking-wide text-slate-600'>
+                          {formatStepName(item.baseName)}
+                        </span>
+                        <span className='text-[9px] font-mono text-slate-400 bg-slate-200/50 px-1 rounded'>
+                          ×{item.messages.length}
+                        </span>
+                      </div>
+                      <div className='h-px flex-1 bg-gradient-to-r from-slate-200/60 via-slate-100/40 to-transparent' />
+                    </div>
+
+                    {/* Vertical Timeline */}
+                    <div className='absolute left-[15px] top-12 bottom-6 w-[2px] bg-slate-200 z-0' />
+
+                    {/* Loop Messages */}
+                    <div className='space-y-3 relative z-10'>
+                      {item.messages.map((msg, _) => (
+                        <div
+                          key={`${msg.stepName}-${msg.nodeIndex}`}
+                          className='relative group flex flex-col'
+                        >
+                          <AgentMessageBubble
+                            message={msg}
+                            isLatest={msg === visibleMessages[visibleMessages.length - 1]}
+                            onViewMore={openModal}
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Loop Running Loader */}
+                    {item.messages[item.messages.length - 1]?.status === 'running' && (
+                      <div className='relative z-10'>
+                        <LoopRunningLoader />
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              const msg = item as AgentMessage;
+              return (
+                <AgentMessageBubble
+                  key={`${msg.stepName}-${msg.nodeIndex}`}
+                  message={msg}
+                  isLatest={msg === visibleMessages[visibleMessages.length - 1]}
+                  onViewMore={openModal}
+                />
+              );
+            })}
+          </div>
         )}
         <div ref={bottomRef} className='h-12 flex-shrink-0' />
       </div>
@@ -513,11 +629,15 @@ const AgentMessageBubble: React.FC<{
             className={`rounded-xl md:rounded-2xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 ${agentInfo.bubbleBg} transition-shadow ${isLatest && isRunning ? 'shadow-sm ring-1 ring-sky-100' : ''}`}
           >
             {summary ? (
-              <TruncatableMarkdownContent
-                content={summary}
-                onExpandChange={setIsSummaryFullyVisible}
-                onViewMore={handleViewMore}
-              />
+              parseReviewerFeedback(summary) ? (
+                <ReviewerFeedback issues={parseReviewerFeedback(summary)!} />
+              ) : (
+                <TruncatableMarkdownContent
+                  content={summary}
+                  onExpandChange={setIsSummaryFullyVisible}
+                  onViewMore={handleViewMore}
+                />
+              )
             ) : isRunning ? (
               <div className='flex items-center gap-2 text-sm text-muted-foreground py-0.5'>
                 <Loader2 size={14} className='animate-spin text-sky-400' />
