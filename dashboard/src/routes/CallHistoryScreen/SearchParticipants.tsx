@@ -218,30 +218,30 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
         }}
         role='button'
         tabIndex={0}
-        className='relative flex items-center h-10 border border-gray-200 rounded-lg focus-within:border-gray-800 duration-300 ease-in-out'
+        className='relative flex items-center h-10 border border-border rounded-lg focus-within:border-foreground duration-300 ease-in-out bg-background'
         data-track-category='calls'
         data-track-name='search-participants-input'
       >
         {/* Render selected options as chips */}
-        <span className='px-2 bg-white'>
-          <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 size-4 text-gray-300 z-50 pointer-events-none bg-white ' />
+        <span className='px-2 bg-background'>
+          <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 size-4 text-muted-foreground z-50 pointer-events-none bg-background ' />
         </span>
-        <span className='bg-gradient-to-r from-white via-white to-transparent absolute left-3 top-0 h-full w-8 pointer-events-none z-10 rounded-lg' />
+        <span className='bg-gradient-to-r from-background via-background to-transparent absolute left-3 top-0 h-full w-8 pointer-events-none z-10 rounded-lg' />
         <div className='flex overflow-x-scroll no-scrollbar items-center gap-1 pl-5 flex-1'>
           {selectedOptions.map(option => (
             <div
               key={option.value}
-              className='flex items-center justify-center gap-1 p-1 bg-gray-100 rounded-md text-sm'
+              className='flex items-center justify-center gap-1 p-1 bg-card rounded-md text-sm border border-border'
             >
               {option.icon && <span>{option.icon}</span>}
-              <span className='truncate max-w-80'>{option.label}</span>
+              <span className='truncate max-w-80 text-foreground'>{option.label}</span>
               <button
                 type='button'
                 onClick={e => {
                   e.stopPropagation();
                   toggleValue(option.value);
                 }}
-                className='ml-1 hover:bg-gray-200 rounded p-0.5'
+                className='ml-1 hover:bg-muted rounded p-0.5 text-foreground'
                 data-track-category='calls'
                 data-track-name='remove-participant'
               >
@@ -262,7 +262,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               disabled={hasChannelSelected}
               onKeyDown={handleKeyDown}
               onChange={e => setSearchQuery(e.target.value)}
-              className='pl-0.5 w-full border-0 shadow-none placeholder:text-[#C9CCCF] focus-visible:ring-0'
+              className='pl-0.5 w-full border-0 shadow-none placeholder:text-muted-foreground text-foreground focus-visible:ring-0 bg-background'
               aria-expanded={isOpen}
               aria-controls='participant-listbox'
               aria-activedescendant={
@@ -276,7 +276,9 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
         </div>
       </div>
       {hasChannelSelected && (
-        <p className='text-xs text-gray-500 mt-1 px-1'>Only one channel selection is allowed</p>
+        <p className='text-xs text-muted-foreground mt-1 px-1'>
+          Only one channel selection is allowed
+        </p>
       )}
     </div>
   );
@@ -304,7 +306,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               e.stopPropagation();
             }}
             className={cn(
-              'z-[100] w-[var(--radix-popover-trigger-width)] max-h-48 overflow-y-auto no-scrollbar rounded-xl border border-gray-200 bg-white shadow-lg',
+              'z-[100] w-[var(--radix-popover-trigger-width)] max-h-48 overflow-y-auto no-scrollbar rounded-xl border border-border bg-background shadow-lg',
             )}
           >
             {filteredOptions.length > 0 && (
@@ -327,8 +329,8 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                       <button
                         type='button'
                         className={cn(
-                          'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-gray-100',
-                          isHighlighted && 'bg-gray-100',
+                          'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm text-foreground hover:bg-muted',
+                          isHighlighted && 'bg-muted',
                         )}
                         onClick={() => toggleValue(option.value)}
                         onMouseEnter={() => setIndex(index)}
@@ -341,9 +343,11 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                           <>
                             {option.icon && <span>{option.icon}</span>}
                             <div className='flex-1 min-w-0 text-left'>
-                              <div className='truncate text-sm'>{option.label}</div>
+                              <div className='truncate text-sm text-foreground'>{option.label}</div>
                               {option.subtitle && (
-                                <div className='truncate text-xs'>{option.subtitle}</div>
+                                <div className='truncate text-xs text-muted-foreground'>
+                                  {option.subtitle}
+                                </div>
                               )}
                             </div>
                           </>
@@ -356,7 +360,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               </ul>
             )}
             {filteredOptions.length === 0 && (
-              <div className='px-3 py-2 text-sm'>No results found</div>
+              <div className='px-3 py-2 text-sm text-foreground'>No results found</div>
             )}
           </Popover.Content>
         </Popover.Portal>

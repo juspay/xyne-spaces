@@ -97,7 +97,7 @@ const MonthView: React.FC<{
   return (
     <div className='mb-6'>
       {/* Month/Year Header */}
-      <div className='text-sm font-semibold text-gray-700 leading-6 mb-2 px-3'>
+      <div className='text-sm font-semibold text-foreground leading-6 mb-2 px-3'>
         {monthNames[month]} {year}
       </div>
 
@@ -125,10 +125,10 @@ const MonthView: React.FC<{
               disabled={isDisabled}
               className={`
                 aspect-square flex items-center justify-center text-sm rounded-md transition-colors
-                ${isSelected ? 'bg-black text-white font-semibold' : ''}
+                ${isSelected ? 'bg-primary text-white font-semibold' : ''}
                 ${!isSelected && isToday ? 'border border-sidebar-badge-accent text-sidebar-badge-accent font-semibold' : ''}
-                ${!isSelected && !isToday && !isDisabled ? 'hover:bg-gray-100 text-gray-900' : ''}
-                ${isDisabled ? 'text-gray-300 cursor-not-allowed' : 'cursor-pointer'}
+                ${!isSelected && !isToday && !isDisabled ? 'hover:bg-muted text-foreground' : ''}
+                ${isDisabled ? 'text-muted-foreground cursor-not-allowed' : 'cursor-pointer'}
               `}
               data-track-category='Tickets'
               data-track-name='SelectDate'
@@ -352,22 +352,22 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               setIsOpen(!isOpen);
             }
           }}
-          className={`relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-gray-50 w-fit max-w-full overflow-hidden cursor-pointer hover:bg-gray-100 ${inputClassName}`}
+          className={`relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-card w-fit max-w-full overflow-hidden cursor-pointer hover:bg-muted ${inputClassName}`}
           data-track-category='Tickets'
           data-track-name='ToggleDatePicker'
         >
-          <Calendar className='flex-shrink-0 w-3.5 h-3.5 text-gray-500' />
-          <span className='text-[13px] text-gray-700 whitespace-nowrap'>
+          <Calendar className='flex-shrink-0 w-3.5 h-3.5 text-muted-foreground' />
+          <span className='text-[13px] text-foreground whitespace-nowrap'>
             {selectedDate ? formatDate(selectedDate) : placeholder}
           </span>
           {showClearButton && selectedDate && (
             <button
               onClick={handleClear}
-              className='ml-1 flex-shrink-0 hover:bg-gray-200 rounded p-0.5 transition-colors'
+              className='ml-1 flex-shrink-0 hover:bg-muted rounded p-0.5 transition-colors'
               data-track-category='Tickets'
               data-track-name='ClearSelectedDate'
             >
-              <X className='w-3 h-3 text-gray-500' />
+              <X className='w-3 h-3 text-muted-foreground' />
             </button>
           )}
         </div>
@@ -384,7 +384,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           }}
           data-testid='ticket-due-date-calendar'
           className={cn(
-            'w-[280px] rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden z-50',
+            'w-[280px] rounded-lg border border-border bg-background shadow-lg overflow-hidden z-50',
             // Animation classes
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
@@ -394,10 +394,13 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           sideOffset={4}
           align='start'
         >
-          <div className='sticky top-0 z-10 bg-white pt-2.5 border-b border-gray-100 shadow-sm'>
+          <div className='sticky top-0 z-10 bg-background pt-2.5 border-b border-border shadow-sm'>
             <div className='grid grid-cols-7 gap-1 px-3'>
               {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
-                <div key={day} className='text-center text-xs font-medium text-gray-500 py-1'>
+                <div
+                  key={day}
+                  className='text-center text-xs font-medium text-muted-foreground py-1'
+                >
                   {day}
                 </div>
               ))}
@@ -425,11 +428,11 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           </div>
 
           {/* Footer with action buttons */}
-          <div className='border-t border-gray-200 flex items-center justify-end gap-3 p-3 h-14 '>
+          <div className='border-t border-border flex items-center justify-end gap-3 p-3 h-14 '>
             <Button
               variant='outline'
               onClick={handleCancel}
-              className='h-8 px-3 text-sm text-gray-600 font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors'
+              className='h-8 px-3 text-sm text-muted-foreground font-semibold rounded-lg border border-border hover:bg-muted transition-colors'
               data-track-category='Tickets'
               data-track-name='CancelDatePicker'
             >

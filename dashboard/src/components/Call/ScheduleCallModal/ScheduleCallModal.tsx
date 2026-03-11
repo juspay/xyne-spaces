@@ -311,9 +311,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({ isOpen, on
     >
       <form className='flex flex-col w-full' onSubmit={e => void handleSubmit(onSubmit)(e)}>
         {/* Header */}
-        <div className='flex items-start justify-between px-5 py-3.5 border-b border-gray-200 '>
+        <div className='flex items-start justify-between px-5 py-3.5 border-b border-border '>
           <span>
-            <h2 className='text-[15px] font-semibold text-gray-900 leading-5'>Schedule a Call</h2>
+            <h2 className='text-[15px] font-semibold text-foreground leading-5'>Schedule a Call</h2>
             <p className='text-sidebar-secondary-foreground text-[13px] font-medium leading-5'>
               Schedule call with people, groups or channel
             </p>
@@ -344,7 +344,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({ isOpen, on
                   className={cn(
                     '!text-[22px] truncate',
                     'px-0 border-none focus-visible:ring-0 rounded-none',
-                    'font-semibold text-gray-700 placeholder:text-xl placeholder:text-slate-300',
+                    'font-semibold text-foreground placeholder:text-xl placeholder:text-muted-foreground',
                     errors.title && 'border-red-500',
                   )}
                 />
@@ -464,7 +464,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({ isOpen, on
 
           {/* Participants Input */}
           <div className='space-y-2 -mb-3'>
-            <p className='text-[#788187] text-[13px] leading-5'>Participants</p>
+            <p className='text-muted-foreground text-[13px] leading-5'>Participants</p>
             <Controller
               name='participants'
               control={control}
@@ -507,7 +507,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({ isOpen, on
                 !!errors.startsAt ||
                 !!errors.endsAt
               }
-              className='rounded-lg text-[13px] px-4 h-9 text-white bg-sidebar-badge-accent hover:bg-sidebar-badge-accent hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
+              className='rounded-lg text-[13px] px-4 h-9 text-white bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
             >
               {isSubmitting ? 'Scheduling...' : 'Schedule Call'}
             </Button>

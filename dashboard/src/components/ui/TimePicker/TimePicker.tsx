@@ -100,21 +100,21 @@ export const TimePicker: React.FC<TimePickerProps> = ({
     >
       <Popover.Trigger asChild>
         <div className='relative w-full rounded-lg h-9'>
-          <Clock className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none' />
+          <Clock className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none' />
           <Input
             type='text'
             value={displayTime}
             placeholder={placeholder}
             disabled={disabled}
             readOnly
-            className='pl-10 cursor-pointer hover:bg-gray-100'
+            className='pl-10 cursor-pointer hover:bg-muted text-foreground'
           />
         </div>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content
           className={cn(
-            'w-fit rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden z-50',
+            'w-fit rounded-lg border border-border bg-background shadow-lg overflow-hidden z-50',
             // Animation classes
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
@@ -141,7 +141,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                 pattern='[0-9]*'
                 placeholder='12'
                 maxLength={2}
-                className='w-16 text-center select-all'
+                className='w-16 text-center select-all text-foreground'
               />
             </div>
 
@@ -161,14 +161,14 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                 pattern='[0-9]*'
                 placeholder='00'
                 maxLength={2}
-                className='w-16 text-center select-all'
+                className='w-16 text-center select-all text-foreground'
               />
             </div>
 
             <div>
               <label
                 htmlFor='timepicker-period-label'
-                className='text-xs font-medium text-gray-600 mb-2 block'
+                className='text-xs font-medium text-muted-foreground mb-2 block'
               >
                 Period
               </label>
@@ -177,15 +177,15 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                 value={period}
                 onValueChange={handlePeriodChange}
                 aria-labelledby='timepicker-period-label'
-                className='inline-flex w-20 rounded-md border border-gray-300 bg-white overflow-hidden'
+                className='inline-flex w-20 rounded-md border border-border bg-background overflow-hidden'
               >
                 <ToggleGroup.Item
                   value='AM'
                   className={cn(
                     'flex-1 text-xs font-mono py-2 rounded-l-sm font-semibold transition-colors',
-                    'hover:bg-gray-50',
-                    'data-[state=on]:bg-gray-800 data-[state=on]:text-white data-[state=on]:hover:bg-gray-800',
-                    'data-[state=off]:text-gray-700',
+                    'hover:bg-muted',
+                    'data-[state=on]:bg-primary data-[state=on]:text-white data-[state=on]:hover:bg-primary',
+                    'data-[state=off]:text-foreground',
                   )}
                 >
                   AM
@@ -194,10 +194,10 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                 <ToggleGroup.Item
                   value='PM'
                   className={cn(
-                    'flex-1 text-xs font-mono py-2 font-semibold transition-colors border-l border-gray-300',
-                    'hover:bg-gray-50',
-                    'data-[state=on]:bg-gray-700 data-[state=on]:text-white data-[state=on]:hover:bg-gray-700 data-[state=on]:border-gray-700',
-                    'data-[state=off]:text-gray-700',
+                    'flex-1 text-xs font-mono py-2 font-semibold transition-colors border-l border-border',
+                    'hover:bg-muted',
+                    'data-[state=on]:bg-primary data-[state=on]:text-white data-[state=on]:hover:bg-primary data-[state=on]:border-primary',
+                    'data-[state=off]:text-foreground',
                   )}
                 >
                   PM
