@@ -1,0 +1,11 @@
+---
+title: "Automated Stage ETA Reminders"
+description: "We’ve added automatic reminders for stage-level ETA breaches to help teams stay on top of ticket progress."
+date: "2026-02-19"
+---
+We’ve added automatic reminders for stage-level ETA breaches to help teams stay on top of ticket progress. A new cron job runs every 30 minutes and sends reminders for tickets whose current stage ETA was breached in the last 30 minutes.
+
+
+
+Stage ETA reminders are sent only when the ticket’s overall ETA is not breached and the ticket is in a non-terminal status. Once the overall ETA is breached, the system switches from stage-level reminders to overall ETA reminders to reflect the higher-priority escalation.
+

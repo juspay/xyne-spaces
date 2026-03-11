@@ -1,0 +1,17 @@
+---
+title: "AI Call Titles for Thread Calls"
+description: "Thread (conversation-origin) calls now get AI-generated titles created from the conversation message history."
+date: "2026-03-02"
+---
+
+Thread (conversation-origin) calls now get AI-generated titles created from the conversation message history. The title is generated as soon as the first participant joins and is persisted immediately, ensuring the call is labeled consistently across the experience. You’ll see this title in the active call UI as a bottom-left overlay that’s clickable to open the thread sidebar, and it also appears in the incoming call notification modal, where clicking it takes you straight to the associated thread.
+
+
+
+We’ve also improved title reliability and call behavior. The useFetchCallTitle hook now prioritizes the AI-generated title over the conversation preview fallback, and ringing suppression has been fixed so the DEFAULT-scope channel filter only affects channel-origin calls—meaning thread calls will always ring as expected. After the call ends, title generation has been enhanced further by combining both the conversation context and the call transcript to produce richer, more accurate titles.
+
+<iframe src="https://drive.google.com/file/d/1rQswIAgGg5VvverKklaojBVeOHzyJvUr/preview"  width="100%" height="600" />
+
+
+
+

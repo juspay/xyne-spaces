@@ -1,0 +1,7 @@
+---
+title: "Google Meet Auto-Summaries from Emails (SAM Integration)"
+description: "XYNE now automatically detects Google Meet links in incoming emails and generates meeting transcripts, summaries, and action items inside the related conversation threads."
+date: "2026-02-12"
+---
+XYNE now automatically detects Google Meet links in incoming emails and generates meeting transcripts, summaries, and action items inside the related conversation threads. Meet links are extracted during email processing and sent to SAM for transcription/analysis, while email ingestion continues in parallel (non-blocking). Once processing is complete, a secure callback endpoint posts a formatted meeting recap back to the thread, backed by API key authentication, Zod validation, and robust error handling to ensure reliability and safety.
+

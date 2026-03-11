@@ -1,0 +1,13 @@
+---
+title: "Draft Messages with Attachments"
+description: "You can now create and manage draft messages, including file attachments, before sending a message or creating a ticket."
+date: "2026-02-19"
+---
+
+You can now create and manage draft messages, including file attachments, before sending a message or creating a ticket. This lets you upload files in advance, preview them (with thumbnail support), and continue composing without losing progress when switching contexts or dealing with intermittent connectivity.
+
+
+
+Under the hood, drafts are stored in a new DraftMessage model, and the attachment system has been extended with a DRAFT entity type and improved schema support (including nullable conversationId) to handle pre-send uploads. Draft attachments also sync in real time via Zero, and when you create a ticket, any draft attachments are seamlessly transferred to the final ticket—so you don’t have to re-upload anything.
+
+

@@ -1,0 +1,22 @@
+---
+title: "Schedule Calls with Reminders and Auto-End"
+description: "Xyne Spaces now supports scheduled calls, letting you plan meetings in advance with a complete end-to-end workflow across UI, API, notifications, and call lifecycle."
+date: "2026-03-09"
+---
+
+Xyne Spaces now supports scheduled calls, letting you plan meetings in advance with a complete end-to-end workflow across UI, API, notifications, and call lifecycle. Using New Call → Schedule call for later, you can set a title, start/end time, and participants. Once scheduled, Xyne creates a call in SCHEDULED state, invites participants, and immediately posts a Scheduled Call notification and an Activity feed entry so everyone is informed and the invite is visible in context.
+
+
+
+Scheduled calls come with built-in reliability through background automation. A Redis-backed job queue manages time-based events: 10 minutes before the start, Xyne sends a reminder to invitees who haven’t accepted yet, and at the scheduled end time, if the call never actually started (no one joined), Xyne automatically marks it as ENDED to avoid stale upcoming calls.
+
+
+
+Joining a scheduled call activates it seamlessly. When a participant clicks Join, the backend creates a fresh LiveKit room on demand, and the first join triggers a webhook that flips the call status from SCHEDULED → ACTIVE, creates the conversation context, and posts a system message like “User started a call”. The call’s end behavior is also smarter: when the last person leaves, the call returns to SCHEDULED if it’s still before the planned end time (so others can rejoin), but becomes ENDED permanently once the scheduled end time has passed.
+
+
+
+To make scheduled calls easy to manage, the Calls screen now groups calls into Upcoming, Recent, and Missed. Upcoming calls can be cancelled directly from the UI, which updates the status to CANCELLED and stops any pending reminder jobs from firing—keeping notifications clean and the calls list accurate.
+
+
+
