@@ -1226,13 +1226,15 @@ model OrgMember {
 
 // Project Models
 model Project {
-  id          String    @id @default(cuid())
-  name        String    @unique
-  description String?
-  createdBy   String    // User ID (no FK constraint)
-  updatedBy   String?   // User ID (no FK constraint)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime? @updatedAt
+  id              String    @id @default(cuid())
+  name            String    @unique
+  code            String    @unique  // Project shortcode for ticket IDs (e.g., EUL, INF)
+  ticketSequence  Int       @default(0)  // Atomic counter for project-scoped ticket numbering
+  description     String?
+  createdBy       String    // User ID (no FK constraint)
+  updatedBy       String?   // User ID (no FK constraint)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime? @updatedAt
 
   // Relations
   tickets  Ticket[]

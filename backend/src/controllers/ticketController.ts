@@ -36,6 +36,7 @@ import { BaseTicketType, FormContextType, FormEntityType } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
+import { TicketIdService } from '@/services/ticketIdService';
 
 const prisma = DatabaseClient.getInstance();
 const DUPLICATE_REFERENCE_LIMIT = 10;
@@ -112,9 +113,8 @@ export class TicketController {
       }
       const channelId = conversation.channelId;
 
-      // Generate xyneId using PostgreSQL sequence
-      const result = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('ticket_xyne_id_seq')`;
-      const xyneId = `XYNE-${result[0].nextval}`;
+      // Generate xyneId using project-scoped format
+      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
       // Create ticket
       const ticket = await this.ticketRepository.createTicket({
@@ -356,9 +356,8 @@ export class TicketController {
 
       // Wrap all database operations in a transaction for data integrity
       const { ticket } = await prisma.$transaction(async (tx) => {
-        // Generate xyneId using PostgreSQL sequence (inside transaction)
-        const result = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('ticket_xyne_id_seq')`;
-        const xyneId = `XYNE-${result[0].nextval}`;
+        // Generate xyneId using project-scoped format
+        const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
         let conversationId: string;
         let ticket: Ticket;

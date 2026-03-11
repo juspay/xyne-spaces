@@ -45,6 +45,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
+import { TicketIdService } from './ticketIdService';
 
 interface UserInfo {
   id: string;
@@ -358,9 +359,8 @@ export class EmailService {
 
     // Step 2: Create ticket and generate xyneId in a transaction
     const ticket = await this.prisma.$transaction(async (tx) => {
-      // Generate xyneId using PostgreSQL sequence
-      const result = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('ticket_xyne_id_seq')`;
-      const xyneId = `XYNE-${result[0].nextval}`;
+      // Generate xyneId using project-scoped format
+      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
       // Create ticket using transaction client
       return await tx.ticket.create({
@@ -697,9 +697,8 @@ export class EmailService {
 
     // Step 2: Create ticket in a transaction
     const ticket = await this.prisma.$transaction(async (tx) => {
-      // Generate xyneId using PostgreSQL sequence
-      const result = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('ticket_xyne_id_seq')`;
-      const xyneId = `XYNE-${result[0].nextval}`;
+      // Generate xyneId using project-scoped format
+      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
       // Create ticket using transaction client
       return await tx.ticket.create({

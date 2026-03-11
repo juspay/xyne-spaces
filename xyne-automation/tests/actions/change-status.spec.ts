@@ -7,5 +7,4 @@ test('test', async ({ page }) => {
   // SKIPPED: Dynamic list item - using text-based selector
   await page.getByRole('button', { name: '📅 In a meeting - 1 hour' }).click();
   await page.getByTestId('update-status-save-btn').click();
-
 });

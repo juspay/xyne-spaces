@@ -1,5 +1,6 @@
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@framework';
+import { TicketIdService } from '@/services/ticketIdService';
 
 const prisma = DatabaseClient.getInstance();
 import { Application } from '@prisma/client';
@@ -98,8 +99,7 @@ export class ApplicationRepository {
         }
 
         const result = await prisma.$transaction(async (tx) => {
-          const seqResult = await tx.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('ticket_xyne_id_seq')`;
-          const xyneId = `XYNE-${seqResult[0].nextval}`;
+          const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
           const prLinks = prLinksByApplication.get(application.id) || [];
           const prLinksSection = prLinks.length > 0

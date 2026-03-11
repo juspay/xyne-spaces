@@ -2,6 +2,7 @@ import { ReactElement, useState } from 'react';
 import { TextInput, TextArea, Button, ButtonType } from '@juspay/blend-design-system';
 import { mixpanelService } from '../../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../../services/Analytics/mixpanel.types';
+import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
 
 interface Project {
   id: string;
@@ -11,7 +12,7 @@ interface Project {
 
 interface ProjectFormProps {
   project?: Project;
-  onSubmit: (data: { name?: string; description?: string }) => Promise<void> | void;
+  onSubmit: (data: { name?: string; description?: string; code?: string }) => Promise<void> | void;
   onCancel: () => void;
   loading?: boolean;
 }
@@ -25,12 +26,20 @@ export const ProjectForm = ({
   const isEdit = !!project;
   const [name, setName] = useState(project?.name || '');
   const [description, setDescription] = useState(project?.description || '');
+  const [code, setCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = (): void => {
     if (!name.trim()) {
       setError('Project name is required');
+      return;
+    }
+
+    // Validate project code for new projects (required)
+    const sanitizedCode = sanitizeProjectCode(code);
+    if (!isEdit && !isValidProjectCode(sanitizedCode)) {
+      setError('Project code must be at least 3 uppercase letters/numbers (e.g., EUL, PRO1, XY2)');
       return;
     }
 
@@ -52,8 +61,9 @@ export const ProjectForm = ({
           await onSubmit(updateData);
         } else {
           // Create mode - send all fields
-          const data: { name: string; description?: string } = {
+          const data: { name: string; description?: string; code: string } = {
             name: name.trim(),
+            code: sanitizedCode,
           };
           if (description.trim()) {
             data.description = description.trim();
@@ -95,6 +105,20 @@ export const ProjectForm = ({
           disabled={isLoading}
         />
       </div>
+
+      {!isEdit && (
+        <div>
+          <TextInput
+            label='Project Code (Ticket Prefix)'
+            value={code}
+            onChange={e => setCode(sanitizeProjectCode(e.target.value))}
+            placeholder='e.g., EUL, PROJ, PRO1, XY2'
+            required={!isEdit}
+            disabled={isLoading}
+            hintText={`Tickets will be: ${code || 'CODE'}-0001, ${code || 'CODE'}-0002...`}
+          />
+        </div>
+      )}
 
       <div>
         <TextArea

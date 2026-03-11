@@ -17,6 +17,7 @@ import { escapeForSlackWithMarkdown } from '@clearfeed-ai/slack-to-html';
 import { vespaQueue } from "@/queues/vespaQueue";
 import { ticketSchema } from "@/vespa/src/types";
 import { NAMESPACE } from "@/vespa/vespaConfig";
+import { TicketIdService } from "@/services/ticketIdService";
    
 
 function extractUserNameFromEmail(email: string): string {
@@ -147,10 +148,9 @@ export async function ingestSlackList(channelId: string, projectId: string, boar
             logger.error('[Slack List] Failed to create conversation or message for item: ' + JSON.stringify(item.listItem));
             continue;
          }
-          
-         const sequenceResult = await db.$queryRaw<[{ nextval: bigint }]>`SELECT nextval('ticket_xyne_id_seq')`;
-         const xyneId = `XYNE-${sequenceResult[0].nextval}`;
-                           
+
+         const xyneId = await TicketIdService.generateTicketId(db, projectId);
+         
          const ticket = await ticketRepo.createTicket({
             title: item.listItem.title,
             description: item.listItem.description || "",
