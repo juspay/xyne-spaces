@@ -1,3 +1,31 @@
+## [1.77.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.76.0...v1.77.0) (2026-03-11)
+
+
+### Features
+
+* activity automation ([c3d4863](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c3d486378d93d157e655c4b42ddf0cfb3ca94c41)), closes [#3963](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3963)
+* Add canvas add support to message input box ([e2bfabd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e2bfabd3b800c38e6468298119d4b8b7c3d4c6e1)), closes [#3870](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3870)
+* Fix scrolling for long forwarded message previews in delete modal ([dd8ddb8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dd8ddb8ccbf724527e0adcbb1b859f10c308bcc8))
+* Retain search queries when navigating Board tickets ([a0ccf23](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a0ccf237fe0d295455cfd98b9a47396930f2e0c3)), closes [#3597](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3597)
+* status updates automation ([005354a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/005354a8e223a17f800de58042b04be6d5f6cddb)), closes [#3702](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3702)
+* ui changes in the workflow chat panel and tool steps ([b0939ed](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b0939edd4188fafd9700ef99fac45e73bd58afef)), closes [#3975](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3975)
+* user group creation automation ([7a9e3c6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7a9e3c669e0262cdbe8c3a99ddd5e8d503db9e78)), closes [#3964](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3964)
+* workflow_steps_migration ([8526c33](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8526c33fdd19f067d6eac4d0c0940c217684bfa2)), closes [#3832](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3832)
+
+
+### Bug Fixes
+
+* changed the default model name from glm-flash to glm-flash-experimental for duplicate ticket check fix ([10bd854](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/10bd854439f97df31911dec12185986a52da2c64)), closes [#3981](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3981)
+* context from pulse ([baec634](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/baec63485f8b3cdc14b9d6db1b43001f4209d5d5)), closes [#3992](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3992)
+* ConversationById query ([557b10d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/557b10d6b9a35cedce26c17f3e12f6ce970f3521)), closes [#3921](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3921)
+* Fix profile popup z-index overlap on small screens ([151f546](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/151f546b553bbb97afacaae6687aeb35e52082e6))
+* native call improvements ([fb2b0f8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fb2b0f8e1b66d37b14b97920aac4f14ed6b95f8f)), closes [#3883](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3883)
+* Preserve table formatting when pasting into chat ([6816e21](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6816e216277c422f4f2dd311cb2bb16217a044d2)), closes [#3939](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3939)
+* removed notification for build sucess ([da9ee24](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/da9ee24b768adf6fb09bdc93997d985307f76bf9)), closes [#3824](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3824)
+* Selected participants cacheing in search inputbox ([860e872](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/860e8724dca33a047dcee3450940363118657b8e)), closes [#3978](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3978)
+* status indicator visibility ([96d1865](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/96d1865a29427526d32180e659890a1d036d34b0)), closes [#3999](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3999)
+* Workflow UX Fixes ([e416c7a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e416c7a262bd1f1c2ec791226a202da16a02c9a8)), closes [#3913](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3913)
+
 ## [1.76.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.75.1...v1.76.0) (2026-03-10)
 
 
