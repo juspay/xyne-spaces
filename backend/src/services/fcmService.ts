@@ -256,11 +256,11 @@ class FcmPushService {
 
     await db.userSession.updateMany({
       where: {
-        userId,
         id: { not: session.id },
         OR: duplicateConditions,
       },
       data: {
+        status: SessionStatus.REVOKED,
         fcmToken: null,
         voipToken: null,
         deviceId: null,
