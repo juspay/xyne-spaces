@@ -199,3 +199,8 @@ electron/ui-active/
 
 # App Specific
 apps/xyne-spaces/.yarn/*
+
+# Lotus generated artifacts
+lotus/.expo/
+lotus/ios/build/
+lotus/ios/lotus.xcodeproj/project.xcworkspace/
