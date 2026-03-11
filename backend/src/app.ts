@@ -67,6 +67,7 @@ import vespaSearchRoutes from '@/routes/vespaSearch';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
+import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
@@ -215,6 +216,9 @@ export class App {
       this.app.use('/api/admin/vespa-backfill', vespaBackfillRoutes);
       this.app.use('/migrate/api/admin/vespa-backfill', vespaBackfillRoutes);
     }
+
+    // Ticket migration route (admin-only)
+    this.app.use('/api/admin/migrate-tickets-xyneid', ticketMigrationRoutes);
     // Activities backfill route (for backfilling group mention actorAction)
     if (process.env.ENABLE_ACTIVITIES_BACKFILL_ROUTES === 'true') {
       this.app.use('/api/admin/activities-backfill', activitiesBackfillRoutes);

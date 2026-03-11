@@ -1,4 +1,4 @@
-import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PRStatusEvent } from '@prisma/client';
+import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PRStatusEvent, PrismaClient } from '@prisma/client';
 import { CreateTicketRequest, ActivitySource } from '../../types/ticket';
 import { websocketService } from '@/services/websocketService';
 import { logger } from '@/utils/logger';
@@ -9,14 +9,24 @@ import { BaseTicketType, PRActivityValue } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
+// Type for Prisma transaction client
+type PrismaTransaction = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;
+
 export class TicketRepository {
 
   /**
    * Create a ticket (repository method - database access only)
    * NOTE: For creating tickets with conversations, use TicketService.createTicketWithConversation()
    * This method expects conversationId and xyneId to be provided
+   * @param data - Ticket data
+   * @param tx - Optional transaction client for atomic operations
    */
-  async createTicket(data: CreateTicketRequest & { xyneId: string }) {
+  async createTicket(data: CreateTicketRequest & { xyneId: string }, tx?: PrismaTransaction) {
+    const db = tx || prisma; // Use transaction if provided, else default prisma
+
     // Validate required fields
     if (!data.conversationId) {
       throw new Error('conversationId is required');
@@ -35,7 +45,7 @@ export class TicketRepository {
     }
 
     // Fetch all stages of the board
-    const stages = await prisma.stage.findMany({
+    const stages = await db.stage.findMany({
       where: {
         boardId: data.boardId
       },
@@ -66,7 +76,7 @@ export class TicketRepository {
 
     // Upsert merchant if merchantId is provided
     if (data.merchantId) {
-      await prisma.merchant.upsert({
+      await db.merchant.upsert({
         where: { mid: data.merchantId },
         update: {}, // No update needed if exists
         create: {
@@ -77,7 +87,7 @@ export class TicketRepository {
     }
 
     // Create ticket with the conversationId, auto-assigned stageName, and calculated ETA
-    const ticket = await prisma.ticket.create({
+    const ticket = await db.ticket.create({
       data: {
         title: data.title,
         description: data.description,
@@ -107,7 +117,7 @@ export class TicketRepository {
     // Only create TicketStageEta entry if the selected stage has ETA
     if (selectedStage.eta !== null) {
 const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta);
-    await prisma.ticketStageEta.create({
+    await db.ticketStageEta.create({
       data: {
         ticketId: ticket.id,
         stageId: selectedStage.id,
@@ -122,7 +132,7 @@ const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta)
     const isHotFix = ticket.ticketType === BaseTicketType.Hotfix
     // If it's a hotfix, add 'hotfix' tag to the ticket
     if (isHotFix) {
-      await prisma.ticketTag.create({
+      await db.ticketTag.create({
         data: {
           ticketId: ticket.id,
           name: 'hotfix'

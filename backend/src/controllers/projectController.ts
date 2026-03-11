@@ -5,6 +5,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { projectSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
+import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
 
 export class ProjectController {
   private projectRepository: ProjectRepository;
@@ -15,7 +16,7 @@ export class ProjectController {
 
   createProject = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, description } = req.body;
+      const { name, description, code } = req.body;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -35,10 +36,40 @@ export class ProjectController {
         return;
       }
 
+      // Validate project code is provided
+      if (!code || typeof code !== 'string') {
+        res.status(400).json({ error: 'Project code is required' });
+        return;
+      }
+
+      // Sanitize code using shared utility
+      const sanitizedCode = sanitizeProjectCode(code);
+
+      // Validate format: at least 3 uppercase letters
+      if (!isValidProjectCode(sanitizedCode)) {
+        res.status(400).json({
+          error: 'Invalid project code',
+          message: `Project code must be at least 3 uppercase letters (e.g., EUL, INT, PROJ). Received: '${code}'`,
+          sanitizedCode
+        });
+        return;
+      }
+
+      // Check code uniqueness
+      const duplicateCheck = await this.projectRepository.checkDuplicateCodeWithInfo(sanitizedCode);
+      if (duplicateCheck.exists) {
+        res.status(409).json({
+          error: `Duplicate project code used by project ${duplicateCheck.existingProject?.name}`,
+          message: `Project code '${sanitizedCode}' is already in use by project '${duplicateCheck.existingProject?.name}'`
+        });
+        return;
+      }
+
       const project = await this.projectRepository.create({
         name: name.trim(),
         description: description?.trim(),
         createdBy: userId,
+        code: sanitizedCode,
       });
 
       // Queue Vespa job in background - worker will handle all processing

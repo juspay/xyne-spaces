@@ -1,18 +1,21 @@
 import { BaseRepository } from './base';
 import { Project } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
+import { sanitizeProjectCode } from '@xyne/shared';
 //import { queueProjectIngestion } from '@/queues/vespaQueue';
 
 export interface CreateProjectInput {
   name: string;
   description?: string;
   createdBy: string;
+  code: string;
 }
 
 export interface UpdateProjectInput {
   name?: string;
   description?: string;
   updatedBy?: string;
+  code?: string;
 }
 
 export interface StageObject {
@@ -36,6 +39,9 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     // Check for duplicate name
     await this.validateNameUnique(data.name);
 
+    // Validate project code
+    await this.validateProjectCode(data.code);
+
     // Use transaction to create project and default board together
     const result =  await this.db.$transaction(async (tx) => {
       const project = await tx.project.create({
@@ -43,6 +49,7 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
           name: data.name,
           description: data.description,
           createdBy: data.createdBy,
+          code: data.code,
         }
       });
 
@@ -283,5 +290,55 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     }
 
     return this.findMany({ where: searchFilter });
+  }
+
+  /**
+   * Validate project code format and uniqueness
+   * Format: 3+ uppercase alphanumeric characters (e.g., "EUL", "INT", "PROJ", "PRO1", "XY2")
+   */
+  async validateProjectCode(code: string, excludeId?: string): Promise<void> {
+    // Sanitize using shared utility
+    const sanitizedCode = sanitizeProjectCode(code);
+
+    // Validate format: at least 3 uppercase alphanumeric characters
+    if (sanitizedCode.length < 3) {
+      throw new Error(`Project code must be at least 3 uppercase alphanumeric characters (e.g., EUL, PRO1, XY2)`);
+    }
+
+    // Check uniqueness
+    const existing = await this.db.project.findFirst({
+      where: { code: sanitizedCode },
+    });
+
+    if (existing && existing.id !== excludeId) {
+      throw new Error(`Project code '${sanitizedCode}' is already in use by '${existing.name}'`);
+    }
+  }
+
+  /**
+   * Check if project code exists and return existing project info if it does
+   * Returns null if code is available
+   */
+  async checkDuplicateCodeWithInfo(code: string, excludeId?: string): Promise<{ exists: boolean; existingProject?: { name: string } }> {
+    const sanitizedCode = sanitizeProjectCode(code);
+    const existing = await this.db.project.findFirst({
+      where: { code: sanitizedCode },
+    });
+
+    if (existing && existing.id !== excludeId) {
+      return {
+        exists: true,
+        existingProject: { name: existing.name }
+      };
+    }
+    return { exists: false };
+  }
+
+  /**
+   * Check if project code exists (legacy method for backward compatibility)
+   */
+  async checkDuplicateCode(code: string, excludeId?: string): Promise<boolean> {
+    const result = await this.checkDuplicateCodeWithInfo(code, excludeId);
+    return result.exists;
   }
 }

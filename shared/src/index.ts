@@ -10,5 +10,6 @@ export * from './board-types';
 export * from './types/workflowApproval';
 export * from './types/userActivity';
 export * from './utils/etaCalculation';
+export * from './utils/project';
 export * from './types/research';
 export * from './tickets';

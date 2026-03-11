@@ -751,6 +751,8 @@ export const projectTable = table('projects')
   .columns({
     id: string(),
     name: string(),
+    code: string(),
+    ticketSequence: number(),
     description: string().optional(),
     createdBy: string(),
     updatedBy: string().optional(),
