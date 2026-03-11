@@ -49,3 +49,10 @@ export function parseWorkflowStepKey(key: string): { workflowExecutionId: string
  * Matches both aggregate and per-step keys.
  */
 export const WORKFLOW_STEP_KEY_PATTERN = 'workflow:*';
+
+/**
+ * Global Redis set key that tracks all workflow step keys.
+ * This set contains all keys in format: workflow:{executionId}:{stepName}
+ * Allows retrieving all workflow step keys via SMEMBERS without scanning.
+ */
+export const WORKFLOW_KEYS_SET = 'workflow';

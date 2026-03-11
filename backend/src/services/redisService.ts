@@ -804,6 +804,31 @@ class RedisService {
   }
 
   /**
+   * Add member(s) to a Redis set using SADD.
+   * Creates the set if it doesn't exist.
+   * Returns number of elements added (0 if all already existed).
+   */
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot sadd - Redis not initialized');
+      return 0;
+    }
+    return await this.redis.sadd(key, ...members);
+  }
+
+  /**
+   * Get all members of a Redis set using SMEMBERS.
+   * Returns empty array if key doesn't exist.
+   */
+  async smembers(key: string): Promise<string[]> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot smembers - Redis not initialized');
+      return [];
+    }
+    return await this.redis.smembers(key);
+  }
+
+  /**
    * Set a value at a specific index in a Redis list.
    * Returns 'OK' on success.
    */
@@ -1062,6 +1087,38 @@ class RedisService {
     await this.redis.set('zero:fallback_enabled', String(config.fallbackEnabled));
     await this.redis.set('zero:allow_mutations', String(config.allowMutations));
     await this.redis.set('zero:poll_interval_ms', String(config.pollIntervalMs));
+  }
+
+  /**
+   * Atomically get all items from a Redis list and delete the key if empty.
+   * Uses Lua script to handle race conditions.
+   * Returns null if key is empty or doesn't exist (and deletes it).
+   */
+ async fetchListAndCleanupIfEmpty(key: string, trackingSetKey?: string): Promise<string[] | null> {    if (!this.redis) {
+      logger.warn('[REDIS] Cannot fetchListAndCleanupIfEmpty - Redis not initialized');
+      return null;
+    }
+
+    const luaScript = `
+      local data = redis.call('LRANGE', KEYS[1], 0, -1)
+      if #data == 0 then
+        redis.call('DEL', KEYS[1])
+        if KEYS[2] then
+          redis.call('SREM', KEYS[2], KEYS[1])
+        end
+        return nil
+      end
+      return data
+    `;
+
+    try {
+      const keys = trackingSetKey ? [key, trackingSetKey] : [key];
+      const result = await this.redis.eval(luaScript, keys.length, ...keys) as string[] | null;
+      return result;
+    } catch (error) {
+      logger.error(`[REDIS] Lua script failed for key ${key}:`, error);
+      throw error;
+    }
   }
 
   // Getter for direct Redis access (use sparingly)

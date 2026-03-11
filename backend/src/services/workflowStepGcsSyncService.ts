@@ -2,7 +2,7 @@ import GCSServiceFactory from './gcsServiceFactory';
 import { redisService } from './redisService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { WORKFLOW_STEP_KEY_PATTERN, parseWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
+import { WORKFLOW_KEYS_SET, parseWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
 
 export interface WorkflowStepData {
   stepId: string;
@@ -24,30 +24,14 @@ export class WorkflowStepGcsSyncService {
    */
   async syncAllWorkflowSteps(): Promise<void> {
     try {
-      // Scan Redis for all workflow step keys
-      const redis = redisService.getClient();
-      const keys: string[] = [];
+      // Get all workflow step keys from the global tracking set
+      const keys = await redisService.smembers(WORKFLOW_KEYS_SET);
 
-      logger.info(`[GCS-SYNC] Starting SCAN with pattern: ${WORKFLOW_STEP_KEY_PATTERN}`);
-
-      // Use SCAN to find all keys matching pattern
-      let cursor = '0';
-      let scanIterations = 0;
-      do {
-        scanIterations++;
-        const result = await redis.scan(cursor, 'MATCH', WORKFLOW_STEP_KEY_PATTERN, 'COUNT', 100);
-        cursor = result[0];
-        keys.push(...result[1]);
-        logger.info(`[GCS-SYNC] SCAN iteration ${scanIterations}: cursor=${cursor}, found ${result[1].length} keys`);
-      } while (cursor !== '0');
-
-      logger.info(`[GCS-SYNC] Found ${keys.length} workflow step keys in Redis after ${scanIterations} iterations`);
+      logger.info(`[GCS-SYNC] Found ${keys.length} workflow step keys in Redis set: ${WORKFLOW_KEYS_SET}`);
 
       if (keys.length === 0) {
-        // Try to get ALL keys to debug
-        const allKeys = await redis.keys('*');
-        logger.info(`[GCS-SYNC] DEBUG: Total keys in Redis: ${allKeys.length}`);
-        logger.info(`[GCS-SYNC] DEBUG: Sample keys: ${allKeys.slice(0, 10).join(', ')}`);
+        logger.info(`[GCS-SYNC] No workflow step keys found in tracking set`);
+        return;
       }
 
       // Process each key
@@ -82,11 +66,12 @@ export class WorkflowStepGcsSyncService {
 
     const { workflowExecutionId, stepName } = parsed;
 
-    // Read all steps from Redis
-    const redisData = await redisService.lrange(redisKey, 0, -1);
+    // Read all steps from Redis atomically using Lua script
+    // If list is empty, the key will be deleted and removed from tracking set
+    const redisData = await redisService.fetchListAndCleanupIfEmpty(redisKey, WORKFLOW_KEYS_SET);
 
-    if (redisData.length === 0) {
-      logger.info(`[GCS-SYNC] No data in Redis for ${redisKey}`);
+    if (!redisData || redisData.length === 0) {
+      logger.info(`[GCS-SYNC] No data in Redis for ${redisKey}, key deleted and removed from tracking set`);
       return;
     }
 
