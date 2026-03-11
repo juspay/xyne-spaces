@@ -1,0 +1,129 @@
+@import "tailwindcss";
+@import "../styles/styles.mdx.css";
+@import "../styles/styles.theme.css";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  color-scheme: light;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    "Inter", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
+
+  overflow-x: hidden;
+  font-size: 14px;
+  font-weight: var(--font-weight-normal);
+  line-height: 24px;
+  letter-spacing: var(--font-letter-spacing-14px);
+  text-wrap: pretty;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-geist-sans: var(--font-geist-sans);
+  --font-geist-mono: var(--font-geist-mono);
+  --navbar-max-width: 1100px;
+
+  --prose-block-spacing-small: 8px;
+  --prose-block-spacing: 16px;
+  --prose-block-spacing-large: 24px;
+  --prose-block-radius: 8px;
+  --prose-block-menu-size: 20px;
+  --prose-block-menu-offset: 28px;
+  --prose-list-inset: 24px;
+  --prose-bullet-disc-width: 8px;
+  --prose-bullet-disc-offset: 8px;
+  --page-padding-inline: 24px;
+  --page-padding-block: 64px;
+  --page-navigation-height: 88px;
+  --page-padding-left: max(
+    env(safe-area-inset-left),
+    var(--page-padding-inline)
+  );
+  --page-padding-right: max(
+    env(safe-area-inset-right),
+    var(--page-padding-inline)
+  );
+  --page-max-width: 900px;
+  --prose-max-width: 640px;
+}
+
+:root.dark {
+  --background: #121212;
+  --foreground: #ededed;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(article) .shiki,
+  :where(article) .shiki span {
+    color: var(--shiki-dark);
+  }
+}
+
+#__next-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: calc(100 * var(--dvh));
+  isolation: isolate;
+}
+
+#main-content {
+  width: 100%;
+  max-width: var(--page-max-width);
+  padding-right: var(--page-padding-right);
+  padding-left: var(--page-padding-left);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.skip-to-content {
+  position: absolute;
+  top: -100px;
+  left: 50%;
+  z-index: 100;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--gray-1);
+  text-decoration: none;
+  background: var(--gray-12);
+  border-radius: 8px;
+  transform: translateX(-50%);
+  transition: top 0.2s ease;
+
+  &:focus {
+    top: 16px;
+  }
+}
+
+.debug {
+  outline: 1px solid red;
+}
+
+.debug-green {
+  outline: 1px solid green;
+}
+
+.debug-blue {
+  outline: 1px solid blue;
+}
+
+.debug-yellow {
+  outline: 1px solid yellow;
+}
+
+.debug-purple {
+  outline: 1px solid purple;
+}

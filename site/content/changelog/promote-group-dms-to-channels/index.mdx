@@ -1,0 +1,6 @@
+---
+title: "Promote Group DMs to Channels"
+description: "You can now convert eligible Group DMs into regular channels for better organization as conversations grow."
+date: "2026-02-11"
+---
+You can now convert eligible Group DMs into regular channels for better organization as conversations grow. A new Promote action is available from the Group DM info page, which opens a promotion dialog. The channel creation flow has been updated to support a promotion mode (with tailored UI copy), allowing users to add channel details like description, visibility, and project association. On the backend, a new promoteToChannel mutator transforms GROUP_DM conversations into DEFAULT channels, creates the required conversation context, and logs a system message for traceability, with client-side validation added to ensure promotion requests are valid.

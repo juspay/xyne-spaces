@@ -1,0 +1,181 @@
+/* 
+--------------------------------
+Radix UI colors for the project
+--------------------------------
+*/
+@import "@radix-ui/colors/gray.css";
+@import "@radix-ui/colors/sky.css";
+@import "@radix-ui/colors/gray.css";
+@import "@radix-ui/colors/gray-dark.css";
+@import "@radix-ui/colors/gray-alpha.css";
+@import "@radix-ui/colors/gray-dark-alpha.css";
+@import "@radix-ui/colors/black-alpha.css";
+@import "@radix-ui/colors/white-alpha.css";
+
+/* --------------------------------
+Typography variables for the project
+--------------------------------
+*/
+@theme inline {
+  --font-letter-spacing-12px: 0.006px;
+  --font-letter-spacing-13px: -0.041px;
+  --font-letter-spacing-14px: -0.087px;
+  --font-letter-spacing-15px: -0.132px;
+  --font-letter-spacing-16px: -0.175px;
+  --font-letter-spacing-17px: -0.217px;
+  --font-letter-spacing-18px: -0.257px;
+  --font-letter-spacing-19px: -0.296px;
+  --font-letter-spacing-20px: -0.333px;
+  --font-letter-spacing-21px: -0.369px;
+  --font-letter-spacing-22px: -0.403px;
+  --font-letter-spacing-23px: -0.436px;
+  --font-letter-spacing-24px: -0.468px;
+  --font-letter-spacing-25px: -0.499px;
+  --font-letter-spacing-26px: -0.528px;
+  --font-letter-spacing-27px: -0.557px;
+  --font-letter-spacing-28px: -0.584px;
+  --font-letter-spacing-29px: -0.611px;
+  --font-letter-spacing-30px: -0.636px;
+  --font-letter-spacing-31px: -0.661px;
+  --font-letter-spacing-32px: -0.685px;
+  --font-letter-spacing-33px: -0.717px;
+  --font-letter-spacing-34px: -0.742px;
+  --font-letter-spacing-35px: -0.766px;
+  --font-letter-spacing-36px: -0.79px;
+  --font-letter-spacing-37px: -0.814px;
+  --font-letter-spacing-38px: -0.838px;
+  --font-letter-spacing-39px: -0.862px;
+  --font-letter-spacing-40px: -0.885px;
+  --font-letter-spacing-41px: -0.908px;
+  --font-letter-spacing-42px: -0.931px;
+  --font-letter-spacing-43px: -0.955px;
+  --font-letter-spacing-44px: -0.977px;
+  --font-letter-spacing-45px: -1px;
+  --font-letter-spacing-46px: -1.023px;
+  --font-letter-spacing-47px: -1.046px;
+  --font-letter-spacing-48px: -1.068px;
+}
+
+:root {
+  --shadow-1:
+    inset 0 0 0 1px var(--gray-a5), inset 0 1.5px 2px 0 var(--gray-a2),
+    inset 0 1.5px 2px 0 var(--black-a2);
+
+  --shadow-2:
+    0 0 0 1px var(--gray-a3), 0 0 0 0.5px var(--black-a1),
+    0 1px 1px 0 var(--gray-a2), 0 2px 1px -1px var(--black-a1),
+    0 1px 3px 0 var(--black-a1);
+
+  --shadow-3:
+    0 0 0 1px var(--gray-a3), 0 2px 3px -2px var(--gray-a3),
+    0 3px 12px -4px var(--black-a2), 0 4px 16px -8px var(--black-a2);
+
+  --shadow-4:
+    0 0 0 1px var(--gray-a3), 0 8px 40px var(--black-a1),
+    0 12px 32px -16px var(--gray-a3);
+
+  --shadow-5:
+    0 0 0 1px var(--gray-a3), 0 12px 60px var(--black-a3),
+    0 12px 32px -16px var(--gray-a5);
+
+  --shadow-6:
+    0 0 0 1px var(--gray-a3), 0 12px 60px var(--black-a3),
+    0 16px 64px var(--gray-a2), 0 16px 36px -20px var(--gray-a7);
+}
+
+@supports (color: color-mix(in oklab, white, black)) {
+  :root {
+    --shadow-1:
+      inset 0 0 0 1px var(--gray-a5), inset 0 1.5px 2px 0 var(--gray-a2),
+      inset 0 1.5px 2px 0 var(--black-a2);
+
+    --shadow-2:
+      0 0 0 1px color-mix(in oklab, var(--gray-a3), var(--gray-3) 25%),
+      0 0 0 0.5px var(--black-a1), 0 1px 1px 0 var(--gray-a2),
+      0 2px 1px -1px var(--black-a1), 0 1px 3px 0 var(--black-a1);
+
+    --shadow-3:
+      0 0 0 1px color-mix(in oklab, var(--gray-a3), var(--gray-3) 25%),
+      0 2px 3px -2px var(--gray-a3), 0 3px 12px -4px var(--black-a2),
+      0 4px 16px -8px var(--black-a2);
+
+    --shadow-4:
+      0 0 0 1px color-mix(in oklab, var(--gray-a3), var(--gray-3) 25%),
+      0 8px 40px var(--black-a1), 0 12px 32px -16px var(--gray-a3);
+
+    --shadow-5:
+      0 0 0 1px color-mix(in oklab, var(--gray-a3), var(--gray-3) 25%),
+      0 12px 60px var(--black-a3), 0 12px 32px -16px var(--gray-a5);
+
+    --shadow-6:
+      0 0 0 1px color-mix(in oklab, var(--gray-a3), var(--gray-3) 25%),
+      0 12px 60px var(--black-a3), 0 16px 64px var(--gray-a2),
+      0 16px 36px -20px var(--gray-a7);
+  }
+}
+
+:is(.dark, .dark-theme),
+:is(.dark, .dark-theme) :where(.radix-themes:not(.light, .light-theme)) {
+  --shadow-1:
+    inset 0 -1px 1px 0 var(--gray-a3), inset 0 0 0 1px var(--gray-a3),
+    inset 0 3px 4px 0 var(--black-a5), inset 0 0 0 1px var(--gray-a4);
+
+  --shadow-2:
+    0 0 0 1px var(--gray-a6), 0 0 0 0.5px var(--black-a3),
+    0 1px 1px 0 var(--black-a6), 0 2px 1px -1px var(--black-a6),
+    0 1px 3px 0 var(--black-a5);
+
+  --shadow-3:
+    0 0 0 1px var(--gray-a6), 0 2px 3px -2px var(--black-a3),
+    0 3px 8px -2px var(--black-a6), 0 4px 12px -4px var(--black-a7);
+
+  --shadow-4:
+    0 0 0 1px var(--gray-a6), 0 8px 40px var(--black-a3),
+    0 12px 32px -16px var(--black-a5);
+
+  --shadow-5:
+    0 0 0 1px var(--gray-a6), 0 12px 60px var(--black-a5),
+    0 12px 32px -16px var(--black-a7);
+
+  --shadow-6:
+    0 0 0 1px var(--gray-a6), 0 12px 60px var(--black-a4),
+    0 16px 64px var(--black-a6), 0 16px 36px -20px var(--black-a11);
+}
+
+/* prettier-ignore */
+@supports (color: color-mix(in oklab, white, black)) {
+  :is(.dark, .dark-theme),
+  :is(.dark, .dark-theme) :where(.radix-themes:not(.light, .light-theme)) {
+    --shadow-1:
+      inset 0 -1px 1px 0 var(--gray-a3),
+      inset 0 0 0 1px var(--gray-a3),
+      inset 0 3px 4px 0 var(--black-a5),
+      inset 0 0 0 1px var(--gray-a4);
+
+    --shadow-2:
+      0 0 0 1px color-mix(in oklab, var(--gray-a6), var(--gray-6) 25%),
+      0 0 0 0.5px var(--black-a3),
+      0 1px 1px 0 var(--black-a6),
+      0 2px 1px -1px var(--black-a6),
+      0 1px 3px 0 var(--black-a5);
+
+    --shadow-3:
+      0 0 0 1px color-mix(in oklab, var(--gray-a6), var(--gray-6) 25%),
+      0 2px 3px -2px var(--black-a3),
+      0 3px 8px -2px var(--black-a6),
+      0 4px 12px -4px var(--black-a7);
+
+    --shadow-4:
+      0 0 0 1px color-mix(in oklab, var(--gray-a6), var(--gray-6) 25%),
+      0 8px 40px var(--black-a3), 0 12px 32px -16px var(--black-a5);
+
+    --shadow-5:
+      0 0 0 1px color-mix(in oklab, var(--gray-a6), var(--gray-6) 25%),
+      0 12px 60px var(--black-a5), 0 12px 32px -16px var(--black-a7);
+
+    --shadow-6:
+      0 0 0 1px color-mix(in oklab, var(--gray-a6), var(--gray-6) 25%),
+      0 12px 60px var(--black-a4), 0 16px 64px var(--black-a6),
+      0 16px 36px -20px var(--black-a11);
+  }
+}

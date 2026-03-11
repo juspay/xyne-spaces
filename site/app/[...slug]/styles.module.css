@@ -1,0 +1,103 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.spacer {
+  min-height: var(--page-navigation-height);
+}
+
+.scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--gray-1);
+  border: 1px solid var(--gray-a4);
+  border-radius: 12px;
+  box-shadow: 0 4px 24px 0 rgba(0, 0, 0, 0.08);
+}
+
+.viewport {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  &:focus-visible {
+    outline: 2px solid var(--color-blue);
+  }
+
+  &::before,
+  &::after {
+    position: absolute;
+    left: 0;
+    display: block;
+    width: 100%;
+    pointer-events: none;
+    content: "";
+    border-radius: 0.375rem;
+    transition: height 0.1s ease-out;
+  }
+
+  &::before {
+    --scroll-area-overflow-y-start: inherit;
+    top: 0;
+    height: min(40px, var(--scroll-area-overflow-y-start));
+    background: linear-gradient(to bottom, var(--gray-1), transparent);
+  }
+
+  &::after {
+    --scroll-area-overflow-y-end: inherit;
+    bottom: 0;
+    height: min(40px, var(--scroll-area-overflow-y-end, 40px));
+    background: linear-gradient(to top, var(--gray-1), transparent);
+  }
+}
+
+.scrollbar {
+  display: flex;
+  justify-content: center;
+  width: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms;
+
+  &[data-scrolling] {
+    transition-duration: 0ms;
+  }
+
+  &[data-hovering],
+  &[data-scrolling] {
+    pointer-events: auto;
+    opacity: 1;
+  }
+
+  &::before {
+    position: absolute;
+    width: 1.25rem;
+    height: 100%;
+    content: "";
+  }
+}
+
+.thumb {
+  width: 100%;
+  background: var(--gray-a4);
+  border-radius: inherit;
+}
+
+.article {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 640px;
+  padding-block-start: 128px;
+  padding-block-end: 256px;
+  margin: 0 auto;
+}

@@ -1,0 +1,14 @@
+---
+title: "Host Controls: End Call for Everyone"
+description: "Hosts can now end a call for all participants, not just leave it running."
+date: "2026-02-11"
+---
+Hosts can now end a call for all participants, not just leave it running. A new End Call modal gives hosts two clear choices: Leave call (host exits) or End for everyone (force-ends the session). Under the hood, this adds an “endingForAll” workflow state in the room XState machine, introduces a new backend /end-for-all endpoint for authorization + call/participant status updates, and deletes the LiveKit room to disconnect everyone cleanly (with improved disconnect reason handling).
+
+
+
+Note (Mobile):
+
+The toast shown when “Host has ended the meeting for everyone” is currently not available on mobile.
+
+The “End call for all” host modal is currently not available on mobile.

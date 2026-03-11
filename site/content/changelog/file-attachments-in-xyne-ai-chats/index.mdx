@@ -1,0 +1,9 @@
+---
+title: "File Attachments in Xyne AI Chat (Upload, Preview, Multimodal Processing)"
+description: "Xyne AI chat now supports file attachments end-to-end, making conversations fully multimodal."
+date: "2026-02-12"
+---
+Xyne AI chat now supports file attachments end-to-end, making conversations fully multimodal. Users can drag-and-drop uploads, see attachment pills and previews, and manage files seamlessly across desktop and mobile. Attachments are stored in a dedicated GCS bucket with Redis caching for fast retrieval and metadata access, and the database schema has been updated to store attachment metadata separately (via WorkflowStep) for cleaner organization. On the AI side, JAF utilities automatically convert and route files to the right processing path—using vision models for images and document/text models for PDFs and supported document formats. Supported types include images (PNG, JPG, GIF, WebP) and documents (PDF, TXT, CSV, JSON, DOCX, XLSX), with robust error handling and logging throughout upload and retrieval flows.
+
+
+
