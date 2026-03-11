@@ -233,10 +233,21 @@ export class XyneCommentService {
       const prCommentsDescription = this.formatPRCommentsForDescription(commentsWithDetails, prId, prUrl);
 
       // Step 4: Build workflow context based on workflow type
+      const workflowType = (originalExecution.workflowType || originalExecution.workflow?.workflowType) as WorkflowType;
+
+      if (!workflowType) {
+        logger.error(`[Xyne-Comment] No workflowType found on execution or workflow`, {
+          version: '1.0',
+          executionId: originalExecution.id,
+          workflowId: originalExecution.workflowId,
+        });
+        return;
+      }
+
       let workflowContext: Record<string, unknown>;
       try {
         workflowContext = buildPRWorkflowContext(
-          originalExecution.workflowType as WorkflowType,
+          workflowType,
           {
             title: `PR Review Fixes: ${ticket.title}`,
             description: prCommentsDescription,
@@ -247,14 +258,14 @@ export class XyneCommentService {
       } catch (error) {
         logger.error(`[Xyne-Comment] Failed to build workflow context: ${error instanceof Error ? error.message : String(error)}`, {
           version: '1.0',
-          workflowType: originalExecution.workflowType,
+          workflowType,
         });
         return;
       }
 
       const result = await workflowManager.startWorkflow({
         ticketId: ticketId,
-        workflowType: originalExecution.workflowType as WorkflowType,
+        workflowType: workflowType,
         context: workflowContext,
         createdBy: originalExecution.createdBy ?? undefined,
         metadata: {
@@ -270,7 +281,7 @@ export class XyneCommentService {
         const messageMetadata = {
           workflowId: result.workflowId,
           workflowName: `PR Review Fixes: ${ticket.title}`,
-          workflowType: originalExecution.workflowType,
+          workflowType: workflowType,
           ticketId: ticketId,
           xyneId: ticketId,
           source: 'pr_comment',
@@ -302,7 +313,7 @@ export class XyneCommentService {
         ticketId,
         prId,
         workflowBranch,
-        workflowType: originalExecution.workflowType,
+        workflowType: workflowType,
         commentsProcessed: commentsWithDetails.length,
       });
     } catch (error) {

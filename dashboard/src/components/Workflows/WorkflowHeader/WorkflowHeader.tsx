@@ -81,44 +81,44 @@ export interface WorkflowHeaderProps {
 type StatusConfig = { bg: string; text: string; dot: string; label: string };
 const STATUS_MAP: Record<string, StatusConfig> = {
   running: {
-    bg: 'bg-blue-50 border border-blue-200',
-    text: 'text-blue-700',
+    bg: 'bg-blue-500/10 border border-blue-500/20',
+    text: 'text-blue-700 dark:text-blue-400',
     dot: 'bg-blue-500',
     label: 'In-Progress',
   },
   inProgress: {
-    bg: 'bg-blue-50 border border-blue-200',
-    text: 'text-blue-700',
+    bg: 'bg-blue-500/10 border border-blue-500/20',
+    text: 'text-blue-700 dark:text-blue-400',
     dot: 'bg-blue-500',
     label: 'In-Progress',
   },
   completed: {
-    bg: 'bg-emerald-50 border border-emerald-200',
-    text: 'text-emerald-700',
+    bg: 'bg-emerald-500/10 border border-emerald-500/20',
+    text: 'text-emerald-700 dark:text-emerald-400',
     dot: 'bg-emerald-500',
     label: 'Completed',
   },
   success: {
-    bg: 'bg-emerald-50 border border-emerald-200',
-    text: 'text-emerald-700',
+    bg: 'bg-emerald-500/10 border border-emerald-500/20',
+    text: 'text-emerald-700 dark:text-emerald-400',
     dot: 'bg-emerald-500',
     label: 'Completed',
   },
   failed: {
-    bg: 'bg-red-50 border border-red-200',
-    text: 'text-red-700',
+    bg: 'bg-red-500/10 border border-red-500/20',
+    text: 'text-red-700 dark:text-red-400',
     dot: 'bg-red-500',
     label: 'Failed',
   },
   failure: {
-    bg: 'bg-red-50 border border-red-200',
-    text: 'text-red-700',
+    bg: 'bg-red-500/10 border border-red-500/20',
+    text: 'text-red-700 dark:text-red-400',
     dot: 'bg-red-500',
     label: 'Failed',
   },
   paused: {
-    bg: 'bg-amber-50 border border-amber-200',
-    text: 'text-amber-700',
+    bg: 'bg-amber-500/10 border border-amber-500/20',
+    text: 'text-amber-700 dark:text-amber-400',
     dot: 'bg-amber-500',
     label: 'Paused',
   },
@@ -241,29 +241,29 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   // const displayDesc = !showDesc && desc.length > 150 ? desc.slice(0, 150) + '...' : desc;
 
   return (
-    <div className='flex-shrink-0 bg-white border-b border-gray-100'>
+    <div className='flex-shrink-0 bg-background border-b border-border'>
       <div className='flex items-center justify-between px-3 md:px-4 py-2 md:py-2.5 gap-2'>
         <div className='flex items-center gap-1.5 md:gap-2 text-sm min-w-0 flex-1'>
           <button
             onClick={() => void navigate('/tickets?clear=true')}
-            className='p-1.5 rounded-md hover:bg-gray-100 transition-colors flex-shrink-0'
+            className='rounded-md hover:bg-muted transition-colors flex-shrink-0 -ml-1'
             title='Back to Workflows'
             data-track-category='Workflows'
             data-track-name='NavigateBackToWorkflows'
             data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
           >
-            <ChevronLeft size={20} className='text-gray-500' />
+            <ChevronLeft size={20} className='text-muted-foreground' />
           </button>
-          <span className='font-semibold text-gray-900 truncate text-sm md:text-base'>
+          <span className='font-semibold text-foreground truncate text-sm md:text-base'>
             {ticket.xyneId || `RUN-${ticket.id.slice(0, 4).toUpperCase()}`}
           </span>
           {workflowType && (
             <>
-              <ChevronRight size={14} className='text-gray-300 flex-shrink-0' />
+              <ChevronRight size={14} className='text-muted-foreground/50 flex-shrink-0' />
               <div className='relative' ref={metadataDropdownRef}>
                 <button
                   onClick={() => setShowMetadataDropdown(!showMetadataDropdown)}
-                  className='text-gray-600 truncate cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-none p-0 inline-flex items-center gap-0.5'
+                  className='text-muted-foreground truncate cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-none p-0 inline-flex items-center gap-0.5'
                   data-track-category='Workflows'
                   data-track-name='ToggleStatusDropdown'
                   data-track-metadata={JSON.stringify({ executionStatus, ticketId: ticket.id })}
@@ -271,34 +271,36 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                   <span>
                     {workflowType.length > 20 ? `${workflowType.slice(0, 20)}...` : workflowType}
                   </span>
-                  <ChevronDown size={14} className='text-gray-400 flex-shrink-0' />
+                  <ChevronDown size={14} className='text-muted-foreground flex-shrink-0' />
                 </button>
                 {showMetadataDropdown && (
-                  <div className='absolute left-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-[60]'>
+                  <div className='absolute left-0 top-full mt-1 w-48 bg-background border border-border rounded-lg shadow-lg py-2 z-[60]'>
                     {executorType && (
-                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
-                        <span className='font-medium text-gray-900'>Executor: {executorType}</span>
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-muted hover:shadow-sm transition-all'>
+                        <span className='font-medium text-foreground'>
+                          Executor: {executorType}
+                        </span>
                       </div>
                     )}
                     {model && (
-                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
-                        <span className='font-medium text-gray-900'>Model: {model}</span>
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-muted hover:shadow-sm transition-all'>
+                        <span className='font-medium text-foreground'>Model: {model}</span>
                       </div>
                     )}
                     {repositoryUrl && (
-                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
-                        <span className='font-medium text-gray-900'>
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-muted hover:shadow-sm transition-all'>
+                        <span className='font-medium text-foreground'>
                           Repository Url: {repositoryUrl}
                         </span>
                       </div>
                     )}
                     {prLink && (
-                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-muted hover:shadow-sm transition-all'>
                         <a
                           href={prLink}
                           target='_blank'
                           rel='noopener noreferrer'
-                          className='font-medium text-gray-900 hover:underline'
+                          className='font-medium text-foreground hover:underline'
                           onClick={e => e.stopPropagation()}
                           data-track-category='Workflows'
                           data-track-name='OpenPullRequestLink'
@@ -309,13 +311,13 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                       </div>
                     )}
                     {useQuestioningMode && (
-                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
-                        <span className='font-medium text-gray-900'>Questioning Enabled</span>
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-muted hover:shadow-sm transition-all'>
+                        <span className='font-medium text-foreground'>Questioning Enabled</span>
                       </div>
                     )}
                     {createdByUser?.id && (
-                      <div className='px-3 py-2 text-sm rounded-md hover:bg-gray-50 hover:shadow-sm transition-all'>
-                        <span className='font-medium text-gray-900'>
+                      <div className='px-3 py-2 text-sm rounded-md hover:bg-muted hover:shadow-sm transition-all'>
+                        <span className='font-medium text-foreground'>
                           Ran By: {createdByUser.name || createdByUser.email || 'Unknown'}
                         </span>
                       </div>
@@ -325,7 +327,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                       !prLink &&
                       !useQuestioningMode &&
                       !createdByUser?.id && (
-                        <div className='px-3 py-2 text-sm text-gray-500'>
+                        <div className='px-3 py-2 text-sm text-muted-foreground'>
                           No additional metadata available
                         </div>
                       )}
@@ -336,7 +338,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           )}
           {executionStatus && (
             <>
-              <ChevronRight size={14} className='text-gray-300 flex-shrink-0' />
+              <ChevronRight size={14} className='text-muted-foreground/50 flex-shrink-0' />
               <div
                 className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md ${statusConfig.bg}`}
               >
@@ -354,7 +356,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           {onTriggerWorkflow && (
             <button
               onClick={onTriggerWorkflow}
-              className='hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors text-xs text-gray-700'
+              className='hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border hover:bg-muted hover:border-border transition-colors text-xs text-foreground'
               title='Trigger Workflow'
               data-track-category='Workflows'
               data-track-name='TriggerWorkflow'
@@ -368,19 +370,19 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
             <button
               onClick={handleCancelWorkflow}
               disabled={isCanceling || !executionId}
-              className='inline-flex items-center gap-1 px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-300 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed'
+              className='inline-flex items-center gap-1 px-2 py-1 rounded-md border border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20 hover:border-red-500/30 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed'
               title='Cancel Workflow'
               data-track-category='Workflows'
               data-track-name='CancelWorkflow'
               data-track-metadata={JSON.stringify({ executionId })}
             >
-              <XCircle size={14} className='text-red-600 flex-shrink-0' />
+              <XCircle size={14} className='text-red-600 dark:text-red-400 flex-shrink-0' />
               <span className='hidden sm:inline'>{isCanceling ? 'Canceling...' : 'Cancel'}</span>
             </button>
           )}
           {(onOpenWorkflowGraph || onGraphViewToggle) && (
             <button
-              className={`hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border transition-colors text-xs ${isGraphViewOpen ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}
+              className={`hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border transition-colors text-xs ${isGraphViewOpen ? 'bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-400 hover:bg-blue-500/20' : 'border-border hover:bg-muted hover:border-border text-foreground'}`}
               title={isGraphViewOpen ? 'Hide Workflow Graph' : 'Show Workflow Graph'}
               onClick={onGraphViewToggle || onOpenWorkflowGraph}
               data-track-category='Workflows'
@@ -389,7 +391,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
             >
               <Workflow
                 size={14}
-                className={`${isGraphViewOpen ? 'text-blue-600' : 'text-gray-500'} flex-shrink-0`}
+                className={`${isGraphViewOpen ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'} flex-shrink-0`}
               />
               Workflow
             </button>
@@ -401,20 +403,20 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                 onClick={() => setShowJenkinsPanel(!showJenkinsPanel)}
                 className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border transition-colors text-xs ${
                   showJenkinsPanel
-                    ? 'border-orange-300 bg-orange-100 text-orange-700'
-                    : 'border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 hover:border-orange-300'
+                    ? 'border-orange-500/30 bg-orange-500/20 text-orange-700 dark:text-orange-400'
+                    : 'border-orange-500/20 bg-orange-500/10 text-orange-700 dark:text-orange-400 hover:bg-orange-500/20 hover:border-orange-500/30'
                 }`}
                 title='Trigger Build'
                 data-track-category='Workflows'
                 data-track-name='ToggleJenkinsPanel'
                 data-track-metadata={JSON.stringify({ branch: gitBranch })}
               >
-                <Rocket size={14} className='text-orange-600 flex-shrink-0' />
+                <Rocket size={14} className='text-orange-600 dark:text-orange-400 flex-shrink-0' />
                 Build
                 {showJenkinsPanel ? (
-                  <ChevronUp size={12} className='text-orange-600' />
+                  <ChevronUp size={12} className='text-orange-600 dark:text-orange-400' />
                 ) : (
-                  <ChevronDown size={12} className='text-orange-600' />
+                  <ChevronDown size={12} className='text-orange-600 dark:text-orange-400' />
                 )}
               </button>
               {showJenkinsPanel && (
@@ -438,10 +440,10 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               data-track-name='ToggleMoreMenu'
               data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
             >
-              <MoreVertical size={18} className='text-gray-500' />
+              <MoreVertical size={18} className='text-muted-foreground' />
             </button>
             {showMenu && (
-              <div className='absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[100]'>
+              <div className='absolute right-0 top-full mt-1 w-44 bg-background border border-border rounded-lg shadow-lg py-1 z-[100]'>
                 {onTriggerWorkflow && (
                   <div className='md:hidden'>
                     <MenuItem
@@ -449,7 +451,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                         onTriggerWorkflow();
                         setShowMenu(false);
                       }}
-                      icon={<Play size={14} className='text-gray-400' />}
+                      icon={<Play size={14} className='text-muted-foreground' />}
                       data-track-category='Workflows'
                       data-track-name='TriggerWorkflow'
                     >
@@ -464,7 +466,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                         (onGraphViewToggle || onOpenWorkflowGraph)?.();
                         setShowMenu(false);
                       }}
-                      icon={<Workflow size={14} className='text-gray-400' />}
+                      icon={<Workflow size={14} className='text-muted-foreground' />}
                       data-track-category='Workflows'
                       data-track-name='ToggleWorkflowGraph'
                     >
@@ -480,7 +482,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                         void handleTriggerJenkinsBuild();
                         setShowMenu(false);
                       }}
-                      icon={<Rocket size={14} className='text-orange-500' />}
+                      icon={<Rocket size={14} className='text-orange-500 dark:text-orange-400' />}
                       data-track-category='Workflows'
                       data-track-name='TriggerJenkinsBuild'
                     >
@@ -488,7 +490,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                     </MenuItem>
                   </div>
                 )}
-                <div className='border-t border-gray-100 md:border-t-0' />
+                <div className='border-t border-border md:border-t-0' />
                 <MenuItem
                   onClick={() => {
                     void navigator.clipboard.writeText(executionId || ticket.id);
@@ -533,9 +535,9 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
         </div>
       </div>
       <div className='px-4 pb-3'>
-        <h1 className='text-base font-semibold text-gray-900 leading-tight flex items-center gap-2'>
+        <h1 className='text-base font-semibold text-foreground leading-tight flex items-center gap-2'>
           {workflowNumber !== undefined && (
-            <span className='inline-flex items-center justify-center flex-shrink-0 min-w-[28px] h-6 px-2 bg-blue-100 text-blue-700 text-xs font-bold rounded-full border border-blue-200'>
+            <span className='inline-flex items-center justify-center flex-shrink-0 min-w-[28px] h-6 px-2 bg-blue-500/10 text-blue-700 dark:text-blue-400 text-xs font-bold rounded-full border border-blue-500/20'>
               #{workflowNumber}
             </span>
           )}
