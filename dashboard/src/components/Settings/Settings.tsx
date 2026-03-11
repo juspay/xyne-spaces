@@ -205,6 +205,7 @@ const Settings = (): ReactElement => {
           onClick={handleStatusClick}
           data-track-category='Settings'
           data-track-name='EditUserStatus'
+          data-testid='set-status-btn'
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
@@ -348,6 +349,7 @@ const Settings = (): ReactElement => {
               data-track-category='Settings'
               data-track-name='SelectTheme'
               data-track-metadata={JSON.stringify({ themeId: themeOption.id })}
+              data-testid={`theme-btn-${themeOption.id}`}
             >
               <div
                 className='w-25 h-[70px] rounded-md relative overflow-clip'

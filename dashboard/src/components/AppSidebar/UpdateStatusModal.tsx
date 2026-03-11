@@ -246,7 +246,9 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
     <Dialog open={isOpen} onOpenChange={onClose} className='max-w-lg rounded-2xl'>
       <div className='p-6 space-y-4'>
         <div className='flex items-center justify-between'>
-          <h2 className='text-lg font-semibold'>Set a status</h2>
+          <h2 className='text-lg font-semibold' data-testid='update-status-title'>
+            Set a status
+          </h2>
           <Button
             variant='ghost'
             size='sm'
@@ -516,6 +518,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Save_Status'
                 data-track-metadata={JSON.stringify({ statusText, expiryOption })}
+                data-testid='update-status-save-btn'
               >
                 Save
               </Button>
