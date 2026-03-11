@@ -120,6 +120,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
                 onChange={e => field.handleChange(e.target.value)}
                 placeholder='Say something to start the conversation...'
                 rows={4}
+                data-testid='dm-message-textarea'
                 className={cn(
                   field.state.meta.errors.length > 0 &&
                     'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
@@ -170,6 +171,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
             className='bg-blue-600 hover:bg-blue-700'
             loading={loading || false}
             disabled={selectedUsers.length === 0}
+            data-testid='start-dm-btn'
             data-track-category='ADD_DM_FORM'
             data-track-name='Start_DM'
             data-track-metadata={JSON.stringify({ selectedUserCount: selectedUsers })}

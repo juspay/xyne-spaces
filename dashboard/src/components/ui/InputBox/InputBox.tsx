@@ -1115,6 +1115,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       }}
                       className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                       aria-label='Mention user'
+                      data-testid='mention-user-btn'
                       disabled={disabled || isSending}
                     >
                       <AtSign className='h-4 w-4 text-muted-foreground' />

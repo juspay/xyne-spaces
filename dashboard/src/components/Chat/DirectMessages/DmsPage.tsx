@@ -192,6 +192,7 @@ const DmsPage = (): ReactElement => {
           className='fixed bottom-[85px] right-4 z-40 flex items-center justify-center size-14 rounded-full bg-[#ff4f4f] border-[0.5px] border-[#181B1D]/30 backdrop-blur-[10px] shadow-lg'
           onClick={handleAddDirectMessage}
           aria-label='Create new message'
+          data-testid='create-new-message-btn'
           data-track-category='DM'
           data-track-name='CREATE_DM'
         >
@@ -231,15 +232,19 @@ const DmsPage = (): ReactElement => {
                     to='/chat/dir'
                     className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
                     aria-label='Go back'
+                    data-testid='dms-go-back-link'
                   >
                     <ArrowLeft size={20} />
                   </Link>
-                  <h2 className='text-lg font-semibold'>Direct Messages</h2>
+                  <h2 className='text-lg font-semibold' data-testid='dms-heading'>
+                    Direct Messages
+                  </h2>
                 </div>
                 <button
                   className='flex items-center justify-center size-10 rounded-full bg-background border-[0.1px] backdrop-blur-[10px] shadow-md hover:bg-accent hover:border-primary transition-colors'
                   onClick={handleAddDirectMessage}
                   aria-label='Create new message'
+                  data-testid='create-new-message-btn'
                   data-track-category='DM'
                   data-track-name='CREATE_DM_DESKTOP'
                 >
@@ -254,6 +259,7 @@ const DmsPage = (): ReactElement => {
                   placeholder='Search messages'
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
+                  data-testid='search-messages-input'
                   data-track-event='blur'
                   data-track-category='DM'
                   data-track-name='SEARCH_DMS_INPUT_DESKTOP'
