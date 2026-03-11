@@ -33,7 +33,7 @@ import { websocketService } from '@/services/websocketService'
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service'
 import {logger} from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
-import { buildWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
+import { buildWorkflowStepKey, WORKFLOW_KEYS_SET } from '@/workflows/utils/workflowStepKeys';
 import { config } from '@/config/env';
 
 const prisma = DatabaseClient.getInstance()
@@ -194,7 +194,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
       const redisStepData = { ...stepData, createdAt: now, updatedAt: now };
       await redisService.rpush(redisKey, JSON.stringify(redisStepData));
       await this.broadcastAgentStepEvent(workflowExecutionId, redisStepData);
-
+      await redisService.expire(redisKey, 18000);
       return inputStepDbId;
     }
 
@@ -246,6 +246,9 @@ export class DBWorkflowStorage implements WorkflowStorage {
         });
         logger.info(`[DB-STORAGE] Created MessageAttachment for agentic step ${stepName}`);
       }
+
+      // Add the key to the global workflow keys set for tracking
+      await redisService.sadd(WORKFLOW_KEYS_SET, redisKey);
 
       // Initialize Redis key with 5-hour TTL
       const redisStepData = { ...stepData, createdAt: now, updatedAt: now };

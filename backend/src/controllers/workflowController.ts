@@ -15,7 +15,7 @@ import { bitbucketManager } from '../bitbucket/apis';
 import { extractWorkspace } from '../workflows/framework/agent-executor';
 import { calculateDiffStats } from '@/utils/diffUtils';
 import { redisService } from '@/services/redisService';
-import { buildWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
+import { buildWorkflowStepKey, WORKFLOW_KEYS_SET } from '@/workflows/utils/workflowStepKeys';
 import GCSServiceFactory from '@/services/gcsServiceFactory';
 import { v4 as uuidv4 } from 'uuid';
 import { safeSerialize } from '../workflows/storage/serialization';
@@ -139,6 +139,9 @@ export class WorkflowController {
 
       // Set TTL (5 hours)
       await redisService.expire(newRedisKey, 18000);
+
+      // Add the key to the global workflow keys set for tracking
+      await redisService.sadd(WORKFLOW_KEYS_SET, newRedisKey);
 
       logger.info(`[WORKFLOW-CONTROLLER] Copied ${parentSteps.length} steps from parent ${parentExecutionId} to ${newExecutionId} for step ${stepName}`);
     } catch (error) {
@@ -979,8 +982,8 @@ export class WorkflowController {
         return;
       }
 
-      // If execution is WAIT_FOR_EVENT in MANUAL mode (external wait state)
-      if (execution?.status === 'WAIT_FOR_EVENT' && mode === 'MANUAL') {
+      // If execution is WAIT_FOR_EVENT in MANUAL mode, or FAILURE/CANCELLED/PAUSED (regardless of mode)
+      if ((execution?.status === 'WAIT_FOR_EVENT' && mode === 'MANUAL') || execution?.status === 'FAILURE' || execution?.status === 'CANCELLED' || execution?.status === 'PAUSED') {
         if(!message)
         {
           // this is for continuation or go to next steps
@@ -1044,6 +1047,9 @@ export class WorkflowController {
               // Always push the user message at the end
               await redisService.rpush(perStepKey, JSON.stringify(redisUserStep));
               await redisService.expire(perStepKey, 18000); // 5 hours
+
+              // Add the key to the global workflow keys set for tracking (first time creation)
+              await redisService.sadd(WORKFLOW_KEYS_SET, perStepKey);
             }
           } catch (redisErr) {
             logger.error(`[WORKFLOW-CONTROLLER] Failed to push user message into per-step Redis for ${executionId}:${step.stepName}:`, redisErr);
