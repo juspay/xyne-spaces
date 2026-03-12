@@ -22,8 +22,9 @@ class TicketDuplicateService {
     userId: string;
     limit: number;
     excludeTicketId?: string;
+    parentTicketId?: string;
   }): Promise<{ candidates: TicketDuplicateCandidate[]; analysis: TicketDuplicateCheckAnalysis }> {
-    const { title, description, projectId, userId, limit, excludeTicketId } = params;
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId } = params;
 
     const candidates = await this.getDuplicateCandidates({
       title,
@@ -32,6 +33,7 @@ class TicketDuplicateService {
       userId,
       limit,
       excludeTicketId,
+      parentTicketId,
     });
 
     if (candidates.length === 0) {
@@ -52,7 +54,40 @@ class TicketDuplicateService {
       { userId, projectId },
     );
 
-    return { candidates, analysis };
+
+    const reorderedCandidates = this.reorderCandidatesWithDuplicateFirst(
+      candidates,
+      analysis.duplicateTicketId,
+    );
+
+    return { candidates: reorderedCandidates, analysis };
+  }
+
+  private reorderCandidatesWithDuplicateFirst(
+    candidates: TicketDuplicateCandidate[],
+    duplicateTicketId: string | null | undefined,
+  ): TicketDuplicateCandidate[] {
+    // If no duplicate identified, return original order
+    if (!duplicateTicketId) {
+      return candidates;
+    }
+
+    const duplicateIndex = candidates.findIndex(c => c.id === duplicateTicketId);
+
+    // If duplicate not found or already at index 0, return original order
+    if (duplicateIndex <= 0) {
+      return candidates;
+    }
+
+    // Move the duplicate to index 0, keep rest in original order
+    const duplicate = candidates[duplicateIndex];
+    const reordered = [
+      duplicate,
+      ...candidates.slice(0, duplicateIndex),
+      ...candidates.slice(duplicateIndex + 1),
+    ];
+
+    return reordered;
   }
 
   async analyzeDuplicate(
@@ -115,8 +150,9 @@ class TicketDuplicateService {
     userId: string;
     limit: number;
     excludeTicketId?: string;
+    parentTicketId?: string;
   }): Promise<TicketDuplicateCandidate[]> {
-    const { title, description, projectId, userId, limit, excludeTicketId } = params;
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId } = params;
     const query = `${title}\n\n${description}`.trim();
 
     if (!query) {
@@ -153,11 +189,20 @@ class TicketDuplicateService {
         createdAt: result.metadata.timestamp,
       }));
 
-    if (!excludeTicketId) {
+    // Build set of IDs to exclude (self, parent)
+    const excludeIds = new Set<string>();
+    if (excludeTicketId) {
+      excludeIds.add(excludeTicketId);
+    }
+    if (parentTicketId) {
+      excludeIds.add(parentTicketId);
+    }
+
+    if (excludeIds.size === 0) {
       return candidates;
     }
 
-    return candidates.filter(candidate => candidate.id !== excludeTicketId);
+    return candidates.filter(candidate => !excludeIds.has(candidate.id));
   }
 }
 
