@@ -398,7 +398,8 @@ export const getImplementationReviewConfig = (
   executorType?: ExecutorType,
   taskType?: TaskType,
   coAuthor?: { name: string; email: string },
-  previousReviewFeedback?: string
+  previousReviewFeedback?: string,
+  earlyValidationErrors?: string
 ) => createXyneSpacesAgentConfig(
   'xyne-implementation-reviewer',
   REVIEW_SYSTEM_PROMPTS.IMPLEMENTATION_REVIEWER,
@@ -419,6 +420,14 @@ ${previousReviewFeedback}
 
 The implementer has responded with justifications (ACCEPT/REJECT/PARTIAL) and made changes.
 Verify whether accepted issues were actually fixed and whether rejected justifications are valid.
+` : ''}${earlyValidationErrors ? `
+# ⚠️ EARLY VALIDATION ERRORS
+
+The following TypeScript/ESLint errors were detected during early validation:
+
+${earlyValidationErrors}
+
+**Important:** These errors must be fixed, but you should ALSO provide architectural feedback on the implementation. Score appropriately considering both the validation errors AND the code quality.
 ` : ''}
 # CHANGED FILES
 
