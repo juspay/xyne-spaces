@@ -70,14 +70,11 @@ export async function runImplementationPhase(
       state.gitInfo = { ...state.gitInfo, ...implResult.gitInfo };
 
       // Early Validation: Run TypeScript and ESLint checks before Implementation Review
+      // SOFT GATE: Proceed with review even if validation fails - pass errors as context
       const earlyValidation = await runEarlyValidation(repoPath);
       if (!earlyValidation.passed) {
-        implReviewMetrics.iterations = iteration + 1;
-        implReviewMetrics.score = 0;
-        implReviewMetrics.feedback = `Early TypeScript validation failed. Fix errors before review.`;
-        implFeedback = `TypeScript compilation errors must be fixed before Implementation Review:\n\n${earlyValidation.errors}`;
-        logger.warn('Skipping Implementation Review due to TypeScript errors');
-        return LoopControl.CONTINUE;
+        logger.warn('Early validation failed - proceeding with Implementation Review (soft gate)');
+        // Continue to Implementation Review with validation errors as context
       }
 
       // Get changed files and diff
@@ -104,13 +101,23 @@ export async function runImplementationPhase(
           'xyne-code',
           context.taskType,
           state.coAuthor,
-          previousReviewFeedback || undefined
+          previousReviewFeedback || undefined,
+          earlyValidation.passed ? undefined : earlyValidation.errors
         )
       );
 
       const review = parseReviewResult(reviewResult.result);
       implReviewMetrics.score = review.score;
-      implReviewMetrics.feedback = review.feedback;
+
+      // If early validation failed, combine validation errors with review feedback
+      if (!earlyValidation.passed) {
+        implReviewMetrics.feedback = `## ⚠️ Build Errors (Must Fix)\n\n${earlyValidation.errors}\n\n---\n\n## Reviewer Feedback (Score: ${review.score}/10)\n\n${review.feedback}`;
+        implFeedback = `## ⚠️ Build Errors (Must Fix)\n\n${earlyValidation.errors}\n\n---\n\n## Reviewer Feedback (Score: ${review.score}/10)\n\n${review.feedback}\n\n**Priority:** Fix build errors first, then address review feedback.`;
+      } else {
+        implReviewMetrics.feedback = review.feedback;
+        implFeedback = formatFeedbackForRetry(review.score, review.issues, review.feedback);
+      }
+
       previousReviewFeedback = review.feedback; // Pass to reviewer on next iteration
 
       // Track score history for degradation detection
@@ -156,8 +163,7 @@ Begin again from the original requirement.`;
         }
       }
 
-      // Prepare feedback for next iteration (structured format)
-      implFeedback = formatFeedbackForRetry(review.score, review.issues, review.feedback);
+      // Feedback was already prepared above (lines 112-119) based on early validation result
       logger.warn(`Implementation not approved. Issues: ${review.issues.join(', ')}`);
 
       return LoopControl.CONTINUE;
