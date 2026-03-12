@@ -1,3 +1,25 @@
+## [1.78.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.77.1...v1.78.0) (2026-03-12)
+
+
+### Features
+
+* activity dm automation ([7444a49](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7444a493e0e53eb232267373e53638056a4681b0)), closes [#3983](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3983)
+* added-hashing-support-for-workflow-keys-in-redis ([f78c776](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f78c77625232818eb93cb4299fba65ba9a457ebc)), closes [#4021](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4021)
+* llm failure logs ([5033981](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5033981aba0e7f2b00b4c517c3e2b6f65d043010)), closes [#4043](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4043)
+* march changelogs addition ([89f3de1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/89f3de11c3e21ccf402a979c3fc459dc14a44df7)), closes [#3977](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3977) [#3731](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3731)
+* my-tickets automation ([0939be1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0939be17adb4ad27ae68f99d34d0c5ce8c01653b)), closes [#4023](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4023)
+* project scoped ticket ([76c2bf4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/76c2bf47cc18d3f3a396c8d031f4939df7fb0ee0)), closes [#3808](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3808)
+* workflow ui changess ([3ba781d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3ba781de34e65b8d842ed81e9c403c091e57345b)), closes [#4012](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4012)
+
+
+### Bug Fixes
+
+* bookmark automation ([59b0a8d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/59b0a8d10290499253697bfa81811eeaf52e828e)), closes [#4014](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4014)
+* dark theme ([4adece8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4adece806d9a9fc179d8d896426953be65cbe7f8)), closes [#4022](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4022)
+* fixed the duplicate ticket suggestion issue ([a611b88](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a611b889b3ddb78d31ba5e8a2decde6803311131))
+* Refactor ChatList ([d21d121](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d21d1215c438e8247bb22139fa84219176d3002c)), closes [#4013](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4013)
+* removed health check ([3cc3402](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3cc3402510634ca53f7e1506092a8ba7cbf1b318)), closes [#4031](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4031)
+
 ## [1.77.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.77.0...v1.77.1) (2026-03-11)
 
 
