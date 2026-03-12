@@ -1,71 +1,66 @@
 #!/usr/bin/env sh
 
-# Check if tests were run in the pre-commit phase
-if [ -f .git/XYNE_TEST_RAN ]; then
-  rm .git/XYNE_TEST_RAN
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN_BOLD='\033[1;36m'
+NC='\033[0m' # No Color
 
-  exec < /dev/tty
+exec < /dev/tty
 
-  # Extract ticket ID from the last commit message
-  # Use grep to find pattern like XYNE-123. If multiple, take the first one.
-  LAST_COMMIT_MSG=$(git log -1 --format=%s)
-  TICKET_ID=$(echo "$LAST_COMMIT_MSG" | grep -oE '[A-Z]+-[0-9]+' | head -n 1)
+echo ""
+echo "🧪 ${CYAN_BOLD}Run automation tests now?${NC}"
+echo "   ${YELLOW}(Running tests locally is faster and more reliable than waiting for Jenkins)${NC}"
+echo ""
+printf "   Run tests? [Y/n] "
+read -r response
 
-  if [ -z "$TICKET_ID" ]; then
-    echo "⚠️  No ticket ID found in commit message. Using 'NO-TICKET'."
-    TICKET_ID="NO-TICKET"
+case "$response" in
+    [yY][eE][sS]|[yY]|"")
+        echo "   ${GREEN}Running tests...${NC}"
+        RUN_TESTS=true
+        ;;
+    *)
+        echo "   ${YELLOW}Skipping tests.${NC}"
+        echo ""
+        echo "   ${BLUE}You can retrigger this flow later by running:${NC}"
+        echo "      npm run test && npm run test:push"
+        echo ""
+        exit 0
+        ;;
+esac
+
+if [ "$RUN_TESTS" = "true" ]; then
+  echo ""
+  echo "🔒 Verifying test code integrity..."
+  if ! npm run test:integrity; then
+      echo "❌ Test code integrity check failed!"
+      echo "   Please ensure your test code is in sync with main."
+      exit 1
   fi
 
   echo ""
-  echo "🤖 Detected test run. Creating automated report commit for ticket: $TICKET_ID..."
+  echo "🧪 Running automation tests..."
+  echo "   (This may take several minutes...)"
   echo ""
 
-  # Add the report directory (force add since it's ignored)
-  git add -f xyne-automation/report
-
-  # Create the commit without triggering hooks (--no-verify)
-  # Check if there are changes to commit first
-  if ! git diff --cached --quiet; then
-    git commit --no-verify -m "chore: $TICKET_ID added automation test reports"
+  if npm run test; then
     echo ""
-    echo "✅ Created report commit."
+    echo "✅ Tests completed successfully!"
+
     echo ""
-    echo "ℹ️  NOTE: This automation report commit is temporary."
-    echo "    - Jenkins will archive the reports and automatically remove this commit from remote"
+    echo "📤 Pushing test reports to remote for Jenkins processing..."
+    npm run test:push
+  else
     echo ""
-    echo "📤 Push Options:"
-    echo "    [YES] - Push now, then auto-reset HEAD to sync with remote (default)"
-    echo "    [NO]  - You push manually later. Remember to reset HEAD after push"
-    echo "            (If you don't reset, your local will be out of sync with remote)"
+    echo "⚠️  Tests completed with failures."
+    echo "❌ Skipping push — automation tests did not pass."
     echo ""
-    printf "Do you want to push to remote now? [Y/n] "
-    read -r PUSH_NOW
-
-    PUSH_NOW=${PUSH_NOW:-y}
-
-    if [ "$PUSH_NOW" = "y" ] || [ "$PUSH_NOW" = "Y" ]; then
-      CURRENT_BRANCH=$(git branch --show-current)
-
-      echo "🚀 Pushing to remote..."
-      git push --no-verify origin "$CURRENT_BRANCH"
-
-      if [ $? -eq 0 ]; then
-        echo "✅ Push successful."
-        echo "🔄 Resetting HEAD to remove local report commit..."
-        git reset --hard HEAD~1
-        echo "✅ Local HEAD reset complete. Your branch is now synced with remote."
-        echo "    Jenkins will handle the report commit cleanup on remote."
-      else
-        echo "❌ Push failed. Please resolve the issue and push manually."
-        echo "⚠️  Remember to reset HEAD after successful push: git reset --hard HEAD~1"
-      fi
-    else
-      echo ""
-      echo "⚠️  IMPORTANT: After you push manually, make sure to reset HEAD to sync with remote:"
-      echo "    $ git reset --hard HEAD~1"
-      echo ""
-      echo "    Jenkins will automatically remove the temp commit from remote after archiving."
-      echo ""
-    fi
+    echo "   ${BLUE}You can retrigger this flow later by running:${NC}"
+    echo "      npm run test && npm run test:push"
+    echo ""
+    exit 1
   fi
 fi

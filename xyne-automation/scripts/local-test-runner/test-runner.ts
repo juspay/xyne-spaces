@@ -5,6 +5,7 @@ import { setupEnv } from '@/scripts/local-test-runner/test-runner.env';
 import {
   areDevServicesRunning,
   findLatestCucumberReport,
+  git,
   parseCucumberReport,
 } from '@/scripts/local-test-runner/test-runner.helpers';
 import { runStep } from '@/scripts/local-test-runner/test-runner.step';
@@ -16,9 +17,14 @@ async function runTests(): Promise<void> {
   process.chdir(projectRoot);
 
   const { composeProjectName, failedStage } = setupEnv();
+
+  const commitHash = git('rev-parse --short=9 HEAD');
+  const reportName = commitHash;
+
   const env = {
     COMPOSE_PROJECT_NAME: composeProjectName,
     FAILED_STAGE: failedStage,
+    CUSTOM_REPORT_NAME: reportName,
   };
 
   const isDevRunning = areDevServicesRunning();
@@ -78,6 +84,8 @@ async function runTests(): Promise<void> {
         'TEST_ENV=local-test',
         '-e',
         'ENABLE_BROWSER_CONSOLE_LOGS=false',
+        '-e',
+        `CUSTOM_REPORT_NAME=${reportName}`,
         'xyne-automation',
         'sh',
         '-c',

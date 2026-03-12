@@ -1,26 +1,30 @@
+#!/usr/bin/env sh
+
 BRANCH_NAME=$(git branch --show-current)
-LAST_COMMIT_MSG=$(git log -1 --format=%s)
 REMOTE="$1"
 
 REQUIRED_PATTERN="^(fix|feature)\/.+$"
+TEMP_BRANCH_PATTERN="\-test-reports$"
 
-if [[ ! $BRANCH_NAME =~ $REQUIRED_PATTERN ]]; then
+# Block direct push to temp report branches
+if echo "$BRANCH_NAME" | grep -qE "$TEMP_BRANCH_PATTERN"; then
+  echo ""
+  echo "🛑 \033[1;31mPush rejected: Cannot push directly to a test-reports branch.\033[0m"
+  echo ""
+  echo "   Temp branches ending with '-test-reports' are reserved for automated test report flow."
+  echo "   They are created automatically by the post-commit hook and deleted by Jenkins after processing."
+  echo ""
+  echo "   \033[1;33mTo rename your branch:\033[0m"
+  echo "      git branch -m ${BRANCH_NAME} ${BRANCH_NAME%-test-reports}"
+  echo ""
+  exit 1
+fi
+
+if ! echo "$BRANCH_NAME" | grep -qE "$REQUIRED_PATTERN"; then
   echo "Branch naming validation failed!"
   echo "Branch name: '$BRANCH_NAME'"
   echo "Required pattern: (fix|feature)/(name)"
   echo "Please rename your branch using: git branch -m $BRANCH_NAME (fix|feature)/(name)"
-  exit 1
-fi
-
-if echo "$LAST_COMMIT_MSG" | grep -q "added automation test reports"; then
-  echo ""
-  echo "🛑 \033[1;31mPush rejected: preventing accidental push of temporary report commit.\033[0m"
-  echo ""
-  echo "   To push the report and automatically revert the temporary commit (restoring clean branch), run:"
-  echo ""
-  echo "   👉 \033[1;33mgit push $REMOTE $BRANCH_NAME --no-verify\033[0m && \033[1;33mgit reset --hard HEAD~1\033[0m"
-  echo "   \033[0;37m(Only add --force if necessary)\033[0m"
-  echo ""
   exit 1
 fi
 
