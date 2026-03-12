@@ -1,7 +1,7 @@
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { formatDuration } from '../../utils/dateUtils';
-import { CallStatus, type User } from '@xyne/shared';
+import { CallStatus, InvitationResponse, type User } from '@xyne/shared';
 
 export type Call = QueryResultType<typeof queries.userCallHistory>[number];
 
@@ -18,7 +18,9 @@ export function getParticipantUsers(participants: Call['participants'], allUsers
 
 // Check if any participant joined the call
 export function hasAnyoneJoined(participants: Call['participants']): boolean {
-  return (participants || []).some(p => p.joinedAt !== null);
+  return (participants || []).some(
+    p => p.response === InvitationResponse.ACCEPTED || p.response === InvitationResponse.LEFT,
+  );
 }
 
 // Get other participants (excluding current user)
@@ -34,9 +36,11 @@ export function getCallStatus(
   call: Call,
   isOutgoingCall: boolean,
   hasCurrentUserJoined: boolean,
+  userJoinedandLeft: boolean,
   anyoneJoined: boolean,
 ): CallStatusInfo {
   const isCallEnded = call.status === CallStatus.ENDED;
+  const hasCurrentUserParticipated = hasCurrentUserJoined || userJoinedandLeft;
 
   if (isOutgoingCall) {
     // Outgoing call: "No answer" if ended and no one joined
@@ -46,9 +50,9 @@ export function getCallStatus(
     };
   }
 
-  // Incoming call: "Missed" if ended and current user didn't join
+  // Incoming call: "Missed" if ended and current user didn't participate
   return {
-    isMissedCall: isCallEnded && !hasCurrentUserJoined,
+    isMissedCall: isCallEnded && !hasCurrentUserParticipated,
     didNotAnswer: false,
   };
 }
