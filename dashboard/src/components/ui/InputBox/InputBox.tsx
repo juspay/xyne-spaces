@@ -1319,12 +1319,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         </div>
 
         {/* Canvas Attachment Modal */}
-        <CanvasAttachmentModal
-          isOpen={isCanvasAttachmentModalOpen}
-          onClose={() => setIsCanvasAttachmentModalOpen(false)}
-          onSelectCanvas={handleCanvasSelect}
-          onCreateNewCanvas={handleCreateNewCanvas}
-        />
+        {isCanvasAttachmentModalOpen && (
+          <CanvasAttachmentModal
+            isOpen={isCanvasAttachmentModalOpen}
+            onClose={() => setIsCanvasAttachmentModalOpen(false)}
+            onSelectCanvas={handleCanvasSelect}
+            onCreateNewCanvas={handleCreateNewCanvas}
+          />
+        )}
       </div>
     );
   },

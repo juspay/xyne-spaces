@@ -160,13 +160,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
     useState<NewConversationBoundary | null>(null);
 
   const [initialTopMostItemIndex, setInitialTopMostItemIndex] = useState<VirtuosoIndex | null>(
-    !linkedItemCreatedAt &&
-      cachedConversations.length > 0 &&
-      channel?.lastActivityAt &&
-      channelParticipation?.lastViewedAt &&
-      channel?.lastActivityAt < channelParticipation?.lastViewedAt
-      ? { index: 'LAST', align: 'end' }
-      : null,
+    !linkedItemCreatedAt && cachedConversations.length > 0 ? { index: 'LAST', align: 'end' } : null,
   );
   const initialLinkedIdRef = useRef(linkedConversationId);
 
