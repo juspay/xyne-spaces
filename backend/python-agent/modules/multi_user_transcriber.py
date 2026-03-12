@@ -418,7 +418,7 @@ class MultiUserTranscriber:
                     azure_deployment=self._azure_deployment,
                     api_version=self._azure_api_version,
                     api_key=self._azure_api_key,
-                    prompt=stt_prompt
+                    #prompt=stt_prompt
                 )
                 self._shared_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
         return self._shared_stt
