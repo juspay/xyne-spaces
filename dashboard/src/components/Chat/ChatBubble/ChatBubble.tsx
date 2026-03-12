@@ -120,7 +120,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
   const { editingMessageId, requestEdit, stopEditing } = useEditContext();
-  const { setSkipMarkAsRead, setSkipScrollReset } = React.useContext(ConversationTabContext);
+  const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   // Get sender info from useUser hook
   const sender = useUser(message.senderId);
@@ -496,7 +496,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     // Prevent parent component from marking as read on unmount
     setSkipMarkAsRead(true);
     // Prevent scroll position from resetting when lastViewedAt changes
-    setSkipScrollReset(true);
+    // setSkipScrollReset(true);
 
     try {
       void zero.mutate(
@@ -512,7 +512,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       toast.error('Failed to mark as unread. Please try again.');
       // Reset the skip flags since the operation failed
       setSkipMarkAsRead(false);
-      setSkipScrollReset(false);
+      // setSkipScrollReset(false);
     }
   };
 
