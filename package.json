@@ -11,7 +11,8 @@
     "cleanup": "chmod +x scripts/cleanup-storage.sh && ./scripts/cleanup-storage.sh",
     "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js",
     "test": "./xyne-automation/scripts/run-test.sh",
-    "test:integrity": "npm run test:integrity --prefix xyne-automation"
+    "test:integrity": "npm run test:integrity --prefix xyne-automation",
+    "test:push": "./xyne-automation/scripts/push-report-branch.sh"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.1.0",

@@ -19,7 +19,9 @@
     "clean": "rm -rf report/*",
     "lint": "eslint . && npm run type-check",
     "type-check": "tsc --noEmit",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "validate": "(npm run format:check || (npm run format && exit 1)) && npm run lint"
   },
   "keywords": [],
   "author": "Ameer Noufil <ameer.noufil@juspay.com>",

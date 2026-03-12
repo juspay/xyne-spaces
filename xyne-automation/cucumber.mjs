@@ -3,7 +3,7 @@ import * as dotenv from 'dotenv';
 dotenv.config({ quiet: true });
 
 const date = new Date();
-const timestamp = date.toISOString().replace(/[:.]/g, '-');
+const timestamp = process.env.CUSTOM_REPORT_NAME || date.toISOString().replace(/[:.]/g, '-');
 process.env.REPORT_TIMESTAMP = timestamp;
 
 const common = {
@@ -13,7 +13,7 @@ const common = {
     process.env.TEST_ENV === 'local-test'
       ? 'summary'
       : process.env.TEST_ENV !== 'local'
-        ? 'progress-bar'
+        ? 'progress'
         : 'summary',
     `summary:report/${timestamp}/cucumber-summary.log`,
     `json:report/${timestamp}/cucumber-report.json`,
