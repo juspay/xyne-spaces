@@ -1,3 +1,19 @@
+## [1.79.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.78.0...v1.79.0) (2026-03-12)
+
+
+### Features
+
+* Implementation Review is not happening in Plan-Review Loop Workflows ([bf016fb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bf016fb8ba337c9e28f29642b6777e55ab15f9e0)), closes [#4007](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4007)
+
+
+### Bug Fixes
+
+* fix issue of missed call status ([c051cd9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c051cd90ac885659c6b175770f7fe14ee7caf490))
+* fixed call automation ([a5eee1a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a5eee1a27a12ccb06cc91aab4fad1e3b8a738c5b)), closes [#4023](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4023)
+* fixing css in themes\ ([e45b46a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e45b46a43abf03eb365782ac74bac2347390aba8))
+* replaced loadUrl with webContents.reload to prevent app crash ([65f16c6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/65f16c63e17b571f41a7c2bb5cff7719d7011c17)), closes [#3988](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3988)
+* syncing the prompt fix to main ([4ad8823](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4ad88231d411581e88a9879a005bb5257566b075))
+
 ## [1.78.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.77.1...v1.78.0) (2026-03-12)
 
 
