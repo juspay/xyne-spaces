@@ -19,6 +19,7 @@ import type { Counter } from '@opentelemetry/api';
 
 let mainWindow: BrowserWindow | null = null;
 let isCompactMode = false;
+let isReloading = false;
 let normalBounds: { width: number; height: number } | null = null;
 
 export function getMainWindow(): BrowserWindow | null {
@@ -49,7 +50,7 @@ export async function loadApp(window: BrowserWindow) {
         url: targetUrl,
         has_certificate: false,
       });
-      void loadUrl(window, targetUrl, mtlsFrontendLoaded);
+      await loadUrl(window, targetUrl, mtlsFrontendLoaded);
       return;
     } else {
       const isHealthy = await certificateHealthCheck();
@@ -75,14 +76,14 @@ export async function loadApp(window: BrowserWindow) {
     Logger.info(EnrollmentEvent.DASHBOARD_LOAD, {
       url: bundledUrl,
     });
-    void loadUrl(window, bundledUrl, dashboardLoad);
+    await loadUrl(window, bundledUrl, dashboardLoad);
     return;
   }
   else {
     Logger.info(EnrollmentEvent.DASHBOARD_LOAD, {
       url: config.FRONTEND_URL,
     });
-    void loadUrl(window, config.FRONTEND_URL, dashboardLoad);
+    await loadUrl(window, config.FRONTEND_URL, dashboardLoad);
     return;
   }
 }
@@ -172,19 +173,49 @@ export async function createMainWindow(): Promise<BrowserWindow> {
   }
 
   // Track modifier key state for link clicks
-  mainWindow.webContents.on('before-input-event', (event, input) => {
+  mainWindow.webContents.on('before-input-event', async (event, input) => {
     const isMac = process.platform === 'darwin';
     const modifierKey = isMac ? input.meta : input.control;
     
     if (modifierKey && input.shift && input.key.toLowerCase() === 'r') {
       event.preventDefault();
+
+      if (isReloading) {
+        log.info('[WindowManager] hard Reload already in progress, ignoring duplicate request');
+        return;
+      }
+
       log.info('[WindowManager] Hard refresh triggered (Cmd+Shift+R)');
-      if (mainWindow) {
-        // Clear cache before reloading for a true hard refresh
-        void mainWindow.webContents.session.clearCache().then(() => {
-          log.info('[WindowManager] Cache cleared, reloading app...');
-          void loadApp(mainWindow!);
-        });
+      
+      try {
+        if (mainWindow) {
+          isReloading = true;
+          // Clear cache before reloading for a true hard refresh
+          await mainWindow.webContents.session.clearCache();
+          await loadApp(mainWindow);
+        }
+      } catch (error) {
+        log.error('[WindowManager] Error during hard reload:', error);
+      } finally {
+        isReloading = false;
+      }
+    }
+    else if (modifierKey && input.key.toLowerCase() === 'r') {
+      event.preventDefault();
+      if (isReloading) {
+        log.info('[WindowManager] Reload already in progress, ignoring duplicate request');
+        return;
+      }
+      
+      try {
+        if (mainWindow) {
+          isReloading = true;
+          await loadUrl(mainWindow, mainWindow.webContents.getURL());
+        }
+      } catch (error) {
+        log.error('[WindowManager] Error during reload:', error);
+      } finally {
+        isReloading = false;
       }
     }
   });
@@ -331,25 +362,25 @@ function setupSpellcheckerContextMenu(window: BrowserWindow): void {
   log.info('[WindowManager] Spellchecker context menu configured');
 }
 
-export async function loadUrl(window: BrowserWindow, url: string, counter: Counter): Promise<void> {
+export async function loadUrl(window: BrowserWindow, url: string, counter?: Counter): Promise<void> {
   try {
     await window.loadURL(url);
     safeRecordMetric(() => {
-      counter.add(1, { 
+      counter?.add(1, { 
         success: 'true',
         buildVersion: app.getVersion(),
       });
     });
   } catch (error) {
     safeRecordMetric(() => {
-      counter.add(1, { 
+      counter?.add(1, { 
         success: 'false',
         error: 'url_load_error',
         buildVersion: app.getVersion(),
       });
     });
     const errorPage = path.join(__dirname, '..', '..', 'assets', 'load-error.html');
-    void window.loadFile(errorPage);
+    await window.loadFile(errorPage);
   }
 }
 
