@@ -279,13 +279,17 @@ const CallHistoryScreen = (): ReactElement => {
             <h1 className='text-lg font-semibold text-foreground'>Calls</h1>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button className='bg-primary hover:opacity-90 duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8'>
+                <Button
+                  data-testid='new-call-button'
+                  className='bg-primary hover:opacity-90 duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8'
+                >
                   <span className='text-white text-sm leading-5 font-semibold'>New Call</span>
                   <ChevronDown className='size-4 text-white' strokeWidth={2.3} />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align='end' sideOffset={8} className='rounded-xl'>
                 <DropdownMenuItem
+                  data-testid='start-instant-call-option'
                   className='flex gap-2 items-center text-sm rounded-lg'
                   onSelect={() => {
                     setIsInstantCallModalOpen(true);
@@ -295,6 +299,7 @@ const CallHistoryScreen = (): ReactElement => {
                   Start an instant call
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  data-testid='schedule-call-option'
                   className='flex gap-2 items-center text-sm leading-5 rounded-lg'
                   onSelect={() => setIsScheduleModalOpen(true)}
                 >
@@ -367,7 +372,10 @@ const CallHistoryScreen = (): ReactElement => {
         </div>
 
         {/* Call List */}
-        <div className='flex-1 overflow-y-auto max-w-[810px] w-full no-scrollbar'>
+        <div
+          className='flex-1 overflow-y-auto max-w-[810px] w-full no-scrollbar'
+          data-testid='call-history-list'
+        >
           {/* All Tab View */}
           {activeTab === 'all' && (
             <div className='flex flex-col gap-7'>

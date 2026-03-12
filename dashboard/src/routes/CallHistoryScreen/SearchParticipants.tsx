@@ -271,6 +271,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                   : undefined
               }
               aria-autocomplete='list'
+              data-testid='search-participants-input'
             />
           </div>
         </div>
@@ -314,6 +315,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                 ref={listRef}
                 role='listbox'
                 id='participant-listbox'
+                data-testid='participant-search-results'
                 className='p-2 space-y-1 w-full'
               >
                 {filteredOptions.map((option, i) => {
@@ -336,6 +338,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                         onMouseEnter={() => setIndex(index)}
                         data-track-category='calls'
                         data-track-name='select-participant-option'
+                        data-testid='participant-option'
                       >
                         {option.children ? (
                           option.children

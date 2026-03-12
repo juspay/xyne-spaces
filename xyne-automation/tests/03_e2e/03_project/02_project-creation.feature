@@ -10,6 +10,7 @@ Feature: Project Creation E2E Flow
     When I open the Xyne-Space at "/listprojects"
     And I click the button with text "New"
     And I type "user:admin-browser.name - Project" on the element "input[placeholder*='Enter project name']"
+    And I type "PROJ-user:admin-browser.id" on the element "[data-testid='project-code-input']"
     And I type "A test project for channel creation" on the element "textarea[placeholder*='Enter project description']"
     And I click the button with text "Create Project"
     Then I should see "user:admin-browser.name - Project" in the element "body"

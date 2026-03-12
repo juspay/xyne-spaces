@@ -404,7 +404,7 @@ function CallNotificationUI({
       onOpenChange={open => !open && onReject()}
       title={`Incoming ${callType === CallType.VIDEO ? 'Video' : 'Audio'} Call`}
     >
-      <div className='space-y-6'>
+      <div className='space-y-6' data-testid='incoming-call-modal'>
         {/* Visible Title Header */}
         <div className='relative px-6 pt-6 pb-4 border-b border-border dark:border-border'>
           <h2 className='text-lg font-semibold text-foreground dark:text-foreground text-left'>

@@ -1272,7 +1272,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   title='Kanban View'
                   data-track-category='Tickets'
                   data-track-name='SetKanbanView'
-                  data-testid='kanban-view-btn'
                 >
                   <SquareKanban className='w-3.5 h-3.5' />
                 </button>
@@ -1294,7 +1293,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   title='Table View'
                   data-track-category='Tickets'
                   data-track-name='SetTableView'
-                  data-testid='table-view-btn'
                 >
                   <List className='w-3.5 h-3.5' />
                 </button>
@@ -1322,7 +1320,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       viewMode,
                       channelId,
                     })}
-                    data-testid='calendar-view-btn'
                   >
                     <Calendar className='w-3.5 h-3.5' />
                   </button>
@@ -1519,10 +1516,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
-                <button
-                  className='flex items-center gap-2 px-3 py-1.5 bg-background border border-border rounded-xl text-sm font-medium outline-none hover:bg-muted transition-all min-w-[160px]'
-                  data-testid='group-by-dropdown'
-                >
+                <button className='flex items-center gap-2 px-3 py-1.5 bg-background border border-border rounded-xl text-sm font-medium outline-none hover:bg-muted transition-all min-w-[160px]'>
                   <div className='flex items-center gap-2 flex-1'>
                     <span className='text-muted-foreground font-normal'>Group by:</span>
                     {typeof groupBy === 'object' && groupBy.type === 'formField'
@@ -1575,7 +1569,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                             groupBy.fieldId === value.fieldId
                       }
                       onCheckedChange={() => setGroupBy(value as GroupByType)}
-                      data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
                     >
                       <div className='flex items-center gap-3'>
                         <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
