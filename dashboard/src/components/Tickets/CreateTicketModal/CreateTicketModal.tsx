@@ -1861,7 +1861,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     <span className='flex items-center gap-2'>
                       <Copy className='size-3' strokeWidth={2.5} />
                       <p className='text-sm font-medium text-foreground leading-5'>
-                        Similar tickets found
+                        {duplicateCheck?.analysis?.isDuplicate
+                          ? 'Duplicate ticket found'
+                          : 'Similar tickets found'}
                       </p>
                     </span>
                     <Button
@@ -1873,7 +1875,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       <X strokeWidth={2.33} className='size-3.5' />
                     </Button>
                   </div>
-                  {duplicateCheck?.candidates?.slice(0, 5)?.map(candidate => {
+                  {(duplicateCheck?.analysis?.isDuplicate
+                    ? duplicateCheck?.candidates?.slice(0, 1)
+                    : duplicateCheck?.candidates?.slice(0, 5)
+                  )?.map(candidate => {
                     const candidateLink = candidateLinks.get(candidate.id);
 
                     return (

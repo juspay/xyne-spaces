@@ -18,7 +18,7 @@ export interface MeetLinkMetadata {
 
 export interface SamMeetMetaDataPayload {
   xyneTicketId: string;
-  ThreadId: string;
+  threadId: string;
   zohoTicketId: string;
   notificationUrl: string;
 }
@@ -154,7 +154,7 @@ export async function sendMeetMetadataToSam(metadata: MeetLinkMetadata): Promise
     server: 'xyne-spaces',
     data: {
       xyneTicketId: metadata.xyneTicketId,
-      ThreadId: metadata.threadId,
+      threadId: metadata.threadId,
       zohoTicketId: metadata.zohoTicketId,
       notificationUrl: notificationUrl,
     },

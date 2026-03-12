@@ -182,7 +182,7 @@ export class TicketController {
           participationType: 'MENTIONED',
           isSubscribed: true,
         },
-});
+      });
 
       await this.channelRepository.updateLastActivity(channelId);
 
@@ -743,6 +743,7 @@ export class TicketController {
         description,
         projectId,
         userId,
+        parentTicketId,
       }).catch(error => {
         logger.error('Failed to persist duplicate references for ticket', {
           ticketId: ticket.id,
@@ -863,9 +864,10 @@ export class TicketController {
     description: string;
     projectId: string;
     userId: string;
+    parentTicketId?: string;
   }): Promise<void> {
     try {
-      const { ticket, title, description, projectId, userId } = params;
+      const { ticket, title, description, projectId, userId, parentTicketId } = params;
       const { candidates, analysis } = await ticketDuplicateService.checkDuplicates({
         title,
         description,
@@ -873,6 +875,7 @@ export class TicketController {
         userId,
         limit: DUPLICATE_REFERENCE_LIMIT,
         excludeTicketId: ticket.id,
+        parentTicketId,
       });
 
       if (candidates.length === 0) {
