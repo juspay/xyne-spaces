@@ -7,9 +7,9 @@ Feature: Join Call from History Search
 @join-from-history-notification
   Scenario Outline: <user> can decline a call from notification
     Given using browser "<browser>"
-    And I wait for "[role='dialog'][aria-modal='true']" to appear
+    And I wait for "[data-testid='incoming-call-modal']" to appear
     When I click on "button:has(svg.lucide-phone-off)"
-    Then I should not see "[role='dialog'][aria-modal='true']"
+    Then I should not see "[data-testid='incoming-call-modal']"
 
     Examples:
       | user  | browser       |
@@ -20,8 +20,8 @@ Feature: Join Call from History Search
   Scenario: User2 can join a call from history
     Given using browser "user2-browser"
     When I open the Xyne-Space at "/calls"
-    Then I should see the element "[data-testid='call-history-list'] [data-testid='Active']"
-    And I click on "[data-testid='Active']"
+    Then I should see the element "[data-testid='call-history-list']"
+    And I click on "[data-testid='call-join-button']"
     Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"
 
@@ -29,7 +29,7 @@ Feature: Join Call from History Search
     Given using browser "user3-browser"
     When I open the Xyne-Space at "/calls"
     And I dismiss any open dialog
-    Then I should see the element "[data-testid='call-history-list'] [data-testid='Active']"
-    And I click on "[data-testid='Active']"
+    Then I should see the element "[data-testid='call-history-list']"
+    And I click on "[data-testid='call-join-button']"
     Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 3 participant in the element "[data-testid='participant-count']"

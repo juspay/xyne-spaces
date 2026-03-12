@@ -116,6 +116,7 @@ export const ProjectForm = ({
             required={!isEdit}
             disabled={isLoading}
             hintText={`Tickets will be: ${code || 'CODE'}-0001, ${code || 'CODE'}-0002...`}
+            data-testid='project-code-input'
           />
         </div>
       )}

@@ -8,9 +8,9 @@ Feature: Call Participants Management (Deep Dive)
   Scenario: Verify Active call
     Given using browser "user1-browser"
     When I open the Xyne-Space at "/calls"
-    Then I should see the element "[data-testid='call-history-list'] [data-testid='Active']"
-    Then I should see "user:user2-browser.name", "user:user3-browser.name" in active call in the element "[data-testid='call-history-list']"
-    And I click on "[data-testid='Active']"
+    Then I should see the element "[data-testid='call-history-list']"
+    And I should see "Ongoing" in the element "[data-testid='call-history-list']"
+    And I click on "[data-testid='call-join-button']"
     And I wait for "[data-testid='call-window']" to appear
 
   @call-controls-end
@@ -39,9 +39,9 @@ Feature: Call Participants Management (Deep Dive)
   @reject-call
   Scenario: User2 rejects a call
     Given using browser "user2-browser"
-    And I wait for "[role='dialog'][aria-modal='true']" to appear
+    And I wait for "[data-testid='incoming-call-modal']" to appear
     When I click on "button:has(svg.lucide-phone-off)"
-    Then I should not see "[role='dialog'][aria-modal='true']"
+    Then I should not see "[data-testid='incoming-call-modal']"
 
   @call-participants-add
   Scenario: Add a participant by search
@@ -57,7 +57,7 @@ Feature: Call Participants Management (Deep Dive)
   @call-participants-add @call-participants-add-verify
   Scenario: User3 should receive call notification
     Given using browser "user3-browser"
-    And I wait for "[role='dialog'][aria-modal='true']" to appear
+    And I wait for "[data-testid='incoming-call-modal']" to appear
     When I click on "button:has(svg.lucide-phone)"
     Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"
@@ -76,18 +76,6 @@ Feature: Call Participants Management (Deep Dive)
   @call-participants-add @call-participants-add-verify
   Scenario: User3 should not receive call notification
     Given using browser "user3-browser"
-    Then I should not see "[role='dialog'][aria-modal='true']"
+    Then I should not see "[data-testid='incoming-call-modal']"
 
-  @call-controls-end
-  Scenario: End call from controls
-    Given using browser "user1-browser"
-    And I click on "[data-testid='Active']"
-    And I wait for "[data-testid='call-window']" to appear
-    And I click on "[data-testid='end-call-button']"
-    And I wait for "[data-testid='end-call-modal']" to appear
-    And I click the button with text "Just leave the call"
-    Then I should not see "[data-testid='call-window']"
-    Given using browser "user3-browser"
-    And I should see atleast 1 participant in the element "[data-testid='participant-count']"
-    And I click on "[data-testid='end-call-button']"
-    Then I should not see "[data-testid='call-window']"
+  

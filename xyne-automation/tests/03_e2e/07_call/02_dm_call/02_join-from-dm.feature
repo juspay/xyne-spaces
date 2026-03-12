@@ -7,7 +7,7 @@ Feature: Join Call from Direct Message
   @join-from-notification
   Scenario: User can join a call from notification
     Given using browser "user2-browser"
-    And I wait for "[role='dialog'][aria-modal='true']" to appear
+    And I wait for "[data-testid='incoming-call-modal']" to appear
     When I click on "button:has(svg.lucide-phone)"
     Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"

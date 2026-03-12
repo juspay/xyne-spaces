@@ -295,7 +295,6 @@ const ChatDirectory = ({
           }}
           data-track-category='CHAT_SIDEBAR'
           data-track-name='OPEN_MY_TICKETS'
-          data-testid='my-tickets-btn'
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
             <Ticket className='size-4' />

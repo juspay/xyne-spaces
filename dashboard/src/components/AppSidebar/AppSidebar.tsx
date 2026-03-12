@@ -369,6 +369,7 @@ const AppSidebar = (): ReactElement => {
               <div
                 className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90'
                 style={{ backgroundColor: 'var(--sidebar-divider, #CFD4E2)' }}
+                data-testid='profile-icon'
               >
                 {/* Status Emoji at Top Center */}
                 <div
@@ -407,7 +408,10 @@ const AppSidebar = (): ReactElement => {
                 </div>
               </div>
             ) : (
-              <div className='relative w-[32px] h-14 flex flex-col items-center justify-end transition-opacity hover:opacity-90'>
+              <div
+                className='relative w-[32px] h-14 flex flex-col items-center justify-end transition-opacity hover:opacity-90'
+                data-testid='profile-icon'
+              >
                 {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
                 <div className='relative -mb-1.5'>
                   {user ? (

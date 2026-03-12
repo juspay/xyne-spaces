@@ -16,4 +16,4 @@ Feature: Start Call from Direct Message
   @start-from-dm @start-from-dm-verify
   Scenario: User2 sees the call in the DM
     Given using browser "user2-browser"
-    And I wait for "[role='dialog'][aria-modal='true']" to appear
+    And I wait for "[data-testid='incoming-call-modal']" to appear

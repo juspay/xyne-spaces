@@ -16,7 +16,7 @@ Feature: Start Call from Group Chat
   @start-from-group @start-from-group-verify
   Scenario Outline: <user> sees the call in the group chat
     Given using browser "<browser>"
-    And I wait for "[role='dialog'][aria-modal='true']" to appear
+    And I wait for "[data-testid='incoming-call-modal']" to appear
 
     Examples:
       | user  | browser       |

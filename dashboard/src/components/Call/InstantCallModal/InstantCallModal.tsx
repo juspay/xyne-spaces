@@ -115,6 +115,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       open={isOpen}
       onOpenChange={open => !open && handleClose()}
       className='max-w-[584px] rounded-xl overflow-hidden'
+      data-testid='instant-call-modal'
     >
       <div className='flex flex-col w-full'>
         <div className=''>
@@ -128,6 +129,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               tabIndex={-1}
               className='size-7 rounded-lg'
               onClick={handleClose}
+              data-testid='instant-call-modal-close'
             >
               <X className='size-4' />
             </Button>
@@ -150,6 +152,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 size='sm'
                 className='rounded-lg text-[13px]'
                 onClick={handleClose}
+                data-testid='instant-call-cancel-button'
               >
                 Cancel
               </Button>
@@ -159,6 +162,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 onClick={handleSubmit}
                 disabled={selectedParticipants.length === 0}
                 className='rounded-lg text-[13px] text-white bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
+                data-testid='instant-call-start-button'
               >
                 Start Call
               </Button>

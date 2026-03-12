@@ -57,7 +57,6 @@ export const PrioritySubmenu = ({
                 data-track-category='Tickets'
                 data-track-name='TogglePriorityFilter'
                 data-track-metadata={JSON.stringify({ priority, selected: !isSelected })}
-                data-testid={`priority-filter-${priority.toLowerCase()}`}
               >
                 <div className='flex items-center gap-2'>
                   <div className='flex items-center justify-center'>

@@ -466,6 +466,7 @@ export const CallCard = ({
             <Button
               onClick={onCallClick}
               variant='outline'
+              data-testid='call-join-button'
               className={cn(
                 isActiveState && !hasCurrentUserJoined
                   ? 'ring ring-green-200 border-green-600 hover:bg-card rounded-lg h-8'

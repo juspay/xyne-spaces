@@ -7,7 +7,7 @@ Feature: Join Call from Group Chat
   @join-from-notification
   Scenario Outline: <user> can join a call from notification of group
     Given using browser "<browser>"
-    And I wait for "[role='dialog'][aria-modal='true']" to appear
+     And I wait for "[data-testid='incoming-call-modal']" to appear
     When I click on "button:has(svg.lucide-phone)"
     Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"

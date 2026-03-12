@@ -1,4 +1,4 @@
-import {test } from '@playwright/test';
+import { test } from '@playwright/test';
 
 test('test', async ({ page }) => {
   await page.goto('http://localhost:5173/chat/dit');
