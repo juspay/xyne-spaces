@@ -5,7 +5,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { roomActor } from '../../machines/roomMachine';
-import { CallType, CallStatus, ChannelScopeType } from '@xyne/shared';
+import { CallType, CallStatus, ChannelScopeType, InvitationResponse } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -165,13 +165,19 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
       const isOutgoingCall = call.createdByUserId === userId;
       const currentUserParticipant = call.participants?.find(p => p.userId === userId);
-      const hasCurrentUserJoined =
-        currentUserParticipant !== null &&
-        currentUserParticipant?.joinedAt !== null &&
-        currentUserParticipant?.leftAt === null;
-      const anyoneJoined = (call.participants || []).some(p => p.joinedAt !== null);
+      const hasCurrentUserJoined = currentUserParticipant?.response === InvitationResponse.ACCEPTED;
+      const userJoinedandLeft = currentUserParticipant?.response === InvitationResponse.LEFT;
+      const anyoneJoined = (call.participants || []).some(
+        p => p.response === InvitationResponse.ACCEPTED || p.response === InvitationResponse.LEFT,
+      );
 
-      const callStatus = getCallStatus(call, isOutgoingCall, hasCurrentUserJoined, anyoneJoined);
+      const callStatus = getCallStatus(
+        call,
+        isOutgoingCall,
+        hasCurrentUserJoined,
+        userJoinedandLeft,
+        anyoneJoined,
+      );
       return callStatus.isMissedCall;
     });
   }, [recentCalls, userId]);

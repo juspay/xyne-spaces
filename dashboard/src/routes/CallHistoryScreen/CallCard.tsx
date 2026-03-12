@@ -280,6 +280,7 @@ export const CallCard = ({
   const currentUserParticipant = call.participants?.find(p => p.userId === currentUserId);
 
   const hasCurrentUserJoined = currentUserParticipant?.response === InvitationResponse.ACCEPTED;
+  const userJoinedandLeft = currentUserParticipant?.response === InvitationResponse.LEFT;
 
   const otherParticipants = getOtherParticipants(call.participants, currentUserId);
   const allUsersData = useUsers();
@@ -297,6 +298,7 @@ export const CallCard = ({
     call,
     isOutgoingCall,
     hasCurrentUserJoined,
+    userJoinedandLeft,
     anyoneJoined,
   );
 

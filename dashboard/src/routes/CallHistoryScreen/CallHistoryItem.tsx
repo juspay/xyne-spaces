@@ -9,7 +9,7 @@ import {
   Download,
 } from 'lucide-react';
 import AvatarGroup from '../../components/ui/Avatar/AvatarGroup';
-import { type User, CallStatus, ChannelScopeType } from '@xyne/shared';
+import { type User, CallStatus, ChannelScopeType, InvitationResponse } from '@xyne/shared';
 import { formatRelativeTimestamp } from '../../utils/dateUtils';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
 import {
@@ -49,7 +49,8 @@ export function CallHistoryItem({
   // Basic call info
   const isOutgoingCall = call.createdByUserId === currentUserId;
   const currentUserParticipant = call.participants?.find(p => p.userId === currentUserId);
-  const hasCurrentUserJoined = currentUserParticipant?.joinedAt !== null;
+  const hasCurrentUserJoined = currentUserParticipant?.response === InvitationResponse.ACCEPTED;
+  const userJoinedandLeft = currentUserParticipant?.response === InvitationResponse.LEFT;
 
   // Get channel information
   const allChannels = useAllChannels();
@@ -72,6 +73,7 @@ export function CallHistoryItem({
     call,
     isOutgoingCall,
     hasCurrentUserJoined,
+    userJoinedandLeft,
     anyoneJoined,
   );
 
