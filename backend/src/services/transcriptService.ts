@@ -411,7 +411,8 @@ export class TranscriptService {
       });
     } catch (error) {
       logger.error(
-        `[${callId}] transcript_processing_failed | message_id=${messageId}, error=${error}`
+        `[${callId}] transcript_processing_failed | message_id=${messageId}, error=${error instanceof Error ? error.message : JSON.stringify(error)}`,
+        error
       );
       // Throw error to allow controller to return proper error response
       throw error;
@@ -448,7 +449,7 @@ export class TranscriptService {
       );
       return buffer.toString('utf-8');
     } catch (error) {
-      logger.error(`[${callId}] gcs_download_failed | error=${error}, gcs_path=${gcsPath}`);
+      logger.error(`[${callId}] gcs_download_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}, gcs_path=${gcsPath}`, error);
       throw error;
     }
   }
@@ -834,20 +835,20 @@ Output ONLY the processed transcript, nothing else.`;
 
       if (result.status === 'error' || !result.messages.length) {
         logger.error(
-          `[${logCallId}] ai_summary_generation_failed | error=empty_response, status=${result.status}`
+          `[${logCallId}] ai_summary_generation_failed | status=${result.status}, messages_count=${result.messages.length}, result=${JSON.stringify(result)}`
         );
         return null;
       }
 
       const last = result.messages.at(-1);
       if (!last) {
-        logger.error(`[${logCallId}] ai_summary_generation_failed | error=no_messages`);
+        logger.error(`[${logCallId}] ai_summary_generation_failed | error=no_last_message, messages_count=${result.messages.length}`);
         return null;
       }
 
       const markdownContent = 'content' in last ? last.content?.trim() : null;
       if (!markdownContent) {
-        logger.error(`[${logCallId}] ai_summary_generation_failed | error=no_content`);
+        logger.error(`[${logCallId}] ai_summary_generation_failed | error=empty_content, last_message=${JSON.stringify(last)}`);
         return null;
       }
 
@@ -858,7 +859,8 @@ Output ONLY the processed transcript, nothing else.`;
       return markdownContent;
     } catch (error) {
       logger.error(
-        `[${logCallId}] ai_summary_generation_failed | error=${error}, duration_ms=${Date.now() - summaryStart}`
+        `[${logCallId}] ai_summary_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}, duration_ms=${Date.now() - summaryStart}`,
+        error
       );
       return null;
     }
@@ -955,13 +957,13 @@ Output ONLY the processed transcript, nothing else.`;
       });
 
       if (!['completed', 'max_turns'].includes(result.status as string)) {
-        logger.warn('Failed to generate ticket suggestions: Agent returned error or no messages');
+        logger.error(`ticket_suggestions_generation_failed | status=${result.status}, messages_count=${result.messages.length}, result=${JSON.stringify(result)}`);
         return [];
       }
 
       const last = result.messages.at(-1);
       if (!last || !('content' in last) || !last.content) {
-        logger.warn('Failed to generate ticket suggestions: No content in agent response');
+        logger.error(`ticket_suggestions_generation_failed | error=empty_content, last_message=${JSON.stringify(last)}`);
         return [];
       }
 
@@ -977,7 +979,7 @@ Output ONLY the processed transcript, nothing else.`;
       const parsed = JSON.parse(jsonContent);
 
       if (!parsed.suggestions || !Array.isArray(parsed.suggestions)) {
-        logger.warn('Invalid ticket suggestions format: missing or invalid suggestions array');
+        logger.error(`ticket_suggestions_generation_failed | error=invalid_format, parsed=${JSON.stringify(parsed)}`);
         return [];
       }
 
@@ -998,7 +1000,7 @@ Output ONLY the processed transcript, nothing else.`;
       logger.info(`Generated ${suggestions.length} ticket suggestions`);
       return suggestions;
     } catch (error) {
-      logger.error('Failed to generate ticket suggestions:', error);
+      logger.error(`ticket_suggestions_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
       return [];
     }
   }
@@ -1038,12 +1040,13 @@ Output ONLY the processed transcript, nothing else.`;
       const result = await agent.execute({ messages: [createUserMessage(prompt)] });
 
       if (!['completed', 'max_turns'].includes(result.status as string)) {
-        logger.warn('[Pulse] generatePulseData: agent returned non-completed status');
+        logger.error(`[Pulse] generatePulseData_failed | status=${result.status}, messages_count=${result.messages.length}, result=${JSON.stringify(result)}`);
         return [];
       }
 
       const last = result.messages.at(-1);
       if (!last || !('content' in last) || !last.content) {
+        logger.error(`[Pulse] generatePulseData_failed | error=empty_content, last_message=${JSON.stringify(last)}`);
         return [];
       }
 
@@ -1254,15 +1257,15 @@ Output ONLY the processed transcript, nothing else.`;
       const startTime = Date.now();
       const [summary, title, ticketSuggestions] = await Promise.all([
         this.generateCallSummary(formattedTranscript, callId).catch((err) => {
-          logger.error(`Failed to generate summary: ${err}`);
+          logger.error(`[${callId}] generate_summary_threw | error=${err instanceof Error ? err.message : JSON.stringify(err)}`, err);
           return null;
         }),
         this.generateCallTitle(titleInput).catch((err) => {
-          logger.error(`Failed to generate title: ${err}`);
+          logger.error(`[${callId}] generate_title_threw | error=${err instanceof Error ? err.message : JSON.stringify(err)}`, err);
           return null;
         }),
         this.generateTicketSuggestions(formattedTranscript).catch((err) => {
-          logger.error(`Failed to generate ticket suggestions: ${err}`);
+          logger.error(`[${callId}] generate_ticket_suggestions_threw | error=${err instanceof Error ? err.message : JSON.stringify(err)}`, err);
           return [];
         }),
       ]);
@@ -1408,7 +1411,7 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
     } catch (error) {
-      logger.error(`[${callId}] process_call_with_summary_failed | error=${error}`);
+      logger.error(`[${callId}] process_call_with_summary_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
       // Don't re-throw - the transcript was already processed successfully
     }
   }
