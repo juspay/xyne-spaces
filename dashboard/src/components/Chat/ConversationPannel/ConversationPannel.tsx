@@ -203,12 +203,6 @@ const ConversationPannel = ({
     skipMarkAsReadRef.current = skip;
   }, []);
 
-  // Skip scroll reset when marking as unread
-  const skipScrollResetRef = useRef(false);
-  const setSkipScrollReset = useCallback((skip: boolean) => {
-    skipScrollResetRef.current = skip;
-  }, []);
-
   // Track if component has been mounted long enough to be considered "viewed"
   const hasBeenViewedRef = useRef(false);
 
@@ -329,8 +323,6 @@ const ConversationPannel = ({
         setActiveTab: handleTabChange,
         setSkipMarkAsRead,
         skipMarkAsReadRef,
-        setSkipScrollReset,
-        skipScrollResetRef,
       }}
     >
       <div key={`${channelId}-conversation-panel`} className='w-full relative h-full flex flex-col'>
@@ -369,7 +361,6 @@ const ConversationPannel = ({
                   channelId={channelId}
                   projectId={channel?.projectId}
                   channelScopeType={channel?.scopeType}
-                  skipScrollResetRef={skipScrollResetRef}
                 ></ChatListV2>
               ) : latestMessageDetails.type === 'complete' ? (
                 <div className='text-center text-muted-foreground flex-1 flex items-center justify-center'>

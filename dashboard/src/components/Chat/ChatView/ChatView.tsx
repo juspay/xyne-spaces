@@ -9,7 +9,7 @@ import {
   useOutletContext,
   useSearchParams,
 } from 'react-router-dom';
-import ConversationPannel from '../ConversationPannel/ConversationPannel';
+import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import CanvasScreen from '../../Canvas/CanvasScreen';
 import { ChannelSummary, ThreadSummary } from '../Summary';
 import { ThreadMessages } from '../ThreadPannel';
@@ -238,7 +238,7 @@ const ChatView = (): ReactElement => {
               {shouldStackThreadFromParent && conversationId ? (
                 <Outlet />
               ) : (
-                <ConversationPannel
+                <ConversationPanelV2
                   channelId={channelId ?? ''}
                   previousChannelId={previousChannelId}
                 />
@@ -307,7 +307,7 @@ const ChatView = (): ReactElement => {
                 defaultSize={defaultConversationPannelSize}
                 minSize={minConversationPannelSize}
               >
-                <ConversationPannel channelId={channelId} previousChannelId={previousChannelId} />
+                <ConversationPanelV2 channelId={channelId} previousChannelId={previousChannelId} />
               </Panel>
               <Panel defaultSize={defaultSecondaryPanelSize} minSize={minSecondaryPanelSize}>
                 <div className='h-full bg-muted animate-slide-in-from-right'>
@@ -336,7 +336,7 @@ const ChatView = (): ReactElement => {
                     {shouldStackThreadFromParent && conversationId ? (
                       <Outlet />
                     ) : (
-                      <ConversationPannel
+                      <ConversationPanelV2
                         channelId={channelId ?? ''}
                         previousChannelId={previousChannelId}
                       />

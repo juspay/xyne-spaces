@@ -9,6 +9,7 @@ export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
   // Default false for rendering grey horizontal rule
   const [showLines, setShowLines] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef<number | null>(null);
 
   const INITIAL_CHECK_DELAY_MS = 100;
   const STUCK_TO_TOP_TOLERANCE_PX = 2;
@@ -22,7 +23,7 @@ export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
     const scrollContainer = wrapper.closest('[data-virtuoso-scroller]');
     if (!scrollContainer) return;
 
-    const checkIfSticky = () => {
+    const checkIfSticky = (): void => {
       const stickyParent = wrapper.parentElement;
       if (!stickyParent) return;
 
@@ -36,11 +37,23 @@ export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
       setShowLines(!isStuckAtTop);
     };
 
-    scrollContainer.addEventListener('scroll', checkIfSticky, { passive: true });
+    // Throttle the scroll handler with rAF to avoid setState on every scroll frame
+    const onScroll = (): void => {
+      if (rafRef.current !== null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        checkIfSticky();
+        rafRef.current = null;
+      });
+    };
+
+    scrollContainer.addEventListener('scroll', onScroll, { passive: true });
     setTimeout(checkIfSticky, INITIAL_CHECK_DELAY_MS);
 
     return () => {
-      scrollContainer.removeEventListener('scroll', checkIfSticky);
+      scrollContainer.removeEventListener('scroll', onScroll);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
     };
   }, []);
 
@@ -50,9 +63,11 @@ export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
       data-component='date-pill'
       className='relative flex items-center justify-center py-2 bg-transparent'
     >
-      {showLines && (
-        <div className='absolute left-0 right-0 top-1/2 h-px bg-border -translate-y-1/2' />
-      )}
+      {/* Always render the line in the DOM to maintain constant height;
+          toggle visibility via opacity so Virtuoso's height tracking stays stable. */}
+      <div
+        className={`absolute left-0 right-0 top-1/2 h-px bg-gray-300 -translate-y-1/2 transition-opacity duration-150 ${showLines ? 'opacity-100' : 'opacity-0'}`}
+      />
 
       <div className='relative'>
         <Badge variant='outline' className='bg-background'>

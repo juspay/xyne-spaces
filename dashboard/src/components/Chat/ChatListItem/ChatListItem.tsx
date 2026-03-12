@@ -1,5 +1,5 @@
 import { QueryResultType } from '@rocicorp/zero';
-import { ReactElement } from 'react';
+import React, { ReactElement } from 'react';
 import { queries } from '../../../zero/queries';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
 import { DatePill } from '../DatePill';
@@ -21,7 +21,7 @@ type ChatListItemProps = {
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
 };
 
-export const ChatListItem = ({
+const ChatListItemComponent = ({
   item,
   index,
   chatListItems,
@@ -93,3 +93,5 @@ export const ChatListItem = ({
     </div>
   );
 };
+
+export const ChatListItem = React.memo(ChatListItemComponent);

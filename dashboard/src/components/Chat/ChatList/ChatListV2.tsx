@@ -5,6 +5,7 @@ import { queries } from '../../../zero/queries';
 import { useAuth } from '../../../hooks/useAuth';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useCombinedMesseges } from './ChatListV2.utils';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { GroupedVirtuoso, GroupedVirtuosoHandle } from 'react-virtuoso';
 import { DatePill } from '../DatePill';
 import { formatDatePill } from '../../../utils/dateUtils';
@@ -50,6 +51,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const { baseRoute } = useRouteContext();
+  const { isMobile } = usePlatform();
   const [newestConversation, setNewestConversations] = useState<Anchor>(initialItem);
   const [currentNewestConversation, setCurrentNewestConversationId] = useState<Anchor>(initialItem);
   const [oldestConversation, setOldestConversation] = useState<Anchor>(initialItem);
@@ -313,7 +315,10 @@ const ChatListV2: React.FC<ChatListProps> = ({
     }
   }, [conversations]);
 
-  const { dateGroups, groupCounts, combinedMessages } = useCombinedMesseges(conversations);
+  const { dateGroups, groupCounts, combinedMessages } = useCombinedMesseges(
+    conversations,
+    isMobile,
+  );
 
   // Reset indicator state when channelId changes
   useEffect(() => {

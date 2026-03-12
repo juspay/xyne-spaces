@@ -1,6 +1,7 @@
 import { ReactElement, useEffect, useRef, useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import ChatDirectory from '../../components/Chat/ChatDirectory/ChatDirectory';
+import ConversationPrefetcher from '../../components/Chat/ConversationPrefetcher';
 import MobileChatDirectory from '../../components/Chat/ChatDirectory/MobileChatDirectory';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
@@ -74,6 +75,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
 
   return (
     <TypingStateProvider>
+      <ConversationPrefetcher />
       <div
         ref={containerRef}
         className='h-full relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)]'
