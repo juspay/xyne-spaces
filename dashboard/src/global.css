@@ -60,6 +60,8 @@
     --mention-channel-bg: rgba(29, 155, 209, 0.1);
     --mention-channel-hover-bg: rgba(4, 55, 77, 0.1);
     --mention-group-color: #3d74b6;
+    --link-color: #2563eb;
+    --link-hover-color: #1d4ed8;
   }
 
   /* Classic theme - default theme with current design */
@@ -126,6 +128,8 @@
     --mention-channel-bg: rgba(29, 155, 209, 0.1);
     --mention-channel-hover-bg: rgba(4, 55, 77, 0.1);
     --mention-group-color: #3d74b6;
+    --link-color: #2563eb;
+    --link-hover-color: #1d4ed8;
   }
 
   /* Midnight theme - dark theme variant */
@@ -185,6 +189,8 @@
     --mention-channel-bg: rgba(96, 165, 250, 0.1);
     --mention-channel-hover-bg: rgba(96, 165, 250, 0.15);
     --mention-group-color: #60a5fa;
+    --link-color: #2563eb;
+    --link-hover-color: #1d4ed8;
   }
 }
 
@@ -328,6 +334,11 @@
     word-break: break-word;
   }
 
+  /* Inline Code */
+  .chat-input-field code:not(pre code) {
+    @apply bg-gray-100 border border-gray-200 rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-gray-700;
+  }
+
   /* Code Block Inner Code*/
   .chat-input-field pre code {
     @apply bg-transparent border-0 p-0 text-sm leading-6 block overflow-x-auto font-mono text-slate-700;
@@ -439,6 +450,16 @@
   .chat-input-field .ProseMirror .tableWrapper table th {
     background-color: #f9fafb;
     font-weight: 600;
+  }
+
+  /* Link styles in chat input for classic and summer_breeze themes */
+  .chat-input-field .ProseMirror a {
+    color: var(--link-color);
+    text-decoration: underline;
+  }
+
+  .chat-input-field .ProseMirror a:hover {
+    color: var(--link-hover-color);
   }
 
   /* ============================================================================
@@ -1497,6 +1518,17 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 /* --- 2B: Chat Input Editor --- */
 [data-theme="midnight"] .chat-input-field {
   color: #f3f4f6;
+}
+
+[data-theme="midnight"] .chat-input-field pre {
+  background: #1e293b;
+  border-color: #374151;
+}
+
+[data-theme="midnight"] .chat-input-field code:not(pre code) {
+  background: #1f2937;
+  border-color: #374151;
+  color: #d1d5db;
 }
 
 [data-theme="midnight"] .chat-input-field pre code {

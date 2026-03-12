@@ -216,7 +216,7 @@ const ConversationPanelV2 = ({
             <div ref={dragAndDropAreaRef} className='flex-1 flex flex-col overflow-hidden relative'>
               <DragAndDropOverlay isVisible={isDragging} />
               {urlConversationId && !urlCreatedAt ? (
-                <div className='absolute inset-0 flex items-center justify-center bg-white z-50'>
+                <div className='absolute inset-0 flex items-center justify-center bg-background z-50'>
                   <LoadingAnimation
                     source='ConversationPannelV2: getLinkedConversation'
                     url={location.pathname}
@@ -237,7 +237,7 @@ const ConversationPanelV2 = ({
               {shouldShowJoinChannel ? (
                 <JoinChannel channelId={channelId} channelTitle={channel?.name} />
               ) : (
-                <div className='px-4 pt-4 pb-4 bg-white'>
+                <div className='px-4 pt-4 pb-4 bg-background'>
                   <ChatInput
                     autoFocus='end' // eslint-disable-line jsx-a11y/no-autofocus
                     ref={inputRef}

@@ -344,7 +344,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }).configure({
           openOnClick: false,
           HTMLAttributes: {
-            class: 'text-primary hover:text-blue-700 underline cursor-text',
+            class: 'text-link-color hover:text-link-hover-color underline cursor-text',
             rel: 'noopener noreferrer',
           },
         }),
