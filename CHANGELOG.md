@@ -1,3 +1,10 @@
+## [1.84.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.83.2...v1.84.0) (2026-03-13)
+
+
+### Features
+
+* Add missing indexes ([6530e56](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6530e568e9342563a1d309ba34a4407281d62efe)), closes [#4033](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4033)
+
 ## [1.83.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.83.1...v1.83.2) (2026-03-13)
 
 
