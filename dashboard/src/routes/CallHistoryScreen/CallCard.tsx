@@ -36,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import { usePlatform } from '../../hooks/usePlatform';
+import Tooltip from '../../components/ui/Tooltip/Tooltip';
 
 interface UpcomingCallCardProps {
   call: Call;
@@ -292,6 +293,9 @@ export const CallCard = ({
   const isCallJoinable = isScheduledCallJoinable(call);
   const isActiveState = call.status === CallStatus.ACTIVE;
 
+  const isUserChannelMember = !!channel;
+  const hasTranscript = Boolean(call.transcript);
+
   // Determine call status
   const anyoneJoined = hasAnyoneJoined(otherParticipants);
   const { isMissedCall, didNotAnswer } = getCallStatus(
@@ -447,22 +451,42 @@ export const CallCard = ({
             </div>
             {!isActiveState && !isCallJoinable && (
               <>
-                <Button
-                  onClick={handleGotoTranscript}
-                  variant='outline'
-                  size='icon'
-                  className='size-7'
+                <Tooltip
+                  content={
+                    !isUserChannelMember
+                      ? 'You are not a member of this channel'
+                      : 'Go to Call message'
+                  }
+                  delayDuration={300}
                 >
-                  <ScrollText className='size-3.5 text-muted-foreground' />
-                </Button>
-                <Button
-                  onClick={handleDownloadTranscript}
-                  variant='outline'
-                  size='icon'
-                  className='size-7'
+                  <span className={!isUserChannelMember ? 'cursor-not-allowed' : ''}>
+                    <Button
+                      onClick={handleGotoTranscript}
+                      variant='outline'
+                      size='icon'
+                      disabled={!isUserChannelMember}
+                      className='size-7'
+                    >
+                      <ScrollText className='size-3.5 text-muted-foreground' />
+                    </Button>
+                  </span>
+                </Tooltip>
+                <Tooltip
+                  content={!hasTranscript ? 'Transcript not available' : 'Download Transcript'}
+                  delayDuration={300}
                 >
-                  <Download className='size-3.5 text-muted-foreground' />
-                </Button>
+                  <span className={!hasTranscript ? 'cursor-not-allowed' : ''}>
+                    <Button
+                      onClick={handleDownloadTranscript}
+                      variant='outline'
+                      size='icon'
+                      disabled={!hasTranscript}
+                      className='size-7'
+                    >
+                      <Download className='size-3.5 text-muted-foreground' />
+                    </Button>
+                  </span>
+                </Tooltip>
               </>
             )}
             <Button
