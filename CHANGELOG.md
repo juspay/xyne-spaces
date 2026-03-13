@@ -1,3 +1,11 @@
+## [1.82.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.81.0...v1.82.0) (2026-03-13)
+
+
+### Features
+
+* Context rebuild for wait_for_event and manual rerun for workflows ([75af576](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75af576b03b722624a4b4ce2fb4db6e08acd542d)), closes [#4079](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4079)
+* xyne space workflow loop with review ([1631723](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/163172352a3f4a39a857d2ec0981f04fce0db490)), closes [#3765](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3765) [#3855](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3855)
+
 ## [1.81.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.80.0...v1.81.0) (2026-03-13)
 
 
