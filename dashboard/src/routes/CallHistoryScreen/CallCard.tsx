@@ -76,6 +76,7 @@ export const UpcomingCallCard = ({
   const avatarsToShow = userIds.slice(0, MAX_AVATARS_TO_SHOW);
 
   const isCallJoinable = isScheduledCallJoinable(call);
+  const isUserInvited = !!call.participants?.some(p => p.userId === currentUserId);
 
   const handleCopyLink = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -189,19 +190,21 @@ export const UpcomingCallCard = ({
                   </AvatarStackItem>
                 ))}
             </div>
-            <Button
-              onClick={onCallClick}
-              variant='outline'
-              className={cn(
-                ' text-sm font-medium leading-5 rounded-lg h-8 w-20',
-                isCallJoinable
-                  ? 'border-green-600 text-green-600 hover:text-green-700 hover:border-green-700'
-                  : 'border-gray-400 text-gray-400 hover:text-gray-700 hover:border-gray-700',
-                'flex md:hidden',
-              )}
-            >
-              Join Call
-            </Button>
+            {isUserInvited && (
+              <Button
+                onClick={onCallClick}
+                variant='outline'
+                className={cn(
+                  ' text-sm font-medium leading-5 rounded-lg h-8 w-20',
+                  isCallJoinable
+                    ? 'border-green-600 text-green-600 hover:text-green-700 hover:border-green-700'
+                    : 'border-gray-400 text-gray-400 hover:text-gray-700 hover:border-gray-700',
+                  'flex md:hidden',
+                )}
+              >
+                Join Call
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -243,18 +246,20 @@ export const UpcomingCallCard = ({
           )}
         </div>
         <div className='flex gap-2 items-center'>
-          <Button
-            onClick={onCallClick}
-            variant='outline'
-            className={cn(
-              ' text-sm font-medium leading-5 rounded-lg h-8 w-20',
-              isCallJoinable
-                ? 'border-green-600 text-green-600 hover:text-green-700 hover:border-green-700'
-                : 'border-gray-400 text-gray-400 hover:text-gray-700 hover:border-gray-700',
-            )}
-          >
-            Join Call
-          </Button>
+          {isUserInvited && (
+            <Button
+              onClick={onCallClick}
+              variant='outline'
+              className={cn(
+                ' text-sm font-medium leading-5 rounded-lg h-8 w-20',
+                isCallJoinable
+                  ? 'border-green-600 text-green-600 hover:text-green-700 hover:border-green-700'
+                  : 'border-gray-400 text-gray-400 hover:text-gray-700 hover:border-gray-700',
+              )}
+            >
+              Join Call
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -279,6 +284,7 @@ export const CallCard = ({
   // Basic call info
   const isOutgoingCall = call.createdByUserId === currentUserId;
   const currentUserParticipant = call.participants?.find(p => p.userId === currentUserId);
+  const isUserInvited = !!currentUserParticipant;
 
   const hasCurrentUserJoined = currentUserParticipant?.response === InvitationResponse.ACCEPTED;
   const userJoinedandLeft = currentUserParticipant?.response === InvitationResponse.LEFT;
@@ -298,13 +304,15 @@ export const CallCard = ({
 
   // Determine call status
   const anyoneJoined = hasAnyoneJoined(otherParticipants);
-  const { isMissedCall, didNotAnswer } = getCallStatus(
+  const callStatus = getCallStatus(
     call,
     isOutgoingCall,
     hasCurrentUserJoined,
     userJoinedandLeft,
     anyoneJoined,
   );
+  const isMissedCall = isUserInvited ? callStatus.isMissedCall : false;
+  const didNotAnswer = callStatus.didNotAnswer;
 
   const getCallIcon = (): ReactElement => {
     if (isMissedCall) {
@@ -489,36 +497,38 @@ export const CallCard = ({
                 </Tooltip>
               </>
             )}
-            <Button
-              onClick={onCallClick}
-              variant='outline'
-              data-testid='call-join-button'
-              className={cn(
-                isActiveState && !hasCurrentUserJoined
-                  ? 'ring ring-green-200 border-green-600 hover:bg-card rounded-lg h-8'
-                  : isCallJoinable && !hasCurrentUserJoined
-                    ? 'border-border hover:bg-card rounded-lg h-8'
-                    : (isActiveState || isCallJoinable) && hasCurrentUserJoined
-                      ? 'hidden'
-                      : 'size-7',
-                'gap-1.5 items-center',
-              )}
-            >
-              <HuddleIcon
-                color={isActiveState ? '#229C10' : 'hsl(var(--muted-foreground))'}
-                size={12}
-              />
-              {(isActiveState || isCallJoinable) && !hasCurrentUserJoined && (
-                <span
-                  className={cn(
-                    'font-medium text-sm',
-                    isActiveState ? 'text-green-600 hover:text-green-600' : 'text-foreground',
-                  )}
-                >
-                  Join Call
-                </span>
-              )}
-            </Button>
+            {isUserInvited && (
+              <Button
+                onClick={onCallClick}
+                variant='outline'
+                data-testid='call-join-button'
+                className={cn(
+                  isActiveState && !hasCurrentUserJoined
+                    ? 'ring ring-green-200 border-green-600 hover:bg-card rounded-lg h-8'
+                    : isCallJoinable && !hasCurrentUserJoined
+                      ? 'border-border hover:bg-card rounded-lg h-8'
+                      : (isActiveState || isCallJoinable) && hasCurrentUserJoined
+                        ? 'hidden'
+                        : 'size-7',
+                  'gap-1.5 items-center',
+                )}
+              >
+                <HuddleIcon
+                  color={isActiveState ? '#229C10' : 'hsl(var(--muted-foreground))'}
+                  size={12}
+                />
+                {(isActiveState || isCallJoinable) && !hasCurrentUserJoined && (
+                  <span
+                    className={cn(
+                      'font-medium text-sm',
+                      isActiveState ? 'text-green-600 hover:text-green-600' : 'text-foreground',
+                    )}
+                  >
+                    Join Call
+                  </span>
+                )}
+              </Button>
+            )}
           </div>
         </div>
       </div>

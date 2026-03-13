@@ -49,6 +49,7 @@ export function CallHistoryItem({
   // Basic call info
   const isOutgoingCall = call.createdByUserId === currentUserId;
   const currentUserParticipant = call.participants?.find(p => p.userId === currentUserId);
+  const isUserInvited = !!currentUserParticipant;
   const hasCurrentUserJoined = currentUserParticipant?.response === InvitationResponse.ACCEPTED;
   const userJoinedandLeft = currentUserParticipant?.response === InvitationResponse.LEFT;
 
@@ -69,13 +70,15 @@ export function CallHistoryItem({
 
   // Determine call status
   const anyoneJoined = hasAnyoneJoined(otherParticipants);
-  const { isMissedCall, didNotAnswer } = getCallStatus(
+  const callStatus = getCallStatus(
     call,
     isOutgoingCall,
     hasCurrentUserJoined,
     userJoinedandLeft,
     anyoneJoined,
   );
+  const isMissedCall = isUserInvited ? callStatus.isMissedCall : false;
+  const didNotAnswer = callStatus.didNotAnswer;
 
   // Check if transcript is available
   const hasTranscript = Boolean(call.transcript);
