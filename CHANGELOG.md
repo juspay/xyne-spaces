@@ -1,3 +1,17 @@
+## [1.83.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.82.0...v1.83.0) (2026-03-13)
+
+
+### Features
+
+* : Generate release notes ([037e57a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/037e57ad6f26df2001cab0fd4ab0ca8c7682109f)), closes [#3955](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3955)
+* workflow ui improvements and fix ([bc60ced](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bc60ced03c5b1f026972cc71fd3686f78edd07f7)), closes [#4057](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4057)
+
+
+### Bug Fixes
+
+* add disabled state for "dowload transcript" and "go to message" button ([6aceeac](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6aceeacf04c6c4bacf437675eb537fdc263a139e)), closes [#4083](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4083)
+* update the canvas in schedule calls when the last participant leaves the call after joining again ([cb27384](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cb27384ee744fbad9f8ecf6018e27881088956cd)), closes [#3987](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3987)
+
 ## [1.82.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.81.0...v1.82.0) (2026-03-13)
 
 
