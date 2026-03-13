@@ -11,17 +11,18 @@ import {
   Ghost,
   Laugh,
   Skull,
+  UserRoundCog,
 } from 'lucide-react';
 import { AgentInfo } from './AgentChatView.utils';
 
 export interface AgentAvatarProps {
   agentInfo: AgentInfo;
-  size?: 'sm' | 'md';
+  size?: 'xs' | 'sm' | 'md';
 }
 
 export const AgentAvatar: React.FC<AgentAvatarProps> = ({ agentInfo, size = 'md' }) => {
-  const dim = size === 'sm' ? 'w-6 h-6' : 'w-8 h-8';
-  const iconSize = size === 'sm' ? 14 : 18;
+  const dim = size === 'xs' ? 'w-4 h-4' : size === 'sm' ? 'w-6 h-6' : 'w-8 h-8';
+  const iconSize = size === 'xs' ? 10 : size === 'sm' ? 14 : 18;
 
   const renderIcon = () => {
     switch (agentInfo.icon) {
@@ -45,6 +46,8 @@ export const AgentAvatar: React.FC<AgentAvatarProps> = ({ agentInfo, size = 'md'
         return <GitBranch size={iconSize} strokeWidth={2.5} />;
       case 'bug':
         return <Bug size={iconSize} strokeWidth={2.5} />;
+      case 'user-round-cog':
+        return <UserRoundCog size={iconSize} strokeWidth={2.5} />;
       case 'bot':
       default:
         return <Bot size={iconSize} strokeWidth={2.5} />;

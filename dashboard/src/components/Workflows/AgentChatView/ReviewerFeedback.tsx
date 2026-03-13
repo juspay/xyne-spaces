@@ -1,4 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+import { usePlatform } from '../../../hooks/usePlatform';
 export interface ReviewIssue {
   file: string;
   line: string | number;
@@ -278,85 +280,156 @@ function getSeverityStyle(severity: string): { icon: string; colorClass: string 
 export interface ReviewerFeedbackProps {
   issues: ReviewIssue[];
   suggestions?: string[];
+  /** Callback for mobile 'View more' - opens drawer/modal */
+  onViewMore?: () => void;
+  /** Disable truncation entirely (e.g. in a modal) */
+  disableTruncation?: boolean;
+  /** Max height in px before truncating (default 300) */
+  maxHeightPx?: number;
 }
 
-export const ReviewerFeedback: React.FC<ReviewerFeedbackProps> = ({ issues, suggestions }) => {
+export const ReviewerFeedback: React.FC<ReviewerFeedbackProps> = ({
+  issues,
+  suggestions,
+  onViewMore,
+  disableTruncation = false,
+  maxHeightPx = 300,
+}) => {
+  const { isMobile } = usePlatform();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [needsTruncation, setNeedsTruncation] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (disableTruncation) return;
+    if (contentRef.current) {
+      setNeedsTruncation(contentRef.current.scrollHeight > maxHeightPx + 40);
+    }
+  }, [issues, suggestions, disableTruncation, maxHeightPx]);
+
   const groupedIssues = useMemo(() => {
     if (!issues || issues.length === 0) return [];
     const groups = new Map<string, ReviewIssue[]>();
     issues.forEach(issue => {
-      if (!groups.has(issue.file)) {
-        groups.set(issue.file, []);
-      }
+      if (!groups.has(issue.file)) groups.set(issue.file, []);
       groups.get(issue.file)!.push(issue);
     });
     return Array.from(groups.entries());
   }, [issues]);
 
+  const handleViewMore = (): void => {
+    if (isMobile && onViewMore) {
+      onViewMore();
+    } else {
+      setIsExpanded(v => !v);
+    }
+  };
+
+  const shouldTruncate = !disableTruncation && needsTruncation && !isExpanded;
+
   if ((!issues || issues.length === 0) && (!suggestions || suggestions.length === 0)) return null;
 
   return (
-    <div className='flex flex-col mt-1.5 text-[13px] text-foreground/90 font-sans'>
-      <p className='font-medium mb-3'>I have reviewed the code. Here are my findings:</p>
+    <div className='relative'>
+      <div
+        ref={contentRef}
+        className='flex flex-col mt-1.5 text-[13px] text-foreground/90 font-sans overflow-hidden'
+        style={
+          shouldTruncate
+            ? {
+                maxHeight: `${maxHeightPx}px`,
+                maskImage: 'linear-gradient(to bottom, black 80%, transparent 100%)',
+                WebkitMaskImage: 'linear-gradient(to bottom, black 80%, transparent 100%)',
+              }
+            : undefined
+        }
+      >
+        <p className='font-medium mb-3'>I have reviewed the code. Here are my findings:</p>
 
-      {/* Issues grouped by file */}
-      {groupedIssues.map(([filePath, fileIssues], idx) => {
-        const fileName = filePath.split('/').pop() || filePath;
+        {groupedIssues.map(([filePath, fileIssues], idx) => {
+          const fileName = filePath.split('/').pop() || filePath;
 
-        return (
-          <div key={idx} className='flex flex-col mb-4'>
-            <p className='font-semibold mb-2'>
-              <code className='bg-muted/80 px-1.5 py-0.5 rounded'>{fileName}</code>
-            </p>
-            <ul className='flex flex-col gap-2 pl-0.5'>
-              {fileIssues.map((issue, issueIdx) => {
-                const { icon } = getSeverityStyle(issue.severity);
+          return (
+            <div key={idx} className='flex flex-col mb-4'>
+              <p className='font-semibold mb-2'>
+                <code className='bg-muted/80 px-1.5 py-0.5 rounded'>{fileName}</code>
+              </p>
+              <ul className='flex flex-col gap-2 pl-0.5'>
+                {fileIssues.map((issue, issueIdx) => {
+                  const { icon } = getSeverityStyle(issue.severity);
 
-                return (
-                  <li key={issueIdx} className='flex items-start gap-2 leading-relaxed'>
-                    <span className='mt-[1px] flex-shrink-0 text-sm'>{icon}</span>
-                    <div className='min-w-0 flex-1'>
-                      <span className='font-bold uppercase text-[11px] mr-1.5 tracking-wider text-foreground/80'>
-                        {issue.severity}
-                      </span>
-                      <span className='font-mono text-[11px] text-muted-foreground mr-1.5'>
-                        ({formatLineDisplay(issue.line)}):
-                      </span>
-                      <span className='break-words text-foreground/90'>{issue.message}</span>
+                  return (
+                    <li key={issueIdx} className='flex items-start gap-2 leading-relaxed'>
+                      <span className='mt-[1px] flex-shrink-0 text-sm'>{icon}</span>
+                      <div className='min-w-0 flex-1'>
+                        <span className='font-bold uppercase text-[11px] mr-1.5 tracking-wider text-foreground/80'>
+                          {issue.severity}
+                        </span>
+                        <span className='font-mono text-[11px] text-muted-foreground mr-1.5'>
+                          ({formatLineDisplay(issue.line)}):
+                        </span>
+                        <span className='break-words text-foreground/90'>{issue.message}</span>
 
-                      {/* Suggestion for this specific issue */}
-                      {issue.suggestion && (
-                        <div className='mt-1.5 pl-3 border-l-2 border-blue-400/50'>
-                          <span className='text-[11px] text-blue-400 font-medium'>
-                            Suggestion:{' '}
-                          </span>
-                          <span className='text-[12px] text-foreground/70'>{issue.suggestion}</span>
-                        </div>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
+                        {issue.suggestion && (
+                          <div className='mt-1.5 pl-3 border-l-2 border-blue-400/50'>
+                            <span className='text-[11px] text-blue-400 font-medium'>
+                              Suggestion:{' '}
+                            </span>
+                            <span className='text-[12px] text-foreground/70'>
+                              {issue.suggestion}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })}
+
+        {suggestions && suggestions.length > 0 && (
+          <div className='flex flex-col mt-2 pt-3 border-t border-border/50'>
+            <p className='font-semibold mb-2 text-foreground/80'>💡 Suggestions</p>
+            <ul className='flex flex-col gap-1.5'>
+              {suggestions.map((suggestion, idx) => (
+                <li
+                  key={idx}
+                  className='text-[12px] text-foreground/70 pl-2 border-l-2 border-muted-foreground/30'
+                >
+                  {suggestion}
+                </li>
+              ))}
             </ul>
           </div>
-        );
-      })}
+        )}
+      </div>
 
-      {/* Top-level suggestions */}
-      {suggestions && suggestions.length > 0 && (
-        <div className='flex flex-col mt-2 pt-3 border-t border-border/50'>
-          <p className='font-semibold mb-2 text-foreground/80'>💡 Suggestions</p>
-          <ul className='flex flex-col gap-1.5'>
-            {suggestions.map((suggestion, idx) => (
-              <li
-                key={idx}
-                className='text-[12px] text-foreground/70 pl-2 border-l-2 border-muted-foreground/30'
-              >
-                {suggestion}
-              </li>
-            ))}
-          </ul>
-        </div>
+      {needsTruncation && !disableTruncation && (
+        <button
+          onClick={handleViewMore}
+          className='flex items-center gap-1 mt-2 text-[11px] font-medium text-sky-600 hover:text-sky-700 transition-colors'
+          data-track-category='Workflows'
+          data-track-name='ViewMoreReviewerFeedback'
+        >
+          {isMobile ? (
+            <>
+              <ChevronDown size={12} />
+              View more
+            </>
+          ) : isExpanded ? (
+            <>
+              <ChevronUp size={12} />
+              Read less
+            </>
+          ) : (
+            <>
+              <ChevronDown size={12} />
+              View more
+            </>
+          )}
+        </button>
       )}
     </div>
   );
