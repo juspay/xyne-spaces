@@ -28,6 +28,7 @@ import type { AgentConfigVersions } from '../workflow-types'
 import { redisService } from '@/services/redisService'
 import { DatabaseClient } from '@/database/client'
 import { createKnowledgeCanvas, getCanvasUrl } from '@/services/canvasService'
+import { config as appConfig } from '@/config/env'
 import type { KnowledgeLearning } from '../utils/knowledge-generator'
 import { websocketService } from '@/services/websocketService'
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service'
@@ -3009,11 +3010,12 @@ export class DBWorkflowStorage implements WorkflowStorage {
       : { type: 'litellm' as const, config: modifiedProviderConfig as LiteLLMConfig };
 
     // Build AgentConfig using defaults + DB overrides
+    const defaultModelName = appConfig.workflow.defaultModelName || dbAgent.model.name
     const agentConfig: AgentConfig = {
       // Model config - merge DB data with defaults
       model: {
         provider: providerConfig,
-        defaultModel: dbAgent.model.name,
+        defaultModel: defaultModelName,
         features: defaultConfig.model.features,
         ...(dbAgent.temp !== null && { temperature: dbAgent.temp }),
       },

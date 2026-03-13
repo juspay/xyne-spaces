@@ -179,12 +179,14 @@ async function runTests(): Promise<void> {
       const pending = [...steps.slice(stepIndex + 1), ...cleanupSteps].map((s) => s.title);
 
       if (firstError) {
+        ui.startStep(stepIndex, step.title);
         ui.addResult({
           title: step.title,
           status: 'skipped',
           duration: 0,
           description: 'Skipped due to previous failure',
         });
+        ui.endStep('skipped');
         stepIndex++;
         continue;
       }
@@ -199,7 +201,7 @@ async function runTests(): Promise<void> {
         if (result.status === 'passed') {
           completedSteps.add(step.title);
         }
-        ui.endStep(true);
+        ui.endStep(result.status);
       } catch (error) {
         const duration = Date.now() - stepStart;
         ui.addResult({
@@ -208,7 +210,7 @@ async function runTests(): Promise<void> {
           duration: duration,
           error: error instanceof Error ? error.message : String(error),
         });
-        ui.endStep(false);
+        ui.endStep('failed');
         firstError = error;
       }
       stepIndex++;
@@ -227,7 +229,7 @@ async function runTests(): Promise<void> {
       try {
         const result = await runStep(step, pending, ui);
         ui.addResult(result);
-        ui.endStep(true);
+        ui.endStep(result.status);
       } catch (error) {
         // Cleanup step failed
         const duration = Date.now() - stepStart;
@@ -237,7 +239,7 @@ async function runTests(): Promise<void> {
           duration: duration,
           error: error instanceof Error ? error.message : String(error),
         });
-        ui.endStep(false);
+        ui.endStep('failed');
         // We don't stop cleanup if one cleanup step fails, usually.
         // But if `docker down` fails, maybe we should stop?
         // Let's continue best-effort.

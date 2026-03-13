@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import chalk from 'chalk';
 
 import { formatDuration, git } from '@/scripts/local-test-runner/test-runner.helpers';
@@ -26,15 +27,24 @@ export class TestRunnerUI {
   private gitHash = '';
   private gitDate = '';
   private isSummaryShown = false;
+  private isPlainMode: boolean;
 
   constructor(totalSteps: number) {
     this.totalSteps = totalSteps;
+    this.isPlainMode = process.env.OUTPUT_MODE === 'plain' || !process.stdout.isTTY;
   }
 
   public start(): void {
     this.scriptStartTime = Date.now();
     this.gitHash = git('rev-parse --short HEAD');
     this.gitDate = git("log -1 --pretty=format:'%ar'").replace(/^'|'$/g, '');
+
+    if (this.isPlainMode) {
+      console.log('🧪 XYNE AUTOMATION TEST RUNNER');
+      console.log(`Commit: ${this.gitHash} | ${this.gitDate}`);
+      console.log();
+      return;
+    }
 
     process.stdout.write(HIDE_CURSOR);
     process.stdout.write(CLEAR_SCREEN);
@@ -131,10 +141,20 @@ export class TestRunnerUI {
   }
 
   public startStep(index: number, title: string): void {
-    this.clearLogs();
     this.currentStepIndex = index;
     this.currentTitle = title;
     this.stepStartTime = Date.now();
+
+    if (this.isPlainMode) {
+      if (index > 0) {
+        console.log();
+      }
+      const stepText = `Step ${index + 1}/${this.totalSteps}`;
+      console.log(`[ ] ${stepText} - ${title}`);
+      return;
+    }
+
+    this.clearLogs();
 
     if (this.spinnerInterval) clearInterval(this.spinnerInterval);
 
@@ -147,7 +167,17 @@ export class TestRunnerUI {
     this.updateStatusLine(this.spinnerFrames[0], chalk.cyan);
   }
 
-  public endStep(success: boolean): void {
+  public endStep(status: 'passed' | 'failed' | 'skipped'): void {
+    if (this.isPlainMode) {
+      const elapsed = formatDuration(Date.now() - this.stepStartTime);
+      const icon = status === 'passed' ? '[OK]' : status === 'failed' ? '[FAIL]' : '[SKIP]';
+      const stepText = `Step ${this.currentStepIndex + 1}/${this.totalSteps}`;
+      console.log(`${icon} ${stepText} - ${this.currentTitle} (${elapsed})`);
+      return;
+    }
+
+    const success = status === 'passed';
+
     if (this.spinnerInterval) {
       clearInterval(this.spinnerInterval);
       this.spinnerInterval = null;
@@ -164,6 +194,12 @@ export class TestRunnerUI {
   }
 
   public log(data: string): void {
+    if (this.isPlainMode) {
+      // eslint-disable-next-line no-control-regex
+      const cleanData = data.replace(/\u001b\[\d+m/g, '');
+      console.log(cleanData);
+      return;
+    }
     // Ensure we are in the scroll region (not strictly necessary if we just write to stdout,
     // effectively logs append to bottom, forcing scroll if in region)
     // But to be safe, we just write.
@@ -201,6 +237,44 @@ export class TestRunnerUI {
 
   public printSummary(testStats?: TestStatistics, htmlReportPath?: string): void {
     this.isSummaryShown = true;
+
+    if (this.isPlainMode) {
+      console.log();
+      console.log('EXECUTION SUMMARY');
+      console.log();
+
+      if (this.stepResults.length > 0) {
+        this.stepResults.forEach((result) => {
+          const icon =
+            result.status === 'passed' ? '[OK]' : result.status === 'failed' ? '[FAIL]' : '[SKIP]';
+
+          const durationStr = `(${formatDuration(result.duration)})`;
+          console.log(`${icon} ${result.title} ${durationStr}`);
+
+          if (result.description) {
+            console.log(`     - ${result.description}`);
+          }
+
+          if (result.error) {
+            console.log(`     - Error: ${result.error}`);
+          }
+
+          if (result.title === 'Running the tests' && testStats) {
+            const statsStr = `${testStats.passed} passed, ${testStats.failed} failed, ${testStats.skipped} skipped, ${testStats.total} total`;
+            console.log(`     - Test Cases: ${statsStr}`);
+
+            if (htmlReportPath) {
+              console.log(`     - Report: file://${htmlReportPath}`);
+            }
+          }
+        });
+      } else {
+        console.log('No steps executed.');
+      }
+
+      console.log();
+      return;
+    }
 
     // Reset scroll region so summary prints normally without being cut off
     process.stdout.write(`${ESC}r`);
@@ -290,11 +364,14 @@ export class TestRunnerUI {
   }
 
   public showCursor(): void {
+    if (this.isPlainMode) return;
     process.stdout.write(SHOW_CURSOR);
   }
 
   public cleanup(): void {
     if (this.spinnerInterval) clearInterval(this.spinnerInterval);
+
+    if (this.isPlainMode) return;
 
     process.stdout.write(`${ESC}r`);
 

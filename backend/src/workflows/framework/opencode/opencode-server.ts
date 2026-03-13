@@ -4,6 +4,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { logger } from '@/utils/logger'
+import { repositories } from '@/database/repositories'
 
 interface OpenCodeServerInstance {
   url: string
@@ -122,107 +123,10 @@ class OpenCodeServerManager {
       if (appConfig.openCode.pluginEnabled) {
         const pluginVersion = appConfig.openCode.pluginVersion || 'latest'
         config.plugin = [`oh-my-opencode@${pluginVersion}`]
-        
+
+        await this.ensureOhMyOpencodeConfig()
+
         logger.info(`[OpenCode] Enabling oh-my-opencode plugin (version: ${pluginVersion})`)
-        config['oh-my-opencode'] = {
-          default_agent: 'sisyphus',
-          permission: {
-            external_directory: 'deny'
-          },
-          sisyphus_agent: {
-            disabled: false,
-            default_builder_enabled: true,
-            planner_enabled: true,
-            force_lsp_verification: true,
-            edit_retry_on_failure: true,
-            edit_max_retries: 3,
-            verify_todos_before_completion: true,
-          },
-          disabled_hooks: [
-            'auto-update-checker',
-            'startup-toast',
-            'session-notification',
-          ],
-          agents: {
-            sisyphus: {
-              model: `litellm/${appConfig.openCode.model || 'glm-latest'}`,
-              temperature: 0.1,
-              permission: {
-                external_directory: 'deny'
-              }
-            },
-            explore: {
-              model: `litellm/${appConfig.openCode.model || 'glm-latest'}`,
-              temperature: 0.1,
-              permission: {
-                external_directory: 'deny'
-              }
-            },
-            librarian: {
-              model: `litellm/${appConfig.openCode.model || 'glm-latest'}`,
-              temperature: 0.1,
-              permission: {
-                external_directory: 'deny'
-              }
-            },
-            oracle: {
-              permission: {
-                external_directory: 'deny'
-              }
-            },
-            'multimodal-looker': {
-              permission: {
-                external_directory: 'deny'
-              }
-            },
-            metis: {
-              permission: {
-                external_directory: 'deny'
-              }
-            },
-            momus: {
-              permission: {
-                external_directory: 'deny'
-              }
-            },
-            atlas: {
-              permission: {
-                external_directory: 'deny'
-              }
-            },
-            prometheus: {
-              permission: {
-                external_directory: 'deny'
-              }
-            },
-            'sisyphus-junior': {
-              permission: {
-                external_directory: 'deny'
-              }
-            }
-          },
-          background_task: {
-            defaultConcurrency: 5,
-            providerConcurrency: {
-              litellm: 8
-            },
-            sessionStartDelay: 200,
-            timeout: 0,
-            defaultBlockTimeout: 600000
-          },
-          experimental: {
-            preemptive_compaction: true,
-            preemptive_compaction_threshold: 0.85
-          },
-          tools: {
-            lsp_diagnostics: true,
-            lsp_goto_definition: true,
-            lsp_find_references: true,
-            lsp_symbols: true,
-            lsp_prepare_rename: true,
-            lsp_rename: true
-          }
-        }
         config.lsp = {
           'typescript-language-server': {
             command: ['typescript-language-server', '--stdio'],
@@ -231,46 +135,43 @@ class OpenCodeServerManager {
             disabled: false
           }
         }
-        config.hooks = {
-          PostToolUse: [
-            {
-              matcher: 'Write|Edit|MultiEdit',
-              hooks: [
-                {
-                  type: 'command',
-                  command: 'if [[ "$FILE" == *"/dashboard/"* ]]; then npx prettier --write "$FILE" 2>/dev/null || true; fi'
-                }
-              ]
-            }
-          ]
-        }
       }
       if (appConfig.litellm.baseUrl) {
         const baseURL = appConfig.litellm.baseUrl.replace(/\/$/, '')
-        const modelId = appConfig.openCode.model || 'glm-latest'
-        config.model = `litellm/${modelId}`
+        const litellmModels = await repositories.models.findByProvider('litellm-api')
+        const defaultModelId = appConfig.openCode.model || 'glm-latest'
+
+        const modelsConfig: Record<string, unknown> = {}
+        for (const model of litellmModels) {
+          modelsConfig[model.userDefinedId] = {
+            name: model.userDefinedId,
+            limit: {
+              context: 200000,
+              output: 8192
+            },
+            tool_call: true
+          }
+        }
+
+        const effectiveDefault = modelsConfig[defaultModelId]
+          ? defaultModelId
+          : (litellmModels[0]?.userDefinedId || 'glm-latest')
+
+        config.model = `litellm/${effectiveDefault}`
 
         config.provider = {
           litellm: {
             npm: '@ai-sdk/openai-compatible',
             name: 'LiteLLM',
-            timeout: 900000,
             options: {
               baseURL,
               apiKey: appConfig.litellm.apiKey || '',
             },
-            models: {
-              [modelId]: {
-                name: modelId,
-                limit: {
-                  context: 200000,
-                  output: 8192
-                },
-                tool_call: true
-              }
-            }
+            models: modelsConfig
           }
         }
+
+        logger.info(`[OpenCode] Registered ${Object.keys(modelsConfig).length} litellm models from DB: ${Object.keys(modelsConfig).join(', ')}`)
       } else if (process.env.ANTHROPIC_API_KEY) {
         config.provider = { anthropic: {} }
         config.model = appConfig.openCode.model || 'claude-sonnet-4-20250514'
@@ -320,16 +221,108 @@ class OpenCodeServerManager {
     }
   }
 
+  private async ensureOhMyOpencodeConfig(): Promise<void> {
+    const configDir = path.join(os.homedir(), '.config', 'opencode')
+    const configPath = path.join(configDir, 'oh-my-opencode.json')
+    const modelId = appConfig.openCode.model || 'glm-latest'
+    const modelRef = `litellm/${modelId}`
+
+    const ohMyOpencodeConfig = {
+      default_agent: 'sisyphus',
+      permission: { external_directory: 'deny' },
+      sisyphus_agent: {
+        disabled: false,
+        default_builder_enabled: true,
+        planner_enabled: true,
+        force_lsp_verification: true,
+        edit_retry_on_failure: true,
+        edit_max_retries: 3,
+        verify_todos_before_completion: true
+      },
+      disabled_hooks: ['auto-update-checker', 'startup-toast', 'session-notification'],
+      agents: {
+        sisyphus: {
+          model: modelRef,
+          temperature: 0.1,
+          permission: { external_directory: 'deny' }
+        },
+        explore: {
+          model: modelRef,
+          temperature: 0.1,
+          permission: { external_directory: 'deny' }
+        },
+        librarian: {
+          model: modelRef,
+          temperature: 0.1,
+          permission: { external_directory: 'deny' }
+        },
+        oracle: { permission: { external_directory: 'deny' } },
+        'multimodal-looker': { permission: { external_directory: 'deny' } },
+        metis: { permission: { external_directory: 'deny' } },
+        momus: { permission: { external_directory: 'deny' } },
+        atlas: { permission: { external_directory: 'deny' } },
+        prometheus: { permission: { external_directory: 'deny' } },
+        'sisyphus-junior': { permission: { external_directory: 'deny' } }
+      },
+      background_task: {
+        defaultConcurrency: 5,
+        providerConcurrency: { litellm: 8 },
+        sessionStartDelay: 200,
+        timeout: 0,
+        defaultBlockTimeout: 600000
+      },
+      experimental: {
+        preemptive_compaction: true,
+        preemptive_compaction_threshold: 0.85
+      },
+      tools: {
+        lsp_diagnostics: true,
+        lsp_goto_definition: true,
+        lsp_find_references: true,
+        lsp_symbols: true,
+        lsp_prepare_rename: true,
+        lsp_rename: true
+      },
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: 'Write|Edit|MultiEdit',
+            hooks: [
+              {
+                type: 'command',
+                command:
+                  'if [[ "$FILE" == *"/dashboard/"* ]]; then npx prettier --write "$FILE" 2>/dev/null || true; fi'
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+    try {
+      await fs.promises.mkdir(configDir, { recursive: true })
+      await fs.promises.writeFile(
+        configPath,
+        JSON.stringify(ohMyOpencodeConfig, null, 2)
+      )
+      logger.info(`[OpenCode] Wrote oh-my-opencode config to ${configPath}`)
+    } catch (err) {
+      logger.warn('[OpenCode] Failed to write oh-my-opencode.json:', err)
+    }
+  }
+
   private async ensureModelsCachePopulated(): Promise<void> {
     if (!appConfig.litellm.baseUrl) {
       logger.info('[OpenCode] No LiteLLM provider configured, skipping cache population')
       return
     }
 
-    const modelId = appConfig.openCode.model || 'glm-latest'
     const cacheDir = path.join(os.homedir(), '.cache', 'oh-my-opencode')
 
     try {
+      const litellmModels = await repositories.models.findByProvider('litellm')
+      const modelIds = litellmModels.map(m => m.userDefinedId)
+
       await fs.promises.mkdir(cacheDir, { recursive: true })
 
       const connectedProvidersPath = path.join(cacheDir, 'connected-providers.json')
@@ -346,7 +339,7 @@ class OpenCodeServerManager {
       const providerModelsPath = path.join(cacheDir, 'provider-models.json')
       const providerModels = {
         models: {
-          litellm: [modelId]
+          litellm: modelIds
         },
         connected: ['litellm'],
         updatedAt: new Date().toISOString()
@@ -355,6 +348,7 @@ class OpenCodeServerManager {
         providerModelsPath,
         JSON.stringify(providerModels, null, 2)
       )
+      logger.info(`[OpenCode] ✅ Populated cache with ${modelIds.length} models`)
     } catch (error) {
       logger.warn('[OpenCode] Failed to populate model cache:', error)
     }

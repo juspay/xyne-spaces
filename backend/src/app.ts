@@ -442,11 +442,6 @@ export class App {
     await metricsSyncQueue.initialize();
     await metricsSyncQueue.runInitialSync();
 
-    // Initialize and start model sync queue (Bull-based scheduling)
-    logger.info('Initializing model sync queue...');
-    await modelSyncQueue.initialize();
-    await modelSyncQueue.runInitialSync();
-
     // Initialize presence cleanup queue (Bull-based scheduling)
     logger.info('Initializing presence cleanup queue...');
     await presenceCleanupQueue.initialize();
@@ -479,6 +474,11 @@ export class App {
     // Synchronize config.json with database before starting other services
     logger.info('Synchronizing configuration with database...');
     await configSyncService.syncConfigWithDatabase();
+
+    // Initialize and start model sync queue (Bull-based scheduling)
+    logger.info('Initializing model sync queue...');
+    await modelSyncQueue.initialize();
+    await modelSyncQueue.runInitialSync();
 
     // Initialize Superposition client early to fail fast if misconfigured
     logger.info('Initializing Superposition client...');

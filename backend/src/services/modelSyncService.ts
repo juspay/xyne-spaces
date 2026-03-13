@@ -1,5 +1,5 @@
 import { logger } from '@/utils/logger';
-import { repositories } from '@/database/repositories';
+import { db } from '@/database/client';
 import { config } from '@/config/env';
 
 const EXCLUDED_MODEL_PATTERNS = /^(claude|gemini)/i;
@@ -26,20 +26,22 @@ class ModelSyncService {
       const modelIds = allModelIds.filter((modelId) => !modelId.match(EXCLUDED_MODEL_PATTERNS));
       logger.info(`Fetched ${allModelIds.length} models from LiteLLM, syncing ${modelIds.length} hosted models (filtered out Claude/Gemini)`);
 
-      for (const modelId of modelIds) {
-        try {
-          await repositories.models.upsert(modelId, {
-            userDefinedId: modelId,
-            name: modelId,
-            provider: 'litellm',
-            credentials: JSON.stringify({}),
-          });
-        } catch (error) {
-          logger.debug(`Failed to sync model ${modelId}: ${error}`);
-        }
-      }
+      // Delete all existing litellm-api models
+      await db.model.deleteMany({
+        where: { provider: 'litellm-api' }
+      });
 
-      logger.info(`Model sync completed successfully`);
+      // Create fresh models with userDefinedId as "modelName-litellm-api"
+      await db.model.createMany({
+        data: modelIds.map(modelId => ({
+          userDefinedId: `${modelId}-litellm-api`,
+          name: modelId,
+          provider: 'litellm-api',
+          credentials: JSON.stringify({}),
+        })),
+      });
+
+      logger.info(`Model sync completed: ${modelIds.length} models synced`);
     } catch (error) {
       logger.error('Error syncing models from LiteLLM:', error);
       throw error;

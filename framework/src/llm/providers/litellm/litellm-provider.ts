@@ -433,7 +433,7 @@ export class LiteLLMProvider extends BaseProvider {
 
   private convertToLiteLLMRequest(request: LLMRequest, streaming = false): LiteLLMRequest {
     // Convert system prompt to system message if present
-    const convertedMessages = convertMessages(request.messages, request.model);
+    const convertedMessages = convertMessages(request.messages);
     const allMessages = request.systemPrompt 
       ? [{ role: 'system' as const, content: request.systemPrompt }, ...convertedMessages]
       : convertedMessages;

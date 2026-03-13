@@ -513,6 +513,31 @@ The following files contain L2 logic and changes to them indicate L2-level modif
       { name: "todo-write", status: ToolStatus.ENABLED }
     ]
   },
+  "xyne-cli-reviewer": {
+    systemPrompt: ENHANCED_AI_ASSISTANT_PROMPT,
+    tools: [
+      { name: "read", status: ToolStatus.ENABLED },
+      { name: "write", status: ToolStatus.ENABLED },
+      { name: "grep", status: ToolStatus.ENABLED },
+      { name: "glob", status: ToolStatus.ENABLED },
+      { name: "ls", status: ToolStatus.ENABLED },
+      { name: "bash", status: ToolStatus.ENABLED },
+      { name: "todo-write", status: ToolStatus.ENABLED }
+    ]
+  },
+  "xyne-cli-test-fixer": {
+    systemPrompt: ENHANCED_AI_ASSISTANT_PROMPT,
+    tools: [
+      { name: "read", status: ToolStatus.ENABLED },
+      { name: "write", status: ToolStatus.ENABLED },
+      { name: "edit", status: ToolStatus.ENABLED },
+      { name: "multiedit", status: ToolStatus.ENABLED },
+      { name: "grep", status: ToolStatus.ENABLED },
+      { name: "glob", status: ToolStatus.ENABLED },
+      { name: "ls", status: ToolStatus.ENABLED },
+      { name: "todo-write", status: ToolStatus.ENABLED }
+    ]
+  },
   "document-summarization-agent": {
     systemPrompt: "You are a network document analyst. Analyze network documents and provide actionable insights.\n\nProvide:\n- 2-3 sentence executive summary\n- Key findings\n- Action items with deadlines and priority\n- Risk assessment\n- Tags for categorization\n- Priority level (LOW/MEDIUM/HIGH/CRITICAL)\n- Recommendation (action needed / review / informational)\n\nReturn results as JSON.",
     tools: [

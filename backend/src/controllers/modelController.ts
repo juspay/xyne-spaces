@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { repositories } from '../database/repositories';
+import { modelSyncService } from '../services/modelSyncService';
 import { 
   CreateModelInput,
   UpdateModelInput
@@ -206,6 +207,20 @@ export class ModelController {
     } catch (error) {
       logger.error('Error getting models by name:', error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  syncModelsWithLiteLLM = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      logger.info('Manual model sync triggered via API');
+      await modelSyncService.syncWithLiteLLM();
+      res.status(200).json({ message: 'Model sync completed successfully' });
+    } catch (error) {
+      logger.error('Error syncing models with LiteLLM:', error);
+      res.status(500).json({
+        error: 'Failed to sync models with LiteLLM',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   };
 }

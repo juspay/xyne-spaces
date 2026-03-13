@@ -24,6 +24,7 @@ export {
   createXyneSpacesAgentConfig,
   extractLastMessageContent,
   parseVerificationResult,
+  parseReviewComments,
   validateRepoUrl,
   XyneSpacesWorkflowSteps,
   SYSTEM_PROMPTS,
@@ -31,9 +32,5 @@ export {
   // Agent configuration factories
   getPlanningConfig,
   getImplementationConfig,
+  getReviewConfig,
 } from './utils'
-
-// Export types for external usage
-export type {
-  // These types would be defined in the workflow file if needed externally
-} from './xyneSpacesFeatureImplementationWorkflow'
