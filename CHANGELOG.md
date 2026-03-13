@@ -1,3 +1,10 @@
+## [1.81.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.80.0...v1.81.0) (2026-03-13)
+
+
+### Features
+
+* Daily Channels Recaps ([f0f823e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f0f823e4e0e7747dc2f432a11c6d0c3ab60985c5)), closes [#4019](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4019)
+
 ## [1.80.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.79.0...v1.80.0) (2026-03-13)
 
 
