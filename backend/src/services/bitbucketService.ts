@@ -357,6 +357,7 @@ export class BitbucketService {
     return {
       id: pr.id,
       title: pr.title,
+      description: pr.description,
       state: pr.state,
       url: pr.links.self[0]?.href || '',
       mergedAt: new Date(pr.updatedDate).toISOString(),

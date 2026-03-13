@@ -82,6 +82,8 @@ import Tooltip from '../../ui/Tooltip';
 import WorkflowTriggerModal from '../../Workflow/WorkflowTriggerModal';
 import { SHAREABLE_ORIGIN } from '../../../config';
 import ApprovalNudgeBanner from './ApprovalNudgeBanner';
+import { isReleaseTicket } from '@xyne/shared';
+import { generateReleaseNotes } from '../../../services/ticketBoardService';
 
 const formatTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp);
@@ -189,6 +191,95 @@ const TicketKeyValuePair = ({
   );
 };
 
+interface ReleaseNotesButtonProps {
+  metadata: { releaseNotesCanvasUrl?: string; isGeneratingReleaseNotes?: boolean } | null;
+
+  isGeneratingReleaseNotes: boolean;
+  onGenerate: () => Promise<unknown>;
+  onGeneratingChange: (isGenerating: boolean) => void;
+}
+
+const ReleaseNotesButton: React.FC<ReleaseNotesButtonProps> = ({
+  metadata,
+  isGeneratingReleaseNotes,
+  onGenerate,
+  onGeneratingChange,
+}) => {
+  const canvasUrl = metadata?.releaseNotesCanvasUrl;
+  const isGenerating = isGeneratingReleaseNotes || (metadata?.isGeneratingReleaseNotes ?? false);
+  const navigate = useNavigate();
+
+  const handleViewClick = (): void => {
+    void navigate(canvasUrl!);
+  };
+
+  const handleGenerateClick = (): void => {
+    onGeneratingChange(true);
+    void onGenerate()
+      .then(() => {
+        toast.success('Release notes generated successfully', {
+          description: 'The release notes canvas has been created and posted to the conversation.',
+          duration: 2000,
+        });
+      })
+      .catch(error => {
+        toast.error('Failed to generate release notes', {
+          description: error instanceof Error ? error.message : 'Please try again.',
+          duration: 2000,
+        });
+      })
+      .finally(() => {
+        onGeneratingChange(false);
+      });
+  };
+
+  const config = canvasUrl
+    ? {
+        onClick: handleViewClick,
+        trackName: 'ViewReleaseNotes',
+        testId: 'view-release-notes-button',
+        iconClass: 'bg-green-100 text-green-700',
+        label: 'View Release Notes',
+        description: 'Open the generated release notes canvas',
+        disabled: false,
+      }
+    : {
+        onClick: handleGenerateClick,
+        trackName: 'GenerateReleaseNotes',
+        testId: 'generate-release-notes-button',
+        iconClass: 'bg-purple-100 text-purple-700',
+        label: isGenerating ? 'Generating...' : 'Generate Release Notes',
+        description: 'Create release-notes for this release',
+        disabled: isGenerating,
+      };
+
+  return (
+    <button
+      type='button'
+      onClick={config.onClick}
+      disabled={config.disabled}
+      data-track-category='Tickets'
+      data-track-name={config.trackName}
+      data-testid={config.testId}
+      className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 shadow-sm hover:shadow-md hover:border-gray-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed'
+    >
+      <span className='inline-flex items-center gap-3'>
+        <span
+          className={`flex h-9 w-9 items-center justify-center rounded-full ${config.iconClass}`}
+        >
+          <FileText size={18} />
+        </span>
+        <span className='flex flex-col text-left'>
+          <span className='text-sm font-semibold text-gray-900'>{config.label}</span>
+          <span className='text-xs text-gray-600'>{config.description}</span>
+        </span>
+      </span>
+      <ArrowRight
+        className={`h-4 w-4 text-gray-500 transition-transform group-hover:translate-x-0.5 ${isGenerating ? 'animate-pulse' : ''}`}
+      />
+    </button>
+  );
+};
 export const TicketDetails: React.FC<TicketDetailsProps> = ({
   ticketId,
   onNavigateToTicket,
@@ -243,6 +334,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   } | null>(null);
   const [showBoardChangeConfirmDialog, setShowBoardChangeConfirmDialog] = useState(false);
   const [pendingBoardChange, setPendingBoardChange] = useState<string | null>(null);
+  const [isGeneratingReleaseNotes, setIsGeneratingReleaseNotes] = useState(false);
 
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId }));
@@ -2588,6 +2680,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </button>
         </div>
       )}
+
+      {/* Generate/View Release Notes Button - shown for completed Release/Hotfix tickets */}
+      {ticket &&
+        isReleaseTicket(ticket.ticketType as BaseTicketType) &&
+        ticket.statusV2 === TicketStatusV2.COMPLETED && (
+          <div className='mt-4'>
+            <ReleaseNotesButton
+              metadata={
+                ticket.metadata as {
+                  releaseNotesCanvasUrl?: string;
+                  isGeneratingReleaseNotes?: boolean;
+                } | null
+              }
+              onGenerate={async () => await generateReleaseNotes(ticketId)}
+              isGeneratingReleaseNotes={isGeneratingReleaseNotes}
+              onGeneratingChange={setIsGeneratingReleaseNotes}
+            />
+          </div>
+        )}
 
       {/* Sub-Tickets Section */}
       <div className='mt-6 space-y-6' data-testid='sub-tickets-section'>
