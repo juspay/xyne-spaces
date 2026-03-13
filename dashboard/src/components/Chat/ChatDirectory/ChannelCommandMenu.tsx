@@ -907,6 +907,43 @@ const ChannelCommandMenu = ({
           return;
         }
 
+        // ── Arrow key handling ───────────────────────────────────────────────
+        // cmdk expects a Command.Input with cmdk-input attribute for focus management.
+        // Since we use LexicalSearchInput (ContentEditable), cmdk's native arrow key
+        // navigation doesn't work. We manually manage aria-selected for navigation.
+        // See: https://github.com/pacocoursey/cmdk/issues/322
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          const items = commandRef.current?.querySelectorAll(
+            '[cmdk-item]:not([aria-disabled="true"])',
+          );
+          if (!items || items.length === 0) return;
+
+          // Find current selection (-1 if nothing selected yet)
+          const currentIndex = Array.from(items).findIndex(
+            item => item.getAttribute('aria-selected') === 'true',
+          );
+
+          // Calculate next index
+          let nextIndex: number;
+          if (e.key === 'ArrowDown') {
+            nextIndex =
+              currentIndex < 0 ? 0 : currentIndex >= items.length - 1 ? 0 : currentIndex + 1;
+          } else {
+            nextIndex = currentIndex <= 0 ? items.length - 1 : currentIndex - 1;
+          }
+
+          // Update aria-selected on all items
+          items.forEach((item, i) => {
+            item.setAttribute('aria-selected', i === nextIndex ? 'true' : 'false');
+          });
+
+          // Scroll into view if needed
+          items[nextIndex]?.scrollIntoView({ block: 'nearest' });
+
+          e.preventDefault();
+          return;
+        }
+
         // ── Enter handling ───────────────────────────────────────────────────
         if (e.key !== 'Enter') return;
 
