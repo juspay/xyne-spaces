@@ -19,9 +19,9 @@ import {
 } from './types'
 import { 
   executeBuildCode,
-  executeRemoteConformanceTesting,
-  executeLocalTesting,
-  executeBoilerCode
+  // executeRemoteConformanceTesting,
+  // executeLocalTesting,
+  // executeBoilerCode
 } from './utils'
 import { createRequirementAnalysisTemplate } from './templates/requirement-analysis-template'
 import {logger} from '@/utils/logger';
@@ -173,24 +173,24 @@ logger.info('Generated Implementation Prompt->:',prompt);
 // WORKFLOW IMPLEMENTATION
 // =============================================================================
 const fidoServerWorkflowInputSchema = BaseWorkflowContextSchema.extend({
-  repositoryUrl: z.string(),
+  repositoryUrl: z.string().describe('Enter in SSH format (e.g., ssh://git@github.com/example-org/xyne-spaces.git)'),
   maxIterations: z.number().positive().optional(),
-  repoBranch: z.string().optional(),
-  baseBranch: z.string(),
-  preCommit: z.string().optional(),
+  repoBranch: z.string().optional().describe('Custom branch name (e.g., feature-branch), branch should not exist in the repository'),
+  baseBranch: z.string().describe('Enter branch name from where new branch will be created (e.g., main)'),
+  preCommit: z.string().optional().describe('Custom text before commit message (e.g., "JIRA-1234 | Auto Commit")'),
   buildCommand: z.string().optional(),
-  testDetails: z.array(z.object({
-    filename: z.string(),
-    command: z.string(),
-    parameters: z.array(z.string())
-  })).optional(),
+  // testDetails: z.array(z.object({
+  //   filename: z.string(),
+  //   command: z.string(),
+  //   parameters: z.array(z.string())
+  // })).optional(),
   description: z.string(),
-  instructions: z.string().optional(),
-  ispoller: z.boolean().default(false),
-  connectorName: z.string().optional(),
-  connectorBaseUrl: z.string().optional(),
+  instructions: z.string().optional().describe('Additional instructions or context for the workflow execution (e.g., use AGENTS.md for agent guidelines)'),
+  // ispoller: z.boolean().default(false),
+  // connectorName: z.string().optional(),
+  // connectorBaseUrl: z.string().optional(),
   type: z.nativeEnum(FidoWorkType).optional(),
-  custom: z.record(z.string(), z.unknown()).optional()
+  // custom: z.record(z.string(), z.unknown()).optional()
 })
 const FidoServerWorkflowContextMapper = (payload: z.infer<typeof fidoServerWorkflowInputSchema> & {ticketId: string}): FidoServerWorkflowContext => ({
    ...baseContextMapper(payload),
@@ -202,12 +202,12 @@ const FidoServerWorkflowContextMapper = (payload: z.infer<typeof fidoServerWorkf
   instructions: payload.instructions,
   preCommit: payload.preCommit,
   buildCommand: payload.buildCommand,
-  testDetails: payload.testDetails,
-  ispoller: payload.ispoller,
+  // testDetails: payload.testDetails,
+  // ispoller: payload.ispoller,
   type: payload.type,
-  connectorName: payload.connectorName,
-  connectorBaseUrl: payload.connectorBaseUrl,
-  custom: payload.custom,
+  // connectorName: payload.connectorName,
+  // connectorBaseUrl: payload.connectorBaseUrl,
+  // custom: payload.custom,
 })
 export const fidoServerWorkflow: WorkflowDefinition<
   FidoServerWorkflowContext,
@@ -231,45 +231,45 @@ export const fidoServerWorkflow: WorkflowDefinition<
       description,
       preCommit,
       buildCommand,
-      testDetails,
-      ispoller,
+      // testDetails,
+      // ispoller,
       type,
-      connectorName,
+      // connectorName,
       instructions,
-      connectorBaseUrl,
-      custom,
+      // connectorBaseUrl,
+      // custom,
       maxIterations = 10,
     } = context
-    if(!baseBranch){
-    baseBranch = typeof (custom as any)?.baseBranch === 'string' ? (custom as any).baseBranch : 'main'
-    }
-    if(!repoBranch && typeof (custom as any)?.repoBranch === 'string'){
-    repoBranch = typeof (custom as any)?.repoBranch === 'string' ? (custom as any).repoBranch : undefined
-    }
-    if(!description && typeof (custom as any)?.description === 'string'){
-    description = typeof (custom as any)?.description === 'string' ? (custom as any).description : undefined
-    }
-    if(!buildCommand && typeof (custom as any)?.buildCommand === 'string'){
-    buildCommand = typeof (custom as any)?.buildCommand === 'string' ? (custom as any).buildCommand : undefined
-    }
-    if(!testDetails && Array.isArray((custom as any)?.testDetails)){
-    testDetails = Array.isArray((custom as any)?.testDetails) ? (custom as any).testDetails : undefined
-    }
-    if(!ispoller && typeof (custom as any)?.ispoller === 'boolean'){
-    ispoller = typeof (custom as any)?.ispoller === 'boolean' ? (custom as any).ispoller : undefined
-    }
-    if(!type && typeof (custom as any)?.type === 'string'){
-    const typeString = typeof (custom as any)?.type === 'string' ? (custom as any).type : undefined;
-    type = typeString && Object.values(FidoWorkType).includes(typeString as FidoWorkType) ? typeString as FidoWorkType : undefined;
-    }
-    if(!connectorName && typeof (custom as any)?.connectorName === 'string'){
-    connectorName = typeof (custom as any)?.connectorName === 'string' ? (custom as any).connectorName : undefined;
-    }
-    if(!connectorBaseUrl && typeof (custom as any)?.connectorBaseUrl === 'string'){
-    connectorBaseUrl = typeof (custom as any)?.connectorBaseUrl === 'string' ? (custom as any).connectorBaseUrl : undefined;
-    }
-    console.log('Workflow input parameters:', { custom })
-    console.log('Parsed workflow parameters:', { repositoryUrl, repoBranch, baseBranch, description, buildCommand, testDetails, ispoller, type, connectorName, connectorBaseUrl })
+    // if(!baseBranch){
+    // baseBranch = typeof (custom as any)?.baseBranch === 'string' ? (custom as any).baseBranch : 'main'
+    // }
+    // if(!repoBranch && typeof (custom as any)?.repoBranch === 'string'){
+    // repoBranch = typeof (custom as any)?.repoBranch === 'string' ? (custom as any).repoBranch : undefined
+    // }
+    // if(!description && typeof (custom as any)?.description === 'string'){
+    // description = typeof (custom as any)?.description === 'string' ? (custom as any).description : undefined
+    // }
+    // if(!buildCommand && typeof (custom as any)?.buildCommand === 'string'){
+    // buildCommand = typeof (custom as any)?.buildCommand === 'string' ? (custom as any).buildCommand : undefined
+    // }
+    // if(!testDetails && Array.isArray((custom as any)?.testDetails)){
+    // testDetails = Array.isArray((custom as any)?.testDetails) ? (custom as any).testDetails : undefined
+    // }
+    // if(!ispoller && typeof (custom as any)?.ispoller === 'boolean'){
+    // ispoller = typeof (custom as any)?.ispoller === 'boolean' ? (custom as any).ispoller : undefined
+    // }
+    // if(!type && typeof (custom as any)?.type === 'string'){
+    // const typeString = typeof (custom as any)?.type === 'string' ? (custom as any).type : undefined;
+    // type = typeString && Object.values(FidoWorkType).includes(typeString as FidoWorkType) ? typeString as FidoWorkType : undefined;
+    // }
+    // if(!connectorName && typeof (custom as any)?.connectorName === 'string'){
+    // connectorName = typeof (custom as any)?.connectorName === 'string' ? (custom as any).connectorName : undefined;
+    // }
+    // if(!connectorBaseUrl && typeof (custom as any)?.connectorBaseUrl === 'string'){
+    // connectorBaseUrl = typeof (custom as any)?.connectorBaseUrl === 'string' ? (custom as any).connectorBaseUrl : undefined;
+    // }
+    // console.log('Workflow input parameters:', { custom })
+    // console.log('Parsed workflow parameters:', { repositoryUrl, repoBranch, baseBranch, description, buildCommand, testDetails, ispoller, type, connectorName, connectorBaseUrl })
 
     // Build commit message function if preCommit is provided
     const getCommitMessage = buildGetCommitMessage(preCommit)
@@ -283,44 +283,44 @@ export const fidoServerWorkflow: WorkflowDefinition<
       repoUrl: repositoryUrl,
       hasCommits: false
     }
-     let branchCreated: string | undefined = undefined;
-    if(connectorName && connectorBaseUrl){
-      logger.info('Connector details provided, executing boiler code generation checkpoint...')
-    const boilerCode = await workflow.createCheckpoint(FidoEnhancedWorkflowStepsEnum.PRE_REQUIREMENT_STEP, executeBoilerCode,repositoryUrl,baseBranch, connectorName, connectorBaseUrl )
-    if(boilerCode.success){
-      logger.info('Boiler code generation successful, proceeding with workflow execution.')
-         branchCreated = boilerCode.branchName;
-         repoBranch=branchCreated;
-    }
-    else{
-      logger.error('Boiler code generation failed, terminating workflow execution.')
-      return {
-      ticketId,
-      status: 'failed',
-      implementationDetails: {
-        filesChanged: [], 
-        commitHash: gitInfo.commitHash,
-        branch: gitInfo.branch,
-        buildPassed: false,
-        conformancePassed: false,
-        iterationsCompleted: 0
-      },
-      summary: 'Boiler code generation failed.',
-      gitInfo
-    }
-    }
-  }
-  else{
-    logger.info('No connector details provided, skipping boiler code generation checkpoint.')
-  }
+  //    let branchCreated: string | undefined = undefined;
+  //   if(connectorName && connectorBaseUrl){
+  //     logger.info('Connector details provided, executing boiler code generation checkpoint...')
+  //   const boilerCode = await workflow.createCheckpoint(FidoEnhancedWorkflowStepsEnum.PRE_REQUIREMENT_STEP, executeBoilerCode,repositoryUrl,baseBranch, connectorName, connectorBaseUrl )
+  //   if(boilerCode.success){
+  //     logger.info('Boiler code generation successful, proceeding with workflow execution.')
+  //        branchCreated = boilerCode.branchName;
+  //        repoBranch=branchCreated;
+  //   }
+  //   else{
+  //     logger.error('Boiler code generation failed, terminating workflow execution.')
+  //     return {
+  //     ticketId,
+  //     status: 'failed',
+  //     implementationDetails: {
+  //       filesChanged: [], 
+  //       commitHash: gitInfo.commitHash,
+  //       branch: gitInfo.branch,
+  //       buildPassed: false,
+  //       conformancePassed: false,
+  //       iterationsCompleted: 0
+  //     },
+  //     summary: 'Boiler code generation failed.',
+  //     gitInfo
+  //   }
+  //   }
+  // }
+  // else{
+  //   logger.info('No connector details provided, skipping boiler code generation checkpoint.')
+  // }
     // =========================================================================
     // PHASE 1: REQUIREMENT UNDERSTANDING
     // =========================================================================
     // Extract workflow description from custom context (if provided)
     console.log(' Starting requirement analysis phase...',description)
-    console.log('featurevalidationtype:', testDetails?.map((td: any) => td.filename))
+    // console.log('featurevalidationtype:', testDetails?.map((td: any) => td.filename))
     console.log(' Starting requirement analysis phase...',description)
-    console.log('featurevalidationtype:', testDetails?.map((td: any) => td.filename))
+    // console.log('featurevalidationtype:', testDetails?.map((td: any) => td.filename))
     const requirementConfig = getEnhancedRequirementAnalysisConfig(repositoryUrl, repoBranch, baseBranch, description, type, getCommitMessage)
     const requirementResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(
       FidoEnhancedWorkflowStepsEnum.REQUIREMENT_ANALYSIS,
@@ -379,59 +379,60 @@ export const fidoServerWorkflow: WorkflowDefinition<
           return LoopControl.CONTINUE
         }
       }
-        console.log(' Implementation compiles successfully!', testDetails);
+        // console.log(' Implementation compiles successfully!', testDetails);
         buildPassed = true;
-        if (testDetails && Array.isArray(testDetails) && testDetails.length > 0) {
-            let allValidationsPassed = true;
-            if(ispoller){
-              for (const testDetail of testDetails) {
-                console.log(`🌐 Executing feature conformance testing for: ${testDetail.filename}...`);
-                 conformanceResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.DETERMINISTIC_TESTING, executeRemoteConformanceTesting, testDetail, repositoryUrl , gitInfo.branch);
-                 if(conformanceResult){
-                    const { success , output  } = conformanceResult;
-                    console.log(` feature Conformance Results for ${testDetail.filename} - Success: ${success} -- ${output}`);
-                    if (!success) {
-                        allValidationsPassed = false;
-                        break;
-                    }
-                 } else {
-                    console.log(` Conformance Results for ${testDetail.filename} - No results returned.`);
-                    allValidationsPassed = false;
-                    break;
-                 }
-            }
-            }
-            else{
-              console.log('ispoller is false, skipping feature conformance testing.');
-              for (const testDetail of testDetails) {
-                console.log(`🌐 Executing feature conformance testing for: ${testDetail.filename}...`);
-                 conformanceResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.DETERMINISTIC_TESTING, executeLocalTesting, repositoryUrl , gitInfo.branch, testDetail,buildResult!.workingDirectory);
-                 if(conformanceResult){
-                    const { success , output  } = conformanceResult;
-                    console.log(` feature Conformance Results for ${testDetail.filename} - Success: ${success} -- ${output}`);
-                    if (!success) {
-                        allValidationsPassed = false;
-                    }
-                 } else {
-                    console.log(` Conformance Results for ${testDetail.filename} - No results returned.`);
-                    allValidationsPassed = false;
-                 }
-            }
-            }
-            if (allValidationsPassed) {
-                console.log('All validation types passed successfully!');
-                conformancePassed = true;
-                return LoopControl.BREAK;
-            } else {
-                console.log(' Some validations failed, continuing implementation loop to fix errors.');
-                conformancePassed = false;
-                return LoopControl.CONTINUE;
-            }
-        } else {
-            console.log(' No feature validation types specified, marking as complete.');
-            conformancePassed = true;
-            return LoopControl.BREAK;
-        }
+        // if (testDetails && Array.isArray(testDetails) && testDetails.length > 0) {
+        //     let allValidationsPassed = true;
+        //     if(ispoller){
+        //       for (const testDetail of testDetails) {
+        //         console.log(`🌐 Executing feature conformance testing for: ${testDetail.filename}...`);
+        //          conformanceResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.DETERMINISTIC_TESTING, executeRemoteConformanceTesting, testDetail, repositoryUrl , gitInfo.branch);
+        //          if(conformanceResult){
+        //             const { success , output  } = conformanceResult;
+        //             console.log(` feature Conformance Results for ${testDetail.filename} - Success: ${success} -- ${output}`);
+        //             if (!success) {
+        //                 allValidationsPassed = false;
+        //                 break;
+        //             }
+        //          } else {
+        //             console.log(` Conformance Results for ${testDetail.filename} - No results returned.`);
+        //             allValidationsPassed = false;
+        //             break;
+        //          }
+        //     }
+        //     }
+        //     else{
+        //       console.log('ispoller is false, skipping feature conformance testing.');
+        //       for (const testDetail of testDetails) {
+        //         console.log(`🌐 Executing feature conformance testing for: ${testDetail.filename}...`);
+        //          conformanceResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.DETERMINISTIC_TESTING, executeLocalTesting, repositoryUrl , gitInfo.branch, testDetail,buildResult!.workingDirectory);
+        //          if(conformanceResult){
+        //             const { success , output  } = conformanceResult;
+        //             console.log(` feature Conformance Results for ${testDetail.filename} - Success: ${success} -- ${output}`);
+        //             if (!success) {
+        //                 allValidationsPassed = false;
+        //             }
+        //          } else {
+        //             console.log(` Conformance Results for ${testDetail.filename} - No results returned.`);
+        //             allValidationsPassed = false;
+        //          }
+        //     }
+        //     }
+        //     if (allValidationsPassed) {
+        //         console.log('All validation types passed successfully!');
+        //         conformancePassed = true;
+        //         return LoopControl.BREAK;
+        //     } else {
+        //         console.log(' Some validations failed, continuing implementation loop to fix errors.');
+        //         conformancePassed = false;
+        //         return LoopControl.CONTINUE;
+        //     }
+        // } else {
+        //     console.log(' No feature validation types specified, marking as complete.');
+        //     conformancePassed = true;
+        //     return LoopControl.BREAK;
+        // }
+        return LoopControl.BREAK;
       }
     )
     if(type === FidoWorkType.DEEP){

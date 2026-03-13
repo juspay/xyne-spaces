@@ -361,13 +361,13 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
             <button
               onClick={onTriggerWorkflow}
               className='hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border hover:bg-muted hover:border-border transition-colors text-xs text-foreground'
-              title='Trigger Workflow'
+              title='Rerun Workflow'
               data-track-category='Workflows'
               data-track-name='TriggerWorkflow'
               data-track-metadata={JSON.stringify({ ticketId: ticket.id, workflowType })}
             >
               <Play size={14} className='text-muted-foreground flex-shrink-0' />
-              Trigger
+              Rerun
             </button>
           )}
           {isRunning && (
@@ -459,7 +459,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                       data-track-category='Workflows'
                       data-track-name='TriggerWorkflow'
                     >
-                      Trigger Workflow
+                      Rerun Workflow
                     </MenuItem>
                   </div>
                 )}

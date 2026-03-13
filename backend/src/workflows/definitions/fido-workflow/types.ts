@@ -8,7 +8,7 @@ export enum FidoWorkType {
 // =============================================================================
 // TYPE DEFINITIONS
 // =============================================================================
-import { BaseWorkflowContext,WorkflowCustomConfig, GitInfo } from '../../workflow-types';
+import { BaseWorkflowContext, GitInfo } from '../../workflow-types';
 export interface FidoServerWorkflowContext extends BaseWorkflowContext {
   ticketId: string;
   repositoryUrl: string;
@@ -18,13 +18,13 @@ export interface FidoServerWorkflowContext extends BaseWorkflowContext {
   description?: string;
   preCommit?: string;
   buildCommand?: string;
-  testDetails?: TestDetail[];
-  ispoller?: boolean;
+  // testDetails?: TestDetail[];
+  // ispoller?: boolean;
   instructions?: string;
   type?: FidoWorkType;
-  connectorName?: string;
-  connectorBaseUrl?: string;
-  custom?: WorkflowCustomConfig
+  // connectorName?: string;
+  // connectorBaseUrl?: string;
+  // custom?: WorkflowCustomConfig
 }
 export interface TestDetail {
   filename: string;
