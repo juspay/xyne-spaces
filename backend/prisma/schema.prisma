@@ -921,6 +921,7 @@ model UserGroupMapping {
   @@unique([userId, userGroupId])
   @@index([userId])
   @@index([userGroupId])
+  @@index([userGroupId, createdAt, id]) // for getUserGroupMembers
   @@map("user_group_mappings")
   @@schema("public")
 }
@@ -1290,6 +1291,7 @@ model Stage {
   ticketStageEtas TicketStageEta[]
 
   @@index([boardId])
+  @@index([boardId, sequenceNumber]) // for stagesByBoard
   @@map("stages")
   @@schema("public")
 }
@@ -1335,6 +1337,7 @@ model Channel {
 
   @@index([projectId])
   @@index([createdBy])
+  @@index([visibility, id]) // for userAllChannels
   @@map("channels")
   @@schema("public")
 }
@@ -1361,6 +1364,7 @@ model ChannelParticipant {
   @@index([userId]) // Fast user channel lookup
   @@index([userId, isStarred]) // Fast Starred Channels Lookup
   @@index([userId, isClosed]) // Fast closed DMs lookup
+  @@index([channelId, userId, id]) 
   @@map("channel_participants")
   @@schema("public")
 }
@@ -1420,6 +1424,7 @@ model Conversation {
   @@index([ticketId]) // Fast ticket lookup
   @@index([callId])
   @@index([conversationId, callId])
+  @@index([channelId, createdAt, conversationId])
   @@index([createdBy])
   @@map("conversations")
   @@schema("public")
@@ -1440,6 +1445,7 @@ model ConversationParticipant {
 
   @@unique([conversationId, userId]) // One participation record per user per conversation
   @@index([conversationId]) // Fast conversation participant lookup
+  @@index ([conversationId,participationType,joinedAt,id])
   @@index([userId]) // Fast user conversation lookup
   @@map("conversation_participants")
   @@schema("public")
@@ -1556,6 +1562,7 @@ model MessageAttachment {
   @@index([entityType])
   @@index([conversationId])
   @@index([entityId])
+  @@index([entityId, id])
   @@map("message_attachments")
   @@schema("public")
 }
@@ -1573,6 +1580,7 @@ model Reaction {
 
   @@unique([messageId, userId, emojiName]) // User can only react once per emoji per message
   @@index([messageId]) // Fast lookup of message reactions
+  @@index([messageId, reactionId])
   @@map("reactions")
   @@schema("public")
 }
@@ -1589,6 +1597,7 @@ model ReactionCount {
 
   @@unique([messageId, emojiName]) // One count record per emoji per message
   @@index([messageId]) // Fast lookup of message reaction counts
+  @@index([messageId, countId])
   @@map("reaction_counts")
   @@schema("public")
 
@@ -2356,6 +2365,7 @@ model DraftMessage {
   updatedAt       DateTime    @updatedAt
 
   @@index([channelId, conversationId, messageId, userId]) // Fast lookup of user's draft for a conversation
+  @@index([userId, id]) // for userDrafts
   @@unique([channelId, conversationId, messageId, userId])
   @@map("draft_messages")
   @@schema("public")
