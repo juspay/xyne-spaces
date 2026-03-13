@@ -5,6 +5,7 @@ import { PencilIcon } from 'lucide-react';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { formatRelativeTime } from '../../../utils/dateUtils';
 import { ViewNewerRepliesButton } from '../../ui/MessageBubble/ThreadMessageIndicators';
+import { ConversationParticipation } from '@xyne/shared';
 
 const ReplyLayout: React.FC<{
   replies: ThreadData;
@@ -53,7 +54,10 @@ const ReplyLayout: React.FC<{
   const hasDraft = draft || hasDraftAttachments;
   if ((!replies || replies.replyCount === 0) && (!hasDraft || isThreadOpen)) return null;
 
-  const participants = replies.conversation?.participants || [];
+  const participants =
+    replies.conversation?.participants?.filter(
+      p => p.participationType === ConversationParticipation.AUTHOR,
+    ) || [];
 
   return (
     <div
