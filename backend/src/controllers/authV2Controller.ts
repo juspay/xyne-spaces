@@ -19,7 +19,9 @@ export class AuthV2Controller {
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
     if (!clientId || !clientSecret) {
-      throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required');
+      throw new Error(
+        'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required'
+      );
     }
 
     this.googleClient = new OAuth2Client(clientId, clientSecret);
@@ -27,14 +29,13 @@ export class AuthV2Controller {
     this.userSessionService = new UserSessionService();
   }
 
-  private getFrontendUrl(req: Request | null = null,): string {
-
+  private getFrontendUrl(req: Request | null = null): string {
     logger.info(`[X-Original-Host]: value: ${req?.headers['x-original-host']}`);
 
     if (req) {
       const originalHost = req.headers['x-original-host'];
       if (originalHost && typeof originalHost === 'string') {
-        const protocol = req.headers['x-forwarded-proto'] || req.protocol || "https";
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
         return `${protocol}://${originalHost}`;
       }
     }
@@ -47,13 +48,12 @@ export class AuthV2Controller {
   }
 
   private getBackendUrl(req: Request | null = null): string {
-
     logger.info(`[X-Original-Host]: value: ${req?.headers['x-original-host']}`);
 
     if (req) {
       const originalHost = req.headers['x-original-host'];
       if (originalHost && typeof originalHost === 'string') {
-        const protocol = req.headers['x-forwarded-proto'] || req.protocol || "https";
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
         return `${protocol}://${originalHost}`;
       }
     }
@@ -173,9 +173,7 @@ export class AuthV2Controller {
       if (stateData.platform === 'electron') {
         const frontendUrl = this.getFrontendUrl(req);
         const launchUrl = `${frontendUrl}/launch?code=${encodeURIComponent(code as string)}&state=${encodeURIComponent(state as string)}`;
-        logger.info(
-          `[${requestId}] Redirecting to Frontend launch page`
-        );
+        logger.info(`[${requestId}] Redirecting to Frontend launch page`);
         res.redirect(launchUrl);
         return;
       }
@@ -323,13 +321,14 @@ export class AuthV2Controller {
       const frontendUrl = this.getFrontendUrl(req);
       logger.info(`[${requestId}] Redirecting to frontend with success`);
       res.redirect(`${frontendUrl}?success=true`);
-
     } catch (error) {
       logger.error(`[${requestId}] Callback error:`, error);
 
       const frontendUrl = this.getFrontendUrl(req);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      res.redirect(`${frontendUrl}?error=callback_failed&message=${encodeURIComponent(errorMessage)}`);
+      res.redirect(
+        `${frontendUrl}?error=callback_failed&message=${encodeURIComponent(errorMessage)}`
+      );
     }
   };
 
@@ -404,7 +403,6 @@ export class AuthV2Controller {
         success: true,
         message: 'Session refreshed successfully',
       });
-
     } catch (error) {
       logger.error(`[${requestId}] Error refreshing session:`, error);
 
@@ -604,7 +602,6 @@ export class AuthV2Controller {
         success: true,
         message: 'Authentication successful',
       });
-
     } catch (error) {
       logger.error(`[${requestId}] Electron code exchange error:`, error);
 
@@ -619,33 +616,53 @@ export class AuthV2Controller {
     const requestId = `EXCHANGE_CODE_${Date.now()}`;
     const frontendUrl = this.getFrontendUrl(req);
 
-    try {
-      const { code, error } = req.query;
+    const isMobileNative =
+      req.headers['x-platform'] === 'mobile' || req.query.platform === 'mobile';
 
-      logger.info(`[${requestId}] OAuth callback received`);
+    // Helper to send error response (JSON for mobile, redirect for web)
+    const sendError = (errorCode: string, message: string, statusCode = 400) => {
+      if (isMobileNative) {
+        res.status(statusCode).json({
+          success: false,
+          error: errorCode,
+          message,
+        });
+      } else {
+        res.redirect(`${frontendUrl}?error=${errorCode}&message=${encodeURIComponent(message)}`);
+      }
+    };
+
+    try {
+      // Support both query params and body for mobile
+      const code = (req.query.code || req.body?.code) as string | undefined;
+      const error = req.query.error as string | undefined;
+
+      logger.info(`[${requestId}] OAuth code exchange received (mobile: ${isMobileNative})`);
 
       if (error) {
         logger.error(`[${requestId}] OAuth error: ${error}`);
-        res.redirect(`${frontendUrl}?error=oauth_error&message=${encodeURIComponent(error as string)}`);
+        sendError('oauth_error', error as string);
         return;
       }
 
       if (!code) {
         logger.error(`[${requestId}] Missing code`);
-        res.redirect(`${frontendUrl}?error=missing_params&message=${encodeURIComponent('Missing authorization code')}`);
+        sendError('missing_params', 'Missing authorization code');
         return;
       }
 
       const isCodeUsed = await oauthStateServiceV2.isCodeUsed(code as string);
       if (isCodeUsed) {
         logger.error(`[${requestId}] Authorization code already used`);
-        res.redirect(`${frontendUrl}?error=code_reused&message=${encodeURIComponent('Authorization code already used')}`);
+        sendError('code_reused', 'Authorization code already used');
         return;
       }
 
       await oauthStateServiceV2.markCodeAsUsed(code as string);
 
-      const redirectUri = `${this.getBackendUrl(req)}/api/auth/exchange`;
+      // For mobile native apps using serverAuthCode, use empty string as redirect_uri
+      // For web OAuth flow, use the backend callback URL
+      const redirectUri = isMobileNative ? '' : `${this.getBackendUrl(req)}/api/auth/exchange`;
 
       logger.info('[X-Original-Host] : Redirect URI:', redirectUri);
 
@@ -659,20 +676,23 @@ export class AuthV2Controller {
 
       if (!id_token) {
         logger.error(`[${requestId}] No ID token received`);
-        res.redirect(`${frontendUrl}?error=no_id_token&message=${encodeURIComponent('No ID token received')}`);
+        sendError('no_id_token', 'No ID token received', 500);
         return;
       }
 
       logger.info(`[${requestId}] Verifying ID token`);
       const ticket = await this.googleClient.verifyIdToken({
         idToken: id_token,
-        audience: process.env.GOOGLE_CLIENT_ID,
+        // Accept both web and iOS client IDs
+        audience: [process.env.GOOGLE_CLIENT_ID!, process.env.GOOGLE_IOS_CLIENT_ID!].filter(
+          Boolean
+        ),
       });
 
       const payload = ticket.getPayload();
       if (!payload) {
         logger.error(`[${requestId}] Invalid token payload`);
-        res.redirect(`${frontendUrl}?error=invalid_token&message=${encodeURIComponent('Invalid token payload')}`);
+        sendError('invalid_token', 'Invalid token payload', 401);
         return;
       }
 
@@ -712,7 +732,7 @@ export class AuthV2Controller {
             userAgent: req.headers['user-agent'],
             acceptLanguage: req.headers['accept-language'],
             timestamp: new Date().toISOString(),
-            platform: 'mobile',
+            platform: isMobileNative ? 'mobile-native' : 'mobile',
           });
 
           const session = await this.userSessionService.createSession({
@@ -730,13 +750,15 @@ export class AuthV2Controller {
         } catch (sessionError) {
           logger.error(`[${requestId}] Session creation failed:`, sessionError);
         }
+      } else {
+        logger.warn(`[${requestId}] No refresh token received from Google`);
       }
 
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieOptions = {
         httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict' as const,
+        secure: isProduction || isMobileNative, // Must be secure for sameSite: 'none'
+        sameSite: (isMobileNative ? 'none' : 'strict') as 'none' | 'strict',
         path: '/',
       };
 
@@ -756,17 +778,16 @@ export class AuthV2Controller {
       if (isNewUser) {
         res.cookie('is_new_user', 'true', {
           httpOnly: false,
-          secure: isProduction,
-          sameSite: 'strict',
+          secure: isProduction || isMobileNative,
+          sameSite: isMobileNative ? 'none' : 'strict',
           path: '/',
           maxAge: 30 * 24 * 60 * 60 * 1000,
         });
         logger.info(`[${requestId}] Set is_new_user cookie for new user: ${user.email}`);
       }
 
-      const sendUserId = req.headers['x-platform'] === 'mobile';
-
-      if (sendUserId) {
+      if (isMobileNative) {
+        logger.info(`[${requestId}] Mobile auth successful for: ${user.email}`);
         res.status(200).json({
           success: true,
           user: {
@@ -775,6 +796,8 @@ export class AuthV2Controller {
             email: user.email,
             picture: user.picture,
           },
+          token: customToken,
+          isNewUser,
         });
         return;
       }
@@ -785,7 +808,17 @@ export class AuthV2Controller {
       logger.error(`[${requestId}] Callback error:`, error);
 
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      res.redirect(`${frontendUrl}?error=callback_failed&message=${encodeURIComponent(errorMessage)}`);
+      if (isMobileNative) {
+        res.status(500).json({
+          success: false,
+          error: 'callback_failed',
+          message: errorMessage,
+        });
+      } else {
+        res.redirect(
+          `${frontendUrl}?error=callback_failed&message=${encodeURIComponent(errorMessage)}`
+        );
+      }
     }
   };
 
@@ -815,7 +848,6 @@ export class AuthV2Controller {
       const frontendUrl = this.getFrontendUrl(req);
       logger.info(`[${requestId}] Redirecting to frontend`);
       res.redirect(frontendUrl);
-
     } catch (error) {
       logger.error(`[${requestId}] Logout error:`, error);
 
