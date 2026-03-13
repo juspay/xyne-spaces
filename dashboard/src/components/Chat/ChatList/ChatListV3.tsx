@@ -55,6 +55,40 @@ function dedupeAndSort(a: Conversation[], b: Conversation[]): Conversation[] {
   return Array.from(map.values()).sort((x, y) => x.createdAt - y.createdAt);
 }
 
+function mergeWithCached(
+  cachedConversations: Conversation[],
+  fetchedConversations: Conversation[],
+): Conversation[] {
+  if (fetchedConversations.length === 0) {
+    return cachedConversations;
+  }
+
+  const sorted = [...cachedConversations].sort((a, b) => a.createdAt - b.createdAt);
+  const sortedFetched = [...fetchedConversations].sort((a, b) => a.createdAt - b.createdAt);
+  const fetchedConversationIds = new Set(sortedFetched.map(l => l.conversationId));
+  const overlapIndex = sorted.findIndex(f => fetchedConversationIds.has(f.conversationId));
+
+  if (overlapIndex !== -1) {
+    // Find where the overlap occurs in fetched
+    const overlapId = sorted[overlapIndex]!.conversationId;
+    const fetchedOverlapIndex = sortedFetched.findIndex(f => f.conversationId === overlapId);
+
+    const isFetchedNewer = fetchedOverlapIndex === 0;
+
+    if (isFetchedNewer) {
+      // Fetched has newer items, trim end of cached (keep items before overlap)
+      const trimmed = sorted.slice(0, overlapIndex);
+      return dedupeAndSort(trimmed, sortedFetched);
+    } else {
+      // Fetched has older items, trim start of cached (keep items after overlap)
+      const trimmed = sorted.slice(overlapIndex + 1);
+      return dedupeAndSort(sortedFetched, trimmed);
+    }
+  }
+
+  return sortedFetched;
+}
+
 function mergeWithLatest(
   fetchedConversations: Conversation[],
   latestList: Conversation[],
@@ -221,11 +255,11 @@ const ChatListV3: React.FC<ChatListProps> = ({
       .then(([older, newerNullable]) => {
         const newer = newerNullable ?? [];
         const fetched = dedupeAndSort(older, newer);
-        const mergeWithCached = dedupeAndSort(conversations, fetched);
+        const mergedWithCached = mergeWithCached(conversations, fetched);
         // Read from ref to get the CURRENT latestConversationsList, not the
         // stale closure value (which is always [] since this effect has [] deps).
         const { merged, latestClear } = mergeWithLatest(
-          mergeWithCached,
+          mergedWithCached,
           latestConversationsListRef.current,
           true,
         );
@@ -746,6 +780,10 @@ const ChatListV3: React.FC<ChatListProps> = ({
   }, []);
 
   const scrollToBottom = useCallback(() => {
+    if (latestConversationsListRef.current.length > 0) {
+      handleLatestMessagesScroll();
+      return;
+    }
     if (virtuosoRef.current) {
       virtuosoRef.current.scrollToIndex({
         index: 'LAST',
@@ -754,7 +792,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       });
       setShowScrollButton(false);
     }
-  }, []);
+  }, [handleLatestMessagesScroll]);
 
   if (conversations.length === 0 && isInitialLoadComplete)
     return (
