@@ -461,3 +461,53 @@ export async function getCanvasByViewAccessId(viewAccessId: string) {
     },
   });
 }
+
+/**
+ * Find an existing detailed summary canvas for a call.
+ */
+export async function findExistingDetailedSummaryCanvas(
+  callId: string
+): Promise<{ canvasId: string; viewAccessId: string; version: number } | null> {
+  try {
+    const prisma = DatabaseClient.getInstance();
+
+    const existingCanvas = await prisma.canvas.findFirst({
+      where: {
+        AND: [
+          {
+            metadata: {
+              path: ['source'],
+              equals: 'call_detailed_summary',
+            },
+          },
+          {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        viewAccessId: true,
+        metadata: true,
+      },
+    });
+
+    if (existingCanvas && existingCanvas.viewAccessId) {
+      const metadata = existingCanvas.metadata as Record<string, any> | null;
+      const version = typeof metadata?.version === 'number' ? metadata.version : 1;
+      return {
+        canvasId: existingCanvas.id,
+        viewAccessId: existingCanvas.viewAccessId,
+        version,
+      };
+    }
+
+    return null;
+  } catch (error) {
+    logger.error('[CanvasService] Error finding existing detailed summary canvas:', error);
+    return null;
+  }
+}

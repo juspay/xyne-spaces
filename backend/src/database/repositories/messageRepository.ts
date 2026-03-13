@@ -569,6 +569,38 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
       },
     });
   }
+
+  /**
+   * Find an existing detailed summary message for a call.
+   */
+  async findExistingDetailedSummaryMessage(
+    conversationId: string,
+    callId: string
+  ): Promise<Message | null> {
+    return await this.db.message.findFirst({
+      where: {
+        conversationId,
+        msgType: MessageType.BOT,
+        AND: [
+          {
+            metadata: {
+              path: ['messageSubtype'],
+              equals: 'call_detailed_summary',
+            },
+          },
+          {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+        ],
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
   async findLastMessage(filters: MessageFilters): Promise<Message | null> {
   return await this.db.message.findFirst({
     where: {
