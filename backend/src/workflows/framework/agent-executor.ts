@@ -14,6 +14,8 @@ import { FullAgenticCheckpointConfig, WorkflowState, BaseWorkflowContext, GitInf
 import { WorkflowPausedException, WorkflowCancelledException, WorkflowExternalWaitException } from '../exceptions/workflow-exceptions'
 import { BitbucketManager } from '@/bitbucket/apis'
 import { TicketRepository, WorkflowRepository } from '@/database/repositories/workflows'
+import { AgentStepRepository } from '@/database/repositories/agentSteps'
+import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import {logger} from '@/utils/logger';
@@ -189,7 +191,10 @@ export class AgentExecutor {
       // Fall back to GCS via MessageAttachment (for old executions or after Redis TTL)
       logger.info(`🔄 [AGENT-EXECUTOR] No Redis steps found, trying GCS for ${checkpointId}`)
       const gcsSteps = await this.storage.getAgenticStepsFromGCS(parentExecutionId, inputStepDbId)
-      conversationHistory = this.reconstructConversationFromSteps(gcsSteps)
+      const validGcsSteps = gcsSteps.filter(
+        (s): s is typeof s & { stepName: string; data: string } => !!s.stepName && !!s.data
+      );
+      conversationHistory = this.reconstructConversationFromRedisSteps(validGcsSteps)
     }
 
     // If no history could be reconstructed, use the original conversation request
@@ -518,6 +523,83 @@ export class AgentExecutor {
     // Execute conversation with internal continuation support
     let result: ConversationResult | undefined;
     let isRunning = true;
+
+    // If mode is AUTOMATIC and last message is an assistant message,
+    // skip agent execution - the agent already completed its work in the previous run
+    // (which ended with WorkflowExternalWaitException in MANUAL mode).
+    // All git side-effects (push, PR) already happened, and commitTracker is fresh
+    // so the post-loop git operations will naturally be skipped.
+    const currentExecutionMode = await this.storage.getExecutionMode(parentExecutionId);
+    const lastMessage = conversationRequest.messages[conversationRequest.messages.length - 1];
+
+    if (currentExecutionMode === 'AUTOMATIC' && lastMessage?.type === 'assistant') {
+      logger.info(`[AGENT-EXECUTOR] AUTOMATIC mode with last message as assistant - skipping agent execution, returning conversation as result`);
+
+      cleanupContinuationListener();
+
+      // Fetch last commit hash from agentSteps table for this step
+      const agentStepRepo = new AgentStepRepository();
+      const agentSteps = await agentStepRepo.findByStepsId(inputStepDbId);
+      const lastCommitStep = [...agentSteps].reverse().find(s => s.commitHash);
+      const latestCommitHash = lastCommitStep?.commitHash || undefined;
+
+      // Fetch PR URL from pullRequests table for this execution
+      const pullRequestRepository = new PRMetricsRepository();
+      const prRecord = await pullRequestRepository.findByWorkflowExecutionId(parentExecutionId);
+      const pullRequestUrl = prRecord?.prUrl || undefined;
+
+      result = {
+        messages: [...conversationRequest.messages],
+        toolExecutions: [],
+        metrics: {
+          totalDuration: 0,
+          llmCalls: 0,
+          totalTokens: 0,
+          toolExecutions: 0,
+          averageToolDuration: 0,
+          conversationTurns: 0,
+          startTime: new Date(),
+          endTime: new Date()
+        },
+        status: 'completed' as const
+      };
+
+      // Compute git diff BEFORE cleanup (while repo is still available)
+      let gitDiff: GitDiffFile[] | undefined
+      let diffStats: GitDiffStats | undefined
+      let baseCommitHash: string | undefined
+
+      if (repoPath && baseBranch && latestCommitHash) {
+        try {
+          const { stdout } = await execAsync(`git merge-base HEAD origin/${baseBranch}`, { cwd: repoPath });
+          baseCommitHash = stdout.trim();
+          logger.info(`[AGENT-EXECUTOR] AUTOMATIC mode - Using merge-base: ${baseCommitHash.substring(0, 8)} (vs ${baseBranch})`)
+
+          const diffResult = await this.computeGitDiff(repoPath, baseCommitHash)
+          gitDiff = diffResult.gitDiff
+          diffStats = diffResult.diffStats
+        } catch (error) {
+          logger.error(`[AGENT-EXECUTOR] AUTOMATIC mode - Failed to compute git diff with merge-base:`, error)
+        }
+      }
+
+      if (repoPath) {
+        await workspaceEventService.publishWorkspaceClosed(parentExecutionId, inputStepDbId);
+      }
+
+      const gitInfo: GitInfo = {
+        branch: branchName || agentChkConfig.repoInfo?.repoBranch || 'main',
+        repoUrl: commitTracker.repoUrl,
+        commitHash: latestCommitHash,
+        baseCommitHash,
+        pullRequestUrl,
+        pr_link: pullRequestUrl,
+        gitDiff,
+        diffStats
+      };
+
+      return { result, gitInfo };
+    }
 
     while (isRunning) {
       try {
@@ -967,58 +1049,6 @@ export class AgentExecutor {
   }
 
   /**
-   * Reconstruct conversation history from WorkflowSteps
-   */
-  private reconstructConversationFromSteps(steps: Array<{ stepName?: string | null; data?: string | null; createdAt: Date }>): Message[] {
-    const conversationHistory: Message[] = []
-
-    // Sort steps by creation time
-    const sortedSteps = steps.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-
-    for (const step of sortedSteps) {
-      if (!step.data) continue
-
-      try {
-        const stepData = JSON.parse(step.data)
-
-        // Map WorkflowSteps back to framework message format
-        if (step.stepName?.startsWith('tool_')) {
-          // For tool executions, we'll create a tool result message
-          if (stepData.output !== null) {
-            const toolResultMessage = createToolResultMessage(
-              JSON.stringify(stepData.output),
-              stepData.id || `tool_${Date.now()}`,
-              stepData.success !== false, // default to true if not specified
-              {
-                error: stepData.error,
-                executionTime: stepData.duration
-              }
-            )
-            conversationHistory.push(toolResultMessage)
-          }
-
-        } else if (step.stepName?.startsWith('llm_call_') || step.stepName === 'assistant_message') {
-          // LLM response or assistant message
-          const content = stepData.response || stepData.content || stepData.turn?.result?.content
-          if (content) {
-            const assistantMessage = createAssistantMessage(content, {
-              thinking: stepData.thinking,
-              toolCalls: stepData.toolCalls
-            })
-            conversationHistory.push(assistantMessage)
-          }
-        }
-      } catch (error) {
-        logger.error(`Error parsing step data for ${step.stepName}:`, error)
-        // Skip malformed steps
-        continue
-      }
-    }
-
-    return conversationHistory
-  }
-
-  /**
    * Build updated workflow state from completed execution
    */
   private buildStateFromCompletedExecution<T extends BaseWorkflowContext>(parentState: WorkflowState<T>, result: FrameworkExecutionResult): WorkflowState<T> {
@@ -1343,7 +1373,10 @@ export class AgentExecutor {
       logger.info(`🔄 [AGENT-EXECUTOR] No Redis steps found, trying GCS for continuation`);
       try {
         const gcsSteps = await this.storage.getAgenticStepsFromGCS(parentExecutionId, inputStepDbId);
-        conversationHistory = this.reconstructConversationFromSteps(gcsSteps);
+        const validGcsSteps = gcsSteps.filter(
+          (s): s is typeof s & { stepName: string; data: string } => !!s.stepName && !!s.data
+        );
+        conversationHistory = this.reconstructConversationFromRedisSteps(validGcsSteps);
       } catch (gcsError) {
         logger.warn(`⚠️ [AGENT-EXECUTOR] Failed to load from GCS for continuation:`, gcsError);
       }

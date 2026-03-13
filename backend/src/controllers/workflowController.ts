@@ -940,7 +940,7 @@ export class WorkflowController {
             targetStepId: step.stepName
           }),
           ignoreDuration: 0,
-          mode: 'AUTOMATIC',
+          mode: 'MANUAL',
           createdBy: execution.createdBy || null,
         });
 
