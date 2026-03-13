@@ -60,7 +60,8 @@ export interface AgentInfo {
     | 'twitch'
     | 'ghost'
     | 'laugh'
-    | 'skull';
+    | 'skull'
+    | 'user-round-cog';
 }
 
 export const getAgentInfo = (stepName: string): AgentInfo => {
@@ -105,7 +106,7 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
       initials: 'BD',
       labelColor: 'text-gray-700',
       bubbleBg: 'bg-gray-50/80',
-      icon: 'code',
+      icon: 'user-round-cog',
     };
   }
 

@@ -494,7 +494,7 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
                 return (
                   <div key={`loop-${item.baseName}-${i}`} className='relative'>
                     {/* Loop Header */}
-                    <div className='flex items-center gap-2 mb-3 ml-2'>
+                    <div className='flex items-center gap-2 mb-3'>
                       <div className='flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100/80 border border-slate-200/60'>
                         <Repeat size={11} className='text-slate-500' strokeWidth={2.5} />
                         <span className='text-[10px] font-semibold uppercase tracking-wide text-slate-600'>
@@ -630,7 +630,10 @@ const AgentMessageBubble: React.FC<{
           >
             {summary ? (
               parseReviewerFeedback(summary) ? (
-                <ReviewerFeedback issues={parseReviewerFeedback(summary)!} />
+                <ReviewerFeedback
+                  issues={parseReviewerFeedback(summary)!}
+                  onViewMore={handleViewMore}
+                />
               ) : (
                 <TruncatableMarkdownContent
                   content={summary}

@@ -186,6 +186,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   const menuRef = useRef<HTMLDivElement>(null);
   const jenkinsPanelRef = useRef<HTMLDivElement>(null);
   const metadataDropdownRef = useRef<HTMLDivElement>(null);
+  const mobileMetadataRef = useRef<HTMLDivElement>(null);
 
   const { cancelExecution, isCanceling } = useWorkflowControl();
 
@@ -233,6 +234,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   useClickOutside(menuRef, closeMenu, showMenu);
   useClickOutside(jenkinsPanelRef, closeJenkinsPanel, showJenkinsPanel);
   useClickOutside(metadataDropdownRef, closeMetadataDropdown, showMetadataDropdown);
+  useClickOutside(mobileMetadataRef, closeMetadataDropdown, showMetadataDropdown);
 
   const status = executionStatus?.toLowerCase() || '';
   const isRunning = ['running', 'in_progress'].includes(status);
@@ -259,8 +261,11 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           </span>
           {workflowType && (
             <>
-              <ChevronRight size={14} className='text-muted-foreground/50 flex-shrink-0' />
-              <div className='relative' ref={metadataDropdownRef}>
+              <ChevronRight
+                size={14}
+                className='hidden md:block text-muted-foreground/50 flex-shrink-0'
+              />
+              <div className='hidden md:block relative' ref={metadataDropdownRef}>
                 <button
                   onClick={() => setShowMetadataDropdown(!showMetadataDropdown)}
                   className='text-muted-foreground truncate cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-none p-0 inline-flex items-center gap-0.5'
@@ -274,7 +279,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                   <ChevronDown size={14} className='text-muted-foreground flex-shrink-0' />
                 </button>
                 {showMetadataDropdown && (
-                  <div className='absolute left-0 top-full mt-1 w-48 bg-background border border-border rounded-lg shadow-lg py-2 z-[60]'>
+                  <div className='absolute left-0 top-full mt-1 w-72 bg-background border border-border rounded-lg shadow-lg py-2 z-[60]'>
                     {executorType && (
                       <div className='px-3 py-2 text-sm rounded-md hover:bg-muted hover:shadow-sm transition-all'>
                         <span className='font-medium text-foreground'>
@@ -289,9 +294,8 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                     )}
                     {repositoryUrl && (
                       <div className='px-3 py-2 text-sm rounded-md hover:bg-muted hover:shadow-sm transition-all'>
-                        <span className='font-medium text-foreground'>
-                          Repository Url: {repositoryUrl}
-                        </span>
+                        <span className='font-medium text-foreground block'>Repository Url:</span>
+                        <span className='text-foreground break-all text-xs'>{repositoryUrl}</span>
                       </div>
                     )}
                     {prLink && (
@@ -370,7 +374,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
             <button
               onClick={handleCancelWorkflow}
               disabled={isCanceling || !executionId}
-              className='inline-flex items-center gap-1 px-2 py-1 rounded-md border border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20 hover:border-red-500/30 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed'
+              className='hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20 hover:border-red-500/30 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed'
               title='Cancel Workflow'
               data-track-category='Workflows'
               data-track-name='CancelWorkflow'
@@ -490,6 +494,22 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
                     </MenuItem>
                   </div>
                 )}
+                {isRunning && (
+                  <div className='md:hidden'>
+                    <MenuItem
+                      onClick={() => {
+                        handleCancelWorkflow();
+                        setShowMenu(false);
+                      }}
+                      disabled={isCanceling || !executionId}
+                      icon={<XCircle size={14} className='text-red-500' />}
+                      data-track-category='Workflows'
+                      data-track-name='CancelWorkflow'
+                    >
+                      {isCanceling ? 'Canceling...' : 'Cancel Workflow'}
+                    </MenuItem>
+                  </div>
+                )}
                 <div className='border-t border-border md:border-t-0' />
                 <MenuItem
                   onClick={() => {
@@ -534,7 +554,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           </div>
         </div>
       </div>
-      <div className='px-4 pb-3'>
+      <div className='px-4 pb-2.5'>
         <h1 className='text-base font-semibold text-foreground leading-tight flex items-center gap-2'>
           {workflowNumber !== undefined && (
             <span className='inline-flex items-center justify-center flex-shrink-0 min-w-[28px] h-6 px-2 bg-blue-500/10 text-blue-700 dark:text-blue-400 text-xs font-bold rounded-full border border-blue-500/20'>
@@ -543,6 +563,81 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           )}
           <span className='truncate'>{workflowTitle ?? ticket.title}</span>
         </h1>
+        {workflowType && (
+          <div className='relative md:hidden mt-1' ref={mobileMetadataRef}>
+            <button
+              onClick={() => setShowMetadataDropdown(!showMetadataDropdown)}
+              className='inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
+              data-track-category='Workflows'
+              data-track-name='ToggleStatusDropdown'
+              data-track-metadata={JSON.stringify({ executionStatus, ticketId: ticket.id })}
+            >
+              <span className='truncate max-w-[200px]'>{workflowType}</span>
+              {showMetadataDropdown ? (
+                <ChevronUp size={12} className='flex-shrink-0' />
+              ) : (
+                <ChevronDown size={12} className='flex-shrink-0' />
+              )}
+            </button>
+            {showMetadataDropdown && (
+              <div className='absolute left-0 top-full mt-1 w-72 bg-background border border-border rounded-lg shadow-lg py-2 z-[60]'>
+                {executorType && (
+                  <div className='px-3 py-2 text-sm rounded-md hover:bg-muted transition-all'>
+                    <span className='font-medium text-foreground'>Executor: {executorType}</span>
+                  </div>
+                )}
+                {model && (
+                  <div className='px-3 py-2 text-sm rounded-md hover:bg-muted transition-all'>
+                    <span className='font-medium text-foreground'>Model: {model}</span>
+                  </div>
+                )}
+                {repositoryUrl && (
+                  <div className='px-3 py-2 text-sm rounded-md hover:bg-muted transition-all'>
+                    <span className='font-medium text-foreground block'>Repository Url:</span>
+                    <span className='text-foreground break-all text-xs'>{repositoryUrl}</span>
+                  </div>
+                )}
+                {prLink && (
+                  <div className='px-3 py-2 text-sm rounded-md hover:bg-muted transition-all'>
+                    <a
+                      href={prLink}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      className='font-medium text-foreground hover:underline'
+                      onClick={e => e.stopPropagation()}
+                      data-track-category='Workflows'
+                      data-track-name='OpenPullRequestLink'
+                      data-track-metadata={JSON.stringify({ prLink, ticketId: ticket.id })}
+                    >
+                      Link to Pull Request
+                    </a>
+                  </div>
+                )}
+                {useQuestioningMode && (
+                  <div className='px-3 py-2 text-sm rounded-md hover:bg-muted transition-all'>
+                    <span className='font-medium text-foreground'>Questioning Enabled</span>
+                  </div>
+                )}
+                {createdByUser?.id && (
+                  <div className='px-3 py-2 text-sm rounded-md hover:bg-muted transition-all'>
+                    <span className='font-medium text-foreground'>
+                      Ran By: {createdByUser.name || createdByUser.email || 'Unknown'}
+                    </span>
+                  </div>
+                )}
+                {!executorType &&
+                  !model &&
+                  !prLink &&
+                  !useQuestioningMode &&
+                  !createdByUser?.id && (
+                    <div className='px-3 py-2 text-sm text-muted-foreground'>
+                      No additional metadata
+                    </div>
+                  )}
+              </div>
+            )}
+          </div>
+        )}
         {/* {desc && (
           <div className='mt-1.5 flex items-start gap-2'>
             <p className='text-sm text-gray-500 leading-relaxed flex-1'>{displayDesc}</p>

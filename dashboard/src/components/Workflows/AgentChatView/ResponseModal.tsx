@@ -3,6 +3,7 @@ import MarkdownPreview from '@uiw/react-markdown-preview';
 import { X, FileText } from 'lucide-react';
 import { AgentInfo } from './AgentChatView.utils';
 import { AgentAvatar } from './AgentAvatar';
+import { ReviewerFeedback, parseReviewerFeedback } from './ReviewerFeedback';
 
 interface ResponseModalProps {
   isOpen: boolean;
@@ -75,19 +76,31 @@ export const ResponseModal: React.FC<ResponseModalProps> = ({
         </div>
 
         <div className='flex-1 overflow-y-auto px-4 py-4'>
-          <div className='[&_pre]:overflow-x-auto [&_pre]:!bg-gray-50 [&_.wmde-markdown]:bg-transparent prose prose-sm max-w-none'>
-            <MarkdownPreview
-              source={content}
-              style={{
-                backgroundColor: 'transparent',
-                color: '#374151',
-                maxWidth: '100%',
-                fontSize: '14px',
-                lineHeight: '1.7',
-              }}
-              wrapperElement={{ 'data-color-mode': 'light' }}
-            />
-          </div>
+          {(() => {
+            const parsedIssues = parseReviewerFeedback(content);
+            if (parsedIssues) {
+              return (
+                <div className='text-foreground'>
+                  <ReviewerFeedback issues={parsedIssues} disableTruncation />
+                </div>
+              );
+            }
+            return (
+              <div className='[&_pre]:overflow-x-auto [&_pre]:!bg-gray-50 [&_.wmde-markdown]:bg-transparent prose prose-sm max-w-none'>
+                <MarkdownPreview
+                  source={content}
+                  style={{
+                    backgroundColor: 'transparent',
+                    color: '#374151',
+                    maxWidth: '100%',
+                    fontSize: '14px',
+                    lineHeight: '1.7',
+                  }}
+                  wrapperElement={{ 'data-color-mode': 'light' }}
+                />
+              </div>
+            );
+          })()}
         </div>
 
         <div className='flex items-center justify-center gap-2 px-4 py-3 border-t border-gray-100 bg-gray-50/50'>
