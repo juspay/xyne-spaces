@@ -443,6 +443,7 @@ export class AgentExecutor {
     const checkoutCommit = agentChkConfig.repoInfo?.checkoutCommit;
     const continuationCommitHash = agentChkConfig.repoInfo?.continuationCommitHash;
     const existingPrLink = agentChkConfig.repoInfo?.existingPrLink;
+    const shallow = agentChkConfig.repoInfo?.shallow ?? false;
     let repoPath: string | undefined;
     let branchName: string | undefined;
     let projectName: string | undefined;
@@ -462,7 +463,8 @@ export class AgentExecutor {
         baseBranch, 
         repoBranch,
         isContinuation ? continuationCommitHash : undefined,
-        checkoutCommit
+        checkoutCommit,
+        shallow
       );
 
       logger.info(`🔧 [AGENT-EXECUTOR] Workspace at: ${cloneResult.repoPath}`);

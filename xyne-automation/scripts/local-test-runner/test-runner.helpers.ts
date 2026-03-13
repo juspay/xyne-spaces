@@ -4,6 +4,14 @@ import path from 'path';
 
 import { TestStatistics } from '@/scripts/local-test-runner/test-runner.types';
 
+/**
+ * Check if running in plain output mode (non-interactive).
+ * Used to determine if we should skip ANSI colors and terminal features.
+ */
+export function isPlainMode(): boolean {
+  return process.env.OUTPUT_MODE === 'plain' || !process.stdout.isTTY;
+}
+
 export function git(cmd: string): string {
   try {
     return execSync(`git ${cmd}`, { encoding: 'utf-8' }).trim();

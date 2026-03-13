@@ -25,4 +25,7 @@ router.get('/provider/:provider', modelController.getModelsByProvider);
 // Get models by name
 router.get('/name/:name', modelController.getModelsByName);
 
+// Sync models with LiteLLM
+router.post('/sync', modelController.syncModelsWithLiteLLM);
+
 export default router;

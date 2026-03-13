@@ -4,7 +4,7 @@ import path from 'path';
 
 import chalk from 'chalk';
 
-import { formatDuration } from '@/scripts/local-test-runner/test-runner.helpers';
+import { formatDuration, isPlainMode } from '@/scripts/local-test-runner/test-runner.helpers';
 import { StepDef, StepResult } from '@/scripts/local-test-runner/test-runner.types';
 import { TestRunnerUI } from '@/scripts/local-test-runner/test-runner.ui';
 
@@ -19,10 +19,13 @@ export async function runStep(
 
   // If condition is false, we just return skipped result.
   if (!shouldRun) {
-    ui.log(`${chalk.yellow('○')} ${chalk.gray(title + ' [SKIPPED]')}`);
     const reason = typeof step.skipReason === 'function' ? step.skipReason() : step.skipReason;
-    if (reason) {
-      ui.log(chalk.gray(`     | - ${reason}`));
+    // In plain mode, don't log here - let the caller handle it
+    if (!isPlainMode()) {
+      ui.log(`${chalk.yellow('○')} ${chalk.gray(title + ' [SKIPPED]')}`);
+      if (reason) {
+        ui.log(chalk.gray(`     | - ${reason}`));
+      }
     }
     return {
       title,
@@ -82,7 +85,10 @@ export async function runStep(
       const elapsed = formatDuration(duration);
 
       if (code === 0) {
-        ui.log(chalk.green(`✔ ${title} completed in ${elapsed}`));
+        // In plain mode, don't log here - let the caller handle it
+        if (!isPlainMode()) {
+          ui.log(chalk.green(`✔ ${title} completed in ${elapsed}`));
+        }
         resolve({
           title,
           status: 'passed',
@@ -90,7 +96,10 @@ export async function runStep(
         });
       } else {
         const errorMsg = `Step "${title}" failed with exit code ${code}`;
-        ui.log(chalk.red(`✖ ${title} failed in ${elapsed} with exit code ${code}`));
+        // In plain mode, don't log here - let the caller handle it
+        if (!isPlainMode()) {
+          ui.log(chalk.red(`✖ ${title} failed in ${elapsed} with exit code ${code}`));
+        }
         reject(new Error(errorMsg));
       }
     });

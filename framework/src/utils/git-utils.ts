@@ -93,8 +93,11 @@ export async function commitChanges(
  * 
  * @param repoUrl URL of the repository to clone
  * @param executionId Execution ID used for temp directory naming
+ * @param baseBranch Optional base branch to checkout from
  * @param repoBranch Optional branch name to checkout or create
  * @param commitHash Optional commit hash to checkout (for continuation mode)
+ * @param checkoutCommit Optional specific commit to checkout
+ * @param shallow If true, use shallow clone (depth 1) for faster cloning
  * @returns Object containing the repository path and branch name
  */
 export async function cloneRepository(
@@ -103,7 +106,8 @@ export async function cloneRepository(
   baseBranch?: string,
   repoBranch?: string,
   commitHash?: string,
-  checkoutCommit?: string
+  checkoutCommit?: string,
+  shallow: boolean = false
 ): Promise<{ repoPath: string; branchName: string }> {
   // Create a temp directory for cloning the repo
   const tempDir = `/tmp/${executionId}`;
@@ -111,7 +115,8 @@ export async function cloneRepository(
   logger.info('Checking workspace existence', {
     workspacePath: tempDir,
     executionId,
-    repoUrl
+    repoUrl,
+    shallow
   });
 
   // Check if workspace already exists (from previous agentic step in same workflow)
@@ -167,35 +172,58 @@ export async function cloneRepository(
       executionId,
       branchName,
       baseBranch,
-      repoBranch
+      repoBranch,
+      shallow
     });
 
     git = simpleGit();
 
-    // Clone the repository and store the path
-    await git.clone(repoUrl, tempDir);
+    const effectiveShallow = shallow && !checkoutCommit;
+    const cloneArgs = effectiveShallow ? ['--depth', '1', '--no-single-branch'] : [];
+    await git.clone(repoUrl, tempDir, cloneArgs);
     git = simpleGit(tempDir);
 
     logger.info('Git clone completed successfully', {
       repoPath: tempDir,
-      executionId
+      executionId,
+      shallow: effectiveShallow,
+      cloneArgs: effectiveShallow ? cloneArgs.join(' ') : 'full clone'
     });
 
-    await git.fetch();
-
-    if (baseBranch) {
-      await git.checkout(baseBranch); // checkout to base branch 
+    if (!effectiveShallow) {
+      await git.fetch();
+    } else {
+      git.fetch(['--unshallow']).then(() => {
+        logger.info('Background unshallow fetch completed', {
+          repoPath: tempDir,
+          executionId
+        });
+      }).catch((error) => {
+        logger.warn('Background unshallow fetch failed, continuing with shallow clone', {
+          executionId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
     }
 
-    if (checkoutCommit || repoBranch) {
-      const source = checkoutCommit || `origin/${repoBranch}`;
+    if (baseBranch) {
+      await git.checkout(baseBranch); // checkout to base branch
+    }
+
+    if(checkoutCommit) {
       try {
-        await git.checkout(['-b', branchName, source]);
+        await git.checkout(checkoutCommit);
+      } catch {
+        logger.warn('Failed to checkout specific commit, it may not exist in the repository. Continuing with default branch.')
+      }
+    }
+
+    if (repoBranch) {
+      try {
+        await git.checkout(['-b', branchName, `origin/${repoBranch}`]);
       } catch {
         await git.checkout(['-b', branchName]);
       }
-    } else {
-      await git.checkout(['-b', branchName]);
     }
   }
 

@@ -206,7 +206,11 @@ export class ConfigSyncService {
       const config = await this.readConfig();
       
       // Get the first available model (as specified in requirements)
-      const models = await repositories.models.findMany();
+      const models = await repositories.models.findMany({                                                                                                                                                                                             
+        where: {
+          provider: { not: 'litellm-api' }
+        }
+      });
       if (models.length === 0) {
         throw new Error('No models found in database. At least one model is required for agent synchronization.');
       }

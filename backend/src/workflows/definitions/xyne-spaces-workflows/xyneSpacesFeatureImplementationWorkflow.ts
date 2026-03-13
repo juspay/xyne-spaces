@@ -34,6 +34,7 @@ import {
   AgenticCheckpointResult,
   GitInfo,
   ExecutorType,
+  LoopControl,
 } from '../../workflow-types';
 import { WorkflowDefinition, EmptyPreExecuteResult } from '../../registry/workflowRegistry';
 import { WorkflowType, ImageAttachment } from '../../types/workflow-enums';
@@ -47,11 +48,17 @@ import {
   XyneSpacesWorkflowSteps,
   getPlanningConfig,
   getImplementationConfig,
-  getValidationConfig,
+  getReviewConfig,
+  parseReviewComments,
   loadRootGuidelines,
+  getValidationConfig,
+  getImplementationPrompt,
+  formatReviewFeedback,
+  filterReviewCommentsBySeverity,
+  getTestFixConfig,
 } from './utils';
-import { runDeterministicValidation } from '../validation-helpers';
-import {logger} from '@/utils/logger';
+import { runDeterministicValidation, getGitDiffForReview, runTestCases, commitPostTestChanges, type TestExecutionResult } from '../validation-helpers';
+import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 
 // =============================================================================
@@ -113,7 +120,7 @@ const XyneSpacesFeatureInputSchema = BaseWorkflowContextSchema.extend({
 });
 
 const xyneSpacesFeatureContextMapper = (
-  payload: z.infer<typeof XyneSpacesFeatureInputSchema> & { ticketId: string ; title: string; description: string; baseBranch?: string; repoBranch?: string; checkoutCommit?: string; imageAttachments?: ImageAttachment[]; executorType?: ExecutorType }
+  payload: z.infer<typeof XyneSpacesFeatureInputSchema> & { ticketId: string; title: string; description: string; baseBranch?: string; repoBranch?: string; checkoutCommit?: string; imageAttachments?: ImageAttachment[]; executorType?: ExecutorType }
 ): XyneSpacesFeatureContext => ({
   ...baseContextMapper(payload),
   title: payload.title,
@@ -145,7 +152,6 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
     const { ticketId, title, description, imageAttachments } = context;
 
     const repoUrl = "ssh://git@github.com/example-org/xyne-spaces.git";
-    
 
     const validRepoUrl = validateRepoUrl(repoUrl);
     let gitInfo: GitInfo = {
@@ -157,7 +163,7 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
     // =========================================================================
     // LOAD USER INFO FOR CO-AUTHOR
     // =========================================================================
-    
+
     let coAuthor: { name: string; email: string } | undefined;
     const executionId = workflow.getWorkflowExecutionId();
     const execution = await repositories.workflowExecutions.findById(executionId);
@@ -223,43 +229,134 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
     }
 
     // =========================================================================
-    // PHASE 2: IMPLEMENTATION
+    // PHASE 2: IMPLEMENTATION AND REVIEW LOOP
     // =========================================================================
 
-    const implementationResult: AgenticCheckpointResult = await workflow.createAgenticCheckpoint(
-      XyneSpacesWorkflowSteps.IMPLEMENTATION,
-      'xyne-cli-implementer',
-      getImplementationConfig(
-        implementationPlan,
-        validRepoUrl,
-        workflowBranch,  // Pass the branch from planning step so implementation continues on same branch
-        context.baseBranch || 'main', // baseBranch
-        context.checkoutCommit,
-        projectGuidelines,
-        context.executorType,
-        false,
-        context.taskType,
-        coAuthor
-      )
+    const MAX_ITERATIONS = 5;
+    let reviewComments: Record<string, unknown>[] = [];
+    let previousFeedbackContext = '';
+    let iterationsCompleted = 0;
+
+    const workspaceName = workflow.getWorkflowExecutionId();
+    const repoPath = `/tmp/${workspaceName}`;
+    const baseCommit = context.checkoutCommit || (context.baseBranch || 'main');
+
+    // Implementation loop: handles review feedback only
+    await workflow.createWhileLoop(
+      XyneSpacesWorkflowSteps.IMPLEMENTATION_LOOP,
+      MAX_ITERATIONS,
+      async (iteration, scopedEngine) => {
+        iterationsCompleted = iteration + 1;
+        logger.info(`🔄 Starting implementation iteration ${iterationsCompleted}/${MAX_ITERATIONS}`);
+
+        const implementationPrompt = getImplementationPrompt(implementationPlan, previousFeedbackContext || undefined);
+
+        const agentConfig = getImplementationConfig(
+          implementationPrompt,
+          validRepoUrl,
+          workflowBranch,
+          context.baseBranch || 'main',
+          context.checkoutCommit,
+          projectGuidelines,
+          context.executorType,
+          false,
+          context.taskType,
+          coAuthor
+        );
+
+        const implementationResult: AgenticCheckpointResult = await scopedEngine.createAgenticCheckpoint(
+          XyneSpacesWorkflowSteps.IMPLEMENTATION,
+          'xyne-cli-implementer',
+          agentConfig
+        );
+
+        gitInfo = { ...gitInfo, ...implementationResult.gitInfo };
+        logger.info(`Implementation iteration ${iterationsCompleted} completed`);
+
+        // =========================================================================
+        // GIT DIFF GATHERING PHASE (Deterministic - visible in frontend)
+        // =========================================================================
+        const diffResult = await scopedEngine.createCheckpoint(
+          XyneSpacesWorkflowSteps.GIT_DIFF_GATHERING,
+          async () => {
+            logger.info(`[Review] Getting diff from base commit: ${baseCommit}`);
+            const result = await getGitDiffForReview(repoPath, baseCommit);
+
+            if (!result.success) {
+              logger.error('Failed to get git diff for review:', result.error);
+            } else {
+              logger.info(`Got git diff for review: ${result.changedFiles.length} files, ${result.diffOutput.length} chars`);
+            }
+
+            return result;
+          }
+        );
+
+        // =========================================================================
+        // CODE REVIEW PHASE (Agentic)
+        // =========================================================================
+
+        logger.info('Starting code review phase...');
+
+        const reviewResult: AgenticCheckpointResult = await scopedEngine.createAgenticCheckpoint(
+          XyneSpacesWorkflowSteps.REVIEW,
+          'xyne-cli-reviewer',
+          getReviewConfig(
+            validRepoUrl,
+            gitInfo.branch,
+            context.baseBranch || 'main',
+            context.checkoutCommit,
+            projectGuidelines,
+            context.executorType,
+            diffResult.changedFiles,
+            diffResult.diffOutput
+          )
+        );
+
+        gitInfo = { ...gitInfo, ...reviewResult.gitInfo };
+
+        // Parse review comments from the result
+        const allReviewComments = parseReviewComments(reviewResult.result);
+
+        // Filter by severity: keep error, warning, high, medium; ignore info, low, suggestion, nit
+        reviewComments = filterReviewCommentsBySeverity(allReviewComments);
+
+        logger.info(`Review: ${allReviewComments.length} total comments, ${reviewComments.length} after severity filter`);
+
+        if (reviewComments.length === 0) {
+          logger.info('✅ Code review passed! No issues found.');
+          return LoopControl.BREAK;
+        }
+
+        // Format review comments for the next iteration
+        previousFeedbackContext = formatReviewFeedback(reviewComments);
+
+        logger.warn(`⚠️ Code review found ${reviewComments.length} issues.`);
+        logger.info(`Review comments:\n${JSON.stringify(reviewComments, null, 2)}`);
+
+        return LoopControl.CONTINUE;
+      }
     );
-
-    gitInfo = { ...gitInfo, ...implementationResult.gitInfo };
-
-    logger.info('Implementation completed successfully');
 
     // =========================================================================
     // PHASE 3: VALIDATION PHASE
     // =========================================================================
 
-    const workspaceName = workflow.getWorkflowExecutionId();
-    const repoPath = `/tmp/${workspaceName}`;
-    const deterministicResult = await runDeterministicValidation(repoPath, gitInfo, coAuthor);
-    
+    logger.info('Starting deterministic validation phase...');
+
+    let validationPassed = false;
+    const deterministicResult = await workflow.createCheckpoint(
+      XyneSpacesWorkflowSteps.DETERMINISTIC_VALIDATION,
+      async () => {
+        return await runDeterministicValidation(repoPath, gitInfo, coAuthor);
+      }
+    );
+
     if (deterministicResult.formatCommitHash) {
       gitInfo = { ...gitInfo, commitHash: deterministicResult.formatCommitHash };
     }
 
-    let validationPassed = deterministicResult.passed;
+    validationPassed = deterministicResult.passed ?? false;
 
     if (!validationPassed) {
       logger.warn('Validation failed with errors, starting agentic error fixing...');
@@ -267,6 +364,8 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
       const validationErrors = deterministicResult.errorLines?.length
         ? deterministicResult.errorLines!.join('\n')
         : deterministicResult.validationOutput?.stderr || deterministicResult.validationOutput?.stdout || '';
+
+      logger.warn(`Validation failed with errors. Running validation fixer...`);
 
       const validationConfig = getValidationConfig(
         validationErrors,
@@ -288,17 +387,88 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
       );
 
       gitInfo = { ...gitInfo, ...validationResult.gitInfo };
-
-      const lastMessageContent = extractLastMessageContent(validationResult.result).toLowerCase();
-      validationPassed = lastMessageContent.includes('validation passed');
-
-      if (validationPassed) {
-        logger.info('Validation errors fixed by agent!');
-      } else {
-        logger.warn('Agent could not fix all validation errors. Manual intervention required.');
-      }
+      logger.info('Validation fixer completed');
     } else {
-      logger.info('Validation passed on first try!');
+      logger.info('✅ Validation passed!');
+    }
+
+    // =========================================================================
+    // PHASE 4: TEST EXECUTION (3 steps: test → fix → commit)
+    // =========================================================================
+
+    let testsPassed = false;
+    let testIterationsCompleted = 0;
+    let currentTestFailures = '';
+
+    logger.info('Starting test execution phase...');
+
+    // Test execution loop: run tests → if failed, fix with LLM → retry (max 3)
+    await workflow.createWhileLoop(
+      XyneSpacesWorkflowSteps.AUTOMATION_TEST_EXECUTION,
+      3,
+      async (iteration: number, scopedEngine: typeof workflow) => {
+        testIterationsCompleted = iteration + 1;
+        logger.info(`🔄 Test execution iteration ${testIterationsCompleted}/3`);
+
+        // Step 1: Automation Test Execution
+        const testResult: TestExecutionResult = await scopedEngine.createCheckpoint(
+          XyneSpacesWorkflowSteps.AUTOMATION_TEST_EXECUTION,
+          async () => runTestCases(repoPath)
+        );
+
+        if (testResult.passed) {
+          logger.info('✅ All tests passed!');
+          testsPassed = true;
+          return LoopControl.BREAK;
+        }
+
+        // Tests failed
+        logger.warn(`⚠️ Tests failed on iteration ${testIterationsCompleted}. Fixing with LLM...`);
+        currentTestFailures = testResult.failureDetails.length > 0
+          ? testResult.failureDetails
+          : testResult.testOutput;
+
+        // Step 2: Test Fix with LLM
+        const fixResult: AgenticCheckpointResult = await scopedEngine.createAgenticCheckpoint(
+          XyneSpacesWorkflowSteps.AUTOMATION_TEST_FIX,
+          'xyne-cli-test-fixer',
+          getTestFixConfig(
+            currentTestFailures,
+            validRepoUrl,
+            gitInfo,
+            context.baseBranch || 'main',
+            context.checkoutCommit,
+            projectGuidelines,
+            context.executorType,
+            coAuthor
+          )
+        );
+
+        gitInfo = { ...gitInfo, ...fixResult.gitInfo };
+
+        // Loop back to Step 1 for re-test
+        return LoopControl.CONTINUE;
+      }
+    );
+
+    // Step 3: Commit Changes (if any exist after test fixes)
+    const postTestCommitResult = await workflow.createCheckpoint(
+      XyneSpacesWorkflowSteps.POST_AUTOMATION_COMMIT,
+      async () => commitPostTestChanges(repoPath, gitInfo, coAuthor)
+    );
+
+    if (postTestCommitResult.commitHash) {
+      gitInfo = { ...gitInfo, commitHash: postTestCommitResult.commitHash };
+    }
+
+    // =========================================================================
+    // FINAL STATUS
+    // =========================================================================
+
+    const overallPassed = validationPassed && testsPassed && reviewComments.length === 0;
+
+    if (iterationsCompleted >= MAX_ITERATIONS && !overallPassed) {
+      logger.warn(`Max iterations (${MAX_ITERATIONS}) reached. Some issues may still be unresolved.`);
     }
 
     // Add preview configuration for live preview in dashboard
@@ -310,17 +480,19 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
 
     return {
       ticketId,
-      status: validationPassed ? 'completed' : 'failed' as const,
+      status: overallPassed ? 'completed' : 'failed' as const,
       implementationDetails: {
         filesChanged: [],
         commitHash: gitInfo.commitHash,
         branch: gitInfo.branch,
-        verificationPassed: validationPassed,
-        iterationsCompleted: 1,
+        verificationPassed: overallPassed,
+        iterationsCompleted,
       },
-      summary: validationPassed
-        ? 'Feature implementation completed and validated successfully'
-        : 'Feature implementation completed but validation encountered issues',
+      summary: overallPassed
+        ? `Feature implementation completed, validated, and all tests passed after ${iterationsCompleted} iteration(s)`
+        : testsPassed
+          ? `Feature implementation completed but validation encountered issues after ${iterationsCompleted} iteration(s)`
+          : `Feature implementation completed but test cases are failing after ${testIterationsCompleted} iteration(s)`,
       gitInfo: {
         ...gitInfo,
         preview: previewConfig
@@ -328,3 +500,4 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
     };
   },
 };
+

@@ -14,7 +14,7 @@ import {
 /**
  * Convert internal messages to LiteLLM format
  */
-export function convertMessages(messages: readonly Message[], model?: string): LiteLLMMessage[] {
+export function convertMessages(messages: readonly Message[]): LiteLLMMessage[] {
   return messages.map(message => {
     switch (message.type) {
       case 'user': {
@@ -66,50 +66,38 @@ export function convertMessages(messages: readonly Message[], model?: string): L
               continue;
             }
 
-            // Check if attachment type is supported for native multimodal
-            const isNativeSupported = model ? isAttachmentSupportedByModel(attachment, model) : false;
-            logger.debug('Native support check', {
-              attachmentId: attachment.id,
-              isNativeSupported,
-              attachmentType: attachment.type,
-              mimeType: attachment.mimeType,
-              model
-            });
-
-            if (isNativeSupported) {
-              // Use appropriate format based on attachment type
-              if (attachment.type === 'image') {
-                // Send images as image_url (OpenAI format)
-                const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`;
-                contentParts.push({
-                  type: 'image_url',
+            // Send attachments in native format - LiteLLM handles model compatibility
+            if (attachment.type === 'image') {
+              // Send images as image_url (OpenAI format)
+              const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`;
+              contentParts.push({
+                type: 'image_url',
+                // eslint-disable-next-line @typescript-eslint/naming-convention
+                image_url: {
+                  url: dataUrl,
+                  detail: 'auto'
+                }
+              });
+              logger.debug('Added image attachment to content parts', {
+                attachmentId: attachment.id,
+                mimeType: attachment.mimeType
+              });
+            } else if (attachment.type === 'file') {
+              // Send documents as file type (LiteLLM preferred format)
+              const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`;
+              contentParts.push({
+                type: 'file',
+                file: {
                   // eslint-disable-next-line @typescript-eslint/naming-convention
-                  image_url: {
-                    url: dataUrl,
-                    detail: 'auto'
-                  }
-                });
-                logger.debug('Added image attachment to content parts', {
-                  attachmentId: attachment.id,
-                  mimeType: attachment.mimeType
-                });
-              } else {
-                // Send documents as file type (LiteLLM preferred format)
-                const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`;
-                contentParts.push({
-                  type: 'file',
-                  file: {
-                    // eslint-disable-next-line @typescript-eslint/naming-convention
-                    file_data: dataUrl,
-                    format: attachment.mimeType
-                  }
-                });
-                logger.debug('Added document attachment to content parts', {
-                  attachmentId: attachment.id,
-                  mimeType: attachment.mimeType,
-                  attachmentType: attachment.type
-                });
-              }
+                  file_data: dataUrl,
+                  format: attachment.mimeType
+                }
+              });
+              logger.debug('Added document attachment to content parts', {
+                attachmentId: attachment.id,
+                mimeType: attachment.mimeType,
+                attachmentType: attachment.type
+              });
             } else {
               // Try to convert to text if it's a text file
               const buffer = Buffer.from(attachment.data, 'base64');
@@ -223,66 +211,6 @@ export function convertMessages(messages: readonly Message[], model?: string): L
     }
   });
 }
-
-/**
- * File type support matrix for LiteLLM models
- */
-const LITELLM_FILE_TYPE_SUPPORT = {
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  'claude-sonnet-4': {
-    images: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-    documents: ['application/pdf']
-  },
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  'claude-sonnet-4-20250514': {
-    images: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-    documents: ['application/pdf']
-  },
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  'gemini-2.5-pro': {
-    images: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-    videos: ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/webm'],
-    audio: ['audio/wav', 'audio/mp3', 'audio/aiff', 'audio/aac', 'audio/ogg', 'audio/flac'],
-    documents: ['application/pdf']
-  },
-  // GLM models - images only for now
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  'glm-45-fp8': {
-    images: ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-  },
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  'glm-46-fp8': {
-    images: ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-  },
-  'glm-latest': {
-    images: ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-  },
-  // MiniMax M2 - images support
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  'xyne-spaces-minimax-m2': {
-    images: ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-  }
-} as const;
-
-/**
- * Check if attachment is supported by specific LiteLLM model
- */
-export function isAttachmentSupportedByModel(attachment: Attachment, modelName: string): boolean {
-  const supportInfo = LITELLM_FILE_TYPE_SUPPORT[modelName as keyof typeof LITELLM_FILE_TYPE_SUPPORT];
-  if (!supportInfo) return false;
-  
-  const mimeType = attachment.mimeType.toLowerCase();
-  const allSupportedTypes: readonly string[] = [
-    ...supportInfo.images,
-    ...(('videos' in supportInfo) ? supportInfo.videos : []),
-    ...(('audio' in supportInfo) ? supportInfo.audio : []),
-    ...(('documents' in supportInfo) ? supportInfo.documents : [])
-  ];
-  
-  return allSupportedTypes.includes(mimeType);
-}
-
-
 
 /**
  * Check if file content is valid UTF-8 text

@@ -7,14 +7,14 @@
  */
 
 import { createUserMessage, type ConversationResult } from '@framework'
-import { AgenticCheckpointConfig, ExecutorType } from '../../workflow-types'
+import { AgenticCheckpointConfig, ExecutorType, GitInfo } from '../../workflow-types'
 import { ImageAttachment } from '../../types/workflow-enums'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { spawn } from 'child_process'
 import { access } from 'fs/promises'
 import { join } from 'path'
-import {logger} from '@/utils/logger';
+import { logger } from '@/utils/logger';
 
 // Cache for tracking already-installed repos within a session
 const installedRepos = new Map<string, number>()
@@ -26,13 +26,13 @@ const INSTALL_CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours
  */
 export const installXyneSpacesDependencies = async (repoPath: string, repoName: string): Promise<void> => {
   const installKey = `${repoPath}:${repoName}`
-  
+
   // Check cache
   const timestamp = installedRepos.get(installKey)
   if (timestamp && Date.now() - timestamp < INSTALL_CACHE_TTL) {
     return
   }
-  
+
   // Check if this is a xyne-spaces repo by looking for backend/package.json
   try {
     await access(join(repoPath, 'backend', 'package.json'))
@@ -43,7 +43,7 @@ export const installXyneSpacesDependencies = async (repoPath: string, repoName: 
   logger.info(`[INSTALL-DEPS] Installing dependencies for ${repoName}`)
 
   const packages = ['shared', 'framework', 'backend', 'dashboard']
-  
+
   const installPromises = packages.map(async (pkg) => {
     const pkgPath = join(repoPath, pkg)
     try {
@@ -54,19 +54,19 @@ export const installXyneSpacesDependencies = async (repoPath: string, repoName: 
     try {
       await new Promise<void>((resolve, reject) => {
         const needsBuild = pkg === 'shared' || pkg === 'framework'
-        const installProcess = needsBuild 
+        const installProcess = needsBuild
           ? spawn('bash', ['-c', 'NODE_ENV=development npm install --force && npm run build'], {
-              cwd: pkgPath,
-              stdio: ['inherit', 'pipe', 'pipe']
-            })
+            cwd: pkgPath,
+            stdio: ['inherit', 'pipe', 'pipe']
+          })
           : spawn('npm', ['install', '--force'], {
-              cwd: pkgPath,
-              stdio: ['inherit', 'pipe', 'pipe']
-            })
+            cwd: pkgPath,
+            stdio: ['inherit', 'pipe', 'pipe']
+          })
 
         let completed = false
         let stderr = ''
-        
+
         const timeoutId = setTimeout(() => {
           if (completed) return
           completed = true
@@ -75,7 +75,7 @@ export const installXyneSpacesDependencies = async (repoPath: string, repoName: 
           reject(new Error(`Installation timeout for ${pkg}`))
         }, 600000)
 
-        installProcess.stdout?.on('data', () => {})
+        installProcess.stdout?.on('data', () => { })
 
         installProcess.stderr?.on('data', (data) => {
           stderr += data.toString()
@@ -142,22 +142,24 @@ export const createXyneSpacesAgentConfig = (
   coAuthor?: { name: string; email: string }
 ): AgenticCheckpointConfig => {
 
-  const repoInfo: { 
+  const repoInfo: {
     repoUrl: string
     repoBranch?: string
     baseBranch?: string
     checkoutCommit?: string
     postCloneSetup?: (repoPath: string, repoName: string) => Promise<void>
     coAuthor?: { name: string; email: string }
-  } = { 
-    repoUrl, 
+    shallow?: boolean
+  } = {
+    repoUrl,
     baseBranch,
-    postCloneSetup: installXyneSpacesDependencies
+    postCloneSetup: installXyneSpacesDependencies,
+    shallow: true
   }
   if (repoBranch) {
     repoInfo.repoBranch = repoBranch
-  }  
-  
+  }
+
   if (checkoutCommit) {
     repoInfo.checkoutCommit = checkoutCommit
   }
@@ -237,16 +239,16 @@ export const parseVerificationResult = (result: ConversationResult): {
 // =============================================================================
 
 /**
- * Load AGENTS.md from project root
+ * Load xyne.md from project root
  */
 export const loadRootGuidelines = async (repoPath: string): Promise<string> => {
   const resolvedRepoPath = path.basename(repoPath) === 'backend' ? path.dirname(repoPath) : repoPath
-  const agentsPath = path.join(resolvedRepoPath, 'guidelines', 'AGENTS.md')
-  
+  const agentsPath = path.join(resolvedRepoPath, 'xyne.md')
+
   try {
     const content = await fs.readFile(agentsPath, 'utf-8')
-    logger.info('[loadRootGuidelines] ✓ Successfully loaded AGENTS.md')
-    return `\n\n# AGENTS.md - Project Guidelines\n\n${content}`
+    logger.info('[loadRootGuidelines] ✓ Successfully loaded xyne.md')
+    return `\n\n# xyne.md - Project Guidelines\n\n${content}`
   } catch (error) {
     logger.error('[loadRootGuidelines] Error details:', error)
     return ''
@@ -362,10 +364,10 @@ Implementation requirements:
 - Export via index.ts files
 - **NEVER use \`any\` type** - Always use proper TypeScript types
 - **Define interfaces/types for all props, state, and function parameters**
-- **Use proper generic types** - e.g., \`Array<User>\` not \`any[]\`
-- **Type all callbacks** - e.g., \`(item: ItemType) => void\` not \`(item) => void\`
+- **Use proper generic types** - e.g. \`Array<User>\` not \`any[]\`
+- **Type all callbacks** - e.g. \`(item: ItemType) => void\` not \`(item) => void\`
 - **Use \`unknown\` instead of \`any\` when type is truly unknown, then narrow with type guards**
-- **Import types from shared package** - e.g., \`import { ChannelScopeType } from '@xyne/shared'\`
+- **Import types from shared package** - e.g. \`import { ChannelScopeType } from '@xyne/shared'\`
 - **Check existing types before creating new ones** - Reuse types from @xyne/shared, types.ts files
 
 **Backend (if applicable):**
@@ -391,6 +393,100 @@ Implementation requirements:
 
 CRITICAL: Follow the guidelines provided. Quality over speed.`,
 
+  REVIEWER: `You are a senior code reviewer for the Xyne Spaces platform.
+
+# FIRST: Read the Project Guidelines
+
+Before reviewing any code, you MUST read the project guidelines file:
+1. Read the file at: \`xyne.md\`
+2. Understand all the coding standards, conventions, and best practices defined there
+3. Use these guidelines as your reference for the review
+
+# Your Role
+
+1. **Review the implemented code changes** against the project guidelines from AGENTS.md
+2. **Identify issues** that violate guidelines, best practices, or code quality standards
+3. **Provide actionable feedback** with specific line numbers and clear comments
+
+# Review Criteria
+
+Based on the guidelines in AGENTS.md, check for:
+- **Guidelines Compliance**: Check if code follows all conventions defined in AGENTS.md
+- **TypeScript Best Practices**: No \`any\` types, proper typing, correct imports
+- **Code Quality**: Clean code, proper naming, no dead code, proper error handling
+- **Architecture**: Correct folder structure, proper layer separation (Route → Controller → Service → Repository)
+- **Consistency**: Follows existing patterns in the codebase
+
+# Steps to Review
+
+1. FIRST, read the guidelines:
+   \`\`\`bash
+   cat xyne.md
+   \`\`\`
+
+2. Review the git diff provided below for each changed file
+
+3. Read the full file if needed to understand context
+
+4. Check against the guidelines you read from xyne.md
+
+# CRITICAL: OUTPUT FORMAT
+
+You MUST respond with ONLY a valid JSON array. No other text before or after.
+
+If there are ACTUAL ISSUES, respond with:
+\`\`\`json
+[
+  {
+    "file": "path/to/file.ts",
+    "line": "42",
+    "severity": "error",
+    "message": "Description of the issue and how to fix it"
+  }
+]
+\`\`\`
+
+If there are NO issues, respond with:
+\`\`\`json
+[]
+\`\`\`
+
+# SEVERITY LEVELS - STRICT ENFORCEMENT
+
+You MUST use ONLY these three exact string values for severity - no variations allowed:
+- **"error"** - Only for critical bugs, TypeScript errors, broken functionality, security vulnerabilities. Code will not work correctly. MUST be fixed.
+- **"warning"** - Only for issues that will likely cause bugs: missing error handling, race conditions, memory leaks, incorrect logic. SHOULD be fixed.
+- **"info"** - Rarely use. Only for clear violations of documented guidelines from xyne.md that don't break functionality.
+
+**STRICT FILTER - DO NOT RETURN:**
+- Style preferences not in guidelines
+- "Consider" or "You might want" suggestions
+- Missing comments or documentation (unless required by guidelines)
+- Variable naming that follows existing patterns
+- Refactoring suggestions without concrete bug risk
+- Any issue with "nit" or "minor" in the description
+
+**BE CRITICAL:** If you're unsure if something is a real issue, don't include it. Empty array [] is better than noise.
+
+# CRITICAL RULES
+
+1. ONLY output a JSON array - no explanations, no markdown headers, no additional text
+2. **Each item MUST have exactly these fields:**
+   - "file": relative path to the file
+   - "line": the line number where the issue is (MUST be STRING like "42")
+   - "severity": one of "error", "warning", or "info"
+   - "message": description of the issue and how to fix it
+3. Line numbers must be accurate - read the actual files to get correct line numbers
+4. Messages must be actionable - explain what's wrong AND how to fix it
+5. Do **NOT** include:
+   - Positive feedback ("good cleanup", "nice improvement")
+   - Informational notes without action items
+   - Nits, suggestions, or opinions without concrete impact
+6. **LINE FIELD MUST BE STRING NOT NUMBER:** The "line" field MUST be a string like "42" or "1-5". Never use a number like 42.
+7. If the code is good and follows guidelines, return an empty array []
+
+**REMEMBER: Your output is parsed programmatically. Only valid JSON arrays are accepted. The "line" field MUST be a STRING (e.g., "42" or "1-5"), NOT a number.**`,
+
   VALIDATOR: `You are a strict validation error fixer for the Xyne Spaces platform.
 
 CRITICAL RULES - VIOLATING ANY OF THESE IS UNACCEPTABLE:
@@ -400,11 +496,16 @@ CRITICAL RULES - VIOLATING ANY OF THESE IS UNACCEPTABLE:
 4. **NO FEATURE CHANGES** - Don't add anything new, don't modify behavior
 5. **MINIMAL CHANGES ONLY** - Make the smallest possible change to fix each error
 
+VALIDATION COMMAND:
+- Run ONLY: cd /tmp/{workspace}/dashboard && npm run validate
+- This single command(npm run validate) covers all validation: TypeScript compilation, ESLint rules, and formatting, so need to run them separately.
+- If exit code is 0 (success), return "VALIDATION PASSED" immediately. NO NEED to run again and again.
+- If exit code is non-zero, fix the errors and re-run
+
 YOUR ONLY JOB:
+- Run npm run validate
 - Fix TypeScript/ESLint/Build ERRORS (not warnings)
-- Test the fix with: cd /tmp/{workspace}/dashboard && npm run validate
-- Repeat until ZERO ERRORS remain
-- COMMIT fixes after each successful validation
+- Repeat until npm run validate returns exit code 0
 
 WHAT YOU MUST IGNORE:
 - Warnings (yellow text, "warning:", etc.) - SKIP THESE COMPLETELY
@@ -413,40 +514,132 @@ WHAT YOU MUST IGNORE:
 - Optimizations or refactoring - NOT YOUR JOB
 
 FIXING PROTOCOL:
-1. Read ONLY the ERROR lines from validation output (ignore warnings)
-2. For EACH error:
+1. Run: cd /tmp/{workspace}/dashboard && npm run validate
+2. If exit code is 0, IMMEDIATELY report "VALIDATION PASSED" - you're done
+3. If errors exist, read ONLY the ERROR lines from output (ignore warnings)
+4. For EACH error:
    a. Quote the exact error message
    b. Identify the minimal fix (smallest change possible)
    c. Apply ONLY that fix - change nothing else
    d. DO NOT touch any working code
-3. Re-run: cd /tmp/{workspace}/dashboard && npm run validate
-4. If errors remain, repeat from step 1
-5. If ZERO errors, commit and report "VALIDATION PASSED"
+5. Re-run: npm run validate
+6. If exit code is 0, commit and report "VALIDATION PASSED"
+7. If errors remain, repeat from step 3
 
 EXAMPLES OF WHAT TO FIX:
-"error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'"
-"error: 'useState' is not defined"
-"Build failed with 3 errors"
+- "error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'"
+- "error: 'useState' is not defined"
+- "Build failed with 3 errors"
 
 EXAMPLES OF WHAT TO IGNORE:
-"warning: 'useEffect' has a missing dependency"
-"warning: Consider using const instead of let"
-"suggestion: This code could be simplified"
+- "warning: 'useEffect' has a missing dependency"
+- "warning: Consider using const instead of let"
+- "suggestion: This code could be simplified"
 
 FORBIDDEN ACTIONS:
-Changing variable names
-Adding new features or logic
-Restructuring code organization
-Fixing warnings (only errors)
-Improving code style beyond what's required
-Modifying working functionality
+- Changing variable names
+- Adding new features or logic
+- Restructuring code organization
+- Fixing warnings (only errors)
+- Improving code style beyond what's required
+- Modifying working functionality
 
-Your output must end with one of:
-- "VALIDATION PASSED: All errors fixed, zero errors remaining" - when npm run validate shows NO ERRORS (warnings are OK)
-- "VALIDATION FAILED: Max attempts reached, manual intervention required" - only when hitting limits
+Your output must end with:
+- "VALIDATION PASSED: All errors fixed, zero errors remaining" - when npm run validate shows exit code 0 (warnings are OK)
 
-REMEMBER: You are a surgical error fixer, not a code improver. Fix errors. Change nothing else.`
+REMEMBER: You are a surgical error fixer, not a code improver. Fix errors. Change nothing else.`,
+
+  TEST_FIXER: `You are a test failure fixer for the Xyne Spaces platform.
+
+Your ONLY job is to analyze failing test cases and fix the SOURCE CODE (not the tests themselves) so they will pass.
+You will NOT run tests or evaluate results - that is handled by subsequent workflow steps.
+
+CRITICAL RULES:
+1. **READ THE TEST FAILURES CAREFULLY** - Understand exactly what each test expects
+2. **FIX THE SOURCE CODE** - The tests define the expected behavior; fix the implementation to match
+3. **DO NOT MODIFY TEST FILES** - Tests are the source of truth, do not change them
+4. **MINIMAL CHANGES ONLY** - Make the smallest possible change to fix each failing test
+5. **DO NOT BREAK PASSING TESTS** - Your fixes must not cause other tests to fail
+6. **DO NOT CHANGE FUNCTIONALITY BEYOND WHAT TESTS REQUIRE** - Only fix what's needed
+7. **DO NOT RUN TESTS** - Just apply the fixes. Test execution is handled separately.
+8. **DO NOT COMMIT** - Just apply the fixes. Committing is handled separately.
+
+FIXING PROTOCOL:
+1. Read the test failure output carefully
+2. For EACH failing test:
+   a. Identify the test file and test name
+   b. Understand what the test expects
+   c. Read the source code that needs fixing to understand the current implementation
+   d. Apply the minimal fix to the source code
+3. After applying all fixes, report what you changed and why`
 } as const
+
+// =============================================================================
+// PROMPT BUILDERS
+// =============================================================================
+
+/**
+ * Builds the implementation prompt, optionally including review feedback for reimplementation
+ */
+export const getImplementationPrompt = (
+  implementationPlan: string,
+  reviewFeedback?: string
+): string => {
+  if (!reviewFeedback) {
+    return implementationPlan;
+  }
+
+  return `# IMPORTANT: This is a re-implementation based on code review feedback
+
+${reviewFeedback}
+
+## Original Implementation Plan
+${implementationPlan}
+
+## Your Task
+1. Review the existing implementation
+2. Address ALL the review feedback listed above
+3. Make the necessary code changes to fix the issues
+4. Commit your changes with a clear message`;
+}
+
+/**
+ * Formats review comments into feedback context for next iteration
+ */
+export const formatReviewFeedback = (reviewComments: Record<string, unknown>[]): string => {
+  const formattedReviewComments = JSON.stringify(reviewComments, null, 2);
+
+  return `## Code Review Comments - ADDRESS THESE ISSUES
+
+The code changes have been implemented, but the following review comments were raised.
+You MUST address ALL of these issues properly.
+
+${formattedReviewComments}
+
+## CRITICAL INSTRUCTIONS FOR ADDRESSING REVIEW COMMENTS
+
+1. **IMPLEMENT PROPERLY** - Fix each issue completely and correctly according to the requirements
+2. **NO SHORTCUTS** - Do not take shortcuts or apply quick hacks to silence the review
+3. **NO TODOs** - Do not add "TODO" comments or defer fixes for later - fix everything NOW
+4. **NO PLACEHOLDERS** - Do not use placeholder implementations or stub code
+5. **FOLLOW GUIDELINES** - Ensure all fixes comply with the project guidelines in AGENTS.md
+6. **QUALITY CODE** - Write clean, maintainable, production-ready code
+
+## FIXING PROTOCOL
+
+1. Read each review comment carefully and understand the issue
+2. Implement the CORRECT fix as described in the comment
+3. If the comment suggests a specific approach, follow it
+4. Verify your fix actually resolves the issue
+5. Commit your fixes with a clear message like "fix: address code review feedback"
+
+## FORBIDDEN ACTIONS
+- Adding "// TODO: fix this later" comments
+- Using \`any\` type to bypass TypeScript errors
+- Commenting out code instead of fixing it
+- Applying band-aid fixes that don't address the root cause
+- Ignoring any review comment`;
+}
 
 /**
  * Validate that a repository URL is provided and properly formatted
@@ -478,11 +671,24 @@ export enum XyneSpacesWorkflowSteps {
   // Phase 1: Planning with Guidelines Context
   PLANNING = 'planning',
 
-  // Phase 2: Implementation
+  // Phase 2: Implementation Loop
+  IMPLEMENTATION_LOOP = 'implementation_loop',
+
   IMPLEMENTATION = 'implementation',
 
-  // Phase 3: Validation with iterative error fixing
+  GIT_DIFF_GATHERING = 'git_diff_gathering',
+
+  REVIEW = 'review',
+
+  // Phase 3: Validation (runs once after loop)
+  DETERMINISTIC_VALIDATION = 'deterministic_validation',
+
   VALIDATION = 'validation',
+
+  // Phase 4: Test Execution
+  AUTOMATION_TEST_EXECUTION = 'automation_test_execution',
+  AUTOMATION_TEST_FIX = 'automation_test_fix',
+  POST_AUTOMATION_COMMIT = 'post_automation_commit',
 }
 
 
@@ -714,5 +920,120 @@ Your response must end with:
   25,
   executorType,
   useQuestioningMode,
+  coAuthor
+)
+
+/**
+ * Creates agent configuration for code review using guidelines
+ */
+export const getReviewConfig = (
+  repoUrl: string,
+  repoBranch?: string,
+  baseBranch?: string,
+  checkoutCommit?: string,
+  _guidelines?: string,
+  executorType?: ExecutorType,
+  changedFiles?: string[],
+  diffOutput?: string
+) => createXyneSpacesAgentConfig(
+  'xyne-reviewer',
+  SYSTEM_PROMPTS.REVIEWER,
+  `First read the guidelines from xyne.md, then review the code changes below and return a JSON array of review comments.
+# Changed Files (${changedFiles?.length || 0} files)
+${changedFiles && changedFiles.length > 0 ? changedFiles.map(f => `- ${f}`).join('\n') : 'No files provided'}
+
+# Git Diff
+\`\`\`diff
+${diffOutput || 'No diff provided'}
+\`\`\``,
+  repoUrl,
+  undefined,
+  ['read', 'grep', 'bash', 'ls'], // Read-only tools for review
+  0.1,
+  repoBranch,
+  baseBranch,
+  checkoutCommit,
+  undefined, // maxTurns
+  executorType
+)
+
+/**
+ * Parse review comments from agent response
+ * Returns raw JSON array - whatever the agent returned
+ */
+export const parseReviewComments = (result: ConversationResult): Record<string, unknown>[] => {
+  try {
+    const content = extractLastMessageContent(result)
+
+    // Try to find JSON array in the content
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+    return [];
+  } catch (error) {
+    logger.error('Error parsing review comments:', error);
+    return [];
+  }
+}
+
+/**
+ * Filter review comments by severity
+ * - If severity field exists: keep only "error", "warning", "high", "medium"
+ * - If no severity field: keep all comments
+ */
+export const filterReviewCommentsBySeverity = (comments: Record<string, unknown>[]): Record<string, unknown>[] => {
+  const allowedSeverities = ['error', 'warning', 'high', 'medium'];
+
+  return comments.filter(comment => {
+    // If no severity field, keep the comment
+    if (!('severity' in comment)) {
+      return true;
+    }
+
+    const severity = String(comment.severity).toLowerCase();
+    return allowedSeverities.includes(severity);
+  });
+}
+
+/**
+ * Creates agent configuration for test failure fixing
+ */
+export const getTestFixConfig = (
+  testFailureOutput: string,
+  repoUrl: string,
+  gitInfo: GitInfo,
+  baseBranch?: string,
+  checkoutCommit?: string,
+  guidelines?: string,
+  executorType?: ExecutorType,
+  coAuthor?: { name: string; email: string }
+) => createXyneSpacesAgentConfig(
+  'xyne-test-fixer',
+  SYSTEM_PROMPTS.TEST_FIXER,
+  `# Project Guidelines
+
+${guidelines || 'No specific guidelines provided.'}
+
+# TEST FAILURE OUTPUT
+
+\`\`\`
+${testFailureOutput}
+\`\`\`
+
+Analyze the test failures above and fix the source code accordingly.`,
+  repoUrl,
+  undefined,
+  ['read', 'grep', 'write', 'ls', 'edit'],
+  0.1,
+  gitInfo.branch,
+  baseBranch,
+  checkoutCommit,
+  25,
+  executorType,
+  false,
   coAuthor
 )

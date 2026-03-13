@@ -164,6 +164,8 @@ export type AgenticCheckpointConfig = {
       name: string
       email: string
     }
+    /** If true, use shallow clone (depth 1) for faster cloning. Default: false */
+    shallow?: boolean
   }
   agentConfigVersions?: AgentConfigVersions
   /** When true, captures learnings from the checkpoint for the knowledge base */

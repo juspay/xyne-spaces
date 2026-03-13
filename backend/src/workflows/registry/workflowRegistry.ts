@@ -340,7 +340,7 @@ export class WorkflowRegistry {
       const schemaFields = convertJsonSchemaToFields(jsonSchema);
       const modelField = schemaFields.find(f => f.name === 'modelName');
       if (modelField) {
-        const allModels = await repositories.models.findMany();
+        const allModels = await repositories.models.findByProvider('litellm-api');
         const modelNames = allModels.map((model: { name: string }) => model.name);
         
         if (modelNames.length > 0) {
