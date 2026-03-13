@@ -755,6 +755,7 @@ enum UserStatus {
 enum UserType {
   USER
   BOT
+  APP
   @@schema("public")
 }
 
@@ -888,6 +889,8 @@ model User {
   userAssignmentStates      UserAssignmentState[]  @relation("UserAssignmentStateUser")
   workloadMappings          UserWorkloadMapping[]  @relation("UserWorkloadUser")
   expertiseMappings         UserExpertiseMapping[] @relation("UserExpertiseUser")
+  appsCreated               Apps[]                @relation("AppsCreatedBy")
+  installedAppsFor          InstalledApps[]        @relation("InstalledAppsUser")
 
   @@map("users")
   @@schema("public")
@@ -2736,5 +2739,42 @@ model SurfaceLink {
   @@index([targetType, targetId])
   @@index([projectId])
   @@map("surface_links")
+  @@schema("public")
+}
+
+model Apps {
+  id String @id @default(cuid())
+  name String
+  description String?
+  createdBy String
+  createdAt DateTime
+  updatedAt DateTime
+
+  // Relations
+  createdByUser User           @relation("AppsCreatedBy", fields: [createdBy], references: [id])
+  installations InstalledApps[]
+
+  @@index([name])
+  @@index([createdBy])
+  @@map("apps")
+  @@schema("public")
+}
+
+model InstalledApps {
+  id String @id @default(cuid())
+  appId String
+  userId String
+  webhookUrl String?
+  signingSecret String
+  createdAt DateTime
+  updatedAt DateTime
+
+  // Relations
+  app             Apps         @relation(fields: [appId], references: [id])
+  user            User         @relation("InstalledAppsUser", fields: [userId], references: [id])
+
+  @@index([appId])
+  @@index([userId])
+  @@map("installed_apps")
   @@schema("public")
 }

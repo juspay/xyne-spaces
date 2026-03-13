@@ -248,6 +248,7 @@ export enum UserStatus {
 export enum UserType {
   USER = 'USER',
   BOT = 'BOT',
+  APP = 'APP',
 }
 
 // @ts-ignore TS1294
@@ -1720,6 +1721,29 @@ export const channelDailyRecapTable = table('channel_daily_recaps')
   })
   .primaryKey('channelId', 'recapDate');
 
+export const appsTable = table('apps')
+  .columns({
+    id: string(),
+    name: string(),
+    description: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const installedAppsTable = table('installed_apps')
+  .columns({
+    id: string(),
+    appId: string(),
+    userId: string(),
+    webhookUrl: string().optional(),
+    signingSecret: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 // Define relationships
 
 export const merchantTable = table('merchants')
@@ -2319,6 +2343,16 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ['userId'],
     destSchema: activityTable,
   }),
+  appsCreated: many({
+    sourceField: ['id'],
+    destField: ['createdBy'],
+    destSchema: appsTable,
+  }),
+  installedAppsFor: many({
+    sourceField: ['id'],
+    destField: ['userId'],
+    destSchema: installedAppsTable,
+  }),
 }));
 
 export const userPresenceTableRelationships = relationships(userPresenceTable, ({ one }) => ({
@@ -2644,6 +2678,32 @@ export const surfaceLinkTableRelationships = relationships(surfaceLinkTable, ({ 
     sourceField: ['sourceId'],
     destField: ['messageId'],
     destSchema: messageTable,
+  }),
+}));
+
+export const appsTableRelationships = relationships(appsTable, ({ one, many }) => ({
+  createdByUser: one({
+    sourceField: ['createdBy'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+  installations: many({
+    sourceField: ['id'],
+    destField: ['appId'],
+    destSchema: installedAppsTable,
+  }),
+}));
+
+export const installedAppsTableRelationships = relationships(installedAppsTable, ({ one }) => ({
+  app: one({
+    sourceField: ['appId'],
+    destField: ['id'],
+    destSchema: appsTable,
+  }),
+  user: one({
+    sourceField: ['userId'],
+    destField: ['id'],
+    destSchema: userTable,
   }),
 }));
 
@@ -3099,6 +3159,9 @@ export const schema = createSchema({
     surfaceLinkTable,
     // Channel Daily Recaps
     channelDailyRecapTable,
+    // Apps
+    appsTable,
+    installedAppsTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -3178,6 +3241,9 @@ export const schema = createSchema({
     surfaceLinkTableRelationships,
     // Channel Daily Recaps
     channelDailyRecapTableRelationships,
+    // Apps
+    appsTableRelationships,
+    installedAppsTableRelationships,
   ],
 });
 
@@ -3269,6 +3335,10 @@ export type SurfaceLink = Row<typeof schema.tables.surface_links>;
 
 // Channel Daily Recaps Types
 export type ChannelDailyRecap = Row<typeof schema.tables.channel_daily_recaps>;
+
+// Apps Types
+export type Apps = Row<typeof schema.tables.apps>;
+export type InstalledApps = Row<typeof schema.tables.installed_apps>;
 
 export type Context = {
   userID: string;

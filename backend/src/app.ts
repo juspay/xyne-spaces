@@ -105,6 +105,7 @@ import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
 import emojiRoutes from '@/routes/emojis';
 import applicationBackfillRoutes from '@/routes/applicationBackfill';
+import { appRoutes } from '@/apps';
 
 export class App {
   public app: Application;
@@ -295,6 +296,10 @@ export class App {
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
+    
+    // App routes 
+    this.app.use('/api/apps', appRoutes);
+    
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes

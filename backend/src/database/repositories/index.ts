@@ -48,6 +48,8 @@ export { UserGroupMappingRepository } from './userGroupMappingRepository';
 export { EmailRepository } from './emailRepository';
 export { EmailDraftRepository } from './emailDraftRepository';
 export { ActivityEventRepository } from './activityEventRepository';
+export { AppsRepository } from './appsRepository';
+export { InstalledAppsRepository } from './installedAppsRepository';
 
 // Import statements for the container
 import { AgentRepository } from './agents';
@@ -88,6 +90,8 @@ import { UserGroupMappingRepository } from './userGroupMappingRepository';
 import { EmailRepository } from './emailRepository';
 import { EmailDraftRepository } from './emailDraftRepository';
 import { ActivityEventRepository } from './activityEventRepository';
+import { AppsRepository } from './appsRepository';
+import { InstalledAppsRepository } from './installedAppsRepository';
 
 // Repository container for dependency injection
 export class RepositoryContainer {
@@ -128,6 +132,8 @@ export class RepositoryContainer {
   public emails: EmailRepository;
   public emailDrafts: EmailDraftRepository;
   public activityEvents: ActivityEventRepository;
+  public apps: AppsRepository;
+  public installedApps: InstalledAppsRepository;
 
   private constructor() {
     this.agents = new AgentRepository();
@@ -165,6 +171,8 @@ export class RepositoryContainer {
     this.emails = new EmailRepository();
     this.emailDrafts = new EmailDraftRepository();
     this.activityEvents = new ActivityEventRepository();
+    this.apps = new AppsRepository();
+    this.installedApps = new InstalledAppsRepository();
   }
 
   static getInstance(): RepositoryContainer {
