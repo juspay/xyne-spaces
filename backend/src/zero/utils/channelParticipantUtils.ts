@@ -57,6 +57,7 @@ export async function addChannelParticipant(
     isStarred: false,
     isClosed: false,
     unreadCount: 0,
+    isRecapSubscribed: false,
   });
 
   // Increment participantCount
@@ -126,6 +127,7 @@ export async function addChannelParticipants(
       isStarred: false,
       isClosed: false,
       unreadCount: 0,
+      isRecapSubscribed: false,
     });
   }
 

@@ -11,6 +11,7 @@ export {
   CallsACL,
   CanvasParticipantsACL,
   CanvasesACL,
+  ChannelDailyRecapsACL,
   ChannelParticipantsACL,
   ChannelsACL,
   ConversationParticipantsACL,

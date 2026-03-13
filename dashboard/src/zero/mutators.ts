@@ -121,6 +121,7 @@ export const mutators = defineMutators({
           isStarred: false,
           isClosed: false,
           unreadCount: 0,
+          isRecapSubscribed: false,
         });
       },
     ),
@@ -233,6 +234,7 @@ export const mutators = defineMutators({
             isStarred: false,
             isClosed: false,
             unreadCount: 0,
+            isRecapSubscribed: false,
           });
         }
       },
@@ -5201,6 +5203,100 @@ export const mutators = defineMutators({
           ...(issueStartAt !== undefined && { issueStartAt }),
           ...(status !== undefined && { status }),
           updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+  recap: {
+    saveSubscriptions: defineMutator(
+      z.object({
+        channelIds: z.array(z.string()),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { channelIds, timestamp: _timestamp } }) => {
+        // Get existing channel user status for this user
+        const existingStatuses = await tx.run(zql.channel_user_status.where('userId', ctx.userID));
+
+        const newChannelIds = new Set(channelIds);
+
+        // Update isRecapSubscribed based on selection
+        for (const status of existingStatuses) {
+          const shouldSubscribe = newChannelIds.has(status.channelId);
+          if (status.isRecapSubscribed !== shouldSubscribe) {
+            await tx.mutate.channel_user_status.update({
+              id: status.id,
+              isRecapSubscribed: shouldSubscribe,
+            });
+          }
+        }
+      },
+    ),
+    markSeen: defineMutator(
+      z.object({
+        recapDate: z.number(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { recapDate, timestamp: _timestamp } }) => {
+        // Update all subscribed channel user statuses for this user with the seen date
+        const statuses = await tx.run(
+          zql.channel_user_status.where('userId', ctx.userID).where('isRecapSubscribed', true),
+        );
+
+        for (const status of statuses) {
+          // Only update if the new date is more recent
+          if (status.lastSeenRecapDate === null || status.lastSeenRecapDate < recapDate) {
+            await tx.mutate.channel_user_status.update({
+              id: status.id,
+              lastSeenRecapDate: recapDate,
+            });
+          }
+        }
+      },
+    ),
+    markChannelRecapAsRead: defineMutator(
+      z.object({
+        channelId: z.string(),
+        recapDate: z.number(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { channelId, recapDate, timestamp: _timestamp } }) => {
+        // Find the channel user status for this channel
+        const status = await tx.run(
+          zql.channel_user_status.where('userId', ctx.userID).where('channelId', channelId).one(),
+        );
+
+        if (!status) {
+          throw new Error('Channel user status not found for this channel');
+        }
+
+        // Only update if the new date is more recent
+        if (status.lastSeenRecapDate === null || status.lastSeenRecapDate < recapDate) {
+          await tx.mutate.channel_user_status.update({
+            id: status.id,
+            lastSeenRecapDate: recapDate,
+          });
+        }
+      },
+    ),
+    markChannelRecapAsUnread: defineMutator(
+      z.object({
+        channelId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { channelId, timestamp: _timestamp } }) => {
+        // Find the channel user status for this channel
+        const status = await tx.run(
+          zql.channel_user_status.where('userId', ctx.userID).where('channelId', channelId).one(),
+        );
+
+        if (!status) {
+          throw new Error('Channel user status not found for this channel');
+        }
+
+        // Set lastSeenRecapDate to null to mark as unread
+        await tx.mutate.channel_user_status.update({
+          id: status.id,
+          lastSeenRecapDate: null,
         });
       },
     ),

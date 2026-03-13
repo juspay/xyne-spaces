@@ -1463,6 +1463,23 @@ export const queries = defineQueries({
     },
   ),
 
+  // Recap Queries
+  channelDailyRecaps: defineQuery(
+    z.object({
+      channelIds: z.array(z.string()),
+      recapDate: z.number(),
+    }),
+    ({ args: { channelIds, recapDate } }) => {
+      if (channelIds.length === 0) {
+        return zql.channel_daily_recaps.limit(0);
+      }
+
+      return zql.channel_daily_recaps
+        .where('recapDate', recapDate)
+        .where(helpers => helpers.or(...channelIds.map(id => helpers.cmp('channelId', id))));
+    },
+  ),
+
   entityNudges: defineQuery(
     z.object({
       sourceId: z.string(),

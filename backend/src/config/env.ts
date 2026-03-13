@@ -77,6 +77,10 @@ const envSchema = Joi.object({
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
+  ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
+  RECAP_GENERATION_CRON: Joi.string().default(''),//5:45 IST daily
+  RECAP_CLEANUP_CRON: Joi.string().default(''),//5:00 IST daily
+  RECAP_RETENTION_DAYS: Joi.number().default(30),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
@@ -330,6 +334,13 @@ export const config = {
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
+  runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
+  recapScheduler: {
+    enabled: envVars.ENABLE_RECAP_SCHEDULER,
+    generationCron: envVars.RECAP_GENERATION_CRON,
+    cleanupCron: envVars.RECAP_CLEANUP_CRON,
+    retentionDays: envVars.RECAP_RETENTION_DAYS,
+  },
   otel: {
     baseUrl: envVars.OTEL_BASE_URL,
     serviceName: envVars.OTEL_SERVICE_NAME,

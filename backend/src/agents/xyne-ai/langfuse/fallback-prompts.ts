@@ -896,6 +896,28 @@ If the user doesn't have edit access, the tool will return an error message.
 The tool returns the updated canvas URL.`;
 
 /**
+ * Fallback prompt for recap generation - concise version
+ */
+const FETCH_CHANNEL_MESSAGES_RECAP_FALLBACK = `You are a recap generator. Analyze messages, tickets, attachments, and calls to create a concise recap showing WHO did WHAT and WHAT changed.
+
+Your task:
+1. Read all messages, tickets, attachments, and call transcripts
+2. Identify key updates, decisions, actions, and outcomes
+3. Summarize in 5 key points max, combining related updates
+
+Output JSON:
+{"summary":"Brief overview","keypoints":"• Topic - Description\\n• Topic - Description","citations":{1:5,2:12}}
+
+Rules:
+- Maximum 5 key points; combine related updates
+- Format: "• Topic - Content" (no citation numbers in text)
+- Citations: {pointNumber: messageNumber} mapping to source [N]
+- Cite the most important/final source per point
+- Keep exact names/terms from messages
+- Use only provided data, no outside knowledge
+- No empty outputs if data exists`;
+
+/**
  * Fallback prompt for nudge extractor
  */
 const NUDGE_EXTRACTOR_FALLBACK = `You are the "Xyne Spaces Proactive Nudge Extractor".
@@ -1029,6 +1051,7 @@ Example:
 export const FALLBACK_PROMPTS: Record<string, string> = {
   'xyne-ai': XYNE_AI_SYSTEM_FALLBACK,
   'fetch_channel_messages': FETCH_CHANNEL_MESSAGES_FALLBACK,
+  'fetch_channel_messages_recap': FETCH_CHANNEL_MESSAGES_RECAP_FALLBACK,
   'fetch_thread_messages': FETCH_THREAD_MESSAGES_FALLBACK,
   'fetch_link_content': FETCH_LINK_CONTENT_FALLBACK,
   'search_relevant_messages': SEARCH_RELEVANT_MESSAGES_FALLBACK,
