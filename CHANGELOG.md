@@ -1,3 +1,16 @@
+## [1.80.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.79.0...v1.80.0) (2026-03-13)
+
+
+### Features
+
+* temp branch based report collection ([c1ceb3e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c1ceb3eded9cd9ee36a5da960b9590a8d975d77e)), closes [#3962](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3962)
+
+
+### Bug Fixes
+
+* Canvas query fix ([b6a4764](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b6a4764b0dc8240934503b19909e8af94ed60fb1)), closes [#4062](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4062) [#4056](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4056)
+* Conversation participation avatar fix ([907b6b0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/907b6b01ca9a2d7e462f18f5740b2076569d202d)), closes [#4074](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4074)
+
 ## [1.79.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.78.0...v1.79.0) (2026-03-12)
 
 
