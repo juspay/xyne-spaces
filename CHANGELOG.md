@@ -1,3 +1,10 @@
+## [1.83.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.83.0...v1.83.1) (2026-03-13)
+
+
+### Bug Fixes
+
+* Fix arrow key navigation in Cmd+K search dialog ([fa546da](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fa546da8b186099a7e48e4977a9bfc1f3329b50a))
+
 ## [1.83.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.82.0...v1.83.0) (2026-03-13)
 
 
