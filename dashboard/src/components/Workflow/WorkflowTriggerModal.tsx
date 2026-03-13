@@ -10,7 +10,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useWorkflowTypes, type WorkflowType } from '../../hooks/useWorkflowTypes';
 import { useWorkflowFormPersistence } from '../../hooks/useWorkflowFormPersistence';
 import type { WorkflowTypeSchema } from '../Tickets/types';
-import { Play, X, RotateCcw } from 'lucide-react';
+import { Play, X } from 'lucide-react';
 import {
   validateCustomField,
   updateFormWithTicketData,
@@ -28,6 +28,9 @@ interface WorkflowTriggerModalProps {
   onClose: () => void;
   ticketId: string;
   redirectOnSuccess?: boolean;
+  isRerun?: boolean;
+  defaultWorkflowType?: string;
+  defaultCustomFields?: Record<string, unknown>;
 }
 
 export default function WorkflowTriggerModal({
@@ -35,6 +38,9 @@ export default function WorkflowTriggerModal({
   onClose,
   ticketId,
   redirectOnSuccess = false,
+  isRerun = false,
+  defaultWorkflowType,
+  defaultCustomFields,
 }: WorkflowTriggerModalProps): React.ReactElement | null {
   const navigate = useNavigate();
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowTypeSchema | null>(null);
@@ -68,10 +74,11 @@ export default function WorkflowTriggerModal({
   // Use persistence hook to save/restore form values - must be defined before mutation
   const {
     savedValues,
-    hasSavedValues,
     save: saveFormValues,
     clear: clearSavedValues,
   } = useWorkflowFormPersistence(workflowType);
+
+  const hasSavedRepositoryUrl = !!savedValues?.customFields?.['repositoryUrl'];
 
   // Track which fields have persisted values from localStorage
   const [persistedFields, setPersistedFields] = useState<Set<string>>(new Set());
@@ -114,15 +121,15 @@ export default function WorkflowTriggerModal({
       return createWorkflow(workflowRequest);
     },
     onSuccess: (response, variables) => {
-      // Save form values to localStorage before closing (excluding description)
-      saveFormValues({
-        customFields: Object.fromEntries(
-          Object.entries(variables.customFields).filter(
-            ([key]) => key !== 'description' && key !== 'title',
-          ),
-        ),
-        context: variables.context,
-      });
+      const repositoryUrl = variables.customFields['repositoryUrl'];
+      if (repositoryUrl !== undefined && repositoryUrl !== null && repositoryUrl !== '') {
+        saveFormValues({
+          customFields: { repositoryUrl },
+          context: '',
+        });
+      } else {
+        clearSavedValues();
+      }
 
       form.reset();
       setSelectedWorkflow(null);
@@ -224,30 +231,34 @@ export default function WorkflowTriggerModal({
     [workflowTypes, ticketData, form, setValue],
   );
 
-  // Load saved form values when workflow type changes
   useEffect(() => {
+    if (isRerun) return;
     if (savedValues && selectedWorkflow?.schema) {
       const persistedFieldNames = new Set<string>();
-
-      // Restore custom fields from saved values
-      for (const [fieldName, fieldValue] of Object.entries(savedValues.customFields)) {
-        if (fieldName === 'modelName') continue;
-
-        const fieldExists = selectedWorkflow.schema.some(f => f.name === fieldName);
-        if (fieldExists && fieldValue !== undefined && fieldValue !== null && fieldValue !== '') {
-          setValue(`customFields.${fieldName}` as Path<TriggerWorkflowFormData>, fieldValue);
-          persistedFieldNames.add(fieldName);
-        }
+      const repositoryUrl = savedValues.customFields['repositoryUrl'];
+      const fieldExists = selectedWorkflow.schema.some(f => f.name === 'repositoryUrl');
+      if (
+        fieldExists &&
+        repositoryUrl !== undefined &&
+        repositoryUrl !== null &&
+        repositoryUrl !== ''
+      ) {
+        setValue('customFields.repositoryUrl' as Path<TriggerWorkflowFormData>, repositoryUrl);
+        persistedFieldNames.add('repositoryUrl');
       }
-      // Restore context if saved
-      if (savedValues.context) {
-        setValue('context', savedValues.context);
-        persistedFieldNames.add('context');
-      }
-
       setPersistedFields(persistedFieldNames);
     }
-  }, [savedValues, selectedWorkflow, setValue]);
+  }, [isRerun, savedValues, selectedWorkflow, setValue]);
+
+  useEffect(() => {
+    if (!isRerun || !selectedWorkflow?.schema || !defaultCustomFields) return;
+    for (const [fieldName, fieldValue] of Object.entries(defaultCustomFields)) {
+      const fieldExists = selectedWorkflow.schema.some(f => f.name === fieldName);
+      if (fieldExists && fieldValue !== undefined && fieldValue !== null && fieldValue !== '') {
+        setValue(`customFields.${fieldName}` as Path<TriggerWorkflowFormData>, fieldValue);
+      }
+    }
+  }, [isRerun, selectedWorkflow, defaultCustomFields, setValue]);
 
   useEffect(() => {
     if (selectedWorkflow?.schema) {
@@ -257,21 +268,6 @@ export default function WorkflowTriggerModal({
       }
     }
   }, [selectedWorkflow, setValue]);
-
-  // Handle reset to defaults
-  const handleResetToDefaults = useCallback(() => {
-    clearSavedValues();
-    setPersistedFields(new Set());
-    // Reset custom fields to empty
-    if (selectedWorkflow?.schema) {
-      const resetCustomFields: Record<string, unknown> = {};
-      for (const field of selectedWorkflow.schema) {
-        resetCustomFields[field.name] = field.defaultValue ?? '';
-      }
-      setValue('customFields', resetCustomFields);
-    }
-    setValue('context', '');
-  }, [clearSavedValues, selectedWorkflow, setValue]);
 
   const handleClose = (): void => {
     // Explicitly reset form to initial values to prevent stale workflow selection
@@ -320,8 +316,18 @@ export default function WorkflowTriggerModal({
       setSelectedWorkflow(null);
       setValidationErrors([]);
       createWorkflowMutation.reset();
+
+      if (isRerun && defaultWorkflowType && workflowTypes.length > 0) {
+        handleWorkflowSelect(defaultWorkflowType);
+      }
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && isRerun && defaultWorkflowType && workflowTypes.length > 0 && !selectedWorkflow) {
+      handleWorkflowSelect(defaultWorkflowType);
+    }
+  }, [isOpen, isRerun, defaultWorkflowType, workflowTypes, selectedWorkflow]);
 
   const renderFormFields = () => {
     if (!selectedWorkflow?.schema) return null;
@@ -344,7 +350,7 @@ export default function WorkflowTriggerModal({
           <>
             <h3 className='text-sm font-medium text-foreground'>
               Required Parameters
-              {hasSavedValues && (
+              {hasSavedRepositoryUrl && (
                 <span className='text-xs text-muted-foreground font-normal ml-2'>
                   (includes saved values)
                 </span>
@@ -406,11 +412,6 @@ export default function WorkflowTriggerModal({
             <label className='block text-sm font-medium text-foreground'>
               {field.name}
               {field.required && <span className='text-red-500 ml-1'>*</span>}
-              {field.description && (
-                <span className='text-xs text-muted-foreground block mt-1'>
-                  {field.description}
-                </span>
-              )}
             </label>
 
             {/* Render enum fields as select dropdowns */}
@@ -431,6 +432,26 @@ export default function WorkflowTriggerModal({
                 selected={(controllerField.value as string) || (field.defaultValue as string) || ''}
                 onSelect={controllerField.onChange}
                 alignment={SelectMenuAlignment.START}
+              />
+            ) : field.type === 'string' || (!field.type && !field.enumValues) ? (
+              <textarea
+                className='w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[80px] text-sm'
+                data-track-category='Workflows'
+                data-track-name='WorkflowParameterInput'
+                data-track-metadata={JSON.stringify({
+                  fieldName: field.name,
+                  fieldType: field.type,
+                })}
+                value={
+                  typeof controllerField.value === 'string'
+                    ? controllerField.value
+                    : typeof controllerField.value === 'number'
+                      ? String(controllerField.value)
+                      : ''
+                }
+                onChange={e => controllerField.onChange(e.target.value)}
+                placeholder={field.description || `Enter ${field.name}`}
+                rows={field.name === 'description' || field.name === 'instructions' ? 4 : 2}
               />
             ) : (
               <input
@@ -512,9 +533,7 @@ export default function WorkflowTriggerModal({
                         ? 'Enter a number'
                         : field.type === 'boolean'
                           ? 'Enter true or false'
-                          : field.name === 'repositoryUrl'
-                            ? 'Enter in SSH format (e.g., ssh://git@github.com/example-org/xyne-spaces.git)'
-                            : `Enter ${field.name}`
+                          : field.description || `Enter ${field.name}`
                 }
               />
             )}
@@ -586,7 +605,9 @@ export default function WorkflowTriggerModal({
         <div className='flex items-center justify-between mb-4'>
           <div className='flex items-center gap-2'>
             <Play className='w-5 h-5 text-blue-600' />
-            <h2 className='text-lg font-semibold text-foreground'>Trigger Workflow</h2>
+            <h2 className='text-lg font-semibold text-foreground'>
+              {isRerun ? 'Rerun Workflow' : 'Trigger Workflow'}
+            </h2>
           </div>
           <button
             onClick={handleClose}
@@ -630,23 +651,6 @@ export default function WorkflowTriggerModal({
           />
 
           {renderFormFields()}
-
-          {/* Show reset button if there are saved values */}
-          {hasSavedValues && selectedWorkflow && (
-            <div className='flex items-center justify-between py-2'>
-              <span className='text-xs text-muted-foreground'>Using previously saved values</span>
-              <button
-                type='button'
-                onClick={handleResetToDefaults}
-                className='flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors'
-                data-track-category='Workflows'
-                data-track-name='ResetWorkflowFormDefaults'
-              >
-                <RotateCcw className='w-3 h-3' />
-                Reset to defaults
-              </button>
-            </div>
-          )}
 
           {validationErrors.length > 0 && (
             <div className='p-3 bg-orange-50 border border-orange-200 rounded-md'>
@@ -695,7 +699,11 @@ export default function WorkflowTriggerModal({
               type='submit'
               disabled={createWorkflowMutation.isPending || !selectedWorkflow || !formState.isValid}
             >
-              {createWorkflowMutation.isPending ? 'Please wait...' : 'Trigger Workflow'}
+              {createWorkflowMutation.isPending
+                ? 'Please wait...'
+                : isRerun
+                  ? 'Rerun Workflow'
+                  : 'Trigger Workflow'}
             </Button>
           </div>
         </form>

@@ -30,6 +30,15 @@ import { usePlatform } from '../../hooks/usePlatform';
 
 const LAST_WORKFLOW_PATH_KEY = 'last-viewed-workflow-path';
 
+const RERUN_EXCLUDED_KEYS = new Set([
+  'title',
+  'description',
+  'workflowType',
+  'ticketId',
+  'conversationId',
+  'xyneId',
+]);
+
 const WorkflowScreen: React.FC = () => {
   const { ticketId, workflowId } = useParams<{ ticketId: string; workflowId?: string }>();
   const [searchParams] = useSearchParams();
@@ -172,6 +181,17 @@ const WorkflowScreen: React.FC = () => {
   const repositoryUrl = useMemo(() => {
     const url = combinedStepsData?.workflows?.[0]?.metadata?.originalRequest?.['repositoryUrl'];
     return typeof url === 'string' ? url : undefined;
+  }, [combinedStepsData]);
+
+  const rerunDefaultFields = useMemo((): Record<string, unknown> => {
+    const req = combinedStepsData?.workflows?.[0]?.metadata?.originalRequest;
+    if (!req || typeof req !== 'object') return {};
+    return Object.fromEntries(
+      Object.entries(req).filter(
+        ([key, value]) =>
+          !RERUN_EXCLUDED_KEYS.has(key) && value !== undefined && value !== null && value !== '',
+      ),
+    );
   }, [combinedStepsData]);
 
   // Check if preview tab should be enabled
@@ -670,6 +690,9 @@ const WorkflowScreen: React.FC = () => {
           onClose={() => setIsWorkflowModalOpen(false)}
           ticketId={ticket.id}
           redirectOnSuccess={true}
+          isRerun={true}
+          {...(workflowType && { defaultWorkflowType: workflowType })}
+          defaultCustomFields={rerunDefaultFields}
         />
       )}
 
