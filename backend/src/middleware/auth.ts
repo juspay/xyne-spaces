@@ -18,10 +18,10 @@ export class AuthMiddleware {
   constructor() {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    
+
     // Only initialize Google OAuth if credentials are provided
     this.googleAuthEnabled = !!(clientId && clientSecret);
-    
+
     if (this.googleAuthEnabled) {
       this.googleClient = new OAuth2Client(clientId, clientSecret);
       this.userService = new UserService();
@@ -43,7 +43,7 @@ export class AuthMiddleware {
       const authHeader = req.headers.authorization;
       if (authHeader) {
         let apiKey: string | null = null;
-        
+
         // Check for Bearer token format
         if (authHeader.startsWith('Bearer ')) {
           apiKey = apiKeyService.extractApiKey(authHeader);
@@ -56,14 +56,14 @@ export class AuthMiddleware {
           // Use username as API key (password is ignored)
           apiKey = username;
         }
-        
+
         if (apiKey) {
           // Extract user details from headers
           const userHeaders = {
             name: req.headers['x-user-name'] as string,
-            email: req.headers['x-user-email'] as string
+            email: req.headers['x-user-email'] as string,
           };
-          
+
           const apiKeyUser = await apiKeyService.validateApiKey(apiKey, userHeaders);
           if (apiKeyUser) {
             // Attach API key user to request object
@@ -89,22 +89,24 @@ export class AuthMiddleware {
         logger.warn('Authentication failed: API key invalid and Google OAuth not configured');
         res.status(401).json({
           error: 'Authentication required',
-          message: 'Please provide a valid API key. Google OAuth is not configured.'
+          message: 'Please provide a valid API key. Google OAuth is not configured.',
         });
         return;
       }
 
       // Continue with Google OAuth authentication if API key failed
       // Secure dev mode check - only allow in development environment
-      const isDevEnvironment = process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === 'true';
+      const isDevEnvironment =
+        process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === 'true';
       const clientDevMode = req.headers['x-dev-mode'] === 'true';
 
       // Additional security: check if request is from localhost
-      const isLocalhost = req.ip === '127.0.0.1' ||
-                         req.ip === '::1' ||
-                         req.ip === '::ffff:127.0.0.1' ||
-                         req.hostname === 'localhost' ||
-                         req.get('host')?.startsWith('localhost');
+      const isLocalhost =
+        req.ip === '127.0.0.1' ||
+        req.ip === '::1' ||
+        req.ip === '::ffff:127.0.0.1' ||
+        req.hostname === 'localhost' ||
+        req.get('host')?.startsWith('localhost');
 
       if (isDevEnvironment && isLocalhost && clientDevMode) {
         logger.info('Secure dev mode detected, using mock user authentication', {
@@ -112,7 +114,7 @@ export class AuthMiddleware {
           enableDevAuth: process.env.ENABLE_DEV_AUTH,
           clientIp: req.ip,
           hostname: req.hostname,
-          host: req.get('host')
+          host: req.get('host'),
         });
 
         const devUserId = req.headers['x-dev-user-id'] as string;
@@ -123,7 +125,7 @@ export class AuthMiddleware {
           logger.warn('Dev mode headers incomplete');
           res.status(401).json({
             error: 'Authentication required',
-            message: 'Dev mode headers incomplete'
+            message: 'Dev mode headers incomplete',
           });
           return;
         }
@@ -159,7 +161,7 @@ export class AuthMiddleware {
         logger.warn('Dev mode headers detected but rejected - not in development environment', {
           nodeEnv: process.env.NODE_ENV,
           clientIp: req.ip,
-          hostname: req.hostname
+          hostname: req.hostname,
         });
       }
 
@@ -167,7 +169,7 @@ export class AuthMiddleware {
         logger.warn('Dev mode headers detected but rejected - not from localhost', {
           clientIp: req.ip,
           hostname: req.hostname,
-          host: req.get('host')
+          host: req.get('host'),
         });
       }
 
@@ -181,7 +183,9 @@ export class AuthMiddleware {
         req.authenticatedSessionId = sessionId;
       }
 
-      logger.info(`Auth header: ${authHeader ? 'Present' : 'Missing'}, Session ID: ${sessionId ? 'Present' : 'Missing'}`);
+      logger.info(
+        `Auth header: ${authHeader ? 'Present' : 'Missing'}, Session ID: ${sessionId ? 'Present' : 'Missing'}`
+      );
 
       // Try to get token from Authorization header first, then from cookie
       let token: string | undefined;
@@ -238,28 +242,31 @@ export class AuthMiddleware {
         logger.warn('Authentication failed: No token and no valid session');
         res.status(401).json({
           error: 'Authentication required',
-          message: 'Please provide a valid Google authentication token'
+          message: 'Please provide a valid Google authentication token',
         });
         return;
       }
-      
+
       // Verify custom JWT token
       let payload: any;
       let isTokenExpired = false;
       try {
         payload = jwtService.verifyToken(token);
-        
+
         // Check if token is about to expire (within 5 minutes for 15-min tokens)
         const now = Math.floor(Date.now() / 1000);
         const timeUntilExpiry = payload.exp - now;
 
-        if (timeUntilExpiry < 5 * 60) { // Less than 5 minutes
+        if (timeUntilExpiry < 5 * 60) {
+          // Less than 5 minutes
           logger.info(`Token is about to expire in ${timeUntilExpiry}s, considering refresh`);
           isTokenExpired = true;
         }
-        
       } catch (verifyError) {
-        logger.info('JWT token verification failed:', verifyError instanceof Error ? verifyError.message : 'Unknown error');
+        logger.info(
+          'JWT token verification failed:',
+          verifyError instanceof Error ? verifyError.message : 'Unknown error'
+        );
         isTokenExpired = true;
       }
 
@@ -291,11 +298,9 @@ export class AuthMiddleware {
             req.cookies.google_access_token = refreshResult.customToken;
 
             logger.info('Token successfully refreshed via session and cookie updated');
-
           } else {
             throw new Error('Token refresh failed');
           }
-
         } catch (refreshError) {
           logger.error('Failed to refresh token:', refreshError);
           res.status(401).json({
@@ -316,7 +321,7 @@ export class AuthMiddleware {
       if (!payload) {
         res.status(401).json({
           error: 'Invalid token',
-          message: 'JWT token payload is invalid'
+          message: 'JWT token payload is invalid',
         });
         return;
       }
@@ -324,11 +329,11 @@ export class AuthMiddleware {
       // Extract user information from custom JWT token
       // Since we're using our own JWT, we can directly get user from database using the sub (user ID)
       const user = await this.userService!.getUserById(payload.sub);
-      
+
       if (!user) {
         res.status(401).json({
           error: 'User not found',
-          message: 'User associated with this token no longer exists'
+          message: 'User associated with this token no longer exists',
         });
         return;
       }
@@ -346,13 +351,12 @@ export class AuthMiddleware {
 
       logger.info(`Authenticated user: ${user.email} (${user.id})`);
       next();
-
     } catch (error) {
       logger.error('Authentication error:', error);
 
       res.status(401).json({
         error: 'Authentication failed',
-        message: 'Unable to verify authentication token'
+        message: 'Unable to verify authentication token',
       });
     }
   };
@@ -360,7 +364,9 @@ export class AuthMiddleware {
   /**
    * Helper method to refresh token using session ID
    */
-  private async refreshTokenBySession(sessionId: string): Promise<{ success: boolean; customToken?: string; error?: string }> {
+  private async refreshTokenBySession(
+    sessionId: string
+  ): Promise<{ success: boolean; customToken?: string; error?: string }> {
     try {
       if (!this.userSessionService || !this.googleClient) {
         return { success: false, error: 'Google authentication not configured' };
@@ -368,7 +374,7 @@ export class AuthMiddleware {
 
       // Find session by ID
       const session = await this.userSessionService.getSessionById(sessionId);
-      
+
       if (!session || !session.user) {
         return { success: false, error: 'Invalid session' };
       }
@@ -392,7 +398,6 @@ export class AuthMiddleware {
       });
 
       return { success: true, customToken };
-
     } catch (error) {
       logger.error('Error in refreshTokenBySession:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -406,13 +411,15 @@ export class AuthMiddleware {
   optionalAuthenticate = async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Check for secure dev mode (same security checks as authenticate)
-      const isDevEnvironment = process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === 'true';
+      const isDevEnvironment =
+        process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_AUTH === 'true';
       const clientDevMode = req.headers['x-dev-mode'] === 'true';
-      const isLocalhost = req.ip === '127.0.0.1' ||
-                         req.ip === '::1' ||
-                         req.ip === '::ffff:127.0.0.1' ||
-                         req.hostname === 'localhost' ||
-                         req.get('host')?.startsWith('localhost');
+      const isLocalhost =
+        req.ip === '127.0.0.1' ||
+        req.ip === '::1' ||
+        req.ip === '::ffff:127.0.0.1' ||
+        req.hostname === 'localhost' ||
+        req.get('host')?.startsWith('localhost');
 
       if (isDevEnvironment && isLocalhost && clientDevMode) {
         // Use the full authenticate method for dev mode
@@ -443,7 +450,7 @@ export class AuthMiddleware {
       if (!req.user) {
         res.status(401).json({
           error: 'Authentication required',
-          message: 'Please authenticate to access this resource'
+          message: 'Please authenticate to access this resource',
         });
         return;
       }
@@ -460,7 +467,7 @@ export class AuthMiddleware {
           res.status(403).json({
             error: 'Insufficient permissions',
             message: `Required scope: ${requiredScope}`,
-            userScopes: req.user.scopes
+            userScopes: req.user.scopes,
           });
           return;
         }
@@ -478,7 +485,7 @@ export class AuthMiddleware {
     if (!req.user) {
       res.status(401).json({
         error: 'Authentication required',
-        message: 'Please authenticate to access this resource'
+        message: 'Please authenticate to access this resource',
       });
       return;
     }
@@ -486,7 +493,7 @@ export class AuthMiddleware {
     if (req.user.role !== 'admin') {
       res.status(403).json({
         error: 'Admin access required',
-        message: 'This endpoint requires admin privileges'
+        message: 'This endpoint requires admin privileges',
       });
       return;
     }
@@ -503,7 +510,17 @@ export class AuthMiddleware {
 
     try {
       // Get JWT token from HTTP-only cookie
-      const token = req.cookies?.google_access_token;
+      let token = req.cookies?.google_access_token;
+
+      // Try API Key authentication first
+      const authHeader = req.headers.authorization;
+
+      if (!token && authHeader) {
+        // Check for Bearer token format
+        if (authHeader.startsWith('Bearer ')) {
+          token = authHeader.split(' ')[1];
+        }
+      }
 
       // If no token, return 401 immediately (NO auto-refresh for Zero endpoints)
       if (!token) {
@@ -519,10 +536,15 @@ export class AuthMiddleware {
       let payload: any;
       try {
         payload = jwtService.verifyToken(token);
-        logger.info(`Zero auth: Token valid, expires at ${new Date(payload.exp * 1000).toISOString()}`);
+        logger.info(
+          `Zero auth: Token valid, expires at ${new Date(payload.exp * 1000).toISOString()}`
+        );
       } catch (verifyError) {
         logger.warn('Zero auth failed: JWT token expired/invalid - returning 401');
-        logger.info('Error details:', verifyError instanceof Error ? verifyError.message : 'Unknown error');
+        logger.info(
+          'Error details:',
+          verifyError instanceof Error ? verifyError.message : 'Unknown error'
+        );
         res.status(401).json({
           error: 'Invalid or expired token',
           message: 'Token verification failed',
@@ -569,7 +591,6 @@ export class AuthMiddleware {
         logger.info(`Zero authenticated user: ${user.email} (${user.id})`);
         next();
       });
-
     } catch (error) {
       logger.error('Zero authentication error:', error);
 
