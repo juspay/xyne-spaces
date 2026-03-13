@@ -165,6 +165,9 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
       const isOutgoingCall = call.createdByUserId === userId;
       const currentUserParticipant = call.participants?.find(p => p.userId === userId);
+      if (!currentUserParticipant) {
+        return false;
+      }
       const hasCurrentUserJoined = currentUserParticipant?.response === InvitationResponse.ACCEPTED;
       const userJoinedandLeft = currentUserParticipant?.response === InvitationResponse.LEFT;
       const anyoneJoined = (call.participants || []).some(
