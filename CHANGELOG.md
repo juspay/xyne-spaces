@@ -1,3 +1,16 @@
+## [1.85.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.84.0...v1.85.0) (2026-03-13)
+
+
+### Features
+
+* Xyne Apps Integrations ([576055c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/576055c1413c89062a2469707b6f9f6150a9b016)), closes [#4039](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4039)
+
+
+### Bug Fixes
+
+* changes in workflow trigger modal ([ad736da](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ad736da19d3845699e1bcb6221944385eca6176a)), closes [#4095](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4095)
+* Merging with cached fix ([5d2a38f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5d2a38fb5da25485c2cc9d72e08fe93728693be0)), closes [#4090](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4090)
+
 ## [1.84.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.83.2...v1.84.0) (2026-03-13)
 
 
