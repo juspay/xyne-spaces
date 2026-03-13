@@ -15,7 +15,7 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { CanvasRole } from '@prisma/client';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
-import { getCanvasUrl } from '@/services/canvasService';
+import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -505,6 +505,67 @@ function sanitizeBlockNoteContent(obj: any): any {
 
 export class CallDocumentService {
   /**
+   * Prepare canvas content from markdown summary.
+   * Extracts title, builds participant map, converts markdown to BlockNote, and sanitizes content.
+   */
+  private async prepareCanvasContent(
+    markdownSummary: string,
+    channelId: string,
+    callStartedAt?: Date
+  ): Promise<{
+    title: string;
+    content: any;
+    mentionedUserIds: string[];
+  }> {
+    // Extract title from markdown
+    let title = callStartedAt
+      ? `Detailed Summary - Call ${callStartedAt.toLocaleString()}`
+      : `Detailed Summary (Updated)`;
+
+    const firstHeadingMatch = markdownSummary.match(/^#\s+(.+)$/m);
+    if (firstHeadingMatch) {
+      title = firstHeadingMatch[1].trim();
+    } else {
+      const primaryFocusMatch = markdownSummary.match(/\*\*Primary Focus:\*\*\s*(.+?)(?:\n|$)/i);
+      if (primaryFocusMatch) {
+        title = `Call Summary: ${primaryFocusMatch[1].trim()}`;
+      }
+    }
+
+    // Build participant map from channel members for mention resolution
+    const participantMap = await buildParticipantMap(channelId);
+    const logContext = callStartedAt ? '' : ' (update)';
+    logger.info(`[CallDocumentService] Built channel participant map with ${participantMap.size} participants for mentions${logContext}`);
+
+    // Convert markdown to BlockNote with mention support
+    const { blocks: content, mentionedUserIds } = await convertMarkdownToBlockNote(markdownSummary, participantMap);
+
+    // Sanitize content to remove undefined values for Prisma
+    const sanitizedContent = sanitizeBlockNoteContent(content);
+
+    return { title, content: sanitizedContent, mentionedUserIds };
+  }
+
+  /**
+   * Queue Vespa indexing for a canvas.
+   */
+  private async queueVespaIndexing(canvasId: string, userId: string, operation: 'create' | 'update'): Promise<void> {
+    try {
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: canvasId,
+        jobType: 'feed',
+        userId,
+        app: SubApp.CANVAS,
+      });
+      const action = operation === 'create' ? 'indexing' : 're-indexing';
+      logger.info(`[CallDocumentService] Queued Vespa ${action} for canvas ${canvasId}`);
+    } catch (error) {
+      logger.error(`[CallDocumentService] Failed to queue Vespa job for canvas ${canvasId}:`, error);
+    }
+  }
+
+  /**
    * Create a fresh Agent instance for each request
    * This prevents state pollution between concurrent requests
    */
@@ -788,30 +849,12 @@ export class CallDocumentService {
       const editAccessId = uuidv4();
       const participantId = uuidv4();
 
-      // Extract title from markdown - use first heading or primary focus
-      let title = `Detailed Summary - Call ${callStartedAt.toLocaleString()}`;
-      const firstHeadingMatch = markdownSummary.match(/^#\s+(.+)$/m);
-      if (firstHeadingMatch) {
-        title = firstHeadingMatch[1].trim();
-      } else {
-        // Try to extract Primary Focus as fallback
-        const primaryFocusMatch = markdownSummary.match(/\*\*Primary Focus:\*\*\s*(.+?)(?:\n|$)/i);
-        if (primaryFocusMatch) {
-          title = `Call Summary: ${primaryFocusMatch[1].trim()}`;
-        }
-      }
-
-      // Build participant map from channel members for mention resolution
-      // channelId is already available as a method parameter
-      const participantMap = await buildParticipantMap(channelId);
-      logger.info(`[CallDocumentService] Built channel participant map with ${participantMap.size} participants for mentions`);
-
-      // Convert markdown to BlockNote with mention support
-      // mentionedUserIds are collected during the same pass — no second scan needed
-      const { blocks: content, mentionedUserIds } = await convertMarkdownToBlockNote(markdownSummary, participantMap);
-
-      // Sanitize content to remove undefined values for Prisma
-      const sanitizedContent = sanitizeBlockNoteContent(content);
+      // Prepare canvas content (title, content, mentions)
+      const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
+        markdownSummary,
+        channelId,
+        callStartedAt
+      );
 
       // Create canvas
       await prisma.canvas.create({
@@ -836,6 +879,7 @@ export class CallDocumentService {
             isAiGenerated: true,
             generatedAt: now.toISOString(),
             mentionedUserIds, // Store mentioned users for side effect handler
+            version: 1, // Initial version for new canvases
           },
         },
       });
@@ -876,24 +920,122 @@ export class CallDocumentService {
       }).catch(err => logger.error('[CallDocumentService] Canvas side-effect handler error:', err));
 
       // Queue Vespa indexing for the canvas
-      try {
-        await vespaQueue.addJob({
-          schema: fileSchema,
-          docId: canvasId,
-          jobType: 'feed',
-          userId: createdByUserId,
-          app: SubApp.CANVAS,
-        });
-        logger.info(`[CallDocumentService] Queued Vespa indexing for detailed summary canvas ${canvasId}`);
-      } catch (vespaError) {
-        logger.error(`[CallDocumentService] Failed to queue Vespa job for detailed summary canvas ${canvasId}:`, vespaError);
-      }
+      await this.queueVespaIndexing(canvasId, createdByUserId, 'create');
 
       return viewAccessId;
     } catch (error) {
       logger.error('[CallDocumentService] Failed to create detailed summary canvas:', error);
       return null;
     }
+  }
+
+  /**
+   * Update an existing detailed summary Canvas with new content.
+   * Preserves viewAccessId and editAccessId so existing links remain valid.
+   */
+  async updateDetailedSummaryCanvas(
+    canvasId: string,
+    markdownSummary: string,
+    updatedByUserId: string,
+    channelId: string,
+    existingViewAccessId: string,
+    currentVersion: number,
+    callId: string
+  ): Promise<string | null> {
+    try {
+      const prisma = DatabaseClient.getInstance();
+      const now = new Date();
+
+      // Prepare canvas content (title, content, mentions)
+      const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
+        markdownSummary,
+        channelId
+      );
+
+      const newVersion = currentVersion + 1;
+
+      // Update existing canvas - preserve viewAccessId and editAccessId
+      await prisma.canvas.update({
+        where: { id: canvasId },
+        data: {
+          title,
+          content: sanitizedContent as any,
+          lastEditedBy: updatedByUserId,
+          lastEditedAt: now,
+          updatedAt: now,
+          metadata: {
+            source: 'call_detailed_summary',
+            callId,
+            isAiGenerated: true,
+            generatedAt: now.toISOString(),
+            mentionedUserIds,
+            version: newVersion,
+            lastUpdatedAt: now.toISOString(),
+          },
+        },
+      });
+
+      logger.info(`[CallDocumentService] Updated detailed summary canvas ${canvasId} for call ${callId}, version ${currentVersion} -> ${newVersion}`);
+
+      // Queue Vespa re-indexing for the updated canvas
+      await this.queueVespaIndexing(canvasId, updatedByUserId, 'update');
+
+      return existingViewAccessId;
+    } catch (error) {
+      logger.error('[CallDocumentService] Failed to update detailed summary canvas:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Create or update detailed summary Canvas.
+   * If an existing canvas is found for the call, updates it instead of creating a duplicate.
+   */
+  async createOrUpdateDetailedSummaryCanvas(
+    callId: string,
+    markdownSummary: string,
+    createdByUserId: string,
+    conversationId: string,
+    channelId: string,
+    callStartedAt: Date,
+    callCreatorUserId: string
+  ): Promise<{ viewAccessId: string | null; version: number }> {
+    // Check if an existing canvas exists for this call
+    const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
+
+    if (existingCanvas) {
+      // Update existing canvas instead of creating a new one
+      const updatedViewAccessId = await this.updateDetailedSummaryCanvas(
+        existingCanvas.canvasId,
+        markdownSummary,
+        createdByUserId,
+        channelId,
+        existingCanvas.viewAccessId,
+        existingCanvas.version,
+        callId
+      );
+
+      return {
+        viewAccessId: updatedViewAccessId,
+        version: existingCanvas.version + 1,
+      };
+    }
+
+    // No existing canvas, create a new one
+    const viewAccessId = await this.createDetailedSummaryCanvas(
+      callId,
+      markdownSummary,
+      createdByUserId,
+      conversationId,
+      channelId,
+      callStartedAt,
+      callCreatorUserId
+    );
+
+    return {
+      viewAccessId,
+      version: 1,
+    };
   }
 
   /**
@@ -948,47 +1090,80 @@ A Product Requirements Document has been generated from this call discussion.
   }
 
   /**
-   * Post detailed summary canvas link to conversation
+   * Post detailed summary canvas link to conversation (or update existing message)
    */
   async postDetailedSummaryToConversation(
     conversationId: string,
     callId: string,
     canvasUrl: string,
-    summaryTitle: string
+    summaryTitle: string,
+    version: number = 1
   ): Promise<void> {
     try {
+      const prisma = DatabaseClient.getInstance();
       const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
       if (!xyneAutomaticBot) {
         throw new Error('Xyne Automatic bot not found');
       }
 
-      const messageContent = `## 📊 ${summaryTitle}
+      // Build message content with version indicator if updated
+      const isUpdate = version > 1;
+      const versionIndicator = isUpdate ? ` (v${version})` : '';
+      const updatedIndicator = isUpdate ? '\n\n_This summary has been updated with the latest call content._' : '';
+
+      const messageContent = `## 📊 ${summaryTitle}${versionIndicator}
 
 A comprehensive detailed summary has been generated from this call.
 
-[📄 View Detailed Summary](${canvasUrl})`;
+[📄 View Detailed Summary](${canvasUrl})${updatedIndicator}`;
 
-      await repositories.messages.create({
-        conversationId,
-        senderId: xyneAutomaticBot.id,
-        content: messageContent,
-        msgType: MessageType.BOT,
-        showInChannel: false,
-        metadata: {
-          messageSubtype: 'call_detailed_summary',
-          callId,
-          canvasUrl,
-          isAiGenerated: true,
-          contentFormat: 'markdown',
-        },
-      });
+      // Check if a detailed summary message already exists for this call
+      const existingMessage = await repositories.messages.findExistingDetailedSummaryMessage(conversationId, callId);
 
-      await repositories.conversations.incrementReplyCount(conversationId);
+      if (existingMessage) {
+        // Update existing message instead of creating a new one
+        await prisma.message.update({
+          where: { messageId: existingMessage.messageId },
+          data: {
+            content: messageContent,
+            metadata: {
+              messageSubtype: 'call_detailed_summary',
+              callId,
+              canvasUrl,
+              isAiGenerated: true,
+              contentFormat: 'markdown',
+              version: version,
+              lastUpdatedAt: new Date().toISOString(),
+            },
+          },
+        });
+      } else {
+        // Create new message
+        await repositories.messages.create({
+          conversationId,
+          senderId: xyneAutomaticBot.id,
+          content: messageContent,
+          msgType: MessageType.BOT,
+          showInChannel: false,
+          metadata: {
+            messageSubtype: 'call_detailed_summary',
+            callId,
+            canvasUrl,
+            isAiGenerated: true,
+            contentFormat: 'markdown',
+            version: version,
+            createdAt: new Date().toISOString(),
+          },
+        });
+
+        await repositories.conversations.incrementReplyCount(conversationId);
+        logger.info(`[CallDocumentService] Posted new detailed summary link to conversation ${conversationId}`);
+      }
 
       // Update call message with canvas URL
       await this.updateCallMessageMetadata(conversationId, callId, 'detailedSummaryCanvasUrl', canvasUrl);
 
-      logger.info(`[CallDocumentService] Posted detailed summary link to conversation ${conversationId}`);
+      logger.info(`[CallDocumentService] Detailed summary processing completed for conversation ${conversationId}`);
     } catch (error) {
       logger.error('[CallDocumentService] Failed to post detailed summary to conversation:', error);
       throw error;
@@ -1145,8 +1320,8 @@ A comprehensive detailed summary has been generated from this call.
         return { success: false, error: 'Conversation not found' };
       }
 
-      // 2. Create Canvas
-      const viewAccessId = await this.createDetailedSummaryCanvas(
+      // 2. Create or Update Canvas (handles rejoin scenario)
+      const { viewAccessId, version } = await this.createOrUpdateDetailedSummaryCanvas(
         callId,
         detailedSummaryMarkdown,
         xyneAutomaticBot.id,
@@ -1156,21 +1331,22 @@ A comprehensive detailed summary has been generated from this call.
         call.createdByUserId
       );
       if (!viewAccessId) {
-        return { success: false, error: 'Failed to create detailed summary canvas' };
+        return { success: false, error: 'Failed to create or update detailed summary canvas' };
       }
 
       const canvasUrl = getCanvasUrl(viewAccessId);
       const canvasTitle = `Detailed Summary - Call ${new Date(call.startedAt).toLocaleString()}`;
 
-      // 3. Post to conversation
+      // 3. Post to conversation (or update existing message)
       await this.postDetailedSummaryToConversation(
         conversationId,
         callId,
         canvasUrl,
-        canvasTitle
+        canvasTitle,
+        version
       );
 
-      return { success: true, canvasUrl };
+      return { success: true, canvasUrl};
     } catch (error) {
       logger.error('[CallDocumentService] Error in generateAndPostDetailedSummary:', error);
       return {

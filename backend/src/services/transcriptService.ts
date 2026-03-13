@@ -1182,13 +1182,12 @@ Output ONLY the processed transcript, nothing else.`;
           createdAt: new Date().toISOString(),
         },
       });
-
+      await repositories.conversations.incrementReplyCount(conversationId);
       logger.info(
         `[postSummaryAsReply] Message created: ${message.messageId} in conversation ${conversationId}`
       );
     }
 
-    await repositories.conversations.incrementReplyCount(conversationId);
     logger.info(`[postSummaryAsReply] Reply count incremented for conversation ${conversationId}`);
   }
 
