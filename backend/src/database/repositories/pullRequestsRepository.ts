@@ -80,21 +80,33 @@ export class PRMetricsRepository {
     const today = new Date();
     // today.setHours(0, 0, 0, 0);
     console.log(`[PR-Repository] Inserting/updating PR ${prId} with ticketId: ${ticketId || 'none'}`);
-    return await this.prisma.pullRequests.upsert({
-      where: {
-        prId_prUrl: {
+
+    // First find by workflowExecutionId
+    const existingPr = await this.prisma.pullRequests.findFirst({
+      where: { workflowExecutionId: childExecutionId }
+    });
+
+    if (existingPr) {
+      // Update existing PR
+      return await this.prisma.pullRequests.update({
+        where: { id: existingPr.id },
+        data: {
+          date: today,
+          status: 'OPEN',
+          repositoryUrl,
+          prUrl,
           prId,
-          prUrl
+          repoName,
+          sourceBranchName,
+          destinationBranchName,
+          ...(ticketId ? { ticketId } : {})
         }
-      },
-      update: {
-        date: today,
-        status: 'OPEN',
-        repositoryUrl,
-        workflowExecutionId: childExecutionId,
-        ...(ticketId ? { ticketId } : {})
-      },
-      create: {
+      });
+    }
+
+    // Create new PR
+    return await this.prisma.pullRequests.create({
+      data: {
         date: today,
         sourceBranchName,
         destinationBranchName,
@@ -106,7 +118,7 @@ export class PRMetricsRepository {
         workflowExecutionId: childExecutionId,
         ticketId
       }
-    })
+    });
   }
 
   async markMergedPr({
@@ -393,6 +405,17 @@ export class PRMetricsRepository {
         ticketId,
         updatedAt: today
       }
+    });
+  }
+
+  /**
+   * Find the most recent PR record by workflow execution ID
+   * Returns the PR with the latest updatedAt timestamp
+   */
+  async findByWorkflowExecutionId(workflowExecutionId: string): Promise<PullRequests | null> {
+    return await this.prisma.pullRequests.findFirst({
+      where: { workflowExecutionId },
+      orderBy: { updatedAt: 'desc' }
     });
   }
 
