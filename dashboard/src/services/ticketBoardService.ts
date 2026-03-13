@@ -31,6 +31,11 @@ interface TicketBoardApiResponse {
   error?: string;
 }
 
+interface ReleaseNotesApiResponse {
+  success: boolean;
+  error?: string;
+}
+
 export const checkBoardSuggestion = async (
   payload: TicketBoardSuggestionRequest,
   options?: { signal?: AbortSignal },
@@ -48,4 +53,26 @@ export const checkBoardSuggestion = async (
   }
 
   return responseData.data;
+};
+
+export const generateReleaseNotes = async (
+  ticketId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ReleaseNotesApiResponse> => {
+  const requestConfig = options?.signal ? { signal: options.signal } : undefined;
+  const response = await apiInstance.post<ReleaseNotesApiResponse>(
+    `/tickets/${ticketId}/release-notes/generate`,
+    {},
+    requestConfig,
+  );
+  const responseData: ReleaseNotesApiResponse = response.data;
+
+  if (!responseData.success) {
+    throw new Error(responseData.error || 'Failed to generate release notes');
+  }
+
+  return {
+    success: responseData.success,
+    ...(!responseData.success ? { error: responseData.error } : {}),
+  };
 };

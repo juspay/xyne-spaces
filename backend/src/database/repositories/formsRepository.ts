@@ -161,4 +161,29 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       skipDuplicates: true,
     });
   }
+
+  async getFormEntityValuesByEntityId(
+    entityId: string,
+    entityType: string
+  ): Promise<Record<string, any>> {
+    const values = await this.db.formEntityValues.findMany({
+      where: {
+        entityId,
+        entityType,
+      },
+    });
+
+    const result: Record<string, any> = {};
+    
+    for (const v of values) {
+      const field = await this.db.formFields.findUnique({
+        where: { id: v.fieldId },
+      });
+      if (field) {
+        result[field.fieldName] = v.actualFieldValue ?? v.fieldValue;
+      }
+    }
+
+    return result;
+  }
 }

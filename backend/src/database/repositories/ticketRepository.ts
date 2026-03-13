@@ -116,17 +116,17 @@ export class TicketRepository {
     const stageEnteredAt = new Date();
     // Only create TicketStageEta entry if the selected stage has ETA
     if (selectedStage.eta !== null) {
-const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta);
-    await db.ticketStageEta.create({
-      data: {
-        ticketId: ticket.id,
-        stageId: selectedStage.id,
-        stageEnteredAt: stageEnteredAt,
-        stageLeftAt: null,
-        stageEta: stageEtaDeadline,
-        updatedBy: data.createdBy,
-      }
-    });
+      const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta);
+      await db.ticketStageEta.create({
+        data: {
+          ticketId: ticket.id,
+          stageId: selectedStage.id,
+          stageEnteredAt: stageEnteredAt,
+          stageLeftAt: null,
+          stageEta: stageEtaDeadline,
+          updatedBy: data.createdBy,
+        }
+      });
     }
 
     const isHotFix = ticket.ticketType === BaseTicketType.Hotfix
@@ -249,7 +249,7 @@ const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta)
 
     if (isForwardMovement) {
       // FORWARD MOVEMENT: Mark old stage as left, create/reactivate new stage entry
-      
+
       // 1. Mark current stage as left (if exists)
       if (currentStage) {
         await prisma.ticketStageEta.updateMany({
@@ -289,23 +289,23 @@ const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta)
         // First time entering this stage - create new entry only if stage has ETA
         if (targetStage.eta !== null) {
 
-        const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
-        
-        await prisma.ticketStageEta.create({
-          data: {
-            ticketId: ticketId,
-            stageId: targetStage.id,
-            stageEnteredAt: now,
-            stageLeftAt: null,
-            stageEta: stageEtaDeadline,
-            updatedBy: updatedBy
-          }
-        });
-      }
+          const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
+
+          await prisma.ticketStageEta.create({
+            data: {
+              ticketId: ticketId,
+              stageId: targetStage.id,
+              stageEnteredAt: now,
+              stageLeftAt: null,
+              stageEta: stageEtaDeadline,
+              updatedBy: updatedBy
+            }
+          });
+        }
       }
     } else {
       // BACKWARD MOVEMENT: Delete all forward stage entries, reactivate target
-      
+
       // 1. Get all stageIds with sequenceNumber > target
       const forwardStages = await prisma.stage.findMany({
         where: {
@@ -327,7 +327,7 @@ const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta)
         });
 
       }
-      
+
       // 3. Reactivate target stage (set stageLeftAt to null)
       const targetEntry = await prisma.ticketStageEta.findFirst({
         where: {
@@ -606,6 +606,55 @@ const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta)
   async getTicketById(ticketId: string) {
     return await prisma.ticket.findUnique({
       where: { id: ticketId }
+    });
+  }
+
+
+  /**
+   * Get hotfix sub-tickets for a parent ticket
+   */
+  async getHotfixSubTickets(parentTicketId: string) {
+    const mappings = await prisma.ticketSubTicketMapping.findMany({
+      where: {
+        ticketId: parentTicketId,
+        subTicket: {
+          mappedTicket: {
+            ticketType: BaseTicketType.Hotfix
+          }
+        }
+      },
+      include: {
+        subTicket: {
+          include: {
+            mappedTicket: true
+          }
+        }
+      }
+    });
+
+    return mappings.map(m => m.subTicket);
+  }
+
+  async updateTicketMetadata(ticketId: string, metadata: Record<string, any>): Promise<void> {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { metadata: true }
+    });
+
+    if (!ticket) {
+      throw new Error(`Ticket ${ticketId} not found`);
+    }
+
+    const existingMetadata = (ticket.metadata as Record<string, any>) || {};
+
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: {
+        metadata: {
+          ...existingMetadata,
+          ...metadata
+        }
+      }
     });
   }
 }

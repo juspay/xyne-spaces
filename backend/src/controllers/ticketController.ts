@@ -37,6 +37,7 @@ import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { TicketIdService } from '@/services/ticketIdService';
+import { unifiedBotUserService } from '@/bots/unified';
 
 const prisma = DatabaseClient.getInstance();
 const DUPLICATE_REFERENCE_LIMIT = 10;
@@ -784,12 +785,13 @@ export class TicketController {
         // TODO: Replace hardcoded values with actual configuration from project/board settings
         const workspace = 'XYNE';
         const repoSlug = 'xyne-spaces';
+        const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot');
 
         this.commitAnalysisController.analyzeCommits({
           workspace,
           repoSlug,
           conversationId: ticket.conversationId,
-          userId: finalCreatedBy,
+          userId: xyneReleaseBot?.id || finalCreatedBy,
           channelId: ticket.channelId || undefined,
           newCommitId,
           deployedCommitId,

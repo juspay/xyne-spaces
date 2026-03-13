@@ -29,6 +29,9 @@ import '@/bots/implementations/docs-publisher/docs-publisher.js';
 // Xyne Automatic Bot - system bot for posting automated messages like call summaries
 import '@/bots/implementations/xyne-automatic/xyne-automatic.js';
 
+// Xyne Release Bot - system bot for posting release notes canvases to threads
+import '@/bots/implementations/xyne-release-bot/xyne-release-bot.js';
+
 // Ask AI Bot - system bot for AI-generated content and canvases
 import '@/bots/implementations/ask-ai/ask-ai.js';
 

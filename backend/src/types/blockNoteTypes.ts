@@ -76,6 +76,25 @@ export interface BlockNoteBulletListBlock {
     children?: BlockNoteBlock[];
 }
 
+export interface BlockNoteDividerBlock {
+    id: string;
+    type: 'divider';
+    props?: Record<string, never>;
+    content: undefined;
+    children?: BlockNoteBlock[];
+}
+
+export interface BlockNoteQuoteBlock {
+    id: string;
+    type: 'quote';
+    props?: {
+        textColor?: string;
+        backgroundColor?: string;
+    };
+    content: BlockNoteInlineContent[];
+    children?: BlockNoteBlock[];
+}
+
 // ---------------------------------------------------------------------------
 // Table types
 // ---------------------------------------------------------------------------
@@ -113,4 +132,6 @@ export type BlockNoteBlock =
     | BlockNoteTextBlock
     | BlockNoteCodeBlock
     | BlockNoteBulletListBlock
-    | BlockNoteTableBlock;
+    | BlockNoteTableBlock
+    | BlockNoteDividerBlock
+    | BlockNoteQuoteBlock;

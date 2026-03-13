@@ -398,6 +398,7 @@ export interface CommitData {
 export interface PullRequestInfo {
   id: number;
   title: string;
+  description?: string;
   state: string;
   url: string;
   mergedAt?: string;
