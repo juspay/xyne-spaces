@@ -1082,6 +1082,9 @@ export const channelUserStatusTable = table('channel_user_status')
     isClosed: boolean(),
     unreadCount: number(),
     selectedBoardId: string().optional(),
+    // Recap subscription fields
+    isRecapSubscribed: boolean(),
+    lastSeenRecapDate: number().optional(),
   })
   .primaryKey('id');
 
@@ -1708,6 +1711,14 @@ export const surfaceLinkTable = table('surface_links')
     createdAt: number(),
   })
   .primaryKey('id');
+
+export const channelDailyRecapTable = table('channel_daily_recaps')
+  .columns({
+    channelId: string(),
+    recapDate: number(),
+    summary: string(),
+  })
+  .primaryKey('channelId', 'recapDate');
 
 // Define relationships
 
@@ -2988,6 +2999,15 @@ export const releaseAttributionTableRelationships = relationships(releaseAttribu
   }),
 }));
 
+// Channel Daily Recaps Relationships
+export const channelDailyRecapTableRelationships = relationships(channelDailyRecapTable, ({ one }) => ({
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+}));
+
 
 // Define schema
 
@@ -3077,6 +3097,8 @@ export const schema = createSchema({
     releaseAttributionTable,
     // Surface Nudge Framework
     surfaceLinkTable,
+    // Channel Daily Recaps
+    channelDailyRecapTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -3154,6 +3176,8 @@ export const schema = createSchema({
     releaseAttributionTableRelationships,
     // Surface Nudge Framework
     surfaceLinkTableRelationships,
+    // Channel Daily Recaps
+    channelDailyRecapTableRelationships,
   ],
 });
 
@@ -3242,6 +3266,9 @@ export type ReleaseAttribution = Row<typeof schema.tables.release_attributions>;
 
 // Surface Framework Types
 export type SurfaceLink = Row<typeof schema.tables.surface_links>;
+
+// Channel Daily Recaps Types
+export type ChannelDailyRecap = Row<typeof schema.tables.channel_daily_recaps>;
 
 export type Context = {
   userID: string;

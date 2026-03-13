@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { runReclusteringFlow } from '@/services/productInsightsPipeline';
 import { db } from '@/database/client';
+import { recapWorker } from './recapWorker';
 
 /**
  * Worker Scheduler
@@ -15,6 +16,8 @@ export class WorkerScheduler {
     private isRunning = false;
     private personalizationQueue: Bull.Queue | null = null;
     private productInsightsQueue: Bull.Queue | null = null;
+    private recapGenerationQueue: Bull.Queue | null = null;
+    private recapCleanupQueue: Bull.Queue | null = null;
 
     /**
      * Start all workers
@@ -89,6 +92,137 @@ export class WorkerScheduler {
         );
 
         logger.info('[WORKER_SCHEDULER] Product insights recluster scheduled via Bull');
+
+        // Initialize Recap Generation Queue
+        if (config.recapScheduler.enabled) {
+            this.recapGenerationQueue = new Bull('recap-generation', {
+                redis: { ...redisService.getRedisConfig(), lazyConnect: false },
+                defaultJobOptions: {
+                    removeOnComplete: true,
+                    removeOnFail: false,
+                    attempts: 3,
+                    backoff: {
+                        type: 'exponential',
+                        delay: 5000,
+                    },
+                },
+                settings: {
+                    stalledInterval: 30 * 60 * 1000, // 30 minutes - extended for long-running recap jobs
+                    maxStalledCount: 1,
+                },
+            });
+
+            this.recapGenerationQueue.process(async (job) => {
+                logger.info(`[WORKER_SCHEDULER] Processing recap generation job ${job.id}...`);
+                try {
+                    await recapWorker.processGenerationJob(job);
+                    logger.info(`[WORKER_SCHEDULER] Recap generation job ${job.id} completed successfully`);
+                } catch (error) {
+                    logger.error(`[WORKER_SCHEDULER] Recap generation job ${job.id} failed:`, error);
+                    throw error;
+                }
+            });
+
+            // Remove existing repeatable job to allow CRON updates
+            try {
+                await this.recapGenerationQueue.removeRepeatableByKey('recap-generation-repeatable');
+                logger.info('[WORKER_SCHEDULER] Removed existing recap generation repeatable job');
+            } catch (error) {
+                // Ignore error if job doesn't exist
+                logger.debug('[WORKER_SCHEDULER] No existing recap generation repeatable job to remove');
+            }
+
+            // Schedule daily recap generation
+            const recapCron = config.recapScheduler.generationCron;
+            logger.info(`[WORKER_SCHEDULER] Scheduling recap generation with cron: "${recapCron}"`);
+            
+            try {
+                await this.recapGenerationQueue.add(
+                    {},
+                    {
+                        repeat: { cron: recapCron },
+                        jobId: 'recap-generation-repeatable',
+                        attempts: 3,
+                        backoff: {
+                            type: 'exponential',
+                            delay: 5000,
+                        },
+                        removeOnComplete: true,
+                    }
+                );
+                logger.info(`[WORKER_SCHEDULER] Recap generation scheduled via Bull (${recapCron})`);
+            } catch (cronError) {
+                logger.error(`[WORKER_SCHEDULER] Failed to schedule recap generation with cron "${recapCron}":`, cronError);
+                logger.warn(`[WORKER_SCHEDULER] Recap generation will not be automatically scheduled. Manual triggers will still work.`);
+                // Continue without crashing the entire worker
+            }
+
+            // Initialize Recap Cleanup Queue
+            this.recapCleanupQueue = new Bull('recap-cleanup', {
+                redis: { ...redisService.getRedisConfig(), lazyConnect: false },
+                defaultJobOptions: {
+                    removeOnComplete: true,
+                    removeOnFail: false,
+                    attempts: 3,
+                    backoff: {
+                        type: 'exponential',
+                        delay: 5000,
+                    },
+                },
+                settings: {
+                    stalledInterval: 10 * 60 * 1000, // 10 minutes for cleanup jobs
+                    maxStalledCount: 1,
+                },
+            });
+
+            this.recapCleanupQueue.process(async (job) => {
+                logger.info(`[WORKER_SCHEDULER] Processing recap cleanup job ${job.id}...`);
+                try {
+                    await recapWorker.processCleanupJob(job);
+                    logger.info(`[WORKER_SCHEDULER] Recap cleanup job ${job.id} completed successfully`);
+                } catch (error) {
+                    logger.error(`[WORKER_SCHEDULER] Recap cleanup job ${job.id} failed:`, error);
+                    throw error;
+                }
+            });
+
+            // Remove existing repeatable job to allow CRON updates
+            try {
+                await this.recapCleanupQueue.removeRepeatableByKey('recap-cleanup-repeatable');
+                logger.info('[WORKER_SCHEDULER] Removed existing recap cleanup repeatable job');
+            } catch (error) {
+                // Ignore error if job doesn't exist
+                logger.debug('[WORKER_SCHEDULER] No existing recap cleanup repeatable job to remove');
+            }
+
+            // Schedule daily recap cleanup
+            const cleanupCron = config.recapScheduler.cleanupCron;
+            logger.info(`[WORKER_SCHEDULER] Scheduling recap cleanup with cron: "${cleanupCron}"`);
+            
+            try {
+                await this.recapCleanupQueue.add(
+                    {},
+                    {
+                        repeat: { cron: cleanupCron },
+                        jobId: 'recap-cleanup-repeatable',
+                        attempts: 3,
+                        backoff: {
+                            type: 'exponential',
+                            delay: 5000,
+                        },
+                        //removeOnComplete: true,
+                    }
+                );
+                logger.info(`[WORKER_SCHEDULER] Recap cleanup scheduled via Bull (${cleanupCron})`);
+            } catch (cronError) {
+                logger.error(`[WORKER_SCHEDULER] Failed to schedule recap cleanup with cron "${cleanupCron}":`, cronError);
+                logger.warn(`[WORKER_SCHEDULER] Recap cleanup will not be automatically scheduled. Manual triggers will still work.`);
+                // Continue without crashing the entire worker
+            }
+        } else {
+            logger.info('[WORKER_SCHEDULER] Recap scheduler is disabled (ENABLE_RECAP_SCHEDULER=false)');
+        }
+
         this.isRunning = true;
         logger.info('[WORKER_SCHEDULER] All workers started');
     }
@@ -113,6 +247,16 @@ export class WorkerScheduler {
         if (this.productInsightsQueue) {
             await this.productInsightsQueue.close();
             this.productInsightsQueue = null;
+        }
+
+        if (this.recapGenerationQueue) {
+            await this.recapGenerationQueue.close();
+            this.recapGenerationQueue = null;
+        }
+
+        if (this.recapCleanupQueue) {
+            await this.recapCleanupQueue.close();
+            this.recapCleanupQueue = null;
         }
 
         this.isRunning = false;

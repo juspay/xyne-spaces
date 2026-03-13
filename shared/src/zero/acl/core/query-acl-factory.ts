@@ -11,6 +11,7 @@ import {
   CallsACL,
   CanvasParticipantsACL,
   CanvasesACL,
+  ChannelDailyRecapsACL,
   ChannelParticipantsACL,
   ChannelsACL,
   ConversationParticipantsACL,
@@ -75,6 +76,8 @@ export class QueryACLFactory {
         return new ChannelParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_user_status':
         return new BaseQueryACL(ctx, table);
+      case 'channel_daily_recaps':
+        return new ChannelDailyRecapsACL(ctx) as BaseQueryACL<TTable>;
       case 'channels':
         return new ChannelsACL(ctx) as BaseQueryACL<TTable>;
       case 'conversation_participants':

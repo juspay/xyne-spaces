@@ -19,7 +19,7 @@ export interface SessionEvent {
 }
 
 export interface UserEvent {
-  type: 'channel_added' | 'channel_removed' | 'participant_added' | 'participant_removed' | 'user_mentioned' | 'incoming_call' | 'call_ended' | 'call_cancelled';
+  type: 'channel_added' | 'channel_removed' | 'participant_added' | 'participant_removed' | 'user_mentioned' | 'incoming_call' | 'call_ended' | 'call_cancelled' | 'recap_unread_count_updated' | 'recap_generated' | 'recap_cleanup_completed';
   userId: string;
   data: any;
   timestamp: Date;

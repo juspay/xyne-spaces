@@ -24,6 +24,13 @@ import {
 // Import config for environment variables
 import { config } from '../../config/env.js';
 
+// Import langfuse for prompt management
+import { getPromptFromLangfuse, PROMPT_NAMES } from '../xyne-ai/langfuse/index.js';
+
+// Import and re-export shared types from helpers
+import type { EnhancedEntityMetadata } from '../xyne-ai/tools/helpers.js';
+export type { EnhancedEntityMetadata };
+
 // ============================================================================
 // Configuration - Loaded from environment variables
 // ============================================================================
@@ -45,24 +52,8 @@ export interface SummarizerContext {
   readonly userId: string;
   readonly conversationId: string;
   readonly channelId: string;
-  readonly summarizationType?: 'thread' | 'channel' | 'searchMessage';
+  readonly summarizationType?: 'thread' | 'channel' | 'searchMessage' | 'recap';
   readonly searchQuery?: string; // Added for search message context
-}
-
-/**
- * Enhanced entity metadata for multi-entity citation support
- */
-export interface EnhancedEntityMetadata {
-  readonly entityType: 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search';
-  readonly entityId: string;
-  readonly messageId?: string;
-  readonly conversationId?: string;
-  readonly canvasId?: string;
-  readonly callId?: string;
-  readonly ticketId?: string;
-  readonly channelId: string;
-  readonly externalUrl?: string; 
-  readonly isExternal?: boolean;  
 }
 
 /**
@@ -89,7 +80,7 @@ export interface ThreadMessage {
 
 /**
  * Citation reference linking a key point to a source message
- * Enhanced to support multiple entity types
+ * Enhanced to support multiple entity types (recap-specific)
  */
 export interface Citation {
   readonly messageIndex: number;  // 1-based index from the input messages
@@ -103,9 +94,9 @@ export interface Citation {
   readonly canvasId?: string;
   readonly callId?: string;
   readonly ticketId?: string;
-  readonly externalUrl?: string;  
-  readonly isExternal?: boolean;  
-  readonly isTicket?: boolean;    // Backwards compatibility flag
+  readonly isTicket?: boolean;
+  readonly externalUrl?: string;
+  readonly isExternal?: boolean;
 }
 
 /**
@@ -167,69 +158,51 @@ const ThreadSummaryOutputSchema = z.object({
 // Agent Definition
 // ============================================================================
 
+const LANGFUSE_PROMPT_LABEL = 'production';
+
 /**
- * Unified Summarizer Agent
- * 
- * This agent takes a series of messages and produces a structured summary
- * including key points and citations. Works for both thread and channel summarization.
- * Uses dynamic instructions based on summarizationType in context.
+ * Mapping of summarization types to their corresponding Langfuse prompt names
+ * Add new types here to extend support
  */
-export const summarizerAgent: Agent<SummarizerContext, AgentRawOutput> = {
-  name: 'Summarizer',
-  
-  instructions: (state: Readonly<RunState<SummarizerContext>>) => {
-    const summarizationType = state.context.summarizationType || 'thread';
-    const searchQuery = state.context.searchQuery;
-    
-    let contextType: string;
-    
-    if (summarizationType === 'searchMessage') {
-      contextType = 'search result';
-    } else if (summarizationType === 'channel') {
-      contextType = 'channel';
-    } else {
-      contextType = 'thread';
-    }
-    
-    return `
-You summarize conversations. BE EXTREMELY CONCISE.
+const SUMMARIZATION_TYPE_TO_PROMPT: Record<string, string> = {
+  channel: PROMPT_NAMES.FETCH_CHANNEL_MESSAGES,
+  thread: PROMPT_NAMES.FETCH_THREAD_MESSAGES,
+  recap: PROMPT_NAMES.FETCH_CHANNEL_MESSAGES_RECAP,
+  searchMessage: PROMPT_NAMES.SEARCH_RELEVANT_MESSAGES,
+};
 
-${summarizationType === 'searchMessage' ? `
-The user searched for: "${searchQuery}"
-Your summary MUST be relevant to this search query. Focus on information that directly relates to what the user was looking for.
-` : ''}
+/**
+ * Resolve the summarizer prompt from Langfuse based on summarization type
+ * Langfuse internally handles fallback prompts
+ */
+async function resolveSummarizerPrompt(summarizationType: SummarizerContext['summarizationType']): Promise<string> {
+  const promptName = summarizationType && SUMMARIZATION_TYPE_TO_PROMPT[summarizationType] 
+    ? SUMMARIZATION_TYPE_TO_PROMPT[summarizationType] 
+    : PROMPT_NAMES.FETCH_THREAD_MESSAGES;
 
-CRITICAL RULES:
-- Summary: Start with "This ${contextType}..." - Length depends on content (more messages/topics = more sentences, but stay concise). ALWAYS mention user names. Focus on WHO said/did WHAT.${summarizationType === 'searchMessage' ? ' Make sure the summary addresses the search query: "' + searchQuery + '".' : ''}
-- Key points: Format as "• **Topic** - Content" where Topic is bold. Number of points depends on topics covered.${summarizationType === 'searchMessage' ? ' Prioritize information relevant to the search query.' : ''}
-- Citations: EVERY keypoint MUST have a citation in the citations object. No exceptions.
+  const prompt = await getPromptFromLangfuse(promptName, {
+    label: LANGFUSE_PROMPT_LABEL,
+  });
 
-Output JSON only:
-{
-  "summary": "This ${contextType}...",
-  "keypoints": "• **Topic** - User did/said something\\n• **Another Topic** - Another user did this",
-  "citations": {1: 5, 2: 12, 3: 8}
+  if (!prompt) {
+    throw new Error(`Failed to get prompt from Langfuse: ${promptName}`);
+  }
+
+  return prompt;
 }
 
-STRICT RULES:
-- summary: MUST start with "This ${contextType}..." then mention user names and what they discussed/did. Include relevant dates when the conversation spans multiple days or when timing is important.
-- citations: MANDATORY for EACH keypoint. Map keypoint number (1,2,3...) to message number [N] it references. If you have 3 keypoints, citations MUST have keys 1, 2, and 3.
-- dates: When appropriate, mention dates in the summary or keypoints (e.g., "on Dec 15", "yesterday", "last week") to provide temporal context.
-- Be terse, no fluff. Always attribute actions/statements to specific users.
-
-GUARDRAILS:
-- keypoints: Format each as "• **Topic** - Content". Mention names when relevant. 
-  ABSOLUTELY NEVER include ANY citation references, message numbers, or brackets like [1], [2], [N], (1), (2), etc. in the keypoints field.
-  The keypoints field must contain ONLY the plain text description with NO numbers or references whatsoever.
-  ALL citation mappings go EXCLUSIVELY in the "citations" object - NEVER in keypoints text.
-- NEVER use escape characters like "///", or excessive backslashes in your output. Keep the JSON clean and simple.
-`;
-  },
-
-  modelConfig: {
-    temperature: 0.3,
-  },
-};
+/**
+ * Create a summarizer agent with the given instructions
+ */
+function createSummarizerAgent(instructions: string): Agent<SummarizerContext, AgentRawOutput> {
+  return {
+    name: 'Summarizer',
+    instructions: () => instructions,
+    modelConfig: {
+      temperature: 0.3,
+    },
+  };
+}
 
 /**
  * Parse simplified agent output (summary, keypoints, citations)
@@ -286,8 +259,6 @@ function parseAgentOutput(
               canvasId: entity.canvasId,
               callId: entity.callId,
               ticketId: entity.ticketId,
-              externalUrl: entity.externalUrl, 
-              isExternal: entity.isExternal,  
               isTicket: entity.entityType === 'ticket',  // Backwards compatibility
             },
           };
@@ -335,11 +306,11 @@ export function createModelProvider() {
 // ============================================================================
 
 /**
- * Agent registry containing all available agents
+ * Create agent registry with the given agent
  */
-export const agentRegistry = new Map<string, Agent<SummarizerContext, any>>([
-  ['Summarizer', summarizerAgent],
-]);
+function createAgentRegistry(agent: Agent<SummarizerContext, AgentRawOutput>): Map<string, Agent<SummarizerContext, any>> {
+  return new Map([['Summarizer', agent]]);
+}
 
 /**
  * Calculate deterministic counts from messages
@@ -375,6 +346,11 @@ export async function* summarizeStream(
 
   // Calculate deterministic counts from input messages
   const { messageCount, participantCount } = calculateCounts(input.messages);
+
+  // Fetch prompt from langfuse and create agent
+  const systemPrompt = await resolveSummarizerPrompt(context.summarizationType);
+  const agent = createSummarizerAgent(systemPrompt);
+  const agentRegistry = createAgentRegistry(agent);
 
   // Format messages for the agent
   const formattedMessages = formatMessagesForAgent(
@@ -562,6 +538,11 @@ export async function summarizeThread(
   // Calculate deterministic counts
   const { messageCount, participantCount } = calculateCounts(input.messages);
 
+  // Fetch prompt from langfuse and create agent
+  const systemPrompt = await resolveSummarizerPrompt(context.summarizationType);
+  const agent = createSummarizerAgent(systemPrompt);
+  const agentRegistry = createAgentRegistry(agent);
+
   // Format messages for the agent
   const formattedMessages = formatMessagesForAgent(input.messages);
 
@@ -646,7 +627,7 @@ function stripHtml(content: string): string {
  */
 function formatMessagesForAgent(
   messages: readonly ThreadMessage[],
-  summarizationType: 'thread' | 'channel' | 'searchMessage' = 'thread',
+  summarizationType: 'thread' | 'channel' | 'searchMessage' | 'recap' = 'thread',
   searchQuery?: string
 ): string {
   const formattedMessages = messages.map((msg, index) => {
@@ -673,7 +654,7 @@ function formatMessagesForAgent(
 
 Focus on information that is relevant to what the user was searching for.
 Provide a detailed summary including context and nuances.`;
-  } else if (summarizationType === 'channel') {
+  } else if (summarizationType === 'channel' || summarizationType === 'recap') {
     contextLabel = 'CHANNEL MESSAGES';
     endLabel = 'END OF CHANNEL MESSAGES';
     introText = `Please summarize the following channel conversation:

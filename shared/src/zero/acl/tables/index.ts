@@ -41,3 +41,4 @@ export { UsersACL } from './users-acl';
 export { UserWorkloadMappingsACL } from './user-workload-mappings-acl';
 export { WorkflowExecutionsACL } from './workflow-executions-acl';
 export { WorkflowsACL } from './workflows-acl';
+export { ChannelDailyRecapsACL } from './channel-daily-recaps-acl';

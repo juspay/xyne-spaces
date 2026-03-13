@@ -1375,6 +1375,10 @@ model ChannelUserStatus {
   isClosed                  Boolean     @default(false) // Track if user has closed/hidden this DM
   unreadCount               Int         @default(0) // Track unread count for this channel
   selectedBoardId           String?     // Track user's preferred board for this channel
+  
+  // Recap subscription fields
+  isRecapSubscribed         Boolean     @default(false) // User opted into AI recaps for this channel
+  lastSeenRecapDate         DateTime?   @db.Date // Last recap date the user has seen for this channel
 
   // Relations
   channel Channel @relation(fields: [channelId], references: [id])
@@ -1385,6 +1389,7 @@ model ChannelUserStatus {
   @@index([userId]) // Fast user channel lookup
   @@index([userId, isStarred]) // Fast Starred Channels Lookup
   @@index([userId, isClosed]) // Fast closed DMs lookup
+  @@index([userId, isRecapSubscribed]) // Fast recap subscriptions lookup
   @@map("channel_user_status")
   @@schema("public")
 }
@@ -2665,6 +2670,22 @@ model ReleaseAttribution {
   @@index([releaseApplicationId])
   @@index([rootCauseTicketId])
   @@map("release_attributions")
+  @@schema("public")
+}
+
+// ============================================================================
+// RECAP FEATURE MODELS
+// ============================================================================
+
+// Stores daily AI-generated summaries for each channel
+model ChannelDailyRecap {
+  channelId String
+  recapDate DateTime @db.Date
+  summary   String // Final bullet summary text for the day
+
+  @@id([channelId, recapDate])
+  @@index([recapDate])
+  @@map("channel_daily_recaps")
   @@schema("public")
 }
 

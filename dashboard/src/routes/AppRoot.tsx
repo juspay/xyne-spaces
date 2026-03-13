@@ -55,6 +55,7 @@ import Search from '../components/Chat/Search/Search';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
 import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
 import UserThreads from '../components/Chat/UserThreads/UserThreads';
+import { RecapPanel } from '../components/RecapPanel';
 import { RouterErrorFallback } from '../components/ErrorBoundary';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
@@ -521,6 +522,30 @@ export const router = createBrowserRouter([
                       {
                         path: 'threads',
                         element: <UserThreads />,
+                      },
+                      // Recap (must come before :channelId)
+                      {
+                        path: 'recap',
+                        children: [
+                          {
+                            index: true,
+                            element: <RecapPanel />,
+                          },
+                          {
+                            path: ':channelId',
+                            element: <RecapPanel />,
+                            children: [
+                              {
+                                index: true,
+                                element: null,
+                              },
+                              {
+                                path: ':conversationId',
+                                element: <ThreadMessages />,
+                              },
+                            ],
+                          },
+                        ],
                       },
                       // My Tickets (must come before :channelId)
                       {
