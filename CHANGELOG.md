@@ -1,3 +1,10 @@
+## [1.83.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.83.1...v1.83.2) (2026-03-13)
+
+
+### Bug Fixes
+
+* fixed call history in thread calls ([12d54dc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/12d54dc9af069462c22bd354c7c35c6696bd21fb))
+
 ## [1.83.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.83.0...v1.83.1) (2026-03-13)
 
 
