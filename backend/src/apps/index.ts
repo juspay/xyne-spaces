@@ -1,0 +1,1 @@
+export { default as appRoutes } from './routes/apps';
