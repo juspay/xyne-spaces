@@ -12,6 +12,7 @@ interface RecordingStoreSnapshot {
 }
 
 export type RecordingStoreEvent =
+  | { type: 'requestAutoStart' }
   | { type: 'startRecording'; sttModel?: 'google' | 'azure' | 'deepgram' }
   | {
       type: 'recordingStarted';

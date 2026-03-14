@@ -9,6 +9,8 @@ import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
 import { CallType } from '@xyne/shared';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
+import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
+import { sendRecordingEvent } from '../../hooks/useRecordingStore';
 
 // Function to play notification sound
 const playNotificationSound = (): void => {
@@ -351,6 +353,16 @@ export const NotificationHandler: React.FC = () => {
     }
     return undefined;
   }, [navigate, isElectron, location.pathname]);
+
+  useEffect(() => {
+    const meetingDetector = window.electronAPI?.meetingDetector;
+    if (!isElectron || !meetingDetector) return;
+    // Sync stored preference to main process on startup
+    meetingDetector.setEnabled(localStorage.getItem(MEETING_DETECTION_ENABLED_KEY) !== 'false');
+    return meetingDetector.onStartRecordingFromMeeting(() => {
+      sendRecordingEvent({ type: 'requestAutoStart' });
+    });
+  }, [isElectron]);
 
   const handleNotificationRef = useRef(handleNotification);
   const handleNotificationAckConfirmedRef = useRef(handleNotificationAckConfirmed);

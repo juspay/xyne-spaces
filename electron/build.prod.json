@@ -14,7 +14,11 @@
     "dist",
     "assets",
     "certs",
-    "ui-active"
+    "ui-active",
+    "native/mic-monitor/mic-monitor"
+  ],
+  "asarUnpack": [
+    "native/mic-monitor/mic-monitor"
   ],
   "mac": {
     "icon": "assets/images/xyne.png",

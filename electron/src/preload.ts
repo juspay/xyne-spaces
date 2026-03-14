@@ -190,5 +190,44 @@ contextBridge.exposeInMainWorld('electronAPI', {
   applyAppUpdate: () => ipcRenderer.send('apply-app-update'),
   requestAllMediaPermissions: () =>
     ipcRenderer.invoke('request-all-media-permissions'),
+
+  // Generic IPC send (used by standalone HTML windows like meeting-popup)
+  ipcSend: (channel: string, ...args: unknown[]) => {
+    const allowed = ['meeting-popup:content-height'];
+    if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
+  },
+
+  // Meeting Detector APIs
+  meetingDetector: {
+    onStartRecordingFromMeeting: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('meeting:start-recording', listener);
+      return () => ipcRenderer.removeListener('meeting:start-recording', listener);
+    },
+    setEnabled: (enabled: boolean) => {
+      ipcRenderer.send('meeting-detection:set-enabled', enabled);
+    },
+  },
+
+  // Meeting popup (used by the popup window itself)
+  meetingPopup: {
+    onShow: (callback: (data: { app: string; startedAt: string }) => void) => {
+      const listener = (_event: unknown, data: { app: string; startedAt: string }) => callback(data);
+      ipcRenderer.on('meeting-popup:show', listener);
+      return () => ipcRenderer.removeListener('meeting-popup:show', listener);
+    },
+    onUpdate: (callback: (data: { app: string; startedAt: string }) => void) => {
+      const listener = (_event: unknown, data: { app: string; startedAt: string }) => callback(data);
+      ipcRenderer.on('meeting-popup:update', listener);
+      return () => ipcRenderer.removeListener('meeting-popup:update', listener);
+    },
+    onHide: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('meeting-popup:hide', listener);
+      return () => ipcRenderer.removeListener('meeting-popup:hide', listener);
+    },
+    dismiss: () => ipcRenderer.send('meeting-popup:dismiss'),
+    startRecording: () => ipcRenderer.send('meeting-popup:start-recording'),
+  },
 });
 

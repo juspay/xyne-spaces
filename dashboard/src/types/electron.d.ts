@@ -122,6 +122,18 @@ export interface ElectronAPI {
   ) => () => void;
   applyAppUpdate: () => void;
   requestAllMediaPermissions: () => Promise<{ microphone: boolean; camera: boolean }>;
+  ipcSend?: (channel: string, ...args: unknown[]) => void;
+  meetingDetector?: {
+    onStartRecordingFromMeeting: (callback: () => void) => () => void;
+    setEnabled: (enabled: boolean) => void;
+  };
+  meetingPopup?: {
+    onShow: (callback: (data: { app: string; startedAt: string }) => void) => () => void;
+    onUpdate: (callback: (data: { app: string; startedAt: string }) => void) => () => void;
+    onHide: (callback: () => void) => () => void;
+    dismiss: () => void;
+    startRecording: () => void;
+  };
 }
 
 declare global {
