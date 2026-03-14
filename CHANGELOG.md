@@ -1,3 +1,15 @@
+## [1.86.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.85.0...v1.86.0) (2026-03-14)
+
+
+### Features
+
+* native auth change ([abe038d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/abe038db3dbaab39b09bb299ab5736b20533dc43)), closes [#4098](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4098)
+
+
+### Bug Fixes
+
+* removing functional test case skipping condition ([6114a5f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6114a5f18736b837558f35c3d38a7ddca42dff88)), closes [#4102](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4102)
+
 ## [1.85.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.84.0...v1.85.0) (2026-03-13)
 
 
