@@ -1,3 +1,10 @@
+## [1.87.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.86.0...v1.87.0) (2026-03-14)
+
+
+### Features
+
+* Meeting Detection ([c4cefb4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c4cefb43cec5144093ed6132199ebecd0efba075)), closes [#4044](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4044)
+
 ## [1.86.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.85.0...v1.86.0) (2026-03-14)
 
 
