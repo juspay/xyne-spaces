@@ -14,6 +14,7 @@ import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
 import ElectronEvent from '../services/logger/electron-events';
+import { meetingDetectorService } from '../services/meeting-detector';
 
 // Forward logs to renderer process
 (log.transports as any).forwardToRenderer = (message: any) => {
@@ -86,6 +87,9 @@ app.on('before-quit', async () => {
   // Stop version checker
   stopVersionChecker();
 
+  // Stop meeting detector
+  meetingDetectorService.stop();
+
   // Gracefully stop agent auth server
   try {
     await agentAuthService.stopServer();
@@ -151,6 +155,9 @@ async function initializeApp(): Promise<void> {
   // Start version checker to auto-reload on new deployments
   startVersionChecker();
 
+  // Start meeting detector (macOS only, event-driven)
+  startMeetingDetectorInBackground();
+
   // setup app state listners 
   setupAppStateListeners();
 
@@ -207,6 +214,11 @@ function startDocsPublishServerInBackground(): void {
     .catch((error) => {
       Logger.logError(ElectronEvent.DOCS_PUBLISH_SERVER_START_FAILED, error, {}, 'App');
     });
+}
+
+function startMeetingDetectorInBackground(): void {
+  if (process.platform !== 'darwin') return;
+  meetingDetectorService.start();
 }
 
 function setupAppStateListeners(): void {

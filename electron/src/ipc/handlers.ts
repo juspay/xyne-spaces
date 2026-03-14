@@ -11,6 +11,8 @@ import { Logger } from '../services/logger/Logger';
 import {
   requestAllMediaPermissions,
 } from '../services/media-permission';
+import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
+import { meetingDetectorService } from '../services/meeting-detector';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -343,6 +345,33 @@ export function setupIpcHandlers(): void {
   });
   ipcMain.handle('request-all-media-permissions', async () => {
     return requestAllMediaPermissions();
+  });
+
+  // Meeting popup actions
+  ipcMain.on('meeting-popup:dismiss', () => {
+    // Just close the popup — do NOT show/focus the main window
+    hideMeetingPopup();
+  });
+
+  ipcMain.on('meeting-popup:start-recording', () => {
+    const mainWindow = getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // Navigate and auto-start recording without stealing focus from the meeting
+      mainWindow.webContents.send('navigate-to', '/recordings');
+      mainWindow.webContents.send('meeting:start-recording');
+    }
+    // Delay close so the popup can show the recording-started state for 3 seconds
+    hideMeetingPopupAfter(3000);
+  });
+
+  // Meeting detection toggle (user preference from settings)
+  ipcMain.on('meeting-detection:set-enabled', (_event, enabled: boolean) => {
+    if (enabled) {
+      meetingDetectorService.start();
+    } else {
+      hideMeetingPopup();
+      meetingDetectorService.stop();
+    }
   });
 }
 

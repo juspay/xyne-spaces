@@ -71,6 +71,15 @@ const ElectronEvent = {
     DOCS_PUBLISH_SHARE_DOC_REQUEST: 'docs_publish_share_doc_request',
     DOCS_PUBLISH_OPEN_TICKET_THREAD: 'docs_publish_open_ticket_thread',
     
+    // Meeting Detector events
+    MEETING_DETECTOR_START: 'meeting_detector_start',
+    MEETING_DETECTOR_STOP: 'meeting_detector_stop',
+    MEETING_DETECTOR_ERROR: 'meeting_detector_error',
+    MEETING_DETECTOR_PROCESS_EXIT: 'meeting_detector_process_exit',
+    MEETING_DETECTOR_RESTART: 'meeting_detector_restart',
+    MEETING_DETECTED: 'meeting_detected',
+    MEETING_ENDED: 'meeting_ended',
+
     // UI Update events
     UI_UPDATE_CHECK_START: 'ui_update_check_start',
     UI_UPDATE_CHECK_FAILED: 'ui_update_check_failed',

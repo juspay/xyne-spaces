@@ -34,6 +34,7 @@ export interface RecordingState {
   transcripts: TranscriptEntry[];
   error: string | null;
   sttModel: SttModel;
+  pendingAutoStart: boolean;
 }
 
 const initialContext: RecordingState = {
@@ -46,12 +47,18 @@ const initialContext: RecordingState = {
   error: null,
   sttModel: 'azure',
   transcripts: [],
+  pendingAutoStart: false,
 };
 
 export const recordingStore = createStore({
   context: initialContext,
   on: {
     // Actions
+    requestAutoStart: (context): RecordingState => ({
+      ...context,
+      pendingAutoStart: true,
+    }),
+
     startRecording: (context, event: { sttModel?: SttModel }): RecordingState => {
       const sttModel = event.sttModel || context.sttModel;
 
@@ -108,6 +115,7 @@ export const recordingStore = createStore({
         status: 'starting',
         sttModel,
         error: null,
+        pendingAutoStart: false,
       };
     },
 
@@ -245,6 +253,7 @@ export const recordingStore = createStore({
         error: null,
         sttModel: context.sttModel, // Preserve STT model preference
         transcripts: [], // Clear transcripts when recording stops
+        pendingAutoStart: false,
       };
     },
 
@@ -284,6 +293,7 @@ export const recordingStore = createStore({
       error: null,
       sttModel: context.sttModel, // Preserve STT model preference
       transcripts: [], // Clear transcripts
+      pendingAutoStart: false,
     }),
 
     addTranscript: (context, event: { entry: TranscriptEntry }): RecordingState => ({

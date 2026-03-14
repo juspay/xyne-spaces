@@ -41,6 +41,7 @@ export default function RecordingsScreen(): ReactElement {
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const startTime = useRecordingStore(ctx => ctx.startTime);
   const externalId = useRecordingStore(ctx => ctx.externalId);
+  const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
 
   const isActive =
     recordingStatus === 'recording' ||
@@ -75,6 +76,14 @@ export default function RecordingsScreen(): ReactElement {
     sendRecordingEvent({ type: 'clearTranscripts' });
     sendRecordingEvent({ type: 'startRecording', sttModel });
   };
+
+  // Auto-start recording when triggered from the meeting popup
+  useEffect(() => {
+    if (pendingAutoStart && (recordingStatus === 'idle' || recordingStatus === 'error')) {
+      handleStartRecording();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoStart]);
 
   const handlePauseRecording = (): void => {
     sendRecordingEvent({ type: 'pauseRecording' });

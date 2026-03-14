@@ -11,6 +11,8 @@ import { Button } from '../ui/Button/Button';
 import { useCurrentUserAssignmentState } from '../../hooks/useAssignmentState';
 import { useTheme } from '../../hooks/useTheme';
 import { useDebugSettings } from '../../hooks/useDebugSettings';
+import { MeetingDetectionToggle } from './MeetingDetectionToggle';
+import { isElectronApp } from '../../utils/electronApp';
 import { cn } from '../../utils/classNames';
 import { isStatusExpired, formatExpiryTime } from '../../utils/statusUtils';
 import { Switch } from '../ui/Switch';
@@ -390,6 +392,16 @@ const Settings = (): ReactElement => {
           />
         </div>
       </div>
+
+      {isElectronApp() && (
+        <>
+          <hr className='border-border w-full' />
+          <div className='space-y-2'>
+            <p className='text-sm font-medium text-foreground'>Notifications</p>
+            <MeetingDetectionToggle />
+          </div>
+        </>
+      )}
 
       <hr className='border-border w-full' />
 
