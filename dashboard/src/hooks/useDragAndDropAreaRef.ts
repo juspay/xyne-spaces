@@ -6,6 +6,7 @@ export interface InputBoxHandle {
   addFiles: (files: File[]) => void;
   clearContent: () => void;
   insertContent: (content: string) => void;
+  isSuggestionOpen: () => boolean;
 }
 
 interface UseDragAndDropAreaRefReturn {

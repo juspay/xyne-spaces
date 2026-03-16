@@ -98,6 +98,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
         addFiles: (files: File[]) => inputBoxRef.current?.addFiles(files),
         clearContent: () => inputBoxRef.current?.clearContent(),
         insertContent: (content: string) => inputBoxRef.current?.insertContent(content),
+        isSuggestionOpen: () => inputBoxRef.current?.isSuggestionOpen() ?? false,
       }),
       [],
     );
