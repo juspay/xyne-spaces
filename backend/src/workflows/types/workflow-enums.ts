@@ -21,6 +21,7 @@ export enum WorkflowType {
   NETWORK_DOCUMENT_PROCESSING = 'NETWORK_DOCUMENT_PROCESSING',
   INTEGRITY_DEBUG_WORKFLOW = 'INTEGRITY_DEBUG_WORKFLOW',
   XYNE_AUTO_RCA_WORKFLOW = 'XYNE_AUTO_RCA_WORKFLOW',
+  VERSION_BUMP_WORKFLOW = 'VERSION_BUMP_WORKFLOW',
 }
 
 export enum WorkflowExecutionStatus {
@@ -572,6 +573,7 @@ export function getWorkflowTypeDisplayName(workflowType: WorkflowType): string {
     [WorkflowType.NETWORK_DOCUMENT_PROCESSING]: 'Network Document Processing',
     [WorkflowType.INTEGRITY_DEBUG_WORKFLOW]: 'Integrity Debug Workflow',
     [WorkflowType.XYNE_AUTO_RCA_WORKFLOW]: 'Xyne Auto RCA Workflow',
+    [WorkflowType.VERSION_BUMP_WORKFLOW]: 'Version Bump Workflow',
   };
   return displayNames[workflowType]
 }
