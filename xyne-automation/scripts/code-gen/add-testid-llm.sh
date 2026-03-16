@@ -177,15 +177,23 @@ echo -e "${CYAN}Step 2: Analyzing spec file for selectors needing testid...${NC}
 SELECTORS=$(grep -noE "getBy(Role|Text|Label|Placeholder)\([^)]+\)" "$SPEC_FILE" 2>/dev/null || true)
 
 if [ -z "$SELECTORS" ]; then
-    echo -e "${GREEN}✓ No selectors need conversion — all already use getByTestId()${NC}"
-    exit 0
+    if [ ${#MISSING_TESTIDS[@]} -gt 0 ]; then
+        echo -e "${GREEN}✓ No selectors need conversion — all already use getByTestId()${NC}"
+        echo ""
+        echo -e "${YELLOW}⚠ However, ${#MISSING_TESTIDS[@]} testid(s) need to be added to dashboard components.${NC}"
+        echo -e "${CYAN}Proceeding to add missing testids to dashboard...${NC}"
+        SELECTOR_COUNT=0
+    else
+        echo -e "${GREEN}✓ All selectors use getByTestId() and all testids exist in dashboard. Nothing to do.${NC}"
+        exit 0
+    fi
+else
+    SELECTOR_COUNT=$(echo "$SELECTORS" | wc -l | tr -d ' ')
+    echo -e "${YELLOW}  Found $SELECTOR_COUNT selector(s) that need data-testid:${NC}"
+    echo "$SELECTORS" | while IFS= read -r sel_line; do
+        echo -e "    ${CYAN}${sel_line}${NC}"
+    done
 fi
-
-SELECTOR_COUNT=$(echo "$SELECTORS" | wc -l | tr -d ' ')
-echo -e "${YELLOW}  Found $SELECTOR_COUNT selector(s) that need data-testid:${NC}"
-echo "$SELECTORS" | while IFS= read -r sel_line; do
-    echo -e "    ${CYAN}${sel_line}${NC}"
-done
 echo ""
 
 # Log selectors to report (plain text, no color codes)
