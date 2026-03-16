@@ -26,6 +26,9 @@ export interface AppConfig {
   DEEP_LINK_PROTOCOL: string;
   USER_DATA_SUFFIX: string;         // Appended to userData dir to isolate flavors
   APP_NAME: string;
+  APP_CONFIG: string;            
+  APP_ID: string;
+  SENTRY_DSN?: string;
   window: {
     width: number;
     height: number;
@@ -54,6 +57,9 @@ const devConfig: AppConfig = {
   DEEP_LINK_PROTOCOL: 'xyne-spaces-dev',
   USER_DATA_SUFFIX: '-dev',
   APP_NAME: 'Xyne Spaces DEV',
+  APP_CONFIG: 'dev',
+  APP_ID: "com.xyne.spaces.dev",
+  SENTRY_DSN: 'https://4ec5e3164a31edeb0db87ecf7c0978f3@o4507576052023296.ingest.us.sentry.io/4511031818846208',
   window: {
     width: 1200,
     height: 800,
@@ -92,6 +98,8 @@ const prodConfig: AppConfig = {
   DEEP_LINK_PROTOCOL: 'xyne-spaces',
   USER_DATA_SUFFIX: '',             // Empty — prod keeps original path, no migration needed
   APP_NAME: 'Xyne Spaces',
+  APP_CONFIG: 'prod',
+  APP_ID: "com.xyne.spaces",
   window: {
     width: 1200,
     height: 800,
@@ -130,6 +138,9 @@ const sandboxConfig: AppConfig = {
   DEEP_LINK_PROTOCOL: 'xyne-spaces-sandbox',
   USER_DATA_SUFFIX: '-sandbox',
   APP_NAME: 'Xyne Spaces Sandbox',
+  APP_CONFIG: 'sandbox',
+  APP_ID: "com.xyne.spaces.sandbox",
+  SENTRY_DSN: 'https://4ec5e3164a31edeb0db87ecf7c0978f3@o4507576052023296.ingest.us.sentry.io/4511031818846208',
   window: {
     width: 1200,
     height: 800,

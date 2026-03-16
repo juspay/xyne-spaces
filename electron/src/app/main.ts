@@ -15,6 +15,12 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
 import ElectronEvent from '../services/logger/electron-events';
 import { meetingDetectorService } from '../services/meeting-detector';
+import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
+import { initializeUIUpdater } from '../services/ui-updater';
+import { initializeTelemetry } from '../services/telemetry';
+import { setupGlobalErrorHandlers } from '../services/error-handler';
+import Sentry from "@sentry/electron/main";
+
 
 // Forward logs to renderer process
 (log.transports as any).forwardToRenderer = (message: any) => {
@@ -32,14 +38,11 @@ import { meetingDetectorService } from '../services/meeting-detector';
     });
   }
 };
-import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
-import { initializeUIUpdater } from '../services/ui-updater';
-import { initializeTelemetry } from '../services/telemetry';
-import { setupGlobalErrorHandlers } from '../services/error-handler';
 
 if (process.platform === 'darwin') {
   app.setName(config.APP_NAME);
 }
+app.setAppUserModelId(config.APP_ID);
 
 // Initialize electron-log for main process
 log.initialize();
@@ -49,6 +52,9 @@ log.info('[Main] Electron app starting...');
 
 // Setup global error handlers FIRST to catch any initialization errors
 setupGlobalErrorHandlers();
+
+// Initialize Sentry for crash reporting
+Sentry.init({ dsn: config.SENTRY_DSN });
 
 // Log app opened event
 Logger.info(EnrollmentEvent.APP_OPENED);

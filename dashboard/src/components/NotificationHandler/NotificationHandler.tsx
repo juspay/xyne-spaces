@@ -75,6 +75,7 @@ export const NotificationHandler: React.FC = () => {
           window.electronAPI &&
           typeof window.electronAPI.showNotification === 'function'
         ) {
+          playNotificationSound();
           window.electronAPI.showNotification({
             title: data.notification.title,
             body: data.notification.message,

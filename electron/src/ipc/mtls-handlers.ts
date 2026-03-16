@@ -82,7 +82,7 @@ export function setupMTLSIpcHandlers(): void {
 
     ipcMain.handle('store-certificate', async (event, pem: string) => {
         try {
-            const result = await keychain.importCertificate(pem);
+            await keychain.importCertificate(pem);
             Logger.info(EnrollmentEvent.ENROLLMENT_SUCCESS, { 
                 certificate_imported: true,
                 next_step: 'loading_frontend'
@@ -109,7 +109,6 @@ export function setupMTLSIpcHandlers(): void {
             });
             // Switch logger to use protected URL
             Logger.enablePostEnrollmentLogging();
-            return result;
         } catch (error) {
             Logger.logError(EnrollmentEvent.CERTIFICATE_STORAGE_FAILED, error);
             throw error;
