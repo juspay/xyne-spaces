@@ -1,3 +1,17 @@
+## [1.89.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.88.0...v1.89.0) (2026-03-16)
+
+
+### Features
+
+* | Multi repo version bump workflow ([306d27f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/306d27f394ce909fea031124156fc5c95fa8496b)), closes [#3919](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3919)
+* Jiraffe Migration ([c02da62](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c02da62c02b0195042eddf0b0ba170b4698e2490)), closes [#3973](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3973)
+* update automation script ([4ec4e52](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4ec4e5223a2388a8559717d9c512c91f76101407)), closes [#4093](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4093)
+
+
+### Bug Fixes
+
+* ETA calendar fix ([e90a3f7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e90a3f7c48e3a400122f4765d31f36c132c57084)), closes [#3929](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3929)
+
 ## [1.88.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.87.0...v1.88.0) (2026-03-16)
 
 
