@@ -1,3 +1,10 @@
+## [1.90.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.89.0...v1.90.0) (2026-03-16)
+
+
+### Features
+
+* boards config revamp ([cc3e0ab](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cc3e0abfb998edf845f3b05d8108cd4b9500e6a7)), closes [#4099](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4099)
+
 ## [1.89.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.88.0...v1.89.0) (2026-03-16)
 
 
