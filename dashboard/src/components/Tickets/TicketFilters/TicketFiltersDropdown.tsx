@@ -658,6 +658,7 @@ export const TicketFiltersDropdown = ({
               variant='outline'
               size='sm'
               className={cn(hasActiveFilters ? 'border-border' : '', 'rounded-[10px]')}
+              data-testid='more-filters-btn'
             >
               <div className='flex items-center gap-1.5'>
                 <ListFilter className='w-3 h-3 font-medium' />
@@ -713,6 +714,7 @@ export const TicketFiltersDropdown = ({
                         filterId: item.id,
                         filterLabel: item.label,
                       })}
+                      data-testid={`filter-menu-${item.id}`}
                     >
                       <div className='flex items-center gap-3'>
                         <Icon className='w-4 h-4' />
@@ -760,6 +762,7 @@ export const TicketFiltersDropdown = ({
             onClick={handleClearAllFilters}
             data-track-category='Tickets'
             data-track-name='ClearAllFiltersDropdown'
+            data-testid='clear-filters-btn'
           >
             <X className='w-4 h-4' />
             <span>Clear Filters</span>
