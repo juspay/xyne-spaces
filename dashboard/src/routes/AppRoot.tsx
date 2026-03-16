@@ -15,6 +15,7 @@ import VSCodeWorkspaceScreen from './VSCodeWorkspaceScreen/VSCodeWorkspaceScreen
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import AgentsScreen from './AgentsScreen/AgentScreen';
 import KnowledgeBaseScreen from './KnowledgeBaseScreen/KnowledgeBase';
+import { MemoryScreen } from './MemoryScreen';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
@@ -685,6 +686,10 @@ export const router = createBrowserRouter([
                     <KnowledgeBaseScreen />
                   </ResourceProtectedRoute>
                 ),
+              },
+              {
+                path: '/memory',
+                element: <MemoryScreen />,
               },
               {
                 path: '/analytics',

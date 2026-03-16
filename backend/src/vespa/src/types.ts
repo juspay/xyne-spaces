@@ -7,6 +7,7 @@ export const channelSchema = 'chat_container';
 export const projectSchema = 'project';
 export const userSchema = 'user';
 export const fileSchema = 'file'
+export const memorySchema = 'memory';
 export type VespaSchema =
   | typeof ticketSchema
   | typeof messageSchema
@@ -15,6 +16,7 @@ export type VespaSchema =
   | typeof userSchema
   | typeof projectSchema
   | typeof fileSchema
+  | typeof memorySchema
 
 export const VESPA_SCHEMAS: VespaSchema[] = [
   ticketSchema,
@@ -24,10 +26,18 @@ export const VESPA_SCHEMAS: VespaSchema[] = [
   projectSchema,
   userSchema,
   fileSchema,
+  memorySchema
 ];
 
+export const MemoryScope = {
+  MY: 'my',
+  ALL: 'all',
+} as const;
+
+export type MemoryScope = (typeof MemoryScope)[keyof typeof MemoryScope];
 // Deprecated: Use VESPA_SCHEMAS instead
 export const AllSources: VespaSchema[] = VESPA_SCHEMAS;
+
 export enum VespaDocType {
   TICKET = 'ticket',
   MESSAGE = 'message',
@@ -35,7 +45,11 @@ export enum VespaDocType {
   CHANNEL = 'channel',
   PROJECT = 'project',
   USER = 'user',
-  FILE = 'file'
+  FILE = 'file',
+  MEMORY = 'memory',
+  FACT = 'fact',
+  SOP = 'sop'
+
 }
 
 export enum SubApp {
@@ -244,6 +258,26 @@ export interface VespaFileDocument extends VespaDocument {
   conversationId?: string;
 }
 
+export interface VespaMemoryDocument extends VespaDocument {
+  userId: string;
+  sessionId: string;
+  repoUrl?: string;
+  commitId?: string;
+  ticketId?: string;
+  userQuery?: string;
+  tags: string[];
+  filePointers: string[];
+  chatSummary: string[];
+  createdAt: number;
+  updatedAt: number;
+  committedAt?: number;
+  agentUsed: string;
+  modelUsed: string[];
+  parentRef?: string;
+  reviewStatus: string;
+  relevanceScore?: number;
+}
+
 export type VespaSearchResult =
   | VespaChatContainerDocument
   | VespaChatAttachmentDocument
@@ -252,6 +286,7 @@ export type VespaSearchResult =
   | VespaProjectDocument
   | VespaUserDocument
   | VespaFileDocument
+  | VespaMemoryDocument
 
 export interface VespaSearchHit {
   id: string;
@@ -296,6 +331,7 @@ export type InsertDocument =
   | VespaTicketDocument
   | VespaUserDocument
   | VespaFileDocument
+  | VespaMemoryDocument
 
 export type SchemaDataMap = {
   [messageSchema]: VespaChatMessageDocument;
@@ -305,9 +341,10 @@ export type SchemaDataMap = {
   [ticketSchema]: VespaTicketDocument;
   [userSchema]: VespaUserDocument;
   [fileSchema]: VespaFileDocument;
+  [memorySchema]: VespaMemoryDocument;
 };
 
-export const schemaToDocType: Record<VespaSchema, VespaDocType> = {
+export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
   [channelSchema]: VespaDocType.CHANNEL,
   [messageSchema]: VespaDocType.MESSAGE,
   [projectSchema]: VespaDocType.PROJECT,
@@ -319,4 +356,38 @@ export const schemaToDocType: Record<VespaSchema, VespaDocType> = {
 
 export interface MatchFeatures {
   [key: string]: number | string;
+}
+
+export interface MemoryUpdateFields {
+  userQuery?: string;
+  chatSummary?: string[];
+  tags?: string[];
+  filePointers?: string[];
+  commitId?: string;
+  reviewStatus?: string;
+}
+
+export interface MemorySearchRequest {
+  query?: string;
+  scope: MemoryScope;
+  limit: number;
+  offset: number;
+  includeQuery?: boolean;
+  includeSummary?: boolean;
+  docType?: VespaDocType;
+  tags?: string[];
+  repoUrl?: string;
+  commitId?: string;
+  sessionId?: string;
+  filePointers?: string;
+  ticketId?: string;
+  parentRef?: string;
+  reviewStatus?: string;
+  docId?: string;
+}
+
+export interface MemorySearchResult {
+  documents: VespaMemoryDocument[];
+  totalCount: number;
+  hasMore: boolean;
 }

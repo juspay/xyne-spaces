@@ -13,7 +13,8 @@ export type TabType =
   | 'live-edits'
   | 'rca-details'
   | 'workflow'
-  | 'thread-summary';
+  | 'thread-summary'
+  | 'context';
 
 export interface WorkflowTab {
   id: string;

@@ -123,6 +123,10 @@ class AgentAuthService {
         await this.handleInteract(req, res);
       } else if (req.method === 'GET' && url.pathname === '/search') {
         await this.handleSearch(req, res, url);
+      } else if (req.method === 'POST' && url.pathname === '/memory/search') {
+        await this.handleMemorySearch(req, res);
+      } else if (req.method === 'POST' && url.pathname === '/memory/upload') {
+        await this.handleMemoryUpload(req, res);
       } else if (req.method === 'GET' && url.pathname === '/health') {
         this.sendJson(res, 200, { status: 'ok' });
       } else {
@@ -289,6 +293,25 @@ class AgentAuthService {
   /**
    * Handle /search endpoint - proxy search requests to backend with user's access token
    * Supports query parameters: q, app, filterOnly, and any additional Vespa parameters
+   * Payload structure:
+    * {
+    *   query?: string;
+    *   scope: MemoryScope; // e.g., 'my' | 'all'
+    *   limit: number;
+    *   offset: number;
+    *   includeQuery?: boolean;
+    *   includeSummary?: boolean;
+    *   docType?: VespaDocType; // e.g., 'fact' | 'sop'
+    *   tags?: string[];
+    *   repoUrl?: string;
+    *   commitId?: string;
+    *   sessionId?: string;
+    *   filePointers?: string;
+    *   ticketId?: string;
+    *   parentRef?: string;
+    *   reviewStatus?: string; // e.g., 'pending' | 'verified' | 'rejected'
+    *   docId?: string;
+    * }
    */
   private async handleSearch(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     // Validate agent authorization token
@@ -341,6 +364,98 @@ class AgentAuthService {
       });
     }
   }
+
+  // ==================== Memory Proxy Handlers ====================
+
+  /**
+   * Handle POST /memory/search - Search documents
+   */
+  private async handleMemorySearch(req: IncomingMessage, res: ServerResponse): Promise<void> {
+   
+    const body = await this.parseBody(req);
+    log.info(`[AgentAuth] Memory search request: ${JSON.stringify(body)}`);
+    
+    if (!body || typeof body !== 'object') {
+      this.sendJson(res, 400, { error: 'Invalid request body' });
+      return;
+    }
+
+    try {
+      const cookies = await session.defaultSession.cookies.get({});
+      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+      const backendUrl = `${config.BACKEND_URL}/api/memory/search`;
+      log.info(`[AgentAuth] Proxying POST memory/search request to ${backendUrl}`);
+
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': cookieString
+        },
+        data: body
+      });
+
+      res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(backendResponse.data));
+    } catch (error: any) {
+      log.error('[AgentAuth] Memory search request failed:', error);
+      this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
+    }
+  }
+
+  /**
+   * Handle POST /memory/upload - Upload session turn
+  * Payload structure:
+    * {
+    *   sessionId: string;
+    *   repoUrl: string;
+    *   ticketId: string;
+    *   commitId: string;
+    *   agentUsed: string[];
+    *   modelUsed: string[];
+    *   messages: any[]; // AnyFrontendMessage[]
+    * }
+   */
+  private async handleMemoryUpload(req: IncomingMessage, res: ServerResponse): Promise<void> {
+
+    const body = await this.parseBody(req);
+    if (!body || typeof body !== 'object') {
+      this.sendJson(res, 400, { error: 'Invalid request body' });
+      return;
+    }
+
+    log.info(`[AgentAuth] Buffering session ${body?.sessionId}`);
+
+    try {
+      const cookies = await session.defaultSession.cookies.get({});
+      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+      const backendUrl = `${config.BACKEND_URL}/api/memory/turn`;
+      log.info(`[AgentAuth] Proxying POST memory/turn request to ${backendUrl}`);
+
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': cookieString
+        },
+        data: body
+      });
+
+      res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(backendResponse.data));
+    } catch (error: any) {
+      log.error('[AgentAuth] Memory upload request failed:', error);
+      this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
+    }
+  }
+
+
+
+  // ==================== End Memory Proxy Handlers ====================
 
   /**
    * Make HTTP/HTTPS request to backend using Electron's net module

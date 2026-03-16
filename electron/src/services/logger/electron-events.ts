@@ -71,6 +71,10 @@ const ElectronEvent = {
     DOCS_PUBLISH_SHARE_DOC_REQUEST: 'docs_publish_share_doc_request',
     DOCS_PUBLISH_OPEN_TICKET_THREAD: 'docs_publish_open_ticket_thread',
     
+    // Memory Proxy events
+    MEMORY_SEARCH_REQUEST: 'memory_search_request',
+    MEMORY_UPLOAD_REQUEST: 'memory_upload_request',
+
     // Meeting Detector events
     MEETING_DETECTOR_START: 'meeting_detector_start',
     MEETING_DETECTOR_STOP: 'meeting_detector_stop',

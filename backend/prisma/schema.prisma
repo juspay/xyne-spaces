@@ -2721,6 +2721,29 @@ enum SurfaceLinkKind {
   @@schema("public")
 }
 
+enum SessionRecordingProcessStatus {
+  PENDING      // File synced to GCS, needs SOP/fact extraction
+  PROCESSING   // Extraction job running
+  COMPLETED    // Extraction done
+  FAILED       // Extraction failed
+  @@schema("workflow")
+}
+
+// GCS Path format: sessions/${userId}/${sessionId}/recording.json
+model SessionRecordingFile {
+  id                String   @id @default(cuid())
+  sessionId         String   @unique
+  userId            String
+  
+  status            SessionRecordingProcessStatus @default(PENDING)
+  lastProcessedTurn Int?     // Last turn ID that was processed for SOP/fact extraction
+
+  @@index([status])
+  @@index([sessionId])
+  @@map("session_recording_files")
+  @@schema("workflow")
+}
+
 model SurfaceLink {
   id          String          @id @default(cuid())
 
