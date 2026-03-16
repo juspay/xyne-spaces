@@ -636,6 +636,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           editor?.commands.insertContent(content);
           editor?.commands.focus();
         },
+        isSuggestionOpen: (): boolean => {
+          if (!editor) return false;
+          const state = editor.state;
+          const mentionState = mentionPluginKey.getState(state);
+          const channelMentionState = channelMentionPluginKey.getState(state);
+          const commandState = commandPluginKey.getState(state);
+          return (
+            ((mentionState?.isOpen && mentionState.items.length > 0) ||
+              (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
+              (commandState?.isOpen && commandState.items.length > 0)) ??
+            false
+          );
+        },
       }),
       [editor, addFilesWithLimit, providerClearDroppedFiles, channelId, conversationId],
     );

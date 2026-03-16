@@ -469,6 +469,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         <div
           onKeyDownCapture={e => {
             if (e.key === 'Enter' && !e.shiftKey && selectedTargets.length > 0) {
+              if (inputBoxRef.current?.isSuggestionOpen()) return;
               e.preventDefault();
               e.stopPropagation();
               void form.handleSubmit();
