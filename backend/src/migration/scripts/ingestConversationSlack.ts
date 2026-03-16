@@ -10,7 +10,7 @@ import { ExternalMessageRepository } from '../../database/repositories/externalM
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ChannelUserStatusRepository } from '../../database/repositories/channelUserStatusRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
-import { AuthProvider, MessageDirection } from '@prisma/client';
+import { AuthProvider, ExternalEntityType, MessageDirection } from '@prisma/client';
 import { SlackMessage, SlackFile } from '../slack/utils/extractConversation';
 import {
   ExternalAttachmentService,
@@ -29,6 +29,7 @@ export interface IngestConversationSlackInput {
   slackMessages: SlackMessage[];
   externalSourceName: string;
   channelId: string;
+  onlyReplies?: boolean;
 }
 
 export interface IngestConversationSlackResult {
@@ -115,7 +116,7 @@ export const findOrCreateUser = async (
 export async function ingestConversationSlack(
   input: IngestConversationSlackInput
 ): Promise<IngestConversationSlackResult> {
-  const { slackMessages, externalSourceName, channelId } = input;
+  const { slackMessages, externalSourceName, channelId, onlyReplies = false } = input;
 
   logger.info('[IngestSlack] Starting ingestion', {
     externalSourceName,
@@ -201,14 +202,15 @@ export async function ingestConversationSlack(
     const findConversationByThread = async (externalThreadId: string): Promise<string | null> => {
       const existingThreadMessage = await externalMessageRepo.findByThreadId(
         externalSourceId,
-        externalThreadId
+        externalThreadId,
+        ExternalEntityType.MESSAGE
       );
 
-      if (!existingThreadMessage) {
+      if (!existingThreadMessage || !existingThreadMessage.entityId) {
         return null;
       }
 
-      const existingMessage = await messageRepo.findById(existingThreadMessage.messageId);
+      const existingMessage = await messageRepo.findById(existingThreadMessage.entityId);
       return existingMessage?.conversationId || null;
     };
 
@@ -320,28 +322,31 @@ export async function ingestConversationSlack(
     // Process all messages
     for (const slackMessage of slackMessages) {
       try {
-        // Check for duplicate top-level message
-        const existingTopLevel = await externalMessageRepo.findByExternalId(
-          externalSourceId,
-          slackMessage.externalId
-        );
+        // Skip main message ingestion if onlyReplies is true
+        if (!onlyReplies) {
+          // Check for duplicate top-level message
+          const existingTopLevel = await externalMessageRepo.findByExternalId(
+            externalSourceId,
+            slackMessage.externalId
+          );
 
-        if (existingTopLevel) {
-          continue; // Skip duplicate
+          if (existingTopLevel) {
+            continue; // Skip duplicate
+          }
+
+          // Ingest top-level message (throws on failure)
+          // Use userId if available, otherwise use userEmail and userName
+          await ingestMessage(
+            slackMessage.externalId,
+            slackMessage.externalId, // externalThreadId same for top-level
+            slackMessage.content,
+            slackMessage.userId,
+            slackMessage.userEmail,
+            slackMessage.userName,
+            slackMessage.isDeactivated || false,
+            slackMessage.files
+          );
         }
-
-        // Ingest top-level message (throws on failure)
-        // Use userId if available, otherwise use userEmail and userName
-        await ingestMessage(
-          slackMessage.externalId,
-          slackMessage.externalId, // externalThreadId same for top-level
-          slackMessage.content,
-          slackMessage.userId,
-          slackMessage.userEmail,
-          slackMessage.userName,
-          slackMessage.isDeactivated || false,
-          slackMessage.files
-        );
 
         // Process thread replies
         if (slackMessage.replies && slackMessage.replies.length > 0) {

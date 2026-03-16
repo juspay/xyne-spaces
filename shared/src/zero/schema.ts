@@ -390,6 +390,7 @@ export enum ChannelType {
 export enum ExternalEntityType {
   MESSAGE = 'MESSAGE',
   EMAIL = 'EMAIL',
+  TICKET = 'TICKET',
 }
 
 // @ts-ignore TS1294

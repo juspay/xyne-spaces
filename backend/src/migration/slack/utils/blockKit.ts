@@ -8,6 +8,7 @@ export interface MigrationMessageData {
   userId?: string;
   syncOptions?: string[];
   xyneSpaceChannelId?: string;
+  isJiraffeMigration?: boolean;
 }
 
 function formatSyncOptions(syncOptions?: string[]): string {
@@ -107,6 +108,83 @@ export function getSyncModal(channelId?: string) {
   };
 }
 
+export function getSyncJiraffeModal(channelId?: string) {
+  return {
+    type: 'modal',
+    callback_id: 'sync_jiraffe_modal',
+    private_metadata: channelId ? JSON.stringify({ channel_id: channelId }) : undefined,
+    title: {
+      type: 'plain_text',
+      text: 'Sync Jiraffe',
+    },
+    submit: {
+      type: 'plain_text',
+      text: 'Start Sync',
+    },
+    close: {
+      type: 'plain_text',
+      text: 'Cancel',
+    },
+    blocks: [
+      {
+        type: 'input',
+        block_id: 'all_titles_checkbox',
+        label: {
+          type: 'plain_text',
+          text: 'All tickets',
+        },
+        element: {
+          type: 'checkboxes',
+          action_id: 'all_titles_checkbox_action',
+          options: [
+            {
+              text: {
+                type: 'plain_text',
+                text: 'All tickets',
+              },
+              value: 'all_titles',
+            },
+          ],
+        },
+        optional: true,
+      },
+      {
+        type: 'input',
+        block_id: 'sync_date',
+        label: {
+          type: 'plain_text',
+          text: 'Select Start Date',
+        },
+        element: {
+          type: 'datepicker',
+          action_id: 'sync_date_picker',
+          placeholder: {
+            type: 'plain_text',
+            text: 'Pick a start date',
+          },
+        },
+        optional: true,
+      },
+      {
+        type: 'input',
+        block_id: 'xyne_space_channel_id',
+        label: {
+          type: 'plain_text',
+          text: 'Xyne Space Channel ID',
+        },
+        element: {
+          type: 'plain_text_input',
+          action_id: 'xyne_space_channel_input',
+          placeholder: {
+            type: 'plain_text',
+            text: 'Enter Xyne Space channel ID',
+          },
+        },
+      },
+    ],
+  };
+}
+
 export function getMigrationMessageBlocks(data: MigrationMessageData) {
   const optionsText = formatSyncOptions(data.syncOptions);
   const today = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
@@ -116,7 +194,7 @@ export function getMigrationMessageBlocks(data: MigrationMessageData) {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: `Sync Date: ${today}`,
+        text: `${data.isJiraffeMigration ? 'Jiraffe' : ''} Sync Date: ${today}`,
       },
     },
     {
@@ -138,19 +216,20 @@ export function getMigrationMessageBlocks(data: MigrationMessageData) {
         text: '*Data filled in form:*',
       },
     },
-    {
+    ...(data.syncDate || (data.syncOptions && data.syncOptions.length > 0) ? [{
       type: 'section',
       fields: [
-        {
+        ...(data.syncDate ? [{
           type: 'mrkdwn',
-          text: `*Sync Date:*\n${data.syncDate || 'N/A'}`,
-        },
-        {
-          type: 'mrkdwn',
-          text: `*Sync Options:*\n${optionsText}`,
-        },
+          text: `*Sync Date:*\n${data.syncDate}`,
+        }] : []),
+        ...(data.syncOptions && data.syncOptions.length > 0 ? [{
+            type: 'mrkdwn',
+            text: `*Sync Options:*\n${optionsText}`,
+          },
+        ] : []),
       ],
-    },
+    }] : []),
     ...(data.xyneSpaceChannelId
       ? [
           {

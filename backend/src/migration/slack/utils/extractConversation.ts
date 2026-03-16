@@ -205,13 +205,18 @@ async function processBatch<T>(
 }
 
 /**
- * Check if message is from a human (not bot or system)
+ * Check if message should be included in conversation
+ * - Filters out system messages
+ * - Includes human messages (non-bot)
+ * - Includes bot messages only if bot name exists in allowedBots array
+ * @param allowedBots - Array of bot names (case-insensitive) to include in messages (default: [])
  */
-function isHumanMessage(message: any, context: 'channel' | 'thread' = 'channel'): boolean {
-  if (message.bot_id || !message.user) {
-    return false;
-  }
-
+function isHumanMessage(
+  message: any,
+  context: 'channel' | 'thread' = 'channel',
+  allowedBots: string[] = []
+): boolean {
+  // Filter out system messages (with exceptions for threads)
   if (message.subtype && SYSTEM_SUBTYPES.includes(message.subtype)) {
     if (context === 'thread' && ALLOWED_SYSTEM_THREAD_SUBTYPES.includes(message.subtype)) {
       return true;
@@ -219,7 +224,20 @@ function isHumanMessage(message: any, context: 'channel' | 'thread' = 'channel')
     return false;
   }
 
-  return true;
+  // If it's a bot message, only include if bot name exists in allowedBots array
+  if (message.bot_id) {
+    if (allowedBots.length === 0) {
+      return false;
+    }
+    const botName = message.username?.toLowerCase() ||
+                    message.app_name?.toLowerCase() ||
+                    message.bot_profile?.name?.toLowerCase() ||
+                    '';
+    return allowedBots.some(allowed => botName.includes(allowed.toLowerCase()));
+  }
+
+  // Include all user messages (non-bot)
+  return !!message.user;
 }
 
 /**
@@ -382,10 +400,11 @@ async function prefetchUserInfo(userIds: string[], cache: UserInfoCache): Promis
 /**
  * Fetch all thread replies for a message
  */
-async function fetchThreadReplies(
+export async function fetchThreadReplies(
   client: WebClient,
   channelId: string,
-  threadTs: string
+  threadTs: string,
+  allowedBots: string[] = []
 ): Promise<any[]> {
   const replies: any[] = [];
   let cursor: string | undefined;
@@ -410,7 +429,7 @@ async function fetchThreadReplies(
     }
 
     if (result.messages && result.messages.length > 0) {
-      const humanReplies = result.messages.slice(1).filter((msg) => isHumanMessage(msg, 'thread'));
+      const humanReplies = result.messages.slice(1).filter((msg) => isHumanMessage(msg, 'thread', allowedBots));
       replies.push(...humanReplies);
     }
 
@@ -513,19 +532,42 @@ async function fetchAllThreadReplies(
 /**
  * Transform a single reply with user info and content
  */
-async function transformReply(
+export async function transformReply(
   reply: any,
   cache: UserInfoCache,
-  includeAttachments: boolean
+  includeAttachments: boolean,
+  allowedBots: string[] = []
 ): Promise<SlackReply> {
   const userInfo = await getUserInfo(reply.user, cache);
   const resolvedText = await resolveSlackMentions(reply.text, process.env.SLACK_BOT_TOKEN || '');
   const htmlContent = escapeForSlackWithMarkdown(resolvedText);
 
+  // Check if this is a bot message that matches allowedBots
+  let botEmail: string | undefined;
+  if (reply.bot_id && allowedBots.length > 0) {
+    const botName = reply.username?.toLowerCase() ||
+                    reply.app_name?.toLowerCase() ||
+                    reply.bot_profile?.name?.toLowerCase() ||
+                    '';
+    // Case-insensitive matching: check if bot name includes any allowed bot name
+    const matchesAllowed = allowedBots.some(allowed => {
+      const allowedLower = allowed.toLowerCase();
+      return botName.includes(allowedLower) || allowedLower.includes(botName);
+    });
+    
+    // If bot matches and userEmail is missing, create bot email (userName can exist)
+    if (matchesAllowed && !userInfo?.userEmail && botName) {
+      // Use the bot name (or username/app_name) to create email
+      const emailUsername = reply.username || reply.app_name || reply.bot_profile?.name || botName;
+      botEmail = `${emailUsername.toLowerCase().replace(/[^a-z0-9]/g, '')}@xyne.bot.in`;
+    }
+  }
+
   return {
     content: htmlContent,
     externalThreadId: reply.ts,
     ...(userInfo?.userEmail && { userEmail: userInfo.userEmail }),
+    ...(botEmail && { userEmail: botEmail }),
     ...(userInfo?.userName && { userName: userInfo.userName }),
     ...(userInfo?.userId && { userId: userInfo.userId }),
     ...(userInfo?.isDeactivated === true && { isDeactivated: true }),

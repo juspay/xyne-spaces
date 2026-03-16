@@ -26,11 +26,12 @@ export class ExternalMessageRepository {
   /**
    * Find external messages by thread ID (to find existing conversation)
    */
-  async findByThreadId(externalSourceId: string, externalThreadId: string) {
+  async findByThreadId(externalSourceId: string, externalThreadId: string, entityType?: ExternalEntityType) {
     return await this.db.externalMessage.findFirst({
       where: {
         externalSourceId,
-        externalThreadId
+        externalThreadId,
+        ...(entityType && { entityType: entityType })
       },
       orderBy: { createdAt: 'asc' }  // Get earliest message
     });
