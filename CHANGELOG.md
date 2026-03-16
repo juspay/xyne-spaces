@@ -1,3 +1,16 @@
+## [1.91.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.90.0...v1.91.0) (2026-03-16)
+
+
+### Features
+
+* fix issues in my tickets automation ([11bcfb6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/11bcfb6aef4f6206e9858150e207f8af47d9d9ff)), closes [#4023](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4023)
+
+
+### Bug Fixes
+
+* Fix user tagging failure during message forwarding ([68f5c86](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/68f5c8632a2f45eeb8fbf02b64846b97cbc5236f))
+* update Y-Sweet document initialization and sync methods to use DocConnection ([bfd6183](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bfd6183973cddc58952086a1ebb2777e1845364a)), closes [#4126](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4126)
+
 ## [1.90.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.89.0...v1.90.0) (2026-03-16)
 
 
