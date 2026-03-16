@@ -154,7 +154,9 @@ function convertJsonSchemaToFields(jsonSchema: any): WorkflowFieldSchema[] {
     if (def.enum) {  
       type = "enum";  
       enumValues = def.enum;  
-    }  
+    } else if (def.type === "array" && def.items && def.items.enum) {
+      enumValues = def.items.enum;
+    }
       
     // Handle nested objects recursively
     if (def.type === "object" && def.properties) {

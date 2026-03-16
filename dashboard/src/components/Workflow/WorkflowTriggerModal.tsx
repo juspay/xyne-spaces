@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
+import { MultiSelect } from '../ui/MultiSelect';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm, Controller, type SubmitHandler, type Path } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
@@ -416,23 +417,39 @@ export default function WorkflowTriggerModal({
 
             {/* Render enum fields as select dropdowns */}
             {field.enumValues && field.enumValues.length > 0 ? (
-              <SingleSelect
-                placeholder={`Select ${field.name}`}
-                items={[
-                  {
-                    items: (field.name === 'modelName'
-                      ? field.enumValues.filter(v => ALLOWED_MODEL_NAMES.includes(v))
-                      : field.enumValues
-                    ).map(enumValue => ({
-                      label: enumValue,
-                      value: enumValue,
-                    })),
-                  },
-                ]}
-                selected={(controllerField.value as string) || (field.defaultValue as string) || ''}
-                onSelect={controllerField.onChange}
-                alignment={SelectMenuAlignment.START}
-              />
+              field.type === 'array' ? (
+                <MultiSelect
+                  placeholder={`Select ${field.name}`}
+                  options={field.enumValues.map(enumValue => ({
+                    label: enumValue,
+                    value: enumValue,
+                  }))}
+                  selectedValues={
+                    (controllerField.value as string[]) || (field.defaultValue as string[]) || []
+                  }
+                  onChange={controllerField.onChange}
+                />
+              ) : (
+                <SingleSelect
+                  placeholder={`Select ${field.name}`}
+                  items={[
+                    {
+                      items: (field.name === 'modelName'
+                        ? field.enumValues.filter(v => ALLOWED_MODEL_NAMES.includes(v))
+                        : field.enumValues
+                      ).map(enumValue => ({
+                        label: enumValue,
+                        value: enumValue,
+                      })),
+                    },
+                  ]}
+                  selected={
+                    (controllerField.value as string) || (field.defaultValue as string) || ''
+                  }
+                  onSelect={controllerField.onChange}
+                  alignment={SelectMenuAlignment.START}
+                />
+              )
             ) : field.type === 'string' || (!field.type && !field.enumValues) ? (
               <textarea
                 className='w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[80px] text-sm'

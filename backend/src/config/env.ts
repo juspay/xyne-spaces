@@ -149,6 +149,10 @@ const envSchema = Joi.object({
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
   PULSE_API_URL: Joi.string().uri().default(''),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
+  // Jira Configuration
+  JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
+  JIRA_EULER_BOT_EMAIL: Joi.string().allow('').default(''),
+  JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -358,5 +362,10 @@ export const config = {
       .filter(Boolean),
     apiUrl: envVars.PULSE_API_URL as string,
     authorization: envVars.PULSE_AUTHORIZATION as string,
+  },
+  jira: {
+    baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,
+    eulerBotEmail: envVars.JIRA_EULER_BOT_EMAIL as string,
+    eulerBotAuthToken: envVars.JIRA_EULER_BOT_AUTH_TOKEN as string,
   },
 };
