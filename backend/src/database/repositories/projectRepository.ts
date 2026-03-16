@@ -1,5 +1,5 @@
 import { BaseRepository } from './base';
-import { Project } from '@prisma/client';
+import { Project, TicketStatusV2 } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
 import { sanitizeProjectCode } from '@xyne/shared';
 //import { queueProjectIngestion } from '@/queues/vespaQueue';
@@ -62,7 +62,7 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
         }
       });
 
-      // Create default stages for the board
+      // Create default stages for the board with proper status mappings
       await tx.stage.createMany({
         data: [
           {
@@ -70,24 +70,28 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
             sequenceNumber: 1,
             boardId: board.id,
             createdBy: data.createdBy,
+            defaultTicketStatusV2: TicketStatusV2.TODO,
           },
           {
             name: 'In Progress',
             sequenceNumber: 2,
             boardId: board.id,
             createdBy: data.createdBy,
+            defaultTicketStatusV2: TicketStatusV2.STARTED,
           },
           {
             name: 'Review',
             sequenceNumber: 3,
             boardId: board.id,
             createdBy: data.createdBy,
+            defaultTicketStatusV2: TicketStatusV2.STARTED,
           },
           {
             name: 'Completed',
             sequenceNumber: 4,
             boardId: board.id,
             createdBy: data.createdBy,
+            defaultTicketStatusV2: TicketStatusV2.COMPLETED,
           },
         ]
       });

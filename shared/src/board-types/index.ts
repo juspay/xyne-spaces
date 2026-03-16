@@ -29,7 +29,14 @@ export interface TicketFormConfig {
   };
 }
 
+export interface FieldOrderItem {
+  fieldId: string;
+  fieldType: 'core' | 'custom';
+}
+
 export interface BoardMetadata {
   ticketFormConfig?: TicketFormConfig;
   isAllowedToTransfer?: boolean;
+  fieldOrder?: FieldOrderItem[];
+  customFieldsFormId?: string;
 }
