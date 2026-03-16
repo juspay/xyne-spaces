@@ -108,6 +108,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setUserEmail: (email: string) => ipcRenderer.send('set-user-email', email),
   getClientSessionId: () => ipcRenderer.invoke('logger:get-client-session-id'),
 
+  // Browser Settings APIs
+  getBrowserSettings: () => ipcRenderer.invoke('get-browser-settings'),
+  setBrowserSettings: (settings: any) => ipcRenderer.invoke('set-browser-settings', settings),
+  clearSiteData: () => ipcRenderer.invoke('clear-site-data'),
+
   // Code Server APIs
   codeServer: {
     start: () => ipcRenderer.invoke('code-server:start'),

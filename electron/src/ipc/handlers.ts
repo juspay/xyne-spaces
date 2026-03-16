@@ -1,5 +1,5 @@
 import { ipcMain, shell, app, BrowserView, BrowserWindow } from 'electron';
-import { clearAllCookies } from '../services/cookies';
+import { clearAllCookies, clearBrowserTabsData } from '../services/cookies';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
@@ -13,6 +13,7 @@ import {
 } from '../services/media-permission';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
 import { meetingDetectorService } from '../services/meeting-detector';
+import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -372,6 +373,20 @@ export function setupIpcHandlers(): void {
       hideMeetingPopup();
       meetingDetectorService.stop();
     }
+  });
+
+  // Browser Settings handlers
+  ipcMain.handle('get-browser-settings', () => {
+    return browserSettingsService.getSettings();
+  });
+
+  ipcMain.handle('set-browser-settings', (_event, settings: Partial<BrowserSettings>) => {
+    return browserSettingsService.setSettings(settings);
+  });
+
+  ipcMain.handle('clear-site-data', async () => {
+    await clearBrowserTabsData();
+    return { success: true };
   });
 }
 
