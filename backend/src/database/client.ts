@@ -7,6 +7,24 @@ export class DatabaseClient {
   private static readReplicaInstance: PrismaClient | null = null;
   private static isConnected = false;
 
+  static getReadReplicaInstance(): PrismaClient | null {
+    if (!DatabaseClient.readReplicaInstance) {
+      if (!config.database.readReplicaPoolUrl) {
+        logger.warn('Read replica not configured. Set DATABASE_READ_REPLICA_POOL_URL environment variable.');
+        return null;
+      }
+      DatabaseClient.readReplicaInstance = new PrismaClient({
+        errorFormat: 'pretty',
+        datasources: {
+          db: {
+            url: config.database.readReplicaPoolUrl,
+          },
+        },
+      });
+    }
+    return DatabaseClient.readReplicaInstance;
+  }
+
   static getInstance(): PrismaClient {
     if (!DatabaseClient.instance) {
       DatabaseClient.instance = new PrismaClient({
@@ -105,3 +123,4 @@ export class DatabaseClient {
 }
 
 export const db = DatabaseClient.getInstance();
+export const readReplicaDb = DatabaseClient.getReadReplicaInstance();

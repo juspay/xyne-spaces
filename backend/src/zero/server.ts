@@ -31,7 +31,6 @@ import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
-import { ReplicaPoolManager } from '@/database/replica-pool-manager';
 
 // Create database connection pool
 const isDev = process.env['NODE_ENV'] === 'development';
@@ -42,16 +41,19 @@ const pool = new Pool({
 
 export const dbProvider = zeroNodePg(schema, pool);
 
-const replicaPoolManager = config.database.readReplicaUrls.length > 0
-  ? ReplicaPoolManager.getInstance(
-      config.database.readReplicaUrls,
-      config.database.poolMax,
-      !isDev && !config.isTestEnv
-    )
+const replicaPool = config.database.readReplicaPoolUrl
+  ? new Pool({
+      connectionString: config.database.readReplicaPoolUrl,
+      ...((!isDev && !config.isTestEnv) && { ssl: { rejectUnauthorized: false } }),
+    })
   : null;
 
-if (replicaPoolManager) {
-  logger.info(`Initialized ReplicaPoolManager with ${replicaPoolManager.getReplicaCount()} replica(s)`);
+export const replicaDbProvider = replicaPool
+  ? zeroNodePg(schema, replicaPool) as typeof dbProvider
+  : null;
+
+if (replicaDbProvider) {
+  logger.info('Initialized read replica pool for fallback queries');
 }
 
 let serverSchemaCache: any | null = null;
@@ -264,14 +266,11 @@ export async function handleQueriesFallback(request: Request): Promise<any> {
       queries: Array<{ name: string; args?: any }>;
     };
 
-    logger.info(`Fallback executing ${queryRequests.length} queries from read replica`);
+    logger.info(`Fallback executing ${queryRequests.length} queries from read replica pool`);
 
-    if (!replicaPoolManager) {
-      throw new Error('Read replica not configured. Set DATABASE_READ_REPLICA_URLS environment variable.');
+    if (!replicaDbProvider) {
+      throw new Error('Read replica pool not configured. Set DATABASE_READ_REPLICA_POOL_URL environment variable.');
     }
-
-    const replicaPool = replicaPoolManager.getNextPool();
-    const replicaDbProvider = zeroNodePg(schema, replicaPool) as typeof dbProvider;
 
     const serverSchema = await fetchServerSchema();
 

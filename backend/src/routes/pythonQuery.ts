@@ -1,15 +1,18 @@
 import { Router, Request, Response } from 'express'
-import { DatabaseClient } from '@/database/client'
+import { readReplicaDb } from '@/database/client'
 import { logger } from '@/utils/logger'
 import { validateQueryAST, translateQueryAST, ACLFactory } from '@/services/pythonQuery'
-
 const router = Router()
-const prisma = DatabaseClient.getInstance()
 
 router.post('/', async (req: Request, res: Response) => {
   const startTime = Date.now()
 
   try {
+    if (!readReplicaDb) {
+      res.status(503).json({ error: 'Read replica not available' })
+      return
+    }
+
     const userId = req.user?.id
 
     if (!userId) {
@@ -37,11 +40,11 @@ router.post('/', async (req: Request, res: Response) => {
 
     // Apply ACLs
     const aclContext = { userId}
-    const acl = ACLFactory.getACL(translated.modelName, aclContext, prisma)
+    const acl = ACLFactory.getACL(translated.modelName, aclContext, readReplicaDb)
     const whereWithAcl = await acl.applyToWhere(translated.args.where as Record<string, unknown>)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const model = (prisma as any)[translated.modelName]
+    const model = (readReplicaDb as any)[translated.modelName]
 
     if (!model || typeof model !== 'object') {
       logger.error(`Model not found in Prisma client: ${translated.modelName}`)
