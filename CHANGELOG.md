@@ -1,3 +1,10 @@
+## [1.88.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.87.0...v1.88.0) (2026-03-16)
+
+
+### Features
+
+* migrate-query-and-fallback-endpoint-to-read-replica-pool ([a03bf35](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a03bf355227e733e22c288c35781c3ccde557959)), closes [#3974](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3974)
+
 ## [1.87.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.86.0...v1.87.0) (2026-03-14)
 
 
