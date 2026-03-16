@@ -49,7 +49,7 @@ export interface UpdateBoardFormData {
 export type BoardFormData = CreateBoardFormData | UpdateBoardFormData;
 
 export interface BoardFormProps {
-  board?: import('../BoardCard').BoardWithStages;
+  board?: import('../BoardCard').BoardWithStages | undefined;
   onSubmit: (data: BoardFormData) => Promise<void> | void;
   onCancel: () => void;
   loading?: boolean;

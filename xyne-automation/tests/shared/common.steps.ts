@@ -183,6 +183,12 @@ When('I clear the text in {string}', async function (this: CustomWorld, selector
   uiLogger.info(`[UI] Cleared text in element "${selector}"`);
 });
 
+When('I press {string}', async function (this: CustomWorld, key: string) {
+  if (!this.page) throw new Error('Browser not initialized');
+  await this.page.keyboard.press(key);
+  uiLogger.info(`[UI] Pressed key "${key}"`);
+});
+
 When(
   'I set datetime input {string} to {int} days from now',
   async function (this: CustomWorld, selector: string, days: number) {

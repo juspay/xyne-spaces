@@ -467,7 +467,7 @@ export const BoardForm = ({
             ticketFormConfig: ticketFormConfig,
             isAllowedToTransfer: isAllowedToTransfer,
             hasStagesWithApproval: stages.some(s => s.approverIds.length > 0),
-          } as ReadonlyJSONValue;
+          } as unknown as ReadonlyJSONValue;
 
           // Include description if changed
           const trimmedDescription = description.trim();

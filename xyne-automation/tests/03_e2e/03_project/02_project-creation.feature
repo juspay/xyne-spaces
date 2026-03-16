@@ -28,8 +28,18 @@ Feature: Project Creation E2E Flow
     And I click on text "user:admin-browser.name - Project" in the element "[data-testid^='project-card-']"
     And I wait for 2 seconds
     And I click on "[data-testid='edit-board-button']"
-    And I click on "[data-testid='stage-eta-toggle-0']"
-    And I click on "[data-testid='stage-eta-toggle-1']"
-    And I click on "[data-testid='stage-eta-toggle-2']"
-    And I click the button with text "Update Board"
+    And I click the button with text "Next"
+    # Set ETA for the first 3 stages to enable stage ETA in tickets
+    And I click the button with text "Set ETA"
+    And I type "24" on the element "input[data-track-name='edit_eta_input']"
+    And I press "Enter"
+    And I wait for 1 seconds
+    And I click on "[data-track-name='start_edit_eta']"
+    And I type "24" on the element "input[data-track-name='edit_eta_input']"
+    And I press "Enter"
+    And I wait for 1 seconds
+    And I click on "[data-track-name='start_edit_eta']"
+    And I type "24" on the element "input[data-track-name='edit_eta_input']"
+    And I press "Enter"
+    And I click the button with text "Finish"
     Then I should see "user:admin-browser.name - Project" in the element "body"
