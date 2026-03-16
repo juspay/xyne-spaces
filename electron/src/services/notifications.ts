@@ -1,4 +1,5 @@
 import { Notification, BrowserWindow, app } from 'electron';
+import log from 'electron-log/main';
 
 export interface NotificationData {
   title: string;
@@ -28,7 +29,7 @@ export function showNotification(data: NotificationData, mainWindow: BrowserWind
     const notification = new Notification({
       title: data.title,
       body: data.body,
-      silent: false,
+      silent: true,
       urgency: 'critical',
     });
 
@@ -52,7 +53,7 @@ export function showNotification(data: NotificationData, mainWindow: BrowserWind
     });
 
     notification.on('failed', (_event, error) => {
-      console.error('[NotificationService] Notification failed:', error);
+      log.error('[NotificationService] Notification failed to show:', error);
       activeNotifications.delete(notification);
     });
 

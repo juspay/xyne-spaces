@@ -9,10 +9,13 @@ import { devicePasswordPopup } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import { app } from 'electron';
 import { IKeychain } from './IKeychain';
+import { config } from '../app/config';
 
 const execAsync = promisify(exec);
 const writeFileAsync = promisify(fs.writeFile);
 const unlinkAsync = promisify(fs.unlink);
+const SECURITY = '/usr/bin/security';
+const OPENSSL = '/usr/bin/openssl';
 
 class MacKeychainService implements IKeychain {
     // Store private key PEM in memory for the duration of the session
@@ -29,7 +32,7 @@ class MacKeychainService implements IKeychain {
 
         // openssl ecparam -name secp384r1 -genkey -noout
         try {
-            const { stdout } = await execAsync('openssl ecparam -name secp384r1 -genkey -noout');
+            const { stdout } = await execAsync(`${OPENSSL} ecparam -name secp384r1 -genkey -noout`);
             this.privateKeyPem = stdout;
             Logger.info(EnrollmentEvent.KEY_GENERATION_SUCCESS, { label });
         } catch (e: any) {
@@ -53,7 +56,7 @@ class MacKeychainService implements IKeychain {
 
         try {
             // openssl req -new -key key.pem -subj "/CN=..." -sha384
-            const cmd = `openssl req -new -key "${keyPath}" -subj "/CN=${commonName}" -sha384`;
+            const cmd = `${OPENSSL} req -new -key "${keyPath}" -subj "/CN=${commonName}" -sha384`;
             const { stdout } = await execAsync(cmd);
             return stdout;
         } catch (error) {
@@ -79,7 +82,7 @@ class MacKeychainService implements IKeychain {
 
         try {
             // openssl pkcs12 -export -in cert.pem -inkey key.pem -out identity.p12 -passout pass:changeit -name "label"
-            const p12Cmd = `openssl pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${this.label}"`;
+            const p12Cmd = `${OPENSSL} pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${this.label}"`;
             await execAsync(p12Cmd);
 
             // Define list of applications to trust
@@ -87,8 +90,9 @@ class MacKeychainService implements IKeychain {
                 process.execPath,
                 "/Applications/Google Chrome.app",
                 "/Applications/Safari.app",
-                "/Applications/Xyne Spaces.app",
-                "/Applications/Brave Browser.app"
+                `/Applications/${config.APP_NAME}.app`,
+                "/Applications/Brave Browser.app",
+                "/Applications/Firefox.app"
             ];
 
             // Generate -T flags only for applications that exist on the system
@@ -98,8 +102,9 @@ class MacKeychainService implements IKeychain {
                 .join(' ');
 
             // Import into Keychain
-            const importCmd = `security import "${p12Path}" -k "$(security login-keychain | xargs)" -f pkcs12 -P "changeit" -x ${trustFlags}`;
+            const importCmd = `${SECURITY} import "${p12Path}" -k "$(${SECURITY} login-keychain | xargs)" -f pkcs12 -P "changeit" -x ${trustFlags}`;
             await execAsync(importCmd);
+            
             safeRecordMetric(() => {
                 devicePasswordPopup.add(1, { 
                     success: 'true',
@@ -137,7 +142,7 @@ class MacKeychainService implements IKeychain {
 
         try {
             // Check if certificate with same Common Name already exists
-            const { stdout: subjectOut } = await execAsync(`openssl x509 -in "${tmpPath}" -noout -subject -nameopt multiline`);
+            const { stdout: subjectOut } = await execAsync(`${OPENSSL} x509 -in "${tmpPath}" -noout -subject -nameopt multiline`);
             const cnMatch = subjectOut.match(/commonName\s*=\s*(.*)/);
 
             if (cnMatch && cnMatch[1]) {
@@ -146,7 +151,7 @@ class MacKeychainService implements IKeychain {
 
                 try {
                     // security find-certificate returns 0 if found, non-zero if not found
-                    await execAsync(`security find-certificate -c "${commonName}"`);
+                    await execAsync(`${SECURITY} find-certificate -c "${commonName}"`);
                     await unlinkAsync(tmpPath);
                     Logger.info(EnrollmentEvent.ROOT_CA_INSTALL_SUCCESS, {
                         exists_in_keychain: true,
@@ -178,7 +183,7 @@ class MacKeychainService implements IKeychain {
         // Attempt 1: Resolve keychain path in Node
         let keychainPath = "";
         try {
-            const { stdout } = await execAsync('security login-keychain | head -n 1 | xargs');
+            const { stdout } = await execAsync(`${SECURITY} login-keychain | head -n 1 | xargs`);
             keychainPath = stdout.trim();
         } catch (e) {
             console.warn("Could not resolve login keychain path, falling back to default.");
@@ -187,10 +192,10 @@ class MacKeychainService implements IKeychain {
         // If we have a path, use it. Otherwise, let `security` use the default.
         // Use `security import` instead of `add-trusted-cert` for subordinate CAs to avoid trust setting errors.
 
-        let cmd = `security import "${tmpPath}" -k "${keychainPath}"`;
+        let cmd = `${SECURITY} import "${tmpPath}" -k "${keychainPath}"`;
         if (!keychainPath) {
             // Fallback: Don't specify keychain, let it use default (usually login)
-            cmd = `security import "${tmpPath}"`;
+            cmd = `${SECURITY} import "${tmpPath}"`;
         }
 
         console.log("Installing CA with command:", cmd);
@@ -214,7 +219,7 @@ class MacKeychainService implements IKeychain {
         console.log(`Deleting identity for "${commonName}"...`);
         // Security command to delete identity (cert + key) matching the preference
         // -c: Match on common name
-        const cmd = `security delete-identity -c "${commonName}"`;
+        const cmd = `${SECURITY} delete-identity -c "${commonName}"`;
 
         try {
             await execAsync(cmd);
@@ -238,7 +243,7 @@ class MacKeychainService implements IKeychain {
     async checkIdentity(commonName: string): Promise<boolean> {
         // -p: Output pem (just to see if it finds something)
         // -c: Match common name
-        const cmd = `security find-identity -p ssl-client -s "${commonName}"`;
+        const cmd = `${SECURITY} find-identity -p ssl-client -s "${commonName}"`;
         console.log(`Checking identity for "${commonName}"...`, cmd);
         try {
             const { stdout } = await execAsync(cmd);
