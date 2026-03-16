@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { isElectronApp } from '../../utils/electronApp';
 import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
 import { useActivityTracking } from '../../hooks/useActivityTracking';
+import { BrowserSettingsMenu } from '../../components/BrowserPanel/BrowserSettingsMenu';
 
 // Define WebviewTag interface locally since Electron types may not be available in renderer
 interface WebviewTag extends HTMLElement {
@@ -42,6 +43,7 @@ interface WebviewTabProps {
   onUrlUpdate: (tabId: string, url: string) => void;
   onNewWindow: (url: string) => void;
   isPanel: boolean;
+  popupsEnabled: boolean;
 }
 
 function WebviewTab({
@@ -52,6 +54,7 @@ function WebviewTab({
   onUrlUpdate,
   onNewWindow,
   isPanel,
+  popupsEnabled,
 }: WebviewTabProps) {
   const ref = useRef<WebviewTag>(null);
   const initialUrlRef = useRef(tab.url);
@@ -105,7 +108,7 @@ function WebviewTab({
     };
   }, [tab.id]);
 
-  const webviewProps = {
+  const webviewProps: Record<string, unknown> = {
     ref,
     src: initialUrlRef.current,
     partition: 'persist:browser-tabs',
@@ -120,10 +123,13 @@ function WebviewTab({
     },
   };
 
+  if (popupsEnabled) {
+    webviewProps['allowpopups'] = '';
+  }
+
   return (
-    // @ts-expect-error - webview is an Electron-specific element, allowpopups="" is required
     // eslint-disable-next-line react/no-unknown-property
-    <webview {...webviewProps} allowpopups='' />
+    <webview {...webviewProps} allowpopups={true} />
   );
 }
 
@@ -134,7 +140,9 @@ export function BrowserTabsScreen({
   const tabs = useSelector(browserPanelActor, state => state.context.tabs);
   const activeTabId = useSelector(browserPanelActor, state => state.context.activeTabId);
   const statePendingUrls = useSelector(browserPanelActor, state => state.context.pendingUrls);
+  const browserSettings = useSelector(browserPanelActor, state => state.context.browserSettings);
   const [urlInput, setUrlInput] = useState('');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const webviewRefs = useRef<Record<string, WebviewTag | null>>({});
   const { track } = useActivityTracking();
   const navigate = useNavigate();
@@ -192,6 +200,15 @@ export function BrowserTabsScreen({
     // Clear pendingUrls after processing (both panel and fullscreen)
     browserPanelActor.send({ type: 'OPEN_URLS', urls: [] });
   }, [pendingUrls, isPanel, tabs]);
+
+  // Load settings on mount
+  useEffect(() => {
+    if (isElectronApp() && window.electronAPI?.getBrowserSettings) {
+      void window.electronAPI.getBrowserSettings().then(settings => {
+        browserPanelActor.send({ type: 'UPDATE_SETTINGS', settings });
+      });
+    }
+  }, []);
 
   // Update URL input when active tab changes
   useEffect(() => {
@@ -345,6 +362,7 @@ export function BrowserTabsScreen({
             <span className='text-sm font-medium text-foreground'>Browser</span>
           </div>
           <div className='flex items-center gap-1'>
+            <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
             <button
               onClick={handleOpenFullscreen}
               className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
@@ -386,6 +404,7 @@ export function BrowserTabsScreen({
             <span className='text-base font-medium text-foreground'>Browser</span>
           </div>
           <div className='flex items-center gap-1'>
+            <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
             <button
               onClick={handleMinimizeToPanel}
               className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
@@ -544,6 +563,7 @@ export function BrowserTabsScreen({
             onUrlUpdate={handleUrlUpdate}
             onNewWindow={handleCreateTab}
             isPanel={isPanel}
+            popupsEnabled={browserSettings.popups}
           />
         ))}
 

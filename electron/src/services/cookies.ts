@@ -46,3 +46,16 @@ export async function setCookiesFromHeaders(
 
   await Promise.all(cookiePromises);
 }
+
+/**
+ * Clears all cookies and storage for the browser-tabs partition
+ */
+export async function clearBrowserTabsData(): Promise<void> {
+  try {
+    const browserSession = session.fromPartition('persist:browser-tabs');
+    await browserSession.clearStorageData();
+    console.log('Cleared browser tabs data');
+  } catch (error) {
+    console.error('Failed to clear browser tabs data:', error);
+  }
+}

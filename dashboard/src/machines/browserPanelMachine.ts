@@ -1,5 +1,6 @@
 import { setup, createActor, assign } from 'xstate';
 import { RefObject } from 'react';
+import { BrowserSettings, defaultBrowserSettings } from '../types/browserSettings';
 
 export type BrowserPanelState = 'closed' | 'open';
 
@@ -18,6 +19,7 @@ export interface BrowserPanelContext {
   pendingUrls: string[];
   tabs: BrowserTab[];
   activeTabId: string | null;
+  browserSettings: BrowserSettings;
 }
 
 export type BrowserPanelEvent =
@@ -27,7 +29,8 @@ export type BrowserPanelEvent =
   | { type: 'ADD_TAB'; tab: BrowserTab }
   | { type: 'CLOSE_TAB'; tabId: string }
   | { type: 'SWITCH_TAB'; tabId: string }
-  | { type: 'UPDATE_TAB'; tabId: string; patch: Partial<BrowserTab> };
+  | { type: 'UPDATE_TAB'; tabId: string; patch: Partial<BrowserTab> }
+  | { type: 'UPDATE_SETTINGS'; settings: Partial<BrowserSettings> };
 
 interface PanelHandle {
   resize: (size: number) => void;
@@ -111,6 +114,12 @@ export const browserPanelMachine = setup({
         return context.tabs.map(t => (t.id === event.tabId ? { ...t, ...event.patch } : t));
       },
     }),
+    updateSettings: assign({
+      browserSettings: ({ context, event }) => {
+        if (event.type !== 'UPDATE_SETTINGS') return context.browserSettings;
+        return { ...context.browserSettings, ...event.settings };
+      },
+    }),
   },
 }).createMachine({
   context: () => ({
@@ -118,6 +127,7 @@ export const browserPanelMachine = setup({
     pendingUrls: [],
     tabs: [] as BrowserTab[],
     activeTabId: null as string | null,
+    browserSettings: defaultBrowserSettings,
   }),
   id: 'browserPanelMachine',
   initial: 'closed',
@@ -143,6 +153,9 @@ export const browserPanelMachine = setup({
         UPDATE_TAB: {
           actions: 'updateTab',
         },
+        UPDATE_SETTINGS: {
+          actions: 'updateSettings',
+        },
       },
     },
     open: {
@@ -165,6 +178,9 @@ export const browserPanelMachine = setup({
         },
         UPDATE_TAB: {
           actions: 'updateTab',
+        },
+        UPDATE_SETTINGS: {
+          actions: 'updateSettings',
         },
       },
     },

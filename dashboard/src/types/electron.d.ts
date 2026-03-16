@@ -40,6 +40,11 @@ export interface ElectronAPI {
   setUserEmail: (email: string) => void;
   getClientSessionId: () => Promise<string>;
   toggleCompactMode: () => void;
+  getBrowserSettings: () => Promise<{ javascript: boolean; popups: boolean }>;
+  setBrowserSettings: (
+    settings: Partial<{ javascript: boolean; popups: boolean }>,
+  ) => Promise<{ javascript: boolean; popups: boolean }>;
+  clearSiteData: () => Promise<{ success: boolean }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   codeServer: {
     start: () => Promise<{ success: boolean; url?: string; error?: string }>;
