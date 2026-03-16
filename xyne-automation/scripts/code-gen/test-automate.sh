@@ -5,6 +5,9 @@
 
 set -e
 
+# Ensure Ctrl+C exits immediately
+trap 'echo -e "\n\033[0;31m✗ Interrupted by user (Ctrl+C)\033[0m"; exit 130' INT TERM
+
 # Enable nullglob so unmatched globs expand to nothing instead of literal strings
 shopt -s nullglob
 
@@ -128,6 +131,9 @@ echo ""
 # Parse arguments to check for dry-run report flag and retry folder
 DRY_RUN_REPORT_FILE=""
 RETRY_FOLDER=""
+SKIP_FOLDER_ANALYSIS=false
+SKIP_SCENARIO_ANALYSIS=false
+SKIP_TESTIDS=false
 SPEC_FILE_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -140,6 +146,23 @@ while [[ $# -gt 0 ]]; do
             RETRY_FOLDER="$2"
             shift 2
             ;;
+        --skip-folder-analysis)
+            SKIP_FOLDER_ANALYSIS=true
+            shift
+            ;;
+        --skip-scenario-analysis)
+            SKIP_SCENARIO_ANALYSIS=true
+            shift
+            ;;
+        --skip-all-analysis)
+            SKIP_FOLDER_ANALYSIS=true
+            SKIP_SCENARIO_ANALYSIS=true
+            shift
+            ;;
+        --skip-testids)
+            SKIP_TESTIDS=true
+            shift
+            ;;
         *)
             SPEC_FILE_ARGS+=("$1")
             shift
@@ -150,6 +173,18 @@ done
 # Restore positional parameters
 set -- "${SPEC_FILE_ARGS[@]}"
 
+# Display active skip flags
+if [ "$SKIP_FOLDER_ANALYSIS" = true ]; then
+    echo -e "${YELLOW}⏭ Skipping folder analysis LLM call (--skip-folder-analysis)${NC}"
+fi
+if [ "$SKIP_SCENARIO_ANALYSIS" = true ]; then
+    echo -e "${YELLOW}⏭ Skipping scenario analysis LLM call (--skip-scenario-analysis)${NC}"
+fi
+if [ "$SKIP_TESTIDS" = true ]; then
+    echo -e "${YELLOW}⏭ Skipping testid addition LLM call (--skip-testids)${NC}"
+fi
+echo ""
+
 # Check if files are provided as arguments
 if [ $# -eq 0 ]; then
     echo -e "${RED}Error: No Playwright spec files provided.${NC}"
@@ -157,11 +192,22 @@ if [ $# -eq 0 ]; then
     echo "Usage:"
     echo "  npm run codegen -- <file1.spec.ts> [file2.spec.ts ...]"
     echo "  npm run codegen -- --dry-run-report <report-file> <file.spec.ts>"
+    echo "  npm run codegen -- --skip-folder-analysis <file.spec.ts>"
+    echo "  npm run codegen -- --skip-scenario-analysis <file.spec.ts>"
+    echo "  npm run codegen -- --skip-all-analysis <file.spec.ts>"
+    echo ""
+    echo "Options:"
+    echo "  --skip-folder-analysis     Skip LLM folder placement analysis (auto-select recommended folder)"
+    echo "  --skip-scenario-analysis   Skip LLM scenario duplicate check (always regenerate)"
+    echo "  --skip-all-analysis        Skip both folder and scenario LLM analysis calls"
+    echo "  --dry-run-report <file>    Use dry-run failure report to fix previous attempt"
+    echo "  --retry-folder <folder>    Specify folder explicitly for retry"
     echo ""
     echo "Examples:"
     echo "  npm run codegen -- test-1.spec.ts"
     echo "  npm run codegen -- test-1.spec.ts test-2.spec.ts"
     echo "  npm run codegen -- ../tests/*.spec.ts"
+    echo "  npm run codegen -- --skip-all-analysis test-1.spec.ts"
     echo "  npm run codegen -- --dry-run-report path/to/report.txt test-1.spec.ts"
     exit 1
 fi
@@ -275,6 +321,43 @@ for INPUT_FILE in "$@"; do
         echo -e "${CYAN}Scanning existing test structure...${NC}"
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
+
+    if [ "$SKIP_FOLDER_ANALYSIS" = true ]; then
+        # Skip LLM folder analysis — create a new folder based on the spec file name
+        echo -e "${YELLOW}⏭ Skipping folder analysis LLM call${NC}"
+        echo -e "${CYAN}Auto-creating folder based on spec file name: ${BASE_NAME}${NC}"
+
+        # Try to find an existing folder that matches the base name pattern
+        MATCHING_FOLDER=""
+        for existing_dir in "$E2E_DIR"/*/; do
+            [ -d "$existing_dir" ] || continue
+            dir_name=$(basename "$existing_dir")
+            # Strip numeric prefix for comparison (e.g., 04_messages -> messages)
+            dir_bare=$(echo "$dir_name" | sed -E 's/^[0-9]+_//')
+            if [[ "$dir_bare" == *"$BASE_NAME"* ]] || [[ "$BASE_NAME" == *"$dir_bare"* ]]; then
+                MATCHING_FOLDER="$dir_name"
+                break
+            fi
+        done
+
+        if [ -n "$MATCHING_FOLDER" ]; then
+            OUTPUT_FOLDER="$MATCHING_FOLDER"
+            OUTPUT_FOLDER_ABS="$E2E_DIR/$OUTPUT_FOLDER"
+            echo -e "${GREEN}✓ Found matching existing folder:${NC} ${CYAN}tests/03_e2e/${OUTPUT_FOLDER}${NC}"
+        else
+            # No match — create a new folder
+            OUTPUT_FOLDER=$(ensure_prefix "$E2E_DIR" "$BASE_NAME")
+            OUTPUT_FOLDER_ABS="$E2E_DIR/$OUTPUT_FOLDER"
+            mkdir -p "$OUTPUT_FOLDER_ABS"
+            echo -e "${GREEN}✓ Created new folder:${NC} ${CYAN}tests/03_e2e/${OUTPUT_FOLDER}${NC}"
+        fi
+
+        echo ""
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${GREEN}Final output location: tests/03_e2e/${OUTPUT_FOLDER}${NC}"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+    else
     
     E2E_STRUCTURE=""
     for folder in */; do
@@ -285,17 +368,19 @@ for INPUT_FILE in "$@"; do
         
         E2E_STRUCTURE="${E2E_STRUCTURE}${folder_name}/\n"
         
-        for feat in "$folder"*.feature; do
+        # Scan feature files recursively (including subdirectories, excluding _previous)
+        while IFS= read -r feat; do
             [ -e "$feat" ] || continue
-            feat_name=$(basename "$feat")
+            feat_rel=$(realpath --relative-to="$E2E_DIR" "$feat" 2>/dev/null || echo "$feat")
             scenarios=$(grep -E '^\s*(Scenario|Scenario Outline):' "$feat" 2>/dev/null | sed -E 's/^\s*(Scenario|Scenario Outline):\s*//' || true)
             if [ -n "$scenarios" ]; then
-                E2E_STRUCTURE="${E2E_STRUCTURE}  ${feat_name}\n"
+                E2E_STRUCTURE="${E2E_STRUCTURE}  ${feat_rel}\n"
                 while IFS= read -r scn; do
                     E2E_STRUCTURE="${E2E_STRUCTURE}    - ${scn}\n"
                 done <<< "$scenarios"
             fi
-        done
+        done < <(find "$folder" -name "*.feature" -not -path "*/_previous/*" -not -path "*/node_modules/*" -type f 2>/dev/null | sort)
+        
         E2E_STRUCTURE="${E2E_STRUCTURE}\n"
     done
 
@@ -345,12 +430,36 @@ for INPUT_FILE in "$@"; do
         continue
     fi
     
-    # Display LLM analysis to user
+    # Display LLM analysis to user (pretty-print if JSON)
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}LLM Analysis Results:${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    cat "$FOLDER_ANALYSIS_FILE"
+    # Extract JSON from output (skip non-JSON lines like Bun warnings, handle code fences)
+    JSON_CONTENT=""
+    if command -v python3 &>/dev/null; then
+        JSON_CONTENT=$(python3 -c "
+import sys, json, re
+content = open(sys.argv[1]).read()
+content = re.sub(r'\`\`\`\w*\n?', '', content)
+depth = 0; start = -1
+for i, c in enumerate(content):
+    if c == '{':
+        if depth == 0: start = i
+        depth += 1
+    elif c == '}':
+        depth -= 1
+        if depth == 0 and start >= 0:
+            candidate = content[start:i+1]
+            try:
+                json.loads(candidate); print(candidate); sys.exit(0)
+            except: start = -1
+" "$FOLDER_ANALYSIS_FILE" 2>/dev/null)
+    fi
+    if [ -n "$JSON_CONTENT" ]; then
+        echo "$JSON_CONTENT" | python3 -m json.tool 2>/dev/null || echo "$JSON_CONTENT"
+    else
+        cat "$FOLDER_ANALYSIS_FILE"
+    fi
     echo ""
     echo -e "${YELLOW}File: $FOLDER_DEBUG_FILE${NC}"
     echo ""
@@ -362,30 +471,34 @@ for INPUT_FILE in "$@"; do
     echo -e "${YELLOW}The LLM identified the above-mentioned folders and files as having similarities.${NC}"
     echo -e "${YELLOW}What would you like to do?${NC}"
     echo -e "  ${CYAN}1)${NC} Skip conversion (keep existing tests)"
-    echo -e "  ${CYAN}2)${NC} Use LLM's recommended folder ${GREEN}(auto-select in 20s)${NC}"
+    echo -e "  ${CYAN}2)${NC} Use LLM's recommended folder"
     echo -e "  ${CYAN}3)${NC} Choose a different existing folder"
     echo -e "  ${CYAN}4)${NC} Create a new folder with custom name"
     echo ""
 
-    # Simple countdown with read timeout
+    # Simple prompt — wait for user input, loop until valid choice (max 10 attempts)
     USER_DECISION=""
+    ATTEMPT=0
+    MAX_ATTEMPTS=10
     echo ""
-    echo -e "${YELLOW}Type your choice (1-4) and press Enter (auto-selects option 2 in 20s):${NC}"
-
-    # Read with 20 second timeout
-    if IFS= read -r -t 20 USER_DECISION; then
+    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+        ATTEMPT=$((ATTEMPT + 1))
+        echo -n -e "${YELLOW}Type your choice (1-4) and press Enter [attempt ${ATTEMPT}/${MAX_ATTEMPTS}]: ${NC}"
+        read -r USER_DECISION < /dev/tty
         USER_DECISION=$(echo "$USER_DECISION" | tr -d '[:space:]' | head -c 1)
-    fi
 
-    # Clear line and show result
-    printf "\r\033[K"
+        if [[ "$USER_DECISION" =~ ^[1-4]$ ]]; then
+            echo -e "${GREEN}✓ Selected option: ${USER_DECISION}${NC}"
+            break
+        else
+            echo -e "${RED}Invalid input. Please enter 1, 2, 3, or 4.${NC}"
+            USER_DECISION=""
+        fi
+    done
 
-    # If no user input, auto-select option 2 (LLM recommended folder)
-    if [ -z "$USER_DECISION" ]; then
-        USER_DECISION="2"
-        echo -e "${GREEN}✓ Auto-selected: Use LLM's recommended folder${NC}"
-    else
-        echo -e "${GREEN}✓ Selected option: ${USER_DECISION}${NC}"
+    if [ -z "$USER_DECISION" ] || ! [[ "$USER_DECISION" =~ ^[1-4]$ ]]; then
+        echo -e "${RED}Max attempts reached. Exiting.${NC}"
+        exit 1
     fi
 
     echo ""
@@ -405,13 +518,18 @@ for INPUT_FILE in "$@"; do
         declare -a FOLDER_OPTIONS
         declare -a FOLDER_SIMILARITIES
         
-        # Parse JSON matches array
-        while IFS= read -r match_line; do
-            folder_match=$(echo "$match_line" | grep -oE '"folder"[[:space:]]*:[[:space:]]*"[^"]+"' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
-            similarity=$(echo "$match_line" | grep -oE '"similarity_percentage"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' || echo "0")
-            
-            if [ -n "$folder_match" ] && [ "$similarity" -gt 0 ]; then
-                # Check if folder exists
+        # Parse JSON matches — flatten to one line, then extract each match object individually
+        LLM_JSON_FLAT=$(cat "$FOLDER_ANALYSIS_FILE" 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g')
+
+        while IFS= read -r match_block; do
+            [ -z "$match_block" ] && continue
+            folder_match=$(echo "$match_block" | sed -E 's/.*"folder"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+            similarity=$(echo "$match_block" | sed -E 's/.*"similarity_percentage"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/')
+
+            # Validate sed actually extracted values (not the whole block back)
+            if [ -n "$folder_match" ] && [ "$folder_match" != "$match_block" ] && \
+               [ -n "$similarity" ] && [ "$similarity" != "$match_block" ] && \
+               [ "$similarity" -gt 0 ] 2>/dev/null; then
                 if [ -d "$E2E_DIR/$folder_match" ]; then
                     FOLDER_OPTIONS[$folder_idx]="$folder_match"
                     FOLDER_SIMILARITIES[$folder_idx]="$similarity"
@@ -419,10 +537,17 @@ for INPUT_FILE in "$@"; do
                     folder_idx=$((folder_idx + 1))
                 fi
             fi
-        done < <(grep -A 10 '"matches"' "$FOLDER_ANALYSIS_FILE" | grep -E '"folder"|"similarity_percentage"')
+        done < <(echo "$LLM_JSON_FLAT" | grep -oE '\{[^{}]*"folder"[^{}]*\}' 2>/dev/null)
         
         # Add recommended folder from recommendation section
-        RECOMMENDED_FOLDER=$(grep -oE '"folder_name"[[:space:]]*:[[:space:]]*"[^"]+"' "$FOLDER_ANALYSIS_FILE" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+        RECOMMENDED_FOLDER=$(echo "$LLM_JSON_FLAT" | \
+            sed -E 's/.*"recommendation"[[:space:]]*:[[:space:]]*\{([^}]*)\}.*/\1/' | \
+            grep -oE '"folder_name"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | \
+            sed -E 's/.*"([^"]+)"$/\1/')
+        # Validate it's a clean folder name
+        if [ -z "$RECOMMENDED_FOLDER" ] || [ ${#RECOMMENDED_FOLDER} -gt 100 ]; then
+            RECOMMENDED_FOLDER=""
+        fi
         if [ -n "$RECOMMENDED_FOLDER" ] && [ -d "$E2E_DIR/$RECOMMENDED_FOLDER" ]; then
             # Check if not already in list
             if [[ ! " ${FOLDER_OPTIONS[@]} " =~ " ${RECOMMENDED_FOLDER} " ]]; then
@@ -435,7 +560,21 @@ for INPUT_FILE in "$@"; do
         
         # If no matches found, try new folder suggestion
         if [ ${#FOLDER_OPTIONS[@]} -eq 0 ]; then
-            NEW_FOLDER_SUGGESTION=$(grep -oE '"new_folder_suggestion"[[:space:]]*:[[:space:]]*"[^"]+"' "$FOLDER_ANALYSIS_FILE" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+            # Check if LLM recommends a new folder
+            IS_NEW_FOLDER=$(echo "$LLM_JSON_FLAT" | grep -oE '"is_new_folder"[[:space:]]*:[[:space:]]*(true|false)' | head -1 | grep -oE '(true|false)' || echo "false")
+
+            NEW_FOLDER_SUGGESTION=""
+            if [ "$IS_NEW_FOLDER" = "true" ] && [ -n "$RECOMMENDED_FOLDER" ]; then
+                NEW_FOLDER_SUGGESTION="$RECOMMENDED_FOLDER"
+            else
+                NEW_FOLDER_SUGGESTION=$(echo "$LLM_JSON_FLAT" | \
+                    grep -oE '"new_folder_suggestion"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | \
+                    sed -E 's/.*"([^"]+)"$/\1/')
+                # Validate it's a clean name
+                if [ -z "$NEW_FOLDER_SUGGESTION" ] || [ ${#NEW_FOLDER_SUGGESTION} -gt 100 ]; then
+                    NEW_FOLDER_SUGGESTION=""
+                fi
+            fi
             if [ -n "$NEW_FOLDER_SUGGESTION" ]; then
                 echo -e "${YELLOW}LLM recommends creating a new folder: ${CYAN}${NEW_FOLDER_SUGGESTION}${NC}"
                 echo -e "${YELLOW}Creating new folder...${NC}"
@@ -450,7 +589,7 @@ for INPUT_FILE in "$@"; do
         else
             echo ""
 
-            # Find the LLM recommended folder index for auto-selection
+            # Find the LLM recommended folder index for highlighting
             RECOMMENDED_IDX=""
             for i in "${!FOLDER_OPTIONS[@]}"; do
                 if [ "${FOLDER_SIMILARITIES[$i]}" = "recommended" ]; then
@@ -464,48 +603,43 @@ for INPUT_FILE in "$@"; do
                 RECOMMENDED_IDX="${!FOLDER_OPTIONS[@]}"
                 RECOMMENDED_IDX="${RECOMMENDED_IDX##* }"
             fi
-            # Simple countdown with read timeout
+
+            # Simple prompt — wait for user input
             FOLDER_NUM=""
             echo ""
             if [ -n "$RECOMMENDED_IDX" ]; then
-                echo -e "${YELLOW}Type folder number and press Enter (auto-selects ${RECOMMENDED_IDX} in 20s):${NC}"
+                echo -e "${YELLOW}Type folder number and press Enter (LLM recommends ${RECOMMENDED_IDX}):${NC}"
             else
-                echo -e "${YELLOW}Type folder number and press Enter (auto-selects in 20s):${NC}"
+                echo -n -e "${YELLOW}Type folder number and press Enter: ${NC}"
             fi
 
-            # Loop until valid selection or timeout
-            while true; do
-                # Read with 20 second timeout
-                if IFS= read -r -t 20 FOLDER_NUM; then
-                    FOLDER_NUM=$(echo "$FOLDER_NUM" | tr -d '[:space:]' | head -c 2)
-                fi
+            # Loop until valid selection (max 10 attempts)
+            FOLDER_ATTEMPT=0
+            MAX_FOLDER_ATTEMPTS=10
+            while [ $FOLDER_ATTEMPT -lt $MAX_FOLDER_ATTEMPTS ]; do
+                FOLDER_ATTEMPT=$((FOLDER_ATTEMPT + 1))
+                read -r FOLDER_NUM < /dev/tty
+                FOLDER_NUM=$(echo "$FOLDER_NUM" | tr -d '[:space:]' | head -c 2)
 
-                # If no user input, auto-select LLM recommended folder
-                if [ -z "$FOLDER_NUM" ] && [ -n "$RECOMMENDED_IDX" ]; then
-                    FOLDER_NUM="$RECOMMENDED_IDX"
-                    echo -e "${GREEN}✓ Auto-selected folder:${NC} ${CYAN}${FOLDER_OPTIONS[$FOLDER_NUM]}${NC} ${GREEN}(LLM recommended)${NC}"
-                    break
-                elif [ -z "$FOLDER_NUM" ]; then
-                    # Fallback to first option if no recommended found
-                    FOLDER_NUM="${!FOLDER_OPTIONS[@]}"
-                    FOLDER_NUM="${FOLDER_NUM%% *}"
-                    echo -e "${GREEN}✓ Auto-selected folder:${NC} ${CYAN}${FOLDER_OPTIONS[$FOLDER_NUM]}${NC}"
-                    break
-                elif [ "$FOLDER_NUM" -ge 1 ] && [ "$FOLDER_NUM" -lt "$folder_idx" ] 2>/dev/null; then
+                if [ -n "$FOLDER_NUM" ] && [ "$FOLDER_NUM" -ge 1 ] 2>/dev/null && [ "$FOLDER_NUM" -lt "$folder_idx" ] 2>/dev/null; then
                     echo -e "${GREEN}✓ Selected folder:${NC} ${CYAN}${FOLDER_OPTIONS[$FOLDER_NUM]}${NC}"
                     break
                 else
-                    echo -e "${RED}Invalid selection. Please try again.${NC}"
+                    echo -e "${RED}Invalid selection. Please try again. [attempt ${FOLDER_ATTEMPT}/${MAX_FOLDER_ATTEMPTS}]${NC}"
                     echo ""
-                    # Show valid options again
                     for i in "${!FOLDER_OPTIONS[@]}"; do
                         echo -e "  ${CYAN}${i})${NC} ${FOLDER_OPTIONS[$i]} ${YELLOW}(${FOLDER_SIMILARITIES[$i]})${NC}"
                     done
                     echo ""
-                    echo -e "${YELLOW}Type folder number and press Enter:${NC}"
+                    echo -n -e "${YELLOW}Type folder number and press Enter: ${NC}"
                     FOLDER_NUM=""
                 fi
             done
+
+            if [ -z "$FOLDER_NUM" ] || ! { [ "$FOLDER_NUM" -ge 1 ] 2>/dev/null && [ "$FOLDER_NUM" -lt "$folder_idx" ] 2>/dev/null; }; then
+                echo -e "${RED}Max attempts reached. Exiting.${NC}"
+                exit 1
+            fi
 
             OUTPUT_FOLDER="${FOLDER_OPTIONS[$FOLDER_NUM]}"
             OUTPUT_FOLDER_ABS="$E2E_DIR/$OUTPUT_FOLDER"
@@ -520,7 +654,7 @@ for INPUT_FILE in "$@"; do
         # Find all folders (including subfolders) that contain .feature files or steps
         while IFS= read -r folder_path; do
             # Get relative path from E2E_DIR
-            folder_rel=$(python3 -c "import os; print(os.path.relpath('$folder_path', '$E2E_DIR'))" 2>/dev/null || basename "$folder_path")
+            folder_rel=$(realpath --relative-to="$E2E_DIR" "$folder_path" 2>/dev/null || basename "$folder_path")
             [[ "$folder_rel" == _* ]] && continue
             [[ "$folder_rel" == "node_modules" ]] && continue
             [[ "$folder_rel" == *"/_previous"* ]] && continue
@@ -535,15 +669,28 @@ for INPUT_FILE in "$@"; do
         
         echo ""
         echo -n -e "${YELLOW}Select folder number: ${NC}"
-        read -r FOLDER_NUM
-        FOLDER_NUM=$(echo "$FOLDER_NUM" | tr -d '[:space:]')
         
-        if [ "$FOLDER_NUM" -ge 1 ] && [ "$FOLDER_NUM" -lt "$folder_idx" ]; then
-            OUTPUT_FOLDER="${FOLDER_OPTIONS[$FOLDER_NUM]}"
-            OUTPUT_FOLDER_ABS="$E2E_DIR/$OUTPUT_FOLDER"
-            echo -e "${GREEN}✓ Selected folder:${NC} ${CYAN}tests/03_e2e/${OUTPUT_FOLDER}${NC}"
-        else
-            echo -e "${RED}Invalid selection. Exiting.${NC}"
+        OPT3_ATTEMPT=0
+        MAX_OPT3_ATTEMPTS=10
+        while [ $OPT3_ATTEMPT -lt $MAX_OPT3_ATTEMPTS ]; do
+            OPT3_ATTEMPT=$((OPT3_ATTEMPT + 1))
+            read -r FOLDER_NUM < /dev/tty
+            FOLDER_NUM=$(echo "$FOLDER_NUM" | tr -d '[:space:]\\' | head -c 3)
+            
+            if [ -n "$FOLDER_NUM" ] && [ "$FOLDER_NUM" -ge 1 ] 2>/dev/null && [ "$FOLDER_NUM" -lt "$folder_idx" ] 2>/dev/null; then
+                OUTPUT_FOLDER="${FOLDER_OPTIONS[$FOLDER_NUM]}"
+                OUTPUT_FOLDER_ABS="$E2E_DIR/$OUTPUT_FOLDER"
+                echo -e "${GREEN}✓ Selected folder:${NC} ${CYAN}tests/03_e2e/${OUTPUT_FOLDER}${NC}"
+                break
+            else
+                echo -e "${RED}Invalid selection. Please enter a number between 1 and $((folder_idx - 1)). [attempt ${OPT3_ATTEMPT}/${MAX_OPT3_ATTEMPTS}]${NC}"
+                echo -n -e "${YELLOW}Select folder number: ${NC}"
+                FOLDER_NUM=""
+            fi
+        done
+
+        if [ -z "$FOLDER_NUM" ] || ! { [ "$FOLDER_NUM" -ge 1 ] 2>/dev/null && [ "$FOLDER_NUM" -lt "$folder_idx" ] 2>/dev/null; }; then
+            echo -e "${RED}Max attempts reached. Exiting.${NC}"
             exit 1
         fi
     elif [ "$USER_DECISION" = "4" ]; then
@@ -577,6 +724,7 @@ for INPUT_FILE in "$@"; do
     echo -e "${GREEN}Final output location: tests/03_e2e/${OUTPUT_FOLDER}${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
+    fi  # End of skip-folder-analysis check
     fi  # End of retry check - closes the if-else for RETRY_FOLDER
     # ============================================================
 
@@ -618,6 +766,14 @@ for INPUT_FILE in "$@"; do
     # STEP 3: Check for existing scenarios and ask LLM for similarity analysis
     # ============================================================
     if [ ${#EXISTING_FEATURE_FILES[@]} -gt 0 ] || [ ${#EXISTING_STEPS_FILES[@]} -gt 0 ]; then
+      if [ "$SKIP_SCENARIO_ANALYSIS" = true ]; then
+        echo -e "${YELLOW}⏭ Skipping scenario analysis LLM call — will regenerate all scenarios${NC}" >&2
+        USER_ACTION="regenerate_all"
+        EXISTING_FEATURE_FILES=()
+        EXISTING_STEPS_FILES=()
+        EXISTING_FEATURE_NAMES=()
+        EXISTING_STEPS_NAMES=()
+      else
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
         echo -e "${YELLOW}Existing files detected in ${OUTPUT_FOLDER}${NC}" >&2
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
@@ -719,6 +875,7 @@ $(cat "$ef")
             USER_ACTION="update"
             echo "" >&2
         fi
+      fi  # End of skip-scenario-analysis check
     fi
 
     # Also scan ALL other e2e folders for scenario names to detect cross-folder duplicates
@@ -748,7 +905,160 @@ $(cat "$ef")
     echo "" >> "$TEMP_PROMPT_FILE"
     echo "Do NOT use any other folder path. The folder '${OUTPUT_FOLDER}' already exists and is the correct location for this test." >> "$TEMP_PROMPT_FILE"
     echo "" >> "$TEMP_PROMPT_FILE"
-    
+
+    # Add critical conversion rules
+    cat >> "$TEMP_PROMPT_FILE" << 'CONVERSION_RULES_EOF'
+
+## CRITICAL CONVERSION RULES:
+
+### Rule 1 — No Hardcoded Dynamic IDs
+
+Selectors or values containing any runtime-generated identifiers must NEVER appear literally in feature files.
+Dynamic IDs can take many forms, including but not limited to:
+- UUIDs (e.g., 57fe4e5f-eb75-44b6-887b-c6cf4b96eab5)
+- Numeric IDs (e.g., 12345, item-9823)
+- Short hashes (e.g., a3f8c2, x9k2m)
+- Timestamps or date-based IDs (e.g., 1678901234, msg-20250309)
+- Random slugs or suffixes (e.g., canvas-abc123def, thread-xK9mQ)
+- Any value in a selector that looks like it was generated at runtime rather than being a static, human-readable test ID
+
+How to detect: If a data-testid, URL segment, or selector value contains random-looking characters,
+long alphanumeric strings, or patterns that would differ between test runs, treat it as dynamic.
+
+What to do instead:
+- After a resource is created (navigation happens, new item appears), ALWAYS store the current path immediately:
+  And I store the current path as "descriptive-resource-name"
+- Use a descriptive name that identifies who created it, what it is, and where:
+  And I store the current path as "canvas-created-by-user1-in-channel-1"
+  And I store the current path as "ticket-created-by-admin"
+  And I store the current path as "thread-created-by-user2-in-dm"
+- In ALL subsequent steps that reference that resource (same scenario or later scenarios), use the stored value:
+  When I open the Xyne-Space at "canvas-created-by-user1-in-channel-1"
+- NEVER use the raw URL or dynamic selector to reference the resource again — always use the stored path name.
+- Static, human-readable test IDs like my-canvas-btn, go-back-btn, canvas-editor are fine to use directly.
+
+### Rule 2 — Single-Line Gherkin Steps (ABSOLUTE REQUIREMENT)
+
+Every Gherkin step MUST be on a SINGLE LINE. This is NON-NEGOTIABLE.
+
+When a Playwright test uses .fill() or .type() with \n (newline characters), you MUST keep them as the
+literal two-character sequence \n in the output string. Do NOT expand \n into actual line breaks.
+
+NEVER use Doc Strings (triple-quoted blocks) for typing text. ALWAYS use a single-line step with \n.
+Do NOT create custom step definitions like "I type the following on the element". Use the existing shared step.
+
+WRONG — NEVER expand newlines into real line breaks:
+    And I type "Hii
+Hello
+" on the element "[data-testid='editor'] [role='textbox']"
+
+WRONG — NEVER use Doc Strings for type/fill actions:
+    And I type the following on the element "[data-testid='editor']"
+      (triple-quotes)
+      Hii
+      Hello
+      (triple-quotes)
+
+CORRECT — the entire step is ONE line with literal backslash-n:
+    And I type "Hii\n\nHello\n\n" on the element "[data-testid='editor'] [role='textbox']"
+
+This applies to ALL step keywords: Given, When, Then, And, But.
+A step line starts with a keyword and MUST end on that same line.
+
+### Rule 3 — No Redundant Intermediate Fill Steps
+
+When a Playwright test calls .fill() multiple times on the same element with progressively longer text
+(building up content incrementally), only convert the FINAL .fill() call. Skip all intermediate ones
+that are overwritten by later fills on the same element.
+
+For example, if the Playwright test has:
+  await page.getByTestId('editor').fill('Hello')
+  await page.getByTestId('editor').fill('Hello\n\nWorld')
+  await page.getByTestId('editor').fill('Hello\n\nWorld\n\nFinal text')
+
+Only generate a step for the LAST fill:
+  And I type "Hello\n\nWorld\n\nFinal text" on the element "[data-testid='editor']"
+
+### Rule 4 — Correct Element Targeting for fill/type Actions
+
+Playwright .fill() and .type() ONLY work on input, textarea, or contenteditable elements.
+When the Playwright test chains selectors like:
+  page.getByTestId('canvas-editor').getByRole('textbox').fill('...')
+
+You MUST include the FULL selector chain — target the INNER editable element, NOT the outer container div.
+
+WRONG — targets the container div, fill() will fail with "Element is not an input":
+    And I type "Hello" on the element "[data-testid='canvas-editor']"
+
+CORRECT — targets the actual textbox inside the container:
+    And I type "Hello" on the element "[data-testid='canvas-editor'] [role='textbox']"
+
+Always check the Playwright code: if it uses .getByRole('textbox'), .locator('textarea'), .locator('input'),
+or similar after a container selector, the Gherkin CSS selector MUST include both the container AND the inner element.
+
+### Rule 5 — Use EXACT Test IDs from the Playwright Spec (NEVER invent or rename)
+
+When the Playwright spec uses page.getByTestId('some-id'), you MUST use the EXACT same test ID
+in your feature file selector: [data-testid='some-id'].
+
+NEVER rename, abbreviate, prefix, or modify the test ID in any way.
+NEVER invent new test IDs that don't appear in the spec file.
+NEVER add context prefixes like "dm-", "chat-", "canvas-" to existing test IDs.
+
+For example, if the spec has:
+  await page.getByTestId('message-input').click();
+  await page.getByTestId('send-message-button').click();
+  await page.getByTestId('emoji-picker-btn').click();
+
+WRONG — invented/renamed IDs:
+  And I click on "[data-testid='dm-message-input']"
+  And I click on "[data-testid='send-btn']"
+  And I click on "[data-testid='emoji-button']"
+
+CORRECT — exact IDs from the spec:
+  And I click on "[data-testid='message-input']"
+  And I click on "[data-testid='send-message-button']"
+  And I click on "[data-testid='emoji-picker-btn']"
+
+Similarly for chained selectors like:
+  await page.getByTestId('message-input').getByRole('paragraph').click();
+
+CORRECT:
+  And I click on "[data-testid='message-input'] [role='paragraph']"
+
+WRONG:
+  And I click on "[data-testid='dm-message-input'] p"
+
+### Rule 6 — Correct Mapping of Playwright getByRole with name
+
+When the Playwright spec uses getByRole('button', { name: '...', exact: true }) or similar getByRole
+calls with a name parameter, the name usually maps to the element's **accessible name** (aria-label),
+NOT its visible text content.
+
+Common patterns:
+  page.getByRole('button', { name: 'grin', exact: true })
+    → And I click on "button[aria-label='grin']"
+    OR if the step supports CSS selectors:
+    → And I click on "[aria-label='grin']"
+
+  page.getByRole('button', { name: 'Send message' })
+    → And I click on "button[aria-label='Send message']"
+
+Do NOT use "I click the button with text" for elements whose accessible name comes from aria-label
+rather than visible text. Emoji pickers, icon buttons, and toolbar buttons typically use aria-label.
+
+If the Playwright code uses { exact: true }, the aria-label must match exactly.
+
+WRONG — "text" steps search visible text, but emoji buttons use aria-label:
+  And I click the button with text "grin"
+
+CORRECT — use aria-label CSS selector:
+  And I click on "[aria-label='grin']"
+
+For getByRole without a name, or with visible text content, use the appropriate text-based step.
+
+CONVERSION_RULES_EOF
+
     # Add user action context if exists
     if [ -n "${USER_ACTION:-}" ]; then
         echo "## USER DECISION:" >> "$TEMP_PROMPT_FILE"
@@ -887,7 +1197,7 @@ $(cat "$ef")
         e2e_steps_basename=$(basename "$e2e_steps_file")
         [ "$e2e_steps_basename" = "e2e-common.steps.ts" ] && continue
         # Skip files in the current output folder — already listed in folder-level steps section
-        e2e_steps_rel=$(python3 -c "import os; print(os.path.relpath('$e2e_steps_file', '$AUTOMATION_DIR/tests/03_e2e'))" 2>/dev/null || echo "$e2e_steps_file")
+        e2e_steps_rel=$(realpath --relative-to="$AUTOMATION_DIR/tests/03_e2e" "$e2e_steps_file" 2>/dev/null || echo "$e2e_steps_file")
         if [ -n "$OUTPUT_FOLDER" ] && [[ "$e2e_steps_rel" == "$OUTPUT_FOLDER"* ]]; then
             continue
         fi
@@ -1240,6 +1550,7 @@ BROWSER_REUSE_EOF
             code_content=""
             inside_code=0
             continue
+       
         fi
 
         # Detect start of code block with language identifier
@@ -1349,6 +1660,61 @@ BROWSER_REUSE_EOF
                         sed -i '' 's|{config\.[^}]*}/|/|g' "$outpath" 2>/dev/null || true
                         sed -i '' 's|http://localhost:[0-9]*/|/|g' "$outpath" 2>/dev/null || true
                         sed -i '' 's|I navigate to |I open the Xyne-Space at |g' "$outpath" 2>/dev/null || true
+
+                        # Post-process: collapse multi-line Gherkin steps into single lines with \n
+                        # Detects steps with unclosed quotes and joins continuation lines
+                        awk '
+                        {
+                            # If we are accumulating a multi-line step
+                            if (accumulating) {
+                                # Check if this line closes the quote
+                                gsub(/\r$/, "")  # strip CR
+                                combined = combined "\\n" $0
+                                # Count double quotes in combined so far
+                                n = gsub(/"/, "\"", combined)
+                                # Recalculate from scratch on combined
+                                tmp = combined
+                                qcount = 0
+                                while (match(tmp, /"/)) {
+                                    qcount++
+                                    tmp = substr(tmp, RSTART + 1)
+                                }
+                                if (qcount % 2 == 0) {
+                                    # Quotes are balanced — emit the combined line
+                                    print combined
+                                    accumulating = 0
+                                    combined = ""
+                                }
+                                next
+                            }
+
+                            gsub(/\r$/, "")  # strip CR
+
+                            # Check if line is a Gherkin step keyword line
+                            if (/^[[:space:]]*(Given |When |Then |And |But )/) {
+                                # Count unescaped double quotes
+                                tmp = $0
+                                qcount = 0
+                                while (match(tmp, /"/)) {
+                                    qcount++
+                                    tmp = substr(tmp, RSTART + 1)
+                                }
+                                if (qcount % 2 == 1) {
+                                    # Odd quotes — unclosed string, start accumulating
+                                    accumulating = 1
+                                    combined = $0
+                                    next
+                                }
+                            }
+
+                            print
+                        }
+                        END {
+                            # If still accumulating at EOF, emit what we have
+                            if (accumulating) print combined
+                        }
+                        ' "$outpath" > "${outpath}.tmp" && mv "${outpath}.tmp" "$outpath"
+
                         actual_feature_path="$outpath"
                         all_generated_features+=("$outpath")
                     elif [ "$current_block_type" = "steps" ]; then
@@ -1398,7 +1764,7 @@ BROWSER_REUSE_EOF
             echo -e "${CYAN}  Using existing steps file: $(basename "$_steps_file")${NC}"
         else
             cat > "$_steps_file" << 'MINIMAL_STEPS_EOF'
-import { CustomWorld } from '../../../fixtures/cucumber.world';
+import { CustomWorld, scope } from '@/fixtures/cucumber.world';
 // All steps are defined in shared step files (common.steps.ts, browser.steps.ts, e2e-common.steps.ts)
 // No additional step definitions needed for this feature.
 MINIMAL_STEPS_EOF
@@ -1435,7 +1801,7 @@ MINIMAL_STEPS_EOF
         echo -e "  ${YELLOW}Steps written to:${NC}   ${CYAN}${actual_steps_path}${NC}"
 
         # Generate run command with prerequisites
-        FEATURE_REL_PATH=$(python3 -c "import os; print(os.path.relpath('$actual_feature_path', '$AUTOMATION_DIR'))" 2>/dev/null || echo "$actual_feature_path")
+        FEATURE_REL_PATH=$(realpath --relative-to="$AUTOMATION_DIR" "$actual_feature_path" 2>/dev/null || echo "$actual_feature_path")
 
         # Detect tags needed for prerequisites
         FEATURE_CONTENT=$(cat "$actual_feature_path" 2>/dev/null || echo "")
@@ -1571,4 +1937,16 @@ for i in "${!FINAL_FEATURE_PATHS[@]}"; do
     if [ -n "$sp" ]; then
         echo -e "  ${YELLOW}Steps:${NC} ${CYAN}$sp${NC}"
     fi
+done
+
+# After writing the steps file, fix common LLM mistakes:
+# 1. Fix relative imports to use @/ path aliases
+for _gen_steps in "${all_generated_steps[@]}"; do
+    [ -z "$_gen_steps" ] && continue
+    [ -f "$_gen_steps" ] || continue
+    # Fix any relative import paths to use @/ aliases
+    sed -i '' "s|from ['\"]\.\.\/[^'\"]*fixtures/|from '@/fixtures/|g" "$_gen_steps" 2>/dev/null || true
+    sed -i '' "s|import ['\"]\.\.\/[^'\"]*fixtures/|import '@/fixtures/|g" "$_gen_steps" 2>/dev/null || true
+    sed -i '' "s|from ['\"]\.\.\/[^'\"]*lib/|from '@/lib/|g" "$_gen_steps" 2>/dev/null || true
+    echo -e "${GREEN}✓ Fixed import paths in: $(basename "$_gen_steps")${NC}"
 done

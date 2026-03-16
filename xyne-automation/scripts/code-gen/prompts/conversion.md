@@ -64,7 +64,7 @@ const resolvedText = text.replace(/user:([^.,\s]+)\.([^,\s]+)/g, (match, browser
 - For EVERY step phrase in the .feature file that is NOT in the QUICK REFERENCE list, you MUST generate a matching step definition in the .steps.ts file.
 - The step definition string must match the feature file step phrase EXACTLY, character for character.
 - The step definition body MUST use the equivalent Playwright API method. Always use `this.page` (from CustomWorld) — never `page` directly.
-- Even if all steps exist in shared files, you MUST still output a .steps.ts file (it can be minimal with just imports).
+- **If ALL steps in the .feature file are already covered by existing shared step definitions (QUICK REFERENCE list), do NOT generate a .steps.ts file at all.** Only generate a steps file when there are genuinely new step definitions needed.
 
 ### Rule 4 — Faithful Selector Conversion (NEVER invent data-testid)
 
@@ -98,6 +98,7 @@ Some elements look like inputs but are actually `<div>` containers for rich text
 | TestID | Element Type | Correct Conversion |
 |---|---|---|
 | `search-textbox` | `<div data-lexical-search-input>` | `I type "text" using keyboard` |
+| `canvas-editor` | `<div role="application">` | Click to focus, then `I type "text" using keyboard` |
 
 **Known Working Input TestIDs:**
 | TestID | Correct Conversion |
@@ -113,12 +114,28 @@ Some elements look like inputs but are actually `<div>` containers for rich text
 - ❌ WRONG: `And I type "john@example.com" on the element "#search"`
 - ✅ CORRECT: `And I type "user:user2-browser.email" on the element "#search"`
 
+## Dynamic Value Handling Rules:
+- When the Playwright test navigates to a URL and later returns to it, use `I store the current path as "<variable>"` to capture the dynamic URL after creation, then `I open the Xyne-Space at "<variable>"` to navigate back.
+- NEVER hardcode dynamic URLs, IDs, or paths that are generated at runtime (e.g., canvas IDs, ticket IDs, project slugs).
+- When the Playwright code does `page.url()` or stores a URL/path, convert it to the store-path pattern.
+- When the test creates something (canvas, ticket, message) and later navigates back to it, always use the stored path pattern instead of trying to find the item via selectors.
+- Pattern: After a creation action, add `Then I store the current path as "<descriptive-name>"`. Later use `When I open the Xyne-Space at "<descriptive-name>"` to navigate back.
+
 ### Rule 5 — TypeScript & Null Checks
 
 - Every step using `this.page` must include: `if (!this.page) throw new Error('Browser not initialized');`
 - Inside `.catch()`, `.then()`, or callbacks, re-add the null check before using `this.page`.
 - The .steps.ts file MUST compile with zero TypeScript errors.
 - Do NOT access properties that do not exist on Config, CustomWorld, Page, or Locator types.
+- **CRITICAL — Import Paths**: ALWAYS use `@/` path aliases for imports. NEVER use relative paths like `../../../`. The project has tsconfig path aliases configured:
+  ```typescript
+  // ✅ CORRECT
+  import { CustomWorld } from '@/fixtures/cucumber.world';
+  import '@/fixtures/cucumber.parameters';
+  
+  // ❌ WRONG — NEVER use relative paths
+  import { CustomWorld } from '../../../fixtures/cucumber.world';
+  ```
 
 ### Rule 5b — Search Input Patterns
 
@@ -221,6 +238,7 @@ Given using browser "admin-browser"
 - If the Playwright test has multiple `test()` blocks, create separate `Scenario:` blocks for each.
 - Add a blank line between scenarios for readability.
 - Tags go on the line BEFORE the Feature or Scenario they apply to.
+- **CRITICAL — Unique Tags**: The `@e2e` tag is shared, but the second tag MUST be unique across all feature files. Use a descriptive, specific tag like `@canvas-editor-formatting`, `@dm-creation-flow`, `@ticket-from-message`. NEVER use a generic tag like `@canvas`, `@tickets`, `@messages` that other feature files already use.
 
 ### Rule 9 — Keyboard Commands & Key Presses
 
@@ -303,7 +321,7 @@ When('exact step phrase from feature file', async function (this: CustomWorld, p
 
 ## OUTPUT FORMAT
 
-You MUST output BOTH files with complete content inside fenced code blocks.
+You MUST output the feature file with complete content inside a fenced code block. Only output a steps file if there are NEW step definitions not already covered by shared steps.
 
 **CRITICAL — EVERY feature file MUST start with a browser context step:**
 
@@ -333,8 +351,16 @@ Feature: My Feature
 <full feature file content>
 ```
 
-## File: {{OUTPUT_FOLDER}}/steps/NN\_<file_name>.steps.ts
+## File: {{OUTPUT_FOLDER}}/steps/NN\_<file_name>.steps.ts (ONLY if new steps are needed)
 
 ```typescript
-<full steps file content>
+<full steps file content — OMIT THIS ENTIRE SECTION if all steps exist in shared definitions>
 ```
+
+## Selector Rules:
+- **ABSOLUTELY FORBIDDEN**: NEVER use `[role='paragraph']`, `[role='textbox']`, `[role='application']` or ANY `[role='...']` selector as a click or type target. These do NOT work in Cucumber.
+- **ABSOLUTELY FORBIDDEN**: NEVER append `[role='...']` to a testid selector. If you have `[data-testid='canvas-editor']`, use it ALONE — never `[data-testid='canvas-editor'] [role='textbox']`.
+- **ABSOLUTELY FORBIDDEN**: NEVER use `:nth-of-type()`, `:nth-child()`, or similar CSS pseudo-selectors.
+- **ALWAYS**: If a `data-testid` exists on a container, use that testid directly. Click on the container, type using keyboard.
+- **ALWAYS**: For menu items without data-testid or aria-label, use `I click on text "Menu Item Text"`.
+- For `aria-label` selectors, only use them for buttons/toolbars (e.g., `[aria-label='Add block']`), NOT for content areas.
