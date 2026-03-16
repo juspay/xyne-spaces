@@ -1,3 +1,16 @@
+## [1.92.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.91.0...v1.92.0) (2026-03-16)
+
+
+### Features
+
+* add browser settings management for JavaScript and popups with a new UI component and Electron service. ([bfe15e9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bfe15e968fa40a52f7b514f115b0d04bc86fd4c0)), closes [#4128](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4128)
+
+
+### Bug Fixes
+
+* added dummy google login for getting emailId before enrollment ([edf1505](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/edf1505ab6122a8858a24f3d92d4eb9f4722f500)), closes [#4144](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4144)
+* electron crashreports and fix for notification banner ([9ceda7d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9ceda7d88811217eb8a0f8f906abf5ecf9fdb155))
+
 ## [1.91.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.90.0...v1.91.0) (2026-03-16)
 
 
