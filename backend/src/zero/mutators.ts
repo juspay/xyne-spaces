@@ -3707,6 +3707,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const ticket = await tx.run(zql.tickets.where("id", params.id).one());
           if (!ticket) throw new Error("Ticket not found");
 
+          const now = Date.now();
+          if (params.eta !== undefined && params.eta !== null && params.eta < now) {
+            throw new Error("ETA cannot be set to a past date");
+          }
+
           // ACL Business Logic: Check ticket transfer permission for assignedTo or userGroupId changes
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
           const isUserGroupChanging = params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId;
@@ -4297,6 +4302,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         async ({ tx, args }) => {
           const { id, stageEta, updatedAt, ticketId, stageId } = args;
 
+          const now = Date.now();
+          if (stageEta < now) {
+            throw new Error("Status Deadline cannot be set to a past date");
+          }
+
           // 1. Fetch the OLD ticket stage ETA entry BEFORE updating
           const oldTicketStageEtaEntry = await tx.run(
             zql.ticket_stage_eta.where('id', id).one()
@@ -4310,8 +4320,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             logger.warn('[MUTATOR] Ticket stage ETA entry not found and no ticketId/stageId provided');
             return;
           }
-
-          const now = Date.now();
 
           // 2. Upsert the current stage ETA entry (will create if not exists, update if exists)
           await tx.mutate.ticket_stage_eta.upsert({
