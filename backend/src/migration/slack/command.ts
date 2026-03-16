@@ -1,12 +1,12 @@
 /**
  * Slack Migration Command Handler
- * Handles /sync command - opens modal
+ * Handles multiple slash commands: /sync, and others
  */
 
 import { Router, Request, Response } from 'express';
 import { WebClient } from '@slack/web-api';
 import { logger } from '../../utils/logger';
-import { getSyncModal } from './utils/blockKit';
+import { getSyncModal, getSyncJiraffeModal } from './utils/blockKit';
 import { verifySlackRequest } from './middleware/verifySlackRequest';
 import { config } from '../../config/env';
 import { UserRepository } from '../../database/repositories/users';
@@ -15,7 +15,59 @@ import { UserGroupMappingRepository } from '../../database/repositories/userGrou
 
 const router = Router();
 
-router.post('/command', verifySlackRequest, async (req: Request, res: Response) => {
+/**
+ * Check if user is authorized to run migration commands
+ */
+async function checkUserAuthorization(user_id: string): Promise<{ authorized: boolean; message?: string }> {
+  const approvedUsers = config.slackMigrationApprovals;
+
+  if (approvedUsers.length > 0) {
+    if (!user_id) {
+      return {
+        authorized: false,
+        message: '❌ User ID is required for authorization.',
+      };
+    }
+
+    if (!approvedUsers.includes(user_id)) {
+      let messageText = ':sadblob: You are not authorized to perform this action.\n\n';
+      messageText += 'Approved users:\n';
+      messageText += approvedUsers.map((userId: string) => `<@${userId}>`).join(',');
+      messageText += '\n\nPlease contact them to run this migration.';
+
+      const userRepo = new UserRepository();
+      const userGroupRepo = new UserGroupRepository();
+      const userGroupMappingRepo = new UserGroupMappingRepository();
+      const userGroupId = 'cml9ekof80268qqgsz9de3m6d'; // User Group ID for Slack Migration Admins
+
+      const user = await userRepo.findByMetadataField('slackId', user_id);
+      const userGroup = await userGroupRepo.findById(userGroupId);
+
+      if (!user || !userGroup) {
+        return {
+          authorized: false,
+          message: messageText,
+        };
+      }
+
+      const userGroupMapping = await userGroupMappingRepo.exists(userGroupId, user.id);
+
+      if (!userGroupMapping) {
+        return {
+          authorized: false,
+          message: messageText,
+        };
+      }
+    }
+  }
+
+  return { authorized: true };
+}
+
+/**
+ * Handle /sync command - opens sync modal
+ */
+async function handleSyncCommand(req: Request, res: Response): Promise<Response> {
   try {
     const { trigger_id, channel_id, user_id } = req.body;
 
@@ -28,50 +80,14 @@ router.post('/command', verifySlackRequest, async (req: Request, res: Response) 
       });
     }
 
-    // Check if user is authorized to run migrations
-    const approvedUsers = config.slackMigrationApprovals;
-
-    if (approvedUsers.length > 0) {
-      if (!user_id) {
-        logger.warn('[Migration] No user_id provided in /sync command');
-
-        return res.status(200).json({
-          response_type: 'ephemeral',
-          text: '❌ User ID is required for authorization.',
-        });
-      }
-
-      if (!approvedUsers.includes(user_id)) {
-
-        let messageText = ':sadblob: You are not authorized to perform this action.\n\n';
-        messageText += 'Approved users:\n';
-        messageText += approvedUsers.map((userId: string) => `<@${userId}>`).join(',');
-        messageText += '\n\nPlease contact them to run this migration.';
-
-        const userRepo = new UserRepository();
-        const userGroupRepo = new UserGroupRepository();
-        const userGroupMappingRepo = new UserGroupMappingRepository();        
-        const userGroupId = 'cml9ekof80268qqgsz9de3m6d' //User Group ID for Slack Migration Admins
-
-        const user = await userRepo.findByMetadataField('slackId', user_id);
-        const userGroup = await userGroupRepo.findById(userGroupId);
-
-        if (!user || !userGroup) {
-          return res.status(200).json({
-            response_type: 'ephemeral',
-            text: messageText,
-          });
-        }
-
-        const userGroupMapping = await userGroupMappingRepo.exists(userGroupId, user.id);
-
-        if (!userGroupMapping) {
-          return res.status(200).json({
-            response_type: 'ephemeral',
-            text: messageText,
-          });
-        }
-      }
+    // Check authorization
+    const authResult = await checkUserAuthorization(user_id);
+    if (!authResult.authorized) {
+      logger.warn('[Migration] Unauthorized user attempted /sync command', { user_id });
+      return res.status(200).json({
+        response_type: 'ephemeral',
+        text: authResult.message || 'You are not authorized to perform this action.',
+      });
     }
 
     const client = new WebClient(token);
@@ -90,6 +106,94 @@ router.post('/command', verifySlackRequest, async (req: Request, res: Response) 
     return res.status(200).json({
       response_type: 'ephemeral',
       text: 'Failed to open modal. Please try again.',
+    });
+  }
+}
+
+/**
+ * Handle /sync-jiraffe command - opens sync jiraffe modal
+ */
+async function handleSyncJiraffeCommand(req: Request, res: Response): Promise<Response> {
+  try {
+    const { trigger_id, channel_id, user_id } = req.body;
+
+    const token = process.env.SLACK_BOT_TOKEN;
+    if (!token) {
+      logger.error('[Migration] SLACK_BOT_TOKEN is not set');
+      return res.status(200).json({
+        response_type: 'ephemeral',
+        text: 'Slack integration is not configured.',
+      });
+    }
+
+    // Check authorization
+    const authResult = await checkUserAuthorization(user_id);
+    if (!authResult.authorized) {
+      logger.warn('[Migration] Unauthorized user attempted /sync-jiraffe command', { user_id });
+      return res.status(200).json({
+        response_type: 'ephemeral',
+        text: authResult.message || 'You are not authorized to perform this action.',
+      });
+    }
+
+    const client = new WebClient(token);
+    const modalView = getSyncJiraffeModal(channel_id);
+
+    await client.views.open({
+      trigger_id,
+      view: modalView as any,
+    });
+
+    return res.status(200).send();
+  } catch (error) {
+    logger.error('[Migration] Error handling /sync-jiraffe command', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return res.status(200).json({
+      response_type: 'ephemeral',
+      text: 'Failed to open modal. Please try again.',
+    });
+  }
+}
+
+
+/**
+ * Main command router - routes to appropriate handler based on command name
+ */
+router.post('/command', verifySlackRequest, async (req: Request, res: Response) => {
+  try {
+    const { command } = req.body;
+
+    if (!command) {
+      logger.warn('[Migration] No command specified in request');
+      return res.status(200).json({
+        response_type: 'ephemeral',
+        text: '❌ No command specified.',
+      });
+    }
+
+    // Route to appropriate handler based on command
+    switch (command) {
+      case '/sync':
+        return await handleSyncCommand(req, res);
+      
+      case '/sync-jiraffe':
+        return await handleSyncJiraffeCommand(req, res);
+      
+      default:
+        logger.warn('[Migration] Unknown command received', { command });
+        return res.status(200).json({
+          response_type: 'ephemeral',
+          text: `❌ Unknown command: ${command}\n\nAvailable commands: /sync, /sync-jiraffe`,
+        });
+    }
+  } catch (error) {
+    logger.error('[Migration] Error routing command', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return res.status(200).json({
+      response_type: 'ephemeral',
+      text: 'Failed to process command. Please try again.',
     });
   }
 });

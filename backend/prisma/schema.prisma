@@ -1689,6 +1689,7 @@ model ExternalSource {
 enum ExternalEntityType {
   MESSAGE
   EMAIL
+  TICKET
   @@schema("public")
 }
 
