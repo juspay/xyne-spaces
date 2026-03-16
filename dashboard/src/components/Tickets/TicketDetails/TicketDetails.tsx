@@ -2058,6 +2058,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     value={etaValue}
                     onChange={e => setEtaValue(e.target.value)}
                     onBlur={handleETAChange}
+                    min={new Date().toISOString().slice(0, 16)}
                     onKeyDown={e => {
                       if (e.key === 'Enter') handleETAChange();
                       if (e.key === 'Escape') {
@@ -2137,6 +2138,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       ref={stageEtaInputRef}
                       type='datetime-local'
                       value={stageEtaValue}
+                      min={new Date().toISOString().slice(0, 16)}
                       onChange={e => setStageEtaValue(e.target.value)}
                       onBlur={handleStageETAChange}
                       onKeyDown={e => {
