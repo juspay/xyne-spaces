@@ -2,6 +2,7 @@ import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { workflowStepGcsSyncService } from '@/services/workflowStepGcsSyncService';
+import { sessionRecordingSyncService } from '@/services/sessionRecordingSyncService';
 
 export type WorkflowStepGcsSyncJobType = 'sync-workflow-steps-to-gcs';
 
@@ -77,8 +78,13 @@ class WorkflowStepGcsSyncQueue {
     this.queue.process('sync-workflow-steps-to-gcs', async () => {
       logger.info('[WORKFLOW-STEP-GCS-SYNC] Processing workflow step GCS sync job');
       try {
+        // Sync workflow steps
         await workflowStepGcsSyncService.syncAllWorkflowSteps();
         logger.info('[WORKFLOW-STEP-GCS-SYNC] Workflow step GCS sync completed');
+
+        // Sync session recordings
+        await sessionRecordingSyncService.syncAllSessionRecordings();
+        logger.info('[WORKFLOW-STEP-GCS-SYNC] Session recording sync completed');
       } catch (error) {
         logger.error('[WORKFLOW-STEP-GCS-SYNC] Workflow step GCS sync failed:', error);
         throw error;

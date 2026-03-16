@@ -37,6 +37,7 @@ import {
   Bookmark,
   Globe,
   ShieldUser,
+  Brain,
 } from 'lucide-react';
 
 import Avatar from '../ui/Avatar/Avatar';
@@ -83,6 +84,11 @@ const navigationItems = [
     path: '/knowledge-base',
     label: 'Knowledge Base',
     icon: <BookOpen size={16} color='var(--app-sidebar-active-foreground)' />,
+  },
+  {
+    path: '/memory',
+    label: 'Context',
+    icon: <Brain size={16} color='var(--app-sidebar-active-foreground)' />,
   },
   {
     path: '/analytics',

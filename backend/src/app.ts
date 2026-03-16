@@ -90,6 +90,7 @@ import userActivityRoutes from '@/routes/userActivity';
 import activityAliasesRoutes from '@/routes/activityAliases';
 import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
+import memoryRoutes from '@/routes/memory';
 import { verifySamCallback } from '@/middleware/samCallbackAuth';
 import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
@@ -324,6 +325,9 @@ export class App {
 
     // Knowledge routes (auth required)
     this.app.use('/api/knowledge', authMiddleware.authenticate, knowledgeRoutes);
+
+    // Memory routes (auth handled internally by dualAuthenticate middleware)
+    this.app.use('/api/memory', memoryRoutes);
 
     // Y-Sweet collaboration routes (auth required)
     this.app.use('/api/ysweet', authMiddleware.authenticate, ysweetRoutes);

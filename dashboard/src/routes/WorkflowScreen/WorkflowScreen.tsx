@@ -20,7 +20,20 @@ import {
   CombinedWorkflowData,
   StepDetailsResponse,
 } from '../../services/Workflow/workflowGraphService.types';
-import { Loader2, AlertCircle, ArrowLeft, Globe, Table2, GitBranch, Eye, Code } from 'lucide-react';
+import {
+  Loader2,
+  AlertCircle,
+  ArrowLeft,
+  Globe,
+  Table2,
+  GitBranch,
+  Eye,
+  Code,
+  Brain,
+} from 'lucide-react';
+import MemoryHeader from '../../components/Memory/MemoryHeader';
+import MemoryTable from '../../components/Memory/MemoryTable';
+import { MemoryScope, MemoryFilters } from '../../types/memory';
 import GitDiffPanel from '../../components/Workflows/GitDiffPanel';
 import LiveEditsPanel from '../../components/Workflows/LiveEditsPanel';
 import { RCADetailsPanel, type RCAItem } from '../../components/Workflows/RCADetailsPanel';
@@ -85,6 +98,21 @@ const WorkflowScreen: React.FC = () => {
   const [selectedStep, setSelectedStep] = useState<
     (StepDetailsResponse & { workflowStepIds: string[] }) | null
   >(null);
+
+  // Memory/Context filter state for the Context tab
+  const [memoryFilters, setMemoryFilters] = useState<MemoryFilters>({
+    searchQuery: '',
+    scope: MemoryScope.MY,
+    includeQuery: true,
+    includeSummary: true,
+    docTypeFilter: [],
+    tagsFilter: '',
+    repoUrlFilter: '',
+    commitIdFilter: '',
+    sessionIdFilter: '',
+    filePointersFilter: '',
+    ticketIdFilter: ticketId || '',
+  });
 
   // Fetch combined steps data using React Query
   const {
@@ -252,6 +280,14 @@ const WorkflowScreen: React.FC = () => {
         title: 'Live Edits',
         type: 'live-edits',
         icon: <Code size={14} />,
+        closable: false,
+        disabled: false,
+      },
+      {
+        id: 'context',
+        title: 'Context',
+        type: 'context' as const,
+        icon: <Brain size={14} />,
         closable: false,
         disabled: false,
       },
@@ -490,6 +526,18 @@ const WorkflowScreen: React.FC = () => {
           ) : null;
         case 'preview':
           return <WorkflowPreviewPanel />;
+        case 'context':
+          return (
+            <div className='h-full overflow-auto bg-background'>
+              <div className='px-6 py-4'>
+                <MemoryHeader filters={memoryFilters} onFiltersChange={setMemoryFilters} />
+                <MemoryTable
+                  filters={memoryFilters}
+                  enableCompare={memoryFilters.scope === MemoryScope.MY}
+                />
+              </div>
+            </div>
+          );
         case 'rca-details':
           // Derive RCA data from selected node
           // eslint-disable-next-line no-case-declarations
@@ -516,6 +564,7 @@ const WorkflowScreen: React.FC = () => {
       activeTabId,
       isGraphViewOpen,
       handleExecutionSelect,
+      memoryFilters,
     ],
   );
 
