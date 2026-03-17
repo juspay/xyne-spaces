@@ -10,6 +10,7 @@ import {
   Lock,
   BookMarked,
   ExternalLink,
+  Check,
 } from 'lucide-react';
 import { CanvasListProps, Canvas } from '../Canvas.types';
 import { CanvasRole, CanvasVisibility, DocType } from '@xyne/shared';
@@ -89,6 +90,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   showQuartoDocsFilter = false,
   activeFilter: externalActiveFilter,
   onFilterChange,
+  selectedCanvasId,
 }) => {
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -307,12 +309,16 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
               const isQuartoDoc = canvas.docType === DocType.Quarto;
 
+              const isSelected = selectedCanvasId === canvas.id;
+
               return (
                 <div
                   key={canvas.id}
                   role='button'
                   tabIndex={0}
-                  className='group flex items-center px-6 py-4 hover:bg-accent transition-colors cursor-pointer'
+                  className={`group flex items-center px-6 py-4 transition-colors cursor-pointer ${
+                    isSelected ? 'bg-accent' : 'hover:bg-accent'
+                  }`}
                   onClick={e =>
                     isQuartoDoc ? handleQuartoDocClick(e, canvas) : onSelect(e, canvas)
                   }
@@ -422,6 +428,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   </div>
 
                   <div className='flex items-center gap-3 ml-4'>
+                    {isSelected && (
+                      <div className='flex-shrink-0 w-5 h-5 rounded-full bg-primary flex items-center justify-center'>
+                        <Check className='w-3 h-3 text-primary-foreground' strokeWidth={3} />
+                      </div>
+                    )}
                     {!isQuartoDoc && (
                       <button
                         onClick={e => {
