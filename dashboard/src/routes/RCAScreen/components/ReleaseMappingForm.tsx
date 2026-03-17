@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Plus, Trash2 } from 'lucide-react';
-import { AttributionConfidence, BaseTicketType } from '@xyne/shared';
+import { AttributionConfidence } from '@xyne/shared';
+import { useForm } from 'react-hook-form';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
@@ -10,13 +11,20 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { Button } from '../../../components/ui/Button';
 import { Combobox } from '../../../components/ui/Combobox/Combobox';
-import type { ReleaseMappingFormProps, Phase } from '../RCAScreen.types';
+import type { ReleaseMappingFormProps } from '../RCAScreen.types';
 
 const confidenceOptions = [
   { label: 'Low', value: AttributionConfidence.LOW },
   { label: 'Medium', value: AttributionConfidence.MEDIUM },
   { label: 'High', value: AttributionConfidence.HIGH },
 ];
+
+interface ReleaseMappingFormValues {
+  selectedReleaseId: string;
+  selectedAppReleaseId: string;
+  selectedRootCauseTicketId: string;
+  confidence: AttributionConfidence;
+}
 
 export const ReleaseMappingForm = ({
   ticketId,
@@ -26,15 +34,23 @@ export const ReleaseMappingForm = ({
   onPhaseChange,
 }: ReleaseMappingFormProps) => {
   const zero = useZero();
+  const form = useForm<ReleaseMappingFormValues>({
+    defaultValues: {
+      selectedReleaseId: '',
+      selectedAppReleaseId: '',
+      selectedRootCauseTicketId: '',
+      confidence: AttributionConfidence.LOW,
+    },
+  });
   const [releaseSearch, setReleaseSearch] = useState('');
   const debouncedReleaseSearch = useDebouncedValue(releaseSearch, 300);
-  const [selectedReleaseId, setSelectedReleaseId] = useState('');
-  const [selectedAppReleaseId, setSelectedAppReleaseId] = useState('');
+  const selectedReleaseId = form.watch('selectedReleaseId') ?? '';
+  const selectedAppReleaseId = form.watch('selectedAppReleaseId') ?? '';
   const [appReleaseSearch, setAppReleaseSearch] = useState('');
-  const [selectedRootCauseTicketId, setSelectedRootCauseTicketId] = useState('');
+  const selectedRootCauseTicketId = form.watch('selectedRootCauseTicketId') ?? '';
   const [rootCauseTicketSearch, setRootCauseTicketSearch] = useState('');
   const debouncedRootCauseTicketSearch = useDebouncedValue(rootCauseTicketSearch, 300);
-  const [confidence, setConfidence] = useState<AttributionConfidence>(AttributionConfidence.LOW);
+  const confidence = form.watch('confidence') ?? AttributionConfidence.LOW;
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -83,62 +99,40 @@ export const ReleaseMappingForm = ({
     [releaseAttributions],
   );
 
-  const [releaseTicketsById] = useCachedQuery(queries.ticketsByIds({ ticketIds: releaseIds }), {
-    enabled: releaseIds.length > 0,
+  const allTicketIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...releaseIds,
+            ...rootCauseTicketIds,
+            selectedReleaseId,
+            selectedRootCauseTicketId,
+          ].filter((id): id is string => !!id),
+        ),
+      ),
+    [releaseIds, rootCauseTicketIds, selectedReleaseId, selectedRootCauseTicketId],
+  );
+
+  const [ticketsByAllIds] = useCachedQuery(queries.ticketsByIds({ ticketIds: allTicketIds }), {
+    enabled: allTicketIds.length > 0,
   });
 
-  const [rootCauseTicketsById] = useCachedQuery(
-    queries.ticketsByIds({ ticketIds: rootCauseTicketIds }),
-    { enabled: rootCauseTicketIds.length > 0 },
-  );
-
-  const [selectedReleaseTicketById] = useCachedQuery(
-    queries.ticketsByIds({ ticketIds: selectedReleaseId ? [selectedReleaseId] : [] }),
-    { enabled: !!selectedReleaseId },
-  );
-
-  const [selectedRootCauseTicketById] = useCachedQuery(
-    queries.ticketsByIds({
-      ticketIds: selectedRootCauseTicketId ? [selectedRootCauseTicketId] : [],
-    }),
-    { enabled: !!selectedRootCauseTicketId },
-  );
-
-  // Get release ticket IDs that are sub-tickets (have a parent ticket)
-  const releaseTicketIds = useMemo(
-    () => (releaseTicketsData ?? []).map(ticket => ticket.id),
-    [releaseTicketsData],
-  );
-
-  const [subTicketMappings] = useCachedQuery(
-    queries.subTicketsByMappedTicketIds({ mappedTicketIds: releaseTicketIds }),
-    { enabled: releaseTicketIds.length > 0 },
-  );
-
-  const releaseTicketOptions = useMemo(() => {
-    const subTicketIds = new Set(
-      (subTicketMappings ?? []).map(st => st.mappedTicketId).filter(Boolean),
-    );
-    return (releaseTicketsData ?? []).filter(
-      ticket => ticket.ticketType === BaseTicketType.Release && !subTicketIds.has(ticket.id),
-    );
-  }, [releaseTicketsData, subTicketMappings]);
+  const releaseTicketOptions = useMemo(() => releaseTicketsData ?? [], [releaseTicketsData]);
 
   const releaseTicketMap = useMemo(() => {
     const map = new Map<string, (typeof releaseTicketOptions)[number]>();
-    (releaseTicketsById ?? []).forEach(ticket => map.set(ticket.id, ticket));
-    (selectedReleaseTicketById ?? []).forEach(ticket => map.set(ticket.id, ticket));
+    (ticketsByAllIds ?? []).forEach(ticket => map.set(ticket.id, ticket));
     releaseTicketOptions.forEach(ticket => map.set(ticket.id, ticket));
     return map;
-  }, [releaseTicketOptions, releaseTicketsById, selectedReleaseTicketById]);
+  }, [releaseTicketOptions, ticketsByAllIds]);
 
   const rootCauseTicketMap = useMemo(() => {
     const map = new Map<string, (typeof rootCauseTicketsData)[number]>();
     (rootCauseTicketsData ?? []).forEach(ticket => map.set(ticket.id, ticket));
-    (selectedRootCauseTicketById ?? []).forEach(ticket => map.set(ticket.id, ticket));
-    (rootCauseTicketsById ?? []).forEach(ticket => map.set(ticket.id, ticket));
+    (ticketsByAllIds ?? []).forEach(ticket => map.set(ticket.id, ticket));
     return map;
-  }, [rootCauseTicketsData, selectedRootCauseTicketById, rootCauseTicketsById]);
+  }, [rootCauseTicketsData, ticketsByAllIds]);
 
   const attributedSubTicketMap = useMemo(
     () => new Map(attributedSubTickets.map(subTicket => [subTicket.id, subTicket])),
@@ -252,9 +246,13 @@ export const ReleaseMappingForm = ({
       }
 
       toast.success('Release linked to RCA');
-      setSelectedAppReleaseId('');
-      setSelectedRootCauseTicketId('');
-      setConfidence(AttributionConfidence.LOW);
+      form.reset({
+        selectedReleaseId: '',
+        selectedAppReleaseId: '',
+        selectedRootCauseTicketId: '',
+        confidence: AttributionConfidence.LOW,
+      });
+      setReleaseSearch('');
       setAppReleaseSearch('');
       setRootCauseTicketSearch('');
     } catch (error) {
@@ -282,15 +280,13 @@ export const ReleaseMappingForm = ({
     }
   };
 
-  const handleContinue = (): void => {
-    onPhaseChange('rca' as Phase);
-  };
+  const handleContinue = (): void => onPhaseChange('rca');
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden'>
+      <div className='bg-background shadow-sm border border-border rounded-xl'>
         {/* Header Section */}
-        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-gray-50 to-white'>
+        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-muted/40 to-background'>
           <div className='flex items-center justify-between'>
             <div className='flex items-center gap-3'>
               <div className='h-10 w-10 rounded-lg bg-indigo-600 flex items-center justify-center'>
@@ -329,15 +325,15 @@ export const ReleaseMappingForm = ({
                 if (value === '' && selectedReleaseItem) return;
                 setReleaseSearch(value);
                 if (selectedReleaseItem && value !== selectedReleaseItem.label) {
-                  setSelectedReleaseId('');
+                  form.setValue('selectedReleaseId', '', { shouldDirty: true });
                 }
               }}
               items={releaseItems}
               value={selectedReleaseItem}
               onValueChange={value => {
-                setSelectedReleaseId(value ?? '');
+                form.setValue('selectedReleaseId', value ?? '', { shouldDirty: true });
                 setReleaseSearch('');
-                setSelectedAppReleaseId('');
+                form.setValue('selectedAppReleaseId', '', { shouldDirty: true });
                 setAppReleaseSearch('');
               }}
             />
@@ -355,13 +351,13 @@ export const ReleaseMappingForm = ({
                 if (value === '' && selectedAppReleaseItem) return;
                 setAppReleaseSearch(value);
                 if (selectedAppReleaseItem && value !== selectedAppReleaseItem.label) {
-                  setSelectedAppReleaseId('');
+                  form.setValue('selectedAppReleaseId', '', { shouldDirty: true });
                 }
               }}
               items={selectedReleaseId ? filteredAppReleaseItems : []}
               value={selectedAppReleaseItem}
               onValueChange={value => {
-                setSelectedAppReleaseId(value ?? '');
+                form.setValue('selectedAppReleaseId', value ?? '', { shouldDirty: true });
                 setAppReleaseSearch('');
               }}
             />
@@ -376,13 +372,13 @@ export const ReleaseMappingForm = ({
                 if (value === '' && selectedRootCauseTicketItem) return;
                 setRootCauseTicketSearch(value);
                 if (selectedRootCauseTicketItem && value !== selectedRootCauseTicketItem.label) {
-                  setSelectedRootCauseTicketId('');
+                  form.setValue('selectedRootCauseTicketId', '', { shouldDirty: true });
                 }
               }}
               items={rootCauseTicketItems}
               value={selectedRootCauseTicketItem}
               onValueChange={value => {
-                setSelectedRootCauseTicketId(value ?? '');
+                form.setValue('selectedRootCauseTicketId', value ?? '', { shouldDirty: true });
                 setRootCauseTicketSearch('');
               }}
             />
@@ -397,7 +393,11 @@ export const ReleaseMappingForm = ({
               items={confidenceOptions}
               value={selectedConfidenceItem}
               onValueChange={value =>
-                setConfidence((value as AttributionConfidence) ?? AttributionConfidence.LOW)
+                form.setValue(
+                  'confidence',
+                  (value as AttributionConfidence) ?? AttributionConfidence.LOW,
+                  { shouldDirty: true },
+                )
               }
             />
           </div>
@@ -481,7 +481,7 @@ export const ReleaseMappingForm = ({
                           type='button'
                           size='iconSm'
                           variant='ghost'
-                          className='text-red-600 hover:text-red-700 hover:bg-red-50'
+                          className='text-destructive hover:text-destructive hover:bg-destructive/10'
                           onClick={() => void handleDeleteMapping(attribution.id)}
                           loading={deletingId === attribution.id}
                           disabled={isSubmitting || deletingId !== null}
@@ -498,7 +498,7 @@ export const ReleaseMappingForm = ({
           </div>
 
           {/* Footer */}
-          <div className='flex justify-end border-t border-border pt-6'>
+          <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex justify-end'>
             <Button type='button' onClick={handleContinue} disabled={isSubmitting}>
               Next
             </Button>

@@ -41,6 +41,7 @@ import {
   FormEntityType,
   TicketStageRequestStatus,
   BaseTicketType,
+  RCAStatus,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -339,7 +340,36 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
 
   // Query ticket data
-  const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId }));
+  const [ticket] = useCachedQuery(queries.ticketDetailsById({ ticketId: ticketId }));
+  const rcaRecord = ticket?.rcas?.[0];
+
+  // RCA button labels based on status
+  const isClosedRca = rcaRecord?.status === RCAStatus.CLOSED;
+  const isDraftRca = rcaRecord?.status === RCAStatus.DRAFT;
+  const rcaButtonTitle = isClosedRca ? 'View/Edit RCA' : isDraftRca ? 'Continue RCA' : 'Fill RCA';
+  const rcaButtonSubtitle = isClosedRca
+    ? 'Review submitted RCA and edit details'
+    : isDraftRca
+      ? 'Resume your in-progress RCA'
+      : 'Add root cause, impact, and COE details';
+  const rcaTrackName = isClosedRca ? 'ViewEditRCA' : isDraftRca ? 'ContinueRCA' : 'FillRCA';
+
+  const handleOpenRcaPanel = (): void => {
+    if (onFillRCA) {
+      onFillRCA();
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(location.search);
+    nextSearchParams.set('selectedTab', 'rca');
+    void navigate(
+      {
+        pathname: location.pathname,
+        search: `?${nextSearchParams.toString()}`,
+      },
+      { replace: true },
+    );
+  };
 
   // Query all assignments for this ticket
   const [ticketAssignments] = useCachedQuery(
@@ -2706,24 +2736,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <div className='mt-6'>
             <button
               type='button'
-              onClick={() => {
-                if (onFillRCA) {
-                  onFillRCA();
-                  return;
-                }
-
-                const nextSearchParams = new URLSearchParams(location.search);
-                nextSearchParams.set('selectedTab', 'rca');
-                void navigate(
-                  {
-                    pathname: location.pathname,
-                    search: `?${nextSearchParams.toString()}`,
-                  },
-                  { replace: true },
-                );
-              }}
+              onClick={handleOpenRcaPanel}
               data-track-category='Tickets'
-              data-track-name='FillRCA'
+              data-track-name={rcaTrackName}
               data-testid='fill-rca-button'
               className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
             >
@@ -2732,10 +2747,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   <ClipboardCheck size={18} />
                 </span>
                 <span className='flex flex-col text-left'>
-                  <span className='text-sm font-semibold text-foreground'>Fill RCA</span>
-                  <span className='text-xs text-muted-foreground'>
-                    Add root cause, impact, and COE details
-                  </span>
+                  <span className='text-sm font-semibold text-foreground'>{rcaButtonTitle}</span>
+                  <span className='text-xs text-muted-foreground'>{rcaButtonSubtitle}</span>
                 </span>
               </span>
               <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />

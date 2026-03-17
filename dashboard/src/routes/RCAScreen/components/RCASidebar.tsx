@@ -4,11 +4,11 @@ import { Badge } from '../../../components/ui/Badge';
 import { cn } from '../../../utils/classNames';
 import type { RCASidebarProps } from '../RCAScreen.types';
 import { RCAStatus } from '@xyne/shared';
+import { formatRcaValue } from '../rcaCacConfig';
 
 export const RCASidebar = ({
   records,
   ownerItems,
-  bugTypeValueById,
   isLoading,
   isSubmitting,
   onRecordClick,
@@ -57,7 +57,7 @@ export const RCASidebar = ({
           const ticketTitle = record.ticket?.title || 'Ticket details unavailable';
           const ownerLabel =
             ownerItems.find(o => o.value === record.ownerId)?.label ?? record.ownerId;
-          const bugTypeLabel = bugTypeValueById.get(record.bugTypeId ?? '') ?? '-';
+          const bugTypeLabel = record.bugTypeId ? formatRcaValue(record.bugTypeId) : '-';
 
           return (
             <button

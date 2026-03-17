@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { COEStatus, SEVERITY, LookupType } from '@xyne/shared';
+import { COEStatus, SEVERITY } from '@xyne/shared';
 import type { PhaseConfig, COEStatusOption, ReadOnlyFieldProps } from './RCAScreen.types';
 
 export const coeStatusOptions: COEStatusOption[] = [
@@ -20,24 +20,6 @@ export const phases: PhaseConfig[] = [
   { id: 'impact', label: 'Impact', description: '' },
   { id: 'coe', label: 'COE', description: '' },
 ];
-
-export const bugCategoryValueMap: Record<string, string[]> = {
-  Reliability: ['Change', 'Capacity', 'Fault'],
-  Performance: ['N', 'C', 'P/U'],
-  'UI/UX': ['UI/UX'],
-};
-
-export const issueCategoryLookupTypeByCategoryValue: Record<string, LookupType> = {
-  Capacity: LookupType.BUG_ISSUE_CATEGORY_CAPACITY,
-  Change: LookupType.BUG_ISSUE_CATEGORY_CHANGE,
-  Fault: LookupType.BUG_ISSUE_CATEGORY_FAULT,
-};
-
-export const issueResolutionLookupTypeByCategoryValue: Record<string, LookupType> = {
-  Capacity: LookupType.BUG_RESOLUTION_CAPACITY,
-  Change: LookupType.BUG_RESOLUTION_CHANGE,
-  Fault: LookupType.BUG_RESOLUTION_FAULT,
-};
 
 /** Format enum-like values into readable labels. */
 export const formatEnumLabel = (value: string): string =>

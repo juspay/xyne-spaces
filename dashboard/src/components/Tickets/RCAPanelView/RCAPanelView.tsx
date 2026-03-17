@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ClipboardCheck, Maximize2, Minimize2 } from 'lucide-react';
 import { RCAStatus } from '@xyne/shared';
-import { useZero } from '../../../hooks/useZero';
+import { toast } from 'sonner';
+import { Button } from '../../ui/Button';
+import { Dialog } from '../../ui/Dialog';
 import { queries } from '../../../zero/queries';
-import { mutators } from '../../../zero/mutators';
 import {
   RCAForm,
   RCADetailsView,
@@ -17,14 +18,13 @@ import {
   coeStatusOptions,
   severityOptions,
 } from '../../../routes/RCAScreen/RCAScreen.utils';
-import type {
-  ImpactType,
-  COEType,
-  ImpactAttachment,
-} from '../../../routes/RCAScreen/RCAScreen.types';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useRCALookups } from '../../../hooks/useRCALookups';
 import { useRCASubmissions } from '../../../hooks/useRCASubmissions';
+import { useAuth } from '../../../hooks/useAuth';
+import { useCacConfig } from '../../../hooks/useCacConfig';
+import { DEFAULT_RCA_CAC_CONFIG, type RcaCacConfig } from '../../../routes/RCAScreen/rcaCacConfig';
+import type { FormControllerRef } from '../../../routes/RCAScreen/RCAScreen.types';
 interface RCAPanelViewProps {
   ticketId: string;
 }
@@ -37,16 +37,22 @@ const useFilteredItems = <T extends { label: string }>(items: T[], searchQuery: 
   }, [items, searchQuery]);
 };
 
-export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
-  const zero = useZero();
-
+export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElement => {
+  const { user } = useAuth();
+  const { config } = useCacConfig<RcaCacConfig>({
+    key: 'rca_config',
+    fallbackConfig: DEFAULT_RCA_CAC_CONFIG,
+  });
+  const rcaFormRef = useRef<FormControllerRef | null>(null);
+  const impactFormRef = useRef<FormControllerRef | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [selectedImpactId, setSelectedImpactId] = useState<string | null>(null);
-  const [selectedCoeId, setSelectedCoeId] = useState<string | null>(null);
+  const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; message: string }>({
+    open: false,
+    message: '',
+  });
+  const [isClosedEditMode, setIsClosedEditMode] = useState(false);
   const [ownerSearchQuery, setOwnerSearchQuery] = useState('');
-  const [bugLookupsLoaded, setBugLookupsLoaded] = useState(false);
-  const [impactLookupsLoaded, setImpactLookupsLoaded] = useState(false);
-  const [coeLookupsLoaded, setCoeLookupsLoaded] = useState(false);
 
   // Fetch existing RCA for this ticket
   const [rcaData] = useCachedQuery(queries.rcaByTicketId({ ticketId }), {
@@ -56,25 +62,15 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
   const {
     handleCreateRCA,
     handleRcaSubmit,
-    uploadImpactAttachments,
     handleCoeSubmit,
     activePhase,
     setActivePhase,
     isSubmitting,
     isCreatingRCA,
-    pendingImpacts,
-    setPendingImpacts,
-    impactDraftById,
-    setImpactDraftById,
-    draftImpactFilesById,
-    setDraftImpactFilesById,
-    pendingCOEs,
-    setPendingCOEs,
-    pendingRCA,
-    setPendingRCA,
   } = useRCASubmissions({
     ticketId,
     selectedRecord,
+    config,
   });
 
   const {
@@ -84,89 +80,37 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
     releaseSubTicketsData,
     impactTypeOptions,
     bugTypeOptions,
-    bugTypeValueById,
-    categoryTypeOptions,
-    categoryValueById,
+    categoryOptions,
+    categoryOptionsByBugTypeValue,
     coeActionTypeOptions,
-    coeActionTypeValueById,
-    quickFixActionTypeId,
-    excludedCoeActionTypeIds,
+    coeActionLabelByValue,
+    quickFixOptions,
+    quickFixActionValue,
+    hiddenCoeActionValues,
     issueCategoryOptionsByCategoryValue,
-    issueCategoryValueById,
+    issueCategoryRequiredByCategoryValue,
   } = useRCALookups({
     ticketId,
-    activePhase,
     selectedRecord,
-    pendingRCA,
-    bugLookupsLoaded,
-    impactLookupsLoaded,
-    coeLookupsLoaded,
+    config,
   });
 
-  const selectedImpact = useMemo<ImpactType | null>(() => {
-    if (!selectedRecord) return null;
-    const impacts = selectedRecord.impacts ?? [];
-    if (selectedImpactId) {
-      return impacts.find(entry => entry.id === selectedImpactId) ?? impacts[0] ?? null;
-    }
-    return impacts[0] ?? null;
-  }, [selectedRecord, selectedImpactId]);
-
-  const [impactAttachmentsData] = useCachedQuery(
-    queries.attachmentsByImpact({ impactId: selectedImpact?.id ?? '' }),
-    { enabled: !!selectedImpact?.id },
-  );
-  const impactAttachments = (impactAttachmentsData ?? []) as ImpactAttachment[];
-
-  const selectedCoe = useMemo<COEType | null>(() => {
-    if (!selectedRecord) return null;
-    const coes = (selectedRecord.coes ?? []).filter(
-      coe => !excludedCoeActionTypeIds.has(coe.actionTypeId),
-    );
-    if (selectedCoeId) {
-      return coes.find(entry => entry.id === selectedCoeId) ?? coes[0] ?? null;
-    }
-    return coes[0] ?? null;
-  }, [selectedRecord, selectedCoeId, excludedCoeActionTypeIds]);
-
-  const isRcaEditable = selectedRecord?.status !== RCAStatus.CLOSED;
-  const isImpactEnabled = selectedRecord?.status !== RCAStatus.CLOSED;
-  const isCoeEnabled = selectedRecord?.status !== RCAStatus.CLOSED;
+  const isOwner = !!selectedRecord && !!user?.id && selectedRecord.ownerId === user.id;
+  const canEditRca =
+    isOwner &&
+    (selectedRecord?.status === RCAStatus.DRAFT || selectedRecord?.status === RCAStatus.CLOSED);
+  const canEditInView = canEditRca && selectedRecord?.status === RCAStatus.CLOSED;
+  const isReadOnlyView =
+    !isOwner ||
+    selectedRecord?.status === RCAStatus.IN_REVIEW ||
+    selectedRecord?.status === RCAStatus.APPROVED ||
+    (selectedRecord?.status === RCAStatus.CLOSED && !isClosedEditMode);
 
   const filteredOwnerItems = useFilteredItems(ownerItems, ownerSearchQuery);
 
-  // Sync selected impact/coe when record changes
   useEffect(() => {
-    if (!selectedRecord) {
-      setSelectedImpactId(null);
-      setSelectedCoeId(null);
-      return;
-    }
-
-    const impacts = selectedRecord.impacts ?? [];
-    const coes = (selectedRecord.coes ?? []).filter(
-      coe => !excludedCoeActionTypeIds.has(coe.actionTypeId),
-    );
-
-    if (!impacts.some(entry => entry.id === selectedImpactId)) {
-      setSelectedImpactId(impacts[0]?.id ?? null);
-    }
-    if (!coes.some(entry => entry.id === selectedCoeId)) {
-      setSelectedCoeId(coes[0]?.id ?? null);
-    }
-  }, [selectedRecord, selectedImpactId, selectedCoeId, excludedCoeActionTypeIds]);
-
-  useEffect(() => {
-    setSelectedImpactId(null);
-    setSelectedCoeId(null);
-    setBugLookupsLoaded(false);
-    setImpactLookupsLoaded(false);
-    setCoeLookupsLoaded(false);
+    setIsClosedEditMode(false);
   }, [ticketId]);
-
-  // Removed activePhase dependency from here because activePhase is now managed by the hook.
-  // We can't easily sync local lookup state back to the hook's activePhase if we depend on it.
-  // Instead, the new useRCASubmissions hook manages activePhase. We'll extract activePhase below.
 
   useEffect(() => {
     if (!isExpanded) return;
@@ -178,7 +122,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => {
+    return (): void => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', handleKeyDown);
     };
@@ -187,10 +131,96 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
   // the hook call for submissions was moved up here
 
   useEffect(() => {
-    if (activePhase === 'rca') setBugLookupsLoaded(true);
-    if (activePhase === 'impact') setImpactLookupsLoaded(true);
-    if (activePhase === 'coe') setCoeLookupsLoaded(true);
-  }, [activePhase]);
+    if (selectedRecord?.status !== RCAStatus.CLOSED && isClosedEditMode) {
+      setIsClosedEditMode(false);
+    }
+  }, [selectedRecord?.status, isClosedEditMode]);
+
+  useEffect((): (() => void) => {
+    return (): void => {
+      if (confirmResolverRef.current) {
+        confirmResolverRef.current(false);
+        confirmResolverRef.current = null;
+      }
+    };
+  }, []);
+
+  const askForPhaseSaveConfirmation = (message: string): Promise<boolean> =>
+    new Promise((resolve): void => {
+      confirmResolverRef.current = resolve;
+      setConfirmDialog({ open: true, message });
+    });
+
+  const closeConfirmDialog = (result: boolean): void => {
+    setConfirmDialog(prev => ({ ...prev, open: false }));
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(result);
+      confirmResolverRef.current = null;
+    }
+  };
+
+  const handlePhaseClick = async (phase: typeof activePhase): Promise<void> => {
+    if (!canEditRca) {
+      setActivePhase(phase);
+      return;
+    }
+
+    if (
+      activePhase === 'rca' &&
+      phase !== 'rca' &&
+      rcaFormRef.current?.hasUnsavedChanges() &&
+      rcaFormRef.current
+    ) {
+      const shouldSave = await askForPhaseSaveConfirmation(
+        'You have unsaved changes in the RCA phase. Save before moving?',
+      );
+      if (shouldSave) {
+        try {
+          const saved = await rcaFormRef.current.save();
+          if (saved) {
+            toast.success('RCA details saved');
+          } else {
+            toast.error('Could not save RCA details. Please check required fields.');
+            return;
+          }
+        } catch {
+          toast.error('Error saving RCA details');
+          return;
+        }
+      } else {
+        rcaFormRef.current.discard?.();
+      }
+    }
+
+    if (
+      activePhase === 'impact' &&
+      phase !== 'impact' &&
+      impactFormRef.current?.hasUnsavedChanges() &&
+      impactFormRef.current
+    ) {
+      const shouldSave = await askForPhaseSaveConfirmation(
+        'You have unsaved changes in the Impact phase. Save before moving?',
+      );
+      if (shouldSave) {
+        try {
+          const saved = await impactFormRef.current.save();
+          if (saved) {
+            toast.success('Impact details saved');
+          } else {
+            toast.error('Could not save Impact details. Please check required fields.');
+            return;
+          }
+        } catch {
+          toast.error('Error saving Impact details');
+          return;
+        }
+      } else {
+        impactFormRef.current.discard?.();
+      }
+    }
+
+    setActivePhase(phase);
+  };
 
   let content: React.ReactNode;
 
@@ -207,7 +237,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
         <button
           type='button'
           className='px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50'
-          onClick={() => void handleCreateRCA(bugTypeOptions, categoryTypeOptions)}
+          onClick={() => void handleCreateRCA()}
           disabled={isCreatingRCA}
           data-track-category='RCA'
           data-track-name='StartRCAFromPanel'
@@ -216,7 +246,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
         </button>
       </div>
     );
-  } else if (selectedRecord.status === RCAStatus.CLOSED) {
+  } else if (isReadOnlyView) {
     content = (
       <div className='p-4 overflow-y-auto h-full'>
         <RCADetailsView
@@ -224,12 +254,17 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
           ownerItems={ownerItems}
           impactTypeOptions={impactTypeOptions}
           coeActionTypeOptions={coeActionTypeOptions}
-          bugTypeOptions={bugTypeOptions}
-          categoryTypeOptions={categoryTypeOptions}
-          issueCategoryValueById={issueCategoryValueById}
+          coeActionLabelByValue={coeActionLabelByValue}
+          quickFixActionValue={quickFixActionValue}
           releaseTickets={releaseTicketsData ?? []}
           releaseAttributions={releaseAttributionsData ?? []}
           attributedSubTickets={releaseSubTicketsData ?? []}
+          {...(canEditInView && {
+            onEdit: (): void => {
+              setIsClosedEditMode(true);
+              setActivePhase('release');
+            },
+          })}
         />
       </div>
     );
@@ -240,85 +275,85 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
           <RCAPhaseStepper
             phases={phases}
             activePhase={activePhase}
-            isImpactEnabled={isImpactEnabled}
-            isCoeEnabled={isCoeEnabled}
-            onPhaseClick={setActivePhase}
+            isImpactEnabled={canEditRca}
+            isCoeEnabled={canEditRca}
+            onPhaseClick={handlePhaseClick}
           />
         </div>
 
         <div className='flex-1 overflow-y-auto p-4'>
-          {activePhase === 'release' ? (
+          <div className={activePhase === 'release' ? 'block h-full' : 'hidden'}>
             <ReleaseMappingForm
               ticketId={selectedRecord.ticketId}
               releaseAttributions={releaseAttributionsData ?? []}
               attributedSubTickets={releaseSubTicketsData ?? []}
               isSubmitting={isSubmitting}
-              onPhaseChange={setActivePhase}
+              onPhaseChange={phase => {
+                void handlePhaseClick(phase);
+              }}
             />
-          ) : activePhase === 'impact' ? (
+          </div>
+
+          <div className={activePhase === 'impact' ? 'block h-full' : 'hidden'}>
             <ImpactForm
               selectedRecord={selectedRecord}
-              isImpactEnabled={isImpactEnabled}
+              isImpactEnabled={canEditRca}
               isSubmitting={isSubmitting}
               impactTypeOptions={impactTypeOptions}
-              impactAttachments={impactAttachments}
-              onAddImpactAttachments={uploadImpactAttachments}
-              onRemoveImpactAttachment={(attachmentId: string): Promise<void> => {
-                zero.mutate(mutators.messageAttachment.delete({ attachmentId }));
-                return Promise.resolve();
+              controllerRef={impactFormRef}
+              onPhaseChange={phase => {
+                void handlePhaseClick(phase);
               }}
-              pendingImpacts={pendingImpacts}
-              selectedImpact={selectedImpact}
-              impactDraftById={impactDraftById}
-              setImpactDraftById={setImpactDraftById}
-              draftImpactFilesById={draftImpactFilesById}
-              setDraftImpactFilesById={setDraftImpactFilesById}
-              setPendingImpacts={setPendingImpacts}
-              setSelectedImpactId={setSelectedImpactId}
-              onPhaseChange={setActivePhase}
             />
-          ) : activePhase === 'coe' ? (
+          </div>
+
+          <div className={activePhase === 'coe' ? 'block h-full' : 'hidden'}>
             <COEForm
               selectedRecord={selectedRecord}
-              isCoeEnabled={isCoeEnabled}
+              isCoeEnabled={canEditRca}
               isSubmitting={isSubmitting}
               ownerItems={ownerItems}
               coeActionTypeOptions={coeActionTypeOptions}
-              coeActionTypeValueById={coeActionTypeValueById}
-              quickFixActionTypeId={quickFixActionTypeId}
+              coeActionLabelByValue={coeActionLabelByValue}
+              quickFixOptions={quickFixOptions}
+              quickFixActionValue={quickFixActionValue}
+              hiddenCoeActionValues={hiddenCoeActionValues}
               coeStatusOptions={coeStatusOptions}
-              pendingCOEs={pendingCOEs}
-              selectedCoe={selectedCoe}
               rcaOwnerId={selectedRecord.ownerId}
-              setPendingCOEs={setPendingCOEs}
-              setSelectedCoeId={setSelectedCoeId}
-              onSubmit={() => handleCoeSubmit(bugTypeValueById, categoryValueById, selectedCoe)}
-              onPhaseChange={setActivePhase}
-              onNavigate={() => {
-                /* no-op: panel doesn't navigate */
+              onSubmit={async () => {
+                const didSubmit = await handleCoeSubmit();
+                if (didSubmit && selectedRecord?.status === RCAStatus.CLOSED) {
+                  setIsClosedEditMode(false);
+                  setActivePhase('rca');
+                }
               }}
-              pendingRCA={pendingRCA}
+              onPhaseChange={phase => {
+                void handlePhaseClick(phase);
+              }}
             />
-          ) : (
+          </div>
+
+          <div className={activePhase === 'rca' ? 'block h-full' : 'hidden'}>
             <RCAForm
               selectedRecord={selectedRecord}
-              isRcaEditable={isRcaEditable}
+              isRcaEditable={canEditRca}
               isSubmitting={isSubmitting}
               ownerItems={ownerItems}
               filteredOwnerItems={filteredOwnerItems}
               ownerSearchQuery={ownerSearchQuery}
               setOwnerSearchQuery={setOwnerSearchQuery}
               bugTypeOptions={bugTypeOptions}
-              categoryTypeOptions={categoryTypeOptions}
-              bugTypeValueById={bugTypeValueById}
-              categoryValueById={categoryValueById}
+              categoryOptions={categoryOptions}
+              categoryOptionsByBugTypeValue={categoryOptionsByBugTypeValue}
               issueCategoryOptionsByCategoryValue={issueCategoryOptionsByCategoryValue}
+              issueCategoryRequiredByCategoryValue={issueCategoryRequiredByCategoryValue}
               severityOptions={severityOptions}
-              pendingRCA={pendingRCA}
-              setPendingRCA={setPendingRCA}
-              onSubmit={handleRcaSubmit}
+              controllerRef={rcaFormRef}
+              onSubmit={async values => {
+                await handleRcaSubmit(values);
+              }}
             />
-          )}
+          </div>
         </div>
       </div>
     );
@@ -330,6 +365,26 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps) => {
 
   return (
     <div className={containerClass}>
+      <Dialog
+        open={confirmDialog.open}
+        onOpenChange={open => {
+          if (!open) closeConfirmDialog(false);
+        }}
+        title='Unsaved changes'
+      >
+        <div className='p-6'>
+          <h3 className='text-lg font-semibold text-foreground'>Unsaved changes</h3>
+          <p className='mt-2 text-sm text-muted-foreground'>{confirmDialog.message}</p>
+          <div className='mt-6 flex justify-end gap-2'>
+            <Button type='button' variant='outline' onClick={() => closeConfirmDialog(false)}>
+              Skip Save
+            </Button>
+            <Button type='button' onClick={() => closeConfirmDialog(true)}>
+              Save and Continue
+            </Button>
+          </div>
+        </div>
+      </Dialog>
       {isExpanded && (
         <div className='flex items-center justify-between px-10 py-4 border-b border-border bg-muted'>
           <span className='text-lg font-bold text-foreground'>Root Cause Analysis</span>

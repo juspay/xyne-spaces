@@ -30,7 +30,6 @@ import {
   COEStatus,
   RCAStatus,
   SEVERITY,
-  LookupType,
   AttachmentEntityType,
   AttributionConfidence,
   BaseTicketType,
@@ -7203,29 +7202,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Owner not found');
           }
 
-          // Validate bug type exists (skip if empty - will be set later during RCA phase)
-          if (bugTypeId) {
-            const bugType = await tx.run(
-              zql.lookup_values.where('id', bugTypeId).where('type', LookupType.BUG_TYPE).one(),
-            );
-            if (!bugType) {
-              throw new Error('Bug type not found');
-            }
-          }
-
-          // Validate category type exists (skip if empty - will be set later during RCA phase)
-          if (categoryTypeId) {
-            const categoryType = await tx.run(
-              zql.lookup_values
-                .where('id', categoryTypeId)
-                .where('type', LookupType.BUG_CATEGORY_TYPE)
-                .one(),
-            );
-            if (!categoryType) {
-              throw new Error('Category type not found');
-            }
-          }
-
           await tx.mutate.rcas.insert({
             id,
             ticketId,
@@ -7275,7 +7251,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           status,
           timestamp,
         },
-      }) => {
+        }) => {
           const rca = await tx.run(zql.rcas.where('id', id).one());
           if (!rca) {
             throw new Error('RCA not found');
@@ -7285,29 +7261,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const owner = await tx.run(zql.users.where('id', authData.sub).one());
           if (!owner) {
             throw new Error('Owner not found');
-          }
-
-          // Validate bug type if provided
-          if (bugTypeId) {
-            const bugType = await tx.run(
-              zql.lookup_values.where('id', bugTypeId).where('type', LookupType.BUG_TYPE).one(),
-            );
-            if (!bugType) {
-              throw new Error('Bug type not found');
-            }
-          }
-
-          // Validate category type if provided
-          if (categoryTypeId) {
-            const categoryType = await tx.run(
-              zql.lookup_values
-                .where('id', categoryTypeId)
-                .where('type', LookupType.BUG_CATEGORY_TYPE)
-                .one(),
-            );
-            if (!categoryType) {
-              throw new Error('Category type not found');
-            }
           }
 
           await tx.mutate.rcas.update({
@@ -7510,18 +7463,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Ticket not found');
           }
 
-          // Validate impact type exists
-          const impactType = await tx.run(zql.lookup_values.where('id', impactTypeId).where("type", LookupType.IMPACT_TYPE).one());
-          if (!impactType) {
-            throw new Error('Impact type not found');
-          }
-
           await tx.mutate.impacts.insert({
             id,
             ticketId,
             impactTypeId,
             impact,
-            rcaId: rcaId || null,
+            rcaId,
             createdAt: timestamp
           });
         },
@@ -7536,14 +7483,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const existingImpact = await tx.run(zql.impacts.where('id', id).one());
           if (!existingImpact) {
             throw new Error('Impact not found');
-          }
-
-          // Validate impact type exists if provided
-          if (impactTypeId) {
-            const impactType = await tx.run(zql.lookup_values.where('id', impactTypeId).where("type", LookupType.IMPACT_TYPE).one());
-            if (!impactType) {
-              throw new Error('Impact type not found');
-            }
           }
 
           await tx.mutate.impacts.update({
@@ -7604,24 +7543,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Owner not found');
           }
 
-          // Validate action type exists
-          const allowedTypes: LookupType[] = [
-            LookupType.COE_ACTION_TYPE,
-            LookupType.COE_ACTION_TYPE_RELIABILITY_CHANGE,
-            LookupType.COE_ACTION_TYPE_RELIABILITY_CAPACITY,
-            LookupType.COE_ACTION_TYPE_RELIABILITY_FAULT,
-            LookupType.COE_ACTION_TYPE_PERF,
-            LookupType.COE_ACTION_TYPE_UIUX,
-          ];
-          const actionType = await tx.run(
-            zql.lookup_values
-              .where('id', actionTypeId)
-              .where('type', 'IN', allowedTypes)
-              .one(),
-          );
-          if (!actionType) {
-            throw new Error('COE action type not found');
-          }
           await tx.mutate.coes.insert({
             id,
             rcaId,
@@ -7662,6 +7583,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('COE not found');
           }
 
+
           // Validate owner exists if provided
           if (ownerId) {
             const owner = await tx.run(zql.users.where('id', ownerId).one());
@@ -7670,26 +7592,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          // Validate action type exists if provided
-          if (actionTypeId) {
-            const allowedTypes: LookupType[] = [
-              LookupType.COE_ACTION_TYPE,
-              LookupType.COE_ACTION_TYPE_RELIABILITY_CHANGE,
-              LookupType.COE_ACTION_TYPE_RELIABILITY_CAPACITY,
-              LookupType.COE_ACTION_TYPE_RELIABILITY_FAULT,
-              LookupType.COE_ACTION_TYPE_PERF,
-              LookupType.COE_ACTION_TYPE_UIUX,
-            ];
-            const actionType = await tx.run(
-              zql.lookup_values
-                .where('id', actionTypeId)
-                .where('type', 'IN', allowedTypes)
-                .one(),
-            );
-            if (!actionType) {
-              throw new Error('COE action type not found');
-            }
-          }
           await tx.mutate.coes.update({
             id,
             ...(ownerId !== undefined && { ownerId }),

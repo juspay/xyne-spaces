@@ -8,10 +8,11 @@ import {
   UserRound,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Badge } from '../../../components/ui/Badge';
+import { Button } from '../../../components/ui/Button';
 import { AttachmentPreview } from '../../../components/ui/files/AttachmentPreview';
 import { MediaViewer } from '../../../components/ui/files';
 import { formatDate } from '../RCAScreen.utils.tsx';
+import { formatRcaValue } from '../rcaCacConfig';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { fetchFile } from '../../../services/clients/fileFetchService';
@@ -30,13 +31,12 @@ interface RCADetailsViewProps {
   ownerItems: SelectOption[];
   impactTypeOptions: SelectOption[];
   coeActionTypeOptions: SelectOption[];
-  coeActionTypeLabelById?: Map<string, string>;
-  bugTypeOptions: SelectOption[];
-  categoryTypeOptions: SelectOption[];
-  issueCategoryValueById?: Map<string, string>;
+  coeActionLabelByValue?: Map<string, string>;
+  quickFixActionValue?: string;
   releaseTickets?: ReleaseTicket[];
   releaseAttributions?: ReleaseAttributionRecord[];
   attributedSubTickets?: SubTicketRecord[];
+  onEdit?: () => void;
 }
 
 export const RCADetailsView = ({
@@ -44,13 +44,12 @@ export const RCADetailsView = ({
   ownerItems,
   impactTypeOptions,
   coeActionTypeOptions,
-  coeActionTypeLabelById,
-  bugTypeOptions,
-  categoryTypeOptions,
-  issueCategoryValueById,
+  coeActionLabelByValue,
+  quickFixActionValue,
   releaseTickets = [],
   releaseAttributions = [],
   attributedSubTickets = [],
+  onEdit,
 }: RCADetailsViewProps) => {
   const selectedOwnerLabel =
     ownerItems.find(owner => owner.value === selectedRecord?.ownerId)?.label ??
@@ -66,20 +65,33 @@ export const RCADetailsView = ({
   );
 
   const getImpactTypeLabel = (impactTypeId: string) =>
-    impactTypeOptions.find(option => option.value === impactTypeId)?.label ?? impactTypeId;
+    impactTypeOptions.find(option => option.value === impactTypeId)?.label ??
+    formatRcaValue(impactTypeId);
 
   const getActionTypeLabel = (actionTypeId: string) =>
-    coeActionTypeLabelById?.get(actionTypeId) ??
+    coeActionLabelByValue?.get(actionTypeId) ??
     coeActionTypeOptions.find(option => option.value === actionTypeId)?.label ??
-    actionTypeId;
+    formatRcaValue(actionTypeId);
 
-  const getBugTypeLabel = (bugTypeId: string) =>
-    bugTypeOptions.find(option => option.value === bugTypeId)?.label ?? bugTypeId;
-
-  const getCategoryTypeLabel = (categoryTypeId: string) =>
-    categoryTypeOptions.find(option => option.value === categoryTypeId)?.label ?? categoryTypeId;
-  const getIssueCategoryLabel = (issueCategoryId?: string | null) =>
-    (issueCategoryId && issueCategoryValueById?.get(issueCategoryId)) || issueCategoryId || '-';
+  const quickFixCoes = useMemo(
+    () =>
+      (selectedRecord?.coes ?? []).filter(
+        coe => quickFixActionValue && coe.actionTypeId === quickFixActionValue,
+      ),
+    [selectedRecord?.coes, quickFixActionValue],
+  );
+  const nonQuickFixCoes = useMemo(
+    () =>
+      (selectedRecord?.coes ?? []).filter(
+        coe => !quickFixActionValue || coe.actionTypeId !== quickFixActionValue,
+      ),
+    [selectedRecord?.coes, quickFixActionValue],
+  );
+  const parseQuickFixItems = (value?: string | null): string[] =>
+    (value ?? '')
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean);
 
   const getOwnerLabel = (ownerId: string) =>
     ownerItems.find(option => option.value === ownerId)?.label ?? ownerId;
@@ -166,9 +178,13 @@ export const RCADetailsView = ({
               {selectedRecord.title || 'Untitled RCA'}
             </h3>
           </div>
-          <Badge variant='success' className='self-start'>
-            Submitted
-          </Badge>
+          <div className='self-start'>
+            {onEdit && (
+              <Button type='button' size='sm' variant='outline' onClick={onEdit}>
+                Edit
+              </Button>
+            )}
+          </div>
         </div>
         <div className='mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
           <span className='inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1'>
@@ -191,14 +207,13 @@ export const RCADetailsView = ({
         </div>
         <DetailRow label='Summary' value={selectedRecord.summary} />
         <DetailRow label='Root Cause' value={selectedRecord.rootCause} />
-        <DetailRow label='Bug Type' value={getBugTypeLabel(selectedRecord.bugTypeId)} />
-        <DetailRow
-          label='Category Type'
-          value={getCategoryTypeLabel(selectedRecord.categoryTypeId)}
-        />
+        <DetailRow label='Bug Type' value={formatRcaValue(selectedRecord.bugTypeId)} />
+        <DetailRow label='Category Type' value={formatRcaValue(selectedRecord.categoryTypeId)} />
         <DetailRow
           label='Issue Category'
-          value={getIssueCategoryLabel(selectedRecord.issueCategoryId)}
+          value={
+            selectedRecord.issueCategoryId ? formatRcaValue(selectedRecord.issueCategoryId) : '-'
+          }
         />
       </section>
 
@@ -285,7 +300,7 @@ export const RCADetailsView = ({
                 {(attachmentsByImpactId.get(impact.id)?.length ?? 0) > 0 && (
                   <div className='mt-4 border-t border-border pt-4'>
                     <p className='text-sm font-medium text-foreground'>Attachments</p>
-                    <div className='mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3'>
+                    <div className='mt-2 flex flex-wrap gap-2'>
                       {(attachmentsByImpactId.get(impact.id) ?? []).map(file => (
                         <AttachmentPreview
                           key={file.id}
@@ -312,9 +327,34 @@ export const RCADetailsView = ({
           <p className='text-sm text-muted-foreground'>No COE details available.</p>
         ) : (
           <div className='space-y-4'>
-            {(selectedRecord.coes ?? []).map((coe, index) => (
-              <div key={coe.id} className='rounded-lg border border-border p-4'>
-                <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+            {quickFixCoes.map((coe, index) => {
+              const quickFixItems = parseQuickFixItems(coe.action);
+              return (
+                <div key={coe.id} className='rounded-lg border border-gray-200 p-4'>
+                  <p className='text-xs font-medium uppercase tracking-wide text-gray-500'>
+                    Quick Fixes Done {quickFixCoes.length > 1 ? index + 1 : ''}
+                  </p>
+                  {quickFixItems.length > 0 ? (
+                    <div className='mt-3 flex flex-wrap gap-2'>
+                      {quickFixItems.map((item, itemIndex) => (
+                        <span
+                          key={`${coe.id}-${item}-${itemIndex}`}
+                          className='inline-flex items-center rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700'
+                        >
+                          {formatRcaValue(item)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className='mt-2 text-sm text-gray-600'>-</p>
+                  )}
+                </div>
+              );
+            })}
+
+            {nonQuickFixCoes.map((coe, index) => (
+              <div key={coe.id} className='rounded-lg border border-gray-200 p-4'>
+                <p className='text-xs font-medium uppercase tracking-wide text-gray-500'>
                   COE {index + 1}
                 </p>
                 <div className='mt-2 space-y-2'>

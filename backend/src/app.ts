@@ -66,6 +66,7 @@ import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
+import cacConfigRoutes from '@/routes/cacConfig';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
@@ -351,6 +352,9 @@ export class App {
 
     // Xyne AI routes (unified AI assistant with context awareness)
     this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
+
+    // Generic CAC config routes
+    this.app.use('/api/cac-config', authMiddleware.authenticate, cacConfigRoutes);
 
     // Custom instruction routes (auth required)
     this.app.use('/api/custom-instruction', customInstructionRoutes);

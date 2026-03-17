@@ -1,50 +1,41 @@
 import { useMemo } from 'react';
-import { LookupType, RCAStatus } from '@xyne/shared';
 import { useCachedQuery } from './useCachedQuery';
 import { queries } from '../zero/queries';
 import { useUsers } from './useUsers';
-import { formatEnumLabel } from '../routes/RCAScreen/RCAScreen.utils';
-import type { Phase } from '../routes/RCAScreen/RCAScreen.types';
+import type { SelectOption } from '../routes/RCAScreen/RCAScreen.types';
+import {
+  formatRcaValue,
+  getQuickFixActionValue,
+  getRcaBugTypeValues,
+  getRcaBugTypeOptions,
+  getRcaCategoryConfigByValue,
+  getRcaCategoryValues,
+  getRcaCategoryValuesForBugType,
+  getRcaCategoryOptions,
+  getRcaCoeActionOptions,
+  getRcaImpactTypeOptions,
+  getRcaQuickFixOptions,
+  getSharedHiddenCoeActionValues,
+  type RcaCacConfig,
+} from '../routes/RCAScreen/rcaCacConfig';
+
+export interface RcaLookupContext {
+  bugTypeId?: string | null;
+  categoryTypeId?: string | null;
+}
 
 export interface UseRCALookupsProps {
   ticketId: string;
-  activePhase: Phase;
-  selectedRecord: {
-    status?: RCAStatus;
-    bugTypeId?: string | null;
-    categoryTypeId?: string | null;
-    issueCategoryId?: string | null;
-  } | null;
-  pendingRCA: { bugTypeId?: string; categoryTypeId?: string; issueCategoryId?: string } | null;
-  bugLookupsLoaded: boolean;
-  impactLookupsLoaded: boolean;
-  coeLookupsLoaded: boolean;
+  selectedRecord: RcaLookupContext | null;
+  config: RcaCacConfig;
 }
 
-export const useRCALookups = ({
-  ticketId,
-  activePhase,
-  selectedRecord,
-  pendingRCA,
-  bugLookupsLoaded,
-  impactLookupsLoaded,
-  coeLookupsLoaded,
-}: UseRCALookupsProps) => {
+export const useRCALookups = ({ ticketId, selectedRecord, config }: UseRCALookupsProps) => {
   const users = useUsers();
   const ownerItems = useMemo(
     () => users.map(user => ({ label: user.name || user.email, value: user.id })),
     [users],
   );
-
-  const isClosedRca = selectedRecord?.status === RCAStatus.CLOSED;
-
-  const shouldLoadBugLookups =
-    isClosedRca ||
-    bugLookupsLoaded ||
-    activePhase === 'rca' ||
-    activePhase === 'coe' ||
-    !selectedRecord;
-  const shouldLoadImpactLookups = isClosedRca || impactLookupsLoaded || activePhase === 'impact';
 
   const [releaseAttributionsData] = useCachedQuery(
     queries.releaseAttributionsByTicketId({ ticketId }),
@@ -77,153 +68,74 @@ export const useRCALookups = ({
     { enabled: releaseApplicationIds.length > 0 },
   );
 
-  const [impactTypesDataRaw] = useCachedQuery(
-    queries.lookupValuesByType({ type: LookupType.IMPACT_TYPE }),
-    { enabled: shouldLoadImpactLookups },
-  );
-  const impactTypesData = impactTypesDataRaw ?? [];
-  const impactTypeOptions = useMemo(
+  const impactTypeOptions = useMemo(() => getRcaImpactTypeOptions(config), [config]);
+  const bugTypeOptions = useMemo(() => getRcaBugTypeOptions(config), [config]);
+
+  const categoryOptions = useMemo(() => getRcaCategoryOptions(config), [config]);
+
+  const categoryOptionsByBugTypeValue = useMemo(
     () =>
-      impactTypesData.map((lt: { id: string; value: string }) => ({
-        label: formatEnumLabel(lt.value),
-        value: lt.id,
-      })),
-    [impactTypesData],
+      Object.fromEntries(
+        getRcaBugTypeValues(config).map(bugTypeLabel => [
+          bugTypeLabel,
+          getRcaCategoryValuesForBugType(config, bugTypeLabel).map(categoryLabel => ({
+            label: formatRcaValue(categoryLabel),
+            value: categoryLabel,
+          })),
+        ]),
+      ) as Record<string, SelectOption[]>,
+    [config],
   );
 
-  const [bugTypesDataRaw] = useCachedQuery(
-    queries.lookupValuesByType({ type: LookupType.BUG_TYPE }),
-    { enabled: shouldLoadBugLookups },
-  );
-  const bugTypesData = bugTypesDataRaw ?? [];
-  const bugTypeOptions = useMemo(
+  const issueCategoryOptionsByCategoryValue = useMemo(
     () =>
-      bugTypesData.map((lt: { id: string; value: string }) => ({
-        label: lt.value,
-        value: lt.id,
-      })),
-    [bugTypesData],
-  );
-  const bugTypeValueById = useMemo(
-    () => new Map(bugTypesData.map((lt: { id: string; value: string }) => [lt.id, lt.value])),
-    [bugTypesData],
+      Object.fromEntries(
+        getRcaCategoryValues(config).map(categoryLabel => [
+          categoryLabel,
+          (getRcaCategoryConfigByValue(config, categoryLabel)?.issueCategories ?? []).map(
+            label => ({
+              label: formatRcaValue(label),
+              value: label,
+            }),
+          ),
+        ]),
+      ) as Record<string, SelectOption[]>,
+    [config],
   );
 
-  const [categoryTypesDataRaw] = useCachedQuery(
-    queries.lookupValuesByType({ type: LookupType.BUG_CATEGORY_TYPE }),
-    { enabled: shouldLoadBugLookups },
-  );
-  const categoryTypesData = categoryTypesDataRaw ?? [];
-  const categoryTypeOptions = useMemo(
+  const issueCategoryRequiredByCategoryValue = useMemo(
     () =>
-      categoryTypesData.map((lt: { id: string; value: string }) => ({
-        label: lt.value,
-        value: lt.id,
-      })),
-    [categoryTypesData],
-  );
-  const categoryValueById = useMemo(
-    () => new Map(categoryTypesData.map((lt: { id: string; value: string }) => [lt.id, lt.value])),
-    [categoryTypesData],
+      Object.fromEntries(
+        getRcaCategoryValues(config).map(categoryLabel => [
+          categoryLabel,
+          (getRcaCategoryConfigByValue(config, categoryLabel)?.issueCategories.length ?? 0) > 0,
+        ]),
+      ) as Record<string, boolean>,
+    [config],
   );
 
-  const effectiveBugTypeId = pendingRCA?.bugTypeId ?? selectedRecord?.bugTypeId ?? '';
-  const effectiveCategoryTypeId =
-    pendingRCA?.categoryTypeId ?? selectedRecord?.categoryTypeId ?? '';
-
-  const bugTypeValue = bugTypeValueById.get(effectiveBugTypeId) ?? '';
-  const categoryValue = categoryValueById.get(effectiveCategoryTypeId) ?? '';
-  const isBugTypeSelected = !!bugTypeValue;
-  const isCategorySelected = !!categoryValue;
-  const isReliabilityBug = bugTypeValue === 'Reliability';
-  const shouldLoadIssueLookups = shouldLoadBugLookups && isBugTypeSelected && isCategorySelected;
-  const shouldLoadCoeLookups =
-    isClosedRca ||
-    coeLookupsLoaded ||
-    (activePhase === 'coe' && isBugTypeSelected && (!isReliabilityBug || isCategorySelected));
-
-  const coeLookupType = useMemo(() => {
-    if (bugTypeValue === 'Reliability') {
-      if (categoryValue === 'Change') return LookupType.COE_ACTION_TYPE_RELIABILITY_CHANGE;
-      if (categoryValue === 'Capacity') return LookupType.COE_ACTION_TYPE_RELIABILITY_CAPACITY;
-      if (categoryValue === 'Fault') return LookupType.COE_ACTION_TYPE_RELIABILITY_FAULT;
-    }
-    if (bugTypeValue === 'Performance') return LookupType.COE_ACTION_TYPE_PERF;
-    if (bugTypeValue === 'UI/UX') return LookupType.COE_ACTION_TYPE_UIUX;
-    return LookupType.COE_ACTION_TYPE;
-  }, [bugTypeValue, categoryValue]);
-
-  const [coeActionTypesDataRaw] = useCachedQuery(
-    queries.lookupValuesByType({ type: coeLookupType }),
-    { enabled: shouldLoadCoeLookups },
-  );
-  const coeActionTypesData = coeActionTypesDataRaw ?? [];
+  const bugTypeValue = selectedRecord?.bugTypeId ?? '';
+  const categoryValue = selectedRecord?.categoryTypeId ?? '';
   const coeActionTypeOptions = useMemo(
-    () =>
-      coeActionTypesData.map((ct: { id: string; value: string }) => ({
-        label: formatEnumLabel(ct.value),
-        value: ct.id,
+    () => getRcaCoeActionOptions(config, bugTypeValue, categoryValue),
+    [bugTypeValue, categoryValue, config],
+  );
+
+  const hiddenCoeActionValues = useMemo(() => getSharedHiddenCoeActionValues(config), [config]);
+
+  const coeActionLabelByValue = useMemo(() => {
+    const pairs = [
+      ...coeActionTypeOptions,
+      ...hiddenCoeActionValues.map(label => ({
+        label: formatRcaValue(label),
+        value: label,
       })),
-    [coeActionTypesData],
-  );
-  const coeActionTypeValueById = useMemo(
-    () => new Map(coeActionTypesData.map((ct: { id: string; value: string }) => [ct.id, ct.value])),
-    [coeActionTypesData],
-  );
+    ];
+    return new Map(pairs.map(option => [option.value, option.label]));
+  }, [coeActionTypeOptions, hiddenCoeActionValues]);
 
-  const [baseCoeActionTypesDataRaw] = useCachedQuery(
-    queries.lookupValuesByType({ type: LookupType.COE_ACTION_TYPE }),
-    { enabled: shouldLoadCoeLookups },
-  );
-  const baseCoeActionTypesData = baseCoeActionTypesDataRaw ?? [];
-  const quickFixActionTypeId = useMemo(() => {
-    for (const entry of baseCoeActionTypesData) {
-      if (entry.value === 'QUICK_FIXES_DONE') return entry.id;
-    }
-    return '';
-  }, [baseCoeActionTypesData]);
-
-  const excludedCoeActionTypeIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const [id, value] of coeActionTypeValueById.entries()) {
-      if (value === 'QUICK_FIXES_DONE' || value === 'PREVENTION_PRINCIPLE') {
-        ids.add(id);
-      }
-    }
-    return ids;
-  }, [coeActionTypeValueById]);
-
-  const [issueCategoryCapacityData] = useCachedQuery(
-    queries.lookupValuesByType({ type: LookupType.BUG_ISSUE_CATEGORY_CAPACITY }),
-    { enabled: shouldLoadIssueLookups },
-  );
-  const [issueCategoryChangeData] = useCachedQuery(
-    queries.lookupValuesByType({ type: LookupType.BUG_ISSUE_CATEGORY_CHANGE }),
-    { enabled: shouldLoadIssueLookups },
-  );
-  const [issueCategoryFaultData] = useCachedQuery(
-    queries.lookupValuesByType({ type: LookupType.BUG_ISSUE_CATEGORY_FAULT }),
-    { enabled: shouldLoadIssueLookups },
-  );
-
-  const issueCategoryOptionsByCategoryValue = useMemo(() => {
-    const toOptions = (data?: Array<{ id: string; value: string }>) =>
-      (data ?? []).map(item => ({ label: item.value, value: item.id }));
-    return {
-      Capacity: toOptions(issueCategoryCapacityData),
-      Change: toOptions(issueCategoryChangeData),
-      Fault: toOptions(issueCategoryFaultData),
-    };
-  }, [issueCategoryCapacityData, issueCategoryChangeData, issueCategoryFaultData]);
-
-  const issueCategoryOptions = useMemo(
-    () => Object.values(issueCategoryOptionsByCategoryValue).flat(),
-    [issueCategoryOptionsByCategoryValue],
-  );
-  const issueCategoryValueById = useMemo(
-    () => new Map(issueCategoryOptions.map(option => [option.value, option.label])),
-    [issueCategoryOptions],
-  );
+  const quickFixOptions = useMemo(() => getRcaQuickFixOptions(config), [config]);
+  const quickFixActionValue = useMemo(() => getQuickFixActionValue(config) ?? '', [config]);
 
   return {
     ownerItems,
@@ -232,15 +144,14 @@ export const useRCALookups = ({
     releaseSubTicketsData,
     impactTypeOptions,
     bugTypeOptions,
-    bugTypeValueById,
-    categoryTypeOptions,
-    categoryValueById,
-    coeActionTypeOptions,
-    coeActionTypeValueById,
-    quickFixActionTypeId,
-    excludedCoeActionTypeIds,
+    categoryOptions,
+    categoryOptionsByBugTypeValue,
     issueCategoryOptionsByCategoryValue,
-    issueCategoryValueById,
-    bugTypeValue, // Extracted for form
+    issueCategoryRequiredByCategoryValue,
+    coeActionTypeOptions,
+    coeActionLabelByValue,
+    quickFixOptions,
+    quickFixActionValue,
+    hiddenCoeActionValues,
   };
 };

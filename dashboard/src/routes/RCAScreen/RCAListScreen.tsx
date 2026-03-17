@@ -4,13 +4,18 @@ import { useUsers } from '../../hooks/useUsers';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { RCASidebar } from './components';
+import { useCacConfig } from '../../hooks/useCacConfig';
+import { DEFAULT_RCA_CAC_CONFIG, type RcaCacConfig } from './rcaCacConfig';
 import type { RCARecord } from './RCAScreen.types';
-import { LookupType } from '@xyne/shared';
 
 const ITEMS_PER_PAGE = 50;
 
 const RCAListScreen = () => {
   const navigate = useNavigate();
+  useCacConfig<RcaCacConfig>({
+    key: 'rca_config',
+    fallbackConfig: DEFAULT_RCA_CAC_CONFIG,
+  });
   const users = useUsers();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentPage = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
@@ -45,15 +50,6 @@ const RCAListScreen = () => {
       limit: ITEMS_PER_PAGE,
       start: startCursor,
     }),
-  );
-
-  const [bugTypesDataRaw] = useCachedQuery(
-    queries.lookupValuesByType({ type: LookupType.BUG_TYPE }),
-  );
-  const bugTypesData = bugTypesDataRaw ?? [];
-  const bugTypeValueById = useMemo(
-    () => new Map(bugTypesData.map((lt: { id: string; value: string }) => [lt.id, lt.value])),
-    [bugTypesData],
   );
 
   const ownerItems = useMemo(
@@ -96,7 +92,6 @@ const RCAListScreen = () => {
         <RCASidebar
           records={records}
           ownerItems={ownerItems}
-          bugTypeValueById={bugTypeValueById}
           isLoading={isSidebarLoading}
           isSubmitting={false}
           onRecordClick={handleRecordClick}

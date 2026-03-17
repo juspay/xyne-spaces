@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { useForm } from '@tanstack/react-form';
+import { useFieldArray, useForm } from 'react-hook-form';
 import { useZero } from '../../../hooks/useZero';
-import { SingleSelect } from '@juspay/blend-design-system';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import Textarea from '../../../components/ui/Textarea';
@@ -10,38 +9,127 @@ import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
 import { RCAStatus } from '@xyne/shared';
 import { impactSchema } from '../schemas';
-import { formatDate, renderFieldError, ReadOnlyField } from '../RCAScreen.utils.tsx';
+import { renderFieldError, ReadOnlyField } from '../RCAScreen.utils.tsx';
 import { mutators } from '../../../zero/mutators';
-import type { ImpactFormProps, Phase, PendingImpact } from '../RCAScreen.types';
+import { queries } from '../../../zero/queries';
+import type { ImpactFormProps, PendingImpact, ImpactAttachment } from '../RCAScreen.types';
 import { AttachmentPreview } from '../../../components/ui/files/AttachmentPreview';
+import { MediaViewer } from '../../../components/ui/files';
 import type { UploadedFile } from '../../../components/ui/files/Files.types';
+import { fetchFile } from '../../../services/clients/fileFetchService';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
+import { apiInstance } from '../../../services/clients/apiClient';
 
-/**
- * Get the appropriate error message for a form field.
- * Prioritizes explicit required check over schema validation errors.
- */
-const getFieldErrorMessage = (
-  value: string,
-  schemaErrors: string[],
-  showErrors: boolean,
-  requiredMessage: string,
-): string | null => {
-  if (showErrors && !value.trim()) return requiredMessage;
-  if (schemaErrors[0]) return schemaErrors[0];
-  return null;
-};
+interface ExistingImpactRow {
+  id: string;
+  impactType: string;
+  impact: string;
+  files: File[];
+}
 
-/**
- * Determine if error styling should be applied to a field.
- */
-const hasFieldError = (
-  schemaErrors: string[],
-  isTouched: boolean,
-  showErrors: boolean,
-  value: string,
-): boolean => {
-  return (schemaErrors.length > 0 && isTouched) || (showErrors && !value.trim());
+interface ImpactFormValues {
+  existingImpacts: ExistingImpactRow[];
+  pendingImpacts: PendingImpact[];
+}
+
+const toUploadedFile = (attachment: ImpactAttachment): UploadedFile => ({
+  id: attachment.id,
+  originalName: attachment.originalFilename,
+  fileName: attachment.originalFilename,
+  fileSize: attachment.size,
+  mimeType: attachment.mimetype,
+  fileUrl: attachment.url,
+  ...(attachment.thumbnailUrl ? { thumbnailUrl: attachment.thumbnailUrl } : {}),
+  metadata: (attachment.metadata as Record<string, unknown>) ?? {},
+});
+
+const ImpactAttachments = ({
+  impactId,
+  draftFiles,
+  isUploading,
+  onAddFiles,
+  onRemoveDraft,
+  onRemoveUploaded,
+  onPreview,
+}: {
+  impactId: string;
+  draftFiles: File[];
+  isUploading: boolean;
+  onAddFiles: (files: File[]) => void;
+  onRemoveDraft: (index: number) => void;
+  onRemoveUploaded: (attachmentId: string) => void;
+  onPreview: (file: File | UploadedFile) => void;
+}) => {
+  const [attachmentsData] = useCachedQuery(queries.attachmentsByImpact({ impactId }), {
+    enabled: !!impactId,
+  });
+
+  const uploadedFiles = useMemo<UploadedFile[]>(
+    () => (attachmentsData ?? []).map(toUploadedFile),
+    [attachmentsData],
+  );
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    onAddFiles(files);
+    e.target.value = '';
+  };
+
+  return (
+    <div className='pt-4 border-t border-border'>
+      <div className='flex items-center justify-between gap-3'>
+        <div>
+          <h4 className='text-sm font-semibold text-foreground'>Attachments</h4>
+          <p className='text-xs text-muted-foreground'>Upload supporting graphs or files.</p>
+        </div>
+        <div>
+          <input
+            ref={fileInputRef}
+            type='file'
+            multiple
+            className='hidden'
+            onChange={handleFileChange}
+            disabled={isUploading}
+          />
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+          >
+            Upload files
+          </Button>
+        </div>
+      </div>
+
+      {(uploadedFiles.length > 0 || draftFiles.length > 0) && (
+        <div className='mt-3 flex flex-wrap items-start gap-2'>
+          {uploadedFiles.map(file => (
+            <AttachmentPreview
+              key={file.id}
+              file={file}
+              onRemove={() => onRemoveUploaded(file.id)}
+              onPreview={() => onPreview(file)}
+            />
+          ))}
+          {draftFiles.map((file, idx) => (
+            <AttachmentPreview
+              key={`${file.name}-${file.size}-${idx}`}
+              file={file}
+              onRemove={() => onRemoveDraft(idx)}
+              onPreview={() => onPreview(file)}
+              isUploading={isUploading}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 };
 
 export const ImpactForm = ({
@@ -49,237 +137,313 @@ export const ImpactForm = ({
   isImpactEnabled,
   isSubmitting,
   impactTypeOptions,
-  impactAttachments,
-  onAddImpactAttachments,
-  onRemoveImpactAttachment,
-  pendingImpacts,
-  selectedImpact,
-  impactDraftById,
-  setImpactDraftById,
-  draftImpactFilesById,
-  setDraftImpactFilesById,
-  setPendingImpacts,
-  setSelectedImpactId,
   onPhaseChange,
+  controllerRef,
 }: ImpactFormProps) => {
   if (!selectedRecord) {
     throw new Error('Invalid RCA');
   }
+
   const zero = useZero();
-  const isLocked = selectedRecord.status === RCAStatus.CLOSED;
+  const isLocked =
+    selectedRecord.status !== RCAStatus.DRAFT && selectedRecord.status !== RCAStatus.CLOSED;
   const [deletingImpactId, setDeletingImpactId] = useState<string | null>(null);
-  const [showPendingErrors, setShowPendingErrors] = useState(false);
-  const [showSelectedErrors, setShowSelectedErrors] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const pendingFileInputsRef = useRef<Record<string, HTMLInputElement | null>>({});
+  const previousRecordIdRef = useRef<string | null>(null);
 
-  const impactUploadedFiles = useMemo<UploadedFile[]>(
-    () =>
-      (impactAttachments ?? []).map(attachment => ({
-        id: attachment.id,
-        originalName: attachment.originalFilename,
-        fileName: attachment.originalFilename,
-        fileSize: attachment.size,
-        mimeType: attachment.mimetype,
-        fileUrl: attachment.url,
-        ...(attachment.thumbnailUrl ? { thumbnailUrl: attachment.thumbnailUrl } : {}),
-        metadata: (attachment.metadata as Record<string, unknown>) ?? {},
-      })),
-    [impactAttachments],
-  );
-
-  const createPendingImpact = useCallback(
-    (): PendingImpact => ({
-      tempId: uuidv4(),
-      impactTypeId: impactTypeOptions[0]?.value ?? '',
-      impact: '',
-      files: [],
-    }),
-    [impactTypeOptions],
-  );
-
-  const impactForm = useForm({
+  const form = useForm<ImpactFormValues>({
     defaultValues: {
-      ticketId: selectedRecord.ticketId,
-      impactTypeId: selectedImpact?.impactTypeId ?? '',
-      impact: selectedImpact?.impact ?? '',
-    },
-    onSubmit: async ({ value }) => {
-      if (!selectedImpact) return;
-
-      try {
-        const mutationResult = zero.mutate(
-          mutators.impact.update({
-            id: selectedImpact.id,
-            impactTypeId: value.impactTypeId,
-            impact: value.impact,
-          }),
-        );
-        const serverResult = await mutationResult.server;
-        if (serverResult.type === 'error') {
-          toast.error(serverResult.error.message || 'Failed to save Impact');
-          return;
-        }
-        toast.success('Impact saved');
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'Failed to save Impact');
-      }
+      existingImpacts: [],
+      pendingImpacts: [],
     },
   });
+  const { control, getValues, reset, watch, formState } = form;
+  const isDirty = formState.isDirty;
+
+  const {
+    fields: existingImpactFields,
+    remove: removeExistingImpact,
+    update: updateExistingImpact,
+  } = useFieldArray({
+    control,
+    name: 'existingImpacts',
+  });
+
+  const {
+    fields: pendingImpactFields,
+    append: appendPendingImpact,
+    replace: replacePendingImpacts,
+    remove: removePendingImpact,
+    update: updatePendingImpact,
+  } = useFieldArray({
+    control,
+    name: 'pendingImpacts',
+  });
+
+  const existingImpactValues = watch('existingImpacts');
+  const pendingImpactValues = watch('pendingImpacts');
+
+  const updateExistingRow = (
+    index: number,
+    updater: (row: ExistingImpactRow) => ExistingImpactRow,
+  ) => {
+    const current = getValues(`existingImpacts.${index}`);
+    if (!current) return;
+    updateExistingImpact(index, updater(current));
+  };
+
+  const updatePendingRow = (index: number, updater: (row: PendingImpact) => PendingImpact) => {
+    const current = getValues(`pendingImpacts.${index}`);
+    if (!current) return;
+    updatePendingImpact(index, updater(current));
+  };
 
   useEffect(() => {
-    impactForm.reset({
-      ticketId: selectedRecord.ticketId,
-      impactTypeId: selectedImpact
-        ? (impactDraftById[selectedImpact.id]?.impactTypeId ?? selectedImpact.impactTypeId ?? '')
-        : '',
-      impact: selectedImpact
-        ? (impactDraftById[selectedImpact.id]?.impact ?? selectedImpact.impact ?? '')
-        : '',
+    const isRecordChanged = previousRecordIdRef.current !== selectedRecord.id;
+    previousRecordIdRef.current = selectedRecord.id;
+    const initialExisting: ExistingImpactRow[] = (selectedRecord.impacts ?? []).map(impact => ({
+      id: impact.id,
+      impactType: impact.impactTypeId ?? '',
+      impact: impact.impact ?? '',
+      files: [],
+    }));
+
+    reset({
+      existingImpacts: initialExisting,
+      pendingImpacts: isRecordChanged ? [] : getValues('pendingImpacts'),
     });
-    setShowSelectedErrors(false);
-  }, [selectedRecord.ticketId, selectedRecord.updatedAt, selectedImpact?.id]);
-
-  useEffect(() => {
-    if (pendingImpacts.length === 0) {
-      setShowPendingErrors(false);
-    }
-  }, [pendingImpacts.length]);
+    setShowErrors(false);
+  }, [getValues, reset, selectedRecord.id, selectedRecord.impacts]);
 
   useEffect(() => {
     if (!isImpactEnabled || isLocked) return;
-    if (selectedImpact || pendingImpacts.length > 0) return;
-
-    setPendingImpacts([createPendingImpact()]);
-  }, [isImpactEnabled, isLocked, selectedImpact, pendingImpacts.length, createPendingImpact]);
-
-  useEffect(() => {
-    if (!selectedImpact) return;
-    setImpactDraftById(prev => {
-      if (prev[selectedImpact.id]) return prev;
-      return {
-        ...prev,
-        [selectedImpact.id]: {
-          impactTypeId: selectedImpact.impactTypeId ?? '',
-          impact: selectedImpact.impact ?? '',
-        },
-      };
-    });
-  }, [selectedImpact, setImpactDraftById]);
-
-  const handleAddImpact = (): void => {
-    // Clear selected impact so all existing impacts go to view mode
-    setSelectedImpactId(null);
-    setPendingImpacts(prev => [...prev, createPendingImpact()]);
-  };
-
-  const handleRemovePendingImpact = (tempId: string): void => {
-    setPendingImpacts(prev => prev.filter(impact => impact.tempId !== tempId));
-    if (pendingFileInputsRef.current[tempId]) {
-      delete pendingFileInputsRef.current[tempId];
+    if ((pendingImpactValues?.length ?? 0) > 0 || (selectedRecord.impacts?.length ?? 0) > 0) {
+      return;
     }
-  };
 
-  const updatePendingImpact = (tempId: string, field: keyof PendingImpact, value: string): void => {
-    setPendingImpacts(prev =>
-      prev.map(impact => (impact.tempId === tempId ? { ...impact, [field]: value } : impact)),
-    );
-  };
+    const defaultImpactTypeId = impactTypeOptions[0]?.value;
+    if (!defaultImpactTypeId) return;
 
-  const updateSelectedImpactDraft = useCallback(
-    (partial: Partial<Pick<PendingImpact, 'impactTypeId' | 'impact'>>): void => {
-      if (!selectedImpact) return;
-      setImpactDraftById(prev => {
-        const existing = prev[selectedImpact.id] ?? {
-          impactTypeId: selectedImpact.impactTypeId ?? '',
-          impact: selectedImpact.impact ?? '',
-        };
-        return {
-          ...prev,
-          [selectedImpact.id]: {
-            impactTypeId: partial.impactTypeId ?? existing.impactTypeId,
-            impact: partial.impact ?? existing.impact,
-          },
-        };
-      });
-    },
-    [selectedImpact, setImpactDraftById],
-  );
-
-  const validatePendingImpact = (pendingImpact: PendingImpact) => {
-    return impactSchema.safeParse({
-      ticketId: selectedRecord.ticketId,
-      impactTypeId: pendingImpact.impactTypeId,
-      impact: pendingImpact.impact,
+    appendPendingImpact({
+      tempId: uuidv4(),
+      impactType: defaultImpactTypeId,
+      impact: '',
+      files: [],
     });
-  };
+  }, [
+    appendPendingImpact,
+    impactTypeOptions,
+    isImpactEnabled,
+    isLocked,
+    pendingImpactValues?.length,
+    selectedRecord.impacts?.length,
+  ]);
 
-  const getPendingImpactErrors = (
-    pendingImpact: PendingImpact,
-  ): Partial<Record<keyof PendingImpact, string>> => {
-    const validation = validatePendingImpact(pendingImpact);
+  const validateImpact = (impact: { impactType: string; impact: string }) =>
+    impactSchema.safeParse({
+      ticketId: selectedRecord.ticketId,
+      impactType: impact.impactType,
+      impact: impact.impact,
+    });
+
+  const getErrors = (impact: { impactType: string; impact: string }) => {
+    const validation = validateImpact(impact);
     if (validation.success) return {};
 
-    const errors: Partial<Record<keyof PendingImpact, string>> = {};
+    const errors: Partial<Record<'impactType' | 'impact', string>> = {};
     for (const issue of validation.error.issues) {
       const key = issue.path[0];
-      if (key === 'impactTypeId' || key === 'impact') {
+      if (key === 'impactType' || key === 'impact') {
         errors[key] = issue.message;
       }
     }
     return errors;
   };
 
-  const handleGoBackToRca = (): void => {
-    onPhaseChange('rca' as Phase);
-  };
-
-  const handleSubmitAllImpacts = (): void => {
-    onPhaseChange('coe' as Phase);
-  };
-
-  const uploadDraftAttachmentsForImpact = async (impactId: string): Promise<boolean> => {
-    const draftFiles = draftImpactFilesById[impactId] ?? [];
-    if (draftFiles.length === 0) return true;
+  const uploadAttachments = async (files: File[], impactId: string): Promise<void> => {
+    if (files.length === 0) return;
     setIsUploadingAttachments(true);
     try {
-      await onAddImpactAttachments(draftFiles, impactId);
-      setDraftImpactFilesById(prev => ({ ...prev, [impactId]: [] }));
-      return true;
+      const formData = new FormData();
+      files.forEach(file => formData.append('files', file));
+      const metadata = files.map((file, index) => ({
+        originalName: file.name,
+        size: file.size,
+        mimetype: file.type,
+        fileIndex: index,
+        hasThumbnail: false,
+        width: undefined,
+        height: undefined,
+      }));
+      formData.append('fileMetadata', JSON.stringify(metadata));
+      formData.append('entityId', impactId);
+      formData.append('entityType', 'IMPACT');
+
+      await apiInstance.post('/attachments/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to upload attachments');
-      return false;
     } finally {
       setIsUploadingAttachments(false);
     }
   };
 
-  const handleSaveDraft = async (): Promise<void> => {
-    if (!selectedImpact) return;
-    await impactForm.handleSubmit();
-    await uploadDraftAttachmentsForImpact(selectedImpact.id);
+  const saveExistingImpacts = async (): Promise<{ savedCount: number; hasErrors: boolean }> => {
+    const existingImpacts = getValues('existingImpacts');
+    let hasErrors = false;
+    let savedCount = 0;
+
+    for (const [index, impact] of existingImpacts.entries()) {
+      if (!impact) continue;
+      const validation = validateImpact(impact);
+      if (!validation.success) {
+        hasErrors = true;
+        continue;
+      }
+
+      try {
+        const result = await zero.mutate(
+          mutators.impact.update({
+            id: impact.id,
+            impactTypeId: impact.impactType,
+            impact: impact.impact,
+          }),
+        ).server;
+
+        if (result.type === 'error') {
+          toast.error(result.error.message || `Failed to save Impact ${impact.id}`);
+          hasErrors = true;
+        } else {
+          savedCount++;
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Failed to save Impact ${impact.id}`);
+        hasErrors = true;
+      }
+
+      if ((impact.files ?? []).length > 0) {
+        await uploadAttachments(impact.files, impact.id);
+        updateExistingRow(index, row => ({ ...row, files: [] }));
+      }
+    }
+
+    if (hasErrors) {
+      setShowErrors(true);
+    }
+
+    return { savedCount, hasErrors };
   };
 
-  const handleNextToCoe = (): void => {
-    onPhaseChange('coe' as Phase);
-  };
+  const savePendingImpacts = async (): Promise<{ savedCount: number; hasErrors: boolean }> => {
+    const currentPending = getValues('pendingImpacts');
+    if (currentPending.length === 0) {
+      return { savedCount: 0, hasErrors: false };
+    }
 
-  const handleDeleteImpact = async (impactId: string): Promise<void> => {
-    if (deletingImpactId) return;
+    const pendingErrors = currentPending.some(impact => !validateImpact(impact).success);
+    if (pendingErrors) {
+      setShowErrors(true);
+      toast.error('Please complete all pending impact details');
+      return { savedCount: 0, hasErrors: true };
+    }
 
-    setDeletingImpactId(impactId);
+    const impactIdByTempId = new Map<string, string>();
+    const createMutations = currentPending.map(impact => {
+      const impactId = uuidv4();
+      impactIdByTempId.set(impact.tempId, impactId);
+      return zero.mutate(
+        mutators.impact.create({
+          id: impactId,
+          ticketId: selectedRecord.ticketId,
+          impactTypeId: impact.impactType,
+          impact: impact.impact,
+          rcaId: selectedRecord.id,
+          timestamp: Date.now(),
+        }),
+      );
+    });
+
     try {
-      const mutationResult = zero.mutate(mutators.impact.delete({ id: impactId }));
-      const serverResult = await mutationResult.server;
-      if (serverResult.type === 'error') {
-        toast.error(serverResult.error.message || 'Failed to delete Impact');
+      const createResults = await Promise.all(createMutations.map(m => m.server));
+      const failedCreate = createResults.find(r => r.type === 'error');
+      if (failedCreate) {
+        toast.error(
+          failedCreate.type === 'error' ? failedCreate.error.message : 'Failed to create Impact',
+        );
+        return { savedCount: 0, hasErrors: true };
+      }
+
+      for (const impact of currentPending) {
+        const files = impact.files ?? [];
+        if (files.length === 0) continue;
+        const impactId = impactIdByTempId.get(impact.tempId);
+        if (!impactId) continue;
+        await uploadAttachments(files, impactId);
+      }
+
+      replacePendingImpacts([]);
+      return { savedCount: currentPending.length, hasErrors: false };
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save pending Impact drafts');
+      return { savedCount: 0, hasErrors: true };
+    }
+  };
+
+  const handleSaveDraft = async (): Promise<boolean> => {
+    const existingResult = await saveExistingImpacts();
+    const pendingResult = await savePendingImpacts();
+    const hasErrors = existingResult.hasErrors || pendingResult.hasErrors;
+
+    if (hasErrors) {
+      toast.error('Some Impacts failed to save');
+      return false;
+    }
+
+    reset({
+      existingImpacts: getValues('existingImpacts'),
+      pendingImpacts: getValues('pendingImpacts'),
+    });
+
+    return true;
+  };
+
+  const handleSaveDraftClick = async (): Promise<void> => {
+    const saved = await handleSaveDraft();
+    if (saved) {
+      toast.success('Impact details saved');
+    }
+  };
+
+  const hasUnsavedChanges = (): boolean => isDirty;
+  const discardDraft = (): void => {
+    const initialExisting: ExistingImpactRow[] = (selectedRecord.impacts ?? []).map(impact => ({
+      id: impact.id,
+      impactType: impact.impactTypeId ?? '',
+      impact: impact.impact ?? '',
+      files: [],
+    }));
+    reset({
+      existingImpacts: initialExisting,
+      pendingImpacts: [],
+    });
+    setShowErrors(false);
+  };
+
+  const handleDeleteImpact = async (id: string, index: number) => {
+    if (deletingImpactId) return;
+    setDeletingImpactId(id);
+    try {
+      const result = await zero.mutate(mutators.impact.delete({ id })).server;
+      if (result.type === 'error') {
+        toast.error(result.error.message || 'Failed to delete Impact');
         return;
       }
-
-      if (selectedImpact?.id === impactId) {
-        setSelectedImpactId(null);
-      }
+      removeExistingImpact(index);
       toast.success('Impact deleted');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete Impact');
@@ -288,53 +452,225 @@ export const ImpactForm = ({
     }
   };
 
-  const handleAttachmentChange = (event: ChangeEvent<HTMLInputElement>): void => {
-    const files = Array.from(event.target.files ?? []);
-    if (!files.length) return;
-    if (!selectedImpact) {
-      toast.error('Select an impact first.');
-      return;
+  if (controllerRef) {
+    controllerRef.current = {
+      save: handleSaveDraft,
+      hasUnsavedChanges,
+      discard: discardDraft,
+    };
+  }
+
+  const handleSaveAll = async () => {
+    setShowErrors(true);
+    const saved = await handleSaveDraft();
+    if (!saved) return;
+    toast.success('Impact details saved');
+    onPhaseChange('coe');
+  };
+
+  const handlePreviewFile = async (file: File | UploadedFile) => {
+    try {
+      if (file instanceof File) {
+        setPreviewFile(file);
+        setIsPreviewOpen(true);
+        return;
+      }
+      const fetchedFile = await fetchFile(file.id, file.originalName, file.mimeType);
+      setPreviewFile(fetchedFile);
+      setIsPreviewOpen(true);
+    } catch {
+      toast.error('Failed to load attachment preview');
     }
-    setDraftImpactFilesById(prev => ({
-      ...prev,
-      [selectedImpact.id]: [...(prev[selectedImpact.id] ?? []), ...files],
-    }));
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
   };
 
-  const handlePendingAttachmentChange = (
-    tempId: string,
-    event: ChangeEvent<HTMLInputElement>,
-  ): void => {
-    const files = Array.from(event.target.files ?? []);
-    if (!files.length) return;
+  const renderImpactForm = (
+    type: 'existing' | 'pending',
+    id: string,
+    data: ExistingImpactRow | PendingImpact,
+    index: number,
+  ) => {
+    const isExisting = type === 'existing';
+    const impactSummaryFieldId = `impact-summary-${id}`;
+    const impactTypeFieldId = `impact-type-${id}`;
+    const errors = showErrors ? getErrors(data) : {};
+    const isDeleting = isExisting && deletingImpactId === id;
 
-    setPendingImpacts(prev =>
-      prev.map(impact =>
-        impact.tempId === tempId
-          ? { ...impact, files: [...(impact.files ?? []), ...files] }
-          : impact,
-      ),
-    );
-    event.target.value = '';
-  };
+    return (
+      <div key={id} className='space-y-6 pb-8 border-b border-border last:border-b-0 last:pb-0'>
+        <div className='flex items-center justify-between'>
+          <h4 className='text-sm font-semibold text-foreground'>
+            {isExisting ? `Impact ${index + 1}` : 'Impact'}
+          </h4>
+          <Button
+            type='button'
+            size={isExisting ? 'iconSm' : 'sm'}
+            variant='ghost'
+            className={
+              isExisting
+                ? 'text-destructive hover:text-destructive hover:bg-destructive/10'
+                : 'text-destructive hover:text-destructive'
+            }
+            onClick={() =>
+              isExisting
+                ? void handleDeleteImpact(id, index)
+                : (() => {
+                    removePendingImpact(index);
+                    if (pendingFileInputsRef.current[id]) {
+                      delete pendingFileInputsRef.current[id];
+                    }
+                  })()
+            }
+            loading={isDeleting}
+            disabled={isSubmitting || deletingImpactId !== null}
+            aria-label={isExisting ? `Delete Impact ${index + 1}` : 'Remove Impact'}
+          >
+            {isExisting ? (
+              !isDeleting && <Trash2 className='h-3.5 w-3.5' />
+            ) : (
+              <X className='h-4 w-4' />
+            )}
+          </Button>
+        </div>
 
-  const removeDraftImpactFile = (impactId: string, index: number): void => {
-    setDraftImpactFilesById(prev => ({
-      ...prev,
-      [impactId]: (prev[impactId] ?? []).filter((_, i) => i !== index),
-    }));
-  };
+        <div className='space-y-4'>
+          <div className='space-y-1.5'>
+            <label htmlFor={impactTypeFieldId} className='text-sm font-medium text-foreground'>
+              Impact Type *
+            </label>
+            <select
+              id={impactTypeFieldId}
+              value={data.impactType}
+              onChange={e => {
+                if (isExisting) {
+                  updateExistingRow(index, row => ({ ...row, impactType: e.target.value }));
+                  return;
+                }
+                updatePendingRow(index, row => ({ ...row, impactType: e.target.value }));
+              }}
+              data-track-category='RCA'
+              data-track-name='ImpactTypeSelect'
+              className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
+            >
+              <option value=''>Select impact type</option>
+              {impactTypeOptions.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {renderFieldError(errors.impactType ?? null, showErrors)}
+          </div>
 
-  const removeDraftPendingFile = (tempId: string, index: number): void => {
-    setPendingImpacts(prev =>
-      prev.map(impact =>
-        impact.tempId === tempId
-          ? { ...impact, files: impact.files.filter((_, i) => i !== index) }
-          : impact,
-      ),
+          <div className='space-y-1.5'>
+            <label htmlFor={impactSummaryFieldId} className='text-sm font-medium text-foreground'>
+              Impact Summary *
+            </label>
+            <Textarea
+              id={impactSummaryFieldId}
+              value={data.impact}
+              onChange={e => {
+                if (isExisting) {
+                  updateExistingRow(index, row => ({ ...row, impact: e.target.value }));
+                  return;
+                }
+                updatePendingRow(index, row => ({ ...row, impact: e.target.value }));
+              }}
+              placeholder='Describe the impact...'
+              rows={4}
+              aria-invalid={showErrors && !data.impact.trim()}
+              className={cn(
+                showErrors &&
+                  !data.impact.trim() &&
+                  'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
+              )}
+            />
+            {renderFieldError(errors.impact ?? null, showErrors)}
+          </div>
+
+          {isExisting ? (
+            <ImpactAttachments
+              impactId={id}
+              draftFiles={(data as ExistingImpactRow).files ?? []}
+              isUploading={isUploadingAttachments}
+              onAddFiles={files => {
+                updateExistingRow(index, row => ({
+                  ...row,
+                  files: [...(row.files ?? []), ...files],
+                }));
+              }}
+              onRemoveDraft={idx => {
+                updateExistingRow(index, row => ({
+                  ...row,
+                  files: (row.files ?? []).filter((_, i) => i !== idx),
+                }));
+              }}
+              onRemoveUploaded={attachmentId => {
+                zero.mutate(mutators.messageAttachment.delete({ attachmentId }));
+              }}
+              onPreview={file => {
+                void handlePreviewFile(file);
+              }}
+            />
+          ) : (
+            <div className='pt-4 border-t border-border'>
+              <div className='flex items-center justify-between gap-3'>
+                <div>
+                  <h4 className='text-sm font-semibold text-foreground'>Attachments</h4>
+                  <p className='text-xs text-muted-foreground'>Upload supporting files.</p>
+                </div>
+                <div>
+                  <input
+                    ref={el => {
+                      pendingFileInputsRef.current[id] = el;
+                    }}
+                    type='file'
+                    multiple
+                    className='hidden'
+                    onChange={e => {
+                      const files = Array.from(e.target.files ?? []);
+                      if (!files.length) return;
+                      updatePendingRow(index, row => ({
+                        ...row,
+                        files: [...(row.files ?? []), ...files],
+                      }));
+                      e.target.value = '';
+                    }}
+                    disabled={isUploadingAttachments}
+                  />
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    onClick={() => pendingFileInputsRef.current[id]?.click()}
+                    disabled={isUploadingAttachments}
+                  >
+                    Upload files
+                  </Button>
+                </div>
+              </div>
+              {(data.files ?? []).length > 0 && (
+                <div className='mt-3 flex flex-wrap items-start gap-2'>
+                  {(data.files ?? []).map((file, idx) => (
+                    <AttachmentPreview
+                      key={`${file.name}-${file.size}-${idx}`}
+                      file={file}
+                      onRemove={() => {
+                        updatePendingRow(index, row => ({
+                          ...row,
+                          files: row.files.filter((_, i) => i !== idx),
+                        }));
+                      }}
+                      onPreview={() => {
+                        void handlePreviewFile(file);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     );
   };
 
@@ -361,11 +697,11 @@ export const ImpactForm = ({
             <div>
               <p className='text-lg font-semibold text-foreground'>Impact Locked</p>
               <p className='text-sm text-muted-foreground'>
-                Submit RCA details to unlock Impact phase.
+                Impact editing is available only when RCA status is DRAFT or CLOSED.
               </p>
             </div>
           </div>
-          <Button variant='outline' size='sm' onClick={() => onPhaseChange('rca' as Phase)}>
+          <Button variant='outline' size='sm' onClick={() => onPhaseChange('rca')}>
             Review Previous Phase
           </Button>
         </div>
@@ -375,405 +711,69 @@ export const ImpactForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden'>
-        {/* Header Section */}
-        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-gray-50 to-white'>
-          <div className='flex items-center justify-between'>
-            <div className='flex items-center gap-3'>
-              <div className='h-10 w-10 rounded-lg bg-orange-600 flex items-center justify-center'>
-                <svg
-                  className='h-5 w-5 text-white'
-                  fill='none'
-                  viewBox='0 0 24 24'
-                  stroke='currentColor'
-                >
-                  <path
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                    strokeWidth={2}
-                    d='M13 10V3L4 14h7v7l9-11h-7z'
-                  />
-                </svg>
-              </div>
-              <div>
-                <h2 className='text-xl font-bold text-foreground'>Impact Details</h2>
-                <p className='text-sm text-muted-foreground'>
-                  Capture business and customer impact
-                </p>
-              </div>
+      <div className='bg-background shadow-sm border border-border rounded-xl'>
+        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-muted/40 to-background'>
+          <div className='flex items-center gap-3'>
+            <div className='h-10 w-10 rounded-lg bg-orange-600 flex items-center justify-center'>
+              <svg
+                className='h-5 w-5 text-white'
+                fill='none'
+                viewBox='0 0 24 24'
+                stroke='currentColor'
+              >
+                <path
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  strokeWidth={2}
+                  d='M13 10V3L4 14h7v7l9-11h-7z'
+                />
+              </svg>
+            </div>
+            <div>
+              <h2 className='text-xl font-bold text-foreground'>Impact Details</h2>
+              <p className='text-sm text-muted-foreground'>Capture business and customer impact</p>
             </div>
           </div>
         </div>
 
-        {/* Form Section */}
         <div className='p-8 space-y-8'>
           {isLocked
-            ? selectedRecord.impacts?.map((impactEntry, index) => (
+            ? selectedRecord.impacts?.map((impact, index) => (
                 <div
-                  key={impactEntry.id}
+                  key={impact.id}
                   className='space-y-6 pb-8 border-b border-border last:border-b-0 last:pb-0'
                 >
-                  <h4 className='text-sm font-semibold text-foreground'>Impact {index + 1}</h4>
-                  <ReadOnlyField
-                    label='Impact Type'
-                    value={
-                      impactTypeOptions.find(option => option.value === impactEntry.impactTypeId)
-                        ?.label ?? impactEntry.impactTypeId
-                    }
-                  />
-                  <ReadOnlyField label='Impact Summary' value={impactEntry.impact ?? '-'} />
+                  <h4 className='text-base font-semibold text-foreground'>Impact {index + 1}</h4>
+                  <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+                    <ReadOnlyField
+                      label='Impact Type'
+                      value={
+                        impactTypeOptions.find(o => o.value === impact.impactTypeId)?.label ??
+                        impact.impactTypeId
+                      }
+                    />
+                  </div>
+                  <ReadOnlyField label='Impact Summary' value={impact.impact ?? '-'} />
                 </div>
               ))
-            : (selectedRecord.impacts?.length ?? 0) > 0 && (
-                <div className='space-y-4 pb-8 border-b border-border'>
-                  <div className='flex items-center justify-between gap-3'>
-                    <h4 className='text-sm font-semibold text-foreground'>Existing Impacts</h4>
-                    <p className='text-xs text-muted-foreground'>
-                      {selectedRecord.impacts?.length ?? 0} total
-                    </p>
-                  </div>
-
-                  <div className='space-y-4'>
-                    {(selectedRecord.impacts ?? []).map((impactEntry, index) => {
-                      const isActive = selectedImpact?.id === impactEntry.id;
-                      const isDeletingThis = deletingImpactId === impactEntry.id;
-                      const impactTypeLabel =
-                        impactTypeOptions.find(option => option.value === impactEntry.impactTypeId)
-                          ?.label ?? impactEntry.impactTypeId;
-
-                      return (
-                        <div
-                          key={impactEntry.id}
-                          className={cn(
-                            'rounded-lg border p-4',
-                            isActive ? 'border-input bg-muted' : 'border-border bg-background',
-                          )}
-                        >
-                          <div className='flex items-center justify-between gap-3'>
-                            <div className='min-w-0'>
-                              <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wide'>
-                                Impact {index + 1}
-                              </p>
-                              <p className='text-sm font-semibold text-foreground truncate'>
-                                {impactTypeLabel}
-                              </p>
-                            </div>
-                            <div className='flex items-center gap-2'>
-                              {!isActive && (
-                                <Button
-                                  type='button'
-                                  size='sm'
-                                  variant='outline'
-                                  onClick={() => setSelectedImpactId(impactEntry.id)}
-                                  disabled={isSubmitting || deletingImpactId !== null}
-                                >
-                                  Edit
-                                </Button>
-                              )}
-                              <Button
-                                type='button'
-                                size='iconSm'
-                                variant='ghost'
-                                className='text-red-600 hover:text-red-700 hover:bg-red-50'
-                                onClick={() => void handleDeleteImpact(impactEntry.id)}
-                                loading={isDeletingThis}
-                                disabled={isSubmitting || deletingImpactId !== null}
-                                aria-label={`Delete impact ${index + 1}`}
-                              >
-                                {!isDeletingThis && <Trash2 className='h-3.5 w-3.5' />}
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div className='mt-4'>
-                            {isActive ? (
-                              <div className='space-y-6'>
-                                <impactForm.Field
-                                  name='impactTypeId'
-                                  validators={{
-                                    onBlur: ({ value }) => {
-                                      const result =
-                                        impactSchema.shape.impactTypeId.safeParse(value);
-                                      return result.success
-                                        ? undefined
-                                        : result.error.issues[0]?.message;
-                                    },
-                                  }}
-                                >
-                                  {field => (
-                                    <div className='space-y-1.5'>
-                                      <SingleSelect
-                                        label='Impact Type *'
-                                        placeholder='Select impact type'
-                                        items={[{ items: impactTypeOptions }]}
-                                        selected={field.state.value}
-                                        onSelect={selected => {
-                                          field.handleChange(selected);
-                                          updateSelectedImpactDraft({ impactTypeId: selected });
-                                        }}
-                                      />
-                                      {renderFieldError(
-                                        getFieldErrorMessage(
-                                          field.state.value,
-                                          field.state.meta.errors as string[],
-                                          showSelectedErrors,
-                                          'Impact type is required',
-                                        ),
-                                        field.state.meta.isTouched || showSelectedErrors,
-                                      )}
-                                    </div>
-                                  )}
-                                </impactForm.Field>
-
-                                <impactForm.Field
-                                  name='impact'
-                                  validators={{
-                                    onBlur: ({ value }) => {
-                                      const result = impactSchema.shape.impact.safeParse(value);
-                                      return result.success
-                                        ? undefined
-                                        : result.error.issues[0]?.message;
-                                    },
-                                  }}
-                                >
-                                  {field => (
-                                    <div className='space-y-1.5'>
-                                      <label
-                                        htmlFor='impact-summary'
-                                        className='text-sm font-medium text-foreground'
-                                      >
-                                        Impact Summary *
-                                      </label>
-                                      <Textarea
-                                        id='impact-summary'
-                                        value={field.state.value}
-                                        onChange={e => {
-                                          const nextValue = e.target.value;
-                                          field.handleChange(nextValue);
-                                          updateSelectedImpactDraft({ impact: nextValue });
-                                        }}
-                                        onBlur={field.handleBlur}
-                                        placeholder='Describe the impact...'
-                                        rows={4}
-                                        aria-invalid={hasFieldError(
-                                          field.state.meta.errors as string[],
-                                          field.state.meta.isTouched,
-                                          showSelectedErrors,
-                                          field.state.value,
-                                        )}
-                                        className={cn(
-                                          hasFieldError(
-                                            field.state.meta.errors as string[],
-                                            field.state.meta.isTouched,
-                                            showSelectedErrors,
-                                            field.state.value,
-                                          ) &&
-                                            'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-                                        )}
-                                      />
-                                      {renderFieldError(
-                                        getFieldErrorMessage(
-                                          field.state.value,
-                                          field.state.meta.errors as string[],
-                                          showSelectedErrors,
-                                          'Impact summary is required',
-                                        ),
-                                        field.state.meta.isTouched || showSelectedErrors,
-                                      )}
-                                    </div>
-                                  )}
-                                </impactForm.Field>
-
-                                <div className='pt-4 border-t border-border'>
-                                  <div className='flex items-center justify-between gap-3'>
-                                    <div>
-                                      <h4 className='text-sm font-semibold text-foreground'>
-                                        Attachments
-                                      </h4>
-                                      <p className='text-xs text-muted-foreground'>
-                                        Upload supporting graphs or files for this impact.
-                                      </p>
-                                      <p className='text-xs text-muted-foreground'>
-                                        Files upload when you click Save Draft or submit COE.
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <input
-                                        ref={fileInputRef}
-                                        type='file'
-                                        multiple
-                                        className='hidden'
-                                        onChange={handleAttachmentChange}
-                                        disabled={isUploadingAttachments}
-                                      />
-                                      <Button
-                                        type='button'
-                                        size='sm'
-                                        variant='outline'
-                                        onClick={() => fileInputRef.current?.click()}
-                                        disabled={isUploadingAttachments}
-                                      >
-                                        Upload files
-                                      </Button>
-                                    </div>
-                                  </div>
-
-                                  {(impactUploadedFiles.length > 0 ||
-                                    (selectedImpact &&
-                                      (draftImpactFilesById[selectedImpact.id] ?? []).length >
-                                        0)) && (
-                                    <div className='mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3'>
-                                      {impactUploadedFiles.map(file => (
-                                        <AttachmentPreview
-                                          key={file.id}
-                                          file={file}
-                                          onRemove={() => void onRemoveImpactAttachment(file.id)}
-                                        />
-                                      ))}
-                                      {(selectedImpact
-                                        ? (draftImpactFilesById[selectedImpact.id] ?? [])
-                                        : []
-                                      ).map((file, index) => (
-                                        <AttachmentPreview
-                                          key={`${file.name}-${file.size}-${index}`}
-                                          file={file}
-                                          onRemove={() => {
-                                            if (selectedImpact) {
-                                              removeDraftImpactFile(selectedImpact.id, index);
-                                            }
-                                          }}
-                                          isUploading={isUploadingAttachments}
-                                        />
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              <div className='text-sm text-muted-foreground whitespace-pre-wrap break-words'>
-                                {impactEntry.impact?.trim() || '-'}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+            : existingImpactFields.map((field, index) =>
+                renderImpactForm(
+                  'existing',
+                  existingImpactValues?.[index]?.id ?? field.id,
+                  existingImpactValues?.[index] ?? field,
+                  index,
+                ),
               )}
 
-          {pendingImpacts.map(pendingImpact => (
-            <div
-              key={pendingImpact.tempId}
-              className='space-y-6 pb-8 border-b border-border last:border-b-0 last:pb-0'
-            >
-              <div className='flex items-center justify-between'>
-                <h4 className='text-sm font-semibold text-foreground'>Impact</h4>
-                <Button
-                  type='button'
-                  size='sm'
-                  variant='ghost'
-                  onClick={() => handleRemovePendingImpact(pendingImpact.tempId)}
-                  className='text-red-600 hover:text-red-700'
-                >
-                  <X className='h-4 w-4' />
-                </Button>
-              </div>
-
-              <div className='space-y-1.5'>
-                <SingleSelect
-                  label='Impact Type *'
-                  placeholder='Select impact type'
-                  items={[{ items: impactTypeOptions }]}
-                  selected={pendingImpact.impactTypeId}
-                  onSelect={selected =>
-                    updatePendingImpact(pendingImpact.tempId, 'impactTypeId', selected)
-                  }
-                />
-                {renderFieldError(
-                  getPendingImpactErrors(pendingImpact).impactTypeId ?? null,
-                  showPendingErrors,
-                )}
-              </div>
-
-              <div className='space-y-1.5'>
-                <label
-                  htmlFor={`impact-summary-${pendingImpact.tempId}`}
-                  className='text-sm font-medium text-foreground'
-                >
-                  Impact Summary *
-                </label>
-                <Textarea
-                  id={`impact-summary-${pendingImpact.tempId}`}
-                  value={pendingImpact.impact}
-                  onChange={e =>
-                    updatePendingImpact(pendingImpact.tempId, 'impact', e.target.value)
-                  }
-                  placeholder='Describe the impact...'
-                  rows={4}
-                  aria-invalid={showPendingErrors && !pendingImpact.impact.trim()}
-                  className={cn(
-                    showPendingErrors &&
-                      !pendingImpact.impact.trim() &&
-                      'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-                  )}
-                />
-                {renderFieldError(
-                  getPendingImpactErrors(pendingImpact).impact ?? null,
-                  showPendingErrors,
-                )}
-              </div>
-
-              <div className='pt-2'>
-                <div className='flex items-center justify-between gap-3'>
-                  <div>
-                    <h4 className='text-sm font-semibold text-foreground'>Attachments</h4>
-                    <p className='text-xs text-muted-foreground'>
-                      Upload supporting graphs or files for this impact.
-                    </p>
-                    <p className='text-xs text-muted-foreground'>
-                      Files upload when you click Save Draft or submit COE.
-                    </p>
-                  </div>
-                  <div>
-                    <input
-                      ref={el => {
-                        pendingFileInputsRef.current[pendingImpact.tempId] = el;
-                      }}
-                      type='file'
-                      multiple
-                      className='hidden'
-                      onChange={event =>
-                        void handlePendingAttachmentChange(pendingImpact.tempId, event)
-                      }
-                      disabled={isUploadingAttachments}
-                    />
-                    <Button
-                      type='button'
-                      size='sm'
-                      variant='outline'
-                      onClick={() => pendingFileInputsRef.current[pendingImpact.tempId]?.click()}
-                      disabled={isUploadingAttachments}
-                    >
-                      Upload files
-                    </Button>
-                  </div>
-                </div>
-                {(pendingImpact.files ?? []).length > 0 && (
-                  <div className='mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3'>
-                    {(pendingImpact.files ?? []).map((file, index) => (
-                      <AttachmentPreview
-                        key={`${file.name}-${file.size}-${index}`}
-                        file={file}
-                        onRemove={() => removeDraftPendingFile(pendingImpact.tempId, index)}
-                        isUploading={isUploadingAttachments}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+          {!isLocked &&
+            pendingImpactFields.map((field, index) =>
+              renderImpactForm(
+                'pending',
+                pendingImpactValues?.[index]?.tempId ?? field.id,
+                pendingImpactValues?.[index] ?? field,
+                index,
+              ),
+            )}
 
           {!isLocked && (
             <div className='pt-4'>
@@ -781,7 +781,19 @@ export const ImpactForm = ({
                 type='button'
                 variant='outline'
                 className='gap-1'
-                onClick={handleAddImpact}
+                onClick={() => {
+                  const defaultImpactTypeId = impactTypeOptions[0]?.value;
+                  if (!defaultImpactTypeId) {
+                    toast.error('No impact types available');
+                    return;
+                  }
+                  appendPendingImpact({
+                    tempId: uuidv4(),
+                    impactType: defaultImpactTypeId,
+                    impact: '',
+                    files: [],
+                  });
+                }}
                 disabled={isSubmitting}
               >
                 <Plus className='h-3.5 w-3.5' />
@@ -791,61 +803,51 @@ export const ImpactForm = ({
           )}
 
           {!isLocked && (
-            <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-border pt-4'>
+            <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
               <div className='text-xs text-muted-foreground'>
-                {pendingImpacts.length > 0
-                  ? `${pendingImpacts.length} pending impact(s) to submit`
-                  : selectedImpact
-                    ? `Logged ${formatDate(selectedImpact.createdAt)}`
+                {(pendingImpactValues?.length ?? 0) > 0
+                  ? `${pendingImpactValues?.length ?? 0} pending impact(s)`
+                  : (existingImpactValues?.length ?? 0) > 0
+                    ? `${existingImpactValues?.length ?? 0} Impact(s)`
                     : ''}
               </div>
-              {/* Footer */}
-              <div className='flex flex-wrap gap-2 justify-end border-t border-border pt-6'>
-                {pendingImpacts.length > 0 ? (
-                  <>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      onClick={handleGoBackToRca}
-                      disabled={isSubmitting}
-                    >
-                      Go Back
-                    </Button>
-                    <Button
-                      type='button'
-                      onClick={() => void handleSubmitAllImpacts()}
-                      loading={isSubmitting}
-                      disabled={isSubmitting}
-                    >
-                      Next
-                    </Button>
-                  </>
-                ) : selectedImpact ? (
-                  <>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      onClick={() => void handleSaveDraft()}
-                      loading={isSubmitting}
-                      disabled={isSubmitting}
-                    >
-                      Save Draft
-                    </Button>
-                    <Button
-                      type='button'
-                      onClick={() => void handleNextToCoe()}
-                      loading={isSubmitting}
-                      disabled={isSubmitting}
-                    >
-                      Next
-                    </Button>
-                  </>
-                ) : null}
+              <div className='flex flex-wrap gap-2'>
+                {((existingImpactValues?.length ?? 0) > 0 ||
+                  (pendingImpactValues?.length ?? 0) > 0) && (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    onClick={() => void handleSaveDraftClick()}
+                    loading={isSubmitting}
+                    disabled={isSubmitting}
+                  >
+                    Save Draft
+                  </Button>
+                )}
+                <Button
+                  type='button'
+                  onClick={() => void handleSaveAll()}
+                  loading={isSubmitting}
+                  disabled={isSubmitting}
+                >
+                  Next
+                </Button>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {previewFile && (
+        <MediaViewer
+          file={previewFile}
+          isOpen={isPreviewOpen}
+          onClose={() => {
+            setIsPreviewOpen(false);
+            setPreviewFile(null);
+          }}
+        />
+      )}
     </div>
   );
 };
