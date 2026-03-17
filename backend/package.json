@@ -51,8 +51,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@blocknote/core": "^0.46.2",
-    "@blocknote/server-util": "^0.46.2",
+    "@blocknote/core": "^0.47.1",
+    "@blocknote/server-util": "^0.47.1",
     "@clearfeed-ai/slack-to-html": "^1.1.0",
     "@google-cloud/storage": "^7.7.0",
     "@langfuse/client": "^4.5.1",
