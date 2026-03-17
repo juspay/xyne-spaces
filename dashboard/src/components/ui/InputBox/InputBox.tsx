@@ -169,6 +169,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isCanvasAttachmentModalOpen, setIsCanvasAttachmentModalOpen] = useState(false);
 
     const { isMobile } = usePlatform();
+
+    const hasSendableContent = React.useMemo(
+      () => !!content || allAttachments.length > 0 || !!attachedCanvas,
+      [content, allAttachments.length, attachedCanvas],
+    );
     const { notifyTyping } = useTypingState();
 
     useScope('composer', isFocused && !disabled && !isSending);
@@ -659,7 +664,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       const plainText = editor.getText().trim();
       const htmlContent = editor.getHTML();
 
-      if (!plainText && allAttachments.length === 0) return;
+      if (!hasSendableContent) return;
 
       setIsSending(true);
       try {
@@ -688,7 +693,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       } finally {
         setIsSending(false);
       }
-    }, [editor, allAttachments, onSendMessage, isSending, attachedCanvas]);
+    }, [editor, allAttachments, onSendMessage, isSending, attachedCanvas, hasSendableContent]);
 
     // Canvas attachment handlers
     const handleCanvasSelect = useCallback((canvas: Canvas) => {
@@ -1170,7 +1175,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     {onCreateTicket ? (
                       <div
                         className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
-                          content || allAttachments.length > 0 || sendMode === 'ticket'
+                          hasSendableContent || sendMode === 'ticket'
                             ? 'bg-primary text-white hover:bg-primary/90'
                             : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                         }`}
@@ -1194,7 +1199,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             disabled={
                               disabled ||
                               isSending ||
-                              (sendMode === 'message' && !content && allAttachments.length === 0)
+                              (sendMode === 'message' && !hasSendableContent)
                             }
                             className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                             aria-label={sendMode === 'message' ? 'Send message' : 'Create ticket'}
@@ -1224,7 +1229,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         </Tooltip>
                         <div
                           className={`w-px h-4 ${
-                            content || allAttachments.length > 0 || sendMode === 'ticket'
+                            hasSendableContent || sendMode === 'ticket'
                               ? 'bg-background/20'
                               : 'bg-muted-foreground/20'
                           }`}
@@ -1277,11 +1282,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <button
                           type='button'
                           onClick={() => void handleSend()}
-                          disabled={
-                            disabled || isSending || (!content && allAttachments.length === 0)
-                          }
+                          disabled={disabled || isSending || !hasSendableContent}
                           className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
-                            (content || allAttachments.length > 0) && !disabled
+                            hasSendableContent && !disabled
                               ? 'bg-primary text-white hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}

@@ -100,6 +100,7 @@ export interface CanvasListProps {
   activeFilter?: 'all' | 'created_by_me' | 'quarto_docs';
   onFilterChange?: (filter: 'all' | 'created_by_me' | 'quarto_docs') => void;
   onCreateQuartoDoc?: () => void;
+  selectedCanvasId?: string;
 }
 
 export interface CanvasHeaderProps {

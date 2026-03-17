@@ -122,7 +122,7 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
         </div>
 
         {/* Canvas List - Reuse existing component */}
-        <div className='flex-1 overflow-hidden min-h-[400px]'>
+        <div className='flex-1 overflow-y-auto min-h-0'>
           <CanvasList
             canvases={canvases}
             onSelect={handleSelectCanvas}
@@ -132,6 +132,7 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
             showQuartoDocsFilter={true}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
+            {...(selectedCanvas ? { selectedCanvasId: selectedCanvas.id } : {})}
           />
         </div>
 
