@@ -35,6 +35,14 @@ export class TicketACl extends BaseACL<'tickets'> {
             throw new MutationACLError('Ticket update failed: ticket does not exist', 'tickets');
         }
 
+        if (ticket.isArchived && args.isArchived === false) {
+            throw new MutationACLError('Ticket update failed: cannot unarchive ticket - archival is permanent', 'tickets');
+        }
+
+        if (ticket.isArchived) {
+            throw new MutationACLError('Ticket update failed: cannot update archived ticket', 'tickets');
+        }
+
         const isParticipant = await tx
             .run(
             zql.channels

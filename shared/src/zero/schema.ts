@@ -177,6 +177,7 @@ export enum ActivityType {
   STAGE_CHANGE_REQUEST = 'STAGE_CHANGE_REQUEST',
   STAGE_CHANGE_APPROVED = 'STAGE_CHANGE_APPROVED',
   STAGE_CHANGE_REJECTED = 'STAGE_CHANGE_REJECTED',
+  IS_ARCHIVED = 'IS_ARCHIVED',
 }
 
 // @ts-ignore TS1294
@@ -657,6 +658,7 @@ export const ticketTable = table('tickets')
     boardId: string(),
     stageName: string(),
     ticketType: string().optional(),
+    isArchived: boolean(),
   })
   .primaryKey('id');
 

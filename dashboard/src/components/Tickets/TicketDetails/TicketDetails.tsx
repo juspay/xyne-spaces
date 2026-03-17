@@ -22,6 +22,7 @@ import {
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
+  Archive,
 } from 'lucide-react';
 import type {
   SubTicket,
@@ -335,6 +336,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [showBoardChangeConfirmDialog, setShowBoardChangeConfirmDialog] = useState(false);
   const [pendingBoardChange, setPendingBoardChange] = useState<string | null>(null);
   const [isGeneratingReleaseNotes, setIsGeneratingReleaseNotes] = useState(false);
+  const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
 
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId }));
@@ -1246,6 +1248,31 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
   };
 
+  const handleArchiveTicket = (): void => {
+    if (!ticket) return;
+
+    if (
+      ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+      ticket.statusV2 !== TicketStatusV2.CANCELLED
+    ) {
+      setShowArchiveConfirmDialog(false);
+      toast.error('Cannot archive ticket', {
+        description: 'Ticket must be in Completed or Cancelled status to be archived',
+      });
+      return;
+    }
+    setShowArchiveConfirmDialog(false);
+
+    void zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        isArchived: true,
+        updatedAt: Date.now(),
+      }),
+    );
+    toast.success('Ticket archived successfully');
+  };
+
   const handleMinimizeExpandedView = (): void => {
     if (!ticket) return;
 
@@ -1508,9 +1535,22 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   variant='ghost'
                   size='sm'
                   onClick={() => setIsWorkflowModalOpen(true)}
+                  disabled={ticket?.isArchived}
                   aria-label='Trigger Workflow'
                 >
                   <Play size={20} />
+                </Button>
+              </Tooltip>
+              <Tooltip content={'Archive Ticket'}>
+                <Button
+                  className='p-2 border border-border rounded-lg h-8 w-8'
+                  variant='ghost'
+                  size='sm'
+                  onClick={() => setShowArchiveConfirmDialog(true)}
+                  disabled={ticket?.isArchived}
+                  aria-label='Archive Ticket'
+                >
+                  <Archive size={20} />
                 </Button>
               </Tooltip>
               <Tooltip content='Minimize View'>
@@ -1529,627 +1569,561 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </div>
       )}
 
-      <ApprovalNudgeBanner ticketId={ticket.id} className='mb-4' />
+      <div className='relative'>
+        {/* Archived overlay - blocks all interactions on content */}
+        {ticket?.isArchived && (
+          <div
+            className='absolute inset-0 z-50 cursor-not-allowed'
+            style={{ backgroundColor: 'transparent' }}
+          />
+        )}
 
-      {/* Title Section */}
-      <div className='flex items-start gap-3'>
-        {editingTitle ? (
-          <div className='flex-1 flex items-center gap-2'>
-            <input
-              ref={titleInputRef}
-              type='text'
-              value={titleValue}
-              onChange={e => setTitleValue(e.target.value)}
-              onBlur={handleSaveTitle}
-              onKeyDown={e => {
-                if (e.key === 'Enter') handleSaveTitle();
-                if (e.key === 'Escape') {
-                  setTitleValue(ticket.title);
-                  setEditingTitle(false);
-                }
-              }}
-              className='flex-1 text-2xl font-semibold text-foreground outline-none bg-transparent'
-              data-track-category='Tickets'
-              data-track-name='EditTicketTitle'
-              data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-            />
-          </div>
-        ) : (
-          <div
-            role='button'
-            tabIndex={0}
-            className='text-[20px] font-semibold text-foreground flex-1 cursor-text px-2 -mx-2 break-all'
-            onClick={() => setEditingTitle(true)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setEditingTitle(true);
-              }
-            }}
-            data-track-category='Tickets'
-            data-track-name='StartEditTitle'
-          >
-            {ticket.title}
+        <ApprovalNudgeBanner ticketId={ticket.id} className='mb-4' />
+
+        {ticket?.isArchived && (
+          <div className='mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center gap-3'>
+            <Archive className='w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0' />
+            <div className='flex-1'>
+              <p className='text-sm font-medium text-amber-800 dark:text-amber-200'>
+                This ticket is archived and is Read-only
+              </p>
+            </div>
           </div>
         )}
-      </div>
-      <div>
-        {editingDescription ? (
-          <div className='bg-muted rounded-lg p-4 border border-input'>
-            <textarea
-              ref={descriptionTextareaRef}
-              value={descriptionValue}
-              onChange={e => setDescriptionValue(e.target.value)}
-              onBlur={handleSaveDescription}
+
+        {/* Title Section */}
+        <div className='flex items-start gap-3'>
+          {editingTitle ? (
+            <div className='flex-1 flex items-center gap-2'>
+              <input
+                ref={titleInputRef}
+                type='text'
+                value={titleValue}
+                onChange={e => setTitleValue(e.target.value)}
+                onBlur={handleSaveTitle}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleSaveTitle();
+                  if (e.key === 'Escape') {
+                    setTitleValue(ticket.title);
+                    setEditingTitle(false);
+                  }
+                }}
+                className='flex-1 text-2xl font-semibold text-foreground outline-none bg-transparent'
+                data-track-category='Tickets'
+                data-track-name='EditTicketTitle'
+                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+              />
+            </div>
+          ) : (
+            <div
+              role='button'
+              tabIndex={0}
+              className='text-[20px] font-semibold text-foreground flex-1 cursor-text px-2 -mx-2 break-all'
+              onClick={() => setEditingTitle(true)}
               onKeyDown={e => {
-                if (e.key === 'Escape') {
-                  setDescriptionValue(ticket.description);
-                  setEditingDescription(false);
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setEditingTitle(true);
                 }
               }}
-              className='w-full text-sm text-foreground leading-relaxed outline-none bg-transparent resize-none min-h-[100px]'
               data-track-category='Tickets'
-              data-track-name='EditDescription'
-              data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-            />
-          </div>
-        ) : (
-          <div
-            role='button'
-            tabIndex={0}
-            className='cursor-text my-3 text-foreground flex flex-col'
-            onClick={() => setEditingDescription(true)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setEditingDescription(true);
-              }
-            }}
-            data-track-category='Tickets'
-            data-track-name='StartEditDescription'
-          >
-            {!ticket.description ? (
-              <p className='text-sm text-muted-foreground italic'>Add description</p>
-            ) : (
-              <>
-                <p
-                  ref={descriptionRef}
-                  className={cn(
-                    'whitespace-pre-wrap text-foreground break-all text-sm',
-                    !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
-                  )}
-                >
-                  <RenderMessageWithHTML message={ticket.description} />
-                </p>
-                {!showFullDescription && needsReadMore && (
-                  <button
-                    className='text-xs font-semibold cursor-pointer self-start underline py-1'
-                    onClick={event => {
-                      event.stopPropagation();
-                      setShowFullDescription(true);
-                    }}
-                    data-track-category='Tickets'
-                    data-track-name='ReadMoreDescription'
-                  >
-                    Read More
-                  </button>
-                )}
-                {showFullDescription && (
-                  <button
-                    className='text-xs font-semibold cursor-pointer self-start underline py-1'
-                    onClick={event => {
-                      event.stopPropagation();
-                      setShowFullDescription(false);
-                    }}
-                    data-track-category='Tickets'
-                    data-track-name='ViewLessDescription'
-                  >
-                    View Less
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        )}
-      </div>
-      {/* Display Ticket Files */}
-      {expandedView && ticketAttachments && ticketAttachments.length > 0 && (
-        <div className='space-y-3'>
-          {ticketAttachments.map(attachment => (
-            <FileBubble
-              key={attachment.id}
-              createdBy={attachment.createdBy}
-              createdAt={attachment.createdAt}
-              attachment={attachment}
-            />
-          ))}
+              data-track-name='StartEditTitle'
+            >
+              {ticket.title}
+            </div>
+          )}
         </div>
-      )}
-      {/* Ticket MetaData Key Value */}
-      <div className='flex flex-col gap-y-4 mt-8 mb-4 w-full'>
-        {/* Left Column */}
-
-        <div className='space-y-4'>
-          {/* Status */}
-          <TicketKeyValuePair
-            ticketKey='Status Category'
-            value={
-              <span className='flex items-center gap-2'>
-                {' '}
-                {<TicketStatusIcon size={14} />} {ticket.statusV2}
-              </span>
-            }
-          />
-
-          {/* Assignee */}
-          <TicketKeyValuePair
-            ticketKey='Assignee'
-            value={
-              <UserSelector
-                selectedUserId={ticket.assignedTo ?? null}
-                onUserSelect={handleAssigneeChange}
-                noBorder={true}
+        <div>
+          {editingDescription ? (
+            <div className='bg-muted rounded-lg p-4 border border-input'>
+              <textarea
+                ref={descriptionTextareaRef}
+                value={descriptionValue}
+                onChange={e => setDescriptionValue(e.target.value)}
+                onBlur={handleSaveDescription}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') {
+                    setDescriptionValue(ticket.description);
+                    setEditingDescription(false);
+                  }
+                }}
+                className='w-full text-sm text-foreground leading-relaxed outline-none bg-transparent resize-none min-h-[100px]'
+                data-track-category='Tickets'
+                data-track-name='EditDescription'
+                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
               />
-            }
-          />
+            </div>
+          ) : (
+            <div
+              role='button'
+              tabIndex={0}
+              className='cursor-text my-3 text-foreground flex flex-col'
+              onClick={() => setEditingDescription(true)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setEditingDescription(true);
+                }
+              }}
+              data-track-category='Tickets'
+              data-track-name='StartEditDescription'
+            >
+              {!ticket.description ? (
+                <p className='text-sm text-muted-foreground italic'>Add description</p>
+              ) : (
+                <>
+                  <p
+                    ref={descriptionRef}
+                    className={cn(
+                      'whitespace-pre-wrap text-foreground break-all text-sm',
+                      !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
+                    )}
+                  >
+                    <RenderMessageWithHTML message={ticket.description} />
+                  </p>
+                  {!showFullDescription && needsReadMore && (
+                    <button
+                      className='text-xs font-semibold cursor-pointer self-start underline py-1'
+                      onClick={event => {
+                        event.stopPropagation();
+                        setShowFullDescription(true);
+                      }}
+                      data-track-category='Tickets'
+                      data-track-name='ReadMoreDescription'
+                    >
+                      Read More
+                    </button>
+                  )}
+                  {showFullDescription && (
+                    <button
+                      className='text-xs font-semibold cursor-pointer self-start underline py-1'
+                      onClick={event => {
+                        event.stopPropagation();
+                        setShowFullDescription(false);
+                      }}
+                      data-track-category='Tickets'
+                      data-track-name='ViewLessDescription'
+                    >
+                      View Less
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        {/* Display Ticket Files */}
+        {expandedView && ticketAttachments && ticketAttachments.length > 0 && (
+          <div className='space-y-3'>
+            {ticketAttachments.map(attachment => (
+              <FileBubble
+                key={attachment.id}
+                createdBy={attachment.createdBy}
+                createdAt={attachment.createdAt}
+                attachment={attachment}
+              />
+            ))}
+          </div>
+        )}
+        {/* Ticket MetaData Key Value */}
+        <div className='flex flex-col gap-y-4 mt-8 mb-4 w-full'>
+          {/* Left Column */}
 
-          {/* PR Reviewers - Only show if assigned */}
-          {prReviewerIds && prReviewerIds.length > 0 && (
+          <div className='space-y-4'>
+            {/* Status */}
             <TicketKeyValuePair
-              ticketKey={prReviewerIds.length > 1 ? 'PR Reviewers' : 'PR Reviewer'}
+              ticketKey='Status Category'
               value={
-                <div className='flex flex-col gap-2'>
-                  {prReviewerIds.map((reviewerId: string) => {
-                    const reviewer = users?.find(
-                      (u: { id: string; name: string }) => u.id === reviewerId,
-                    );
-                    return (
-                      <div key={reviewerId} className='flex items-center gap-2'>
-                        <UserAvatar
-                          userId={reviewerId}
-                          size={AvatarSize.SM}
-                          shape={AvatarShape.CIRCULAR}
-                          showActiveStatus={false}
-                        />
-                        <span className='text-sm text-foreground'>
-                          {reviewer?.name || 'Unknown'}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+                <span className='flex items-center gap-2'>
+                  {' '}
+                  {<TicketStatusIcon size={14} />} {ticket.statusV2}
+                </span>
               }
             />
-          )}
 
-          {/* QA - Only show if assigned */}
-          {qaId && (
+            {/* Assignee */}
             <TicketKeyValuePair
-              ticketKey='QA'
+              ticketKey='Assignee'
               value={
-                <div className='flex items-center gap-2'>
-                  <UserAvatar
-                    userId={qaId}
-                    size={AvatarSize.SM}
-                    shape={AvatarShape.CIRCULAR}
-                    showActiveStatus={false}
-                  />
-                  <span className='text-sm text-foreground'>
-                    {users?.find((u: { id: string; name: string }) => u.id === qaId)?.name ||
-                      'Unknown'}
-                  </span>
-                </div>
+                <UserSelector
+                  selectedUserId={ticket.assignedTo ?? null}
+                  onUserSelect={handleAssigneeChange}
+                  noBorder={true}
+                />
               }
             />
-          )}
 
-          {/* Created At */}
-          <TicketKeyValuePair
-            ticketKey='Created at'
-            value={<span>{formatTimestamp(ticket.createdAt)}</span>}
-          />
-
-          {/* Board */}
-          <TicketKeyValuePair
-            ticketKey='Board'
-            value={
-              <EntitySelector
-                options={(boards ?? []).map(board => ({
-                  value: board.id,
-                  label: board.name,
-                  icon: <SquareKanban size={18} className='text-purple-600' />,
-                }))}
-                selectedValue={ticket.boardId ?? null}
-                onSelect={handleBoardChange}
-                placeholder='Select board'
-                searchPlaceholder='Search boards...'
-                isLoading={!boards}
-                width='auto'
-                noBorder={true}
-              />
-            }
-          />
-
-          {/* Add Tag Button */}
-          <TicketKeyValuePair
-            ticketKey='Tags'
-            value={
-              <div className='relative flex items-center' ref={tagDropdownRef}>
-                {/* Tags */}
-                <div className='flex items-center gap-2 flex-wrap'>
-                  {tags &&
-                    tags.length > 0 &&
-                    tags.map((tag, index) => {
-                      const colors = [
-                        {
-                          bg: 'bg-cyan-400',
-                          text: 'text-cyan-700',
-                          icon: 'text-cyan-600',
-                          hoverBg: 'hover:bg-cyan-200',
-                        },
-                        {
-                          bg: 'bg-yellow-400',
-                          text: 'text-yellow-700',
-                          icon: 'text-yellow-600',
-                          hoverBg: 'hover:bg-yellow-200',
-                        },
-                        {
-                          bg: 'bg-purple-400',
-                          text: 'text-purple-700',
-                          icon: 'text-purple-600',
-                          hoverBg: 'hover:bg-purple-200',
-                        },
-                        {
-                          bg: 'bg-green-400',
-                          text: 'text-green-700',
-                          icon: 'text-green-600',
-                          hoverBg: 'hover:bg-green-200',
-                        },
-                        {
-                          bg: 'bg-pink-400',
-                          text: 'text-pink-700',
-                          icon: 'text-pink-600',
-                          hoverBg: 'hover:bg-pink-200',
-                        },
-                        {
-                          bg: 'bg-blue-400',
-                          text: 'text-blue-700',
-                          icon: 'text-blue-600',
-                          hoverBg: 'hover:bg-blue-200',
-                        },
-                      ] as const;
-                      const color = colors[index % colors.length]!;
-
+            {/* PR Reviewers - Only show if assigned */}
+            {prReviewerIds && prReviewerIds.length > 0 && (
+              <TicketKeyValuePair
+                ticketKey={prReviewerIds.length > 1 ? 'PR Reviewers' : 'PR Reviewer'}
+                value={
+                  <div className='flex flex-col gap-2'>
+                    {prReviewerIds.map((reviewerId: string) => {
+                      const reviewer = users?.find(
+                        (u: { id: string; name: string }) => u.id === reviewerId,
+                      );
                       return (
-                        <span
-                          key={tag.id}
-                          className={`inline-flex items-center gap-1.5 px-2 py-1 text-sm font-medium group relative rounded-[6px] border border-border bg-muted`}
-                        >
-                          {/* <Tag size={14} className={color.icon} /> */}
-                          <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
-                          {tag.name}
-                          {
-                            <button
-                              onClick={() => void handleRemoveTag(tag.id)}
-                              className={`ml-1 p-0.5 rounded transition-colors`}
-                              aria-label='Remove tag'
-                              data-track-category='Tickets'
-                              data-track-name='RemoveTag'
-                              data-track-metadata={JSON.stringify({
-                                tagId: tag.id,
-                                tagName: tag.name,
-                              })}
-                            >
-                              <X size={12} />
-                            </button>
-                          }
-                        </span>
+                        <div key={reviewerId} className='flex items-center gap-2'>
+                          <UserAvatar
+                            userId={reviewerId}
+                            size={AvatarSize.SM}
+                            shape={AvatarShape.CIRCULAR}
+                            showActiveStatus={false}
+                          />
+                          <span className='text-sm text-foreground'>
+                            {reviewer?.name || 'Unknown'}
+                          </span>
+                        </div>
                       );
                     })}
-                  <button
-                    onClick={() => setShowTagDropdown(!showTagDropdown)}
-                    className='inline-flex items-center justify-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors'
-                    aria-label='Add tag'
-                    data-track-category='Tickets'
-                    data-track-name='ToggleTagDropdown'
-                    data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                  >
-                    <Plus size={14} />
-                    <span>Add</span>
-                  </button>
-                </div>
+                  </div>
+                }
+              />
+            )}
 
-                {showTagDropdown && (
-                  <div className='absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[250px] max-h-64 overflow-hidden'>
-                    {/* Search Input */}
-                    <div className='p-2 border-b border-border'>
-                      <input
-                        ref={tagInputRef}
-                        type='text'
-                        value={tagSearchQuery}
-                        onChange={e => setTagSearchQuery(e.target.value)}
-                        onKeyDown={handleTagKeyDown}
-                        placeholder='Search or create tag...'
-                        className='w-full px-2.5 py-1.5 text-sm border border-input rounded outline-none focus:border-blue-500'
-                        data-track-category='Tickets'
-                        data-track-name='SearchTags'
-                      />
-                    </div>
+            {/* QA - Only show if assigned */}
+            {qaId && (
+              <TicketKeyValuePair
+                ticketKey='QA'
+                value={
+                  <div className='flex items-center gap-2'>
+                    <UserAvatar
+                      userId={qaId}
+                      size={AvatarSize.SM}
+                      shape={AvatarShape.CIRCULAR}
+                      showActiveStatus={false}
+                    />
+                    <span className='text-sm text-foreground'>
+                      {users?.find((u: { id: string; name: string }) => u.id === qaId)?.name ||
+                        'Unknown'}
+                    </span>
+                  </div>
+                }
+              />
+            )}
 
-                    {/* Tag List */}
-                    <div className='max-h-48 overflow-y-auto'>
-                      {tagSearchQuery.trim() && !exactMatch && (
-                        <button
-                          onClick={() => void handleToggleTag(tagSearchQuery)}
-                          className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
-                          data-track-category='Tickets'
-                          data-track-name='CreateTag'
-                          data-track-metadata={JSON.stringify({ tagName: tagSearchQuery.trim() })}
-                        >
-                          <Plus size={14} className='text-blue-600' />
-                          <span className='text-blue-600 font-medium'>
-                            Create &quot;{tagSearchQuery.trim()}&quot;
-                          </span>
-                        </button>
-                      )}
+            {/* Created At */}
+            <TicketKeyValuePair
+              ticketKey='Created at'
+              value={<span>{formatTimestamp(ticket.createdAt)}</span>}
+            />
 
-                      {filteredTags.map(tagName => {
-                        const isSelected = selectedTagNames.has(tagName);
+            {/* Board */}
+            <TicketKeyValuePair
+              ticketKey='Board'
+              value={
+                <EntitySelector
+                  options={(boards ?? []).map(board => ({
+                    value: board.id,
+                    label: board.name,
+                    icon: <SquareKanban size={18} className='text-purple-600' />,
+                  }))}
+                  selectedValue={ticket.boardId ?? null}
+                  onSelect={handleBoardChange}
+                  placeholder='Select board'
+                  searchPlaceholder='Search boards...'
+                  isLoading={!boards}
+                  width='auto'
+                  noBorder={true}
+                />
+              }
+            />
+
+            {/* Add Tag Button */}
+            <TicketKeyValuePair
+              ticketKey='Tags'
+              value={
+                <div className='relative flex items-center' ref={tagDropdownRef}>
+                  {/* Tags */}
+                  <div className='flex items-center gap-2 flex-wrap'>
+                    {tags &&
+                      tags.length > 0 &&
+                      tags.map((tag, index) => {
+                        const colors = [
+                          {
+                            bg: 'bg-cyan-400',
+                            text: 'text-cyan-700',
+                            icon: 'text-cyan-600',
+                            hoverBg: 'hover:bg-cyan-200',
+                          },
+                          {
+                            bg: 'bg-yellow-400',
+                            text: 'text-yellow-700',
+                            icon: 'text-yellow-600',
+                            hoverBg: 'hover:bg-yellow-200',
+                          },
+                          {
+                            bg: 'bg-purple-400',
+                            text: 'text-purple-700',
+                            icon: 'text-purple-600',
+                            hoverBg: 'hover:bg-purple-200',
+                          },
+                          {
+                            bg: 'bg-green-400',
+                            text: 'text-green-700',
+                            icon: 'text-green-600',
+                            hoverBg: 'hover:bg-green-200',
+                          },
+                          {
+                            bg: 'bg-pink-400',
+                            text: 'text-pink-700',
+                            icon: 'text-pink-600',
+                            hoverBg: 'hover:bg-pink-200',
+                          },
+                          {
+                            bg: 'bg-blue-400',
+                            text: 'text-blue-700',
+                            icon: 'text-blue-600',
+                            hoverBg: 'hover:bg-blue-200',
+                          },
+                        ] as const;
+                        const color = colors[index % colors.length]!;
 
                         return (
-                          <button
-                            key={tagName}
-                            onClick={() => void handleToggleTag(tagName)}
-                            className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
-                            data-track-category='Tickets'
-                            data-track-name='ToggleTag'
-                            data-track-metadata={JSON.stringify({
-                              tagName,
-                              isSelected: !isSelected,
-                            })}
+                          <span
+                            key={tag.id}
+                            className={`inline-flex items-center gap-1.5 px-2 py-1 text-sm font-medium group relative rounded-[6px] border border-border bg-muted`}
                           >
-                            <div className='flex items-center gap-2'>
-                              <Tag size={14} className='text-muted-foreground' />
-                              <span>{tagName}</span>
-                            </div>
-
-                            {isSelected && (
-                              <span className='text-sm'>
-                                <Check size={14} />
-                              </span>
-                            )}
-                          </button>
+                            {/* <Tag size={14} className={color.icon} /> */}
+                            <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
+                            {tag.name}
+                            {
+                              <button
+                                onClick={() => void handleRemoveTag(tag.id)}
+                                className={`ml-1 p-0.5 rounded transition-colors`}
+                                aria-label='Remove tag'
+                                data-track-category='Tickets'
+                                data-track-name='RemoveTag'
+                                data-track-metadata={JSON.stringify({
+                                  tagId: tag.id,
+                                  tagName: tag.name,
+                                })}
+                              >
+                                <X size={12} />
+                              </button>
+                            }
+                          </span>
                         );
                       })}
-                    </div>
+                    <button
+                      onClick={() => setShowTagDropdown(!showTagDropdown)}
+                      className='inline-flex items-center justify-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors'
+                      aria-label='Add tag'
+                      data-track-category='Tickets'
+                      data-track-name='ToggleTagDropdown'
+                      data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                    >
+                      <Plus size={14} />
+                      <span>Add</span>
+                    </button>
                   </div>
-                )}
-              </div>
-            }
-          />
-        </div>
 
-        {/* Right Column */}
-        <div className='space-y-4'>
-          {/* Stage */}
-          <TicketKeyValuePair
-            ticketKey='Status'
-            value={
-              <div
-                data-testid='ticket-detail-status-selector'
-                className='flex items-center gap-2'
-                data-track-event='SELECTOR_CHANGE'
-                data-track-category='TICKETS'
-                data-track-name='CHANGE_STATUS'
-                data-track-metadata={JSON.stringify({
-                  ticketId: ticket.id,
-                  boardId: ticket.boardId,
-                  currentStatus: ticket.stageName,
-                })}
-              >
-                <Selector
-                  items={stages}
-                  selectedValue={ticket.stageName}
-                  onValueChange={handleStageChange}
-                  placeholder='Set Status'
-                  icon={<TicketStatusIcon size={14} />}
-                  noBorder={true}
-                  isItemDisabled={item => {
-                    if (!shouldEnforceSequentialMovement) return false;
-                    const currentStageSeq = stages?.find(
-                      s => s.name === ticket.stageName,
-                    )?.sequenceNumber;
-                    if (currentStageSeq === undefined || item.sequenceNumber === undefined)
-                      return false;
+                  {showTagDropdown && (
+                    <div className='absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[250px] max-h-64 overflow-hidden'>
+                      {/* Search Input */}
+                      <div className='p-2 border-b border-border'>
+                        <input
+                          ref={tagInputRef}
+                          type='text'
+                          value={tagSearchQuery}
+                          onChange={e => setTagSearchQuery(e.target.value)}
+                          onKeyDown={handleTagKeyDown}
+                          placeholder='Search or create tag...'
+                          className='w-full px-2.5 py-1.5 text-sm border border-input rounded outline-none focus:border-blue-500'
+                          data-track-category='Tickets'
+                          data-track-name='SearchTags'
+                        />
+                      </div>
 
-                    if (item.sequenceNumber > currentStageSeq) {
-                      return item.sequenceNumber !== currentStageSeq + 1;
-                    }
-                    // Moving backward: allow to any previous stage
-                    return false;
-                  }}
-                />
-                {/* Show alert icon if there's a pending request for the next stage */}
-                {(() => {
-                  if (!ticket.ticketStageRequests || !stagesWithFormInfo) return null;
-                  const currentStage = stagesWithFormInfo.find(s => s.name === ticket.stageName);
-                  if (!currentStage) return null;
-                  const nextStage = stagesWithFormInfo.find(
-                    s => s.sequenceNumber === currentStage.sequenceNumber + 1,
-                  );
-                  if (!nextStage) return null;
-                  const hasPendingRequest = ticket.ticketStageRequests.some(
-                    req =>
-                      req.status === TicketStageRequestStatus.SUBMITTED &&
-                      req.stageId === nextStage.id,
-                  );
-                  return hasPendingRequest ? (
-                    <Tooltip content='Pending Status Approval'>
-                      <AlertCircle size={14} className='text-orange-500' />
-                    </Tooltip>
-                  ) : null;
-                })()}
-              </div>
-            }
-          />
+                      {/* Tag List */}
+                      <div className='max-h-48 overflow-y-auto'>
+                        {tagSearchQuery.trim() && !exactMatch && (
+                          <button
+                            onClick={() => void handleToggleTag(tagSearchQuery)}
+                            className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
+                            data-track-category='Tickets'
+                            data-track-name='CreateTag'
+                            data-track-metadata={JSON.stringify({ tagName: tagSearchQuery.trim() })}
+                          >
+                            <Plus size={14} className='text-blue-600' />
+                            <span className='text-blue-600 font-medium'>
+                              Create &quot;{tagSearchQuery.trim()}&quot;
+                            </span>
+                          </button>
+                        )}
 
-          {/* Created By */}
-          <TicketKeyValuePair
-            ticketKey='Created by'
-            value={
-              <div className='items-center flex gap-2'>
-                <UserAvatar userId={createdByUser?.id || ''} shape={AvatarShape.CIRCULAR} />
-                {createdByUser?.name || 'Merchant User'}
-              </div>
-            }
-          />
+                        {filteredTags.map(tagName => {
+                          const isSelected = selectedTagNames.has(tagName);
 
-          {/* Priority */}
-          <TicketKeyValuePair
-            ticketKey='Priority'
-            value={
-              <div
-                data-testid='ticket-detail-priority-selector'
-                data-track-event='SELECTOR_CHANGE'
-                data-track-category='TICKETS'
-                data-track-name='CHANGE_PRIORITY'
-                data-track-metadata={JSON.stringify({
-                  ticketId: ticket.id,
-                  currentPriority: ticket.priority,
-                })}
-              >
-                <Selector
-                  items={priorityItems}
-                  selectedValue={ticket.priority}
-                  onValueChange={handlePriorityChange}
-                  placeholder='Set Priority'
-                  icon={<TicketPriorityIcon size={14} />}
-                  noBorder={true}
-                />
-              </div>
-            }
-          />
+                          return (
+                            <button
+                              key={tagName}
+                              onClick={() => void handleToggleTag(tagName)}
+                              className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
+                              data-track-category='Tickets'
+                              data-track-name='ToggleTag'
+                              data-track-metadata={JSON.stringify({
+                                tagName,
+                                isSelected: !isSelected,
+                              })}
+                            >
+                              <div className='flex items-center gap-2'>
+                                <Tag size={14} className='text-muted-foreground' />
+                                <span>{tagName}</span>
+                              </div>
 
-          {/* Ticket Type */}
-          <TicketKeyValuePair
-            ticketKey='Type'
-            value={
-              <span className='flex items-center gap-2'>
-                {ticket.ticketType || BaseTicketType.Fix}
-              </span>
-            }
-          />
-
-          {/* Channel */}
-          <TicketKeyValuePair
-            ticketKey='Channel'
-            value={<p>{channel ? `${channel.name}` : 'XyneSpace'}</p>}
-          />
-
-          {/* ETA */}
-          <TicketKeyValuePair
-            ticketKey='Due Date'
-            value={
-              editingETA ? (
-                <div className='flex items-center gap-2' data-testid='ticket-detail-eta-input'>
-                  <input
-                    ref={etaInputRef}
-                    type='datetime-local'
-                    value={etaValue}
-                    onChange={e => setEtaValue(e.target.value)}
-                    onBlur={handleETAChange}
-                    min={new Date().toISOString().slice(0, 16)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') handleETAChange();
-                      if (e.key === 'Escape') {
-                        setEtaValue(ticket.eta ? getLocalISOString(ticket.eta) : '');
-                        setEditingETA(false);
-                      }
-                    }}
-                    className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
-                    data-track-category='Tickets'
-                    data-track-name='StageETAInput'
-                    data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                  />
+                              {isSelected && (
+                                <span className='text-sm'>
+                                  <Check size={14} />
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ) : (
+              }
+            />
+          </div>
+
+          {/* Right Column */}
+          <div className='space-y-4'>
+            {/* Stage */}
+            <TicketKeyValuePair
+              ticketKey='Status'
+              value={
                 <div
-                  role='button'
-                  tabIndex={0}
-                  data-testid='ticket-detail-eta-display'
-                  className='inline-flex items-center gap-1.5 text-sm text-foreground cursor-pointer hover:bg-muted px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-border transition-colors'
-                  data-track-category='TicketDetails'
-                  data-track-name='EditStageETA'
+                  data-testid='ticket-detail-status-selector'
+                  className='flex items-center gap-2'
+                  data-track-event='SELECTOR_CHANGE'
+                  data-track-category='TICKETS'
+                  data-track-name='CHANGE_STATUS'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
-                    stageId: currentStageEntry?.stageId,
+                    boardId: ticket.boardId,
+                    currentStatus: ticket.stageName,
                   })}
-                  onClick={() => {
-                    if (ticket.eta) {
-                      setEtaValue(getLocalISOString(ticket.eta));
-                    }
-                    setEditingETA(true);
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      if (ticket.eta) {
-                        setEtaValue(getLocalISOString(ticket.eta));
-                      }
-                      setEditingETA(true);
-                    }
-                  }}
                 >
-                  <Calendar
-                    size={14}
-                    className={
-                      ticket.eta &&
-                      new Date(ticket.eta) < new Date() &&
-                      ticket.statusV2 !== TicketStatusV2.COMPLETED &&
-                      ticket.statusV2 !== TicketStatusV2.CANCELLED
-                        ? 'text-red-500'
-                        : 'text-muted-foreground'
-                    }
+                  <Selector
+                    items={stages}
+                    selectedValue={ticket.stageName}
+                    onValueChange={handleStageChange}
+                    placeholder='Set Status'
+                    icon={<TicketStatusIcon size={14} />}
+                    noBorder={true}
+                    isItemDisabled={item => {
+                      if (!shouldEnforceSequentialMovement) return false;
+                      const currentStageSeq = stages?.find(
+                        s => s.name === ticket.stageName,
+                      )?.sequenceNumber;
+                      if (currentStageSeq === undefined || item.sequenceNumber === undefined)
+                        return false;
+
+                      if (item.sequenceNumber > currentStageSeq) {
+                        return item.sequenceNumber !== currentStageSeq + 1;
+                      }
+                      // Moving backward: allow to any previous stage
+                      return false;
+                    }}
                   />
-                  <span>{ticket.eta ? formatETADisplay(ticket.eta) : 'Set Due Date'}</span>
-                  {ticket.eta &&
-                    new Date(ticket.eta) < new Date() &&
-                    ticket.statusV2 !== TicketStatusV2.COMPLETED &&
-                    ticket.statusV2 !== TicketStatusV2.CANCELLED && (
-                      <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
-                        Overdue
-                      </span>
-                    )}
+                  {/* Show alert icon if there's a pending request for the next stage */}
+                  {(() => {
+                    if (!ticket.ticketStageRequests || !stagesWithFormInfo) return null;
+                    const currentStage = stagesWithFormInfo.find(s => s.name === ticket.stageName);
+                    if (!currentStage) return null;
+                    const nextStage = stagesWithFormInfo.find(
+                      s => s.sequenceNumber === currentStage.sequenceNumber + 1,
+                    );
+                    if (!nextStage) return null;
+                    const hasPendingRequest = ticket.ticketStageRequests.some(
+                      req =>
+                        req.status === TicketStageRequestStatus.SUBMITTED &&
+                        req.stageId === nextStage.id,
+                    );
+                    return hasPendingRequest ? (
+                      <Tooltip content='Pending Status Approval'>
+                        <AlertCircle size={14} className='text-orange-500' />
+                      </Tooltip>
+                    ) : null;
+                  })()}
                 </div>
-              )
-            }
-          />
-          {/* Status Deadline - only show if current stage has eta configured */}
-          {currentStageInfo?.eta && (
+              }
+            />
+
+            {/* Created By */}
             <TicketKeyValuePair
-              ticketKey='Status Deadline'
+              ticketKey='Created by'
               value={
-                editingStageETA ? (
-                  <div
-                    className='flex items-center gap-2'
-                    data-testid='ticket-detail-stage-eta-input'
-                  >
+                <div className='items-center flex gap-2'>
+                  <UserAvatar userId={createdByUser?.id || ''} shape={AvatarShape.CIRCULAR} />
+                  {createdByUser?.name || 'Merchant User'}
+                </div>
+              }
+            />
+
+            {/* Priority */}
+            <TicketKeyValuePair
+              ticketKey='Priority'
+              value={
+                <div
+                  data-testid='ticket-detail-priority-selector'
+                  data-track-event='SELECTOR_CHANGE'
+                  data-track-category='TICKETS'
+                  data-track-name='CHANGE_PRIORITY'
+                  data-track-metadata={JSON.stringify({
+                    ticketId: ticket.id,
+                    currentPriority: ticket.priority,
+                  })}
+                >
+                  <Selector
+                    items={priorityItems}
+                    selectedValue={ticket.priority}
+                    onValueChange={handlePriorityChange}
+                    placeholder='Set Priority'
+                    icon={<TicketPriorityIcon size={14} />}
+                    noBorder={true}
+                  />
+                </div>
+              }
+            />
+
+            {/* Ticket Type */}
+            <TicketKeyValuePair
+              ticketKey='Type'
+              value={
+                <span className='flex items-center gap-2'>
+                  {ticket.ticketType || BaseTicketType.Fix}
+                </span>
+              }
+            />
+
+            {/* Channel */}
+            <TicketKeyValuePair
+              ticketKey='Channel'
+              value={<p>{channel ? `${channel.name}` : 'XyneSpace'}</p>}
+            />
+
+            {/* ETA */}
+            <TicketKeyValuePair
+              ticketKey='Due Date'
+              value={
+                editingETA ? (
+                  <div className='flex items-center gap-2' data-testid='ticket-detail-eta-input'>
                     <input
-                      ref={stageEtaInputRef}
+                      ref={etaInputRef}
                       type='datetime-local'
-                      value={stageEtaValue}
+                      value={etaValue}
                       min={new Date().toISOString().slice(0, 16)}
-                      onChange={e => setStageEtaValue(e.target.value)}
-                      onBlur={handleStageETAChange}
+                      onChange={e => setEtaValue(e.target.value)}
+                      onBlur={handleETAChange}
                       onKeyDown={e => {
-                        if (e.key === 'Enter') handleStageETAChange();
+                        if (e.key === 'Enter') handleETAChange();
                         if (e.key === 'Escape') {
-                          setStageEtaValue(
-                            currentStageEntry?.stageEta
-                              ? getLocalISOString(currentStageEntry.stageEta)
-                              : '',
-                          );
-                          setEditingStageETA(false);
+                          setEtaValue(ticket.eta ? getLocalISOString(ticket.eta) : '');
+                          setEditingETA(false);
                         }
                       }}
                       className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
@@ -2162,723 +2136,722 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   <div
                     role='button'
                     tabIndex={0}
-                    data-testid='ticket-detail-stage-eta-display'
+                    data-testid='ticket-detail-eta-display'
                     className='inline-flex items-center gap-1.5 text-sm text-foreground cursor-pointer hover:bg-muted px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-border transition-colors'
-                    onClick={() => {
-                      if (currentStageEntry?.stageEta) {
-                        setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
-                      }
-                      setEditingStageETA(true);
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (currentStageEntry?.stageEta) {
-                          setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
-                        }
-                        setEditingStageETA(true);
-                      }
-                    }}
-                    data-track-category='Tickets'
-                    data-track-name='EditStageDeadline'
+                    data-track-category='TicketDetails'
+                    data-track-name='EditStageETA'
                     data-track-metadata={JSON.stringify({
                       ticketId: ticket.id,
                       stageId: currentStageEntry?.stageId,
                     })}
+                    onClick={() => {
+                      if (ticket.eta) {
+                        setEtaValue(getLocalISOString(ticket.eta));
+                      }
+                      setEditingETA(true);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (ticket.eta) {
+                          setEtaValue(getLocalISOString(ticket.eta));
+                        }
+                        setEditingETA(true);
+                      }
+                    }}
                   >
-                    <Clock
+                    <Calendar
                       size={14}
                       className={
-                        currentStageEntry?.stageEta &&
-                        new Date(currentStageEntry.stageEta) < new Date() &&
+                        ticket.eta &&
+                        new Date(ticket.eta) < new Date() &&
                         ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                         ticket.statusV2 !== TicketStatusV2.CANCELLED
                           ? 'text-red-500'
                           : 'text-muted-foreground'
                       }
                     />
-                    <span>
-                      {currentStageEntry?.stageEta
-                        ? formatETADisplay(currentStageEntry.stageEta)
-                        : 'Set Stage Deadline'}
-                    </span>
-                    {currentStageEntry?.stageEta &&
-                      new Date(currentStageEntry.stageEta) < new Date() &&
+                    <span>{ticket.eta ? formatETADisplay(ticket.eta) : 'Set Due Date'}</span>
+                    {ticket.eta &&
+                      new Date(ticket.eta) < new Date() &&
                       ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                       ticket.statusV2 !== TicketStatusV2.CANCELLED && (
                         <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
-                          Stage Overdue
+                          Overdue
                         </span>
                       )}
                   </div>
                 )
               }
             />
-          )}
-
-          {/* Projected deadline (while PAUSED) */}
-          {ticket.statusV2 === TicketStatusV2.PAUSED && (
-            <TicketKeyValuePair
-              ticketKey='projected deadline'
-              value={
-                ticket.statusUpdatedAt ? (
-                  (() => {
-                    const pausedDurationMs = calculateWorkingDurationMs(
-                      new Date(ticket.statusUpdatedAt),
-                      new Date(Date.now()),
-                    );
-
-                    const projectedEta =
-                      ticket.eta && pausedDurationMs > 0
-                        ? calculateETADeadline(
-                            new Date(Math.max(ticket.eta, ticket.statusUpdatedAt)),
-                            pausedDurationMs / (60 * 60 * 1000),
-                          ).getTime()
-                        : (ticket.eta ?? null);
-
-                    return (
-                      <div className='inline-flex items-center gap-2 text-sm text-foreground'>
-                        <span>{formatETADisplay(projectedEta ?? undefined)}</span>
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <span className='text-sm text-muted-foreground'>-</span>
-                )
-              }
-            />
-          )}
-
-          {/* User Group */}
-          <TicketKeyValuePair
-            ticketKey='User Group'
-            value={
-              <UserGroupSelector
-                selectedGroupId={ticket.userGroupId ?? null}
-                onGroupSelect={handleUserGroupChange}
-              />
-            }
-          />
-        </div>
-      </div>
-
-      {/* Merchant ID */}
-      {ticket.merchantId && (
-        <TicketKeyValuePair
-          ticketKey='Merchant ID'
-          value={<span className='text-sm text-muted-foreground'>{ticket.merchantId}</span>}
-        />
-      )}
-
-      {/* Additional Form Fields */}
-      {allFormFields && allFormFields.length > 0 && (
-        <div className='border border-border bg-muted rounded-lg p-4 my-4'>
-          <h3 className='text-base font-semibold text-foreground mb-4'>Additional Form Fields</h3>
-          <div className='space-y-4'>
-            {allFormFields.map(fieldValue => (
-              <EditableFormField
-                key={fieldValue.id}
-                fieldName={fieldValue.formField?.fieldName || 'Unknown Field'}
-                fieldValue={fieldValue.actualFieldValue ?? fieldValue.fieldValue}
-                fieldType={
-                  (fieldValue.formField?.fieldType as FormFieldType) || FormFieldType.STRING
-                }
-                fieldEnum={fieldValue.formField?.fieldEnum as string[] | undefined}
-                onSave={newValue => handleFormFieldSave(fieldValue.id, newValue)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Stage Forms Section */}
-      {formsToShow.length > 0 && (
-        <div className='my-4'>
-          <div className='flex items-center gap-3 mb-4'>
-            <p className='text-base font-semibold text-foreground'>Status Change Requests</p>
-            <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-              {formsToShow.length}
-            </span>
-          </div>
-
-          <div className='space-y-1'>
-            {formsToShow
-              .sort((a, b) => b.createdAt - a.createdAt)
-              .map(item => {
-                const stage = stagesWithFormInfo?.find(s => s.id === item.stageId);
-                const isSubmitted = item.status === TicketStageRequestStatus.SUBMITTED;
-                const isRejected = item.status === TicketStageRequestStatus.REJECTED;
-                const isApproved = item.status === TicketStageRequestStatus.APPROVED;
-                const isDraft = item.status === TicketStageRequestStatus.DRAFT;
-                const isApprover =
-                  stage?.approvers?.some(a => a.userId === currentUser?.id) ?? false;
-                const hasApprovers = stage?.approvers && stage.approvers.length > 0;
-
-                // Find previous stage
-                const currentStageSeq = stage?.sequenceNumber ?? 0;
-                const previousStage = stagesWithFormInfo?.find(
-                  s => s.sequenceNumber === currentStageSeq - 1,
-                );
-
-                return (
-                  <div key={item.id} className='py-2'>
-                    <div className='flex items-center justify-between gap-4'>
-                      <div className='flex items-center gap-4 flex-1 min-w-0'>
-                        {/* Form Name or Stage Name */}
-                        <p className='text-base font-medium text-foreground'>
-                          {item.formId
-                            ? (item.form?.formName ?? 'Form')
-                            : `Stage: ${stage?.name || 'Unknown Stage'}`}
-                        </p>
-
-                        {/* Old Stage -> New Stage */}
-                        <p className='text-sm text-muted-foreground'>
-                          {previousStage?.name || 'Start'} &rarr; {stage?.name || 'Unknown Stage'}
-                        </p>
-
-                        {/* Status Badge - only show for stages with approvers */}
-                        {hasApprovers &&
-                          item.status &&
-                          (() => {
-                            const config = getStatusBadgeConfig(item.status);
-                            return config ? (
-                              <span className={config.className.replace('text-xs', 'text-sm')}>
-                                {config.label}
-                              </span>
-                            ) : null;
-                          })()}
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className='flex items-center gap-2 shrink-0'>
-                        {hasApprovers ? (
-                          // Stages WITH approvers: Show approval workflow buttons
-                          <>
-                            {/* Draft status - allow user to continue/edit the form */}
-                            {isDraft && item.formId && (
-                              <button
-                                onClick={() =>
-                                  setStageFormModal({
-                                    ticket,
-                                    targetStage: stage ?? {
-                                      id: item.stageId,
-                                      name: 'Unknown Stage',
-                                      sequenceNumber: 0,
-                                      boardId: ticket.boardId || '',
-                                    },
-                                    sourceStageName: previousStage?.name || 'Unknown Stage',
-                                    formId: item.formId,
-                                    isReviewer: false,
-                                    hasApprovers: true,
-                                    existingRequest: item.request!,
-                                  })
-                                }
-                                className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
-                                data-track-category='Tickets'
-                                data-track-name='ContinueDraftStageForm'
-                                data-track-metadata={JSON.stringify({
-                                  stageId: item.stageId,
-                                  formId: item.formId,
-                                })}
-                              >
-                                Continue Draft
-                              </button>
-                            )}
-                            {isDraft && !item.formId && (
-                              <button
-                                onClick={() => {
-                                  void zero.mutate(
-                                    mutators.ticketStageRequest.upsert({
-                                      id: item.id,
-                                      ticketId: ticket.id,
-                                      stageId: item.stageId,
-                                      status: TicketStageRequestStatus.SUBMITTED,
-                                      updatedBy: currentUser?.id || '',
-                                      updatedAt: Date.now(),
-                                      requestActivityId: uuidv4(),
-                                    }),
-                                  );
-                                  toast.success('Request submitted for approval');
-                                }}
-                                className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
-                                data-track-category='Tickets'
-                                data-track-name='SubmitStageRequest'
-                                data-track-metadata={JSON.stringify({ stageId: item.stageId })}
-                              >
-                                Submit Request
-                              </button>
-                            )}
-                            {isSubmitted && item.formId && (
-                              <>
-                                {!isApprover && (
-                                  <button
-                                    onClick={() =>
-                                      setStageFormModal({
-                                        ticket,
-                                        targetStage: stage ?? {
-                                          id: item.stageId,
-                                          name: 'Unknown Stage',
-                                          sequenceNumber: 0,
-                                          boardId: ticket.boardId || '',
-                                        },
-                                        sourceStageName: previousStage?.name || 'Unknown Stage',
-                                        formId: item.formId,
-                                        isReviewer: false,
-                                        hasApprovers: true,
-                                      })
-                                    }
-                                    className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
-                                    aria-label='View form'
-                                    data-track-category='Tickets'
-                                    data-track-name='ViewStageForm'
-                                    data-track-metadata={JSON.stringify({
-                                      stageId: item.stageId,
-                                      formId: item.formId,
-                                    })}
-                                  >
-                                    <Eye size={16} />
-                                  </button>
-                                )}
-                                {isApprover && (
-                                  <button
-                                    onClick={() =>
-                                      setStageFormModal({
-                                        ticket,
-                                        targetStage: stage ?? {
-                                          id: item.stageId,
-                                          name: 'Unknown Stage',
-                                          sequenceNumber: 0,
-                                          boardId: ticket.boardId || '',
-                                        },
-                                        sourceStageName: previousStage?.name || 'Unknown Stage',
-                                        formId: item.formId,
-                                        isReviewer: true,
-                                        hasApprovers: true,
-                                        existingRequest: item.request!,
-                                      })
-                                    }
-                                    className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg flex items-center gap-2 bg-blue-500 text-white hover:bg-blue-600'
-                                    data-track-category='Tickets'
-                                    data-track-name='ReviewStageForm'
-                                    data-track-metadata={JSON.stringify({
-                                      stageId: item.stageId,
-                                      formId: item.formId,
-                                    })}
-                                  >
-                                    View request
-                                  </button>
-                                )}
-                              </>
-                            )}
-                            {isApproved && item.formId && (
-                              <button
-                                onClick={() =>
-                                  setStageFormModal({
-                                    ticket,
-                                    targetStage: stage ?? {
-                                      id: item.stageId,
-                                      name: 'Unknown Stage',
-                                      sequenceNumber: 0,
-                                      boardId: ticket.boardId || '',
-                                    },
-                                    sourceStageName: previousStage?.name || 'Unknown Stage',
-                                    formId: item.formId,
-                                    isReviewer: false,
-                                    hasApprovers: true,
-                                    existingRequest: item.request!,
-                                  })
-                                }
-                                className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
-                                aria-label='View form'
-                                data-track-category='Tickets'
-                                data-track-name='ViewApprovedStageForm'
-                                data-track-metadata={JSON.stringify({
-                                  stageId: item.stageId,
-                                  formId: item.formId,
-                                })}
-                              >
-                                <Eye size={16} />
-                              </button>
-                            )}
-                            {isSubmitted && !item.formId && isApprover && (
-                              <>
-                                <button
-                                  onClick={() =>
-                                    void zero.mutate(
-                                      mutators.ticketStageRequest.upsert({
-                                        id: item.id,
-                                        ticketId: ticket.id,
-                                        stageId: item.stageId,
-                                        status: TicketStageRequestStatus.APPROVED,
-                                        updatedBy: currentUser?.id || '',
-                                        updatedAt: Date.now(),
-                                        approvedActivityId: uuidv4(),
-                                      }),
-                                    )
-                                  }
-                                  className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-green-500 text-white hover:bg-green-600'
-                                  data-track-category='Tickets'
-                                  data-track-name='ApproveStageRequest'
-                                  data-track-metadata={JSON.stringify({ stageId: item.stageId })}
-                                >
-                                  Approve
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    void zero.mutate(
-                                      mutators.ticketStageRequest.upsert({
-                                        id: item.id,
-                                        ticketId: ticket.id,
-                                        stageId: item.stageId,
-                                        status: TicketStageRequestStatus.REJECTED,
-                                        updatedBy: currentUser?.id || '',
-                                        updatedAt: Date.now(),
-                                        rejectedActivityId: uuidv4(),
-                                      }),
-                                    )
-                                  }
-                                  className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600'
-                                  data-track-category='Tickets'
-                                  data-track-name='RejectStageRequest'
-                                  data-track-metadata={JSON.stringify({ stageId: item.stageId })}
-                                >
-                                  Reject
-                                </button>
-                              </>
-                            )}
-                            {isRejected && item.formId && (
-                              <button
-                                onClick={() =>
-                                  setStageFormModal({
-                                    ticket,
-                                    targetStage: stage ?? {
-                                      id: item.stageId,
-                                      name: 'Unknown Stage',
-                                      sequenceNumber: 0,
-                                      boardId: ticket.boardId || '',
-                                    },
-                                    sourceStageName: previousStage?.name || 'Unknown Stage',
-                                    formId: item.formId,
-                                    isReviewer: isApprover,
-                                    hasApprovers: true,
-                                    existingRequest: item.request!,
-                                  })
-                                }
-                                className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
-                                data-track-category='Tickets'
-                                data-track-name='ResubmitStageForm'
-                                data-track-metadata={JSON.stringify({
-                                  stageId: item.stageId,
-                                  formId: item.formId,
-                                })}
-                              >
-                                Resubmit
-                              </button>
-                            )}
-                            {isRejected && !item.formId && (
-                              <button
-                                onClick={() => {
-                                  void zero.mutate(
-                                    mutators.ticketStageRequest.upsert({
-                                      id: item.id,
-                                      ticketId: ticket.id,
-                                      stageId: item.stageId,
-                                      status: TicketStageRequestStatus.SUBMITTED,
-                                      updatedBy: currentUser?.id || '',
-                                      updatedAt: Date.now(),
-                                      requestActivityId: uuidv4(),
-                                    }),
-                                  );
-                                  toast.success('Stage change request resubmitted for approval');
-                                }}
-                                className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
-                                data-track-category='Tickets'
-                                data-track-name='ResubmitStageRequest'
-                                data-track-metadata={JSON.stringify({ stageId: item.stageId })}
-                              >
-                                Resubmit request
-                              </button>
-                            )}
-                          </>
-                        ) : (
-                          // Stages WITHOUT approvers: Just show View Form button
-                          <button
-                            onClick={() =>
-                              setStageFormModal({
-                                ticket,
-                                targetStage: stage ?? {
-                                  id: item.stageId,
-                                  name: 'Unknown Stage',
-                                  sequenceNumber: 0,
-                                  boardId: ticket.boardId || '',
-                                  eta: null,
-                                },
-                                sourceStageName: previousStage?.name || 'Unknown Stage',
-                                formId: item.formId,
-                                isReviewer: false,
-                                hasApprovers: false,
-                                existingRequest: item.request!,
-                              })
-                            }
-                            className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
-                            aria-label='View form'
-                            data-track-category='Tickets'
-                            data-track-name='ViewStageFormNoApprovers'
-                            data-track-metadata={JSON.stringify({
-                              stageId: item.stageId,
-                              formId: item.formId,
-                            })}
-                          >
-                            <Eye size={16} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        </div>
-      )}
-
-      {/* Fill RCA Button - shown for Fix tickets */}
-      {ticket?.ticketType === BaseTicketType.Fix && (
-        <div className='mt-6'>
-          <button
-            type='button'
-            onClick={() => {
-              if (onFillRCA) {
-                onFillRCA();
-                return;
-              }
-
-              const nextSearchParams = new URLSearchParams(location.search);
-              nextSearchParams.set('selectedTab', 'rca');
-              void navigate(
-                {
-                  pathname: location.pathname,
-                  search: `?${nextSearchParams.toString()}`,
-                },
-                { replace: true },
-              );
-            }}
-            data-track-category='Tickets'
-            data-track-name='FillRCA'
-            data-testid='fill-rca-button'
-            className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
-          >
-            <span className='inline-flex items-center gap-3'>
-              <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>
-                <ClipboardCheck size={18} />
-              </span>
-              <span className='flex flex-col text-left'>
-                <span className='text-sm font-semibold text-foreground'>Fill RCA</span>
-                <span className='text-xs text-muted-foreground'>
-                  Add root cause, impact, and COE details
-                </span>
-              </span>
-            </span>
-            <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />
-          </button>
-        </div>
-      )}
-
-      {/* Generate/View Release Notes Button - shown for completed Release/Hotfix tickets */}
-      {ticket &&
-        isReleaseTicket(ticket.ticketType as BaseTicketType) &&
-        ticket.statusV2 === TicketStatusV2.COMPLETED && (
-          <div className='mt-4'>
-            <ReleaseNotesButton
-              metadata={
-                ticket.metadata as {
-                  releaseNotesCanvasUrl?: string;
-                  isGeneratingReleaseNotes?: boolean;
-                } | null
-              }
-              onGenerate={async () => await generateReleaseNotes(ticketId)}
-              isGeneratingReleaseNotes={isGeneratingReleaseNotes}
-              onGeneratingChange={setIsGeneratingReleaseNotes}
-            />
-          </div>
-        )}
-
-      {/* Sub-Tickets Section */}
-      <div className='mt-6 space-y-6' data-testid='sub-tickets-section'>
-        <div>
-          <div className='flex items-center gap-3'>
-            <p className='text-base font-semibold text-foreground'>Sub-Tickets</p>
-            <span
-              className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
-              data-testid='sub-tickets-count'
-            >
-              {subTickets.length}
-            </span>
-          </div>
-
-          <div className='mt-4 space-y-3' data-testid='sub-tickets-list'>
-            {subTickets.length > 0 ? (
-              <div className='space-y-2'>
-                {subTickets.map(subTicket => {
-                  // Extract mappedTicket once
-                  const mappedTicket = subTicket?.mappedTicket;
-
-                  const displayId =
-                    mappedTicket?.xyneId || subTicket.id.substring(0, 8).toUpperCase();
-                  const displayTitle = mappedTicket?.title || subTicket.title;
-
-                  // Calculate stage progress using existing helper
-                  const boardStages = mappedTicket?.boardId
-                    ? stagesByBoardId.get(mappedTicket.boardId)
-                    : undefined;
-                  const stageProgress = getStageProgress(mappedTicket?.stageName, boardStages);
-                  const displayProgress = stageProgress === 0 ? 1 : stageProgress;
-
-                  const priority = mappedTicket?.priority;
-                  const assignedTo = mappedTicket?.assignedTo;
-                  const priorityIcon = priority ? getPriorityIcon(priority) : null;
-                  const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
-
-                  const handleClick = (): void => {
-                    if (subTicket.mappedTicketId) {
-                      if (onNavigateToTicket) {
-                        onNavigateToTicket(subTicket.mappedTicketId);
-                      } else {
-                        setMappedTicketId(subTicket.mappedTicketId);
-                      }
-                    } else {
-                      setSelectedSubTicket(subTicket);
-                      setIsCreateTicketModalOpen(true);
-                    }
-                  };
-
-                  return (
+            {/* Status Deadline - only show if current stage has eta configured */}
+            {currentStageInfo?.eta && (
+              <TicketKeyValuePair
+                ticketKey='Status Deadline'
+                value={
+                  editingStageETA ? (
                     <div
-                      key={subTicket.id}
+                      className='flex items-center gap-2'
+                      data-testid='ticket-detail-stage-eta-input'
+                    >
+                      <input
+                        ref={stageEtaInputRef}
+                        type='datetime-local'
+                        value={stageEtaValue}
+                        onChange={e => setStageEtaValue(e.target.value)}
+                        min={new Date().toISOString().slice(0, 16)}
+                        onBlur={handleStageETAChange}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleStageETAChange();
+                          if (e.key === 'Escape') {
+                            setStageEtaValue(
+                              currentStageEntry?.stageEta
+                                ? getLocalISOString(currentStageEntry.stageEta)
+                                : '',
+                            );
+                            setEditingStageETA(false);
+                          }
+                        }}
+                        className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
+                        data-track-category='Tickets'
+                        data-track-name='StageETAInput'
+                        data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                      />
+                    </div>
+                  ) : (
+                    <div
                       role='button'
                       tabIndex={0}
-                      onClick={handleClick}
+                      data-testid='ticket-detail-stage-eta-display'
+                      className='inline-flex items-center gap-1.5 text-sm text-foreground cursor-pointer hover:bg-muted px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-border transition-colors'
+                      onClick={() => {
+                        if (currentStageEntry?.stageEta) {
+                          setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
+                        }
+                        setEditingStageETA(true);
+                      }}
                       onKeyDown={e => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
-                          handleClick();
+                          if (currentStageEntry?.stageEta) {
+                            setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
+                          }
+                          setEditingStageETA(true);
                         }
                       }}
-                      data-testid={`sub-ticket-item-${subTicket.id}`}
                       data-track-category='Tickets'
-                      data-track-name='OpenSubTicket'
+                      data-track-name='EditStageDeadline'
                       data-track-metadata={JSON.stringify({
-                        subTicketId: subTicket.id,
-                        mappedTicketId: subTicket.mappedTicketId,
+                        ticketId: ticket.id,
+                        stageId: currentStageEntry?.stageId,
                       })}
-                      className='flex items-center justify-between p-3 bg-muted rounded-lg hover:bg-muted transition-colors cursor-pointer'
                     >
-                      <div className='flex items-center gap-3 flex-1 min-w-0'>
-                        <span className='text-xs font-medium text-muted-foreground whitespace-nowrap'>
-                          {displayId}
-                        </span>
-                        <span className='text-sm text-foreground truncate'>{displayTitle}</span>
-                        {subTicket.mappedTicketId && (
-                          <FileText size={14} className='text-blue-600 flex-shrink-0' />
+                      <Clock
+                        size={14}
+                        className={
+                          currentStageEntry?.stageEta &&
+                          new Date(currentStageEntry.stageEta) < new Date() &&
+                          ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+                          ticket.statusV2 !== TicketStatusV2.CANCELLED
+                            ? 'text-red-500'
+                            : 'text-muted-foreground'
+                        }
+                      />
+                      <span>
+                        {currentStageEntry?.stageEta
+                          ? formatETADisplay(currentStageEntry.stageEta)
+                          : 'Set Stage Deadline'}
+                      </span>
+                      {currentStageEntry?.stageEta &&
+                        new Date(currentStageEntry.stageEta) < new Date() &&
+                        ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+                        ticket.statusV2 !== TicketStatusV2.CANCELLED && (
+                          <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
+                            Stage Overdue
+                          </span>
                         )}
-                      </div>
-                      <div className='flex items-center gap-3 shrink-0'>
-                        {/* Stage progress using TicketStatusIcon */}
-                        {boardStages && boardStages.length > 0 && (
-                          <div className='flex items-center gap-1.5'>
-                            <TicketStageIcon progressPercentage={displayProgress} size={18} />
-                            <span className='text-xs font-medium text-foreground whitespace-nowrap'>
-                              {boardStages.findIndex(s => s.name === mappedTicket?.stageName) + 1}/
-                              {boardStages.length}
-                            </span>
-                          </div>
-                        )}
-                        {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
-                        {assigneeId ? (
-                          <UserAvatar
-                            userId={assigneeId}
-                            size={AvatarSize.SM}
-                            shape={AvatarShape.ROUNDED}
-                            showActiveStatus={false}
-                          />
-                        ) : (
-                          <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
-                        )}
+                    </div>
+                  )
+                }
+              />
+            )}
+
+            {/* Projected deadline (while PAUSED) */}
+            {ticket.statusV2 === TicketStatusV2.PAUSED && (
+              <TicketKeyValuePair
+                ticketKey='projected deadline'
+                value={
+                  ticket.statusUpdatedAt ? (
+                    (() => {
+                      const pausedDurationMs = calculateWorkingDurationMs(
+                        new Date(ticket.statusUpdatedAt),
+                        new Date(Date.now()),
+                      );
+
+                      const projectedEta =
+                        ticket.eta && pausedDurationMs > 0
+                          ? calculateETADeadline(
+                              new Date(Math.max(ticket.eta, ticket.statusUpdatedAt)),
+                              pausedDurationMs / (60 * 60 * 1000),
+                            ).getTime()
+                          : (ticket.eta ?? null);
+
+                      return (
+                        <div className='inline-flex items-center gap-2 text-sm text-foreground'>
+                          <span>{formatETADisplay(projectedEta ?? undefined)}</span>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <span className='text-sm text-muted-foreground'>-</span>
+                  )
+                }
+              />
+            )}
+
+            {/* User Group */}
+            <TicketKeyValuePair
+              ticketKey='User Group'
+              value={
+                <UserGroupSelector
+                  selectedGroupId={ticket.userGroupId ?? null}
+                  onGroupSelect={handleUserGroupChange}
+                />
+              }
+            />
+          </div>
+        </div>
+
+        {/* Merchant ID */}
+        {ticket.merchantId && (
+          <TicketKeyValuePair
+            ticketKey='Merchant ID'
+            value={<span className='text-sm text-muted-foreground'>{ticket.merchantId}</span>}
+          />
+        )}
+
+        {/* Additional Form Fields */}
+        {allFormFields && allFormFields.length > 0 && (
+          <div className='border border-border bg-muted rounded-lg p-4 my-4'>
+            <h3 className='text-base font-semibold text-foreground mb-4'>Additional Form Fields</h3>
+            <div className='space-y-4'>
+              {allFormFields.map(fieldValue => (
+                <EditableFormField
+                  key={fieldValue.id}
+                  fieldName={fieldValue.formField?.fieldName || 'Unknown Field'}
+                  fieldValue={fieldValue.actualFieldValue ?? fieldValue.fieldValue}
+                  fieldType={
+                    (fieldValue.formField?.fieldType as FormFieldType) || FormFieldType.STRING
+                  }
+                  fieldEnum={fieldValue.formField?.fieldEnum as string[] | undefined}
+                  onSave={newValue => handleFormFieldSave(fieldValue.id, newValue)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Stage Forms Section */}
+        {formsToShow.length > 0 && (
+          <div className='my-4'>
+            <div className='flex items-center gap-3 mb-4'>
+              <p className='text-base font-semibold text-foreground'>Status Change Requests</p>
+              <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                {formsToShow.length}
+              </span>
+            </div>
+
+            <div className='space-y-1'>
+              {formsToShow
+                .sort((a, b) => b.createdAt - a.createdAt)
+                .map(item => {
+                  const stage = stagesWithFormInfo?.find(s => s.id === item.stageId);
+                  const isSubmitted = item.status === TicketStageRequestStatus.SUBMITTED;
+                  const isRejected = item.status === TicketStageRequestStatus.REJECTED;
+                  const isApproved = item.status === TicketStageRequestStatus.APPROVED;
+                  const isDraft = item.status === TicketStageRequestStatus.DRAFT;
+                  const isApprover =
+                    stage?.approvers?.some(a => a.userId === currentUser?.id) ?? false;
+                  const hasApprovers = stage?.approvers && stage.approvers.length > 0;
+
+                  // Find previous stage
+                  const currentStageSeq = stage?.sequenceNumber ?? 0;
+                  const previousStage = stagesWithFormInfo?.find(
+                    s => s.sequenceNumber === currentStageSeq - 1,
+                  );
+
+                  return (
+                    <div key={item.id} className='py-2'>
+                      <div className='flex items-center justify-between gap-4'>
+                        <div className='flex items-center gap-4 flex-1 min-w-0'>
+                          {/* Form Name or Stage Name */}
+                          <p className='text-base font-medium text-foreground'>
+                            {item.formId
+                              ? (item.form?.formName ?? 'Form')
+                              : `Stage: ${stage?.name || 'Unknown Stage'}`}
+                          </p>
+
+                          {/* Old Stage -> New Stage */}
+                          <p className='text-sm text-muted-foreground'>
+                            {previousStage?.name || 'Start'} &rarr; {stage?.name || 'Unknown Stage'}
+                          </p>
+
+                          {/* Status Badge - only show for stages with approvers */}
+                          {hasApprovers &&
+                            item.status &&
+                            (() => {
+                              const config = getStatusBadgeConfig(item.status);
+                              return config ? (
+                                <span className={config.className.replace('text-xs', 'text-sm')}>
+                                  {config.label}
+                                </span>
+                              ) : null;
+                            })()}
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className='flex items-center gap-2 shrink-0'>
+                          {hasApprovers ? (
+                            // Stages WITH approvers: Show approval workflow buttons
+                            <>
+                              {/* Draft status - allow user to continue/edit the form */}
+                              {isDraft && item.formId && (
+                                <button
+                                  onClick={() =>
+                                    setStageFormModal({
+                                      ticket,
+                                      targetStage: stage ?? {
+                                        id: item.stageId,
+                                        name: 'Unknown Stage',
+                                        sequenceNumber: 0,
+                                        boardId: ticket.boardId || '',
+                                      },
+                                      sourceStageName: previousStage?.name || 'Unknown Stage',
+                                      formId: item.formId,
+                                      isReviewer: false,
+                                      hasApprovers: true,
+                                      existingRequest: item.request!,
+                                    })
+                                  }
+                                  className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                  data-track-category='Tickets'
+                                  data-track-name='ContinueDraftStageForm'
+                                  data-track-metadata={JSON.stringify({
+                                    stageId: item.stageId,
+                                    formId: item.formId,
+                                  })}
+                                >
+                                  Continue Draft
+                                </button>
+                              )}
+                              {isDraft && !item.formId && (
+                                <button
+                                  onClick={() => {
+                                    void zero.mutate(
+                                      mutators.ticketStageRequest.upsert({
+                                        id: item.id,
+                                        ticketId: ticket.id,
+                                        stageId: item.stageId,
+                                        status: TicketStageRequestStatus.SUBMITTED,
+                                        updatedBy: currentUser?.id || '',
+                                        updatedAt: Date.now(),
+                                        requestActivityId: uuidv4(),
+                                      }),
+                                    );
+                                    toast.success('Request submitted for approval');
+                                  }}
+                                  className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                  data-track-category='Tickets'
+                                  data-track-name='SubmitStageRequest'
+                                  data-track-metadata={JSON.stringify({ stageId: item.stageId })}
+                                >
+                                  Submit Request
+                                </button>
+                              )}
+                              {isSubmitted && item.formId && (
+                                <>
+                                  {!isApprover && (
+                                    <button
+                                      onClick={() =>
+                                        setStageFormModal({
+                                          ticket,
+                                          targetStage: stage ?? {
+                                            id: item.stageId,
+                                            name: 'Unknown Stage',
+                                            sequenceNumber: 0,
+                                            boardId: ticket.boardId || '',
+                                          },
+                                          sourceStageName: previousStage?.name || 'Unknown Stage',
+                                          formId: item.formId,
+                                          isReviewer: false,
+                                          hasApprovers: true,
+                                        })
+                                      }
+                                      className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
+                                      aria-label='View form'
+                                      data-track-category='Tickets'
+                                      data-track-name='ViewStageForm'
+                                      data-track-metadata={JSON.stringify({
+                                        stageId: item.stageId,
+                                        formId: item.formId,
+                                      })}
+                                    >
+                                      <Eye size={16} />
+                                    </button>
+                                  )}
+                                  {isApprover && (
+                                    <button
+                                      onClick={() =>
+                                        setStageFormModal({
+                                          ticket,
+                                          targetStage: stage ?? {
+                                            id: item.stageId,
+                                            name: 'Unknown Stage',
+                                            sequenceNumber: 0,
+                                            boardId: ticket.boardId || '',
+                                          },
+                                          sourceStageName: previousStage?.name || 'Unknown Stage',
+                                          formId: item.formId,
+                                          isReviewer: true,
+                                          hasApprovers: true,
+                                          existingRequest: item.request!,
+                                        })
+                                      }
+                                      className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg flex items-center gap-2 bg-blue-500 text-white hover:bg-blue-600'
+                                      data-track-category='Tickets'
+                                      data-track-name='ReviewStageForm'
+                                      data-track-metadata={JSON.stringify({
+                                        stageId: item.stageId,
+                                        formId: item.formId,
+                                      })}
+                                    >
+                                      View request
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                              {isApproved && item.formId && (
+                                <button
+                                  onClick={() =>
+                                    setStageFormModal({
+                                      ticket,
+                                      targetStage: stage ?? {
+                                        id: item.stageId,
+                                        name: 'Unknown Stage',
+                                        sequenceNumber: 0,
+                                        boardId: ticket.boardId || '',
+                                      },
+                                      sourceStageName: previousStage?.name || 'Unknown Stage',
+                                      formId: item.formId,
+                                      isReviewer: false,
+                                      hasApprovers: true,
+                                      existingRequest: item.request!,
+                                    })
+                                  }
+                                  className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
+                                  aria-label='View form'
+                                  data-track-category='Tickets'
+                                  data-track-name='ViewApprovedStageForm'
+                                  data-track-metadata={JSON.stringify({
+                                    stageId: item.stageId,
+                                    formId: item.formId,
+                                  })}
+                                >
+                                  <Eye size={16} />
+                                </button>
+                              )}
+                              {isSubmitted && !item.formId && isApprover && (
+                                <>
+                                  <button
+                                    onClick={() =>
+                                      void zero.mutate(
+                                        mutators.ticketStageRequest.upsert({
+                                          id: item.id,
+                                          ticketId: ticket.id,
+                                          stageId: item.stageId,
+                                          status: TicketStageRequestStatus.APPROVED,
+                                          updatedBy: currentUser?.id || '',
+                                          updatedAt: Date.now(),
+                                          approvedActivityId: uuidv4(),
+                                        }),
+                                      )
+                                    }
+                                    className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-green-500 text-white hover:bg-green-600'
+                                    data-track-category='Tickets'
+                                    data-track-name='ApproveStageRequest'
+                                    data-track-metadata={JSON.stringify({ stageId: item.stageId })}
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      void zero.mutate(
+                                        mutators.ticketStageRequest.upsert({
+                                          id: item.id,
+                                          ticketId: ticket.id,
+                                          stageId: item.stageId,
+                                          status: TicketStageRequestStatus.REJECTED,
+                                          updatedBy: currentUser?.id || '',
+                                          updatedAt: Date.now(),
+                                          rejectedActivityId: uuidv4(),
+                                        }),
+                                      )
+                                    }
+                                    className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600'
+                                    data-track-category='Tickets'
+                                    data-track-name='RejectStageRequest'
+                                    data-track-metadata={JSON.stringify({ stageId: item.stageId })}
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              )}
+                              {isRejected && item.formId && (
+                                <button
+                                  onClick={() =>
+                                    setStageFormModal({
+                                      ticket,
+                                      targetStage: stage ?? {
+                                        id: item.stageId,
+                                        name: 'Unknown Stage',
+                                        sequenceNumber: 0,
+                                        boardId: ticket.boardId || '',
+                                      },
+                                      sourceStageName: previousStage?.name || 'Unknown Stage',
+                                      formId: item.formId,
+                                      isReviewer: isApprover,
+                                      hasApprovers: true,
+                                      existingRequest: item.request!,
+                                    })
+                                  }
+                                  className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                  data-track-category='Tickets'
+                                  data-track-name='ResubmitStageForm'
+                                  data-track-metadata={JSON.stringify({
+                                    stageId: item.stageId,
+                                    formId: item.formId,
+                                  })}
+                                >
+                                  Resubmit
+                                </button>
+                              )}
+                              {isRejected && !item.formId && (
+                                <button
+                                  onClick={() => {
+                                    void zero.mutate(
+                                      mutators.ticketStageRequest.upsert({
+                                        id: item.id,
+                                        ticketId: ticket.id,
+                                        stageId: item.stageId,
+                                        status: TicketStageRequestStatus.SUBMITTED,
+                                        updatedBy: currentUser?.id || '',
+                                        updatedAt: Date.now(),
+                                        requestActivityId: uuidv4(),
+                                      }),
+                                    );
+                                    toast.success('Stage change request resubmitted for approval');
+                                  }}
+                                  className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                  data-track-category='Tickets'
+                                  data-track-name='ResubmitStageRequest'
+                                  data-track-metadata={JSON.stringify({ stageId: item.stageId })}
+                                >
+                                  Resubmit request
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            // Stages WITHOUT approvers: Just show View Form button
+                            <button
+                              onClick={() =>
+                                setStageFormModal({
+                                  ticket,
+                                  targetStage: stage ?? {
+                                    id: item.stageId,
+                                    name: 'Unknown Stage',
+                                    sequenceNumber: 0,
+                                    boardId: ticket.boardId || '',
+                                    eta: null,
+                                  },
+                                  sourceStageName: previousStage?.name || 'Unknown Stage',
+                                  formId: item.formId,
+                                  isReviewer: false,
+                                  hasApprovers: false,
+                                  existingRequest: item.request!,
+                                })
+                              }
+                              className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
+                              aria-label='View form'
+                              data-track-category='Tickets'
+                              data-track-name='ViewStageFormNoApprovers'
+                              data-track-metadata={JSON.stringify({
+                                stageId: item.stageId,
+                                formId: item.formId,
+                              })}
+                            >
+                              <Eye size={16} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
                 })}
-              </div>
-            ) : null}
+            </div>
+          </div>
+        )}
+
+        {/* Fill RCA Button - shown for Fix tickets */}
+        {ticket?.ticketType === BaseTicketType.Fix && (
+          <div className='mt-6'>
             <button
-              onClick={() => setIsSubTicketModalOpen(true)}
-              data-testid='create-sub-ticket-button'
-              data-track-event='BUTTON_CLICK'
-              data-track-category='TICKETS'
-              data-track-name='CREATE_SUB_TICKET'
-              data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-              className='flex items-center gap-2 mt-3 text-sm text-muted-foreground hover:text-foreground transition-colors'
+              type='button'
+              onClick={() => {
+                if (onFillRCA) {
+                  onFillRCA();
+                  return;
+                }
+
+                const nextSearchParams = new URLSearchParams(location.search);
+                nextSearchParams.set('selectedTab', 'rca');
+                void navigate(
+                  {
+                    pathname: location.pathname,
+                    search: `?${nextSearchParams.toString()}`,
+                  },
+                  { replace: true },
+                );
+              }}
+              data-track-category='Tickets'
+              data-track-name='FillRCA'
+              data-testid='fill-rca-button'
+              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
             >
-              <Plus size={16} />
-              Create Sub-Ticket
+              <span className='inline-flex items-center gap-3'>
+                <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>
+                  <ClipboardCheck size={18} />
+                </span>
+                <span className='flex flex-col text-left'>
+                  <span className='text-sm font-semibold text-foreground'>Fill RCA</span>
+                  <span className='text-xs text-muted-foreground'>
+                    Add root cause, impact, and COE details
+                  </span>
+                </span>
+              </span>
+              <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />
             </button>
           </div>
-        </div>
-      </div>
-      {/* Related Tickets Section */}
-      <div className='border-t border-border pt-6 mt-6'>
-        <div>
-          <div className='flex items-center gap-3'>
-            <p className='text-base font-semibold text-foreground'>Related Tickets</p>
-            <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-              {referencesOut.length + referencesIn.length + (parentTickets?.length || 0)}
-            </span>
-          </div>
+        )}
 
-          <div className='mt-4 space-y-3'>
-            {/* Parent Tickets */}
-            {parentTickets && parentTickets.length > 0 && (
-              <div className='space-y-3'>
-                {parentTickets.map(parentTicket => {
-                  const link = buildTicketLink(parentTicket);
-                  const priorityIcon = parentTicket.priority
-                    ? getPriorityIcon(parentTicket.priority)
-                    : null;
-                  const boardStages = parentTicket.boardId
-                    ? stagesByBoardId.get(parentTicket.boardId)
-                    : undefined;
-                  const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
-                  const displayProgress = stageProgress === 0 ? 1 : stageProgress;
-                  const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+        {/* Generate/View Release Notes Button - shown for completed Release/Hotfix tickets */}
+        {ticket &&
+          isReleaseTicket(ticket.ticketType as BaseTicketType) &&
+          ticket.statusV2 === TicketStatusV2.COMPLETED && (
+            <div className='mt-4'>
+              <ReleaseNotesButton
+                metadata={
+                  ticket.metadata as {
+                    releaseNotesCanvasUrl?: string;
+                    isGeneratingReleaseNotes?: boolean;
+                  } | null
+                }
+                onGenerate={async () => await generateReleaseNotes(ticketId)}
+                isGeneratingReleaseNotes={isGeneratingReleaseNotes}
+                onGeneratingChange={setIsGeneratingReleaseNotes}
+              />
+            </div>
+          )}
 
-                  return (
-                    <div key={parentTicket.id} className='flex flex-col gap-2'>
-                      <div>
-                        <span className='inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-foreground'>
-                          Parent:
-                        </span>
-                      </div>
-                      <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-border bg-muted px-3 py-2.5 shadow-sm'>
-                        <div className='flex items-center gap-3 min-w-0'>
-                          <TicketStageIcon progressPercentage={displayProgress} size={18} />
-                          <div className='flex items-center gap-4 min-w-0'>
-                            <span className='text-sm font-medium text-muted-foreground font-mono shrink-0'>
-                              {parentTicket.xyneId || parentTicket.id.substring(0, 8).toUpperCase()}
-                            </span>
-                            {link ? (
-                              <Link
-                                className='text-sm font-normal text-foreground truncate'
-                                to={link}
-                              >
-                                {parentTicket.title || 'Untitled Ticket'}
-                              </Link>
-                            ) : (
-                              <span className='text-sm font-normal text-foreground truncate'>
-                                {parentTicket.title || 'Untitled Ticket'}
-                              </span>
-                            )}
-                          </div>
+        {/* Sub-Tickets Section */}
+        <div className='mt-6 space-y-6' data-testid='sub-tickets-section'>
+          <div>
+            <div className='flex items-center gap-3'>
+              <p className='text-base font-semibold text-foreground'>Sub-Tickets</p>
+              <span
+                className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
+                data-testid='sub-tickets-count'
+              >
+                {subTickets.length}
+              </span>
+            </div>
+
+            <div className='mt-4 space-y-3' data-testid='sub-tickets-list'>
+              {subTickets.length > 0 ? (
+                <div className='space-y-2'>
+                  {subTickets.map(subTicket => {
+                    // Extract mappedTicket once
+                    const mappedTicket = subTicket?.mappedTicket;
+
+                    const displayId =
+                      mappedTicket?.xyneId || subTicket.id.substring(0, 8).toUpperCase();
+                    const displayTitle = mappedTicket?.title || subTicket.title;
+
+                    // Calculate stage progress using existing helper
+                    const boardStages = mappedTicket?.boardId
+                      ? stagesByBoardId.get(mappedTicket.boardId)
+                      : undefined;
+                    const stageProgress = getStageProgress(mappedTicket?.stageName, boardStages);
+                    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
+
+                    const priority = mappedTicket?.priority;
+                    const assignedTo = mappedTicket?.assignedTo;
+                    const priorityIcon = priority ? getPriorityIcon(priority) : null;
+                    const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
+
+                    const handleClick = (): void => {
+                      if (subTicket.mappedTicketId) {
+                        if (onNavigateToTicket) {
+                          onNavigateToTicket(subTicket.mappedTicketId);
+                        } else {
+                          setMappedTicketId(subTicket.mappedTicketId);
+                        }
+                      } else {
+                        setSelectedSubTicket(subTicket);
+                        setIsCreateTicketModalOpen(true);
+                      }
+                    };
+
+                    return (
+                      <div
+                        key={subTicket.id}
+                        role='button'
+                        tabIndex={0}
+                        onClick={handleClick}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleClick();
+                          }
+                        }}
+                        data-testid={`sub-ticket-item-${subTicket.id}`}
+                        data-track-category='Tickets'
+                        data-track-name='OpenSubTicket'
+                        data-track-metadata={JSON.stringify({
+                          subTicketId: subTicket.id,
+                          mappedTicketId: subTicket.mappedTicketId,
+                        })}
+                        className='flex items-center justify-between p-3 bg-muted rounded-lg hover:bg-muted transition-colors cursor-pointer'
+                      >
+                        <div className='flex items-center gap-3 flex-1 min-w-0'>
+                          <span className='text-xs font-medium text-muted-foreground whitespace-nowrap'>
+                            {displayId}
+                          </span>
+                          <span className='text-sm text-foreground truncate'>{displayTitle}</span>
+                          {subTicket.mappedTicketId && (
+                            <FileText size={14} className='text-blue-600 flex-shrink-0' />
+                          )}
                         </div>
                         <div className='flex items-center gap-3 shrink-0'>
+                          {/* Stage progress using TicketStatusIcon */}
+                          {boardStages && boardStages.length > 0 && (
+                            <div className='flex items-center gap-1.5'>
+                              <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                              <span className='text-xs font-medium text-foreground whitespace-nowrap'>
+                                {boardStages.findIndex(s => s.name === mappedTicket?.stageName) + 1}
+                                /{boardStages.length}
+                              </span>
+                            </div>
+                          )}
                           {priorityIcon && (
                             <span className='flex items-center'>{priorityIcon}</span>
                           )}
@@ -2893,79 +2866,173 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
                           )}
                         </div>
-                        <button
-                          onClick={() => {
-                            if (onNavigateToTicket) {
-                              onNavigateToTicket(parentTicket.id);
-                            } else {
-                              setMappedTicketId(parentTicket.id);
-                            }
-                          }}
-                          className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
-                          data-track-category='Tickets'
-                          data-track-name='ViewParentTicket'
-                          data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
-                        >
-                          View
-                        </button>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Regular Related Tickets */}
-            {referencesOut.length + referencesIn.length > 0 && (
-              <>
-                {referencesOut.map(reference =>
-                  renderRelatedTicketRow(
-                    reference,
-                    reference.targetTicket,
-                    formatReferenceLabel(reference.relationType),
-                    true,
-                  ),
-                )}
-                {referencesIn.map(reference =>
-                  renderRelatedTicketRow(
-                    reference,
-                    reference.sourceTicket,
-                    formatIncomingReferenceLabel(reference.relationType),
-                    false,
-                  ),
-                )}
-              </>
-            )}
-
-            {!parentTickets?.length && referencesOut.length + referencesIn.length === 0 && (
-              <p className='text-sm text-muted-foreground'>No related tickets yet.</p>
-            )}
-
-            <div
-              className={`rounded-lg border border-border px-3 py-2 flex items-center ${
-                isReferenceSaving ? 'opacity-60 pointer-events-none' : ''
-              }`}
-            >
-              <EntitySelector
-                options={referenceTicketOptions}
-                selectedValue={null}
-                onSelect={value => handleAddReference(value)}
-                placeholder='+ Add ticket'
-                searchPlaceholder='Search by ID or name'
-                width='100%'
-                noBorder
-              />
+                    );
+                  })}
+                </div>
+              ) : null}
+              <button
+                onClick={() => setIsSubTicketModalOpen(true)}
+                data-testid='create-sub-ticket-button'
+                data-track-event='BUTTON_CLICK'
+                data-track-category='TICKETS'
+                data-track-name='CREATE_SUB_TICKET'
+                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                className='flex items-center gap-2 mt-3 text-sm text-muted-foreground hover:text-foreground transition-colors'
+              >
+                <Plus size={16} />
+                Create Sub-Ticket
+              </button>
             </div>
-            {referenceError && <p className='text-xs text-red-600'>{referenceError}</p>}
           </div>
         </div>
+        {/* Related Tickets Section */}
+        <div className='border-t border-border pt-6 mt-6'>
+          <div>
+            <div className='flex items-center gap-3'>
+              <p className='text-base font-semibold text-foreground'>Related Tickets</p>
+              <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                {referencesOut.length + referencesIn.length + (parentTickets?.length || 0)}
+              </span>
+            </div>
+
+            <div className='mt-4 space-y-3'>
+              {/* Parent Tickets */}
+              {parentTickets && parentTickets.length > 0 && (
+                <div className='space-y-3'>
+                  {parentTickets.map(parentTicket => {
+                    const link = buildTicketLink(parentTicket);
+                    const priorityIcon = parentTicket.priority
+                      ? getPriorityIcon(parentTicket.priority)
+                      : null;
+                    const boardStages = parentTicket.boardId
+                      ? stagesByBoardId.get(parentTicket.boardId)
+                      : undefined;
+                    const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
+                    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
+                    const assigneeId =
+                      parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+
+                    return (
+                      <div key={parentTicket.id} className='flex flex-col gap-2'>
+                        <div>
+                          <span className='inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-foreground'>
+                            Parent:
+                          </span>
+                        </div>
+                        <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-border bg-muted px-3 py-2.5 shadow-sm'>
+                          <div className='flex items-center gap-3 min-w-0'>
+                            <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                            <div className='flex items-center gap-4 min-w-0'>
+                              <span className='text-sm font-medium text-muted-foreground font-mono shrink-0'>
+                                {parentTicket.xyneId ||
+                                  parentTicket.id.substring(0, 8).toUpperCase()}
+                              </span>
+                              {link ? (
+                                <Link
+                                  className='text-sm font-normal text-foreground truncate'
+                                  to={link}
+                                >
+                                  {parentTicket.title || 'Untitled Ticket'}
+                                </Link>
+                              ) : (
+                                <span className='text-sm font-normal text-foreground truncate'>
+                                  {parentTicket.title || 'Untitled Ticket'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className='flex items-center gap-3 shrink-0'>
+                            {priorityIcon && (
+                              <span className='flex items-center'>{priorityIcon}</span>
+                            )}
+                            {assigneeId ? (
+                              <UserAvatar
+                                userId={assigneeId}
+                                size={AvatarSize.SM}
+                                shape={AvatarShape.ROUNDED}
+                                showActiveStatus={false}
+                              />
+                            ) : (
+                              <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
+                            )}
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (onNavigateToTicket) {
+                                onNavigateToTicket(parentTicket.id);
+                              } else {
+                                setMappedTicketId(parentTicket.id);
+                              }
+                            }}
+                            className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                            data-track-category='Tickets'
+                            data-track-name='ViewParentTicket'
+                            data-track-metadata={JSON.stringify({
+                              parentTicketId: parentTicket.id,
+                            })}
+                          >
+                            View
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Regular Related Tickets */}
+              {referencesOut.length + referencesIn.length > 0 && (
+                <>
+                  {referencesOut.map(reference =>
+                    renderRelatedTicketRow(
+                      reference,
+                      reference.targetTicket,
+                      formatReferenceLabel(reference.relationType),
+                      true,
+                    ),
+                  )}
+                  {referencesIn.map(reference =>
+                    renderRelatedTicketRow(
+                      reference,
+                      reference.sourceTicket,
+                      formatIncomingReferenceLabel(reference.relationType),
+                      false,
+                    ),
+                  )}
+                </>
+              )}
+
+              {!parentTickets?.length && referencesOut.length + referencesIn.length === 0 && (
+                <p className='text-sm text-muted-foreground'>No related tickets yet.</p>
+              )}
+
+              <div
+                className={`rounded-lg border border-border px-3 py-2 flex items-center ${
+                  isReferenceSaving ? 'opacity-60 pointer-events-none' : ''
+                }`}
+              >
+                <EntitySelector
+                  options={referenceTicketOptions}
+                  selectedValue={null}
+                  onSelect={value => handleAddReference(value)}
+                  placeholder='+ Add ticket'
+                  searchPlaceholder='Search by ID or name'
+                  width='100%'
+                  noBorder
+                />
+              </div>
+              {referenceError && <p className='text-xs text-red-600'>{referenceError}</p>}
+            </div>
+          </div>
+        </div>
+        <TicketActivity
+          activities={activities}
+          users={users}
+          userGroups={userGroups}
+          boards={boards}
+        />
       </div>
-      <TicketActivity
-        activities={activities}
-        users={users}
-        userGroups={userGroups}
-        boards={boards}
-      />
       {/* SubTicket Modal */}
       {ticket?.conversationId && (
         <SubTicketModal
@@ -3093,6 +3160,40 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 data-track-metadata={JSON.stringify({ stageName: backwardStageChange?.stageName })}
               >
                 Confirm
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Archive Confirmation Dialog */}
+      {showArchiveConfirmDialog && (
+        <Dialog
+          open={showArchiveConfirmDialog}
+          onOpenChange={setShowArchiveConfirmDialog}
+          title='Archive Ticket'
+        >
+          <div className='p-6'>
+            <div className='flex items-center gap-3 mb-4'>
+              <div className='p-2 rounded-full bg-red-100'>
+                <AlertCircle className='w-6 h-6 text-red-600' />
+              </div>
+              <h3 className='text-lg font-semibold'>This action is irreversible</h3>
+            </div>
+            <p className='text-sm text-muted-foreground mb-6'>
+              Once archived, this ticket cannot be unarchived. All data associated with this ticket
+              will be preserved but the ticket will be hidden from active views.
+            </p>
+
+            <div className='flex justify-end gap-3'>
+              <Button variant='secondary' onClick={() => setShowArchiveConfirmDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleArchiveTicket}
+                className='bg-red-600 text-white hover:bg-red-700'
+              >
+                Archive Ticket
               </Button>
             </div>
           </div>

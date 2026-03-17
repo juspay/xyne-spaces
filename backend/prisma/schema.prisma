@@ -122,6 +122,7 @@ enum ActivityType {
   STAGE_CHANGE_REQUEST
   STAGE_CHANGE_APPROVED
   STAGE_CHANGE_REJECTED
+  IS_ARCHIVED
   @@schema("public")
 }
 
@@ -341,6 +342,7 @@ model Ticket {
   boardId          String            // Board to which the ticket belongs
   stageName        String            // Current stage of the ticket
   ticketType       String?           
+  isArchived       Boolean           @default(false)
 
   // Relations
   createdByUser      User                   @relation("TicketCreatedBy", fields: [createdBy], references: [id])
@@ -378,6 +380,9 @@ model Ticket {
   @@index([closedBy])
   @@index([conversationId])
   @@index([channelId])
+  @@index([isArchived])
+  @@index([isArchived, projectId])
+  @@index([isArchived, ticketType])
   @@map("tickets")
   @@schema("public")
 }
