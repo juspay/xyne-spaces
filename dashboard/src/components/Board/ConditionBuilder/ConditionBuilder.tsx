@@ -1,7 +1,7 @@
 import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import { X, ChevronDown, Plus } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { type User } from '@xyne/shared';
+import { type User, FormContextType } from '@xyne/shared';
 import { ApproverSelector } from '../ApproverSelector/ApproverSelector';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -217,8 +217,10 @@ export const ConditionBuilder = ({
   const [thenValue, setThenValue] = useState('');
   const [selectedApprovers, setSelectedApprovers] = useState<User[]>([]);
 
-  // Fetch forms for name lookup
-  const [allForms] = useCachedQuery(queries.getAllForms());
+  // Fetch forms for name lookup - only STAGE context forms
+  const [allForms] = useCachedQuery(
+    queries.getFormsByContextType({ contextType: FormContextType.STAGE }),
+  );
   const formMap = useMemo(() => new Map(allForms?.map(f => [f.id, f.formName]) || []), [allForms]);
 
   // Fetch users for approver lookup
