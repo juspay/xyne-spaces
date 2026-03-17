@@ -263,6 +263,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       await activityService.createActivities(activities);
     }
 
+    // Determine whether this message is a thread reply before sending notifications,
+    // so mentions inside a thread can use the 'thread_mention' context which passes
+    // for THREADS_ONLY users (in addition to ALL and MENTIONS_ONLY).
+    const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
+
     if (notificationUserIds.length > 0) {
       await handleUnreadCount(
         channelId,
@@ -288,7 +293,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           senderId,
           senderName,
           cleanContent,
-          mentionType
+          mentionType,
+          isDMChannel,
+          !!isReply  // isThreadMessage: true when this mention is inside a thread reply
         ),
         slackService.sendMentionNotifications(
           mentionedEmails,
@@ -310,7 +317,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       finalMentionedUserIds
     );
 
-    const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
     if (isReply && conversationId) {
       await this.createReplyActivity(
         conversationId,

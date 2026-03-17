@@ -36,6 +36,7 @@ import { TicketReferenceMappingsACL } from '../tables/ticket-reference-mappings-
 import { TicketTagsACL } from '../tables/ticket-tags-acl';
 import { PullRequestsACL } from '../tables/pull-requests-acl';
 import { BookmarksACL } from '../tables/bookmarks-acl';
+import { ChannelUserStatusACL } from '../tables/channel-user-status-acl';
 import { UserAssignmentStatesACL } from '../tables/user-assignment-states-acl';
 import { BoardComplexityScoresACL } from '../tables/board-complexity-scores-acl';
 import { UserWorkloadMappingsACL } from '../tables/user-workload-mappings-acl';
@@ -157,7 +158,7 @@ export class ACLFactory {
       case 'workflows':
         return new WOrkflowsAcl(ctx);
       case 'channel_user_status': 
-        return new NoAcl<'channel_user_status'>(ctx);
+        return new ChannelUserStatusACL(ctx);
       case 'user_profiles':
         return new NoAcl<'user_profiles'>(ctx);
       case 'rcas':

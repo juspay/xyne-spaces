@@ -17,6 +17,7 @@ import { AI_STAGES } from '@/workflows/types/workflow-enums';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import {  notificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
+import * as notificationFilterService from './notificationFilterService';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -667,7 +668,26 @@ class NotificationService {
     return fcmPushService.isSendEnabled();
   }
 
-  async createNotification(userId: string, data: NotificationData): Promise<void> {
+  /**
+   * Unified notification delivery method for both desktop (WebSocket) and mobile (FCM) channels.
+   *
+   * By default, sends to both channels. Pass `options.sendDesktop = false` or
+   * `options.sendMobile = false` to restrict delivery to a single channel.
+   *
+   * Callers that use `notificationFilterService` to split recipients into `desktopUsers` and
+   * `mobileUsers` should call this method twice:
+   *   - `createNotification(userId, data, { sendDesktop: true, sendMobile: false })` for desktopUsers
+   *   - `createNotification(userId, data, { sendDesktop: false, sendMobile: true })` for mobileUsers
+   *
+   * Callers that do not use the pause filter (calls, canvas, tickets, etc.) should omit
+   * the options parameter so that both channels are used by default.
+   */
+  async createNotification(
+    userId: string,
+    data: NotificationData,
+    { sendDesktop, sendMobile } : { sendDesktop: boolean; sendMobile: boolean } = { sendDesktop: true, sendMobile: true }
+  ): Promise<void> {
+
     try {
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,
@@ -677,72 +697,77 @@ class NotificationService {
         relatedEntityType: data.relatedEntityType,
         relatedEntityId: data.relatedEntityId,
         actionUrl: data.actionUrl,
+        options: { sendDesktop, sendMobile }
       });
 
-      const shouldSendToMobile = await fcmPushService.hasActiveTokens(userId);
-      logger.info(`[NOTIFICATION-SERVICE] Mobile push check for user ${userId}: ${shouldSendToMobile}`);
-      
-      // 1. Queue mobile push notifications with per-session tracking
-      if (shouldSendToMobile) {
-        try {
-          const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
-          logger.info(`Found ${sessions.length} active mobile sessions for user ${userId}`);
+      // ─── MOBILE NOTIFICATIONS ───────────────────────────────────────────────
+      if (sendMobile) {
+        const hasActiveTokens = await fcmPushService.hasActiveTokens(userId);
+        
+        if (hasActiveTokens) {
+          logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+          
+          try {
+            const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
+            const isDirectMessageType = typeof data.type === 'string' && data.type.toUpperCase() === 'DIRECT_MESSAGE';
+            const mobileTitle = isDirectMessageType ? (data.metadata?.senderName ?? data.title) : data.title;
 
-          const isDirectMessageType = typeof data.type === 'string' && data.type.toUpperCase() === 'DIRECT_MESSAGE';
-          const mobileTitle = isDirectMessageType ? (data.metadata?.senderName ?? data.title) : data.title;
+            for (const session of sessions) {
+              const deliveryMethod = session.platform === 'ios'
+                ? NotificationDeliveryMethod.IOS
+                : NotificationDeliveryMethod.ANDROID;
 
-          for (const session of sessions) {
-            // Determine specific delivery method based on platform
-            const deliveryMethod = session.platform === 'ios'
-              ? NotificationDeliveryMethod.IOS
-              : NotificationDeliveryMethod.ANDROID;
+              const sessionNotification = await this.createSessionNotification(
+                userId,
+                data,
+                deliveryMethod
+              );
 
-            // Create individual tracking entry for this session
-            const sessionNotification = await this.createSessionNotification(
-              userId,
-              data,
-              deliveryMethod
-            );
+              const mobilePayload = {
+                type: data.type,
+                title: mobileTitle,
+                message: data.message,
+                notificationId: sessionNotification.id,
+                actionUrl: data.actionUrl,
+                relatedEntityType: data.relatedEntityType,
+                relatedEntityId: data.relatedEntityId,
+                metadata: data.metadata,
+              };
 
-            logger.info(`Created session notification ${sessionNotification.id} for session ${session.id} using method ${deliveryMethod}`);
-
-            const mobilePayload = {
-              type: data.type,
-              title: mobileTitle,
-              message: data.message,
-              notificationId: sessionNotification.id, // Use the specific session notification ID
-              actionUrl: data.actionUrl,
-              relatedEntityType: data.relatedEntityType,
-              relatedEntityId: data.relatedEntityId,
-              metadata: data.metadata
-            };
-
-            await realTimeNotificationService.queueMobilePush(userId, session, mobilePayload);
+              await realTimeNotificationService.queueMobilePush(userId, session, mobilePayload);
+            }
+            logger.info(`[NOTIFICATION-SERVICE] MOBILE QUEUED: ${sessions.length} sessions for user ${userId}`);
+          } catch (error) {
+            logger.error(`[NOTIFICATION-SERVICE] MOBILE FAILED: User ${userId}`, { error });
           }
-          logger.info(`[Notification] Queued ${sessions.length} mobile push jobs for user ${userId}`);
-        } catch (error) {
-          logger.error(`[Notification] Failed to queue mobile push`, { userId, error });
+        } else {
+          logger.info(`[NOTIFICATION-SERVICE] MOBILE SKIPPED (no tokens): User ${userId} | Type: ${data.type}`);
         }
+      } else {
+        logger.info(`[NOTIFICATION-SERVICE] MOBILE SKIPPED (sendMobile=false): User ${userId} | Type: ${data.type}`);
       }
 
-      // 2. Send real-time WebSocket notification (RAW data, edge will create specific entries)
-      logger.info(`[NOTIFICATION-SERVICE] Sending WebSocket notification to user ${userId}`);
-      await realTimeNotificationService.sendNotification(
-        userId,
-        data.type,
-        data.title,
-        data.message,
-        {
-          ...data.metadata,
-          relatedEntityType: data.relatedEntityType,
-          relatedEntityId: data.relatedEntityId
-        },
-        data.actionUrl
-      );
-
-      logger.info(`Broadcasted notification for user ${userId} (Edge creation pending)`);
+      // ─── DESKTOP NOTIFICATIONS ───────────────────────────────────────────────
+      if (sendDesktop) {
+        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+        
+        await realTimeNotificationService.sendNotification(
+          userId,
+          data.type,
+          data.title,
+          data.message,
+          {
+            ...data.metadata,
+            relatedEntityType: data.relatedEntityType,
+            relatedEntityId: data.relatedEntityId,
+          },
+          data.actionUrl
+        );
+      } else {
+        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SKIPPED (sendDesktop=false): User ${userId} | Type: ${data.type}`);
+      }
     } catch (error) {
-      logger.error('Failed to create notification:', error);
+      logger.error('[NOTIFICATION-SERVICE] FAILED to create notification:', { userId, type: data.type, error });
       throw error;
     }
   }
@@ -756,7 +781,9 @@ class NotificationService {
     senderId: string,
     senderName: string,
     cleanContent: string,
-    mentionType?: string
+    mentionType?: string,
+    isDMChannel: boolean = false,
+    isThreadMessage: boolean = false
   ): Promise<void> {
     const title = mentionType
       ? `${mentionType} in ${channelName}`
@@ -765,26 +792,59 @@ class NotificationService {
     const recipientIds = userIds.filter(id => id !== senderId);
 
     notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
+    // Filter users based on device preferences, pause settings and notification level.
+    // For DM channels, only device filter is applied (skips notification level checks).
+    // context='thread_mention': passes for ALL, MENTIONS_ONLY, and THREADS_ONLY — a direct
+    //   @mention inside a thread is relevant to both mention and thread-reply subscribers.
+    // context='mention': ALL or MENTIONS_ONLY passes; THREADS_ONLY blocks.
+    const notificationContext = isThreadMessage && !isDMChannel ? 'thread_mention' : 'mention';
+    const { desktopUsers, mobileUsers } = await notificationFilterService.filterUsers(
+      recipientIds,
+      channelId,
+      isDMChannel,
+      notificationContext
+    );
 
+    logger.info(`[Notification] Filtered mention recipients`, {
+      original: recipientIds.length,
+      desktopUsers: desktopUsers.length,
+      mobileUsers: mobileUsers.length,
+      channelId,
+      mentionType,
+      notificationContext,
+    });
+
+    const notificationData = {
+      title,
+      message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
+      type: NotificationType.MENTION,
+      relatedEntityType: 'message' as const,
+      relatedEntityId: messageId,
+      actionUrl: `/chat/${channelId}/${conversationId}#messageId=${messageId}`,
+      metadata: {
+        channelId,
+        conversationId,
+        messageId,
+        senderId,
+        senderName,
+        channelTitle: channelName,
+        mentionType,
+      },
+    };
+
+    // Send desktop-only notifications (pauseFilter already determined these users should get desktop)
+    notificationJobsExpected.add(desktopUsers.length, { platform: 'desktop', message_type: 'channel' });
     await Promise.allSettled(
-      recipientIds.map(userId =>
-        this.createNotification(userId, {
-          title,
-          message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
-          type: NotificationType.MENTION,
-          relatedEntityType: 'message',
-          relatedEntityId: messageId,
-          actionUrl: `/chat/${channelId}/${conversationId}#messageId=${messageId}`,
-          metadata: {
-            channelId,
-            conversationId,
-            messageId,
-            senderId,
-            senderName,
-            channelTitle: channelName,
-            mentionType,
-          },
-        })
+      desktopUsers.map(userId =>
+        this.createNotification(userId, notificationData, { sendDesktop: true, sendMobile: false })
+      )
+    );
+
+    // Send mobile-only notifications (pauseFilter already determined these users should get mobile)
+    notificationJobsExpected.add(mobileUsers.length, { platform: 'mobile', message_type: 'channel' });
+    await Promise.allSettled(
+      mobileUsers.map(userId =>
+        this.createNotification(userId, notificationData, { sendDesktop: false, sendMobile: true })
       )
     );
   }
@@ -883,31 +943,60 @@ class NotificationService {
     channelName: string,
     senderId: string,
     senderName: string,
-    cleanContent: string
+    cleanContent: string,
+    isDMChannel: boolean = false
   ): Promise<void> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
     notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
+    // Filter users based on device preferences, pause settings and notification level.
+    // For DM channels, only device filter is applied (skips notification level checks).
+    // context='thread_reply': ALL or THREADS_ONLY passes; MENTIONS_ONLY blocks (even for subscribed threads).
+    const { desktopUsers, mobileUsers } = await notificationFilterService.filterUsers(
+      recipientIds,
+      channelId,
+      isDMChannel,
+      'thread_reply'
+    );
 
+    logger.info(`[Notification] Filtered thread reply recipients`, {
+      original: recipientIds.length,
+      desktopUsers: desktopUsers.length,
+      mobileUsers: mobileUsers.length,
+      channelId,
+    });
+
+    const notificationData = {
+      title: `New reply in ${channelName}`,
+      message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
+      type: NotificationType.THREAD_REPLY,
+      relatedEntityType: 'message' as const,
+      relatedEntityId: replyMessageId,
+      actionUrl: `/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
+      metadata: {
+        channelId,
+        conversationId,
+        messageId: replyMessageId,
+        senderId,
+        senderName,
+        channelTitle: channelName,
+        messageType: 'thread_reply',
+      },
+    };
+
+    // Send desktop-only notifications (pauseFilter already determined these users should get desktop)
+    notificationJobsExpected.add(desktopUsers.length, { platform: 'desktop', message_type: 'channel' });
     await Promise.allSettled(
-      recipientIds.map(userId =>
-        this.createNotification(userId, {
-          title: `New reply in ${channelName}`,
-          message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
-          type: NotificationType.THREAD_REPLY,
-          relatedEntityType: 'message',
-          relatedEntityId: replyMessageId,
-          actionUrl: `/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
-          metadata: {
-            channelId,
-            conversationId,
-            messageId: replyMessageId,
-            senderId,
-            senderName,
-            channelTitle: channelName,
-            messageType: 'thread_reply',
-          },
-        })
+      desktopUsers.map(userId =>
+        this.createNotification(userId, notificationData, { sendDesktop: true, sendMobile: false })
+      )
+    );
+
+    // Send mobile-only notifications (pauseFilter already determined these users should get mobile)
+    notificationJobsExpected.add(mobileUsers.length, { platform: 'mobile', message_type: 'channel' });
+    await Promise.allSettled(
+      mobileUsers.map(userId =>
+        this.createNotification(userId, notificationData, { sendDesktop: false, sendMobile: true })
       )
     );
   }
@@ -919,29 +1008,55 @@ class NotificationService {
     channelId: string,
     senderId: string,
     senderName: string,
-    cleanContent: string
+    cleanContent: string,
+    isDMChannel: boolean = true
   ): Promise<void> {
     if (recipientIds.length === 0) return;
 
     notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'dm' });
+    // For DM channels, only apply device filter (skips pause and notification level checks)
+    const { desktopUsers, mobileUsers } = await notificationFilterService.filterUsers(
+      recipientIds,
+      channelId,
+      isDMChannel
+    );
 
+    logger.info(`[Notification] Filtered DM recipients`, {
+      original: recipientIds.length,
+      desktopUsers: desktopUsers.length,
+      mobileUsers: mobileUsers.length,
+      channelId,
+    });
+
+    const notificationData = {
+      title: `New Message from ${senderName}`,
+      message: cleanContent.substring(0, 100) + (cleanContent.length > 100 ? '...' : ''),
+      type: NotificationType.DIRECT_MESSAGE,
+      relatedEntityType: 'message' as const,
+      relatedEntityId: conversationId,
+      actionUrl: `/chat/${channelId}`,
+      metadata: {
+        senderId,
+        senderName,
+        channelId,
+        conversationId,
+        messageId,
+      },
+    };
+
+    // Send desktop-only notifications (pauseFilter already determined these users should get desktop)
+    notificationJobsExpected.add(desktopUsers.length, { platform: 'desktop', message_type: 'dm' });
     await Promise.allSettled(
-      recipientIds.map(recipientId =>
-        this.createNotification(recipientId, {
-          title: `New Message from ${senderName}`,
-          message: cleanContent.substring(0, 100) + (cleanContent.length > 100 ? '...' : ''),
-          type: 'DIRECT_MESSAGE',
-          relatedEntityType: 'message',
-          relatedEntityId: conversationId,
-          actionUrl: `/chat/${channelId}`,
-          metadata: {
-            senderId,
-            senderName,
-            channelId,
-            conversationId,
-            messageId,
-          },
-        })
+      desktopUsers.map(recipientId =>
+        this.createNotification(recipientId, notificationData, { sendDesktop: true, sendMobile: false })
+      )
+    );
+
+    // Send mobile-only notifications (pauseFilter already determined these users should get mobile)
+    notificationJobsExpected.add(mobileUsers.length, { platform: 'mobile', message_type: 'dm' });
+    await Promise.allSettled(
+      mobileUsers.map(recipientId =>
+        this.createNotification(recipientId, notificationData, { sendDesktop: false, sendMobile: true })
       )
     );
   }

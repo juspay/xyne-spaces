@@ -1,5 +1,17 @@
-import { ReactElement, useState } from 'react';
-import { X, SmilePlus, Copy, PauseCircle, Mail, Clock, ChevronDown, Check } from 'lucide-react';
+import { ReactElement, useState, useMemo, useRef, useEffect } from 'react';
+import {
+  X,
+  SmilePlus,
+  Copy,
+  PauseCircle,
+  Mail,
+  Clock,
+  ChevronDown,
+  Check,
+  Bell,
+  BellOff,
+  Calendar,
+} from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { useAuth } from '../../../hooks/useAuth';
 import { Link } from 'react-router-dom';
@@ -24,6 +36,7 @@ import { toast } from 'sonner';
 import { SelectedStatusData } from './SetStatusView';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useUserPresence } from '../../../hooks/usePresence';
+import { DateTimePicker } from '../../ui/DateTimePicker/DateTimePicker';
 
 type ViewType = 'default' | 'status-suggestions' | 'status-edit';
 
@@ -38,7 +51,34 @@ const ProfileView = ({
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [isPresenceDropdownOpen, setIsPresenceDropdownOpen] = useState(false);
+  const [isNotificationDropdownOpen, setIsNotificationDropdownOpen] = useState(false);
+  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
+  const [customDate, setCustomDate] = useState<Date | null>(null);
+  const notificationDropdownRef = useRef<HTMLDivElement>(null);
   const zero = useZero();
+
+  // Handle click outside to close notification dropdown
+  useEffect(() => {
+    if (!isNotificationDropdownOpen) {
+      return undefined;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        notificationDropdownRef.current &&
+        !notificationDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsNotificationDropdownOpen(false);
+        setShowCustomDatePicker(false);
+        setCustomDate(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isNotificationDropdownOpen]);
 
   // Get assignment availability for current user
   const { isCurrentlyUnavailable, unavailableUntil, isActiveInAtLeastOneGroup } =
@@ -66,6 +106,62 @@ const ProfileView = ({
       );
     });
   };
+
+  // Notification pause handlers
+  const notificationsPausedUntil = user?.presenceStatus?.notificationsPausedUntil;
+  const isNotificationsPaused = useMemo(() => {
+    return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
+  }, [notificationsPausedUntil]);
+
+  const handlePauseNotifications = (durationMinutes: number): void => {
+    if (!user?.id) return;
+    const pausedUntil = Date.now() + durationMinutes * 60 * 1000;
+    zero.mutate(
+      mutators.userPresence.upsert({
+        notificationsPausedUntil: pausedUntil,
+        timestamp: Date.now(),
+        presenceId: uuidv4(),
+      }),
+    );
+    setIsNotificationDropdownOpen(false);
+  };
+
+  const handlePauseNotificationsUntil = (untilDate: Date): void => {
+    if (!user?.id) return;
+    zero.mutate(
+      mutators.userPresence.upsert({
+        notificationsPausedUntil: untilDate.getTime(),
+        timestamp: Date.now(),
+        presenceId: uuidv4(),
+      }),
+    );
+    setShowCustomDatePicker(false);
+    setCustomDate(null);
+    setIsNotificationDropdownOpen(false);
+  };
+
+  const handleResumeNotifications = (e: React.MouseEvent<HTMLButtonElement>): void => {
+    e.stopPropagation();
+    if (!user?.id) return;
+    zero.mutate(
+      mutators.userPresence.upsert({
+        notificationsPausedUntil: null,
+        timestamp: Date.now(),
+        presenceId: uuidv4(),
+      }),
+    );
+  };
+
+  const pauseOptions = useMemo(
+    () => [
+      { label: '30 minutes', minutes: 30 },
+      { label: '1 hour', minutes: 60 },
+      { label: '4 hours', minutes: 240 },
+      { label: 'Until tomorrow', minutes: 1440 },
+      { label: 'Until next week', minutes: 10080 },
+    ],
+    [],
+  );
 
   // Check if user has a valid (non-expired) status
   const hasValidStatus =
@@ -261,6 +357,113 @@ const ProfileView = ({
         )}
       </div>
 
+      {/* Global Notification Pause Section */}
+      {isNotificationsPaused ? (
+        <div className='mt-2 space-y-1'>
+          <div
+            className={cn(
+              'px-2 py-1 rounded-lg border border-gray-200 bg-transparent hover:bg-gray-100 transition-colors w-full flex items-center justify-between gap-2',
+            )}
+            data-track-category='PROFILE'
+            data-track-name='ResumeNotificationsArea'
+          >
+            <div className='flex items-center gap-2 min-w-0 flex-1'>
+              <BellOff className='size-4 flex-shrink-0 text-gray-600' />
+              <div className='text-sm font-medium text-gray-900 truncate'>Notifications paused</div>
+            </div>
+            <Button
+              variant='ghost'
+              size='lg'
+              className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
+              title='Resume notifications'
+              onClick={handleResumeNotifications}
+              data-track-category='PROFILE'
+              data-track-name='ResumeNotifications'
+            >
+              <X className='size-3 text-gray-600' />
+            </Button>
+          </div>
+          {notificationsPausedUntil && (
+            <div className='text-xs text-gray-500 px-2'>
+              Until {format(new Date(notificationsPausedUntil), 'dd/MM/yyyy hh:mm a')}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className='mt-2 space-y-1'>
+          {/* Notification Pause Dropdown - inline for mobile compatibility */}
+          <div className='relative' ref={notificationDropdownRef}>
+            <button
+              onClick={() => setIsNotificationDropdownOpen(!isNotificationDropdownOpen)}
+              className='w-full px-2 py-1 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-200 transition-colors flex items-center justify-between gap-2'
+              data-track-category='PROFILE'
+              data-track-name='OpenPauseNotificationsMenu'
+            >
+              <div className='flex items-center p-1 gap-2 text-gray-600'>
+                <Bell className='size-4 flex-shrink-0' />
+                <span className='text-xs truncate'>Pause notifications for: </span>
+              </div>
+              <ChevronDown
+                className={cn(
+                  'size-4 text-gray-400 transition-transform',
+                  isNotificationDropdownOpen && 'rotate-180',
+                )}
+              />
+            </button>
+
+            {isNotificationDropdownOpen && (
+              <div
+                className={cn(
+                  'absolute left-0 top-full mt-1 p-1 bg-white rounded-md border shadow-md z-10',
+                  showCustomDatePicker ? 'w-auto max-h-[40vh]' : 'w-44',
+                )}
+              >
+                {!showCustomDatePicker ? (
+                  <div className='space-y-0.5'>
+                    {pauseOptions.map(option => (
+                      <button
+                        key={option.minutes}
+                        onClick={e => {
+                          e.stopPropagation();
+                          handlePauseNotifications(option.minutes);
+                        }}
+                        className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                        data-track-category='PROFILE'
+                        data-track-name='PauseNotifications'
+                        data-track-metadata={JSON.stringify({ duration: option.minutes })}
+                      >
+                        <span>{option.label}</span>
+                      </button>
+                    ))}
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setShowCustomDatePicker(true);
+                      }}
+                      className='w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                      data-track-category='PROFILE'
+                      data-track-name='PauseNotificationsCustom'
+                    >
+                      <span>Custom</span>
+                      <Calendar className='size-4 text-gray-500' />
+                    </button>
+                  </div>
+                ) : (
+                  <div className='overflow-auto max-h-[calc(70vh-2rem)]'>
+                    <DateTimePicker
+                      value={customDate}
+                      onChange={setCustomDate}
+                      onConfirm={date => handlePauseNotificationsUntil(date)}
+                      inline
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Assignment Status Section */}
       {(isActiveInAtLeastOneGroup || isCurrentlyUnavailable) && (
         <div className='mt-2 space-y-1'>
@@ -319,8 +522,8 @@ const ProfileView = ({
             )}
           </div>
           {isCurrentlyUnavailable && unavailableUntil && (
-            <div className='text-xs text-muted-foreground px-2'>
-              Until {new Date(unavailableUntil).toLocaleString()}
+            <div className='text-xs text-gray-500 px-2'>
+              Until {format(new Date(unavailableUntil), 'dd/MM/yyyy hh:mm a')}
             </div>
           )}
         </div>

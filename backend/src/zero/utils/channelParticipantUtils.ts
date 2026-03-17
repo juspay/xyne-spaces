@@ -58,6 +58,8 @@ export async function addChannelParticipant(
     isClosed: false,
     unreadCount: 0,
     isRecapSubscribed: false,
+    desktopNotificationLevel: 'ALL',
+    mobileNotificationLevel: 'ALL',
   });
 
   // Increment participantCount
@@ -128,6 +130,8 @@ export async function addChannelParticipants(
       isClosed: false,
       unreadCount: 0,
       isRecapSubscribed: false,
+      desktopNotificationLevel: 'ALL',
+      mobileNotificationLevel: 'ALL',
     });
   }
 

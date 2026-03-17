@@ -3,7 +3,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import useMeasure from '../../../hooks/useMeasure';
-import { Star, Users2, ExternalLink } from 'lucide-react';
+import { Star, Users2, Bell, ExternalLink } from 'lucide-react';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Dialog from '../../ui/Dialog';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -161,6 +161,22 @@ const ConversationHeader = ({
                 </span>
                 <span className='h-4 w-[1px] bg-muted-foreground/30 rounded-full'></span>
                 <span className='shrink-0'>{channel.participantCount}</span>
+              </Button>
+            </Tooltip>
+          )}
+          {channelUserStatus && (
+            <Tooltip content='Notifications'>
+              <Button
+                variant='outline'
+                onClick={() => {
+                  setInfoDefaultTab('notifications');
+                  setIsInfoOpen(true);
+                }}
+                className='flex items-center justify-between gap-2 border border-border rounded-lg p-2 text-primary'
+              >
+                <span className='shrink-0'>
+                  <Bell className='w-4 h-4' />
+                </span>
               </Button>
             </Tooltip>
           )}
