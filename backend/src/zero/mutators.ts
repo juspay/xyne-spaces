@@ -346,6 +346,43 @@ async function createNonParticipantSystemMessages(
 
 export function createMutators(authData: AuthData, asyncTasks: Array<() => Promise<void>>) {
   return defineMutators({
+    notificationSettings: {
+      setChannelNotificationLevel: defineMutator(
+        z.object({
+          channelId: z.string(),
+          desktopNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
+          mobileNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { channelId, desktopNotificationLevel, mobileNotificationLevel, timestamp } }) => {
+          // Get channel user status
+          const userStatus = await tx.run(
+            zql.channel_user_status
+              .where('channelId', channelId)
+              .where('userId', authData.sub)
+              .one()
+          );
+
+          if (!userStatus) {
+            throw new Error('Not a channel participant');
+          }
+
+          logger.info(`[NOTIFICATION-SETTINGS] Setting channel notification for user ${authData.sub} in channel ${channelId}`, {
+            desktopNotificationLevel,
+            mobileNotificationLevel,
+            timestamp,
+            userId: authData.sub,
+            channelId,
+          });
+
+          await tx.mutate.channel_user_status.update({
+            id: userStatus.id,
+            ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel }),
+            ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel }),
+          });
+        }
+      ),
+    },
     channel: {
       joinChannel: defineMutator(
         z.object({
@@ -543,18 +580,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               isClosed: false,
             });
 
-            // Update channel_user_status with timestamp
-            const userStatus = await tx.run(zql.channel_user_status
-              .where('channelId', channelId)
-              .where('userId', user.id)
-              .one());
+            // // Update channel_user_status with timestamp
+            // const userStatus = await tx.run(zql.channel_user_status
+            //   .where('channelId', channelId)
+            //   .where('userId', user.id)
+            //   .one());
 
-            if (userStatus) {
-              await tx.mutate.channel_user_status.update({
-                id: userStatus.id,
-                lastViewedAt: timestamp,
-              });
-            }
+            // if (userStatus) {
+            //   await tx.mutate.channel_user_status.update({
+            //     id: userStatus.id,
+            //     lastViewedAt: timestamp,
+            //   });
+            // }
 
             addedUsers.push(user);
           }
@@ -6052,10 +6089,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           statusContent: z.string().nullable().optional(),
           statusExpiryAt: z.number().nullable().optional(),
           assignmentUnavailableUntil: z.number().nullable().optional(),
+          notificationsPausedUntil: z.number().nullable().optional(),
           timestamp: z.number(),
           presenceId: z.string(),
         }),
-        async ({ tx, args: { statusEmoji, statusContent, statusExpiryAt, assignmentUnavailableUntil, timestamp, presenceId } }) => {
+        async ({ tx, args: { statusEmoji, statusContent, statusExpiryAt, assignmentUnavailableUntil, notificationsPausedUntil, timestamp, presenceId } }) => {
           // Decode and validate emoji if provided
           let validatedEmoji: string | undefined;
           if (statusEmoji) {
@@ -6095,6 +6133,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(statusContent !== undefined && { statusContent: statusContent }),
             ...(statusExpiryAt !== undefined && { statusExpiryAt: statusExpiryAt }),
             ...(assignmentUnavailableUntil !== undefined && { assignmentUnavailableUntil: assignmentUnavailableUntil }),
+            ...(notificationsPausedUntil !== undefined && { notificationsPausedUntil: notificationsPausedUntil }),
             updatedAt: now,
             createdAt: existingPresence ? existingPresence.createdAt || now : now,
           };

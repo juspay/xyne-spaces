@@ -1042,6 +1042,7 @@ model UserPresence {
   statusContent String?           // Current status text
   statusExpiryAt DateTime?         // Status expiry timestamp
   assignmentUnavailableUntil DateTime?  // When user will be available for ticket assignment again
+  notificationsPausedUntil DateTime?    // Global notification pause (Slack-style "Pause notifications") - applies to all channels
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
@@ -1391,6 +1392,9 @@ model ChannelUserStatus {
   // Recap subscription fields
   isRecapSubscribed         Boolean     @default(false) // User opted into AI recaps for this channel
   lastSeenRecapDate         DateTime?   @db.Date // Last recap date the user has seen for this channel
+
+  desktopNotificationLevel  NotificationLevel     @default(ALL) // Channel notification preference (desktop)
+  mobileNotificationLevel   NotificationLevel    @default(ALL) // Channel notification preference (mobile)
 
   // Relations
   channel Channel @relation(fields: [channelId], references: [id])
@@ -1847,6 +1851,14 @@ enum NotificationDeliveryMethod {
   MOBILE
   IOS
   ANDROID
+  @@schema("public")
+}
+
+enum NotificationLevel {
+  ALL                    // All new posts - Messages and threads you follow
+  MENTIONS_ONLY          // Just mentions - @you, @channel, @here
+  THREADS_ONLY           // Only thread replies - For threads a user is subscribed to
+  NONE
   @@schema("public")
 }
 

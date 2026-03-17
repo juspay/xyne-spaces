@@ -38,6 +38,7 @@ import {
   NudgeState,
   SurfaceAreaType,
   SurfaceLinkKind,
+  NotificationLevel,
 } from '@xyne/shared';
 import { extractAllMentions } from '../utils/mentionParser';
 import { z } from 'zod';
@@ -62,6 +63,39 @@ function getNudgeDirection(
 }
 
 export const mutators = defineMutators({
+  notificationSettings: {
+    setChannelNotificationLevel: defineMutator(
+      z.object({
+        channelId: z.string(),
+        desktopNotificationLevel: z
+          .enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE'])
+          .optional(),
+        mobileNotificationLevel: z
+          .enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE'])
+          .optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { channelId, desktopNotificationLevel, mobileNotificationLevel },
+      }) => {
+        const userStatus = await tx.run(
+          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!userStatus) {
+          throw new Error('Not a channel participant');
+        }
+
+        await tx.mutate.channel_user_status.update({
+          id: userStatus.id,
+          ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel }),
+          ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel }),
+        });
+      },
+    ),
+  },
   channel: {
     joinChannel: defineMutator(
       z.object({
@@ -122,6 +156,8 @@ export const mutators = defineMutators({
           isClosed: false,
           unreadCount: 0,
           isRecapSubscribed: false,
+          desktopNotificationLevel: NotificationLevel.ALL,
+          mobileNotificationLevel: NotificationLevel.ALL,
         });
       },
     ),
@@ -235,6 +271,8 @@ export const mutators = defineMutators({
             isClosed: false,
             unreadCount: 0,
             isRecapSubscribed: false,
+            desktopNotificationLevel: NotificationLevel.ALL,
+            mobileNotificationLevel: NotificationLevel.ALL,
           });
         }
       },
@@ -4290,6 +4328,7 @@ export const mutators = defineMutators({
         statusContent: z.string().nullable().optional(),
         statusExpiryAt: z.number().nullable().optional(),
         assignmentUnavailableUntil: z.number().nullable().optional(),
+        notificationsPausedUntil: z.number().nullable().optional(),
         timestamp: z.number(),
         presenceId: z.string(),
       }),
@@ -4301,6 +4340,7 @@ export const mutators = defineMutators({
           statusContent,
           statusExpiryAt,
           assignmentUnavailableUntil,
+          notificationsPausedUntil,
           timestamp,
           presenceId: inputPresenceId,
         },
@@ -4342,6 +4382,7 @@ export const mutators = defineMutators({
           ...(statusContent !== undefined && { statusContent }),
           ...(statusExpiryAt !== undefined && { statusExpiryAt }),
           ...(assignmentUnavailableUntil !== undefined && { assignmentUnavailableUntil }),
+          ...(notificationsPausedUntil !== undefined && { notificationsPausedUntil }),
           updatedAt: now,
           createdAt: existingPresence ? existingPresence.createdAt || now : now,
         };

@@ -342,6 +342,14 @@ export enum NotificationDeliveryMethod {
 }
 
 // @ts-ignore TS1294
+export enum NotificationLevel {
+  ALL = "ALL",
+  MENTIONS_ONLY = "MENTIONS_ONLY",
+  THREADS_ONLY = "THREADS_ONLY",
+  NONE = "NONE",
+}
+
+// @ts-ignore TS1294
 export enum CanvasVisibility {
   PUBLIC = 'PUBLIC',
   PRIVATE = 'PRIVATE',
@@ -945,6 +953,7 @@ export const userPresenceTable = table('user_presence')
     statusContent: string().optional(), // Current status text
     statusExpiryAt: number().optional(), // Status expiry timestamp
     assignmentUnavailableUntil: number().optional(), // When user will be available for ticket assignment again
+    notificationsPausedUntil: number().optional(), // Global notification pause (Slack-style "Pause notifications") - applies to all channels
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1089,6 +1098,8 @@ export const channelUserStatusTable = table('channel_user_status')
     // Recap subscription fields
     isRecapSubscribed: boolean(),
     lastSeenRecapDate: number().optional(),
+    desktopNotificationLevel: string(),
+    mobileNotificationLevel: string(),
   })
   .primaryKey('id');
 

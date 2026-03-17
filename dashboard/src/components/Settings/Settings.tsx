@@ -1,8 +1,20 @@
 import { ReactElement, useState } from 'react';
-import { X, User, SmilePlus, Copy, PauseCircle, ChevronDown, Check } from 'lucide-react';
+import {
+  X,
+  User,
+  SmilePlus,
+  Copy,
+  PauseCircle,
+  ChevronDown,
+  Check,
+  Bell,
+  BellOff,
+  Calendar,
+} from 'lucide-react';
 import { useZero } from '../../hooks/useZero';
 import { useAuth } from '../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useMemo } from 'react';
 import Avatar from '../ui/Avatar/Avatar';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { UpdateStatusModal } from '../AppSidebar/UpdateStatusModal';
@@ -25,6 +37,8 @@ import { logger } from '../../utils/logger';
 import { toast } from 'sonner';
 import { Popover } from '../ui/Popover/Popover';
 import { useUserPresence } from '../../hooks/usePresence';
+import { DateTimePicker } from '../ui/DateTimePicker/DateTimePicker';
+import { format } from 'date-fns';
 
 const Settings = (): ReactElement => {
   const { logout } = useAuth();
@@ -64,6 +78,71 @@ const Settings = (): ReactElement => {
       );
     });
   };
+
+  // Notification pause state
+  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
+  const [customDate, setCustomDate] = useState<Date | null>(null);
+
+  // Check if notifications are globally paused
+  const notificationsPausedUntil = user?.presenceStatus?.notificationsPausedUntil;
+  const isNotificationsPaused = useMemo(() => {
+    return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
+  }, [notificationsPausedUntil]);
+
+  const handlePauseNotifications = (durationMinutes: number): void => {
+    if (!user?.id) {
+      return;
+    }
+    const pausedUntil = Date.now() + durationMinutes * 60 * 1000;
+
+    const mutationPayload = {
+      notificationsPausedUntil: pausedUntil,
+      timestamp: Date.now(),
+      presenceId: uuidv4(),
+    };
+
+    try {
+      zero.mutate(mutators.userPresence.upsert(mutationPayload));
+    } catch (error) {
+      console.error('Mutation failed:', error);
+    }
+  };
+
+  const handlePauseNotificationsUntil = (untilDate: Date): void => {
+    if (!user?.id) return;
+    zero.mutate(
+      mutators.userPresence.upsert({
+        notificationsPausedUntil: untilDate.getTime(),
+        timestamp: Date.now(),
+        presenceId: uuidv4(),
+      }),
+    );
+    setShowCustomDatePicker(false);
+    setCustomDate(null);
+  };
+
+  const handleResumeNotifications = (e: React.MouseEvent<HTMLButtonElement>): void => {
+    e.stopPropagation();
+    if (!user?.id) return;
+    zero.mutate(
+      mutators.userPresence.upsert({
+        notificationsPausedUntil: null,
+        timestamp: Date.now(),
+        presenceId: uuidv4(),
+      }),
+    );
+  };
+
+  const pauseOptions = useMemo(
+    () => [
+      { label: '30 minutes', minutes: 30 },
+      { label: '1 hour', minutes: 60 },
+      { label: '4 hours', minutes: 240 },
+      { label: 'Until tomorrow', minutes: 1440 },
+      { label: 'Until next week', minutes: 10080 },
+    ],
+    [],
+  );
 
   // Check if user has a valid (non-expired) status
   const hasValidStatus =
@@ -318,10 +397,111 @@ const Settings = (): ReactElement => {
             )}
           </div>
           {isCurrentlyUnavailable && unavailableUntil && (
-            <div className='text-xs text-muted-foreground'>
-              Until {new Date(unavailableUntil).toLocaleString()}
+            <div className='text-xs text-gray-500'>
+              Until {format(new Date(unavailableUntil), 'dd/MM/yyyy hh:mm a')}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Global Notification Pause Section */}
+      {isNotificationsPaused ? (
+        <div className='mt-2 space-y-1'>
+          <div
+            className={cn(
+              'px-2 py-1 rounded-lg border border-gray-200 bg-transparent hover:bg-gray-100 transition-colors w-full flex items-center justify-between gap-2',
+            )}
+            data-track-category='Settings'
+            data-track-name='ResumeNotificationsArea'
+          >
+            <div className='flex items-center gap-2 min-w-0 flex-1'>
+              <BellOff className='size-4 flex-shrink-0 text-gray-600' />
+              <div className='text-sm font-medium text-gray-900 truncate'>Notifications paused</div>
+            </div>
+            <Button
+              variant='ghost'
+              size='lg'
+              className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
+              title='Resume notifications'
+              onClick={handleResumeNotifications}
+              data-track-category='Settings'
+              data-track-name='ResumeNotifications'
+            >
+              <X className='size-3 text-gray-600' />
+            </Button>
+          </div>
+          {notificationsPausedUntil && (
+            <div className='text-xs text-gray-500'>
+              Until {format(new Date(notificationsPausedUntil), 'dd/MM/yyyy hh:mm a')}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className='mt-2 space-y-1'>
+          <Popover
+            trigger={
+              <button
+                className='w-full px-2 py-1 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-200 transition-colors flex items-center justify-between gap-2'
+                data-track-category='Settings'
+                data-track-name='OpenPauseNotificationsMenu'
+              >
+                <div className='flex items-center p-1 gap-2 text-gray-600'>
+                  <Bell className='size-4 flex-shrink-0' />
+                  <span className='text-xs truncate'>Pause notifications for: </span>
+                </div>
+                <ChevronDown className='size-4 text-gray-400' />
+              </button>
+            }
+            align='start'
+            className={cn('p-1', showCustomDatePicker ? 'w-auto' : 'w-44')}
+            onOpenChange={open => {
+              if (!open) {
+                setShowCustomDatePicker(false);
+                setCustomDate(null);
+              }
+            }}
+          >
+            {!showCustomDatePicker ? (
+              <div className='space-y-0.5'>
+                {pauseOptions.map(option => (
+                  <button
+                    key={option.minutes}
+                    onClick={e => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handlePauseNotifications(option.minutes);
+                    }}
+                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                    data-track-category='Settings'
+                    data-track-name='PauseNotifications'
+                    data-track-metadata={JSON.stringify({ duration: option.minutes })}
+                  >
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setShowCustomDatePicker(true);
+                  }}
+                  className='w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                  data-track-category='Settings'
+                  data-track-name='PauseNotificationsCustom'
+                >
+                  <span>Custom</span>
+                  <Calendar className='size-4 text-gray-500' />
+                </button>
+              </div>
+            ) : (
+              <DateTimePicker
+                value={customDate}
+                onChange={setCustomDate}
+                onConfirm={date => handlePauseNotificationsUntil(date)}
+                inline
+              />
+            )}
+          </Popover>
         </div>
       )}
 

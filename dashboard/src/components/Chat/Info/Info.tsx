@@ -24,6 +24,7 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import AboutChannel from '../AboutChannel/AboutChannel';
 import ChannelSettings from '../ChannelInformation/ChannelSettings';
+import NotificationsTab from '../AboutChannel/NotificationsTab';
 import { AddChannelForm } from '../AddChannelForm/AddChannelForm';
 import { PromoteGroupDmRequest } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
@@ -59,7 +60,7 @@ import { mutators } from '../../../zero/mutators';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { v4 as uuidv4 } from 'uuid';
 
-export type ChannelTab = 'about' | 'members' | 'settings';
+export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings';
 interface InfoProps {
   channel: Channel;
   previousChannelId?: string | null;
@@ -379,6 +380,19 @@ const Info = ({
               Members {channel.participantCount || 0}
             </Tabs.Trigger>
           )}
+          {isParticipant && (
+            <Tabs.Trigger
+              value='notifications'
+              className={cn(
+                'px-4 py-2 flex items-center gap-2 text-sm transition-all duration-100 border-b-2',
+                activeTab === 'notifications'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Notifications
+            </Tabs.Trigger>
+          )}
           {isDefaultChannel && (
             <Tabs.Trigger
               value='settings'
@@ -417,6 +431,11 @@ const Info = ({
               channel={channel}
               isAdmin={currentUserParticipant?.role === ChannelRole.ADMIN}
             />
+          </Tabs.Content>
+        )}
+        {isParticipant && (
+          <Tabs.Content value='notifications' className='outline-none'>
+            <NotificationsTab channel={channel} isParticipant={isParticipant} />
           </Tabs.Content>
         )}
       </Tabs.Root>
