@@ -4,13 +4,14 @@ import GCSServiceFactory from '@/services/gcsServiceFactory';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { SessionRecordingProcessStatus } from '@prisma/client';
+import { SESSION_RECORDING_KEYS_SET, parseSessionRecordingKey } from '@/utils/sessionRecordingKeys';
 
 interface SessionBatch {
   sessionId: string;
   userId: string;
   repoUrl: string;
-  ticketId: string;
-  commitId: string;
+  ticketId?: string;
+  commitId?: string;
   agentUsed: string[];
   modelUsed: string[];
   timestamp: string;
@@ -21,15 +22,12 @@ interface SessionRecording {
   sessionId: string;
   userId: string;
   repoUrl: string;
-  ticketId: string;
-  commitId: string;
+  ticketId?: string;
+  commitId?: string;
   agentUsed: string[];
   modelUsed: string[];
   messages: any[];
 }
-
-// Redis key pattern for session recordings
-const SESSION_RECORDING_KEY_PATTERN = 'session-recording:*';
 
 class SessionRecordingSyncService {
   private gcsService = GCSServiceFactory.getService(config.gcs.sessionRecordingBucketName);
@@ -40,26 +38,13 @@ class SessionRecordingSyncService {
    */
   async syncAllSessionRecordings(): Promise<void> {
     try {
-      const redis = redisService.getClient();
-      const keys: string[] = [];
+      // Get all session recording keys from the global tracking set
+      const keys = await redisService.smembers(SESSION_RECORDING_KEYS_SET);
 
-      logger.info(`[SESSION-RECORDING-SYNC] Starting SCAN with pattern: ${SESSION_RECORDING_KEY_PATTERN}`);
-
-      // Use SCAN to find all keys matching pattern
-      let cursor = '0';
-      let scanIterations = 0;
-      do {
-        scanIterations++;
-        const result = await redis.scan(cursor, 'MATCH', SESSION_RECORDING_KEY_PATTERN, 'COUNT', 100);
-        cursor = result[0];
-        keys.push(...result[1]);
-        logger.info(`[SESSION-RECORDING-SYNC] SCAN iteration ${scanIterations}: cursor=${cursor}, found ${result[1].length} keys`);
-      } while (cursor !== '0');
-
-      logger.info(`[SESSION-RECORDING-SYNC] Found ${keys.length} session recording keys via SCAN`);
+      logger.info(`[SESSION-RECORDING-SYNC] Found ${keys.length} session recording keys in Redis set: ${SESSION_RECORDING_KEYS_SET}`);
 
       if (keys.length === 0) {
-        logger.info(`[SESSION-RECORDING-SYNC] No session recording keys found`);
+        logger.info(`[SESSION-RECORDING-SYNC] No session recording keys found in tracking set`);
         return;
       }
 
@@ -85,14 +70,19 @@ class SessionRecordingSyncService {
    * Reads from Redis and directly uploads to GCS (overwrites existing file).
    */
   private async syncSessionRecording(redisKey: string): Promise<void> {
-    const sessionId = redisKey.replace('session-recording:', '');
+    const sessionId = parseSessionRecordingKey(redisKey);
+
+    if (!sessionId) {
+      logger.warn(`[SESSION-RECORDING-SYNC] Invalid Redis key format: ${redisKey}`);
+      return;
+    }
 
     // Read all batches from Redis atomically using Lua script
-    // Deletes the key after reading
-    const redisData = await redisService.fetchListAndCleanupIfEmpty(redisKey);
+    // Deletes the key and removes from tracking set after reading
+    const redisData = await redisService.fetchListAndDelete(redisKey, SESSION_RECORDING_KEYS_SET);
 
     if (!redisData || redisData.length === 0) {
-      logger.info(`[SESSION-RECORDING-SYNC] No data in Redis for ${redisKey}, key deleted`);
+      logger.info(`[SESSION-RECORDING-SYNC] No data in Redis for ${redisKey}, key cleaned up`);
       return;
     }
 
@@ -130,11 +120,11 @@ class SessionRecordingSyncService {
       sessionId: firstBatch.sessionId,
       userId: firstBatch.userId,
       repoUrl: firstBatch.repoUrl || '',
-      ticketId: firstBatch.ticketId || '',
-      commitId: firstBatch.commitId || '',
       agentUsed: firstBatch.agentUsed || [],
       modelUsed: firstBatch.modelUsed || [],
       messages,
+      ...(firstBatch.ticketId ? { ticketId: firstBatch.ticketId } : {}),
+      ...(firstBatch.commitId ? { commitId: firstBatch.commitId } : {}),
     };
 
     // Read existing recording from GCS if exists

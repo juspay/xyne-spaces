@@ -1121,6 +1121,40 @@ class RedisService {
     }
   }
 
+  /**
+   * Atomically read all items from a Redis list, then always delete the key
+   * and remove it from the tracking set
+   * Use this when data should be consumed exactly once (e.g., syncing to GCS).
+   * Returns null if the key is empty or doesn't exist.
+   */
+  async fetchListAndDelete(key: string, trackingSetKey?: string): Promise<string[] | null> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot fetchListAndDelete - Redis not initialized');
+      return null;
+    }
+
+    const luaScript = `
+      local data = redis.call('LRANGE', KEYS[1], 0, -1)
+      redis.call('DEL', KEYS[1])
+      if KEYS[2] then
+        redis.call('SREM', KEYS[2], KEYS[1])
+      end
+      if #data == 0 then
+        return nil
+      end
+      return data
+    `;
+
+    try {
+      const keys = trackingSetKey ? [key, trackingSetKey] : [key];
+      const result = await this.redis.eval(luaScript, keys.length, ...keys) as string[] | null;
+      return result;
+    } catch (error) {
+      logger.error(`[REDIS] Lua script failed for key ${key}:`, error);
+      throw error;
+    }
+  }
+
   // Getter for direct Redis access (use sparingly)
   getClient() {
     if (!this.redis) throw new Error('Redis not initialized');
