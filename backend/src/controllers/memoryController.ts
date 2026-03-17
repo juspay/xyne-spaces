@@ -4,12 +4,13 @@ import { searchMemory, getMemoryById, updateMemory, deleteMemory, insertMemory }
 import { VespaDocType, VespaMemoryDocument } from '@/vespa/src/types';
 import { DatabaseClient } from '@/database/client';
 import { redisService } from '@/services/redisService';
+import { buildSessionRecordingKey, SESSION_RECORDING_KEYS_SET } from '@/utils/sessionRecordingKeys';
 
 export interface SessionTurnPayload {
   sessionId: string;
   repoUrl: string;
-  ticketId: string;
-  commitId: string;
+  ticketId?: string;
+  commitId?: string;
   agentUsed: string[];
   modelUsed: string[];
   messages: any[];
@@ -356,23 +357,29 @@ export class MemoryController {
       const { sessionId } = payload;
 
       // Build Redis key
-      const redisKey = `session-recording:${sessionId}`;
+      const redisKey = buildSessionRecordingKey(sessionId);
 
       // Store batch with all session info needed for GCS reconstruction
-      const batchData = {
+      const batchData: Record<string, any> = {
         sessionId,
         userId,
         repoUrl: payload.repoUrl,
-        ticketId: payload.ticketId,
-        commitId: payload.commitId,
         agentUsed: payload.agentUsed,
         modelUsed: payload.modelUsed,
         timestamp: new Date().toISOString(),
         messages: payload.messages,
       };
 
-      // Push to Redis list and set TTL
+      if (payload.ticketId) {
+        batchData.ticketId = payload.ticketId;
+      }
+      if (payload.commitId) {
+        batchData.commitId = payload.commitId;
+      }
+
+      // Push to Redis list, add to tracking set, and set TTL
       await redisService.rpush(redisKey, JSON.stringify(batchData));
+      await redisService.sadd(SESSION_RECORDING_KEYS_SET, redisKey);
       await redisService.expire(redisKey, 86400); // 24h TTL
 
       logger.info('Session messages buffered in Redis', {
