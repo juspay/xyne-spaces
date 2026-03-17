@@ -43,14 +43,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 
 const LAST_WORKFLOW_PATH_KEY = 'last-viewed-workflow-path';
 
-const RERUN_EXCLUDED_KEYS = new Set([
-  'title',
-  'description',
-  'workflowType',
-  'ticketId',
-  'conversationId',
-  'xyneId',
-]);
+const RERUN_EXCLUDED_KEYS = new Set(['workflowType', 'ticketId', 'conversationId', 'xyneId']);
 
 const WorkflowScreen: React.FC = () => {
   const { ticketId, workflowId } = useParams<{ ticketId: string; workflowId?: string }>();
@@ -260,7 +253,7 @@ const WorkflowScreen: React.FC = () => {
               id: 'vscode',
               title: 'Code Viewer',
               type: 'vscode' as const,
-              icon: <Eye size={14} />,
+              icon: <Eye size={15} />,
               closable: false,
               disabled: false,
             },
@@ -270,7 +263,7 @@ const WorkflowScreen: React.FC = () => {
         id: 'git-diff',
         title: 'Final Git Diff',
         type: 'git-diff',
-        icon: <GitBranch size={14} />,
+        icon: <GitBranch size={15} />,
         closable: false,
         disabled: false,
         disabledTooltip: 'Git diff will be available after workflow completes',
@@ -279,7 +272,7 @@ const WorkflowScreen: React.FC = () => {
         id: 'live-edits',
         title: 'Live Edits',
         type: 'live-edits',
-        icon: <Code size={14} />,
+        icon: <Code size={15} />,
         closable: false,
         disabled: false,
       },
@@ -287,7 +280,7 @@ const WorkflowScreen: React.FC = () => {
         id: 'context',
         title: 'Context',
         type: 'context' as const,
-        icon: <Brain size={14} />,
+        icon: <Brain size={15} />,
         closable: false,
         disabled: false,
       },

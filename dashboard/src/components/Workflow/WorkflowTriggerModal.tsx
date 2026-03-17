@@ -19,11 +19,6 @@ import {
   type TicketData,
 } from './utils';
 
-/** Allowed model names for workflow trigger modal */
-const ALLOWED_MODEL_NAMES = import.meta.env.DEV
-  ? ['glm-private', 'private-large', 'glm-latest', 'kimi-latest']
-  : ['glm-private', 'private-large'];
-
 interface WorkflowTriggerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -221,12 +216,6 @@ export default function WorkflowTriggerModal({
           ticketDataForUtils,
           wf,
         );
-
-        // Set default modelName if the workflow has this field
-        const modelNameField = wf.schema?.find(f => f.name === 'modelName');
-        if (modelNameField) {
-          setValue('customFields.modelName' as Path<TriggerWorkflowFormData>, 'glm-private');
-        }
       }
     },
     [workflowTypes, ticketData, form, setValue],
@@ -252,23 +241,22 @@ export default function WorkflowTriggerModal({
   }, [isRerun, savedValues, selectedWorkflow, setValue]);
 
   useEffect(() => {
-    if (!isRerun || !selectedWorkflow?.schema || !defaultCustomFields) return;
-    for (const [fieldName, fieldValue] of Object.entries(defaultCustomFields)) {
-      const fieldExists = selectedWorkflow.schema.some(f => f.name === fieldName);
-      if (fieldExists && fieldValue !== undefined && fieldValue !== null && fieldValue !== '') {
+    if (!isRerun || !defaultCustomFields) return;
+
+    const fieldsToPreFill = { ...defaultCustomFields };
+
+    for (const [fieldName, fieldValue] of Object.entries(fieldsToPreFill)) {
+      const fieldExists = selectedWorkflow?.schema?.some(f => f.name === fieldName);
+      if (
+        (fieldExists || fieldName === 'title' || fieldName === 'description') &&
+        fieldValue !== undefined &&
+        fieldValue !== null &&
+        fieldValue !== ''
+      ) {
         setValue(`customFields.${fieldName}` as Path<TriggerWorkflowFormData>, fieldValue);
       }
     }
   }, [isRerun, selectedWorkflow, defaultCustomFields, setValue]);
-
-  useEffect(() => {
-    if (selectedWorkflow?.schema) {
-      const modelNameField = selectedWorkflow.schema.find(f => f.name === 'modelName');
-      if (modelNameField) {
-        setValue('customFields.modelName' as Path<TriggerWorkflowFormData>, 'glm-private');
-      }
-    }
-  }, [selectedWorkflow, setValue]);
 
   const handleClose = (): void => {
     // Explicitly reset form to initial values to prevent stale workflow selection
@@ -333,8 +321,6 @@ export default function WorkflowTriggerModal({
   const renderFormFields = () => {
     if (!selectedWorkflow?.schema) return null;
 
-    if (selectedWorkflow.schema.length === 0) return null;
-
     // Fields to show immediately: required fields OR fields with saved values
     const visibleFields = selectedWorkflow.schema.filter(
       field => field.required || isFieldPersisted(field.name),
@@ -345,18 +331,41 @@ export default function WorkflowTriggerModal({
       field => !field.required && !isFieldPersisted(field.name),
     );
 
+    const rerunFields: React.ReactElement[] = [];
+    if (isRerun && defaultCustomFields) {
+      ['title', 'description'].forEach(fieldName => {
+        const hasValue = !!defaultCustomFields[fieldName];
+        const inSchema = selectedWorkflow.schema?.some(f => f.name === fieldName);
+
+        if (hasValue && !inSchema) {
+          rerunFields.push(
+            renderField({
+              name: fieldName,
+              type: 'string',
+              required: fieldName === 'title',
+              description: `Workflow ${fieldName}`,
+            }),
+          );
+        }
+      });
+    }
+
+    if (visibleFields.length === 0 && rerunFields.length === 0 && hiddenFields.length === 0)
+      return null;
+
     return (
       <div className='space-y-4 mt-4 border-t pt-4 border-border'>
-        {visibleFields.length > 0 && (
+        {(visibleFields.length > 0 || rerunFields.length > 0) && (
           <>
             <h3 className='text-sm font-medium text-foreground'>
-              Required Parameters
-              {hasSavedRepositoryUrl && (
+              {isRerun ? 'Workflow Parameters' : 'Required Parameters'}
+              {hasSavedRepositoryUrl && !isRerun && (
                 <span className='text-xs text-muted-foreground font-normal ml-2'>
                   (includes saved values)
                 </span>
               )}
             </h3>
+            {rerunFields}
             {visibleFields.map(field => renderField(field))}
           </>
         )}
@@ -434,10 +443,7 @@ export default function WorkflowTriggerModal({
                   placeholder={`Select ${field.name}`}
                   items={[
                     {
-                      items: (field.name === 'modelName'
-                        ? field.enumValues.filter(v => ALLOWED_MODEL_NAMES.includes(v))
-                        : field.enumValues
-                      ).map(enumValue => ({
+                      items: field.enumValues.map(enumValue => ({
                         label: enumValue,
                         value: enumValue,
                       })),
@@ -452,7 +458,7 @@ export default function WorkflowTriggerModal({
               )
             ) : field.type === 'string' || (!field.type && !field.enumValues) ? (
               <textarea
-                className='w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[80px] text-sm'
+                className='w-full px-3 py-2 bg-background text-foreground border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[80px] text-sm placeholder:text-muted-foreground'
                 data-track-category='Workflows'
                 data-track-name='WorkflowParameterInput'
                 data-track-metadata={JSON.stringify({
@@ -473,7 +479,7 @@ export default function WorkflowTriggerModal({
             ) : (
               <input
                 type={field.type === 'number' ? 'number' : 'text'}
-                className='w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+                className='w-full px-3 py-2 bg-background text-foreground border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-muted-foreground'
                 data-track-category='Workflows'
                 data-track-name='WorkflowParameterInput'
                 data-track-metadata={JSON.stringify({
@@ -569,7 +575,7 @@ export default function WorkflowTriggerModal({
         <div className='bg-background rounded-lg p-6 max-w-md w-full mx-4'>
           <div className='flex items-center justify-center h-32'>
             <div className='text-center'>
-              <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4' />
+              <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-4' />
               <p className='text-muted-foreground'>Loading workflow types...</p>
             </div>
           </div>
@@ -603,7 +609,7 @@ export default function WorkflowTriggerModal({
               </p>
               <button
                 onClick={handleClose}
-                className='px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors'
+                className='px-4 py-2 bg-muted text-foreground rounded-lg hover:bg-muted/80 transition-colors border border-border'
                 data-track-category='Workflows'
                 data-track-name='CloseErrorModal'
               >
@@ -670,11 +676,11 @@ export default function WorkflowTriggerModal({
           {renderFormFields()}
 
           {validationErrors.length > 0 && (
-            <div className='p-3 bg-orange-50 border border-orange-200 rounded-md'>
-              <p className='text-sm text-orange-600 font-medium'>
+            <div className='p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-md'>
+              <p className='text-sm text-orange-600 dark:text-orange-400 font-medium'>
                 Please fix the following errors:
               </p>
-              <ul className='text-sm text-orange-600 mt-1 list-disc list-inside'>
+              <ul className='text-sm text-orange-600 dark:text-orange-400 mt-1 list-disc list-inside'>
                 {validationErrors.map((validationError, index) => (
                   <li key={index}>{validationError}</li>
                 ))}
@@ -683,18 +689,22 @@ export default function WorkflowTriggerModal({
           )}
 
           {createWorkflowMutation.isPending && (
-            <div className='p-3 bg-blue-50 border border-blue-200 rounded-md'>
+            <div className='p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md'>
               <div className='flex items-center gap-2'>
-                <div className='animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600' />
-                <p className='text-sm text-blue-600 font-medium'>Triggering workflow...</p>
+                <div className='animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 dark:border-blue-400' />
+                <p className='text-sm text-blue-600 dark:text-blue-400 font-medium'>
+                  Triggering workflow...
+                </p>
               </div>
             </div>
           )}
 
           {createWorkflowMutation.isError && (
-            <div className='p-3 bg-red-50 border border-red-200 rounded-md'>
-              <p className='text-sm text-red-600 font-medium'>Error triggering workflow:</p>
-              <p className='text-sm text-red-600'>
+            <div className='p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md'>
+              <p className='text-sm text-red-600 dark:text-red-400 font-medium'>
+                Error triggering workflow:
+              </p>
+              <p className='text-sm text-red-600 dark:text-red-400'>
                 {createWorkflowMutation.error instanceof Error
                   ? createWorkflowMutation.error.message
                   : 'An unexpected error occurred while triggering the workflow'}

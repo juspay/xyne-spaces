@@ -45,7 +45,11 @@ export const ToolWriteRenderer: React.FC<
 
     return (
       <div className='space-y-2 text-sm'>
-        <div className='rounded-xl border border-border overflow-hidden bg-background'>
+        <div
+          className={`rounded-xl border transition-colors overflow-hidden ${
+            success && !error ? 'bg-green-50/30 border-green-200/50' : 'bg-background border-border'
+          }`}
+        >
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
@@ -54,7 +58,13 @@ export const ToolWriteRenderer: React.FC<
             data-track-name='ToggleFileWriteExpand'
             data-track-metadata={JSON.stringify({ fileName, filePath })}
           >
-            <div className='p-2 rounded-lg bg-blue-500/10 text-blue-500'>
+            <div
+              className={`p-2 rounded-lg ${
+                success && !error
+                  ? 'bg-green-500/10 text-green-600'
+                  : 'bg-blue-500/10 text-blue-500'
+              }`}
+            >
               <FileEdit size={18} />
             </div>
 
@@ -62,9 +72,11 @@ export const ToolWriteRenderer: React.FC<
               <div className='flex items-center gap-2'>
                 <span className='text-sm font-semibold text-foreground truncate'>{fileName}</span>
                 {success && !error ? (
-                  <span className='inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-500/10 text-green-600 uppercase tracking-wider'>
-                    Success
-                  </span>
+                  <div className='flex items-center gap-1.5'>
+                    <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-500/10 text-green-600 uppercase tracking-wider border border-green-200/50'>
+                      New
+                    </span>
+                  </div>
                 ) : (
                   <span className='inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-600 uppercase tracking-wider'>
                     Failed

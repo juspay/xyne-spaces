@@ -90,8 +90,8 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
   return (
     <div className={`h-full flex flex-col bg-background ${className}`}>
       {/* Tab Bar - Clean style */}
-      <div className='flex-shrink-0 bg-muted border-b border-border'>
-        <div className='flex items-center h-9'>
+      <div className='flex-shrink-0 bg-background border-b border-border'>
+        <div className='flex items-center h-[56px]'>
           {/* Tab List */}
           <div
             className='flex-1 flex items-center overflow-x-auto'
@@ -110,7 +110,7 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
                 onDragEnd={handleDragEnd}
                 draggable={!tab.disabled}
                 title={tab.disabled ? tab.disabledTooltip : undefined}
-                className={`group relative flex items-center gap-1.5 px-3 h-9 min-w-[100px] max-w-[160px] border-r border-border/50 transition-all duration-150 ${
+                className={`group relative flex items-center gap-1.5 px-5 h-[56px] min-w-[100px] max-w-[160px] border-r border-border/50 transition-all duration-150 ${
                   tab.disabled
                     ? 'cursor-not-allowed opacity-50 bg-transparent text-muted-foreground'
                     : activeTabId === tab.id
@@ -132,7 +132,7 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
                 >
                   {getTabIcon(tab.type, tab.icon)}
                 </span>
-                <span className='flex-1 text-xs font-medium truncate'>{tab.title}</span>
+                <span className='flex-1 text-sm font-medium truncate'>{tab.title}</span>
                 {tab.closable !== false && tabs.length > 1 && onTabClose && !tab.disabled && (
                   <button
                     onClick={e => {
@@ -160,7 +160,7 @@ export const WorkflowTabPanel: React.FC<WorkflowTabPanelProps> = ({
           {onTabAdd && (
             <button
               onClick={onTabAdd}
-              className='flex-shrink-0 flex items-center justify-center w-9 h-9 text-muted-foreground hover:text-muted-foreground hover:bg-background/50 transition-colors border-l border-border/50'
+              className='flex-shrink-0 flex items-center justify-center w-[56px] h-[56px] text-muted-foreground hover:text-muted-foreground hover:bg-background/50 transition-colors border-l border-border/50'
               title='New tab'
               aria-label='Add new tab'
               data-track-category='Workflows'

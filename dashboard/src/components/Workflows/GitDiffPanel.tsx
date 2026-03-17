@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Diff, Hunk, HunkData } from 'react-diff-view';
-import 'react-diff-view/style/index.css';
+import { parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs';
+import { FileDiff } from '@pierre/diffs/react';
+import { useTheme } from '../../hooks/useTheme';
 import {
   GitBranch,
   GitCommit,
@@ -46,69 +47,30 @@ interface GitDiffPanelProps {
   onRefresh?: () => void;
 }
 
-// Parse hunk content into changes array for react-diff-view
-type Change = {
-  type: 'insert' | 'delete' | 'normal';
-  content: string;
-  lineNumber?: number;
-  oldLineNumber?: number;
-  newLineNumber?: number;
-  isNormal?: boolean;
-  isInsert?: boolean;
-  isDelete?: boolean;
-};
+// Build a unified diff patch string from the backend hunk data
+const buildPatchString = (file: GitDiffFile): string => {
+  const oldPath = file.type === 'add' ? '/dev/null' : `a/${file.oldPath}`;
+  const newPath = file.type === 'delete' ? '/dev/null' : `b/${file.newPath}`;
 
-type ParsedHunk = GitDiffFile['hunks'][0] & { changes: Change[] };
+  const parts: string[] = [
+    `diff --git a/${file.oldPath} b/${file.newPath}`,
+    `--- ${oldPath}`,
+    `+++ ${newPath}`,
+  ];
 
-const parseHunkContent = (hunk: GitDiffFile['hunks'][0]): ParsedHunk => {
-  const changes: Change[] = [];
-
-  const lines = hunk.content.split('\n');
-  let oldLineNumber = hunk.oldStart;
-  let newLineNumber = hunk.newStart;
-
-  for (const line of lines) {
-    if (line.startsWith('+')) {
-      changes.push({
-        type: 'insert',
-        content: line.substring(1),
-        lineNumber: newLineNumber,
-        newLineNumber: newLineNumber,
-        isInsert: true,
-      });
-      newLineNumber++;
-    } else if (line.startsWith('-')) {
-      changes.push({
-        type: 'delete',
-        content: line.substring(1),
-        lineNumber: oldLineNumber,
-        oldLineNumber: oldLineNumber,
-        isDelete: true,
-      });
-      oldLineNumber++;
-    } else if (line.startsWith(' ') || line === '') {
-      changes.push({
-        type: 'normal',
-        content: line.startsWith(' ') ? line.substring(1) : line,
-        oldLineNumber: oldLineNumber,
-        newLineNumber: newLineNumber,
-        isNormal: true,
-      });
-      oldLineNumber++;
-      newLineNumber++;
-    }
+  for (const hunk of file.hunks) {
+    parts.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
+    parts.push(hunk.content);
   }
 
-  return {
-    ...hunk,
-    changes,
-  };
+  return parts.join('\n');
 };
 
 const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) => {
   const [viewType, setViewType] = useState<'split' | 'unified'>('unified');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const pierreTheme = useTheme().theme === 'midnight' ? 'pierre-dark' : 'pierre-light';
 
   const {
     data: diffData,
@@ -134,17 +96,19 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
     }
   };
 
-  // Parse hunks to add changes array
-  const parsedDiffData = useMemo(() => {
-    if (!diffData) return null;
-
-    return {
-      ...diffData,
-      gitDiff: diffData.gitDiff.map(file => ({
-        ...file,
-        hunks: file.hunks.map(parseHunkContent),
-      })),
-    };
+  // Parse each file's hunks into FileDiffMetadata for @pierre/diffs
+  const fileDiffs = useMemo((): Array<{ gitFile: GitDiffFile; fileDiff: FileDiffMetadata }> => {
+    if (!diffData) return [];
+    return diffData.gitDiff
+      .map(file => {
+        const patch = buildPatchString(file);
+        const parsed = parsePatchFiles(patch);
+        const fileDiff = parsed[0]?.files[0];
+        return fileDiff ? { gitFile: file, fileDiff } : null;
+      })
+      .filter(
+        (pair): pair is { gitFile: GitDiffFile; fileDiff: FileDiffMetadata } => pair !== null,
+      );
   }, [diffData]);
 
   const getFileIcon = (type: string): React.ReactElement => {
@@ -307,68 +271,33 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
             </div>
           )}
 
-          {parsedDiffData && (
+          {diffData && (
             <div className='p-4'>
-              {parsedDiffData.gitDiff.length === 0 ? (
+              {diffData.gitDiff.length === 0 ? (
                 <div className='text-center py-12'>
                   <GitBranch className='w-12 h-12 mx-auto text-muted-foreground mb-4' />
                   <p className='text-muted-foreground'>
                     No changes detected on branch{' '}
-                    <span className='font-semibold'>{parsedDiffData.branch}</span>
+                    <span className='font-semibold'>{diffData.branch}</span>
                   </p>
                   <p className='text-sm text-muted-foreground mt-2'>
                     The bot did not make any commits during this workflow execution.
                   </p>
                 </div>
               ) : (
-                parsedDiffData.gitDiff
-                  .filter(file => !selectedFile || getFileName(file) === selectedFile)
-                  .map((file, index) => (
-                    <div key={index} className='mb-6'>
-                      <Tooltip content={getFileName(file)} side='top' delayDuration={400}>
-                        <div className='flex items-center gap-2 font-medium text-sm text-foreground mb-2 px-2 py-1 bg-muted rounded cursor-default'>
-                          {getFileIcon(file.type)}
-                          <span className='font-mono truncate'>{getFileName(file)}</span>
-                        </div>
-                      </Tooltip>
-
-                      {file.hunks.length > 0 ? (
-                        <>
-                          {file.hunks.map((hunk, i) => (
-                            <React.Fragment key={i}>
-                              {i > 0 &&
-                                (() => {
-                                  const prevHunk = file.hunks[i - 1];
-                                  if (prevHunk) {
-                                    const prevEndLine = prevHunk.oldStart + prevHunk.oldLines;
-                                    const currentStartLine = hunk.oldStart;
-                                    const lineGap = currentStartLine - prevEndLine;
-
-                                    if (lineGap > 3) {
-                                      return (
-                                        <div className='my-4 border-t border-dashed border-input' />
-                                      );
-                                    }
-                                  }
-                                  return null;
-                                })()}
-                              <Diff
-                                viewType={viewType}
-                                diffType={file.type}
-                                hunks={[hunk] as unknown as HunkData[]}
-                              >
-                                {(hunks): React.ReactElement[] =>
-                                  hunks.map((h, j) => <Hunk key={j} hunk={h} />)
-                                }
-                              </Diff>
-                            </React.Fragment>
-                          ))}
-                        </>
-                      ) : (
-                        <div className='text-sm text-muted-foreground italic px-2'>
-                          No hunks available
-                        </div>
-                      )}
+                fileDiffs
+                  .filter(({ gitFile }) => !selectedFile || getFileName(gitFile) === selectedFile)
+                  .map(({ fileDiff }, index) => (
+                    <div key={index} className='mb-4'>
+                      <FileDiff
+                        fileDiff={fileDiff}
+                        options={{
+                          theme: pierreTheme,
+                          diffStyle: viewType,
+                          lineDiffType: 'word-alt',
+                          hunkSeparators: 'line-info',
+                        }}
+                      />
                     </div>
                   ))
               )}
