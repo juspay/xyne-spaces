@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification, ActivityClassificationJobType } from '@prisma/client';
+import { ActivityClassification, ActivityClassificationJobType, UserType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
@@ -18,8 +18,12 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { logger } from '@/utils/logger';
 import { activityTrackingService } from '@/services/activityTrackingService';
 import { Platform } from '@xyne/shared';
+import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
+import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload } from '@/apps/types';
+import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 
 const LARGE_GROUP_DM_THRESHOLD = 8;
+const messageAttachmentRepository = new MessageAttachmentRepository();
 
 export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
@@ -33,7 +37,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         content: true,
         conversationId: true,
         msgType: true,
-        hasAttachment: true
+        hasAttachment: true,
+        createdAt: true
       },
     });
 
@@ -84,8 +89,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const participantUserIds = channelParticipantsRaw.map(p => p.userId);
     const users = await db.user.findMany({
       where: { id: { in: participantUserIds } },
-      select: { id: true, email: true, name: true }
+      select: { id: true, email: true, name: true, userType: true }
     });
+    const appUserIds = users.filter(u => u.userType === UserType.APP).map(u => u.id);
 
     const userMap = new Map(users.map(u => [u.id, u]));
     const channelParticipants = channelParticipantsRaw.map(p => ({
@@ -177,12 +183,17 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         conversationId,
         channelId,
         senderId,
+        appUserIds,
         dmChannelName || 'Direct Message',
         senderName,
         cleanContent,
+        content,
         conversation.initialMessageId,
         channelParticipants,
-        mentionType
+        mentionType,
+        message.createdAt,
+        channel?.scopeType,
+        message.hasAttachment
       );
       return;
     }
@@ -196,6 +207,33 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         userId: u.userId,
         mentionSource: u.mentionSource
       }))
+
+    const mentionedAppUsersIds = validMentionedUsers.filter(u => appUserIds.includes(u.userId)).map(u => u.userId);
+     
+    if (mentionedAppUsersIds.length > 0) {
+      const attachments = message.hasAttachment
+        ? await messageAttachmentRepository.findByMessageId(messageId)
+        : [];
+
+      void this.handlleMessageAppEvents(AppEventType.APP_MENTION, {
+        conversationId,
+        messageId,
+        content: content,
+        cleanContent: cleanContent,
+        createdAt: message.createdAt,
+        userId: senderId,
+        channelId,
+        ...(attachments.length > 0 && {
+          attachments: attachments.map(att => ({
+            attachmentId: att.id,
+            fileName: att.originalFilename,
+            fileSize: att.size,
+            mimeType: att.mimetype,
+            fileUrl: att.url,
+          })),
+        }),
+      }, mentionedAppUsersIds);
+    }
     
     const finalMentionedUserIds = validMentionedUsers
       .map(user => user.userId);
@@ -368,16 +406,47 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     conversationId: string,
     channelId: string,
     senderId: string,
+    appUserIds: string[],
     channelName: string,
     senderName: string,
     cleanContent: string,
+    htmlContent: string,
     initialMessageId: string | null,
     channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>,
-    mentionType: '@channel' | '@here' | undefined
+    mentionType: '@channel' | '@here' | undefined,
+    createdAt: Date,
+    scopeType: string | undefined,
+    hasAttachment: boolean
   ): Promise<void> {
     const isLargeGroupDm = channelParticipants.length > LARGE_GROUP_DM_THRESHOLD;
     if (mentionType) {
       await this.handleSpecialMentionActivities(channelId, messageId, senderId, mentionType, []);
+    }
+
+    if (scopeType === 'DM' && !appUserIds.includes(senderId)) {
+      const attachments = hasAttachment
+        ? await messageAttachmentRepository.findByMessageId(messageId)
+        : [];
+
+      void this.handlleMessageAppEvents(AppEventType.DM, {
+        conversationId,
+        messageId,
+        content: htmlContent,
+        cleanContent: cleanContent,
+        createdAt,
+        userId: senderId,
+        channelId,
+        ...(attachments.length > 0 && {
+          attachments: attachments.map(att => ({
+            attachmentId: att.id,
+            fileName: att.originalFilename,
+            fileSize: att.size,
+            mimeType: att.mimetype,
+            fileUrl: att.url,
+          })),
+        }),
+      }, appUserIds);
+
     }
 
     const isReply = initialMessageId && initialMessageId !== messageId;
@@ -532,5 +601,28 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       activityService.deleteActivitiesBySourceIds('reaction', reactionIds),
       activityService.deleteActivitiesBySource('message', messageId),
     ]);
+  }
+
+  private async handlleMessageAppEvents(
+    eventType: AppEventType,
+    payload: AppMentionEventPayload | DMEventPayload,
+    userIds: string[],
+  ): Promise<void> {
+    const event: BaseAppEvent = {
+      eventType,
+      payload,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      await handleEventSubscriptionsForUsers(event, userIds);
+    } catch (error) {
+      logger.error(`Failed to handle message app events`, {
+        eventType,
+        payload,
+        userIds,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }

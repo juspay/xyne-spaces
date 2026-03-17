@@ -45,6 +45,19 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     super('message');
   }
 
+  async findByIds(ids: string[]): Promise<Message[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    return await this.db.message.findMany({
+      where: {
+        messageId: {
+          in: ids,
+        },
+      },
+    });
+  }
+
   /**
    * Find an existing bot summary message for a specific call
    */
@@ -364,6 +377,38 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     return await this.db.message.findMany({
       where,
       orderBy: { createdAt: 'asc' }
+    });
+  }
+
+  async findManyWithCursor(
+    conversationId: string,
+    limit: number,
+    cursor?: { messageId: string; createdAt: number }
+  ): Promise<Array<{ messageId: string; conversationId: string; content: string; senderId: string; createdAt: Date; hasAttachment: boolean }>> {
+    const where: any = { conversationId };
+
+    if (cursor) {
+      where.OR = [
+        { createdAt: { lt: new Date(cursor.createdAt) } },
+        {
+          createdAt: new Date(cursor.createdAt),
+          messageId: { lt: cursor.messageId }
+        }
+      ];
+    }
+
+    return await this.db.message.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        messageId: true,
+        conversationId: true,
+        content: true,
+        senderId: true,
+        createdAt: true,
+        hasAttachment: true,
+      },
     });
   }
 

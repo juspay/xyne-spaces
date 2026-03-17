@@ -41,4 +41,29 @@ export class InstalledAppsRepository extends BaseRepository<
   async delete(id: string) {
     return this.db.installedApps.delete({ where: { id } });
   }
+
+  /**
+   * Find installed apps with webhookUrl configured for given user IDs
+   * @param userIds - Array of user IDs to search for
+   * @returns Array of installed apps with webhookUrl configured
+   */
+  async findWithWebhooksByUserIds(userIds: string[]) {
+    return this.db.installedApps.findMany({
+      where: {
+        userId: { in: userIds },
+        webhookUrl: {
+          not: null,
+        },
+        AND: [
+          { webhookUrl: { not: '' } }
+        ],
+      },
+      select: {
+        appId: true,
+        userId: true,
+        webhookUrl: true,
+        signingSecret: true,
+      },
+    });
+  }
 }

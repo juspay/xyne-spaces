@@ -1,11 +1,12 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
-import { findOrCreateConversation, updateConversation } from '../core/conversationUtils';
+import { findOrCreateConversation, updateConversation, getChannelHistory, getConversationReplies } from '../core/conversationUtils';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
 import { config } from '@/config/env';
+import { resolveChannelId } from '../utils/channelUtils';
 
 
 const ChatActionBodySchema = z.object({
@@ -15,13 +16,33 @@ const ChatActionBodySchema = z.object({
 });
 
 const PostMessageBodySchema = ChatActionBodySchema.extend({
-  channelId: z.string().min(1, 'Channel ID is required').trim(),
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   conversationId: z.string().trim().optional(),
-});
+}).refine(
+  data => !!data.channelId || !!data.conversationId,
+  { message: 'Either channelId or conversationId is required', path: ['channelId'] }
+);
 
 const UpdateMessageBodySchema = ChatActionBodySchema.extend({
   messageId: z.string().min(1, 'Message ID is required').trim(),
   channelId: z.string().optional(),
+});
+
+const ChannelHistoryQuerySchema = z.object({
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  conversationId: z.string().min(1, 'Conversation ID is required').trim().optional(),
+  limit: z.string().optional().transform(val => val ? parseInt(val, 10) : 1000),
+  cursor: z.string().optional(),
+}).refine(
+  data => !!data.channelId || !!data.conversationId,
+  { message: 'Either channelId or conversationId is required', path: ['channelId'] }
+);
+
+const ConversationRepliesQuerySchema = z.object({
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  conversationId: z.string().min(1, 'Conversation ID is required').trim(),
+  limit: z.string().optional().transform(val => val ? parseInt(val, 10) : 1000),
+  cursor: z.string().optional(),
 });
 
 export class ChatController {
@@ -82,12 +103,15 @@ export class ChatController {
 
       const { channelId, text, conversationId, attachments, userId } = bodyResult.data;
 
+      // Resolve channelId from conversationId if not provided
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+
       // Process message content (resolve mentions and parse with BlockKit)
       const content = await this.processMessageContent(text, attachments);
 
       // Post the message
       const result = await findOrCreateConversation(
-        channelId,
+        resolvedChannelId,
         userId,
         content,
         conversationId
@@ -163,6 +187,105 @@ export class ChatController {
           res.status(400).json({
             error: error.message,
             code: 'VALIDATION_ERROR',
+          });
+          return;
+        }
+      }
+
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Get channel history with cursor-based pagination
+   * GET /api/external-event/chat/channelHistory?channelId=xxx&limit=1000&cursor=xxx
+   */
+  channelHistory = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const queryResult = ChannelHistoryQuerySchema.safeParse(req.query);
+      
+      if (!queryResult.success) {
+
+        res.status(400).json({ 
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid query parameters',
+        });
+        return;
+      }
+
+      const { channelId, conversationId, limit, cursor } = queryResult.data;
+
+      // Resolve channelId from conversationId if not provided
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+
+      const response = await getChannelHistory(resolvedChannelId, limit, cursor);
+
+      res.status(200).json(response);
+    } catch (error) {
+      logger.error('Error fetching channel history:', error);
+
+      if (error instanceof Error) {
+        if (error.message.includes('Invalid cursor format')) {
+          res.status(400).json({
+            error: error.message,
+            code: 'INVALID_CURSOR',
+          });
+          return;
+        }
+        if (error.message.includes('not found')) {
+          res.status(404).json({
+            error: error.message,
+            code: 'NOT_FOUND',
+          });
+          return;
+        }
+      }
+
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Get conversation replies with cursor-based pagination
+   * GET /api/external-event/chat/conversationReplies?channelId=xxx&conversationId=xxx&limit=1000&cursor=xxx
+   */
+  conversationReplies = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const queryResult = ConversationRepliesQuerySchema.safeParse(req.query);
+      
+      if (!queryResult.success) {
+        res.status(400).json({ 
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid query parameters',
+        });
+        return;
+      }
+
+      const { channelId, conversationId, limit, cursor } = queryResult.data;
+
+      // Resolve channelId from conversationId if not provided
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+
+      const response = await getConversationReplies(resolvedChannelId, conversationId, limit, cursor);
+
+      res.status(200).json(response);
+    } catch (error) {
+      logger.error('Error fetching conversation replies:', error);
+
+      if (error instanceof Error) {
+        if (error.message.includes('Invalid cursor format')) {
+          res.status(400).json({
+            error: error.message,
+            code: 'INVALID_CURSOR',
+          });
+          return;
+        }
+        if (error.message.includes('not found')) {
+          res.status(404).json({
+            error: error.message,
+            code: 'NOT_FOUND',
           });
           return;
         }

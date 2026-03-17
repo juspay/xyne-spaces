@@ -3,12 +3,15 @@ import { logger } from '@/utils/logger';
 import { findOrCreateConversation } from './conversationUtils';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { DatabaseClient } from '@/database/client';
-import { TicketPriority, MessageType } from '@prisma/client';
+import { TicketPriority, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
 import { TicketActionResponse, TicketEventType } from '../types';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { config } from '@/config/env';
 import { TicketIdService } from '@/services/ticketIdService';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketSchema } from '@/vespa/src/types';
+import { NAMESPACE } from '@/vespa/src/config';
 
 // Initialize Block Kit parser instance
 const blockKitParser = new SlackBlockKitParser();
@@ -28,6 +31,41 @@ const CreateTicketParamsSchema = z.object({
   userGroupId: z.string().trim().optional(),
   text: z.string().trim().optional(),
 });
+
+
+async function pushVespaJobForTicket(
+  ticketId: string,
+  userId: string
+): Promise<void> {
+  vespaQueue.addJob({
+    schema: ticketSchema,
+    jobType: "feed",
+    docId: ticketId,
+  }).catch(async (error) => {
+    logger.error('[CREATE-TICKET] Error queuing Vespa job for ticket:', error);
+    try {
+      const db = DatabaseClient.getInstance();
+      const vespaLogs = db.vespaInsertionLogs;
+      if (vespaLogs) {
+        await vespaLogs.create({
+          data: {
+            status: VespaInsertionStatus.FAILED,
+            type: VespaOperationType.INSERT,
+            entityId: ticketId,
+            entityType: ticketSchema,
+            namespace: NAMESPACE,
+            errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+            errorDetails: JSON.stringify(error),
+            userId: userId,
+            createdAt: new Date(),
+          },
+        });
+      }
+    } catch (dbError) {
+      logger.error('[CREATE-TICKET] Failed to log Vespa insertion error to database:', dbError);
+    }
+  });
+}
 
 /**
  * Create a ticket with a conversation
@@ -87,14 +125,10 @@ export async function createTicketWithConversation(
 
     // Create a new conversation with the processed text
     // The text will be used as the message content to which the ticket will be attached
-    // Use MessageType.BOT since tickets are created by external apps
     const conversationResult = await findOrCreateConversation(
       channelId,
       userId,
       processedContent,
-      undefined, 
-      undefined,
-      text ? MessageType.USER : MessageType.SYSTEM
     );
     const finalConversationId = conversationResult.conversationId;
     const messageId = conversationResult.messageId;
@@ -117,6 +151,10 @@ export async function createTicketWithConversation(
         boardId,
         priority: priority || TicketPriority.LOW,
         xyneId,
+      });
+
+      pushVespaJobForTicket(ticket.id, userId).catch(error => {
+        logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${ticket.id}:`, error);
       });
 
       // Update conversation with ticketId

@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 import { encrypt } from '@/services/encryptionService';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import { isValidUrl } from '@/utils/urlUtils';
 
 /**
  * Install an external app
@@ -77,6 +78,42 @@ export async function installApp(appId: string) {
     };
   } catch (error) {
     logger.error(`[INSTALL-APP] Error installing app ${appId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Configure webhook URL for an installed app
+ * 
+ * @param appId - The ID of the app
+ * @param webhookUrl - The webhook URL to configure
+ * @returns The updated installed app entry
+ */
+export async function configureWebhook(appId: string, webhookUrl: string) {
+  try {
+    if (!isValidUrl(webhookUrl)) {
+      throw new Error('Invalid webhook URL format');
+    }
+
+    const installedApp = await repositories.installedApps.findFirst({
+      where: { appId: appId }
+    });
+
+    if (!installedApp) {
+      throw new Error(`[CONFIGURE-WEBHOOK] Installed app with appId ${appId} not found`);
+    }
+
+    const updatedInstalledApp = await repositories.installedApps.update(
+      installedApp.id,
+      { webhookUrl: webhookUrl }
+    );
+
+    return {
+      message: 'Webhook URL configured successfully',
+      webhookUrl: updatedInstalledApp.webhookUrl,
+    };
+  } catch (error) {
+    logger.error(`[CONFIGURE-WEBHOOK] Error configuring webhook for app ${appId}:`, error);
     throw error;
   }
 }

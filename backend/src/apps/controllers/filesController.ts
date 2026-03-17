@@ -2,13 +2,17 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { ingestAttachment } from '../core/fileUtils';
+import { resolveChannelId } from '../utils/channelUtils';
 
 const UploadFilesBodySchema = z.object({
-  channelId: z.string().min(1, 'Channel ID is required').trim(),
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   text: z.string().trim().optional(),
   conversationId: z.string().trim().optional(),
   userId: z.string().min(1, 'User ID is required').trim(),
-});
+}).refine(
+  data => !!data.channelId || !!data.conversationId,
+  { message: 'Either channelId or conversationId is required', path: ['channelId'] }
+);
 
 export class FilesController {
   /**
@@ -31,6 +35,9 @@ export class FilesController {
 
       const { channelId, text, conversationId, userId } = bodyResult.data;
 
+      // Resolve channelId from conversationId if not provided
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+
       // Extract files from multer
       // uploadMultiple uses fields() so files are in object format
       const reqFiles = (Array.isArray(req.files) ? {} : req.files) || {};
@@ -47,7 +54,7 @@ export class FilesController {
       // Upload files and create/update conversation
       const result = await ingestAttachment({
         files,
-        channelId,
+        channelId: resolvedChannelId,
         userId,
         text,
         conversationId,
@@ -62,6 +69,13 @@ export class FilesController {
           res.status(404).json({
             error: error.message,
             code: 'NOT_FOUND',
+          });
+          return;
+        }
+        if (error.message.includes('required')) {
+          res.status(400).json({
+            error: error.message,
+            code: 'VALIDATION_ERROR',
           });
           return;
         }

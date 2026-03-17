@@ -21,6 +21,64 @@ export enum TicketEventType {
 }
 
 /**
+ * Enum for app event types
+ */
+export enum AppEventType {
+    APP_MENTION = 'APP_MENTIONED',  
+    DM = 'DIRECT_MESSAGE',                   
+}
+
+/**
+ * Attachment interface for app events
+ */
+export interface AppEventAttachment {
+    attachmentId: string;
+    fileName: string;
+    fileSize: number;
+    mimeType: string;
+    fileUrl: string;
+}
+
+/**
+ * Payload type for APP_MENTION events
+ */
+export interface AppMentionEventPayload {
+    conversationId: string;
+    messageId: string;
+    content: string;
+    cleanContent: string;
+    createdAt: Date | number;
+    userId: string;
+    channelId: string;
+    attachments?: AppEventAttachment[];
+    metadata?: Record<string, unknown>;
+}
+
+/**
+ * Payload type for DM events
+ */
+export interface DMEventPayload {
+    conversationId: string;
+    messageId: string;
+    content: string;
+    cleanContent: string;
+    createdAt: Date | number;
+    userId: string;
+    channelId: string;
+    attachments?: AppEventAttachment[];
+    metadata?: Record<string, unknown>;
+}
+
+/**
+ * Base app event type with dynamic, event-specific payload
+ */
+export interface BaseAppEvent {
+    eventType: AppEventType;
+    payload: AppMentionEventPayload | DMEventPayload;
+    timestamp: string; // ISO timestamp
+}
+
+/**
  * Response type for chat action API endpoints (postMessage, updateMessage)
  */
 export interface ChatActionResponse {
@@ -55,4 +113,96 @@ export interface TicketActionResponse {
     xyneId: string;
     conversationId: string;
     messageId: string;
+}
+
+export interface PaginatedResponse<T> {
+    items: T[];
+    nextCursor?: string; 
+    hasMore: boolean;
+}
+
+
+export interface PaginationRequest {
+    limit?: number; 
+    cursor?: string; 
+}
+
+/**
+ * Channel history item - represents a conversation with its initial message
+ */
+export interface ChannelHistoryItem {
+    initialMessageId: string;
+    conversationId: string;
+    content: string;
+    cleanContent: string;
+    userId: string;
+    createdAt: Date;
+    attachments?: AppEventAttachment[];
+}
+
+/**
+ * Cursor for channel history pagination
+ */
+export interface ChannelHistoryCursor {
+    conversationId: string;
+    createdAt: number; // timestamp
+}
+
+/**
+ * Request type for channel history API endpoint
+ */
+export interface ChannelHistoryRequest extends PaginationRequest {
+    channelId: string;
+}
+
+/**
+ * Response type for channel history API endpoint
+ */
+export interface ChannelHistoryResponse extends PaginatedResponse<ChannelHistoryItem> {}
+
+/**
+ * Conversation reply item - represents a message in a conversation
+ */
+export interface ConversationRepliesItem {
+    messageId: string;
+    conversationId: string;
+    content: string;
+    cleanContent: string;
+    userId: string;
+    createdAt: Date;
+    attachments?: AppEventAttachment[];
+}
+
+/**
+ * Cursor for conversation replies pagination
+ */
+export interface ConversationRepliesCursor {
+    messageId: string;
+    createdAt: number;
+}
+
+/**
+ * Request type for conversation replies API endpoint
+ */
+export interface ConversationRepliesRequest extends PaginationRequest {
+    channelId: string;
+    conversationId: string;
+}
+
+/**
+ * Response type for conversation replies API endpoint
+ */
+export interface ConversationRepliesResponse extends PaginatedResponse<ConversationRepliesItem> {}
+
+/**
+ * User data response for user API endpoint
+ */
+export interface UserResponse {
+    userId: string;
+    name: string;
+    email: string;
+    picture: string | null;
+    userType: string;
+    status: string;
+    joined: Date; 
 }
