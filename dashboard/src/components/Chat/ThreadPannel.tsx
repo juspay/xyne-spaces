@@ -1010,6 +1010,7 @@ export const ThreadMessages = ({
                 variant='ghost'
                 size='sm'
                 onClick={() => setIsWorkflowModalOpen(true)}
+                disabled={ticket?.isArchived}
                 aria-label='Trigger Workflow'
               >
                 <Play size={20} />

@@ -4,7 +4,7 @@ import { queries } from '../../../zero/queries';
 import { TicketStatusIcon } from '../../../assets/icons';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
-import { Calendar, Tag } from 'lucide-react';
+import { Calendar, Tag, Archive } from 'lucide-react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 
 interface TicketActivityMessageProps {
@@ -28,6 +28,8 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ me
         return <Tag />;
       case 'ETA':
         return <Calendar />;
+      case 'IS_ARCHIVED':
+        return <Archive size={16} className='text-amber-600' />;
       default:
         return <SmallUserAvatar userId={message.senderId} />;
     }

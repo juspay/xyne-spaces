@@ -2516,6 +2516,7 @@ export const mutators = defineMutators({
         eta: z.number().optional(),
         boardId: z.string().optional(),
         metadata: z.any().optional(),
+        isArchived: z.boolean().optional(),
         updatedAt: z.number(),
       }),
       async ({
@@ -2533,6 +2534,7 @@ export const mutators = defineMutators({
           eta,
           boardId,
           metadata,
+          isArchived,
           updatedAt,
         },
       }) => {
@@ -2549,6 +2551,7 @@ export const mutators = defineMutators({
           eta?: number;
           boardId?: string;
           metadata?: ReadonlyJSONValue;
+          isArchived?: boolean;
         }
 
         const updateData: TicketUpdateData = {
@@ -2571,6 +2574,7 @@ export const mutators = defineMutators({
         if (boardId !== undefined) updateData.boardId = boardId;
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         if (metadata !== undefined) updateData.metadata = metadata;
+        if (isArchived !== undefined) updateData.isArchived = isArchived;
 
         await tx.mutate.tickets.update({
           id,

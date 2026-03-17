@@ -3701,6 +3701,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           eta: z.number().optional(),
           boardId: z.string().optional(),
           metadata: z.any().optional(),
+          isArchived: z.boolean().optional(),
           updatedAt: z.number(),
         }),
         async ({ tx, args: params }) => {
@@ -3710,6 +3711,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const now = Date.now();
           if (params.eta !== undefined && params.eta !== null && params.eta < now) {
             throw new Error("ETA cannot be set to a past date");
+          }
+          
+          if (params.isArchived === true && !ticket.isArchived) {
+            if (ticket.statusV2 !== TicketStatusV2.COMPLETED && ticket.statusV2 !== TicketStatusV2.CANCELLED) {
+              throw new Error('Ticket must be in Completed or Cancelled status to be archived');
+            }
           }
 
           // ACL Business Logic: Check ticket transfer permission for assignedTo or userGroupId changes
@@ -3748,7 +3755,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const updateData: any = { updatedAt: params.updatedAt, updatedBy: authData.sub };
           const activities: any[] = [];
-          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata'] as const;
+          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived'] as const;
           const oldAssignedTo = ticket.assignedTo;
           const oldBoardId = ticket.boardId;
 
@@ -3887,6 +3894,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               if (field === 'userGroupId') activityType = 'USER_GROUP_ID';
               if (field === 'eta') activityType = 'ETA';
               if (field === 'boardId') activityType = 'BOARD';
+              if (field === 'isArchived') activityType = 'IS_ARCHIVED';
 
               activities.push({
                 activityType,
@@ -4215,6 +4223,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 const oldGroup = activity.value.oldValue ? await tx.run(zql.user_groups.where('id', activity.value.oldValue).one()) : null;
                 activityMessage = `${userName} removed user group${oldGroup ? ` ${oldGroup.name}` : ''}`;
               }
+            } else if (activity.activityType === 'IS_ARCHIVED') {
+              activityMessage = `${userName} archived the ticket`;
             }
 
             if (activityMessage && ticket.conversationId) {

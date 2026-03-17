@@ -109,6 +109,7 @@ export const queries = defineQueries({
 
   allTickets: defineQuery(() => {
     return zql.tickets
+      .where('isArchived', false)
       .orderBy('createdAt', 'desc')
       .related('project')
       .related('assignments')
@@ -672,7 +673,7 @@ export const queries = defineQueries({
   ),
 
   ticketsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) =>
-    zql.tickets.where('projectId', projectId).related('tags').orderBy('createdAt', 'desc')
+    zql.tickets.where('projectId', projectId).where('isArchived', false).related('tags').orderBy('createdAt', 'desc')
   ),
 
 
@@ -1397,6 +1398,7 @@ export const queries = defineQueries({
   releaseTickets: defineQuery(() => {
     return zql.tickets
       .where('ticketType', BaseTicketType.Release)
+      .where('isArchived', false)
       .orderBy('createdAt', 'desc');
   }),
   releaseTicketsSearch: defineQuery(

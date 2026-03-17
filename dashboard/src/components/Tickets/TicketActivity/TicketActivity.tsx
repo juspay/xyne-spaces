@@ -1,5 +1,13 @@
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
-import { Activity, ArrowUpDown, Calendar, FileText, SquareKanban, Tag } from 'lucide-react';
+import {
+  Activity,
+  ArrowUpDown,
+  Calendar,
+  FileText,
+  SquareKanban,
+  Tag,
+  Archive,
+} from 'lucide-react';
 import {
   ActivityType,
   TicketReferenceRelation,
@@ -294,6 +302,12 @@ const getActivityDescription = (
       };
     }
 
+    case ActivityType.IS_ARCHIVED:
+      return {
+        description: 'archived the ticket',
+        details: '',
+      };
+
     case ActivityType.PR: {
       const parts = formatPRActivityParts(value as PRActivityValue);
 
@@ -355,6 +369,8 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
       return <FileText size={18} className='text-blue-600' />;
     case ActivityType.BOARD:
       return <SquareKanban size={18} className='text-purple-600' />;
+    case ActivityType.IS_ARCHIVED:
+      return <Archive size={18} className='text-amber-600' />;
     case ActivityType.PR_REVIEWER:
     case ActivityType.QA:
     case ActivityType.ASSIGNED_TO:
