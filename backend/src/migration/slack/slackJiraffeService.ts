@@ -41,30 +41,6 @@ interface MigrationJiraffeInput {
    xyneSpaceChannelId?: string;
 }
 
-
-function mapStage(bitbotStage: string | null): string {
-   if (!bitbotStage) return 'ToDo';
-   const stageMapping: Record<string, string> = {
-      TO_BE_PICKED_UP: 'ToDo',
-      BACKLOG: 'ToDo',
-      DEBUGGING: 'InProgress',
-      DESIGN_IN_PROGRESS: 'InProgress',
-      DEV_IN_PROGRESS: 'InProgress',
-      PR_REVIEW: 'InProgress',
-      WAITING_FOR_MERGE: 'InProgress',
-      SANDBOX_TESTING: 'InProgress',
-      PROD_DEPLOYMENT: 'InProgress',
-      ON_HOLD_INTERNAL: 'Paused',
-      ON_HOLD_EXTERNAL: 'Paused',
-      VERIFICATION: 'Completed',
-      COMPLETED: 'Completed',
-      REJECTED: 'Cancelled',
-      DROPPED: 'Cancelled',
-   };
-
-   return stageMapping[bitbotStage] || 'ToDo';
-}
-
 interface BoardValidationResult {
    boardMapper: Map<string, string>;
    defaultBoardId: string;
@@ -347,9 +323,6 @@ async function ingestTicket(
       }
    }
 
-   // Map stage from ticket using mapStage function
-   const mappedStageName = mapStage(ticket.stage);
-
    // Get board ID from mapper based on task_type (uppercase), fallback to default board
    const boardId = boardMapper.get(ticket.task_type.toUpperCase().replace(/_/g, ' ')) || defaultBoardId;
 
@@ -374,7 +347,7 @@ async function ingestTicket(
          channelId: channelId,
          projectId: projectId,
          boardId: boardId,
-         stageName: mappedStageName,
+         stageName: ticket.stage?.replace(/_/g, ' ').toUpperCase() || 'TO BE PICKED',
          xyneId: xyneId,
          ...(assignedToUserId && { assignedTo: assignedToUserId }),
          ...(ticket.eta && { eta: new Date(ticket.eta) }),
