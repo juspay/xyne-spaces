@@ -1,3 +1,22 @@
+## [1.94.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.93.0...v1.94.0) (2026-03-17)
+
+
+### Features
+
+* : added edit functionality ([909688d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/909688dd4e4677894e5770235d94fef879ab244e)), closes [#3878](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3878)
+* Added auto assignments for xyne apps tickets ([ace24b0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ace24b0d401fe3a4f64c2abe7c7fae88761fd7e2)), closes [#4185](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4185)
+* Channel Level Notification Pause added for Users ([ea9450e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ea9450ef2cc86870448b8c2549fe4034c0322782)), closes [#3831](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3831)
+* dark mode in board creation and editing ([3c94ac2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3c94ac2a3d6bb40e5a259c74f4694e48e248fb70)), closes [#4147](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4147)
+* repalce react-diff-viewer with diffs by pierre, and fixes in workflow trigger modal and agent chat view ([c9e4864](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c9e4864180a1c196b8f57e6d15215ebdbb623c95))
+
+
+### Bug Fixes
+
+* fetch only status's form in board's condition builder ([1b650c2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1b650c299e80296e8be28d558c87c42e652a29ca)), closes [#4156](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4156)
+* Jiraffe migration bug ([5f82553](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5f8255373c2d8f79047ea6b9e646e7b37c1841b2)), closes [#4184](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4184)
+* Jiraffe migration bug ([b74e4f1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b74e4f198d20c43890d171397245d6c71dc956e1)), closes [#4169](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4169)
+* Used redis set to maintain keys ([de12927](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/de12927f6d3a40b3ac9e56df627f2dc042c5ca36)), closes [#4164](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4164)
+
 ## [1.93.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.92.0...v1.93.0) (2026-03-17)
 
 
