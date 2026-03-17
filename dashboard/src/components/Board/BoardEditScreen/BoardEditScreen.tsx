@@ -22,6 +22,7 @@ import {
   mapFromFormFieldType,
   mapToFormFieldType,
 } from './BoardEditScreen.types';
+import { getFieldTypeLabel } from './BoardEditScreen.utils';
 import { CustomField } from '../../../components/Board/CustomField/CustomField';
 import { TicketPreviewPanel } from '../../../components/Board/TicketPreviewPanel/TicketPreviewPanel';
 import {
@@ -36,7 +37,6 @@ import {
   mapToPreviewFields,
   mapToCreateModalFields,
   getFieldConfigKey,
-  FIELD_TYPE_OPTIONS,
 } from '../../../utils/board';
 
 // Type for board data passed to onNext callback
@@ -129,15 +129,6 @@ const BoardEditScreen = ({
   // Dropdown state management for assignee type and field type selectors
   const [assigneeTypeDropdownOpen, setAssigneeTypeDropdownOpen] = useState(false);
   const assigneeTypeDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Field type options for display (includes mappings for core fields)
-  const fieldTypeOptionsDisplay = [
-    ...FIELD_TYPE_OPTIONS,
-    { value: 'board', label: 'String' },
-    { value: 'project', label: 'String' },
-    { value: 'status', label: 'String' },
-    { value: 'priority', label: 'String' },
-  ];
 
   const boardData = mode === 'create' && sourceBoard ? sourceBoard : board;
 
@@ -731,8 +722,8 @@ const BoardEditScreen = ({
   if (loading) {
     return (
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-        <div className='bg-white rounded-lg p-8'>
-          <p className='text-xyne-gray-500'>Loading...</p>
+        <div className='bg-background rounded-lg p-8'>
+          <p className='text-muted-foreground'>Loading...</p>
         </div>
       </div>
     );
@@ -741,7 +732,7 @@ const BoardEditScreen = ({
   if (mode === 'edit' && (!board || !projectId)) {
     return (
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-        <div className='bg-white rounded-lg p-8 text-center'>
+        <div className='bg-background rounded-lg p-8 text-center'>
           <p className='text-xyne-gray-600 mb-4'>Board not found</p>
           <Button onClick={onClose}>Close</Button>
         </div>
@@ -752,7 +743,7 @@ const BoardEditScreen = ({
   if (!projectId) {
     return (
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-        <div className='bg-white rounded-lg p-8 text-center'>
+        <div className='bg-background rounded-lg p-8 text-center'>
           <p className='text-xyne-gray-600 mb-4'>Project not found</p>
           <Button onClick={onClose}>Close</Button>
         </div>
@@ -762,20 +753,20 @@ const BoardEditScreen = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='bg-white flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden'>
+      <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
         <header className='flex items-center justify-between px-[18px] py-4'>
           <div className='flex items-center gap-2'>
             <Button
               onClick={() => (onBack ? onBack() : onClose())}
               variant='ghost'
               size='iconSm'
-              className='w-[16px] h-[16px] text-[#181b1d] hover:opacity-70'
+              className='w-[16px] h-[16px] text-foreground hover:opacity-70'
               data-track-category='BOARD_EDIT'
               data-track-name='NAVIGATE_BACK'
             >
               <ChevronLeft size={16} />
             </Button>
-            <span className='text-[16px] font-semibold text-xyne-gray-900'>
+            <span className='text-[16px] font-semibold text-foreground'>
               Edit Board - {boardData?.name || 'Board'}
             </span>
           </div>
@@ -793,9 +784,9 @@ const BoardEditScreen = ({
         </header>
 
         <div className='flex-1 flex overflow-hidden'>
-          <div className='w-[50%] flex flex-col bg-white overflow-hidden'>
+          <div className='w-[50%] flex flex-col bg-background overflow-hidden'>
             <div className='p-6 flex-shrink-0'>
-              <h2 className='text-[16px] font-semibold text-xyne-gray-900'>Define Fields</h2>
+              <h2 className='text-[16px] font-semibold text-foreground'>Define Fields</h2>
               <p className='text-[14px] text-xyne-gray-600 mt-1'>
                 Choose the fields needed in your tickets, arrange their order, and preview how
                 they&apos;ll appear.
@@ -809,14 +800,14 @@ const BoardEditScreen = ({
                   value={boardName}
                   onChange={e => setBoardName(e.target.value)}
                   className={`text-[22px] font-semibold bg-transparent border-none focus:outline-none focus:ring-0 p-0 w-full ${
-                    boardName ? 'text-xyne-gray-900' : 'text-xyne-gray-300'
-                  } placeholder:text-xyne-gray-400 tracking-[-0.44px]`}
+                    boardName ? 'text-foreground' : 'text-xyne-gray-300'
+                  } placeholder:text-muted-foreground/50 tracking-[-0.44px]`}
                   placeholder='Enter Board Name'
                   data-track-category='form'
                   data-track-name='board-name-input'
                 />
               </div>
-              <div className='bg-white rounded-lg'>
+              <div className='bg-background rounded-lg'>
                 <div className='divide'>
                   {fields
                     .sort((a, b) => a.order - b.order)
@@ -877,9 +868,9 @@ const BoardEditScreen = ({
                             }}
                             className={`flex items-center gap-3 px-4 py-2 transition-colors rounded-[12px] ${
                               isDragging === field.id
-                                ? 'bg-xyne-gray-100 opacity-50'
+                                ? 'bg-muted opacity-50'
                                 : hoveredFieldId === field.id
-                                  ? 'bg-xyne-gray-100'
+                                  ? 'bg-muted'
                                   : ''
                             } ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer' : 'cursor-move'}`}
                             data-track-category='form'
@@ -908,7 +899,7 @@ const BoardEditScreen = ({
                                       }
                                     }}
                                     onBlur={saveFieldLabel}
-                                    className='font-medium text-xyne-gray-600 text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-none focus:ring-0'
+                                    className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-none focus:ring-0'
                                     data-track-category='board_edit'
                                     data-track-name='edit_label_input'
                                   />
@@ -923,7 +914,7 @@ const BoardEditScreen = ({
                                       startEditFieldLabel(field);
                                     }
                                   }}
-                                  className={`font-medium text-xyne-gray-600 text-[14px] leading-[20px] min-w-[150px] flex-shrink-0 text-left bg-transparent border-0 p-0 ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer hover:text-xyne-gray-900' : ''}`}
+                                  className={`font-medium text-muted-foreground text-[14px] leading-[20px] min-w-[150px] flex-shrink-0 text-left bg-transparent border-0 p-0 ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer hover:text-foreground' : ''}`}
                                   disabled={DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)}
                                   data-track-category='board_edit'
                                   data-track-name='edit_field_label'
@@ -937,7 +928,7 @@ const BoardEditScreen = ({
                                 className={`w-[140px] shrink-0 text-left ${
                                   DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) &&
                                   field.name !== 'assignedTo'
-                                    ? 'bg-xyne-gray-100 text-xyne-gray-400'
+                                    ? 'bg-muted text-muted-foreground'
                                     : field.name === 'assignedTo'
                                       ? 'cursor-pointer'
                                       : 'cursor-pointer'
@@ -1011,21 +1002,12 @@ const BoardEditScreen = ({
                                   <div
                                     className={`h-8 w-[140px] rounded-md border border-input px-3 py-1.5 text-[13px] flex items-center justify-between ${
                                       DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)
-                                        ? 'bg-xyne-gray-100 text-xyne-gray-400 cursor-not-allowed'
+                                        ? 'bg-muted text-muted-foreground cursor-not-allowed'
                                         : 'bg-background text-foreground cursor-pointer hover:bg-muted'
                                     }`}
                                   >
-                                    <span>
-                                      {fieldTypeOptionsDisplay.find(opt => opt.value === field.type)
-                                        ?.label || 'Type'}
-                                    </span>
-                                    <ChevronDown
-                                      className={`h-4 w-4 ${
-                                        DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)
-                                          ? 'text-xyne-gray-400'
-                                          : 'text-muted-foreground'
-                                      }`}
-                                    />
+                                    <span>{getFieldTypeLabel(field.type)}</span>
+                                    <ChevronDown className='h-4 w-4 text-muted-foreground' />
                                   </div>
                                 )}
                               </button>
@@ -1038,7 +1020,7 @@ const BoardEditScreen = ({
                             >
                               {!['status', 'priority'].includes(field.name) && (
                                 <div className='flex items-center gap-2'>
-                                  <span className='text-[13px] text-xyne-gray-900 leading-[18px] tracking-[-0.2px]'>
+                                  <span className='text-[13px] text-[#505b62] leading-[18px] tracking-[-0.2px]'>
                                     Required
                                   </span>
                                   <button
@@ -1051,13 +1033,13 @@ const BoardEditScreen = ({
                                       );
                                     }}
                                     className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
-                                      field.required ? 'bg-[#6276BE]' : 'bg-xyne-gray-200'
+                                      field.required ? 'bg-[#6276BE]' : 'bg-gray-600'
                                     }`}
                                     data-track-category='form'
                                     data-track-name='required-toggle-hover'
                                   >
                                     <span
-                                      className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-white rounded-full transition-transform ${
+                                      className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
                                         field.required ? 'translate-x-[10px]' : 'translate-x-0'
                                       }`}
                                     />
@@ -1068,7 +1050,7 @@ const BoardEditScreen = ({
                               {/* Show delete button only for custom fields */}
                               {!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) && (
                                 <>
-                                  <div className='w-[1px] h-[20px] bg-xyne-gray-200 mx-1' />
+                                  <div className='w-[1px] h-[20px] bg-muted mx-1' />
                                   <Button
                                     onClick={e => {
                                       e.stopPropagation();
@@ -1076,7 +1058,7 @@ const BoardEditScreen = ({
                                     }}
                                     variant='ghost'
                                     size='iconSm'
-                                    className='w-6 h-6 text-xyne-gray-400 hover:text-xyne-red-500'
+                                    className='w-6 h-6 text-muted-foreground hover:text-red-500'
                                     data-track-category='form'
                                     data-track-name='delete-field-hover'
                                   >

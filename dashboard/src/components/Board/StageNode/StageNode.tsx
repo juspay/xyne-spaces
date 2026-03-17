@@ -8,7 +8,7 @@ import { type StageNodeProps } from './StageNode.types';
 const getStatusColor = (status: TicketStatusV2): string => {
   switch (status) {
     case TicketStatusV2.TODO:
-      return 'bg-xyne-gray-50 border-xyne-gray-200';
+      return 'bg-muted/50 border-border';
     case TicketStatusV2.STARTED:
       return 'bg-blue-50 border-blue-200';
     case TicketStatusV2.PAUSED:
@@ -18,7 +18,7 @@ const getStatusColor = (status: TicketStatusV2): string => {
     case TicketStatusV2.CANCELLED:
       return 'bg-red-50 border-red-200';
     default:
-      return 'bg-white border-xyne-gray-200';
+      return 'bg-background border-border';
   }
 };
 
@@ -76,7 +76,7 @@ export const StageNode = ({
         className={`
           relative flex flex-col gap-2 px-4 py-3 rounded-lg border-2 cursor-pointer
           transition-all duration-200 min-w-[180px] max-w-[240px] shadow-sm
-          ${isSelected ? 'border-xyne-primary-500 ring-2 ring-xyne-primary-200 bg-white' : statusColorClass}
+          ${isSelected ? 'border-xyne-primary-500 ring-2 ring-xyne-primary-200 bg-background' : statusColorClass}
           hover:shadow-md
         `}
       >

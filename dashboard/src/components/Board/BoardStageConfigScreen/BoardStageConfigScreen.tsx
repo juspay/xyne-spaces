@@ -770,7 +770,7 @@ const BoardStageConfigScreen = ({
   if (loading) {
     return (
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-        <div className='bg-white rounded-lg p-8 flex flex-col items-center gap-3'>
+        <div className='bg-background rounded-lg p-8 flex flex-col items-center gap-3'>
           <div className='w-8 h-8 rounded-full border-2 border-xyne-primary-200 border-t-xyne-primary-500 animate-spin' />
           <p className='text-sm text-xyne-gray-500'>Loading board...</p>
         </div>
@@ -781,7 +781,7 @@ const BoardStageConfigScreen = ({
   if (!board || !projectId) {
     return (
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-        <div className='bg-white rounded-lg p-8 text-center'>
+        <div className='bg-background rounded-lg p-8 text-center'>
           <p className='text-xyne-gray-600 mb-4'>Board not found</p>
           <Button onClick={onClose}>Close</Button>
         </div>
@@ -792,7 +792,7 @@ const BoardStageConfigScreen = ({
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='bg-white flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden'>
+      <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
         {/* ── Header ── */}
         <div className='flex items-center justify-between px-[18px] py-4'>
           <div className='flex items-center gap-2'>
@@ -800,7 +800,7 @@ const BoardStageConfigScreen = ({
               onClick={() => (onBack ? onBack() : onClose())}
               variant='ghost'
               size='iconSm'
-              className='w-[16px] h-[16px] text-[#181b1d] hover:opacity-70'
+              className='w-[16px] h-[16px] text-foreground hover:opacity-70'
               data-track-category='BOARD_CONFIG'
               data-track-name='NAVIGATE_BACK'
             >
@@ -830,8 +830,8 @@ const BoardStageConfigScreen = ({
         {/* ── Title Section ── */}
         <div className='px-6 py-3 flex-shrink-0 flex items-start justify-between'>
           <div>
-            <h1 className='text-[18px] font-semibold text-[#181b1d]'>Configure Board</h1>
-            <p className='text-[14px] text-[#788187] mt-1 leading-[20px]'>
+            <h1 className='text-[18px] font-semibold text-foreground'>Configure Board</h1>
+            <p className='text-[14px] text-muted-foreground mt-1 leading-[20px]'>
               Configure the workflow stages for your board. Each card represents a stage in your
               workflow.
             </p>
@@ -842,26 +842,26 @@ const BoardStageConfigScreen = ({
               onClick={() => setIsTransferModalOpen(v => !v)}
               variant='ghost'
               size='iconSm'
-              className='p-2 hover:bg-gray-100 rounded-lg transition-colors'
+              className='p-2 hover:bg-muted rounded-lg transition-colors'
               data-track-category='board_config'
               data-track-name='open_transfer_settings'
             >
-              <MoreVertical size={20} className='text-[#788187]' />
+              <MoreVertical size={20} className='text-muted-foreground' />
             </Button>
 
             {/* Dropdown Menu */}
             {isTransferModalOpen && (
-              <div className='absolute right-0 top-full mt-2 w-[280px] bg-white rounded-lg shadow-lg border border-[#e4e6e7] z-50 py-2'>
+              <div className='absolute right-0 top-full mt-2 w-[280px] bg-background rounded-lg shadow-lg border border-border z-50 py-2'>
                 <div className='px-4 py-3'>
                   <div className='flex items-start justify-between gap-3'>
                     <div>
                       <label
                         htmlFor='allow-transfer-toggle'
-                        className='text-[13px] font-medium text-[#181b1d] block'
+                        className='text-[13px] font-medium text-foreground block'
                       >
                         Allow Ticket Transfer
                       </label>
-                      <p className='text-[11px] text-[#788187] mt-0.5 leading-[14px]'>
+                      <p className='text-[11px] text-muted-foreground mt-0.5 leading-[14px]'>
                         Only Manager and Team Lead can transfer tickets
                       </p>
                     </div>
@@ -869,14 +869,14 @@ const BoardStageConfigScreen = ({
                       id='allow-transfer-toggle'
                       onClick={() => setIsAllowedToTransfer(v => !v)}
                       className={`w-[36px] h-[20px] rounded-full relative transition-colors flex-shrink-0 ${
-                        isAllowedToTransfer ? 'bg-[#6276be]' : 'bg-[#e4e6e7]'
+                        isAllowedToTransfer ? 'bg-[#6276be]' : 'bg-muted'
                       }`}
                       data-track-category='board_config'
                       data-track-name='toggle_allow_transfer'
                       type='button'
                     >
                       <span
-                        className={`absolute top-[2px] w-[16px] h-[16px] bg-white rounded-full transition-transform ${
+                        className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
                           isAllowedToTransfer ? 'left-[18px]' : 'left-[2px]'
                         }`}
                       />
@@ -891,14 +891,15 @@ const BoardStageConfigScreen = ({
         {/* ── Stages Area with Rounded Column Background ── */}
         <div className='flex-1 overflow-hidden px-6 pt-3 pb-6'>
           {/* Rounded container with columns background */}
-          <div className='h-full w-full rounded-[16px] bg-[#f8f8f8] overflow-x-auto overflow-y-hidden'>
+          <div className='h-full w-full rounded-[16px] bg-muted/50 overflow-x-auto overflow-y-hidden'>
             {/* Stage Cards Row - centered when few, scrollable when many */}
             <div className='h-full flex items-stretch justify-center min-w-max relative'>
               {/* Dotted grid pattern background - at top level */}
               <div
                 className='absolute inset-0 pointer-events-none z-[20]'
                 style={{
-                  backgroundImage: 'radial-gradient(circle, #D1D5DB 1px, transparent 1px)',
+                  backgroundImage:
+                    'radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px)',
                   backgroundSize: '24px 24px',
                 }}
               />
@@ -915,21 +916,21 @@ const BoardStageConfigScreen = ({
                 const totalActiveStages = activeStages.length;
                 const stageIndexInActive = activeStages.findIndex(s => s.tempId === stage.tempId);
 
-                // Get background color based on status
+                // Get background color based on status - uses semantic theme-aware colors
                 const getStatusBgColor = (status: TicketStatusV2): string => {
                   switch (status) {
                     case TicketStatusV2.TODO:
-                      return 'bg-[#F5F5F5]';
+                      return 'bg-stage-todo';
                     case TicketStatusV2.STARTED:
-                      return 'bg-[#FAFAFA]';
+                      return 'bg-muted/30';
                     case TicketStatusV2.PAUSED:
-                      return 'bg-[#F5F5F5]';
+                      return 'bg-muted/50';
                     case TicketStatusV2.COMPLETED:
-                      return 'bg-[#F2F7ED]';
+                      return 'bg-stage-completed';
                     case TicketStatusV2.CANCELLED:
-                      return 'bg-[#F8EBEB]';
+                      return 'bg-stage-cancelled';
                     default:
-                      return 'bg-[#FAFAFA]';
+                      return 'bg-muted/30';
                   }
                 };
 
@@ -940,9 +941,9 @@ const BoardStageConfigScreen = ({
                       className={`${getStatusBgColor(stage.defaultTicketStatusV2)} self-stretch flex items-start justify-center px-10 pt-20 relative`}
                     >
                       {/* Stage Card - narrower than colored background */}
-                      <div className='w-[260px] bg-white rounded-[10px] border border-[#e4e6e7] shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] overflow-hidden pb-[10px] shrink-0 z-40'>
+                      <div className='w-[260px] bg-background rounded-[10px] border border-border shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] overflow-hidden pb-[10px] shrink-0 z-40'>
                         {/* Card Header */}
-                        <div className='flex items-center justify-between px-3 py-2 border-b border-[#e4e6e7]'>
+                        <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
                           {/* Status Dropdown */}
                           <DropdownMenu>
                             <DropdownMenuTrigger
@@ -950,10 +951,10 @@ const BoardStageConfigScreen = ({
                               data-track-category='board_config'
                               data-track-name='change_stage_status'
                             >
-                              <span className='text-[13px] font-medium text-[#788187]'>
+                              <span className='text-[13px] font-medium text-muted-foreground'>
                                 {statusOption.label}
                               </span>
-                              <ChevronDown size={14} className='text-[#788187]' />
+                              <ChevronDown size={14} className='text-muted-foreground' />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='start'>
                               {STATUS_OPTIONS.map(opt => (
@@ -980,7 +981,7 @@ const BoardStageConfigScreen = ({
                               onClick={() => handleStartEditEta(stage)}
                               variant='ghost'
                               size='sm'
-                              className='flex items-center gap-[4px] text-[12px] text-[#181b1d] hover:text-gray-700 p-[4px] rounded-[6px] h-auto'
+                              className='flex items-center gap-[4px] text-[12px] text-foreground hover:text-foreground/80 p-[4px] rounded-[6px] h-auto'
                               data-track-category='board_config'
                               data-track-name='start_edit_eta'
                             >
@@ -992,7 +993,7 @@ const BoardStageConfigScreen = ({
 
                             {/* ETA Input dropdown - appears below when editing */}
                             {editingEtaId === stage.tempId && (
-                              <div className='absolute top-full right-0 mt-2 z-50 bg-white border border-[#e4e6e7] rounded-[6px] shadow-[0px_2px_6px_0px_rgba(5,5,6,0.07)] pl-[10px] pr-[6px] py-[8px] flex items-center gap-2 min-w-[80px]'>
+                              <div className='absolute top-full right-0 mt-2 z-50 bg-background border border-border rounded-[6px] shadow-[0px_2px_6px_0px_rgba(5,5,6,0.07)] pl-[10px] pr-[6px] py-[8px] flex items-center gap-2 min-w-[80px]'>
                                 <input
                                   ref={etaInputRef}
                                   type='text'
@@ -1008,16 +1009,16 @@ const BoardStageConfigScreen = ({
                                   data-track-category='board_config'
                                   data-track-name='edit_eta_input'
                                   placeholder='ETA'
-                                  className='w-10 text-[14px] font-[450] text-[#181b1d] bg-transparent border-none focus:outline-none focus:ring-0 p-0 placeholder:text-[#c9cccf]'
+                                  className='w-10 text-[14px] font-[450] text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
                                 />
-                                <span className='text-[14px] font-[450] text-[#181b1d]'>hrs</span>
+                                <span className='text-[14px] font-[450] text-foreground'>hrs</span>
                               </div>
                             )}
                             <Button
                               onClick={() => handleDeleteStage(stage.tempId)}
                               variant='ghost'
                               size='iconSm'
-                              className='text-[#788187] hover:text-gray-600 shrink-0'
+                              className='text-muted-foreground hover:text-muted-foreground/80 shrink-0'
                               data-track-category='board_config'
                               data-track-name='delete_stage'
                             >
@@ -1030,7 +1031,7 @@ const BoardStageConfigScreen = ({
                         <div className='px-3 py-3'>
                           {/* Status Icon + Stage Name */}
                           <div className='flex items-center gap-[4px] mb-3'>
-                            <div className='bg-white h-[26px] flex items-center justify-center px-[6px] py-[4px] rounded-[6px]'>
+                            <div className='bg-background h-[26px] flex items-center justify-center px-[6px] py-[4px] rounded-[6px]'>
                               <StatusIndicator
                                 status={stage.defaultTicketStatusV2}
                                 size={16}
@@ -1051,7 +1052,7 @@ const BoardStageConfigScreen = ({
                               data-track-category='board_config'
                               data-track-name='edit_stage_name'
                               placeholder='Stage name...'
-                              className='flex-1 text-[12px] font-semibold text-[#181b1d] bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-gray-400 uppercase tracking-[0.72px] leading-[18px] text-left'
+                              className='flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground/50 uppercase tracking-[0.72px] leading-[18px] text-left'
                             />
                           </div>
 
@@ -1063,12 +1064,15 @@ const BoardStageConfigScreen = ({
                                   key={condition.id}
                                   onClick={() => handleOpenConditionModal(stage.tempId, condition)}
                                   variant='ghost'
-                                  className='w-full bg-white border border-[#e4e6e7] rounded-[12px] h-auto min-h-[40px] px-2 py-2 flex items-center gap-[6px] hover:bg-[#f8f8f8] transition-colors justify-start'
+                                  className='w-full bg-background border border-border rounded-[12px] h-auto min-h-[40px] px-2 py-2 flex items-center gap-[6px] hover:bg-muted transition-colors justify-start'
                                   data-track-category='board_config'
                                   data-track-name='edit_condition'
                                 >
-                                  <GitBranch size={14} className='text-[#788187] flex-shrink-0' />
-                                  <span className='text-[14px] font-medium text-[#181b1d] break-words whitespace-normal text-left leading-[18px]'>
+                                  <GitBranch
+                                    size={14}
+                                    className='text-muted-foreground flex-shrink-0'
+                                  />
+                                  <span className='text-[14px] font-medium text-foreground break-words whitespace-normal text-left leading-[18px]'>
                                     {condition.name || `Condition ${condIdx + 1}`}
                                   </span>
                                 </Button>
@@ -1125,7 +1129,7 @@ const BoardStageConfigScreen = ({
 
                     {/* Black line on top of where colored backgrounds meet */}
                     {!isLast && (
-                      <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-10 w-[80px] h-[2px] bg-gray-400' />
+                      <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-10 w-[80px] h-[2px] bg-muted-foreground' />
                     )}
 
                     {/* Plus button on top of the line - matches Figma design */}
@@ -1137,9 +1141,9 @@ const BoardStageConfigScreen = ({
                           data-track-name='add_stage_between'
                           variant='ghost'
                           size='iconSm'
-                          className='bg-white border border-[#e4e6e7] rounded-[6px] p-[4px] flex items-center justify-center hover:bg-gray-50 transition-colors shadow-sm h-auto w-auto'
+                          className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-sm h-auto w-auto'
                         >
-                          <Plus size={12} className='text-[#181b1d]' />
+                          <Plus size={12} className='text-foreground' />
                         </Button>
                       </div>
                     )}
@@ -1154,7 +1158,7 @@ const BoardStageConfigScreen = ({
                   data-track-category='board_config'
                   data-track-name='add_first_stage'
                   variant='ghost'
-                  className='w-[280px] h-[120px] rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-gray-700 hover:border-gray-400 hover:bg-white/50 transition-colors'
+                  className='w-[280px] h-[120px] rounded-lg border-2 border-dashed border-muted-foreground flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-muted-foreground/80 hover:border-muted-foreground/60 hover:bg-background/50 transition-colors'
                 >
                   <Plus size={20} />
                   <span className='text-sm font-medium'>Add Stage</span>

@@ -152,7 +152,7 @@ const BoardCreateScreen = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='bg-white flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden'>
+      <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
         {/* Header */}
         <div className='flex items-center justify-between px-6 py-4'>
           {/* Left Section */}
@@ -161,13 +161,13 @@ const BoardCreateScreen = ({
               onClick={handleClose}
               variant='ghost'
               size='iconSm'
-              className='w-[16px] h-[16px] text-[#181b1d] hover:opacity-70'
+              className='w-[16px] h-[16px] text-foreground hover:opacity-70'
               data-track-category='BOARD_CREATE'
               data-track-name='NAVIGATE_BACK'
             >
               <ChevronLeft size={16} />
             </Button>
-            <span className='font-medium text-[14px] leading-[20px] text-[#181b1d] overflow-hidden text-ellipsis whitespace-nowrap'>
+            <span className='font-medium text-[14px] leading-[20px] text-foreground overflow-hidden text-ellipsis whitespace-nowrap'>
               Browse templates
             </span>
           </div>
@@ -196,21 +196,21 @@ const BoardCreateScreen = ({
               <div className='space-y-[12px]'>
                 {/* Header row */}
                 <div className='flex items-center justify-between px-[16px]'>
-                  <h2 className='text-[16px] font-semibold leading-[24px] text-[#181b1d]'>
+                  <h2 className='text-[16px] font-semibold leading-[24px] text-foreground'>
                     Create from boards
                   </h2>
 
                   <div className='relative'>
                     <Search
                       size={16}
-                      className='absolute left-[12px] top-1/2 -translate-y-1/2 text-[#788187]'
+                      className='absolute left-[12px] top-1/2 -translate-y-1/2 text-muted-foreground'
                     />
                     <input
                       type='text'
                       placeholder='Search boards...'
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
-                      className='pl-[36px] pr-[12px] py-[8px] text-[14px] border border-[#e8e8e8] rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#6276be]'
+                      className='pl-[36px] pr-[12px] py-[8px] text-[14px] text-foreground bg-background border border-border rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#6276be]'
                       data-track-category='BOARD_CREATE'
                       data-track-name='SEARCH_BOARDS'
                     />
@@ -219,9 +219,9 @@ const BoardCreateScreen = ({
 
                 {/* Boards Table */}
                 <div className='px-[16px]'>
-                  <div className='rounded-[8px] overflow-hidden bg-white'>
+                  <div className='rounded-[8px] overflow-hidden bg-background'>
                     {/* Table Header */}
-                    <div className='flex items-center gap-[24px] px-[16px] py-[12px] bg-white'>
+                    <div className='flex items-center gap-[24px] px-[16px] py-[12px] bg-background'>
                       <div className='flex-1 text-[14px] font-semibold min-w-0'>Board Title</div>
                       <div className='flex-1 text-[14px] font-semibold min-w-0'>Created by</div>
                       <div className='flex-1 text-[14px] font-semibold min-w-0'>Automations</div>
@@ -249,7 +249,7 @@ const BoardCreateScreen = ({
                       </div>
                     ) : (
                       <div className='px-[16px] py-[32px] text-center'>
-                        <p className='text-[14px] text-[#788187]'>
+                        <p className='text-[14px] text-muted-foreground'>
                           {searchQuery
                             ? 'No boards found matching your search.'
                             : 'No boards available.'}

@@ -4920,6 +4920,28 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Update stages if provided
           if (stages) {
+            // Validate that stages have at least one TODO, STARTED, and COMPLETED stage
+            const hasTodo = stages.some(
+              s =>
+                s.defaultTicketStatusV2 === TicketStatusV2.TODO || s.defaultTicketStatusV2 === 'TODO',
+            );
+            const hasStarted = stages.some(
+              s =>
+                s.defaultTicketStatusV2 === TicketStatusV2.STARTED ||
+                s.defaultTicketStatusV2 === 'STARTED',
+            );
+            const hasCompleted = stages.some(
+              s =>
+                s.defaultTicketStatusV2 === TicketStatusV2.COMPLETED ||
+                s.defaultTicketStatusV2 === 'COMPLETED',
+            );
+
+            if (!hasTodo || !hasStarted || !hasCompleted) {
+              throw new Error(
+                'Board must have at least one TODO, one STARTED, and one COMPLETED stage',
+              );
+            }
+
             const existingStages = await tx.run(zql.stages.where('boardId', boardId));
             const now = timestamp;
 

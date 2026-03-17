@@ -143,10 +143,15 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
   );
 
   return (
-    <div ref={containerRef} className='border border-xyne-gray-200 rounded-[12px] shadow-md p-4'>
-      <div className='flex items-center justify-between gap-3 mb-4'>
+    <div ref={containerRef} className='border border-border rounded-[12px] shadow-md p-4'>
+      <div className='flex items-center justify-between mb-4'>
+        {/* Grip icon placeholder for alignment */}
+        <div className='w-4 flex-shrink-0'>
+          <GripVertical size={16} className='text-xyne-gray-300' />
+        </div>
+
         {/* Left side: Input + Dropdown */}
-        <div className='flex items-center gap-3'>
+        <div className='flex items-center gap-3 flex-1'>
           <input
             ref={inputRef}
             type='text'
@@ -154,7 +159,7 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
             onChange={e => setFieldName(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={mode === 'create' ? 'Custom Field' : 'Field name'}
-            className='w-40 px-3 py-2 border-0 bg-transparent text-[14px] focus:outline-none focus:ring-0 placeholder:text-xyne-gray-400'
+            className='w-40 px-3 py-2 border-0 bg-transparent text-[14px] focus:outline-none focus:ring-0 placeholder:text-muted-foreground'
             data-track-category='form'
             data-track-name='field-name-input'
           />
@@ -200,21 +205,21 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
         {/* Right side: Required + Delete */}
         <div className='flex items-center gap-3'>
           <div className='flex items-center gap-2'>
-            <span className='text-[13px] text-xyne-gray-700 whitespace-nowrap leading-[18px] tracking-[-0.2px]'>
+            <span className='text-[13px] text-[#505b62] whitespace-nowrap leading-[18px] tracking-[-0.2px]'>
               Required
             </span>
             <button
               onClick={() => setFieldRequired(!fieldRequired)}
-              className={`w-8 h-5 rounded-full transition-colors relative flex-shrink-0 ${
-                fieldRequired ? 'bg-xyne-primary-500' : 'bg-xyne-gray-200'
+              className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+                fieldRequired ? 'bg-xyne-primary-500' : 'bg-gray-600'
               }`}
               data-track-category='form'
               data-track-name='required-toggle'
               type='button'
             >
               <span
-                className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${
-                  fieldRequired ? 'translate-x-3' : 'translate-x-0'
+                className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-white rounded-full transition-transform ${
+                  fieldRequired ? 'translate-x-[10px]' : 'translate-x-0'
                 }`}
               />
             </button>
@@ -224,7 +229,7 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
             onClick={onCancel}
             variant='ghost'
             size='iconSm'
-            className='w-8 h-8 text-xyne-gray-400 hover:text-xyne-red-500'
+            className='w-8 h-8 text-muted-foreground hover:text-xyne-red-500'
             data-track-category='form'
             data-track-name='cancel-field'
           >
@@ -235,9 +240,9 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
 
       {/* Options Input for Select/Multiselect Types */}
       {(fieldType === 'select' || fieldType === 'multiselect') && (
-        <div className='border-t border-xyne-gray-200 mt-2 pt-4'>
+        <div className='border-t border-border mt-2 pt-4'>
           <div className='flex items-center justify-between mb-4'>
-            <p className='text-[13px] font-semibold text-xyne-gray-900'>
+            <p className='text-[13px] font-semibold text-foreground'>
               {mode === 'create' ? 'Enter Options' : 'Options'}
             </p>
           </div>
@@ -249,11 +254,14 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
                 onDragStart={() => handleOptionDragStart(idx)}
                 onDragOver={e => handleOptionDragOver(e, idx)}
                 onDragEnd={handleOptionDragEnd}
-                className={`group flex items-center gap-2 px-2 py-2 hover:bg-xyne-gray-50 rounded-[10px] border border-[#E4E6E7] cursor-move ${
+                className={`group flex items-center gap-2 px-2 py-2 hover:bg-muted rounded-[10px] border border-border cursor-move ${
                   draggingOptionIndex === idx ? 'opacity-50' : ''
                 }`}
               >
-                <GripVertical size={16} className='text-xyne-gray-300 flex-shrink-0 cursor-grab' />
+                <GripVertical
+                  size={16}
+                  className='text-muted-foreground flex-shrink-0 cursor-grab'
+                />
                 <input
                   type='text'
                   value={option}
@@ -261,7 +269,7 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
                     const newValue = e.target.value;
                     setFieldOptions(prev => prev.map((opt, i) => (i === idx ? newValue : opt)));
                   }}
-                  className='flex-1 bg-transparent text-[13px] text-xyne-gray-900 focus:outline-none'
+                  className='flex-1 bg-transparent text-[13px] text-foreground focus:outline-none'
                   data-track-category='form'
                   data-track-name='edit-option'
                 />
@@ -269,7 +277,7 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
                   onClick={() => handleRemoveOption(option)}
                   variant='ghost'
                   size='iconSm'
-                  className='w-6 h-6 text-xyne-gray-400 hover:text-xyne-red-500 opacity-0 group-hover:opacity-100'
+                  className='w-6 h-6 text-muted-foreground hover:text-xyne-red-500 opacity-0 group-hover:opacity-100'
                   data-track-category='form'
                   data-track-name='remove-option'
                 >
@@ -289,7 +297,7 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
                   }
                 }}
                 placeholder='Add Option'
-                className='flex-1 bg-transparent text-[13px] text-xyne-gray-900 placeholder:text-xyne-gray-400 focus:outline-none'
+                className='flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none'
                 data-track-category='form'
                 data-track-name='option-input'
               />
@@ -298,7 +306,7 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
                 disabled={!optionInput.trim()}
                 variant='ghost'
                 size='iconSm'
-                className='w-6 h-6 text-xyne-gray-400 hover:text-xyne-gray-600 disabled:opacity-50'
+                className='w-6 h-6 text-muted-foreground hover:text-xyne-gray-600 disabled:opacity-50'
                 data-track-category='form'
                 data-track-name='add-option'
               >
@@ -312,18 +320,18 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
       {/* Boolean Type - Pre-populated Yes/No options */}
       {fieldType === 'boolean' && (
         <div className='border-t border-xyne-gray-200 mt-2 pt-4 ml-7'>
-          <p className='text-[13px] font-semibold text-xyne-gray-900 mb-4'>Options</p>
+          <p className='text-[13px] font-semibold text-foreground mb-4'>Options</p>
           <div className='space-y-3'>
             <div className='flex items-center gap-1.5 bg-xyne-gray-100 border border-xyne-gray-200 rounded-[10px] px-1.5 py-2 h-[34px]'>
-              <GripVertical size={16} className='text-xyne-gray-300' />
-              <span className='flex-1 text-[13px] text-xyne-gray-900'>Yes</span>
-              <div className='w-6 h-6 flex items-center justify-center bg-white border border-xyne-gray-200 rounded-md text-xyne-gray-400'>
+              <GripVertical size={16} className='text-muted-foreground' />
+              <span className='flex-1 text-[13px] text-foreground'>Yes</span>
+              <div className='w-6 h-6 flex items-center justify-center bg-background border border-xyne-gray-200 rounded-md text-muted-foreground'>
                 <span className='text-[14px]'>⏎</span>
               </div>
             </div>
-            <div className='flex items-center gap-1.5 bg-white border border-xyne-gray-200 rounded-[10px] px-1.5 py-2 h-[34px]'>
-              <GripVertical size={16} className='text-xyne-gray-300' />
-              <span className='flex-1 text-[13px] text-xyne-gray-900'>No</span>
+            <div className='flex items-center gap-1.5 bg-background border border-xyne-gray-200 rounded-[10px] px-1.5 py-2 h-[34px]'>
+              <GripVertical size={16} className='text-muted-foreground' />
+              <span className='flex-1 text-[13px] text-foreground'>No</span>
             </div>
           </div>
         </div>

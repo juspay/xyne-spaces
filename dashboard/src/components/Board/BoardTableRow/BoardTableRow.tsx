@@ -16,11 +16,11 @@ export const BoardTableRow = ({
   const createdByName = typeof board.createdBy === 'string' ? board.createdBy : 'Unknown';
 
   return (
-    <div className='group flex items-center gap-[24px] px-[16px] py-[12px] transition-colors rounded-xl bg-white hover:bg-[#f5f5f5]'>
+    <div className='group flex items-center gap-[24px] px-[16px] py-[12px] transition-colors rounded-xl bg-background hover:bg-muted'>
       {/* Board Title */}
       <div className='flex-1 truncate min-w-0'>
         <p
-          className={`text-[14px] text-[#181b1d] leading-[20px] truncate ${isSelected ? 'font-semibold' : ''}`}
+          className={`text-[14px] text-foreground leading-[20px] truncate ${isSelected ? 'font-semibold' : ''}`}
         >
           {board.title}
         </p>
@@ -29,7 +29,9 @@ export const BoardTableRow = ({
       {/* Created by */}
       <div className='flex-1 flex items-center gap-[8px] min-w-0'>
         <UserAvatar userId={board.createdByUserId} showActiveStatus={false} />
-        <p className={`text-[14px] text-[#505B62] truncate ${isSelected ? 'font-semibold' : ''}`}>
+        <p
+          className={`text-[14px] text-muted-foreground truncate ${isSelected ? 'font-semibold' : ''}`}
+        >
           {createdByName}
         </p>
       </div>
@@ -37,14 +39,16 @@ export const BoardTableRow = ({
       {/* Automations */}
       <div className='flex-1 flex items-center gap-[4px] min-w-0'>
         <Zap size={14} className='text-[#6276be] flex-shrink-0' />
-        <span className={`text-[14px] text-[#181b1d] ${isSelected ? 'font-semibold' : ''}`}>
+        <span className={`text-[14px] text-foreground ${isSelected ? 'font-semibold' : ''}`}>
           {board.automations || 0}
         </span>
       </div>
 
       {/* Custom Fields */}
       <div className='flex-1 truncate min-w-0'>
-        <p className={`text-[14px] text-[#505b62] truncate ${isSelected ? 'font-semibold' : ''}`}>
+        <p
+          className={`text-[14px] text-muted-foreground truncate ${isSelected ? 'font-semibold' : ''}`}
+        >
           {formatCustomFields(board.customFieldNames)}
         </p>
       </div>
@@ -55,7 +59,7 @@ export const BoardTableRow = ({
           onClick={() => onPreview(board)}
           variant='secondary'
           size='sm'
-          className='flex-shrink-0 whitespace-nowrap bg-white border border-[#E4E6E7]'
+          className='flex-shrink-0 whitespace-nowrap bg-background border border-border'
           data-track-category='BOARD_CREATE'
           data-track-name='PREVIEW_BOARD'
         >

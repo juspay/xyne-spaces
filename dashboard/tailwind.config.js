@@ -89,6 +89,20 @@ export default {
           active: 'var(--app-sidebar-active)',
           activeForeground: 'var(--app-sidebar-active-foreground)',
         },
+        stage: {
+          todo: {
+            DEFAULT: 'hsl(var(--stage-todo-bg))',
+            border: 'hsl(var(--stage-todo-border))',
+          },
+          completed: {
+            DEFAULT: 'hsl(var(--stage-completed-bg))',
+            border: 'hsl(var(--stage-completed-border))',
+          },
+          cancelled: {
+            DEFAULT: 'hsl(var(--stage-cancelled-bg))',
+            border: 'hsl(var(--stage-cancelled-border))',
+          },
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',

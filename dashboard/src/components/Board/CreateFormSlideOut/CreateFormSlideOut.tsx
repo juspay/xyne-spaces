@@ -31,10 +31,12 @@ const SelectDropdown = ({
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           type='button'
-          className='w-full h-[32px] px-[8px] py-[7px] bg-white border border-[#e4e6e7] rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-[#c9cccf] disabled:cursor-not-allowed flex items-center justify-between'
+          className='w-full h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-center justify-between'
         >
-          <span className={value ? 'text-[#181b1d]' : 'text-[#c9cccf]'}>{selectedLabel}</span>
-          <ChevronDown size={14} className='text-[#788187] shrink-0 ml-1' />
+          <span className={value ? 'text-foreground' : 'text-muted-foreground/50'}>
+            {selectedLabel}
+          </span>
+          <ChevronDown size={14} className='text-muted-foreground shrink-0 ml-1' />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className='w-full max-h-[200px] overflow-y-auto'>
@@ -42,7 +44,7 @@ const SelectDropdown = ({
           <DropdownMenuItem
             key={option.value}
             onClick={() => onChange(option.value)}
-            className={value === option.value ? 'bg-[#f5f5f5] font-medium' : ''}
+            className={value === option.value ? 'bg-muted font-medium' : ''}
           >
             {option.label}
           </DropdownMenuItem>
@@ -181,16 +183,16 @@ export const CreateFormSlideOut = ({
 
   return (
     <div className='fixed right-[130px] top-[280px] bottom-[120px] z-50'>
-      <div className='w-[500px] h-full bg-white rounded-[12px] shadow-[0px_0px_4px_0px_rgba(0,0,0,0.14),0px_8px_24px_0px_rgba(43,45,47,0.08)] flex flex-col overflow-hidden relative'>
+      <div className='w-[500px] h-full bg-background rounded-[12px] shadow-[0px_0px_4px_0px_rgba(0,0,0,0.14),0px_8px_24px_0px_rgba(43,45,47,0.08)] flex flex-col overflow-hidden relative'>
         {/* Header */}
         <div className='flex items-center justify-between px-[16px] pt-[14px]'>
-          <h2 className='text-[14px] font-medium text-[#181b1d]'>Create Form</h2>
+          <h2 className='text-[14px] font-medium text-foreground'>Create Form</h2>
           <Button
             type='button'
             onClick={onClose}
             variant='ghost'
             size='iconSm'
-            className='text-[#788187] hover:text-[#181b1d]'
+            className='text-muted-foreground hover:text-foreground'
             data-track-category='board_config'
             data-track-name='close_create_form'
           >
@@ -207,7 +209,7 @@ export const CreateFormSlideOut = ({
               value={formName}
               onChange={e => setFormName(e.target.value)}
               placeholder='Form Title'
-              className='w-full text-[17px] font-semibold text-[#181b1d] bg-transparent border-0 focus:outline-none focus:ring-0 p-0 placeholder:text-[#c9cccf]'
+              className='w-full text-[17px] font-semibold text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
               data-track-category='board_config'
               data-track-name='form_title_input'
             />
@@ -216,7 +218,7 @@ export const CreateFormSlideOut = ({
               onChange={e => setFormDescription(e.target.value)}
               placeholder='Add description'
               rows={2}
-              className='w-full text-[14px] text-[#181b1d] bg-transparent border-0 focus:outline-none focus:ring-0 p-0 mt-1 resize-none placeholder:text-[#c9cccf]'
+              className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 mt-1 resize-none placeholder:text-muted-foreground/50'
               data-track-category='board_config'
               data-track-name='form_description_input'
             />
@@ -231,12 +233,14 @@ export const CreateFormSlideOut = ({
               return (
                 <div
                   key={field.id}
-                  className={`${isExpanded ? 'border border-[#e4e6e7] shadow-md' : ''} rounded-[12px] bg-white overflow-hidden transition-shadow`}
+                  className={`${isExpanded ? 'border border-border shadow-md' : ''} rounded-[12px] bg-background overflow-hidden transition-shadow`}
                 >
                   {/* Field Header - Always visible */}
                   <div className='flex items-start justify-between px-[12px] py-[10px] gap-3'>
                     {/* GripVertical - Only in expanded state for drag */}
-                    {isExpanded && <GripVertical size={16} className='text-[#788187] mt-1' />}
+                    {isExpanded && (
+                      <GripVertical size={16} className='text-muted-foreground mt-1' />
+                    )}
                     <button
                       type='button'
                       className='flex flex-col gap-2 flex-1 text-left bg-transparent border-0 p-0 cursor-pointer'
@@ -253,22 +257,22 @@ export const CreateFormSlideOut = ({
                     >
                       {!isExpanded && field.fieldName && (
                         <>
-                          <span className='text-[14px] text-[#181b1d] font-medium mb-1'>
+                          <span className='text-[14px] text-foreground font-medium mb-1'>
                             {field.fieldName}
                             {!field.isOptional && <span className='text-[#ff4f4f] ml-1'>*</span>}
                           </span>
-                          <div className='w-full h-[36px] px-[12px] bg-white border border-[#e4e6e7] rounded-[12px] text-[13px] flex items-center justify-between mb-1'>
-                            <span className='text-[#181b1d]'>
+                          <div className='w-full h-[36px] px-[12px] bg-background border border-border rounded-[12px] text-[13px] flex items-center justify-between mb-1'>
+                            <span className='text-foreground'>
                               {FIELD_TYPE_OPTIONS.find(opt => opt.value === field.fieldType)
                                 ?.label || 'Text'}
                             </span>
-                            <ChevronDown size={14} className='text-[#788187]' />
+                            <ChevronDown size={14} className='text-muted-foreground' />
                           </div>
                           {(isSelectField(field.fieldType) ||
                             field.fieldType === FormFieldType.BOOLEAN) &&
                             field.fieldEnum &&
                             field.fieldEnum.length > 0 && (
-                              <span className='text-[12px] text-[#a0a7ab]'>
+                              <span className='text-[12px] text-muted-foreground'>
                                 {field.fieldEnum.length} option
                                 {field.fieldEnum.length > 1 ? 's' : ''}
                               </span>
@@ -280,19 +284,19 @@ export const CreateFormSlideOut = ({
                       {/* Required Toggle - Only in expanded state */}
                       {isExpanded && (
                         <div className='flex items-center gap-[10px]'>
-                          <span className='text-[14px] text-[#181b1d]'>Required</span>
+                          <span className='text-[14px] text-foreground'>Required</span>
                           <button
                             onClick={() =>
                               handleUpdateField(field.id, { isOptional: !field.isOptional })
                             }
                             className={`w-[36px] h-[20px] rounded-full relative transition-colors ${
-                              !field.isOptional ? 'bg-[#6276be]' : 'bg-[#e4e6e7]'
+                              !field.isOptional ? 'bg-[#6276be]' : 'bg-muted'
                             }`}
                             data-track-category='board_config'
                             data-track-name='toggle_required'
                           >
                             <span
-                              className={`absolute top-[2px] w-[16px] h-[16px] bg-white rounded-full transition-transform ${
+                              className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
                                 !field.isOptional ? 'left-[18px]' : 'left-[2px]'
                               }`}
                             />
@@ -305,7 +309,7 @@ export const CreateFormSlideOut = ({
                           onClick={() => handleDeleteField(field.id)}
                           variant='ghost'
                           size='iconSm'
-                          className='text-[#788187] hover:text-red-500'
+                          className='text-muted-foreground hover:text-red-500'
                           data-track-category='board_config'
                           data-track-name='delete_field'
                         >
@@ -324,7 +328,7 @@ export const CreateFormSlideOut = ({
                         >
                           <ChevronDown
                             size={16}
-                            className='text-[#788187] transition-transform rotate-180'
+                            className='text-muted-foreground transition-transform rotate-180'
                           />
                         </Button>
                       )}
@@ -350,7 +354,7 @@ export const CreateFormSlideOut = ({
                             }
                           }}
                           placeholder='Enter question'
-                          className='w-full text-[14px] text-[#181b1d] bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+                          className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
                           data-track-category='board_config'
                           data-track-name='field_name_input'
                         />
@@ -386,9 +390,9 @@ export const CreateFormSlideOut = ({
                             {field.fieldEnum?.map((option, optionIndex) => (
                               <div
                                 key={optionIndex}
-                                className='flex items-center gap-[8px] border border-[#e4e6e7] rounded-[8px] px-[8px] h-[34px]'
+                                className='flex items-center gap-[8px] border border-border rounded-[8px] px-[8px] h-[34px]'
                               >
-                                <GripVertical size={14} className='text-[#788187]' />
+                                <GripVertical size={14} className='text-muted-foreground' />
                                 <input
                                   type='text'
                                   value={option}
@@ -398,7 +402,7 @@ export const CreateFormSlideOut = ({
                                     handleUpdateField(field.id, { fieldEnum: newOptions });
                                   }}
                                   placeholder={`Option ${optionIndex + 1}`}
-                                  className='flex-1 text-[13px] text-[#181b1d] bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+                                  className='flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
                                   data-track-category='board_config'
                                   data-track-name='edit_option'
                                 />
@@ -413,7 +417,7 @@ export const CreateFormSlideOut = ({
                                   }}
                                   variant='ghost'
                                   size='iconSm'
-                                  className='text-[#788187] hover:text-red-500'
+                                  className='text-muted-foreground hover:text-red-500'
                                   data-track-category='board_config'
                                   data-track-name='delete_form_field_option'
                                 >
@@ -445,7 +449,9 @@ export const CreateFormSlideOut = ({
                                 data-track-category='board_config'
                                 data-track-name='add_option'
                               />
-                              <span className='text-[14px] text-[#a0a7ab] font-medium'>⏎</span>
+                              <span className='text-[14px] text-muted-foreground font-medium'>
+                                ⏎
+                              </span>
                             </div>
                           </div>
                         </div>

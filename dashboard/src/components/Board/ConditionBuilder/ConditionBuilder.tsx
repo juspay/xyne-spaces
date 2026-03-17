@@ -50,8 +50,8 @@ const SelectDropdown = ({
       : hasValue && variant === 'then'
         ? 'text-[#e87619]'
         : hasValue
-          ? 'text-[#181b1d]'
-          : 'text-[#c9cccf]';
+          ? 'text-foreground'
+          : 'text-muted-foreground/50';
   const fontClass = hasValue && variant ? 'font-mono' : '';
 
   return (
@@ -59,10 +59,10 @@ const SelectDropdown = ({
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           type='button'
-          className='w-[160px] h-[32px] px-[8px] py-[7px] bg-white border border-[#e4e6e7] rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-[#c9cccf] disabled:cursor-not-allowed flex items-center justify-between'
+          className='w-[160px] h-auto min-h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-start justify-between'
         >
-          <span className={`${textColorClass} ${fontClass}`}>{selectedLabel}</span>
-          <ChevronDown size={14} className='text-[#788187] shrink-0 ml-1' />
+          <span className={`${textColorClass} ${fontClass} break-words`}>{selectedLabel}</span>
+          <ChevronDown size={14} className='text-muted-foreground shrink-0 ml-1 mt-[2px]' />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className='w-[160px] max-h-[200px] overflow-y-auto'>
@@ -70,7 +70,7 @@ const SelectDropdown = ({
           <DropdownMenuItem
             key={option.value}
             onClick={() => onChange(option.value)}
-            className={value === option.value ? 'bg-[#f5f5f5] font-medium' : ''}
+            className={value === option.value ? 'bg-muted font-medium' : ''}
           >
             {option.label}
           </DropdownMenuItem>
@@ -109,10 +109,14 @@ const FormDropdown = ({
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           type='button'
-          className='w-[160px] h-[32px] px-[8px] py-[7px] bg-white border border-[#e4e6e7] rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-[#c9cccf] disabled:cursor-not-allowed flex items-center justify-between'
+          className='w-[160px] h-auto min-h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-start justify-between'
         >
-          <span className={value ? 'text-[#181b1d]' : 'text-[#c9cccf]'}>{displayText}</span>
-          <ChevronDown size={14} className='text-[#788187] shrink-0 ml-1' />
+          <span
+            className={`${value ? 'text-foreground' : 'text-muted-foreground/50'} break-words whitespace-normal leading-tight`}
+          >
+            {displayText}
+          </span>
+          <ChevronDown size={14} className='text-muted-foreground shrink-0 ml-1' />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className='w-[160px] max-h-[200px] overflow-y-auto'>
@@ -141,7 +145,7 @@ const FormDropdown = ({
               key={form.id}
               onClick={() => onChange(form.id)}
               className={
-                value === form.id ? 'text-[#6276be] font-medium bg-[#f5f5f5]' : 'text-[#181b1d]'
+                value === form.id ? 'text-[#6276be] font-medium bg-muted' : 'text-foreground'
               }
             >
               {itemLabel}
@@ -169,12 +173,16 @@ const ApproverDropdown = ({
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           type='button'
-          className='w-[160px] h-[32px] px-[8px] py-[7px] bg-white border border-[#e4e6e7] rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-[#c9cccf] disabled:cursor-not-allowed flex items-center justify-between'
+          className='w-[160px] h-auto min-h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-start justify-between'
         >
-          <span className={selectedApprovers.length > 0 ? 'text-[#181b1d]' : 'text-[#c9cccf]'}>
+          <span
+            className={
+              selectedApprovers.length > 0 ? 'text-foreground' : 'text-muted-foreground/50'
+            }
+          >
             {displayText}
           </span>
-          <ChevronDown size={14} className='text-[#788187] shrink-0 ml-1' />
+          <ChevronDown size={14} className='text-muted-foreground shrink-0 ml-1' />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className='w-[320px] p-0' align='start'>
@@ -425,17 +433,17 @@ export const ConditionBuilder = ({
   const thenValueOptions = getThenValueOptions();
 
   return (
-    <div className='bg-white rounded-[12px] border border-[#e4e6e7] shadow-[0px_184px_51px_0px_rgba(0,0,0,0),0px_117px_47px_0px_rgba(0,0,0,0.01),0px_66px_40px_0px_rgba(0,0,0,0.02),0px_29px_29px_0px_rgba(0,0,0,0.03),0px_7px_16px_0px_rgba(0,0,0,0.04)] w-[550px] -ml-[45px] mt-[300px]'>
+    <div className='bg-background rounded-[12px] border border-border shadow-[0px_184px_51px_0px_rgba(0,0,0,0),0px_117px_47px_0px_rgba(0,0,0,0.01),0px_66px_40px_0px_rgba(0,0,0,0.02),0px_29px_29px_0px_rgba(0,0,0,0.03),0px_7px_16px_0px_rgba(0,0,0,0.04)] w-[550px] -ml-[45px] mt-[300px]'>
       {/* Modal Header */}
-      <div className='flex items-center gap-[6px] px-[12px] py-[12px] border-b border-[#e4e6e7]'>
-        <span className='flex-1 text-[14px] font-medium text-[#181b1d]'>
+      <div className='flex items-center gap-[6px] px-[12px] py-[12px] border-b border-border'>
+        <span className='flex-1 text-[14px] font-medium text-foreground'>
           {condition ? 'Edit Condition' : 'Add Condition'}
         </span>
         <Button
           onClick={onClose}
           variant='ghost'
           size='iconSm'
-          className='text-[#788187] hover:text-[#181b1d]'
+          className='text-muted-foreground hover:text-foreground'
           data-track-category='board_config'
           data-track-name='close_condition_builder'
         >
@@ -448,10 +456,10 @@ export const ConditionBuilder = ({
         {/* WHEN Section */}
         <div className='flex flex-col gap-[6px]'>
           <div className='flex items-center gap-[3px] px-[4px] py-[2px] rounded-[4px] w-fit'>
-            <span className='text-[12px] font-semibold text-[#788187] uppercase tracking-[0.72px]'>
+            <span className='text-[12px] font-semibold text-muted-foreground uppercase tracking-[0.72px]'>
               when
             </span>
-            <ChevronDown size={12} className='text-[#788187]' />
+            <ChevronDown size={12} className='text-muted-foreground' />
           </div>
           <div className='flex gap-[6px] pl-[16px]'>
             {/* When Field Dropdown */}
@@ -492,10 +500,10 @@ export const ConditionBuilder = ({
         {/* THEN Section */}
         <div className='flex flex-col gap-[6px]'>
           <div className='flex items-center gap-[3px] px-[4px] py-[2px] rounded-[4px] w-fit'>
-            <span className='text-[12px] font-semibold text-[#788187] uppercase tracking-[0.72px]'>
+            <span className='text-[12px] font-semibold text-muted-foreground uppercase tracking-[0.72px]'>
               Then
             </span>
-            <ChevronDown size={12} className='text-[#788187]' />
+            <ChevronDown size={12} className='text-muted-foreground' />
           </div>
           <div className='flex gap-[6px] pl-[16px]'>
             {/* Then Field Dropdown */}
@@ -523,19 +531,23 @@ export const ConditionBuilder = ({
 
             {/* Then Value - Different components based on field type */}
             {thenField === 'form' ? (
-              <FormDropdown
-                value={thenValue}
-                onChange={setThenValue}
-                disabled={!thenCondition}
-                onCreateFormClick={onOpenCreateForm}
-                allForms={allForms}
-              />
+              <div className='flex-1'>
+                <FormDropdown
+                  value={thenValue}
+                  onChange={setThenValue}
+                  disabled={!thenCondition}
+                  onCreateFormClick={onOpenCreateForm}
+                  allForms={allForms}
+                />
+              </div>
             ) : thenField === 'approver' ? (
-              <ApproverDropdown
-                selectedApprovers={selectedApprovers}
-                onApproversChange={setSelectedApprovers}
-                disabled={!thenCondition}
-              />
+              <div className='flex-1'>
+                <ApproverDropdown
+                  selectedApprovers={selectedApprovers}
+                  onApproversChange={setSelectedApprovers}
+                  disabled={!thenCondition}
+                />
+              </div>
             ) : (
               <div className='flex-1'>
                 <SelectDropdown
@@ -552,7 +564,7 @@ export const ConditionBuilder = ({
       </div>
 
       {/* Modal Footer */}
-      <div className='flex items-center justify-between px-[12px] py-[12px] border-t border-[#e4e6e7]'>
+      <div className='flex items-center justify-between px-[12px] py-[12px] border-t border-border'>
         <div>
           {condition?.id && onDelete && (
             <button
@@ -568,7 +580,7 @@ export const ConditionBuilder = ({
         <div className='flex items-center gap-2'>
           <button
             onClick={onClose}
-            className='px-3 py-1.5 text-[13px] font-medium text-[#788187] hover:text-[#181b1d] transition-colors'
+            className='px-3 py-1.5 text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors'
             data-track-category='board_config'
             data-track-name='cancel_condition'
           >
@@ -584,7 +596,7 @@ export const ConditionBuilder = ({
               !thenCondition ||
               (thenField === 'approver' ? selectedApprovers.length === 0 : !thenValue)
             }
-            className='px-3 py-1.5 text-[13px] font-medium text-white bg-[#6276be] hover:bg-[#5060a0] disabled:bg-[#c9cccf] disabled:cursor-not-allowed rounded-[6px] transition-colors'
+            className='px-3 py-1.5 text-[13px] font-medium text-white bg-[#6276be] hover:bg-[#5060a0] disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed rounded-[6px] transition-colors'
             data-track-category='board_config'
             data-track-name='save_condition'
           >

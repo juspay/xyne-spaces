@@ -20,9 +20,9 @@ const STATUS_CONFIG: Record<
 > = {
   [TicketStatusV2.TODO]: {
     label: 'Todo',
-    columnBg: 'bg-gray-50',
-    headerBg: 'bg-gray-100',
-    borderColor: 'border-gray-200',
+    columnBg: 'bg-muted/50',
+    headerBg: 'bg-muted',
+    borderColor: 'border-border',
   },
   [TicketStatusV2.STARTED]: {
     label: 'In Progress',
@@ -62,8 +62,8 @@ const ETAChip = ({ eta, onUpdate }: ETAChipProps): ReactElement => {
 
   if (editing) {
     return (
-      <div className='flex items-center gap-1 bg-white border border-blue-300 rounded px-2 py-1 shadow-sm'>
-        <Clock size={13} className='text-gray-500 shrink-0' />
+      <div className='flex items-center gap-1 bg-background border border-blue-300 rounded px-2 py-1 shadow-sm'>
+        <Clock size={13} className='text-muted-foreground shrink-0' />
         <input
           type='number'
           min={0}
@@ -76,7 +76,7 @@ const ETAChip = ({ eta, onUpdate }: ETAChipProps): ReactElement => {
           }}
           data-track-category='board_config'
           data-track-name='eta_edit'
-          className='w-12 text-xs outline-none bg-transparent text-gray-900'
+          className='w-12 text-xs outline-none bg-transparent text-foreground'
         />
       </div>
     );
@@ -87,7 +87,7 @@ const ETAChip = ({ eta, onUpdate }: ETAChipProps): ReactElement => {
       onClick={() => setEditing(true)}
       variant='outline'
       size='sm'
-      className='flex items-center gap-1 text-gray-600 bg-white border-gray-300 text-xs font-medium hover:bg-gray-50 h-auto py-1 px-2'
+      className='flex items-center gap-1 text-muted-foreground bg-background border-border text-xs font-medium hover:bg-muted h-auto py-1 px-2'
       data-track-category='board_config'
       data-track-name='eta_edit_trigger'
     >
@@ -167,18 +167,18 @@ export const StageColumn = ({
               e.stopPropagation();
               setShowStatusMenu(v => !v);
             }}
-            className='flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900'
+            className='flex items-center gap-2 text-sm font-medium text-foreground hover:text-foreground/80'
             data-track-category='board_config'
             data-track-name='toggle_status_menu'
             type='button'
           >
             {config.label}
-            <ChevronDown size={14} className='text-gray-500' />
+            <ChevronDown size={14} className='text-muted-foreground' />
           </button>
 
           {showStatusMenu && (
             <div
-              className='absolute top-full left-0 mt-1 z-10 bg-white border border-gray-300 rounded shadow-lg py-1 min-w-[140px]'
+              className='absolute top-full left-0 mt-1 z-10 bg-background border border-border rounded shadow-lg py-1 min-w-[140px]'
               onClick={e => e.stopPropagation()}
               onKeyDown={e => {
                 if (e.key === 'Escape') {
@@ -200,8 +200,8 @@ export const StageColumn = ({
                       setShowStatusMenu(false);
                     }}
                     className={`
-                      w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors
-                      ${node.defaultTicketStatusV2 === status ? 'text-blue-600 font-medium' : 'text-gray-700'}
+                      w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors
+                      ${node.defaultTicketStatusV2 === status ? 'text-blue-600 font-medium' : 'text-foreground'}
                     `}
                     type='button'
                     data-track-category='board_config'
@@ -236,7 +236,7 @@ export const StageColumn = ({
       <div className='flex-1 p-4 flex flex-col gap-2'>
         {/* Backlog label if TODO status */}
         {node.defaultTicketStatusV2 === TicketStatusV2.TODO && (
-          <div className='text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1'>
+          <div className='text-xs font-semibold text-foreground uppercase tracking-wide mb-1'>
             BACKLOG
           </div>
         )}
@@ -264,12 +264,12 @@ export const StageColumn = ({
 export const StageConnector = ({ onClick }: StageConnectorProps): ReactElement => (
   <div className='flex items-start pt-8 px-2 flex-shrink-0'>
     <div className='flex items-center gap-1'>
-      <div className='w-6 h-px bg-gray-300' />
+      <div className='w-6 h-px bg-border' />
       <button
         onClick={onClick}
         className='
-        w-6 h-6 rounded-full border border-gray-300 bg-white
-        flex items-center justify-center text-gray-500
+        w-6 h-6 rounded-full border border-border bg-background
+        flex items-center justify-center text-muted-foreground
         hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50
         transition-all
       '
@@ -280,7 +280,7 @@ export const StageConnector = ({ onClick }: StageConnectorProps): ReactElement =
       >
         <Plus size={14} />
       </button>
-      <div className='w-6 h-px bg-gray-300' />
+      <div className='w-6 h-px bg-border' />
     </div>
   </div>
 );
