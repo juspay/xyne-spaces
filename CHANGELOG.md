@@ -1,3 +1,20 @@
+## [1.93.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.92.0...v1.93.0) (2026-03-17)
+
+
+### Features
+
+* Add memory retrieval and index flow ([eae1f02](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/eae1f028e0da0707c6e5546720d76c6437d4efe0)), closes [#4097](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4097)
+* automation setup ([534638c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/534638c83b284b553bc8a5f97d7fd17fc17dd391)), closes [#4121](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4121)
+* ticket archive ([c6360d0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c6360d0bb5062c07ca0f754065976a24f2652e3f)), closes [#3976](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3976)
+* Xyne Apps webhook support ([079ab4f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/079ab4f326009f0f5d5ac718989add5751579d93)), closes [#4114](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4114)
+
+
+### Bug Fixes
+
+* fixing scroll and list highlight in canvas attachment popup ([1c95d15](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1c95d1513798fa80c2aba8475b5ae493a2c05c43))
+* Jiraffe migration board mapping issue ([15fc205](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/15fc205e20e1949be783cb88c964d22e8ec19ee2)), closes [#4143](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4143)
+* update [@blocknote](https://ssh.bitbucket.juspay.net/blocknote) packages to version 0.47.1 and bump blocknote-layout to 1.0.21 ([9b21eeb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9b21eebc853c606d3cebf52f3d1d0bf40517a357)), closes [#4118](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4118)
+
 ## [1.92.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.91.0...v1.92.0) (2026-03-16)
 
 
