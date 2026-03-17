@@ -392,6 +392,15 @@ async function ingestTicket(
       data: { ticketId: createdTicket.id },
    });
 
+   await db.message.update({
+      where: { messageId: conversation.message.messageId },
+      data: {
+        metadata: {
+          ticketId: createdTicket.id,
+        },
+      },
+   });
+
    // Create external message tracking record
    await db.externalMessage.createMany({
       data: [
