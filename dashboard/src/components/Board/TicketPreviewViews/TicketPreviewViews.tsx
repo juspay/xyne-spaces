@@ -79,10 +79,10 @@ const TicketPreviewContent = ({
     <div className='flex flex-col w-full p-6'>
       <div className='pb-[16px] pt-[20px]'>
         <div className='flex flex-col gap-[12px]'>
-          <h2 className='text-[20px] font-semibold text-[#181b1d] leading-[26px] overflow-hidden text-ellipsis whitespace-nowrap'>
+          <h2 className='text-[20px] font-semibold text-foreground leading-[26px] overflow-hidden text-ellipsis whitespace-nowrap'>
             {ticket?.title || 'This is a ticket preview'}
           </h2>
-          <p className='text-[16px] text-[#505b62] leading-[22px]'>
+          <p className='text-[16px] text-muted-foreground leading-[22px]'>
             {ticket?.description ||
               'This is where your users would add a detailed description of their issues. One can add attachments & drop links in here as well. We encourage users to be as descriptive about the issues as they can.'}
           </p>
@@ -90,28 +90,24 @@ const TicketPreviewContent = ({
 
         <div className='flex flex-col mt-[32px]'>
           {/* User Group Field */}
-          <div
-            className='flex gap-[66px] items-center pr-[40px] py-[8px] max-w-prose'
-            style={{ borderBottom: '0.5px solid #e4e6e7' }}
-          >
+          <div className='flex gap-[66px] items-center pr-[40px] py-[8px] max-w-prose border-b border-border'>
             <div className='min-w-[140px] max-w-[140px]'>
-              <p className='text-[14px] font-medium text-[#7d7878] leading-[20px]'>User Group</p>
+              <p className='text-[14px] font-medium text-muted-foreground leading-[20px]'>
+                User Group
+              </p>
             </div>
             <div className='flex items-center gap-[6px]'>
-              <div className='inline-flex items-center gap-1.5 text-[14px] rounded-lg transition-colors bg-white border border-gray-200 hover:bg-gray-50 px-2 h-[30px] cursor-pointer'>
-                <Users size={14} className='text-gray-600' />
-                <span className='text-gray-700'>{ticket?.userGroup || 'Support Team'}</span>
+              <div className='inline-flex items-center gap-1.5 text-[14px] rounded-lg transition-colors bg-background border border-border hover:bg-muted px-2 h-[30px] cursor-pointer'>
+                <Users size={14} className='text-muted-foreground' />
+                <span className='text-foreground'>{ticket?.userGroup || 'Support Team'}</span>
               </div>
             </div>
           </div>
 
           {/* Tags Field */}
-          <div
-            className='flex gap-[66px] items-center pr-[40px] py-[8px] max-w-prose'
-            style={{ borderBottom: '0.5px solid #e4e6e7' }}
-          >
+          <div className='flex gap-[66px] items-center pr-[40px] py-[8px] max-w-prose border-b border-border'>
             <div className='min-w-[140px] max-w-[140px]'>
-              <p className='text-[14px] font-medium text-[#7d7878] leading-[20px]'>Tags</p>
+              <p className='text-[14px] font-medium text-muted-foreground leading-[20px]'>Tags</p>
             </div>
             <div className='flex items-center gap-[6px]'>
               <div className='flex items-center gap-2 flex-wrap'>
@@ -128,7 +124,7 @@ const TicketPreviewContent = ({
                   return (
                     <span
                       key={idx}
-                      className='inline-flex items-center gap-1.5 px-2 py-1 text-sm font-medium rounded-[6px] border border-[#F2F2F3] bg-[#FAFAFA]'
+                      className='inline-flex items-center gap-1.5 px-2 py-1 text-sm font-medium rounded-[6px] border border-border bg-muted/50'
                     >
                       <div className={`w-2 h-2 rounded-full ${tagColor}`}></div>
                       {tagName}
@@ -155,11 +151,10 @@ const TicketPreviewContent = ({
           {firstFields.map(field => (
             <div
               key={field.id}
-              className='flex gap-[66px] items-center pr-[40px] py-[8px] max-w-prose'
-              style={{ borderBottom: '0.5px solid #e4e6e7' }}
+              className='flex gap-[66px] items-center pr-[40px] py-[8px] max-w-prose border-b border-border'
             >
               <div className='min-w-[140px] max-w-[140px]'>
-                <p className='text-[14px] font-medium text-[#7d7878] leading-[20px]'>
+                <p className='text-[14px] font-medium text-muted-foreground leading-[20px]'>
                   {field.label}
                   {field.required && <span className='text-red-500'>*</span>}
                 </p>
@@ -174,7 +169,7 @@ const TicketPreviewContent = ({
               {!showAllFields ? (
                 <button
                   onClick={() => setShowAllFields(true)}
-                  className='flex items-center gap-[6px] py-[4px] text-[13px] font-[450] text-[#7d7878] leading-[1.2] tracking-[-0.1px] hover:text-[#505b62] transition-colors cursor-pointer bg-transparent border-0'
+                  className='flex items-center gap-[6px] py-[4px] text-[13px] font-[450] text-muted-foreground leading-[1.2] tracking-[-0.1px] hover:text-muted-foreground transition-colors cursor-pointer bg-transparent border-0'
                   data-track-category='BoardCreate'
                   data-track-name='ShowMoreFields'
                 >
@@ -184,7 +179,7 @@ const TicketPreviewContent = ({
               ) : (
                 <button
                   onClick={() => setShowAllFields(false)}
-                  className='flex items-center gap-[6px] py-[4px] text-[13px] font-[450] text-[#7d7878] leading-[1.2] tracking-[-0.1px] hover:text-[#505b62] transition-colors cursor-pointer bg-transparent border-0'
+                  className='flex items-center gap-[6px] py-[4px] text-[13px] font-[450] text-muted-foreground leading-[1.2] tracking-[-0.1px] hover:text-muted-foreground transition-colors cursor-pointer bg-transparent border-0'
                   data-track-category='BoardCreate'
                   data-track-name='ShowLessFields'
                 >
@@ -200,11 +195,10 @@ const TicketPreviewContent = ({
             remainingFields.map(field => (
               <div
                 key={field.id}
-                className='flex gap-[66px] items-center pr-[40px] py-[8px] max-w-prose'
-                style={{ borderBottom: '0.5px solid #e4e6e7' }}
+                className='flex gap-[66px] items-center pr-[40px] py-[8px] max-w-prose border-b border-border'
               >
                 <div className='min-w-[140px] max-w-[140px]'>
-                  <p className='text-[14px] font-medium text-[#7d7878] leading-[20px]'>
+                  <p className='text-[14px] font-medium text-muted-foreground leading-[20px]'>
                     {field.label}
                     {field.required && <span className='text-red-500'>*</span>}
                   </p>
@@ -261,31 +255,31 @@ const CreateTicketModal = ({
   }, [formMapping, externalFields]);
 
   return (
-    <div className='bg-white border border-[#e1e4ea] rounded-[12px] w-[607px] max-h-[85vh] flex flex-col overflow-hidden mx-auto my-auto shadow-lg'>
+    <div className='bg-background border border-border rounded-[12px] w-[607px] max-h-[85vh] flex flex-col overflow-hidden mx-auto my-auto shadow-lg'>
       {/* Modal Header */}
-      <div className='bg-white flex items-center justify-between pb-[4px] pt-[16px] px-[16px]'>
+      <div className='bg-background flex items-center justify-between pb-[4px] pt-[16px] px-[16px]'>
         <div className='flex items-center pl-[2px] pr-[4px]'>
-          <p className='text-[13px] font-medium text-[#7d7878] leading-[20px] px-[2px] py-[8px]'>
+          <p className='text-[13px] font-medium text-muted-foreground leading-[20px] px-[2px] py-[8px]'>
             New ticket
           </p>
         </div>
         <Button
           variant='ghost'
           size='iconSm'
-          className='w-[24px] h-[24px] border border-[#e4e6e7] rounded-[4px]'
+          className='w-[24px] h-[24px] border border-border rounded-[4px]'
         >
-          <X size={12} className='text-[#7d7878]' />
+          <X size={12} className='text-muted-foreground' />
         </Button>
       </div>
 
       {/* Modal Body */}
-      <div className='bg-white flex flex-col gap-[12px] pb-[16px] pt-[12px] px-[20px] overflow-y-auto max-h-[calc(100vh-120px)]'>
+      <div className='bg-background flex flex-col gap-[12px] pb-[16px] pt-[12px] px-[20px] overflow-y-auto max-h-[calc(100vh-120px)]'>
         {/* Title and Description */}
         <div className='flex flex-col gap-[16px] pb-[12px]'>
-          <p className='text-[17px] font-semibold text-[#111] leading-[20px]'>
+          <p className='text-[17px] font-semibold text-foreground leading-[20px]'>
             Create a new ticket
           </p>
-          <p className='text-[16px] font-normal text-[#505b62] leading-[22px]'>
+          <p className='text-[16px] font-normal text-muted-foreground leading-[22px]'>
             This is where your users would add a detailed description of their issues. One can add
             attachments & drop links in here as well. We encourage users to be as descriptive about
             the issues as they can.
@@ -293,13 +287,13 @@ const CreateTicketModal = ({
         </div>
 
         {/* Select Board Dropdown */}
-        <div className='bg-white border border-[#e4e6e7] rounded-[6px] flex items-center py-[2px] w-fit'>
+        <div className='bg-background border border-border rounded-[6px] flex items-center py-[2px] w-fit'>
           <div className='flex gap-[8px] items-center px-[10px] py-[5px] rounded-[6px]'>
-            <LayoutGrid size={14} className='text-[#788187]' />
-            <p className='text-[13px] font-medium text-[#393939] leading-[18px] tracking-[-0.2px]'>
+            <LayoutGrid size={14} className='text-muted-foreground' />
+            <p className='text-[13px] font-medium text-foreground leading-[18px] tracking-[-0.2px]'>
               {'Select Board'}
             </p>
-            <ChevronDown size={16} className='text-[#788187]' />
+            <ChevronDown size={16} className='text-muted-foreground' />
           </div>
         </div>
 
@@ -311,11 +305,11 @@ const CreateTicketModal = ({
             .map((field, index, array) => (
               <div
                 key={field.id}
-                className={`bg-white border border-[#e1e4ea] flex items-center ${index < array.length - 1 ? 'mb-[-1px]' : ''}`}
+                className={`bg-background border border-border flex items-center ${index < array.length - 1 ? 'mb-[-1px]' : ''}`}
               >
                 {/* Left column - Label with gray background */}
-                <div className='bg-[#fcfcfc] border-r border-[#e1e4ea] w-[160px] p-[10px] flex gap-[8px] items-center mr-[-1px]'>
-                  <p className='text-[14px] font-medium text-[#7d7878] leading-[18px] tracking-[-0.2px]'>
+                <div className='bg-muted/30 border-r border-border w-[160px] p-[10px] flex gap-[8px] items-center mr-[-1px]'>
+                  <p className='text-[14px] font-medium text-muted-foreground leading-[18px] tracking-[-0.2px]'>
                     {field.label}
                     {field.required && <span className='text-red-500'>*</span>}
                   </p>
@@ -324,15 +318,15 @@ const CreateTicketModal = ({
                 {/* Right column - Value */}
                 <div className='flex-1 px-[14px] py-[10px] flex gap-[8px] items-center mr-[-1px]'>
                   {field.type === 'text' && (
-                    <p className='text-[14px] font-medium text-[#505b62] leading-[18px] tracking-[-0.2px]'>
+                    <p className='text-[14px] font-medium text-muted-foreground leading-[18px] tracking-[-0.2px]'>
                       Sample {field.label.toLowerCase()} text
                     </p>
                   )}
 
                   {field.type === 'board' && (
                     <>
-                      <LayoutGrid size={14} className='text-[#788187]' />
-                      <p className='text-[14px] font-medium text-[#505b62] leading-[18px] tracking-[-0.2px]'>
+                      <LayoutGrid size={14} className='text-muted-foreground' />
+                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px] tracking-[-0.2px]'>
                         Sample Board Name{' '}
                       </p>
                     </>
@@ -340,8 +334,8 @@ const CreateTicketModal = ({
 
                   {field.type === 'project' && (
                     <>
-                      <Folder size={14} className='text-[#788187]' />
-                      <p className='text-[14px] font-medium text-[#505b62] leading-[18px] tracking-[-0.2px]'>
+                      <Folder size={14} className='text-muted-foreground' />
+                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px] tracking-[-0.2px]'>
                         Sample Project Name
                       </p>
                     </>
@@ -352,7 +346,7 @@ const CreateTicketModal = ({
                       <div className='w-[12px] h-[12px] rounded-full border-2 border-[#6276be] flex items-center justify-center'>
                         <div className='w-[5px] h-[5px] rounded-full bg-[#6276be]' />
                       </div>
-                      <p className='text-[14px] font-medium text-[#505b62] leading-[18px]'>
+                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
                         In Progress
                       </p>
                     </>
@@ -381,7 +375,7 @@ const CreateTicketModal = ({
                         />
                         <circle cx='8' cy='11.5' r='0.75' fill='currentColor' />
                       </svg>
-                      <p className='text-[14px] font-medium text-[#505b62] leading-[18px]'>
+                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
                         Critical
                       </p>
                     </div>
@@ -389,8 +383,8 @@ const CreateTicketModal = ({
 
                   {field.type === 'date' && (
                     <div className='flex gap-[8px] items-center'>
-                      <Calendar size={14} className='text-[#788187]' />
-                      <p className='text-[14px] font-medium text-[#505b62] leading-[18px]'>
+                      <Calendar size={14} className='text-muted-foreground' />
+                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
                         10 Dec 2025
                       </p>
                     </div>
@@ -398,8 +392,8 @@ const CreateTicketModal = ({
 
                   {field.type === 'select' && field.options && (
                     <>
-                      <List size={14} className='text-[#788187]' />
-                      <p className='text-[14px] font-medium text-[#505b62] leading-[18px]'>
+                      <List size={14} className='text-muted-foreground' />
+                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
                         {field.options[0] || 'Select option'}
                       </p>
                     </>
@@ -424,20 +418,22 @@ const CreateTicketModal = ({
                       <div className='w-[16px] h-[16px] rounded border-[0.8px] border-white bg-orange-400 overflow-hidden text-white text-[8px] font-medium flex items-center justify-center'>
                         NJ
                       </div>
-                      <p className='text-[14px] font-medium text-[#505b62] leading-[18px]'>
+                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
                         Neha Joshi
                       </p>
                     </div>
                   )}
 
                   {field.type === 'boolean' && (
-                    <p className='text-[14px] font-medium text-[#505b62] leading-[18px]'>Yes</p>
+                    <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
+                      Yes
+                    </p>
                   )}
 
                   {field.type === 'workflow' && (
                     <>
-                      <Workflow size={14} strokeWidth={2.33} className='text-[#788187]' />
-                      <p className='text-[14px] font-medium text-[#505b62] leading-[18px]'>
+                      <Workflow size={14} strokeWidth={2.33} className='text-muted-foreground' />
+                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
                         User Onboarding
                       </p>
                     </>
@@ -458,8 +454,8 @@ const CreateTicketModal = ({
 
                   {field.type === 'ticketType' && (
                     <>
-                      <Ticket size={14} strokeWidth={2.33} className='text-[#788187]' />
-                      <p className='text-[14px] font-medium text-[#505b62] leading-[18px]'>
+                      <Ticket size={14} strokeWidth={2.33} className='text-muted-foreground' />
+                      <p className='text-[14px] font-medium text-muted-foreground leading-[18px]'>
                         {BaseTicketType.Feature}
                       </p>
                     </>
@@ -471,9 +467,9 @@ const CreateTicketModal = ({
       </div>
 
       {/* Modal Footer */}
-      <div className='bg-white flex items-center justify-between pb-[16px] pt-[12px] px-[20px] border-t border-[#e1e4ea]'>
-        <button className='flex items-center gap-[8px] px-[12px] py-[8px] rounded-[8px] text-[14px] font-medium text-gray-600 transition-colors'>
-          <Paperclip strokeWidth={2.33} className='size-3.5 text-gray-500' />
+      <div className='bg-background flex items-center justify-between pb-[16px] pt-[12px] px-[20px] border-t border-border'>
+        <button className='flex items-center gap-[8px] px-[12px] py-[8px] rounded-[8px] text-[14px] font-medium text-muted-foreground transition-colors'>
+          <Paperclip strokeWidth={2.33} className='size-3.5 text-muted-foreground' />
           Attach
         </button>
         <button className='bg-[#445bb2] text-white px-[16px] py-[8px] rounded-[8px] text-[14px] font-medium transition-colors'>

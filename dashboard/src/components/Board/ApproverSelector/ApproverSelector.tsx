@@ -35,13 +35,13 @@ export const ApproverSelector = ({
     <div className='flex flex-col gap-3 max-h-[400px]'>
       {/* Search Input */}
       <div className='relative flex-shrink-0'>
-        <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#788187]' />
+        <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
         <input
           type='text'
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder='Search User'
-          className='w-full h-10 pl-10 pr-3 border border-[#e4e6e7] rounded-lg text-[14px] text-[#181b1d] placeholder:text-[#c9cccf] focus:outline-none focus:ring-1 focus:ring-[#6276be]'
+          className='w-full h-10 pl-10 pr-3 border border-border rounded-lg text-[14px] text-foreground placeholder:text-muted-foreground/50 bg-background focus:outline-none focus:ring-1 focus:ring-[#6276be]'
           data-track-category='board_config'
           data-track-name='search_user'
         />
@@ -55,19 +55,21 @@ export const ApproverSelector = ({
             {selectedApprovers.map(user => (
               <div
                 key={user.id}
-                className='flex items-center justify-between px-3 py-2 hover:bg-gray-50 rounded-lg transition-colors group'
+                className='flex items-center justify-between px-3 py-2 hover:bg-muted rounded-lg transition-colors group'
               >
                 <div className='flex items-center gap-2.5 flex-1 min-w-0'>
                   <Avatar userId={user.id} size='sm' />
                   <div className='flex flex-col min-w-0'>
-                    <span className='text-sm font-medium text-gray-900 truncate'>{user.name}</span>
-                    <span className='text-xs text-gray-500 truncate'>{user.email}</span>
+                    <span className='text-sm font-medium text-foreground truncate'>
+                      {user.name}
+                    </span>
+                    <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
                   </div>
                 </div>
                 <button
                   type='button'
                   onClick={() => handleRemoveUser(user.id)}
-                  className='shrink-0 p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors opacity-0 group-hover:opacity-100'
+                  className='shrink-0 p-1 text-muted-foreground hover:text-red-600 hover:bg-red-50 rounded transition-colors opacity-0 group-hover:opacity-100'
                   data-track-category='board_config'
                   data-track-name='remove_approver'
                 >
@@ -86,19 +88,21 @@ export const ApproverSelector = ({
                 <button
                   key={user.id}
                   onClick={() => handleUserClick(user)}
-                  className='flex items-center gap-3 px-3 py-2.5 hover:bg-[#f5f5f5] transition-colors cursor-pointer text-left'
+                  className='flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors cursor-pointer text-left'
                   data-track-category='board_config'
                   data-track-name='select_approver'
                 >
                   <Avatar userId={user.id} size='sm' />
                   <div className='flex flex-col'>
-                    <span className='text-[14px] font-medium text-[#181b1d]'>{user.name}</span>
-                    <span className='text-[12px] text-[#788187]'>{user.email}</span>
+                    <span className='text-[14px] font-medium text-foreground'>{user.name}</span>
+                    <span className='text-[12px] text-muted-foreground'>{user.email}</span>
                   </div>
                 </button>
               ))
             ) : (
-              <div className='px-3 py-4 text-center text-[13px] text-[#788187]'>No users found</div>
+              <div className='px-3 py-4 text-center text-[13px] text-muted-foreground'>
+                No users found
+              </div>
             )}
           </div>
         )}

@@ -13,20 +13,22 @@ export const renderPreviewFieldValue = (field: PreviewField): ReactNode => {
   switch (field.type) {
     case 'text':
       return (
-        <span className='text-[14px] text-[#181b1d]'>Sample {field.label.toLowerCase()} text</span>
+        <span className='text-[14px] text-muted-foreground'>
+          Sample {field.label.toLowerCase()} text
+        </span>
       );
     case 'board':
       return (
         <>
           <LayoutGrid size={14} className='text-gray-400' />
-          <span className='text-[14px] text-[#181b1d]'>Sample Board Name</span>
+          <span className='text-[14px] text-muted-foreground'>Sample Board Name</span>
         </>
       );
     case 'project':
       return (
         <>
           <Folder size={14} className='text-gray-400' />
-          <span className='text-[14px] text-[#181b1d]'>Sample Project Name</span>
+          <span className='text-[14px] text-muted-foreground'>Sample Project Name</span>
         </>
       );
     case 'priority':
@@ -37,16 +39,16 @@ export const renderPreviewFieldValue = (field: PreviewField): ReactNode => {
             <path d='M8 6V9' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
             <circle cx='8' cy='11.5' r='0.75' fill='currentColor' />
           </svg>
-          <span className='text-[14px] text-[#181b1d] font-medium'>Critical</span>
+          <span className='text-[14px] text-muted-foreground font-medium'>Critical</span>
         </>
       );
     case 'date':
-      return <span className='text-[14px] text-[#181b1d] font-medium'>10 Dec 2025</span>;
+      return <span className='text-[14px] text-muted-foreground font-medium'>10 Dec 2025</span>;
     case 'select':
       return (
         <>
           <List size={14} className='text-gray-400' />
-          <span className='text-[14px] text-[#181b1d]'>
+          <span className='text-[14px] text-muted-foreground'>
             {field.options?.[0] || 'Select option'}
           </span>
         </>
@@ -67,16 +69,16 @@ export const renderPreviewFieldValue = (field: PreviewField): ReactNode => {
           <div className='w-[16px] h-[16px] rounded border-[0.8px] border-white bg-orange-400 text-white text-[8px] font-medium flex items-center justify-center'>
             NJ
           </div>
-          <span className='text-[14px] text-[#181b1d] font-medium'>Neha Joshi</span>
+          <span className='text-[14px] text-muted-foreground font-medium'>Neha Joshi</span>
         </>
       );
     case 'boolean':
-      return <span className='text-[14px] text-[#181b1d] font-medium'>Yes</span>;
+      return <span className='text-[14px] text-muted-foreground font-medium'>Yes</span>;
     case 'status':
       return (
         <>
           <TicketStatusIcon size={14} progressPercentage={25} />
-          <span className='text-[14px] text-[#181b1d]'>User defined status</span>
+          <span className='text-[14px] text-muted-foreground'>User defined status</span>
         </>
       );
     default:
