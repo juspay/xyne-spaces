@@ -19,7 +19,7 @@ export const RCAPhaseStepper = ({ phases, activePhase, onPhaseClick }: RCAPhaseS
                     type='button'
                     role='tab'
                     aria-selected={isActive}
-                    onClick={() => onPhaseClick(phase.id)}
+                    onClick={() => void onPhaseClick(phase.id)}
                     data-track-category='RCA'
                     data-track-name='SelectRCAPhase'
                     className={cn(

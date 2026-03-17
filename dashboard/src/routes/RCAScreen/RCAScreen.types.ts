@@ -4,6 +4,7 @@ import { queries } from '../../zero/queries';
 
 export type Phase = 'release' | 'rca' | 'impact' | 'coe';
 
+// Query-backed records still use the raw Zero field names from the DB contract.
 export type RCARecord = QueryResultType<typeof queries.allRCAsPaginated>[number];
 export type DetailedRcaRecord = QueryResultType<typeof queries.rcaById>;
 export type ReleaseTicket = QueryResultType<typeof queries.releaseTickets>[number];
@@ -31,14 +32,14 @@ export interface SelectOption {
 
 export interface PendingImpact {
   tempId: string;
-  impactTypeId: string;
+  impactType: string;
   impact: string;
   files: File[];
 }
 
 export interface PendingCOE {
   ownerId: string;
-  actionTypeId: string;
+  actionType: string;
   action: string;
   status: COEStatus;
 }
@@ -60,28 +61,34 @@ export interface RCAFormValues {
   summary: string;
   rootCause: string;
   severity: SEVERITY;
-  bugTypeId: string;
-  categoryTypeId: string;
-  issueCategoryId?: string;
+  bugType: string;
+  category: string;
+  issueCategory?: string;
   issueStartAt?: number | null;
   status: RCAStatus;
 }
 
 export interface ImpactFormValues {
   ticketId: string;
-  impactTypeId: string;
+  impactType: string;
   impact: string;
 }
 
 export interface COEFormValues {
   ownerId: string;
-  actionTypeId: string;
+  actionType: string;
   action: string;
   status: COEStatus;
   dueDate: number | null;
 }
 
 // Component Props
+export interface FormControllerRef {
+  save: () => Promise<boolean>;
+  hasUnsavedChanges: () => boolean;
+  discard?: () => void;
+}
+
 export interface RCAFormProps {
   selectedRecord: RCARecord;
   isRcaEditable: boolean;
@@ -91,13 +98,12 @@ export interface RCAFormProps {
   ownerSearchQuery: string;
   setOwnerSearchQuery: (query: string) => void;
   bugTypeOptions: SelectOption[];
-  categoryTypeOptions: SelectOption[];
+  categoryOptions: SelectOption[];
+  categoryOptionsByBugTypeValue: Record<string, SelectOption[]>;
   severityOptions: Array<{ label: string; value: SEVERITY }>;
-  bugTypeValueById: Map<string, string>;
-  categoryValueById: Map<string, string>;
   issueCategoryOptionsByCategoryValue: Record<string, SelectOption[]>;
-  pendingRCA?: Partial<RCAFormValues> | null;
-  setPendingRCA?: (values: Partial<RCAFormValues> | null) => void;
+  issueCategoryRequiredByCategoryValue: Record<string, boolean>;
+  controllerRef?: React.MutableRefObject<FormControllerRef | null>;
 }
 
 export type ImpactType = Impact;
@@ -109,20 +115,8 @@ export interface ImpactFormProps {
   isImpactEnabled: boolean;
   isSubmitting: boolean;
   impactTypeOptions: SelectOption[];
-  impactAttachments: ImpactAttachment[];
-  onAddImpactAttachments: (files: File[], impactId: string) => Promise<void>;
-  onRemoveImpactAttachment: (attachmentId: string) => Promise<void>;
-  pendingImpacts: PendingImpact[];
-  selectedImpact: ImpactType | null;
-  impactDraftById: Record<string, Pick<PendingImpact, 'impactTypeId' | 'impact'>>;
-  setImpactDraftById: React.Dispatch<
-    React.SetStateAction<Record<string, Pick<PendingImpact, 'impactTypeId' | 'impact'>>>
-  >;
-  draftImpactFilesById: Record<string, File[]>;
-  setDraftImpactFilesById: React.Dispatch<React.SetStateAction<Record<string, File[]>>>;
-  setPendingImpacts: React.Dispatch<React.SetStateAction<PendingImpact[]>>;
-  setSelectedImpactId: (id: string | null) => void;
   onPhaseChange: (phase: Phase) => void;
+  controllerRef?: React.MutableRefObject<FormControllerRef | null>;
 }
 
 export interface COEFormProps {
@@ -131,19 +125,15 @@ export interface COEFormProps {
   isSubmitting: boolean;
   ownerItems: SelectOption[];
   coeActionTypeOptions: SelectOption[];
-  coeActionTypeLabelById?: Map<string, string>;
-  coeActionTypeValueById: Map<string, string>;
-  quickFixActionTypeId?: string;
+  coeActionLabelByValue?: Map<string, string>;
+  quickFixOptions: SelectOption[];
+  quickFixActionValue?: string;
+  hiddenCoeActionValues?: string[];
   coeStatusOptions: COEStatusOption[];
-  pendingCOEs: PendingCOE[];
-  selectedCoe: COEType | null;
   rcaOwnerId: string;
-  setPendingCOEs: React.Dispatch<React.SetStateAction<PendingCOE[]>>;
-  setSelectedCoeId: (id: string | null) => void;
   onSubmit: () => Promise<void>;
   onPhaseChange: (phase: Phase) => void;
-  onNavigate: (path: string) => void;
-  pendingRCA?: Partial<RCAFormValues> | null;
+  controllerRef?: React.MutableRefObject<FormControllerRef | null>;
 }
 
 export interface RCAPhaseStepperProps {
@@ -151,7 +141,7 @@ export interface RCAPhaseStepperProps {
   activePhase: Phase;
   isImpactEnabled: boolean;
   isCoeEnabled: boolean;
-  onPhaseClick: (phase: Phase) => void;
+  onPhaseClick: (phase: Phase) => void | Promise<void>;
 }
 
 export interface ReleaseMappingFormProps {
@@ -165,7 +155,6 @@ export interface ReleaseMappingFormProps {
 export interface RCASidebarProps {
   records: RCARecord[];
   ownerItems: SelectOption[];
-  bugTypeValueById: Map<string, string>;
   isLoading: boolean;
   isSubmitting: boolean;
   onRecordClick: (record: RCARecord) => void;

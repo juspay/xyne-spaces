@@ -333,6 +333,22 @@ export const queries = defineQueries({
       .one();
   }),
 
+  ticketDetailsById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+    return zql.tickets
+      .where('id', ticketId)
+      .related('project')
+      .related('tags')
+      .related('assignments')
+      .related('referencesOut', (ref) => ref.related('targetTicket'))
+      .related('referencesIn', (ref) => ref.related('sourceTicket'))
+      .related('entity')
+      .related('conversation')
+      .related('stageEtaEntries')
+      .related('rcas', rcaQuery => rcaQuery.orderBy('createdAt', 'desc').limit(1))
+      .related('ticketStageRequests', a => a.related('form'))
+      .one();
+  }),
+
   ticketByXyneId: defineQuery(z.object({ xyneId: z.string() }), ({ args: { xyneId } }) => {
     return zql.tickets
       .where('xyneId', xyneId)
@@ -1345,7 +1361,6 @@ export const queries = defineQueries({
       return zql.lookup_values.where('type', type).orderBy('createdAt', 'asc');
     },
   ),
-
   // RCA Queries
   allRCAsPaginated: defineQuery(
     z.object({

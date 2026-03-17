@@ -1916,6 +1916,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: ticketAssignmentTable,
   }),
+  rcas: many({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: rcaTable,
+  }),
 }));
 
 export const subTicketTableRelationships = relationships(subTicketTable, ({ one, many }) => ({

@@ -13,22 +13,22 @@ export const rcaSchema = z.object({
   summary: z.string().trim().min(1, 'Summary is required'),
   rootCause: z.string().trim().min(1, 'Root cause is required'),
   severity: z.nativeEnum(SEVERITY, { message: 'Severity is required' }),
-  bugTypeId: z.string().trim().min(1, 'Bug type is required'),
-  categoryTypeId: z.string().trim().min(1, 'Category type is required'),
+  bugType: z.string().trim().min(1, 'Bug type is required'),
+  category: z.string().trim().min(1, 'Category type is required'),
   issueStartAt: z.number().nullable().optional(),
   status: z.nativeEnum(RCAStatus),
-  issueCategoryId: z.string().trim().optional(),
+  issueCategory: z.string().trim().optional(),
 });
 
 export const impactSchema = z.object({
   ticketId: z.string().trim().min(1, 'Ticket ID is required'),
-  impactTypeId: z.string().trim().min(1, 'Impact type is required'),
+  impactType: z.string().trim().min(1, 'Impact type is required'),
   impact: z.string().trim().min(1, 'Impact summary is required'),
 });
 
 export const coeSchema = z.object({
   ownerId: z.string().trim().min(1, 'Owner ID is required'),
-  actionTypeId: z.string().trim().min(1, 'Action type is required'),
+  actionType: z.string().trim().min(1, 'Action type is required'),
   action: z.string().trim().min(1, 'Action is required'),
   status: z.nativeEnum(COEStatus),
 });
@@ -39,9 +39,9 @@ export const createRcaSchema = z.object({
   title: z.string().trim().min(1, 'Title is required'),
   summary: optionalTrimmedString,
   severity: z.nativeEnum(SEVERITY, { message: 'Severity is required' }),
-  bugTypeId: z.string().trim().min(1, 'Bug type is required'),
-  categoryTypeId: z.string().trim().min(1, 'Category type is required'),
-  issueCategoryId: z.string().trim().optional(),
+  bugType: z.string().trim().min(1, 'Bug type is required'),
+  category: z.string().trim().min(1, 'Category type is required'),
+  issueCategory: z.string().trim().optional(),
 });
 
 export type RCASchemaType = z.infer<typeof rcaSchema>;
