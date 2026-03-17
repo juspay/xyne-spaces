@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
 import { TicketPriority } from '@prisma/client';
 import { repositories } from '@/database/repositories';
+import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 
 const CreateTicketBodySchema = z.object({
   title: z.string().min(1, 'Title is required').trim(),
@@ -93,6 +94,18 @@ export class TicketController {
         userGroupId = userGroup.id;
       }
 
+      let resolvedAssignedTo = assignedTo;
+      if (userGroupId && !assignedTo) {
+        try {
+          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId);
+          if (assignmentResult.assignedUserId) {
+            resolvedAssignedTo = assignmentResult.assignedUserId;
+          }
+        } catch (error) {
+          logger.error('[Apps Ticket Creation] Error during auto-assignment:', error);
+        }
+      }
+
       // Create ticket with conversation using utility function
       const result = await createTicketWithConversation({
         title,
@@ -102,7 +115,7 @@ export class TicketController {
         channelId,
         userId,
         priority,
-        assignedTo,
+        assignedTo: resolvedAssignedTo,
         userGroupId,
         text,
       });
