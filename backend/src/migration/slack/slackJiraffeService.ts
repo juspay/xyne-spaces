@@ -166,7 +166,7 @@ async function pushVespaJobForTicket(
      jobType: "feed",
      docId: ticketId,
    }).catch(async (error) => {
-     logger.error('[Slack List] Error queuing Vespa job for ticket:', error);
+     logger.error('[Migration] Error queuing Vespa job for ticket:', error);
      try {
        const db = DatabaseClient.getInstance();
        const vespaLogs = db.vespaInsertionLogs;
@@ -186,7 +186,7 @@ async function pushVespaJobForTicket(
          });
        }
      } catch (dbError) {
-       logger.error('[Slack List] Failed to log Vespa insertion error to database:', dbError);
+       logger.error('[Migration] Failed to log Vespa insertion error to database:', dbError);
      }
    });
  }
@@ -202,9 +202,7 @@ async function ingestTicket(
    sourceChannelId: string,
    userRepo: UserRepository,
    userCache: Map<string, { id: string; isDeactivated: boolean }>,
-   userInfoCache: UserInfoCache,
-   counter: number,
-   slackMessageTs: string | null
+   userInfoCache: UserInfoCache
 ): Promise<SlackReply[]> {
    const db = DatabaseClient.getInstance();
 
@@ -273,14 +271,6 @@ async function ingestTicket(
    });
 
    if (existingMessage) {
-      counter++;
-      if (ENABLE_NOTIFICATIONS && slackMessageTs) {
-         await postMessage({
-            channelId: sourceChannelId,
-            text: `🔄 Jiraffe ${counter} tickets processed, (Already migrated)`,
-            threadTs: slackMessageTs,
-         });
-      }
       return threadReplies;
    }
 
@@ -317,10 +307,16 @@ async function ingestTicket(
 
    if (ticket.task_description?.trim()) {
       try {
-         const titleResult = await generateTitle(
-            { description: ticket.task_description },
-            { userId, channelId }
-         );
+         const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('Title generation timeout after 15 seconds')), 15000);
+         });
+         const titleResult = await Promise.race([
+            generateTitle(
+               { description: ticket.task_description },
+               { userId, channelId }
+            ),
+            timeoutPromise,
+         ]);
          titleText = titleResult.title;
       } catch (error) {
          logger.warn('[Migration] Failed to generate title, using fallback', {
@@ -338,7 +334,6 @@ async function ingestTicket(
       channelId,
       userId: userId,
       content: `Ticket Created: ${titleText}`,
-      msgType: 'SYSTEM',
       createdAt: new Date(ticket.created_at),
    });
 
@@ -356,7 +351,7 @@ async function ingestTicket(
    const mappedStageName = mapStage(ticket.stage);
 
    // Get board ID from mapper based on task_type (uppercase), fallback to default board
-   const boardId = boardMapper.get(ticket.task_type.toUpperCase()) || defaultBoardId;
+   const boardId = boardMapper.get(ticket.task_type.toUpperCase().replace(/_/g, ' ')) || defaultBoardId;
 
    // Build description: add JIRA link if title was AI-generated (not fallback)
    let description = ticket.task_description || '';
@@ -420,14 +415,6 @@ async function ingestTicket(
          },
       ],
    });
-   counter++;
-   if (ENABLE_NOTIFICATIONS && slackMessageTs) {
-      await postMessage({
-         channelId: sourceChannelId,
-         text: `🔄 Jiraffe ${counter} tickets processed, (New ticket created)`,
-         threadTs: slackMessageTs,
-      });
-   }
    return threadReplies;
 }
 
@@ -554,7 +541,20 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
 
    const { boardMapper, defaultBoardId } = boardValidation;
 
-   const jiraffeTickets = await fetchTicketsFromBitbot(input.channelId, input.syncDate);
+   let jiraffeTickets: BitbotTicket[];
+   try {
+      jiraffeTickets = await fetchTicketsFromBitbot(input.channelId, input.syncDate);
+   } catch (error) {
+      if (ENABLE_NOTIFICATIONS && messageTs) {
+         await postMessage({
+            channelId: input.channelId,
+            text: `❌ Failed to fetch tickets from Bitbot API`,
+            threadTs: messageTs,
+         });
+      }
+      return;
+   }
+
    const externalSourceName = `jiraffeMigration-${input.channelId}`;
 
    // Initialize repositories and user cache (same pattern as ingestConversationSlack)
@@ -575,7 +575,8 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
    const BATCH_SIZE = 10;
 
    // Process tickets in batches of BATCH_SIZE
-   for (let i = 0; i < jiraffeTickets.length; i += BATCH_SIZE) {
+   try {
+      for (let i = 0; i < jiraffeTickets.length; i += BATCH_SIZE) {
       const batch = jiraffeTickets.slice(i, i + BATCH_SIZE);
       const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
       const totalBatches = Math.ceil(jiraffeTickets.length / BATCH_SIZE);
@@ -590,6 +591,20 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
       // Process each ticket in the current batch
       for (const ticket of batch) {
          try {
+            const externalSource = await db.externalSource.findFirst({
+               where: { name: externalSourceName },
+            });
+            
+            const existingMessage = externalSource
+               ? await db.externalMessage.findFirst({
+                    where: {
+                       externalSourceId: externalSource.id,
+                       externalId: ticket.id,
+                       externalThreadId: ticket.slack_thread_ts,
+                    },
+                 })
+               : null;
+            
             const threadReplies = await ingestTicket(
                ticket,
                externalSourceName,
@@ -601,44 +616,73 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
                userRepo,
                userCache,
                userInfoCache,
-               counter,
-               messageTs,
             );
+            
+            counter++;
+            const ticketStatus = existingMessage ? '(Already migrated)' : '(New ticket created)';
+            
+            if (ENABLE_NOTIFICATIONS && messageTs) {
+               await postMessage({
+                  channelId: input.channelId,
+                  text: `🔄 Jiraffe ${counter} tickets processed, ${ticketStatus}`,
+                  threadTs: messageTs,
+               });
+            }
+            
             if (threadReplies.length > 0) {
                if (ENABLE_NOTIFICATIONS && messageTs) {
                   await postMessage({
                      channelId: input.channelId,
-                     text: `🔄 ${counter} Extracted associated thread replies for ticket`,
+                     text: `🔄 Ticket ${counter}: Extracted ${threadReplies.length} associated thread replies`,
                      threadTs: messageTs,
                   });
                }
-               const slackMessage: SlackMessage = {
-                  externalId: ticket.slack_thread_ts,
-                  content: "",
-                  replies: threadReplies,
-               };
-               await ingestConversationSlack({
-                  slackMessages: [slackMessage],
-                  externalSourceName: externalSourceName,
-                  channelId: input.xyneSpaceChannelId,
-                  onlyReplies: true,
-               });
-               if (ENABLE_NOTIFICATIONS && messageTs) {
-                  await postMessage({
-                     channelId: input.channelId,
-                     text: `🔄 ${counter} Ingested/updated associated thread replies for ticket`,
-                     threadTs: messageTs,
+               try {
+                  const slackMessage: SlackMessage = {
+                     externalId: ticket.slack_thread_ts,
+                     content: "",
+                     replies: threadReplies,
+                  };
+                  await ingestConversationSlack({
+                     slackMessages: [slackMessage],
+                     externalSourceName: externalSourceName,
+                     channelId: input.xyneSpaceChannelId,
+                     onlyReplies: true,
                   });
+                  if (ENABLE_NOTIFICATIONS && messageTs) {
+                     await postMessage({
+                        channelId: input.channelId,
+                        text: `🔄 Ticket ${counter}: Ingested/updated ${threadReplies.length} associated thread replies`,
+                        threadTs: messageTs,
+                     });
+                  }
+                  logger.info('[Migration] Ticket ingested with replies', {
+                     ticketId: ticket.id,
+                     replyCount: threadReplies.length,
+                  });
+               } catch (ingestError) {
+                  const errorMessage = ingestError instanceof Error ? ingestError.message : 'Unknown error';
+                  if (ENABLE_NOTIFICATIONS && messageTs) {
+                     await postMessage({
+                        channelId: input.channelId,
+                        text: `❌ Ticket ${counter}: Failed to ingest thread replies - ${errorMessage}`,
+                        threadTs: messageTs,
+                     });
+                  }
                }
-               logger.info('[Migration] Ticket ingested with replies', {
-                  ticketId: ticket.id,
-                  replyCount: threadReplies.length,
-               });
             }
          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            if (ENABLE_NOTIFICATIONS && messageTs) {
+               await postMessage({
+                  channelId: input.channelId,
+                  text: `❌ Ticket ${counter + 1}: Failed to ingest ticket - ${errorMessage}`,
+                  threadTs: messageTs,
+               });
+            }
             logger.error('[Migration] Failed to ingest ticket', {
                ticketId: ticket.id,
-               error: error instanceof Error ? error.message : 'Unknown error',
+               error: errorMessage,
             });
          }
       }
@@ -676,5 +720,29 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
             nextBatchNumber: batchNumber + 1,
          });
       }
+      }  
+   } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (ENABLE_NOTIFICATIONS && messageTs) {
+         await postMessage({
+            channelId: input.channelId,
+            text: `❌ Migration stopped due to error: ${errorMessage}. Processed ${counter} tickets out of ${ticketCount} total tickets before stopping.`,
+            threadTs: messageTs,
+         });
+      }
+      throw error; 
    }
+
+   if (ENABLE_NOTIFICATIONS && messageTs) {
+      await postMessage({
+         channelId: input.channelId,
+         text: `✅ Jiraffe migration completed successfully! Processed ${counter} tickets out of ${ticketCount} total tickets.`,
+         threadTs: messageTs,
+      });
+   }
+   logger.info('[Migration] Jiraffe migration completed', {
+      totalTickets: ticketCount,
+      processedTickets: counter,
+      channelId: input.channelId,
+   });
 }
