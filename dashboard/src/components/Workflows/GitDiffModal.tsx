@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
-import { Diff, Hunk, HunkData } from 'react-diff-view';
+import React, { useState, useMemo } from 'react';
+import { parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs';
+import { FileDiff } from '@pierre/diffs/react';
 import { X, GitBranch, GitCommit, FilePlus, FileMinus, Edit } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { apiInstance } from '../../services/clients/apiClient';
-
-import 'react-diff-view/style/index.css';
+import { useTheme } from '../../hooks/useTheme';
 
 interface GitDiffFile {
   oldPath: string;
@@ -38,9 +38,29 @@ interface GitDiffModalProps {
   onClose: () => void;
 }
 
+// Build a unified diff patch string from the backend hunk data
+const buildPatchString = (file: GitDiffFile): string => {
+  const oldPath = file.type === 'add' ? '/dev/null' : `a/${file.oldPath}`;
+  const newPath = file.type === 'delete' ? '/dev/null' : `b/${file.newPath}`;
+
+  const parts: string[] = [
+    `diff --git a/${file.oldPath} b/${file.newPath}`,
+    `--- ${oldPath}`,
+    `+++ ${newPath}`,
+  ];
+
+  for (const hunk of file.hunks) {
+    parts.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
+    parts.push(hunk.content);
+  }
+
+  return parts.join('\n');
+};
+
 const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClose }) => {
   const [viewType, setViewType] = useState<'split' | 'unified'>('split');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const pierreTheme = useTheme().theme === 'midnight' ? 'pierre-dark' : 'pierre-light';
 
   const {
     data: diffData,
@@ -54,6 +74,21 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
     },
     enabled: isOpen && !!executionId,
   });
+
+  // Parse each file's hunks into FileDiffMetadata for @pierre/diffs
+  const fileDiffs = useMemo((): Array<{ gitFile: GitDiffFile; fileDiff: FileDiffMetadata }> => {
+    if (!diffData) return [];
+    return diffData.gitDiff
+      .map(file => {
+        const patch = buildPatchString(file);
+        const parsed = parsePatchFiles(patch);
+        const fileDiff = parsed[0]?.files[0];
+        return fileDiff ? { gitFile: file, fileDiff } : null;
+      })
+      .filter(
+        (pair): pair is { gitFile: GitDiffFile; fileDiff: FileDiffMetadata } => pair !== null,
+      );
+  }, [diffData]);
 
   const getFileIcon = (type: string): React.ReactElement => {
     switch (type) {
@@ -211,30 +246,21 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
                   </div>
                 ) : (
                   <div>
-                    {diffData.gitDiff
-                      .filter(file => !selectedFile || getFileName(file) === selectedFile)
-                      .map((file, index) => (
-                        <div key={index} className='mb-6'>
-                          <div className='flex items-center gap-2 font-medium text-sm text-foreground mb-2 p-2 bg-muted rounded'>
-                            {getFileIcon(file.type)}
-                            <span>{getFileName(file)}</span>
-                          </div>
-
-                          {file.hunks.length > 0 ? (
-                            <Diff
-                              viewType={viewType}
-                              diffType={file.type}
-                              hunks={file.hunks as unknown as HunkData[]}
-                            >
-                              {(hunks): React.ReactElement[] =>
-                                hunks.map((hunk, i) => <Hunk key={i} hunk={hunk} />)
-                              }
-                            </Diff>
-                          ) : (
-                            <div className='text-sm text-muted-foreground italic p-2'>
-                              No changes in this file
-                            </div>
-                          )}
+                    {fileDiffs
+                      .filter(
+                        ({ gitFile }) => !selectedFile || getFileName(gitFile) === selectedFile,
+                      )
+                      .map(({ fileDiff }, index) => (
+                        <div key={index} className='mb-4'>
+                          <FileDiff
+                            fileDiff={fileDiff}
+                            options={{
+                              theme: pierreTheme,
+                              diffStyle: viewType,
+                              lineDiffType: 'word-alt',
+                              hunkSeparators: 'line-info',
+                            }}
+                          />
                         </div>
                       ))}
                   </div>

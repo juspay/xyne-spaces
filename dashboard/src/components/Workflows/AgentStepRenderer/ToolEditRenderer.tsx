@@ -1,56 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { BaseStepRendererProps, ToolEditData } from './types';
 import { FileEdit, ChevronDown, ChevronRight, Check, X } from 'lucide-react';
-import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
+import { MultiFileDiff } from '@pierre/diffs/react';
+import { useTheme } from '../../../hooks/useTheme';
 
 type SafeRecord = Record<string, unknown>;
 
-// Diff styles for light theme (Tailwind color values)
-const diffStyles = {
-  diffContainer: {
-    backgroundColor: '#ffffff',
-    border: 'none',
-    fontFamily:
-      'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-    fontSize: '0.8125rem',
-    lineHeight: '1.6',
-  },
-  diffRemoved: {
-    backgroundColor: '#fef2f2', // red-50
-    color: '#374151', // gray-700
-  },
-  diffAdded: {
-    backgroundColor: '#f0fdf4', // green-50
-    color: '#374151', // gray-700
-  },
-  wordAdded: {
-    backgroundColor: '#dbeafe', // blue-100
-    color: '#1d4ed8', // blue-700
-    padding: '1px 2px',
-    borderRadius: '2px',
-  },
-  wordRemoved: {
-    backgroundColor: '#fee2e2', // red-100
-    color: '#dc2626', // red-600
-    textDecoration: 'line-through',
-    padding: '1px 2px',
-    borderRadius: '2px',
-  },
-  gutter: {
-    backgroundColor: 'transparent',
-    color: '#9ca3af', // gray-400
-    minWidth: '36px',
-    padding: '0 8px',
-    textAlign: 'right' as const,
-    userSelect: 'none' as const,
-  },
-  contentText: {
-    color: '#374151', // gray-700
-    padding: '2px 0',
-  },
-  line: {
-    padding: '0 12px',
-  },
+// Sub-component to maintain stable file object references required by @pierre/diffs
+const PierreDiffView: React.FC<{ name: string; oldContents: string; newContents: string }> = ({
+  name,
+  oldContents,
+  newContents,
+}) => {
+  const pierreTheme = useTheme().theme === 'midnight' ? 'pierre-dark' : 'pierre-light';
+  const oldFile = useMemo(() => ({ name, contents: oldContents }), [name, oldContents]);
+  const newFile = useMemo(() => ({ name, contents: newContents }), [name, newContents]);
+  return (
+    <MultiFileDiff
+      oldFile={oldFile}
+      newFile={newFile}
+      options={{
+        theme: pierreTheme,
+        diffStyle: 'unified',
+        lineDiffType: 'word-alt',
+        disableFileHeader: true,
+      }}
+    />
+  );
 };
 
 /**
@@ -91,7 +67,11 @@ export const ToolEditRenderer: React.FC<
 
     return (
       <div className='space-y-2 text-sm'>
-        <div className='rounded-xl border border-border overflow-hidden bg-background'>
+        <div
+          className={`rounded-xl border transition-colors overflow-hidden ${
+            success ? 'bg-amber-50/20 border-amber-200/40' : 'bg-background border-border'
+          }`}
+        >
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
@@ -108,9 +88,11 @@ export const ToolEditRenderer: React.FC<
               <div className='flex items-center gap-2'>
                 <span className='text-sm font-semibold text-foreground truncate'>{fileName}</span>
                 {success ? (
-                  <span className='inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-500/10 text-green-600 uppercase tracking-wider'>
-                    Success
-                  </span>
+                  <div className='flex items-center gap-1.5'>
+                    <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 uppercase tracking-wider border border-amber-200/50'>
+                      Edit
+                    </span>
+                  </div>
                 ) : (
                   <span className='inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-600 uppercase tracking-wider'>
                     Failed
@@ -150,16 +132,11 @@ export const ToolEditRenderer: React.FC<
 
           {/* Diff Content */}
           {isExpanded && (
-            <div className='border-t border-border bg-slate-50/30 overflow-auto max-h-[500px] animate-in fade-in slide-in-from-top-1 duration-200'>
-              <ReactDiffViewer
-                styles={diffStyles}
-                oldValue={oldString}
-                newValue={newString}
-                splitView={false}
-                showDiffOnly={false}
-                useDarkTheme={false}
-                hideLineNumbers={false}
-                compareMethod={DiffMethod.WORDS}
+            <div className='border-t border-border overflow-auto max-h-[500px] animate-in fade-in slide-in-from-top-1 duration-200'>
+              <PierreDiffView
+                name={filePath || fileName}
+                oldContents={oldString}
+                newContents={newString}
               />
             </div>
           )}

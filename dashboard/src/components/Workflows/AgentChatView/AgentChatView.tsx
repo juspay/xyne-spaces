@@ -34,6 +34,8 @@ import {
 } from './AgentChatView.utils';
 import { ResponseModal } from './ResponseModal';
 import LiveEditsPanel from '../LiveEditsPanel';
+import { useUser } from '../../../hooks/useUsers';
+import Avatar from '../../ui/Avatar/Avatar';
 
 const StatusIcon: React.FC<{ status: string; size?: number }> = ({ status, size = 12 }) => {
   const containerClass = 'flex items-center justify-center rounded-md p-1';
@@ -251,7 +253,40 @@ export interface AgentChatViewProps {
   graphNodes: GraphNodeInfo[];
   onClose?: () => void;
   hideTabs?: boolean;
+  ticketDescription?: string;
+  createdBy?: string | null;
 }
+
+const WorkflowRequestCard: React.FC<{ description: string; createdBy: string }> = ({
+  description,
+  createdBy,
+}) => {
+  const user = useUser(createdBy);
+  const displayName = user?.name || user?.email || createdBy;
+
+  return (
+    <div className='flex items-start gap-2 md:gap-3 py-1 mb-2'>
+      <div className='flex-shrink-0'>
+        <Avatar userId={createdBy} size='rg' showActiveStatus={false} className='rounded-full' />
+      </div>
+      <div className='flex-1 min-w-0'>
+        <div className='flex items-center gap-1.5 mb-1.5'>
+          <span className='text-xs font-semibold text-slate-700'>{displayName}</span>
+          <span className='text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+            Started workflow
+          </span>
+        </div>
+        <div className='rounded-xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 bg-slate-50 border border-slate-200/60'>
+          <TruncatableMarkdownContent
+            content={description}
+            maxLinesDesktop={6}
+            maxLinesMobile={4}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const LoopRunningLoader: React.FC = () => (
   <div className='flex items-center gap-1.5 ml-11 py-2'>
@@ -270,11 +305,22 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
   combinedStepsData,
   graphNodes,
   hideTabs,
+  ticketDescription,
+  createdBy: createdByProp,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(0);
 
   const [activeTab, setActiveTab] = useState<'chat' | 'diff'>('chat');
+
+  const requestDescription = useMemo(() => {
+    const fromMeta = combinedStepsData?.workflows?.[0]?.metadata?.originalRequest?.['description'];
+    return (typeof fromMeta === 'string' ? fromMeta : undefined) ?? ticketDescription;
+  }, [combinedStepsData, ticketDescription]);
+
+  const requestCreatedBy = useMemo(() => {
+    return combinedStepsData?.workflows?.[0]?.createdBy ?? createdByProp ?? null;
+  }, [combinedStepsData, createdByProp]);
 
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
@@ -480,77 +526,82 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
         </div>
       )}
 
-      <div className='flex-1 overflow-y-auto px-3 md:px-4 py-4 space-y-4 no-scrollbar'>
+      <div className='flex-1 overflow-y-auto px-3 md:px-4 py-4 space-y-4 no-scrollbar pb-16'>
         {!hideTabs && activeTab === 'diff' ? (
           <div className='h-full -mx-3 md:-mx-4 -my-4'>
             <LiveEditsPanel combinedStepsData={combinedStepsData} />
           </div>
-        ) : visibleMessages.length === 0 ? (
-          <EmptyState />
         ) : (
           <div className='flex flex-col gap-4'>
-            {groupedContent.map((item, i) => {
-              if ('type' in item && item.type === 'loop') {
-                return (
-                  <div key={`loop-${item.baseName}-${i}`} className='relative'>
-                    {/* Loop Header */}
-                    <div className='flex items-center gap-2 mb-3'>
-                      <div className='flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100/80 border border-slate-200/60'>
-                        <Repeat size={11} className='text-slate-500' strokeWidth={2.5} />
-                        <span className='text-[10px] font-semibold uppercase tracking-wide text-slate-600'>
-                          {formatStepName(item.baseName)}
-                        </span>
-                        <span className='text-[9px] font-mono text-slate-400 bg-slate-200/50 px-1 rounded'>
-                          ×{item.messages.length}
-                        </span>
-                      </div>
-                      <div className='h-px flex-1 bg-gradient-to-r from-slate-200/60 via-slate-100/40 to-transparent' />
-                    </div>
-
-                    {/* Vertical Timeline */}
-                    <div className='absolute left-[15px] top-12 bottom-6 w-[2px] bg-slate-200 z-0' />
-
-                    {/* Loop Messages */}
-                    <div className='space-y-3 relative z-10'>
-                      {item.messages.map((msg, _) => (
-                        <div
-                          key={`${msg.stepName}-${msg.nodeIndex}`}
-                          className='relative group flex flex-col'
-                        >
-                          <AgentMessageBubble
-                            message={msg}
-                            isLatest={msg === visibleMessages[visibleMessages.length - 1]}
-                            onViewMore={openModal}
-                          />
+            {requestCreatedBy && requestDescription && (
+              <WorkflowRequestCard description={requestDescription} createdBy={requestCreatedBy} />
+            )}
+            {visibleMessages.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <>
+                {groupedContent.map((item, i) => {
+                  if ('type' in item && item.type === 'loop') {
+                    return (
+                      <div key={`loop-${item.baseName}-${i}`} className='relative'>
+                        {/* Loop Header */}
+                        <div className='flex items-center gap-2 mb-3'>
+                          <div className='flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100/80 border border-slate-200/60'>
+                            <Repeat size={11} className='text-slate-500' strokeWidth={2.5} />
+                            <span className='text-[10px] font-semibold uppercase tracking-wide text-slate-600'>
+                              {formatStepName(item.baseName)}
+                            </span>
+                            <span className='text-[9px] font-mono text-slate-400 bg-slate-200/50 px-1 rounded'>
+                              ×{item.messages.length}
+                            </span>
+                          </div>
+                          <div className='h-px flex-1 bg-gradient-to-r from-slate-200/60 via-slate-100/40 to-transparent' />
                         </div>
-                      ))}
-                    </div>
 
-                    {/* Loop Running Loader */}
-                    {item.messages[item.messages.length - 1]?.status === 'running' && (
-                      <div className='relative z-10'>
-                        <LoopRunningLoader />
+                        {/* Vertical Timeline */}
+                        <div className='absolute left-[15px] top-12 bottom-6 w-[2px] bg-slate-200 z-0' />
+
+                        {/* Loop Messages */}
+                        <div className='space-y-3 relative z-10'>
+                          {item.messages.map((msg, _) => (
+                            <div
+                              key={`${msg.stepName}-${msg.nodeIndex}`}
+                              className='relative group flex flex-col'
+                            >
+                              <AgentMessageBubble
+                                message={msg}
+                                isLatest={msg === visibleMessages[visibleMessages.length - 1]}
+                                onViewMore={openModal}
+                              />
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Loop Running Loader */}
+                        {item.messages[item.messages.length - 1]?.status === 'running' && (
+                          <div className='relative z-10'>
+                            <LoopRunningLoader />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
-              }
-              const msg = item as AgentMessage;
-              return (
-                <AgentMessageBubble
-                  key={`${msg.stepName}-${msg.nodeIndex}`}
-                  message={msg}
-                  isLatest={msg === visibleMessages[visibleMessages.length - 1]}
-                  onViewMore={openModal}
-                />
-              );
-            })}
+                    );
+                  }
+                  const msg = item as AgentMessage;
+                  return (
+                    <AgentMessageBubble
+                      key={`${msg.stepName}-${msg.nodeIndex}`}
+                      message={msg}
+                      isLatest={msg === visibleMessages[visibleMessages.length - 1]}
+                      onViewMore={openModal}
+                    />
+                  );
+                })}
+              </>
+            )}
           </div>
         )}
-        <div ref={bottomRef} className='h-12 flex-shrink-0' />
+        <div ref={bottomRef} className='h-6 flex-shrink-0' />
       </div>
-
-      <div className='absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent pointer-events-none z-10' />
 
       {modalState.agentInfo && (
         <ResponseModal

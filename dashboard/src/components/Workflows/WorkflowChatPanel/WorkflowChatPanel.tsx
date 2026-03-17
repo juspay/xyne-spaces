@@ -967,68 +967,77 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
       ) : (
         /* Flow Tab Content - Original workflow view */
         <>
-          <div ref={headerRef} className='flex-shrink-0 border-b border-border bg-muted'>
+          <div
+            ref={headerRef}
+            className='flex-shrink-0 border-b border-border px-3 h-[57px] flex items-center'
+          >
             {/* Desktop: Show mode view */}
             {!isMobile ? (
-              <div className='flex items-center gap-2.5 w-full h-9 px-3'>
+              <div className='flex items-center gap-2.5 w-full'>
                 {/* Basic Mode: Left details and right controls */}
                 {desktopMode === 'basic' && (
                   <>
-                    {/* Avatar Group */}
-                    {uniqueAgents.length > 0 && (
-                      <div className='flex items-center -space-x-2.5 ml-0.5'>
-                        {uniqueAgents.slice(0, 3).map((agent, i) => (
-                          <div
-                            key={agent.name}
-                            className='relative ring-1 ring-muted rounded-full scale-75'
-                            style={{ zIndex: 10 - i }}
-                          >
-                            <AgentAvatar agentInfo={agent} size='sm' />
-                          </div>
-                        ))}
-                        {uniqueAgents.length > 3 && (
-                          <div
-                            className='relative ring-1 ring-muted rounded-full bg-background border border-border w-6 h-6 flex items-center justify-center text-[8px] font-bold text-muted-foreground scale-75'
-                            style={{ zIndex: 0 }}
-                          >
-                            +{uniqueAgents.length - 3}
+                    <div className='flex items-center gap-2.5 bg-background border border-border shadow-sm p-1 px-3 rounded-lg flex-1 min-w-0 h-[38px] overflow-hidden'>
+                      <div className='flex items-center min-w-0 overflow-hidden'>
+                        {/* Avatar Group */}
+                        {uniqueAgents.length > 0 && (
+                          <div className='flex items-center -space-x-1.5 mr-2 flex-shrink-0'>
+                            {uniqueAgents.slice(0, 3).map((agent, i) => (
+                              <div
+                                key={agent.name}
+                                className='relative ring-2 ring-background rounded-full flex-shrink-0'
+                                style={{ zIndex: 10 - i }}
+                              >
+                                <AgentAvatar agentInfo={agent} size='sm' />
+                              </div>
+                            ))}
+                            {uniqueAgents.length > 3 && (
+                              <div
+                                className='relative ring-2 ring-background rounded-full bg-muted border border-border w-6 h-6 flex items-center justify-center text-[9px] font-bold text-muted-foreground flex-shrink-0'
+                                style={{ zIndex: 0 }}
+                              >
+                                +{uniqueAgents.length - 3}
+                              </div>
+                            )}
                           </div>
                         )}
+                        <span className='text-sm font-semibold text-foreground/80 tracking-tight truncate flex-shrink-0'>
+                          {graphNodes.length} Agent Step{graphNodes.length !== 1 ? 's' : ''}
+                        </span>
                       </div>
-                    )}
 
-                    <span className='text-xs font-semibold text-foreground/80 tracking-tight truncate flex-1 min-w-0'>
-                      {graphNodes.length} Agent Step{graphNodes.length !== 1 ? 's' : ''}
-                    </span>
+                      {/* Status */}
+                      {runningNodeIndex !== -1 && (
+                        <>
+                          <div className='w-px h-4 bg-border' />
+                          <div className='flex items-center gap-1.5'>
+                            <Loader2 size={14} className='text-blue-500 animate-spin' />
+                            <span className='text-xs text-blue-500 font-medium'>Processing</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
 
-                    {/* Status */}
-                    {runningNodeIndex !== -1 && (
-                      <div className='flex items-center gap-1.5'>
-                        <Loader2 size={12} className='text-blue-500 animate-spin' />
-                        <span className='text-[11px] text-blue-500 font-medium'>Processing</span>
-                      </div>
-                    )}
-
-                    {/* Separator + icon buttons */}
-                    <div className='w-px h-4 bg-border/60 flex-shrink-0' />
-                    <div className='flex items-center gap-0.5 flex-shrink-0'>
+                    <div className='flex items-center gap-2 flex-shrink-0'>
                       <button
                         onClick={() => setMainTab('thread')}
-                        className='flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-border/50 transition-colors'
+                        className='flex items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted shadow-sm'
+                        style={{ width: '38px', height: '38px' }}
                         title='Thread'
                         data-track-category='Workflows'
                         data-track-name='OpenThreadTab'
                       >
-                        <MessageSquare size={14} />
+                        <MessageSquare size={15} className='text-muted-foreground' />
                       </button>
                       <button
                         onClick={() => setDesktopMode('advanced')}
-                        className='flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-border/50 transition-colors'
+                        className='flex items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted shadow-sm'
+                        style={{ height: '38px', width: '38px' }}
                         title='Go to Advanced Mode'
                         data-track-category='Workflows'
                         data-track-name='SelectAdvancedMode'
                       >
-                        <Layers size={14} />
+                        <Layers size={14} className='text-muted-foreground' />
                       </button>
                     </div>
                   </>
@@ -1039,12 +1048,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                   <>
                     {/* Step Navigation Header */}
                     {graphNodes.length > 0 ? (
-                      <>
+                      <div className='flex items-center gap-2.5 px-2.5 py-2 bg-muted/50 rounded-lg border border-border flex-1 min-w-0 overflow-hidden'>
                         {/* Prev Button */}
                         <button
                           onClick={handlePrevNode}
                           disabled={currentNodeIndex === 0}
-                          className='flex items-center justify-center w-6 h-6 rounded-md hover:bg-border/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0'
+                          className='p-1 rounded hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
                           title='Previous step'
                           data-track-category='Workflows'
                           data-track-name='NavigateToPreviousStep'
@@ -1057,7 +1066,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                         </button>
 
                         <div
-                          className='flex-1 flex items-center gap-1.5 min-w-0 cursor-pointer hover:bg-border/40 rounded px-1.5 py-1 transition-colors'
+                          className='flex-1 flex items-center gap-2.5 min-w-0 cursor-pointer hover:bg-border/50 rounded px-1.5 py-1 -my-1 transition-colors'
                           onClick={() => setIsGraphViewOpen(!isGraphViewOpen)}
                           onKeyDown={e => {
                             if (e.key === 'Enter' || e.key === ' ') {
@@ -1072,7 +1081,17 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                           data-track-metadata={JSON.stringify({ currentNodeIndex, executionId })}
                         >
                           {/* Status Icon */}
-                          <div className='flex-shrink-0'>
+                          <div
+                            className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${
+                              currentNode?.status === 'running'
+                                ? 'bg-blue-500/10'
+                                : currentNode?.status === 'completed'
+                                  ? 'bg-emerald-500/10'
+                                  : currentNode?.status === 'failed'
+                                    ? 'bg-red-500/10'
+                                    : 'bg-muted'
+                            }`}
+                          >
                             {currentNode?.status === 'running' ? (
                               <Loader2 size={12} className='text-blue-500 animate-spin' />
                             ) : currentNode?.status === 'completed' ? (
@@ -1085,12 +1104,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                           </div>
 
                           {/* Step Name */}
-                          <span className='font-medium text-foreground flex-1 text-left text-xs truncate'>
+                          <span className='font-medium text-foreground flex-1 text-left text-sm truncate'>
                             {currentNode ? formatStepName(currentNode.stepName) : 'Loading...'}
                           </span>
 
-                          <span className='text-[10px] tabular-nums text-muted-foreground bg-foreground/[0.06] rounded px-1.5 py-0.5 flex-shrink-0 font-medium'>
-                            {currentNodeIndex + 1}/{graphNodes.length}
+                          <span className='text-xs text-muted-foreground flex-shrink-0'>
+                            ({currentNodeIndex + 1}/{graphNodes.length})
                           </span>
                         </div>
 
@@ -1116,7 +1135,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                         <button
                           onClick={handleNextNode}
                           disabled={currentNodeIndex >= graphNodes.length - 1}
-                          className='flex items-center justify-center w-6 h-6 rounded-md hover:bg-border/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0'
+                          className='p-1 rounded hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
                           title='Next step'
                           data-track-category='Workflows'
                           data-track-name='NavigateToNextStep'
@@ -1127,112 +1146,110 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                         >
                           <ChevronRight size={16} className='text-foreground/70' />
                         </button>
-                      </>
+                      </div>
                     ) : (
                       /* Fallback header when no graph nodes */
-                      <>
-                        <div className='w-5 h-5 rounded-md flex items-center justify-center'>
-                          <Bot size={12} className='text-muted-foreground' />
+                      <div className='flex items-center gap-2.5 px-2.5 py-2 bg-muted/50 rounded-lg border border-border flex-1'>
+                        <div className='w-6 h-6 rounded-md flex items-center justify-center shadow-sm'>
+                          <Bot size={12} className='text-foreground' />
                         </div>
-                        <span className='font-medium text-foreground flex-1 text-left text-xs'>
+                        <span className='font-medium text-foreground flex-1 text-left text-sm'>
                           Workflow Steps
                         </span>
-                      </>
+                      </div>
                     )}
 
-                    {/* Separator + icon buttons */}
-                    <div className='w-px h-4 bg-border/60 flex-shrink-0' />
-                    <div className='flex items-center gap-0.5 flex-shrink-0'>
-                      {/* Search Toggle Button */}
+                    {/* Search Toggle Button */}
+                    <button
+                      onClick={() => {
+                        setIsSearchOpen(!isSearchOpen);
+                        if (isSearchOpen) setSearchQuery('');
+                      }}
+                      className={`flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors ${
+                        isSearchOpen
+                          ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                          : 'bg-background text-foreground border-border hover:bg-muted'
+                      }`}
+                      style={{ width: '42px', height: '42px' }}
+                      title='Search'
+                      data-track-category='Workflows'
+                      data-track-name='ToggleSearch'
+                    >
+                      <Search size={16} />
+                    </button>
+
+                    {/* Thread Button for Advanced Mode */}
+                    <button
+                      onClick={() => setMainTab('thread')}
+                      className='flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted'
+                      style={{ width: '42px', height: '42px' }}
+                      title='Thread'
+                      data-track-category='Workflows'
+                      data-track-name='OpenThreadTab'
+                    >
+                      <MessageSquare size={16} />
+                    </button>
+
+                    {/* More Actions Menu */}
+                    <div className='relative flex-shrink-0'>
                       <button
-                        onClick={() => {
-                          setIsSearchOpen(!isSearchOpen);
-                          if (isSearchOpen) setSearchQuery('');
-                        }}
-                        className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
-                          isSearchOpen
-                            ? 'bg-blue-500/10 text-blue-500'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-border/50'
-                        }`}
-                        title='Search'
+                        onClick={() => setIsMenuOpen(!isMenuOpen)}
+                        onBlur={() => setTimeout(() => setIsMenuOpen(false), 200)}
+                        className='flex items-center justify-center text-sm font-medium rounded-lg border bg-background text-foreground border-border hover:bg-muted transition-colors'
+                        style={{ width: '42px', height: '42px' }}
+                        title='More Options'
                         data-track-category='Workflows'
-                        data-track-name='ToggleSearch'
+                        data-track-name='ToggleMoreActions'
                       >
-                        <Search size={14} />
+                        <MoreVertical size={16} />
                       </button>
 
-                      {/* Thread Button for Advanced Mode */}
-                      <button
-                        onClick={() => setMainTab('thread')}
-                        className='flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-border/50 transition-colors'
-                        title='Thread'
-                        data-track-category='Workflows'
-                        data-track-name='OpenThreadTab'
-                      >
-                        <MessageSquare size={14} />
-                      </button>
-
-                      {/* More Actions Menu */}
-                      <div className='relative'>
-                        <button
-                          onClick={() => setIsMenuOpen(!isMenuOpen)}
-                          onBlur={() => setTimeout(() => setIsMenuOpen(false), 200)}
-                          className='flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-border/50 transition-colors'
-                          title='More Options'
-                          data-track-category='Workflows'
-                          data-track-name='ToggleMoreActions'
-                        >
-                          <MoreVertical size={16} />
-                        </button>
-
-                        {isMenuOpen && (
-                          <div className='absolute right-0 top-full mt-1.5 w-48 bg-popover rounded-lg shadow-lg border border-border py-1 z-50 overflow-hidden'>
+                      {isMenuOpen && (
+                        <div className='absolute right-0 top-full mt-1.5 w-48 bg-popover rounded-lg shadow-lg border border-border py-1 z-50 overflow-hidden'>
+                          <button
+                            onClick={() => {
+                              setDesktopMode('basic');
+                              setIsMenuOpen(false);
+                            }}
+                            className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors font-medium border-b border-border'
+                            data-track-category='Workflows'
+                            data-track-name='SelectBasicMode'
+                          >
+                            <Bot size={16} className='text-muted-foreground' />
+                            Back to basic mode
+                          </button>
+                          <button
+                            onClick={() => {
+                              setMainTab('history');
+                              setIsMenuOpen(false);
+                            }}
+                            className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors'
+                            data-track-category='Workflows'
+                            data-track-name='OpenHistoryTab'
+                          >
+                            <History size={16} className='text-muted-foreground' />
+                            Attempts
+                          </button>
+                          {errorSteps.length > 0 && (
                             <button
                               onClick={() => {
-                                setDesktopMode('basic');
+                                setMainTab('errors');
                                 setIsMenuOpen(false);
                               }}
-                              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors font-medium border-b border-border'
+                              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 text-left transition-colors'
                               data-track-category='Workflows'
-                              data-track-name='SelectBasicMode'
+                              data-track-name='OpenErrorsTab'
                             >
-                              <Bot size={16} className='text-muted-foreground' />
-                              Back to basic mode
+                              <AlertTriangle size={16} className='text-red-500' />
+                              Errors
+                              <span className='ml-auto bg-red-500/20 text-red-500 text-[10px] font-bold px-1.5 py-0.5 rounded-full'>
+                                {errorSteps.length > 99 ? '99+' : errorSteps.length}
+                              </span>
                             </button>
-                            <button
-                              onClick={() => {
-                                setMainTab('history');
-                                setIsMenuOpen(false);
-                              }}
-                              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors'
-                              data-track-category='Workflows'
-                              data-track-name='OpenHistoryTab'
-                            >
-                              <History size={16} className='text-muted-foreground' />
-                              Attempts
-                            </button>
-                            {errorSteps.length > 0 && (
-                              <button
-                                onClick={() => {
-                                  setMainTab('errors');
-                                  setIsMenuOpen(false);
-                                }}
-                                className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 text-left transition-colors'
-                                data-track-category='Workflows'
-                                data-track-name='OpenErrorsTab'
-                              >
-                                <AlertTriangle size={16} className='text-red-500' />
-                                Errors
-                                <span className='ml-auto bg-red-500/20 text-red-500 text-[10px] font-bold px-1.5 py-0.5 rounded-full'>
-                                  {errorSteps.length > 99 ? '99+' : errorSteps.length}
-                                </span>
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {/* end gap-0.5 buttons group */}
                   </>
                 )}
               </div>
@@ -1540,17 +1557,18 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 combinedStepsData={combinedStepsData}
                 graphNodes={graphNodes}
                 hideTabs={true}
+                {...(ticketDescription && { ticketDescription })}
               />
             </div>
           ) : (
             /* Desktop Advanced Mode or Mobile: Show flow content */
             <>
-              <div className='flex-1 flex flex-col min-h-0 p-2 bg-muted/30 min-w-0'>
+              <div className='flex-1 flex flex-col min-h-0 p-3 bg-muted/50 min-w-0'>
                 <>
                   {ticketTitle && (
                     <button
                       onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
-                      className='w-full text-left border rounded-md bg-muted p-1.5 mb-1 shadow-sm cursor-pointer hover:bg-muted/80 transition-colors overflow-hidden'
+                      className='w-full text-left border rounded-md bg-muted p-2 shadow-sm cursor-pointer hover:bg-muted/80 transition-colors overflow-hidden'
                       data-track-category='Workflows'
                       data-track-name='ToggleTicketDescription'
                       data-track-metadata={JSON.stringify({
@@ -1559,7 +1577,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       })}
                     >
                       <div
-                        className={`text-xs text-foreground prose prose-sm max-w-none ${
+                        className={`text-sm text-foreground prose prose-sm max-w-none ${
                           !isDescriptionExpanded ? 'line-clamp-2' : 'ticket-description-scroll'
                         }`}
                         dangerouslySetInnerHTML={{
@@ -1614,19 +1632,19 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     className='flex-1 min-h-0 overflow-y-auto space-y-0.5 min-w-0 max-w-full overflow-x-hidden no-scrollbar'
                   >
                     {searchedSteps.length === 0 && userMessages.length === 0 ? (
-                      <div className='flex flex-col items-center justify-center py-10 text-center'>
-                        <div className='w-8 h-8 rounded-full bg-muted flex items-center justify-center mb-2'>
+                      <div className='flex flex-col items-center justify-center py-16 text-center'>
+                        <div className='w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-3'>
                           {searchQuery ? (
-                            <Search size={16} className='text-muted-foreground' />
+                            <Search size={24} className='text-muted' />
                           ) : currentNode?.status === 'pending' ? (
-                            <Circle size={16} className='text-muted-foreground' />
+                            <Circle size={24} className='text-muted' />
                           ) : currentNode?.status === 'running' ? (
-                            <Loader2 size={16} className='text-blue-500 animate-spin' />
+                            <Loader2 size={24} className='text-blue-500 animate-spin' />
                           ) : (
-                            <Route size={16} className='text-muted-foreground' />
+                            <Route size={24} className='text-muted-foreground' />
                           )}
                         </div>
-                        <p className='text-muted-foreground text-xs font-medium'>
+                        <p className='text-muted-foreground text-sm font-medium'>
                           {searchQuery
                             ? 'No steps match your search'
                             : currentNode?.status === 'pending'
@@ -1636,7 +1654,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                                 : 'No steps yet'}
                         </p>
                         {currentNode && !searchQuery && (
-                          <p className='text-muted-foreground text-[10px] mt-0.5'>
+                          <p className='text-muted-foreground text-xs mt-1'>
                             {formatStepName(currentNode.stepName)}
                           </p>
                         )}
@@ -1778,16 +1796,15 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
           {isAgentChatOpen &&
             createPortal(
               <div
-                className='fixed bg-background z-50 shadow-lg border-t border-border flex flex-col'
+                className='fixed bg-background z-10 shadow-lg border-t border-border flex flex-col'
                 style={{
                   left: graphPosition.left,
-                  top: graphPosition.top - 45,
+                  top: graphPosition.top - 60,
                   width: graphPosition.width,
-                  height: graphPosition.height + 40,
+                  height: graphPosition.height + 60,
                   right: 'auto',
                   bottom: 'auto',
                   overflow: 'hidden',
-                  borderRadius: '0 0 8px 8px',
                 }}
               >
                 <div className='flex-1 overflow-hidden'>
