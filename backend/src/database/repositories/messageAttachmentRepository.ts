@@ -79,6 +79,21 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findByMessageIds(messageIds: string[]): Promise<MessageAttachment[]> {
+    if (messageIds.length === 0) {
+      return [];
+    }
+    return await this.db.messageAttachment.findMany({
+      where: {
+        entityId: {
+          in: messageIds,
+        },
+        entityType: AttachmentEntityType.CHAT,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async findTranscriptByMessageId(messageId: string): Promise<MessageAttachment | null> {
     return await this.db.messageAttachment.findFirst({
       where: {

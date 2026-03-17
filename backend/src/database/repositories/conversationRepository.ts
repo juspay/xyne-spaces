@@ -247,4 +247,33 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     });
     return conversation?.ticketId || null;
   }
+
+  async findManyWithCursor(
+    channelId: string,
+    limit: number,
+    cursor?: { conversationId: string; createdAt: number }
+  ): Promise<Array<{ conversationId: string; initialMessageId: string; createdAt: Date }>> {
+    const where: any = { channelId };
+
+    if (cursor) {
+      where.OR = [
+        { createdAt: { lt: new Date(cursor.createdAt) } },
+        {
+          createdAt: new Date(cursor.createdAt),
+          conversationId: { lt: cursor.conversationId }
+        }
+      ];
+    }
+
+    return await this.db.conversation.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        conversationId: true,
+        initialMessageId: true,
+        createdAt: true,
+      },
+    });
+  }
 }
