@@ -1,3 +1,15 @@
+## [1.95.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.94.0...v1.95.0) (2026-03-18)
+
+
+### Features
+
+* support dynamic project prefixes in PR validation ([5fcf991](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5fcf9919b3314db255cb297e0a28fd9d43c56bc4))
+
+
+### Bug Fixes
+
+* add Redis dependency for superposition v0.100.0+ ([ff72570](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ff72570b1b55c109c900fc60bdbd8ff27d07e8c2)), closes [#4190](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4190)
+
 ## [1.94.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.93.0...v1.94.0) (2026-03-17)
 
 
