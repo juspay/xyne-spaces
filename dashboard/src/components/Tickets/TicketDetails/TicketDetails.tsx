@@ -338,6 +338,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [pendingBoardChange, setPendingBoardChange] = useState<string | null>(null);
   const [isGeneratingReleaseNotes, setIsGeneratingReleaseNotes] = useState(false);
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
+  const prevStatusV2Ref = useRef<TicketStatusV2 | null>(null);
+  const hasAutoTriggeredReleaseNotesRef = useRef(false);
 
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketDetailsById({ ticketId: ticketId }));
@@ -864,6 +866,56 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       etaInputRef.current.select();
     }
   }, [editingETA]);
+
+  // Auto-generate release notes when ticket status transitions to COMPLETED
+  useEffect(() => {
+    if (!ticket) return;
+
+    const currentStatus = ticket.statusV2;
+    const prevStatus = prevStatusV2Ref.current;
+    const metadata = ticket.metadata as {
+      releaseNotesCanvasUrl?: string;
+      isGeneratingReleaseNotes?: boolean;
+    } | null;
+
+    const isReleaseType = isReleaseTicket(ticket.ticketType as BaseTicketType);
+    const justTransitionedToCompleted =
+      prevStatus !== TicketStatusV2.COMPLETED && currentStatus === TicketStatusV2.COMPLETED;
+    const hasNoReleaseNotes = !metadata?.releaseNotesCanvasUrl;
+    const isNotGenerating = !metadata?.isGeneratingReleaseNotes && !isGeneratingReleaseNotes;
+    const hasNotAutoTriggered = !hasAutoTriggeredReleaseNotesRef.current;
+
+    if (
+      isReleaseType &&
+      justTransitionedToCompleted &&
+      hasNoReleaseNotes &&
+      isNotGenerating &&
+      hasNotAutoTriggered
+    ) {
+      hasAutoTriggeredReleaseNotesRef.current = true;
+      setIsGeneratingReleaseNotes(true);
+
+      generateReleaseNotes(ticket.id)
+        .then(() => {
+          toast.success('Release notes generated automatically', {
+            description: 'Release notes have been created for this completed release.',
+            duration: 3000,
+          });
+        })
+        .catch(error => {
+          hasAutoTriggeredReleaseNotesRef.current = false;
+          toast.error('Failed to generate release notes', {
+            description: error instanceof Error ? error.message : 'Please try again manually.',
+            duration: 4000,
+          });
+        })
+        .finally(() => {
+          setIsGeneratingReleaseNotes(false);
+        });
+    }
+
+    prevStatusV2Ref.current = currentStatus;
+  }, [ticket, isGeneratingReleaseNotes]);
 
   // Click outside handlers
   useEffect(() => {
