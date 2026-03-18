@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import DOMPurify from 'dompurify';
-import { queries } from '../../../zero/queries';
 import {
   Phone,
   Calendar,
@@ -16,23 +15,12 @@ import {
 import { format } from 'date-fns';
 import { useUsers } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { Virtuoso } from 'react-virtuoso';
+import { usePaginatedCalls } from '../../../hooks/usePaginatedCalls';
+import { QueryResultType } from '@rocicorp/zero';
+import { queries } from '../../../zero/queries';
 
-interface CallParticipant {
-  userId: string;
-  joinedAt: number | null;
-}
-
-interface Call {
-  id: string;
-  title: string | null;
-  aiSummary: string | null;
-  transcript: string | null;
-  participants: CallParticipant[];
-  createdByUserId: string;
-  startedAt: number;
-  endedAt: number | null;
-}
+type Call = QueryResultType<typeof queries.userCallHistory>[number];
 
 // TODO: TranscriptEntry interface for future transcript display
 // interface TranscriptEntry {
@@ -55,10 +43,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
   onAttach,
   onClose,
 }) => {
-  const [calls] = useCachedQuery(queries.userCallHistory()) as unknown as [
-    Call[] | undefined,
-    unknown,
-  ];
+  const { calls, hasMoreCalls, loadMoreCalls } = usePaginatedCalls();
   const allUsers = useUsers();
   const { user } = useAuth();
   const currentUserId = user?.id;
@@ -113,7 +98,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
     if (!call) return 'Untitled Call';
     if (call.title) return call.title;
 
-    const participantIds = call.participants?.map((p: CallParticipant) => p.userId) || [];
+    const participantIds = call.participants?.map(p => p.userId) || [];
     const participants = allUsers.filter(u => participantIds.includes(u.id));
 
     if (participants.length === 0) return 'Untitled Call';
@@ -125,9 +110,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
 
   const getCallIcon = (call: Call): React.ReactNode => {
     const isOutgoingCall = call.createdByUserId === currentUserId;
-    const currentUserParticipant = call.participants?.find(
-      (p: CallParticipant) => p.userId === currentUserId,
-    );
+    const currentUserParticipant = call.participants?.find(p => p.userId === currentUserId);
     const hasCurrentUserJoined = currentUserParticipant?.joinedAt !== null;
     const isCallEnded = call.endedAt !== null;
     const isMissedCall = isCallEnded && !isOutgoingCall && !hasCurrentUserJoined;
@@ -151,55 +134,61 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
           <p className='text-[11px] text-muted-foreground mt-0.5'>Select a recording to preview</p>
         </div>
 
-        <div className='flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar'>
+        <div className='flex-1 overflow-hidden p-2 custom-scrollbar'>
           {!calls || calls.length === 0 ? (
             <div className='h-full flex flex-col items-center justify-center text-muted-foreground/50 p-8 text-center'>
               <Phone size={24} className='mb-2 opacity-20' />
               <p className='text-xs italic'>No recent calls</p>
             </div>
           ) : (
-            calls.map(call => {
-              const isActive = selectedCallId === call.id;
-              const title = getCallTitle(call);
+            <Virtuoso
+              data={calls}
+              endReached={() => {
+                if (hasMoreCalls) loadMoreCalls();
+              }}
+              computeItemKey={(_, call) => call.id}
+              itemContent={(_, call) => {
+                const isActive = selectedCallId === call.id;
+                const title = getCallTitle(call);
 
-              return (
-                <button
-                  key={call.id}
-                  onClick={() => setSelectedCallId(call.id)}
-                  className={`w-full text-left px-4 py-3 rounded-lg transition-all border ${
-                    isActive
-                      ? 'bg-card border-border shadow-sm'
-                      : 'hover:bg-accent/50 border-transparent hover:border-border'
-                  } group relative`}
-                  data-track-category='CALLS'
-                  data-track-name='SELECT_CALL_TRANSCRIPT'
-                  data-track-metadata={JSON.stringify({ callId: call.id })}
-                >
-                  <div className='flex justify-between items-start gap-3'>
-                    <div className='flex-1 min-w-0'>
-                      <div className='flex items-center gap-2 mb-0.5'>
-                        {getCallIcon(call)}
-                        <span
-                          className={`font-semibold block truncate flex-1 text-sm ${isActive ? 'text-blue-600' : 'text-foreground'}`}
-                        >
-                          {title}
-                        </span>
+                return (
+                  <button
+                    onClick={() => setSelectedCallId(call.id)}
+                    className={`w-full text-left px-4 py-3 rounded-lg transition-all border mb-1 ${
+                      isActive
+                        ? 'bg-card border-border shadow-sm'
+                        : 'hover:bg-accent/50 border-transparent hover:border-border'
+                    } group relative`}
+                    data-track-category='CALLS'
+                    data-track-name='SELECT_CALL_TRANSCRIPT'
+                    data-track-metadata={JSON.stringify({ callId: call.id })}
+                  >
+                    <div className='flex justify-between items-start gap-3'>
+                      <div className='flex-1 min-w-0'>
+                        <div className='flex items-center gap-2 mb-0.5'>
+                          {getCallIcon(call)}
+                          <span
+                            className={`font-semibold block truncate flex-1 text-sm ${isActive ? 'text-blue-600' : 'text-foreground'}`}
+                          >
+                            {title}
+                          </span>
+                        </div>
+                        <div className='flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground'>
+                          <Clock size={10} className='opacity-60' />
+                          <span>{format(new Date(call.startedAt), 'MMM d, h:mm a')}</span>
+                        </div>
                       </div>
-                      <div className='flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground'>
-                        <Clock size={10} className='opacity-60' />
-                        <span>{format(new Date(call.startedAt), 'MMM d, h:mm a')}</span>
-                      </div>
+                      {!isActive && (
+                        <ChevronRight
+                          size={12}
+                          className='text-muted-foreground/30 group-hover:text-muted-foreground mt-1 shrink-0 transition-colors'
+                        />
+                      )}
                     </div>
-                    {!isActive && (
-                      <ChevronRight
-                        size={12}
-                        className='text-muted-foreground/30 group-hover:text-muted-foreground mt-1 shrink-0 transition-colors'
-                      />
-                    )}
-                  </div>
-                </button>
-              );
-            })
+                  </button>
+                );
+              }}
+            />
           )}
         </div>
       </div>

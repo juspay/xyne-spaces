@@ -18,6 +18,7 @@ import { callService } from '../../services/Call/callService';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { blobToBase64 } from '../../services/clients/fileFetchService';
 import { logger, Event as Logger } from '../../utils/logger';
+import { usePaginatedCalls } from '../../hooks/usePaginatedCalls';
 
 type CallHistoryResult = QueryResultType<typeof queries.userCallHistory>;
 type ScheduledCallsResult = QueryResultType<typeof queries.userScheduledCalls>;
@@ -52,15 +53,28 @@ interface UseCallHistoryReturn {
   closeConfirmModal: () => void;
   handleInstantCall: (selectedParticipants: string[]) => void;
   handleCancelCall: (callId: string) => void;
+  hasMoreCalls: boolean;
+  loadMoreCalls: () => void;
 }
 
 export function useCallHistory(userId: string | undefined): UseCallHistoryReturn {
   const zero = useZero();
-  const [calls, queryDetails] = useCachedQuery(queries.userCallHistory());
+
+  const { calls: accumulatedCalls, hasMoreCalls, loadMoreCalls } = usePaginatedCalls();
+
   const [allScheduledCalls] = useCachedQuery(queries.userScheduledCalls());
+
+  // Fetch all calls when user is searching, so search covers everything
+  const [searchQuery, setSearchQuery] = useState('');
+  const isSearching = searchQuery.trim().length > 0;
+  const [allCallsForSearch] = useCachedQuery(
+    queries.userCallHistory({ limit: 9999, start: null }),
+    { enabled: isSearching },
+  );
+
+  const calls = accumulatedCalls;
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -101,7 +115,9 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   }, [allScheduledCalls]);
 
   const recentCalls = useMemo(() => {
-    if (!calls) return undefined;
+    // When searching, use the full dataset; otherwise use accumulated (paginated) calls
+    const baseCalls = searchQuery.trim() ? allCallsForSearch : calls;
+    if (!baseCalls) return undefined;
 
     const now = Date.now();
 
@@ -113,14 +129,14 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
           (call.startsAt && new Date(call.startsAt).getTime() <= now),
       ) || [];
 
-    const allCalls = [...calls, ...activeScheduledCalls];
+    const allCalls = [...baseCalls, ...activeScheduledCalls];
 
     return allCalls.sort((a, b) => {
       const aTime = a.startedAt || a.startsAt || a.createdAt;
       const bTime = b.startedAt || b.startsAt || b.createdAt;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
-  }, [calls, allScheduledCalls]);
+  }, [calls, allCallsForSearch, searchQuery, allScheduledCalls]);
 
   // Filter users by search query (excluding current user)
   const filteredUsers = useMemo(() => {
@@ -512,7 +528,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     calls: recentCalls,
     scheduledCalls,
     missedCalls,
-    queryDetails,
+    queryDetails: { type: 'complete' as const },
     selectedCall,
     isParticipantsModalOpen,
     searchQuery,
@@ -533,5 +549,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     closeConfirmModal,
     handleInstantCall,
     handleCancelCall,
+    hasMoreCalls,
+    loadMoreCalls,
   };
 }

@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { ReactElement, useEffect, useState, useRef } from 'react';
+import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
 import { CallStatus } from '@xyne/shared';
@@ -80,10 +81,13 @@ const CallHistoryScreen = (): ReactElement => {
     closeConfirmModal,
     handleInstantCall,
     handleCancelCall,
+    hasMoreCalls,
+    loadMoreCalls,
   } = useCallHistory(user?.id);
 
   const zero = useZero();
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
@@ -271,7 +275,10 @@ const CallHistoryScreen = (): ReactElement => {
   }
 
   return (
-    <div className='bg-background dark:bg-background flex flex-col w-full h-full md:rounded-2xl overflow-y-auto shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border border-border relative '>
+    <div
+      ref={scrollContainerRef}
+      className='bg-background dark:bg-background flex flex-col w-full h-full md:rounded-2xl overflow-y-auto shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border border-border relative '
+    >
       <div className='w-full flex flex-col items-center px-4'>
         <div className='max-w-[810px] w-full sticky top-0 bg-background z-50 '>
           {/* Header */}
@@ -430,18 +437,27 @@ const CallHistoryScreen = (): ReactElement => {
                     recents
                   </span>
                   <div className='border border-border rounded-xl overflow-hidden'>
-                    {filteredRecentCalls.map((call, i) => (
-                      <CallCard
-                        key={call.id}
-                        call={call}
-                        currentUserId={user?.id}
-                        isLastItem={i === filteredRecentCalls.length - 1}
-                        onCallClick={() => handleCallRowClick(call)}
-                        onParticipantsClick={() => handleParticipantsClick(call)}
-                        handleGotoTranscript={() => handleGotoTranscript(call)}
-                        handleDownloadTranscript={() => handleDownloadTranscript(call)}
-                      />
-                    ))}
+                    <Virtuoso
+                      {...(scrollContainerRef.current
+                        ? { customScrollParent: scrollContainerRef.current }
+                        : {})}
+                      data={filteredRecentCalls}
+                      endReached={() => {
+                        if (!searchQuery.trim() && hasMoreCalls) loadMoreCalls();
+                      }}
+                      computeItemKey={(_, call) => call.id}
+                      itemContent={(i, call) => (
+                        <CallCard
+                          call={call}
+                          currentUserId={user?.id}
+                          isLastItem={i === filteredRecentCalls.length - 1}
+                          onCallClick={() => handleCallRowClick(call)}
+                          onParticipantsClick={() => handleParticipantsClick(call)}
+                          handleGotoTranscript={() => handleGotoTranscript(call)}
+                          handleDownloadTranscript={() => handleDownloadTranscript(call)}
+                        />
+                      )}
+                    />
                   </div>
                 </div>
               )}
