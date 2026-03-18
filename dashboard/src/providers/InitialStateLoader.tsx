@@ -1,17 +1,19 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
+import { useSelector } from '@xstate/react';
 import { useConnectionState } from '@rocicorp/zero/react';
 import { useZero } from '../hooks/useZero';
 import { useQuery as useTanStackQuery } from '@tanstack/react-query';
 import { queries } from '../zero/queries';
 import { useAuthContextValues } from '../hooks/useAuth';
 import AppLoader from '../components/AppLoader/AppLoader';
-import { stateMachineActor } from '../machines/stateMachine';
+import { stateMachineActor, User, Channel } from '../machines/stateMachine';
 import {
   setupQueryCachePersistence,
   hydrateQueryCacheFromIndexedDB,
 } from '../machines/queryCacheMachine';
 import { UserPermission } from '../machines/stateMachine';
 import { apiInstance } from '../services/clients/apiClient';
+import { useDeltaSubscription } from '../hooks/useDeltaSubscription';
 import { ReadonlyJSONValue } from '@rocicorp/zero';
 import { websocketService } from '../services/clients/socketClient';
 import { initializeMetrics, cleanupMetrics } from '../services/metricsService';
@@ -75,6 +77,20 @@ const areQueriesCompleted = (obj: QueryDetails[]): boolean => {
 
 // Show modal after 60 seconds of disconnected/error state
 const MODAL_DELAY_MS = 60000;
+
+const computeUsersWatermark = (users: User[]): number =>
+  users.reduce((max, u) => {
+    const userWm = u.updatedAt ?? 0;
+    const presenceWm = u.presenceStatus?.updatedAt ?? 0;
+    const rowMax = userWm > presenceWm ? userWm : presenceWm;
+    return rowMax > max ? rowMax : max;
+  }, 0);
+
+const computeChannelsWatermark = (channels: Channel[]): number =>
+  channels.reduce((max, c) => {
+    const wm = c.updatedAt ?? 0;
+    return wm > max ? wm : max;
+  }, 0);
 
 const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): ReactNode => {
   const isRefreshing = useRef(false);
@@ -344,12 +360,63 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     };
   }, [state.name]);
 
-  const [users, usersDetails] = useCachedQuery(queries.getUsers(), { ttl: '10m' });
+  // Read from state machine — watermarks and loaded state
+  const { usersUpdatedAt, allChannelsUpdatedAt } = useSelector(
+    stateMachineActor,
+    state => state.context.watermark,
+  );
+
+  const setLoggerEmail = (users: User[]): void => {
+    if (context.userID) {
+      const currentUser = users.find(u => u.id === context.userID);
+      if (currentUser?.email) {
+        logger.setEmailId(currentUser.email);
+      }
+    }
+  };
+
+  // Users: initial bulk fetch + live delta subscription via generic hook
+  const { isInitialFetchDone: usersLoaded } = useDeltaSubscription({
+    query: queries.getUsers(),
+    watermark: usersUpdatedAt,
+    computeWatermark: computeUsersWatermark,
+    isLoaded: usersUpdatedAt > 0,
+    isHydrated,
+    onInitialLoad: (users, wm) => {
+      stateMachineActor.send({ type: 'ADD_USERS', users, usersUpdatedAt: wm });
+      setLoggerEmail(users);
+    },
+    onDeltaMerge: (users, wm) => {
+      stateMachineActor.send({ type: 'MERGE_USERS', users, usersUpdatedAt: wm });
+      setLoggerEmail(users);
+    },
+  });
+
+  // Channels: initial bulk fetch + live delta subscription via generic hook
+  const { isInitialFetchDone: channelsLoaded } = useDeltaSubscription({
+    query: queries.userAllChannels(),
+    watermark: allChannelsUpdatedAt,
+    computeWatermark: computeChannelsWatermark,
+    isLoaded: allChannelsUpdatedAt > 0,
+    isHydrated,
+    onInitialLoad: (channels, wm) => {
+      stateMachineActor.send({
+        type: 'ADD_ALL_CHANNELS',
+        channels,
+        allChannelsUpdatedAt: wm,
+      });
+    },
+    onDeltaMerge: (channels, wm) => {
+      stateMachineActor.send({
+        type: 'MERGE_ALL_CHANNELS',
+        channels,
+        allChannelsUpdatedAt: wm,
+      });
+    },
+  });
+
   const [bookmarks, bookmarksDetails] = useCachedQuery(queries.userBookmarks(), { ttl: '10m' });
   const [visibleChannels, visibleChannelsDetails] = useCachedQuery(queries.userVisibleChannels(), {
-    ttl: '10m',
-  });
-  const [allChannels, allChannelsDetails] = useCachedQuery(queries.userAllChannels(), {
     ttl: '10m',
   });
   const [allUserGroups, allUserGroupsDetails] = useCachedQuery(queries.getAllUserGroups());
@@ -371,22 +438,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   });
 
   useEffect(() => {
-    if (isQueryCompleted(usersDetails)) {
-      stateMachineActor.send({ type: 'ADD_USERS', users: users || [] });
-      if (users && context.userID) {
-        const currentUser = users.find(user => user.id === context.userID);
-        if (currentUser?.email) {
-          logger.setEmailId(currentUser.email);
-        }
-      }
-    }
-
     if (isQueryCompleted(visibleChannelsDetails)) {
       stateMachineActor.send({ type: 'ADD_VISIBLE_CHANNELS', channels: visibleChannels || [] });
-    }
-
-    if (isQueryCompleted(allChannelsDetails)) {
-      stateMachineActor.send({ type: 'ADD_ALL_CHANNELS', channels: allChannels || [] });
     }
 
     if (permissionsQuery.isSuccess && permissionsQuery.data?.success) {
@@ -417,12 +470,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    users,
-    usersDetails.type,
     visibleChannels,
     visibleChannelsDetails.type,
-    allChannels,
-    allChannelsDetails.type,
     permissionsQuery.data,
     userChannelStatus,
     userChannelStatusDetails.type,
@@ -435,12 +484,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   ]);
 
   const areAllQueriesCompleted =
-    areQueriesCompleted([
-      usersDetails,
-      bookmarksDetails,
-      visibleChannelsDetails,
-      userChannelStatusDetails,
-    ]) && permissionsQuery.isSuccess;
+    usersLoaded &&
+    channelsLoaded &&
+    areQueriesCompleted([bookmarksDetails, visibleChannelsDetails, userChannelStatusDetails]) &&
+    permissionsQuery.isSuccess;
 
   if (areAllQueriesCompleted) {
     return (

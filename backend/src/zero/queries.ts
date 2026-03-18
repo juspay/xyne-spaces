@@ -403,9 +403,16 @@ export const queries = defineQueries({
     },
   ),
 
-  userAllChannels: defineQuery(() => {
-    return zql.channels;
-  }),
+  userAllChannels: defineQuery(
+    z.object({ updatedAt: z.number().optional() }).optional(),
+    ({ args }) => {
+      let query = zql.channels;
+      if (args?.updatedAt !== undefined) {
+        query = query.where('updatedAt', '>', args.updatedAt);
+      }
+      return query;
+    },
+  ),
 
   userVisibleChannels: defineQuery(({ ctx }) => {
     return zql.channels.whereExists('participantsStatus', (p) =>
@@ -523,9 +530,21 @@ export const queries = defineQueries({
       .related('channel');
   }),
 
-  getUsers: defineQuery(() => {
-    return zql.users.related('presenceStatus');
-  }),
+  getUsers: defineQuery(
+    z.object({ updatedAt: z.number().optional() }).optional(),
+    ({ args }) => {
+      let query = zql.users;
+      if (args?.updatedAt !== undefined) {
+        query = query.where(helpers =>
+          helpers.or(
+            helpers.cmp('updatedAt', '>', args.updatedAt!),
+            helpers.exists('presenceStatus', p => p.where('updatedAt', '>', args.updatedAt!)),
+          ),
+        );
+      }
+      return query.related('presenceStatus');
+    },
+  ),
 
   getUserProfilesByIds: defineQuery(
     z.object({ userIds: z.array(z.string()) }),

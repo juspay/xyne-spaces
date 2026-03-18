@@ -85,6 +85,11 @@ export interface UserStatusUpdatedEvent {
 // Keeping same type for browsable channels and user channels
 interface StateMachineContext {
   users: User[];
+  /** Watermark timestamps for delta queries */
+  watermark: {
+    usersUpdatedAt: number;
+    allChannelsUpdatedAt: number;
+  };
   bookmarks: Bookmarks[];
   visibleChannels: Channel[];
   allChannels: Channel[];
@@ -104,10 +109,12 @@ interface StateMachineContext {
 }
 
 type StateMachineEvent =
-  | { type: 'ADD_USERS'; users: User[] }
+  | { type: 'ADD_USERS'; users: User[]; usersUpdatedAt?: number }
+  | { type: 'MERGE_USERS'; users: User[]; usersUpdatedAt: number }
   | { type: 'ADD_USER_BOOKMARKS'; bookmarks: Bookmarks[] }
   | { type: 'ADD_VISIBLE_CHANNELS'; channels: Channel[] }
-  | { type: 'ADD_ALL_CHANNELS'; channels: Channel[] }
+  | { type: 'ADD_ALL_CHANNELS'; channels: Channel[]; allChannelsUpdatedAt?: number }
+  | { type: 'MERGE_ALL_CHANNELS'; channels: Channel[]; allChannelsUpdatedAt: number }
   | { type: 'SET_USER_PERMISSIONS'; permissions: UserPermission[] }
   | { type: 'ADD_USER_CHANNEL_STATUSES'; userChannelStatuses: UserChannelStatus[] }
   | { type: 'SET_LAST_VISITED_CHANNEL'; channelId: string | null }
@@ -145,6 +152,36 @@ export const stateMachine = setup({
         }
         return context.users;
       },
+      watermark: ({ context, event }) => {
+        if (event.type === 'ADD_USERS' && event.usersUpdatedAt !== undefined) {
+          return {
+            ...context.watermark,
+            usersUpdatedAt: Math.max(context.watermark.usersUpdatedAt, event.usersUpdatedAt),
+          };
+        }
+        return context.watermark;
+      },
+    }),
+    mergeUsers: assign({
+      users: ({ context, event }) => {
+        if (event.type === 'MERGE_USERS') {
+          const userMap = new Map(context.users.map(u => [u.id, u]));
+          for (const u of event.users) {
+            userMap.set(u.id, u);
+          }
+          return Array.from(userMap.values());
+        }
+        return context.users;
+      },
+      watermark: ({ context, event }) => {
+        if (event.type === 'MERGE_USERS') {
+          return {
+            ...context.watermark,
+            usersUpdatedAt: Math.max(context.watermark.usersUpdatedAt, event.usersUpdatedAt),
+          };
+        }
+        return context.watermark;
+      },
     }),
     addUserBookmarks: assign({
       bookmarks: ({ context, event }) => {
@@ -168,6 +205,42 @@ export const stateMachine = setup({
           return event.channels;
         }
         return context.allChannels;
+      },
+      watermark: ({ context, event }) => {
+        if (event.type === 'ADD_ALL_CHANNELS' && event.allChannelsUpdatedAt !== undefined) {
+          return {
+            ...context.watermark,
+            allChannelsUpdatedAt: Math.max(
+              context.watermark.allChannelsUpdatedAt,
+              event.allChannelsUpdatedAt,
+            ),
+          };
+        }
+        return context.watermark;
+      },
+    }),
+    mergeAllChannels: assign({
+      allChannels: ({ context, event }) => {
+        if (event.type === 'MERGE_ALL_CHANNELS') {
+          const channelMap = new Map(context.allChannels.map(c => [c.id, c]));
+          for (const c of event.channels) {
+            channelMap.set(c.id, c);
+          }
+          return Array.from(channelMap.values());
+        }
+        return context.allChannels;
+      },
+      watermark: ({ context, event }) => {
+        if (event.type === 'MERGE_ALL_CHANNELS') {
+          return {
+            ...context.watermark,
+            allChannelsUpdatedAt: Math.max(
+              context.watermark.allChannelsUpdatedAt,
+              event.allChannelsUpdatedAt,
+            ),
+          };
+        }
+        return context.watermark;
       },
     }),
     setUserPermissions: assign({
@@ -316,6 +389,10 @@ export const stateMachine = setup({
   id: 'stateMachine',
   context: {
     users: [],
+    watermark: {
+      usersUpdatedAt: 0,
+      allChannelsUpdatedAt: 0,
+    },
     bookmarks: [],
     visibleChannels: [],
     allChannels: [],
@@ -337,6 +414,9 @@ export const stateMachine = setup({
         ADD_USERS: {
           actions: 'addUsers',
         },
+        MERGE_USERS: {
+          actions: 'mergeUsers',
+        },
         ADD_USER_BOOKMARKS: {
           actions: 'addUserBookmarks',
         },
@@ -345,6 +425,9 @@ export const stateMachine = setup({
         },
         ADD_ALL_CHANNELS: {
           actions: 'addAllChannels',
+        },
+        MERGE_ALL_CHANNELS: {
+          actions: 'mergeAllChannels',
         },
         SET_USER_PERMISSIONS: {
           actions: 'setUserPermissions',

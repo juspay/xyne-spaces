@@ -62,12 +62,13 @@ export async function addChannelParticipant(
     mobileNotificationLevel: 'ALL',
   });
 
-  // Increment participantCount
+  // Increment participantCount and bump updatedAt so delta subscriptions pick up the change
   const channel = await tx.run(zql.channels.where('id', channelId).one());
   if (channel) {
     await tx.mutate.channels.update({
       id: channelId,
       participantCount: (channel.participantCount || 0) + 1,
+      updatedAt: now,
     });
   }
 
@@ -135,12 +136,13 @@ export async function addChannelParticipants(
     });
   }
 
-  // Increment participantCount by the number of actually added participants
+  // Increment participantCount and bump updatedAt so delta subscriptions pick up the change
   const channel = await tx.run(zql.channels.where('id', channelId).one());
   if (channel) {
     await tx.mutate.channels.update({
       id: channelId,
       participantCount: (channel.participantCount || 0) + newUserIds.length,
+      updatedAt: Date.now(),
     });
   }
 
@@ -169,13 +171,14 @@ export async function removeChannelParticipant(
     return { removed: false, participantId: null };
   }
 
-  // Update channel participantCount BEFORE deleting participant
+  // Update channel participantCount and bump updatedAt BEFORE deleting participant
   // This ensures the user is still a participant when the ACL check runs
   const channel = await tx.run(zql.channels.where('id', channelId).one());
   if (channel) {
     await tx.mutate.channels.update({
       id: channelId,
       participantCount: Math.max((channel.participantCount || 0) - 1, 0),
+      updatedAt: Date.now(),
     });
   }
 
