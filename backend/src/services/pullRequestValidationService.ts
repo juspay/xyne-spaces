@@ -5,9 +5,9 @@ import { logger } from '@/utils/logger';
 
 // Bitbucket PR validation configuration constants
 const BITBUCKET_PR_CONFIG = {
-  PR_TITLE_PATTERN: /^(?:(?:feat|fix):\s+)?XYNE-\s*(\d+)\s*[:\s]/i,
+  PR_TITLE_PATTERN: /^(?:(?:feat|fix):\s+)?([A-Z][A-Z0-9]{2,})-\s*(\d+)\s*[:\s]/i,
   ERROR_MESSAGES: {
-    INVALID_FORMAT: 'PR title must follow format: XYNE-####: description OR feat/fix: XYNE-####:subject OR feat/fix: XYNE-#### subject',
+    INVALID_FORMAT: 'PR title must format: PROJECT-####: description OR feat/fix: PROJECT-####:subject OR feat/fix: PROJECT-#### subject',
     TICKET_NOT_FOUND: (ticketId: string) => `Ticket ${ticketId} does not exist`,
     TICKET_ALREADY_RESOLVED: (ticketId: string) => `Ticket ${ticketId} is already resolved`,
     DUPLICATE_PR: (ticketId: string) =>
@@ -62,7 +62,7 @@ export class PullRequestValidationService {
         return { isValid: false, errorMessage };
       }
 
-      const ticketId = `XYNE-${ticketIdMatch[1]}`;
+      const ticketId = `${ticketIdMatch[1]}-${ticketIdMatch[2]}`;
       logger.info(`Validating PR ${prId} for ticket ${ticketId}`);
 
       const ticket = await this.ticketRepository.getTicketByXyneId(ticketId);
