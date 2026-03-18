@@ -9,9 +9,9 @@ import type {
 } from '@rocicorp/zero';
 import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
 import { queryCacheActor } from '../machines/queryCacheMachine';
-import { generateQueryHash } from '../utils/queryHash';
 import { useSelector } from '@xstate/react';
 import { useQuery } from './useQuery';
+import { useZero } from './useZero';
 
 /**
  * useCachedQuery Hook
@@ -39,12 +39,19 @@ export function useCachedQuery<
   query: QueryRequest<TTable, TInput, TOutput, TSchema, TReturn, TContext>,
   options?: UseQueryOptions | boolean,
 ): QueryResult<TReturn> {
-  // Extract query name and arguments
-  const name = query.query.queryName;
-  const args = query.args;
+  const zero = useZero();
 
-  const argsKey = useMemo(() => JSON.stringify(args), [args]);
-  const hash = useMemo(() => generateQueryHash(name, args), [name, argsKey]);
+  // Compute hash using the query's internal fn which returns a QueryImpl with hash()
+  const hash = useMemo(() => {
+    // Call the query's fn directly with context and args
+    // This returns a QueryImpl that has the hash() method
+    // @ts-expect-error - accessing internal query structure
+    const queryImpl = query.query.fn({ ctx: zero.context, args: query.args });
+    // The queryImpl has a hash() method that returns the AST-based hash
+    // @ts-expect-error - hash() is part of QueryInternals, not public Query interface
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return queryImpl.hash() as string;
+  }, [query, zero.context]);
 
   const cachedData = useSelector(queryCacheActor, state => {
     const entry = hash ? state.context.cache.get(hash) : undefined;
@@ -60,7 +67,6 @@ export function useCachedQuery<
         hash,
         data: [freshData, freshDetails],
       });
-      queryCacheActor.send({ type: 'EVICT_STALE_ENTRIES' });
     }
   }, [freshData, freshDetails, hash]);
 
