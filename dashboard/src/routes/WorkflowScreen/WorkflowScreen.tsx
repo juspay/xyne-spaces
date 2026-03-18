@@ -747,7 +747,7 @@ const WorkflowScreen: React.FC = () => {
               combinedStepsData={combinedStepsData || null}
               selectedStep={selectedStep}
               onStepSelect={handleStepSelect}
-              {...(executionId !== undefined && { executionId })}
+              {...(effectiveSelectedExecutionId && { executionId: effectiveSelectedExecutionId })}
               ticketTitle={ticket.title}
               {...(ticket.description ? { ticketDescription: ticket.description } : {})}
               onRefresh={handleRefresh}
