@@ -1388,6 +1388,12 @@ export class CallController {
         },
       });
 
+      await db.callParticipant.deleteMany({
+        where: {
+          callId: call.id,
+        },
+      });
+
       // Delete the call record
       await repositories.calls.delete(call.id);
 
