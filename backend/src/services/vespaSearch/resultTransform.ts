@@ -460,11 +460,11 @@ import { PrismaClient } from '@prisma/client';
      const assignee = doc.assignedTo ? userMap[doc.assignedTo] : null;
      const assigneeName = assignee?.name || assignee?.email || null;
    
-     // Build subtitle with all required info
-     const subtitleParts = [`${doc.status} - ${doc.stage || 'No Stage'}`];
-     if (assigneeName) {
-       subtitleParts.push(`Assigned to: ${assigneeName}`);
-     }
+      // Build subtitle with all required info
+      const subtitleParts = [doc.xyneId, `${doc.status} - ${doc.stage || 'No Stage'}`];
+      if (assigneeName) {
+        subtitleParts.push(`Assigned to: ${assigneeName}`);
+      }
    
      return {
        id: doc.docId,
