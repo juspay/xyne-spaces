@@ -47,6 +47,8 @@ import { AgentChatView } from '../AgentChatView';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getAgentInfo, AgentInfo } from '../AgentChatView/AgentChatView.utils';
 import { AgentAvatar } from '../AgentChatView/AgentAvatar';
+import { Tooltip } from '../../../components/ui/Tooltip';
+import AttemptBranchGraphModal from '../AttemptBranchGraphModal';
 
 interface WorkflowChatPanelProps {
   combinedStepsData: CombinedWorkflowData | null;
@@ -332,6 +334,9 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
   // Track current execution ID to detect when it changes
   const currentExecutionId = combinedStepsData?.workflows?.[0]?.executionId;
   const prevExecutionIdRef = useRef<string | undefined>(undefined);
+
+  // Detect when execution is being switched (prop differs from data, or data is loading)
+  const isSwitchingExecution = executionId !== undefined && executionId !== currentExecutionId;
 
   // Reset navigation state when execution changes (e.g., after rerun)
   useEffect(() => {
@@ -967,14 +972,14 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
         <>
           <div
             ref={headerRef}
-            className='flex-shrink-0 border-b border-border px-3 h-[57px] flex items-center'
+            className='flex-shrink-0 border-b border-border px-3 py-1.5 flex items-center'
           >
             {/* Desktop: Show mode view */}
             {!isMobile ? (
-              <div className='flex items-center gap-2.5 w-full'>
+              <div className='flex flex-col w-full gap-1'>
                 {/* Basic Mode: Left details and right controls */}
                 {desktopMode === 'basic' && (
-                  <>
+                  <div className='flex items-center gap-2.5 w-full'>
                     <div className='flex items-center gap-2.5 bg-background border border-border shadow-sm p-1 px-3 rounded-lg flex-1 min-w-0 h-[38px] overflow-hidden'>
                       <div className='flex items-center min-w-0 overflow-hidden'>
                         {/* Avatar Group */}
@@ -1038,216 +1043,328 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                         <Layers size={14} className='text-muted-foreground' />
                       </button>
                     </div>
-                  </>
+                  </div>
                 )}
 
                 {/* Advanced Mode: Show step navigation and other controls */}
                 {desktopMode === 'advanced' && (
                   <>
-                    {/* Step Navigation Header */}
-                    {graphNodes.length > 0 ? (
-                      <div className='flex items-center gap-2.5 px-2.5 py-2 bg-muted/50 rounded-lg border border-border flex-1 min-w-0 overflow-hidden'>
-                        {/* Prev Button */}
-                        <button
-                          onClick={handlePrevNode}
-                          disabled={currentNodeIndex === 0}
-                          className='p-1 rounded hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-                          title='Previous step'
-                          data-track-category='Workflows'
-                          data-track-name='NavigateToPreviousStep'
-                          data-track-metadata={JSON.stringify({
-                            currentNodeIndex,
-                            totalSteps: graphNodes.length,
-                          })}
-                        >
-                          <ChevronLeft size={16} className='text-foreground/70' />
-                        </button>
-
-                        <div
-                          className='flex-1 flex items-center gap-2.5 min-w-0 cursor-pointer hover:bg-border/50 rounded px-1.5 py-1 -my-1 transition-colors'
-                          onClick={() => setIsGraphViewOpen(!isGraphViewOpen)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              setIsGraphViewOpen(!isGraphViewOpen);
-                            }
-                          }}
-                          role='button'
-                          tabIndex={0}
-                          data-track-category='Workflows'
-                          data-track-name='ToggleGraphView'
-                          data-track-metadata={JSON.stringify({ currentNodeIndex, executionId })}
-                        >
-                          {/* Status Icon */}
-                          <div
-                            className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${
-                              currentNode?.status === 'running'
-                                ? 'bg-blue-500/10'
-                                : currentNode?.status === 'completed'
-                                  ? 'bg-emerald-500/10'
-                                  : currentNode?.status === 'failed'
-                                    ? 'bg-red-500/10'
-                                    : 'bg-muted'
-                            }`}
-                          >
-                            {currentNode?.status === 'running' ? (
-                              <Loader2 size={12} className='text-blue-500 animate-spin' />
-                            ) : currentNode?.status === 'completed' ? (
-                              <CheckCircle size={12} className='text-emerald-500' />
-                            ) : currentNode?.status === 'failed' ? (
-                              <AlertCircle size={12} className='text-red-500' />
-                            ) : (
-                              <Clock size={12} className='text-muted-foreground' />
-                            )}
-                          </div>
-
-                          {/* Step Name */}
-                          <span className='font-medium text-foreground flex-1 text-left text-sm truncate'>
-                            {currentNode ? formatStepName(currentNode.stepName) : 'Loading...'}
-                          </span>
-
-                          <span className='text-xs text-muted-foreground flex-shrink-0'>
-                            ({currentNodeIndex + 1}/{graphNodes.length})
-                          </span>
-                        </div>
-
-                        {/* Jump to Running Button */}
-                        {runningNodeIndex !== -1 && runningNodeIndex !== currentNodeIndex && (
+                    {/* Header Row */}
+                    <div className='flex items-center gap-2.5 w-full'>
+                      {/* Step Navigation Header */}
+                      {graphNodes.length > 0 ? (
+                        <div className='flex items-center gap-2.5 px-2.5 py-2 bg-muted/50 rounded-lg border border-border flex-1 min-w-0 overflow-hidden'>
+                          {/* Prev Button */}
                           <button
-                            onClick={handleJumpToRunning}
-                            className='px-2 py-1 text-xs font-medium text-blue-500 bg-blue-500/10 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-1'
-                            title='Jump to running step'
+                            onClick={handlePrevNode}
+                            disabled={currentNodeIndex === 0}
+                            className='p-1 rounded hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+                            title='Previous step'
                             data-track-category='Workflows'
-                            data-track-name='JumpToRunningStep'
+                            data-track-name='NavigateToPreviousStep'
                             data-track-metadata={JSON.stringify({
                               currentNodeIndex,
-                              runningNodeIndex,
+                              totalSteps: graphNodes.length,
                             })}
                           >
-                            <Loader2 size={10} className='animate-spin' />
-                            Live
+                            <ChevronLeft size={16} className='text-foreground/70' />
                           </button>
-                        )}
 
-                        {/* Next Button */}
-                        <button
-                          onClick={handleNextNode}
-                          disabled={currentNodeIndex >= graphNodes.length - 1}
-                          className='p-1 rounded hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-                          title='Next step'
-                          data-track-category='Workflows'
-                          data-track-name='NavigateToNextStep'
-                          data-track-metadata={JSON.stringify({
-                            currentNodeIndex,
-                            totalSteps: graphNodes.length,
-                          })}
-                        >
-                          <ChevronRight size={16} className='text-foreground/70' />
-                        </button>
-                      </div>
-                    ) : (
-                      /* Fallback header when no graph nodes */
-                      <div className='flex items-center gap-2.5 px-2.5 py-2 bg-muted/50 rounded-lg border border-border flex-1'>
-                        <div className='w-6 h-6 rounded-md flex items-center justify-center shadow-sm'>
-                          <Bot size={12} className='text-foreground' />
-                        </div>
-                        <span className='font-medium text-foreground flex-1 text-left text-sm'>
-                          Workflow Steps
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Search Toggle Button */}
-                    <button
-                      onClick={() => {
-                        setIsSearchOpen(!isSearchOpen);
-                        if (isSearchOpen) setSearchQuery('');
-                      }}
-                      className={`flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors ${
-                        isSearchOpen
-                          ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-                          : 'bg-background text-foreground border-border hover:bg-muted'
-                      }`}
-                      style={{ width: '42px', height: '42px' }}
-                      title='Search'
-                      data-track-category='Workflows'
-                      data-track-name='ToggleSearch'
-                    >
-                      <Search size={16} />
-                    </button>
-
-                    {/* Thread Button for Advanced Mode */}
-                    <button
-                      onClick={() => setMainTab('thread')}
-                      className='flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted'
-                      style={{ width: '42px', height: '42px' }}
-                      title='Thread'
-                      data-track-category='Workflows'
-                      data-track-name='OpenThreadTab'
-                    >
-                      <MessageSquare size={16} />
-                    </button>
-
-                    {/* More Actions Menu */}
-                    <div className='relative flex-shrink-0'>
-                      <button
-                        onClick={() => setIsMenuOpen(!isMenuOpen)}
-                        onBlur={() => setTimeout(() => setIsMenuOpen(false), 200)}
-                        className='flex items-center justify-center text-sm font-medium rounded-lg border bg-background text-foreground border-border hover:bg-muted transition-colors'
-                        style={{ width: '42px', height: '42px' }}
-                        title='More Options'
-                        data-track-category='Workflows'
-                        data-track-name='ToggleMoreActions'
-                      >
-                        <MoreVertical size={16} />
-                      </button>
-
-                      {isMenuOpen && (
-                        <div className='absolute right-0 top-full mt-1.5 w-48 bg-popover rounded-lg shadow-lg border border-border py-1 z-50 overflow-hidden'>
-                          <button
-                            onClick={() => {
-                              setDesktopMode('basic');
-                              setIsMenuOpen(false);
+                          <div
+                            className='flex-1 flex items-center gap-2.5 min-w-0 cursor-pointer hover:bg-border/50 rounded px-1.5 py-1 -my-1 transition-colors'
+                            onClick={() => setIsGraphViewOpen(!isGraphViewOpen)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setIsGraphViewOpen(!isGraphViewOpen);
+                              }
                             }}
-                            className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors font-medium border-b border-border'
+                            role='button'
+                            tabIndex={0}
                             data-track-category='Workflows'
-                            data-track-name='SelectBasicMode'
+                            data-track-name='ToggleGraphView'
+                            data-track-metadata={JSON.stringify({ currentNodeIndex, executionId })}
                           >
-                            <Bot size={16} className='text-muted-foreground' />
-                            Back to basic mode
-                          </button>
-                          <button
-                            onClick={() => {
-                              setMainTab('history');
-                              setIsMenuOpen(false);
-                            }}
-                            className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors'
-                            data-track-category='Workflows'
-                            data-track-name='OpenHistoryTab'
-                          >
-                            <History size={16} className='text-muted-foreground' />
-                            Attempts
-                          </button>
-                          {errorSteps.length > 0 && (
-                            <button
-                              onClick={() => {
-                                setMainTab('errors');
-                                setIsMenuOpen(false);
-                              }}
-                              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 text-left transition-colors'
-                              data-track-category='Workflows'
-                              data-track-name='OpenErrorsTab'
+                            {/* Status Icon */}
+                            <div
+                              className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${
+                                currentNode?.status === 'running'
+                                  ? 'bg-blue-500/10'
+                                  : currentNode?.status === 'completed'
+                                    ? 'bg-emerald-500/10'
+                                    : currentNode?.status === 'failed'
+                                      ? 'bg-red-500/10'
+                                      : 'bg-muted'
+                              }`}
                             >
-                              <AlertTriangle size={16} className='text-red-500' />
-                              Errors
-                              <span className='ml-auto bg-red-500/20 text-red-500 text-[10px] font-bold px-1.5 py-0.5 rounded-full'>
-                                {errorSteps.length > 99 ? '99+' : errorSteps.length}
-                              </span>
+                              {currentNode?.status === 'running' ? (
+                                <Loader2 size={12} className='text-blue-500 animate-spin' />
+                              ) : currentNode?.status === 'completed' ? (
+                                <CheckCircle size={12} className='text-emerald-500' />
+                              ) : currentNode?.status === 'failed' ? (
+                                <AlertCircle size={12} className='text-red-500' />
+                              ) : (
+                                <Clock size={12} className='text-muted-foreground' />
+                              )}
+                            </div>
+
+                            {/* Step Name */}
+                            <span className='font-medium text-foreground flex-1 text-left text-sm truncate'>
+                              {currentNode ? formatStepName(currentNode.stepName) : 'Loading...'}
+                            </span>
+
+                            <span className='text-xs text-muted-foreground flex-shrink-0'>
+                              ({currentNodeIndex + 1}/{graphNodes.length})
+                            </span>
+                          </div>
+
+                          {/* Jump to Running Button */}
+                          {runningNodeIndex !== -1 && runningNodeIndex !== currentNodeIndex && (
+                            <button
+                              onClick={handleJumpToRunning}
+                              className='px-2 py-1 text-xs font-medium text-blue-500 bg-blue-500/10 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-1'
+                              title='Jump to running step'
+                              data-track-category='Workflows'
+                              data-track-name='JumpToRunningStep'
+                              data-track-metadata={JSON.stringify({
+                                currentNodeIndex,
+                                runningNodeIndex,
+                              })}
+                            >
+                              <Loader2 size={10} className='animate-spin' />
+                              Live
                             </button>
                           )}
+
+                          {/* Next Button */}
+                          <button
+                            onClick={handleNextNode}
+                            disabled={currentNodeIndex >= graphNodes.length - 1}
+                            className='p-1 rounded hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+                            title='Next step'
+                            data-track-category='Workflows'
+                            data-track-name='NavigateToNextStep'
+                            data-track-metadata={JSON.stringify({
+                              currentNodeIndex,
+                              totalSteps: graphNodes.length,
+                            })}
+                          >
+                            <ChevronRight size={16} className='text-foreground/70' />
+                          </button>
+                        </div>
+                      ) : (
+                        /* Fallback header when no graph nodes */
+                        <div className='flex items-center gap-2.5 px-2.5 py-2 bg-muted/50 rounded-lg border border-border flex-1'>
+                          <div className='w-6 h-6 rounded-md flex items-center justify-center shadow-sm'>
+                            <Bot size={12} className='text-foreground' />
+                          </div>
+                          <span className='font-medium text-foreground flex-1 text-left text-sm'>
+                            Workflow Steps
+                          </span>
                         </div>
                       )}
+
+                      {/* Search Toggle Button */}
+                      <button
+                        onClick={() => {
+                          setIsSearchOpen(!isSearchOpen);
+                          if (isSearchOpen) setSearchQuery('');
+                        }}
+                        className={`flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors ${
+                          isSearchOpen
+                            ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                            : 'bg-background text-foreground border-border hover:bg-muted'
+                        }`}
+                        style={{ width: '42px', height: '42px' }}
+                        title='Search'
+                        data-track-category='Workflows'
+                        data-track-name='ToggleSearch'
+                      >
+                        <Search size={16} />
+                      </button>
+
+                      {/* Thread Button for Advanced Mode */}
+                      <button
+                        onClick={() => setMainTab('thread')}
+                        className='flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted'
+                        style={{ width: '42px', height: '42px' }}
+                        title='Thread'
+                        data-track-category='Workflows'
+                        data-track-name='OpenThreadTab'
+                      >
+                        <MessageSquare size={16} />
+                      </button>
+
+                      {/* More Actions Menu */}
+                      <div className='relative flex-shrink-0'>
+                        <button
+                          onClick={() => setIsMenuOpen(!isMenuOpen)}
+                          onBlur={() => setTimeout(() => setIsMenuOpen(false), 200)}
+                          className='flex items-center justify-center text-sm font-medium rounded-lg border bg-background text-foreground border-border hover:bg-muted transition-colors'
+                          style={{ width: '42px', height: '42px' }}
+                          title='More Options'
+                          data-track-category='Workflows'
+                          data-track-name='ToggleMoreActions'
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+
+                        {isMenuOpen && (
+                          <div className='absolute right-0 top-full mt-1.5 w-48 bg-popover rounded-lg shadow-lg border border-border py-1 z-50 overflow-hidden'>
+                            <button
+                              onClick={() => {
+                                setDesktopMode('basic');
+                                setIsMenuOpen(false);
+                              }}
+                              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors font-medium border-b border-border'
+                              data-track-category='Workflows'
+                              data-track-name='SelectBasicMode'
+                            >
+                              <Bot size={16} className='text-muted-foreground' />
+                              Back to basic mode
+                            </button>
+                            <button
+                              onClick={() => {
+                                setMainTab('history');
+                                setIsMenuOpen(false);
+                              }}
+                              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors'
+                              data-track-category='Workflows'
+                              data-track-name='OpenHistoryTab'
+                            >
+                              <History size={16} className='text-muted-foreground' />
+                              Attempts
+                            </button>
+                            {errorSteps.length > 0 && (
+                              <button
+                                onClick={() => {
+                                  setMainTab('errors');
+                                  setIsMenuOpen(false);
+                                }}
+                                className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 text-left transition-colors'
+                                data-track-category='Workflows'
+                                data-track-name='OpenErrorsTab'
+                              >
+                                <AlertTriangle size={16} className='text-red-500' />
+                                Errors
+                                <span className='ml-auto bg-red-500/20 text-red-500 text-[10px] font-bold px-1.5 py-0.5 rounded-full'>
+                                  {errorSteps.length > 99 ? '99+' : errorSteps.length}
+                                </span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {/* end gap-0.5 buttons group */}
                     </div>
+
+                    {/* Attempt Dots - Desktop (Advanced Mode Only, Full Width) */}
+                    {(() => {
+                      const metadata = combinedStepsData?.workflows?.[0]?.executionMetadata || [];
+                      if (metadata.length === 0) return null;
+
+                      return (
+                        <div className='flex items-center gap-1.5 px-0.5 min-w-0 w-full border-t border-border/50 pt-2 mt-1'>
+                          <span className='text-[10px] text-muted-foreground flex-shrink-0'>
+                            Attempts:
+                          </span>
+                          <div className='flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-shrink-0 py-1 px-0.5'>
+                            {metadata.map((exec, index) => {
+                              const attemptNumber = metadata.length - index;
+                              const isSelected = exec.executionId === executionId;
+                              const status = exec.executionStatus?.toUpperCase();
+
+                              // Get parent info for tooltip
+                              let parentAttemptNumber = null;
+                              if (exec.parentWorkflowExecutionId) {
+                                const parentIndex = metadata.findIndex(
+                                  e => e.executionId === exec.parentWorkflowExecutionId,
+                                );
+                                if (parentIndex !== -1) {
+                                  parentAttemptNumber = metadata.length - parentIndex;
+                                }
+                              }
+
+                              const tooltipContent = (
+                                <div className='space-y-1'>
+                                  <div className='font-medium'>Attempt {attemptNumber}</div>
+                                  {exec.tag === 'root' && (
+                                    <div className='text-[10px] opacity-80'>(Original)</div>
+                                  )}
+                                  <div className='text-[10px] opacity-80'>
+                                    {format(new Date(exec.createdAt), 'PPp')}
+                                  </div>
+                                  <div
+                                    className={`text-[10px] font-medium ${
+                                      status === 'COMPLETED'
+                                        ? 'text-emerald-300'
+                                        : status === 'FAILED'
+                                          ? 'text-red-300'
+                                          : status === 'RUNNING'
+                                            ? 'text-blue-300'
+                                            : 'text-gray-300'
+                                    }`}
+                                  >
+                                    {exec.executionStatus}
+                                  </div>
+                                  {parentAttemptNumber && exec.sourceStepName && (
+                                    <div className='text-[10px] opacity-70 pt-1 border-t border-white/20 mt-1'>
+                                      Forked from Attempt {parentAttemptNumber}
+                                      <br />
+                                      at step &apos;{exec.sourceStepName}&apos;
+                                    </div>
+                                  )}
+                                </div>
+                              );
+
+                              return (
+                                <Tooltip
+                                  key={exec.executionId}
+                                  content={tooltipContent}
+                                  side='bottom'
+                                  sideOffset={4}
+                                >
+                                  <button
+                                    onClick={() => {
+                                      if (onExecutionChange && !isSelected) {
+                                        onExecutionChange(exec.executionId);
+                                      }
+                                    }}
+                                    className={`w-2 h-2 rounded-full flex-shrink-0 transition-all hover:scale-125 ${
+                                      isSelected
+                                        ? 'bg-blue-500'
+                                        : status === 'COMPLETED'
+                                          ? 'bg-emerald-500'
+                                          : status === 'FAILED'
+                                            ? 'bg-red-500'
+                                            : 'bg-muted-foreground'
+                                    }`}
+                                    data-track-category='Workflows'
+                                    data-track-name='SwitchAttemptFromDot'
+                                    data-track-metadata={JSON.stringify({
+                                      executionId: exec.executionId,
+                                      attemptNumber,
+                                    })}
+                                  />
+                                </Tooltip>
+                              );
+                            })}
+                          </div>
+                          {/* Graph Modal - only show if multiple attempts */}
+                          {metadata.length > 1 && (
+                            <AttemptBranchGraphModal
+                              executionMetadata={metadata}
+                              selectedExecutionId={executionId}
+                              onExecutionSelect={execId => {
+                                if (onExecutionChange && execId !== executionId) {
+                                  onExecutionChange(execId);
+                                }
+                              }}
+                            />
+                          )}
+                        </div>
+                      );
+                    })()}
                   </>
                 )}
               </div>
@@ -1635,7 +1752,19 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     onScroll={handleScroll}
                     className='flex-1 min-h-0 overflow-y-auto space-y-0.5 min-w-0 max-w-full overflow-x-hidden no-scrollbar'
                   >
-                    {searchedSteps.length === 0 && userMessages.length === 0 ? (
+                    {/* Loading state when switching executions */}
+                    {isSwitchingExecution && (
+                      <div className='flex flex-col items-center justify-center py-12 text-center bg-muted/50 rounded-lg border border-border mx-2 mt-2'>
+                        <Loader2 size={24} className='text-blue-500 animate-spin mb-2' />
+                        <p className='text-muted-foreground text-xs font-medium'>
+                          Loading attempt data...
+                        </p>
+                      </div>
+                    )}
+
+                    {!isSwitchingExecution &&
+                    searchedSteps.length === 0 &&
+                    userMessages.length === 0 ? (
                       <div className='flex flex-col items-center justify-center py-16 text-center'>
                         <div className='w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-3'>
                           {searchQuery ? (
@@ -1663,7 +1792,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                           </p>
                         )}
                       </div>
-                    ) : (
+                    ) : !isSwitchingExecution ? (
                       <>
                         {searchedSteps.map(step => (
                           <StepItem
@@ -1674,7 +1803,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                         ))}
                         {/* Do not show user messages as chat bubbles */}
                       </>
-                    )}
+                    ) : null}
                     <div ref={messagesEndRef} />
                   </div>
                 </>

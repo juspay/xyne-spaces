@@ -264,6 +264,7 @@ export interface AgentChatViewProps {
   graphNodes: GraphNodeInfo[];
   onClose?: () => void | undefined;
   hideTabs?: boolean | undefined;
+  isLoading?: boolean;
   ticketDescription?: string | undefined;
   createdBy?: string | null | undefined;
   executionId?: string | undefined;
@@ -326,6 +327,7 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
   combinedStepsData,
   graphNodes,
   hideTabs,
+  isLoading,
   ticketDescription,
   createdBy: createdByProp,
   executionId,
@@ -598,7 +600,12 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
       )}
 
       <div className='flex-1 overflow-y-auto px-3 md:px-4 py-4 space-y-4 no-scrollbar pb-16'>
-        {!hideTabs && activeTab === 'diff' ? (
+        {isLoading ? (
+          <div className='flex flex-col items-center justify-center py-12 text-center'>
+            <Loader2 size={24} className='text-blue-500 animate-spin mb-2' />
+            <p className='text-muted-foreground text-xs font-medium'>Loading attempt data...</p>
+          </div>
+        ) : !hideTabs && activeTab === 'diff' ? (
           <div className='h-full -mx-3 md:-mx-4 -my-4'>
             <LiveEditsPanel combinedStepsData={combinedStepsData} />
           </div>
