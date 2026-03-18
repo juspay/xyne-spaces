@@ -142,6 +142,8 @@ else
                 echo -e "  ${CYAN}Skip testids and continue:${NC}"
                 echo -e "  ${GREEN}npm run codegen -- convert --skip-testids $SPEC_ARGS${NC}"
                 echo ""
+                echo -e "${RED}Stopping pipeline.${NC}"
+                exit 1
             fi
             echo ""
         done
@@ -287,15 +289,35 @@ for spec in "${RESOLVED_SPECS[@]}"; do
 
     set +e
     cd "$AUTOMATION_DIR"
+    echo -e "${CYAN}  Running: npx cucumber-js --dry-run $FEATURE_REL --profile e2e${NC}"
     npx cucumber-js --dry-run "$FEATURE_FILE" --profile e2e > "$DRY_RUN_REPORT" 2>&1
     DRY_RUN_EXIT=$?
     set -e
 
-    if [ $DRY_RUN_EXIT -eq 0 ]; then
+    # Check for undefined/pending steps in output (cucumber exits 0 for these)
+    DRY_RUN_CONTENT_CHECK=$(cat "$DRY_RUN_REPORT" 2>/dev/null)
+    HAS_UNDEFINED_IN_OUTPUT=false
+    if echo "$DRY_RUN_CONTENT_CHECK" | grep -qiE 'Undefined'; then
+        HAS_UNDEFINED_IN_OUTPUT=true
+    fi
+    if echo "$DRY_RUN_CONTENT_CHECK" | grep -qE '[0-9]+ undefined'; then
+        HAS_UNDEFINED_IN_OUTPUT=true
+    fi
+    if echo "$DRY_RUN_CONTENT_CHECK" | grep -qE '[0-9]+ pending'; then
+        HAS_UNDEFINED_IN_OUTPUT=true
+    fi
+
+    if [ $DRY_RUN_EXIT -eq 0 ] && [ "$HAS_UNDEFINED_IN_OUTPUT" = false ]; then
         echo -e "${GREEN}✓ Dry-run passed!${NC}"
     else
-        echo -e "${RED}✗ Dry-run failed (exit code: $DRY_RUN_EXIT)${NC}"
+        if [ $DRY_RUN_EXIT -eq 0 ] && [ "$HAS_UNDEFINED_IN_OUTPUT" = true ]; then
+            echo -e "${RED}✗ Dry-run found undefined/pending steps (exit code 0 but output has undefined steps)${NC}"
+            DRY_RUN_EXIT=1
+        else
+            echo -e "${RED}✗ Dry-run failed (exit code: $DRY_RUN_EXIT)${NC}"
+        fi
         echo -e "${YELLOW}Report: $DRY_RUN_REPORT${NC}"
+        echo -e "${CYAN}  Manual dry-run:${NC} ${GREEN}cd $AUTOMATION_DIR && npx cucumber-js --dry-run $FEATURE_REL --profile e2e${NC}"
         echo ""
 
         # Detect folder from feature path
@@ -417,14 +439,32 @@ for spec in "${RESOLVED_SPECS[@]}"; do
                 DRY_RUN_REPORT2="$AUTOMATION_DIR/llm_reports/dry_run/${BASE_NAME}_dryrun_retry_$(date +%Y%m%d_%H%M%S).txt"
                 set +e
                 cd "$AUTOMATION_DIR"
+                echo -e "${CYAN}  Running: npx cucumber-js --dry-run $FEATURE_REL --profile e2e${NC}"
                 npx cucumber-js --dry-run "$FEATURE_FILE" --profile e2e > "$DRY_RUN_REPORT2" 2>&1
                 DRY_RUN_EXIT2=$?
                 set -e
 
-                if [ $DRY_RUN_EXIT2 -eq 0 ]; then
+                # Check for undefined steps in retry output too
+                DRY_RUN_CONTENT2=$(cat "$DRY_RUN_REPORT2" 2>/dev/null)
+                HAS_UNDEFINED_IN_RETRY=false
+                if echo "$DRY_RUN_CONTENT2" | grep -qiE 'Undefined'; then
+                    HAS_UNDEFINED_IN_RETRY=true
+                fi
+                if echo "$DRY_RUN_CONTENT2" | grep -qE '[0-9]+ undefined'; then
+                    HAS_UNDEFINED_IN_RETRY=true
+                fi
+                if echo "$DRY_RUN_CONTENT2" | grep -qE '[0-9]+ pending'; then
+                    HAS_UNDEFINED_IN_RETRY=true
+                fi
+
+                if [ $DRY_RUN_EXIT2 -eq 0 ] && [ "$HAS_UNDEFINED_IN_RETRY" = false ]; then
                     echo -e "${GREEN}✓ Dry-run passed after retry!${NC}"
                 else
-                    echo -e "${RED}✗ Dry-run still failing after retry${NC}"
+                    if [ "$HAS_UNDEFINED_IN_RETRY" = true ]; then
+                        echo -e "${RED}✗ Dry-run still has undefined/pending steps after retry${NC}"
+                    else
+                        echo -e "${RED}✗ Dry-run still failing after retry${NC}"
+                    fi
                     echo -e "  ${CYAN}Report:${NC} ${GREEN}cat $DRY_RUN_REPORT2${NC}"
                     echo -e "  ${CYAN}Manual dry-run:${NC} ${GREEN}cd $AUTOMATION_DIR && npx cucumber-js --dry-run $FEATURE_REL --profile e2e${NC}"
                     echo ""
@@ -504,7 +544,7 @@ else
     echo -e "${RED}✗ Tests failed (exit code: $TEST_EXIT)${NC}"
     echo ""
     echo -e "${YELLOW}💡 Recovery options:${NC}"
-    echo -e "  ${CYAN}Re-run tests:${NC} ${GREEN}npm run test:e2e${NC}"
+    echo -e "  ${CYAN}Re-run same tests:${NC} ${GREEN}npx cucumber-js --tags \"${TAG_EXPR}\" --profile e2e${NC}"
     for spec in "${RESOLVED_SPECS[@]}"; do
         BN=$(basename "$spec" .spec.ts)
         FF=$(find "$E2E_DIR" -name "*${BN}*.feature" -not -path "*/_previous/*" -type f 2>/dev/null | head -1)
@@ -513,7 +553,7 @@ else
             echo -e "  ${CYAN}Run specific:${NC} ${GREEN}npx cucumber-js $FF_REL --profile e2e${NC}"
         fi
     done
-    echo -e "  ${CYAN}Debug mode:${NC}  ${GREEN}npm run test:debug${NC}"
+    echo -e "  ${CYAN}Debug mode:${NC}  ${GREEN}npx cucumber-js --tags \"${TAG_EXPR}\" --profile e2e --format-options '{\"snippetInterface\":\"async-await\"}'${NC}"
 fi
 
 echo ""
