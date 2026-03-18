@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import path from 'path';
 import log from 'electron-log/main';
 import { config } from './config';
 import { setupDeepLinks } from '../services/deep-links';
@@ -19,6 +20,7 @@ import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-
 import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
+import { browserSettingsService } from '../services/browser-settings';
 import Sentry from "@sentry/electron/main";
 
 
@@ -244,8 +246,37 @@ function setupAppStateListeners(): void {
   });
 }
 
-// Handle new window requests from webviews
+// Handle webview preload scripts - will-attach-webview fires on the HOST webContents
 app.on('web-contents-created', (_event, webContents) => {
+  // Listen for will-attach-webview on any webContents (to catch webviews being created in the renderer)
+  webContents.on('will-attach-webview', (_event, webPreferences, _params) => {
+    // Set the webview preload script for Ask AI text selection
+    // In production, the preload script is in resources/app/dist
+    // In development, it's in the dist folder (parent of app folder where main.js is)
+    const webviewPreloadPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app', 'dist', 'webview-preload.js')
+      : path.join(__dirname, '..', 'webview-preload.js');
+    
+    webPreferences.preload = webviewPreloadPath;
+    log.info('[Main] Setting webview preload:', webviewPreloadPath);
+    
+    // Enable context isolation for security
+    webPreferences.contextIsolation = true;
+    // Disable node integration for security
+    webPreferences.nodeIntegration = false;
+    
+    // Apply browser settings to the webview
+    const settings = browserSettingsService.getSettings();
+    webPreferences.javascript = settings.javascript;
+    
+    log.info('[Main] Webview preferences set:', {
+      preload: webPreferences.preload,
+      nodeIntegration: webPreferences.nodeIntegration,
+      contextIsolation: webPreferences.contextIsolation,
+    });
+  });
+
+  // Handle new window requests from webviews
   if (webContents.getType() === 'webview') {
     webContents.setWindowOpenHandler(({ url }) => {      
       try {

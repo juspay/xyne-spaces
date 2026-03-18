@@ -1,0 +1,112 @@
+/**
+ * Xyne AI Chrome Extension - Styles
+ * 
+ * Styling for the floating "Ask AI" button
+ * Clean, minimal design with white background
+ */
+
+/* Reset and base styles for the Ask AI button */
+#xyne-ask-ai-button {
+  /* Reset all inherited styles */
+  all: initial;
+  
+  /* Positioning */
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  
+  /* Initial hidden state */
+  display: flex !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  transform: scale(0.95) !important;
+  pointer-events: none !important;
+  
+  /* Layout */
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 6px 10px !important;
+  
+  /* Appearance - Clean white design */
+  background: white !important;
+  color: #333 !important;
+  border: 1px solid #e0e0e0 !important;
+  border-radius: 6px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+  
+  /* Typography */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  
+  /* Interaction */
+  cursor: pointer !important;
+  
+  /* Transition */
+  transition: all 0.15s ease !important;
+}
+
+/* Visible state */
+#xyne-ask-ai-button.xyne-visible {
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: scale(1) !important;
+  pointer-events: auto !important;
+}
+
+/* Hover state */
+#xyne-ask-ai-button:hover {
+  background: #f8f8f8 !important;
+  border-color: #d0d0d0 !important;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18) !important;
+}
+
+/* Active state */
+#xyne-ask-ai-button:active {
+  transform: scale(0.98) !important;
+}
+
+/* Icon styling */
+#xyne-ask-ai-button .xyne-ask-ai-icon {
+  flex-shrink: 0 !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
+/* Text styling */
+#xyne-ask-ai-button .xyne-ask-ai-text {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  color: inherit !important;
+  line-height: inherit !important;
+}
+
+/* Focus state for accessibility */
+#xyne-ask-ai-button:focus {
+  outline: 2px solid #667eea !important;
+  outline-offset: 2px !important;
+}
+
+/* Ensure button doesn't get affected by page styles */
+#xyne-ask-ai-button * {
+  box-sizing: border-box !important;
+}
+
+/* Animation for button appearance */
+@keyframes xyne-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+#xyne-ask-ai-button.xyne-visible {
+  animation: xyne-fade-in 0.15s ease forwards !important;
+}

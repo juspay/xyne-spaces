@@ -104,6 +104,7 @@ export const useXyneAIStream = ({
       query: string,
       attachments: MessageAttachment[] = [],
       selectionContexts?: SelectionContext[],
+      displayContent?: string,
     ): Promise<void> => {
       // Allow empty query if there are selection contexts
       if (!query.trim() && (!selectionContexts || selectionContexts.length === 0)) return;
@@ -137,7 +138,7 @@ export const useXyneAIStream = ({
       const userMessage: Message = {
         id: `user-${Date.now()}`,
         type: 'user',
-        content: query,
+        content: displayContent ?? query,
         timestamp: new Date(),
         ...(attachments.length > 0 && { attachments }),
         ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),

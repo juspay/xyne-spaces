@@ -106,7 +106,78 @@ async function handleDeepLink(url: string): Promise<void> {
     return;
   }
 
-  // 2. Generic Navigation Case
+  // 2. Ask AI Context Case (from Chrome extension)
+  // e.g. xyne-spaces://ask-ai?text=...&url=...&domain=...&title=...
+  if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://ask-ai`)) {
+    try {
+      const urlObj = new URL(url);
+      const text = urlObj.searchParams.get('text') || '';
+      const sourceUrl = urlObj.searchParams.get('url') || '';
+      const domain = urlObj.searchParams.get('domain') || '';
+      const title = urlObj.searchParams.get('title') || '';
+
+      log.info('[DeepLinks] Ask AI context received:', { text: text.slice(0, 50), domain, title });
+
+      // Wait for mainWindow to be available (app might be launching)
+      const waitForWindow = async (): Promise<BrowserWindow | null> => {
+        if (mainWindow) return mainWindow;
+        
+        // Wait up to 10 seconds for window to be created
+        for (let i = 0; i < 100; i++) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          if (mainWindow) return mainWindow;
+        }
+        return null;
+      };
+
+      const window = await waitForWindow();
+
+      if (window) {
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+
+        // Wait for window to be ready before sending IPC
+        if (!window.webContents.isLoading()) {
+          window.webContents.send('open-xyne-ai-with-context', {
+            text,
+            url: sourceUrl,
+            domain,
+            title,
+            timestamp: Date.now(),
+          });
+        } else {
+          // Wait for page to finish loading
+          window.webContents.once('did-finish-load', () => {
+            window.webContents.send('open-xyne-ai-with-context', {
+              text,
+              url: sourceUrl,
+              domain,
+              title,
+              timestamp: Date.now(),
+            });
+          });
+        }
+
+        Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, {
+          url: 'ask-ai',
+          origin: 'chrome-extension',
+          hasText: !!text,
+          domain,
+        });
+      } else {
+        log.error('[DeepLinks] No window available after timeout');
+      }
+    } catch (error) {
+      Logger.logError(EnrollmentEvent.DEEP_LINK_HANDLING_FAILED, error, {
+        type: 'ask-ai',
+      });
+      log.error('Failed to handle ask-ai deep link:', error);
+    }
+    return;
+  }
+
+  // 3. Generic Navigation Case
   // e.g. xyne-spaces://chat/123 or xyne-spaces:///chat/123
   if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://`)) {
     // Strip protocol

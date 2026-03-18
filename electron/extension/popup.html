@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Xyne AI Assistant</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 300px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%);
+      color: #333;
+    }
+
+    .container {
+      padding: 20px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .title-section {
+      flex: 1;
+    }
+
+    .title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a1a2e;
+    }
+
+    .subtitle {
+      font-size: 12px;
+      color: #6c757d;
+      margin-top: 2px;
+    }
+
+    .status-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      margin-bottom: 16px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .status-label {
+      font-size: 14px;
+      color: #495057;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .status-badge.connected {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status-badge.disconnected {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .status-badge.checking {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .status-dot.connected {
+      background: #28a745;
+    }
+
+    .status-dot.disconnected {
+      background: #dc3545;
+    }
+
+    .status-dot.checking {
+      background: #ffc107;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .instructions {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+
+    .instructions-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #495057;
+      margin-bottom: 8px;
+    }
+
+    .instructions-list {
+      font-size: 12px;
+      color: #6c757d;
+      line-height: 1.6;
+      list-style: none;
+    }
+
+    .instructions-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .instructions-list li:last-child {
+      margin-bottom: 0;
+    }
+
+    .step-number {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-secondary {
+      background: #e9ecef;
+      color: #495057;
+    }
+
+    .btn-secondary:hover {
+      background: #dee2e6;
+    }
+
+    .vpn-warning {
+      display: none;
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      font-size: 12px;
+      color: #856404;
+    }
+
+    .vpn-warning.show {
+      display: block;
+    }
+
+    .vpn-warning-icon {
+      display: inline-block;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M7.27143 15.2409C7.26996 12.6631 6.89499 11.1104 6.00967 10.1694C5.13445 9.23917 3.58587 8.72653 0.726533 8.72653C0.325075 8.72653 0.000340076 8.40138 0 8C0 7.59833 0.324865 7.27143 0.726533 7.27143C3.5859 7.27143 5.13445 6.75882 6.00967 5.82854C6.89478 4.88743 7.27 3.33479 7.27143 0.757059C7.27144 0.747035 7.27144 0.736583 7.27143 0.726533C7.27166 0.325027 7.59849 0 8 0C8.40122 0.000339949 8.7263 0.325237 8.72653 0.726533C8.72654 0.737114 8.72654 0.748536 8.72653 0.759094C8.72813 3.33547 9.10364 4.8876 9.9883 5.82854C10.8634 6.75873 12.4126 7.27134 15.2714 7.27143C15.6731 7.27143 16 7.59833 16 8C15.9997 8.40138 15.6729 8.72653 15.2714 8.72653C12.4126 8.72663 10.8634 9.23923 9.9883 10.1694C9.10322 11.1105 8.72801 12.6634 8.72653 15.2409C8.72653 15.251 8.72653 15.2633 8.72653 15.2735C8.72585 15.6744 8.40094 15.9997 8 16C7.59877 16 7.27212 15.6746 7.27143 15.2735C7.27144 15.2633 7.27144 15.251 7.27143 15.2409Z" fill="white"/>
+        </svg>
+      </div>
+      <div class="title-section">
+        <div class="title">Xyne AI Assistant</div>
+        <div class="subtitle">Ask AI about any text</div>
+      </div>
+    </div>
+
+    <div class="status-card">
+      <div class="status-row">
+        <span class="status-label">VPN Status</span>
+        <div id="vpnStatus" class="status-badge checking">
+          <span class="status-dot checking"></span>
+          <span id="vpnStatusText">Checking...</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="vpnWarning" class="vpn-warning">
+      <span class="vpn-warning-icon">⚠️</span>
+      Please connect to VPN to use Xyne AI Assistant.
+    </div>
+
+    <div class="instructions">
+      <div class="instructions-title">How to use</div>
+      <ul class="instructions-list">
+        <li>
+          <span class="step-number">1</span>
+          <span>Select any text on a webpage</span>
+        </li>
+        <li>
+          <span class="step-number">2</span>
+          <span>Click the "Ask AI" button that appears</span>
+        </li>
+        <li>
+          <span class="step-number">3</span>
+          <span>Xyne Spaces will open with your question</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="actions">
+      <button id="refreshBtn" class="btn btn-secondary">Refresh Status</button>
+      <button id="openAppBtn" class="btn btn-primary">Open Xyne Spaces</button>
+    </div>
+  </div>
+
+  <script>
+    // Elements
+    const vpnStatusEl = document.getElementById('vpnStatus');
+    const vpnStatusTextEl = document.getElementById('vpnStatusText');
+    const vpnWarningEl = document.getElementById('vpnWarning');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const openAppBtn = document.getElementById('openAppBtn');
+
+    // Update VPN status UI
+    function updateVPNStatus(isConnected, isChecking = false) {
+      vpnStatusEl.className = 'status-badge ' + (isChecking ? 'checking' : (isConnected ? 'connected' : 'disconnected'));
+      
+      const dot = vpnStatusEl.querySelector('.status-dot');
+      dot.className = 'status-dot ' + (isChecking ? 'checking' : (isConnected ? 'connected' : 'disconnected'));
+      
+      vpnStatusTextEl.textContent = isChecking ? 'Checking...' : (isConnected ? 'Connected' : 'Disconnected');
+      
+      // Show/hide warning
+      vpnWarningEl.classList.toggle('show', !isConnected && !isChecking);
+      
+      // Update open app button state
+      openAppBtn.style.opacity = isConnected ? '1' : '0.5';
+      openAppBtn.style.pointerEvents = isConnected ? 'auto' : 'none';
+    }
+
+    // Check VPN status
+    function checkVPNStatus() {
+      updateVPNStatus(false, true);
+      
+      chrome.runtime.sendMessage({ type: 'CHECK_VPN' }, (response) => {
+        if (response) {
+          updateVPNStatus(response.isConnected);
+        } else {
+          updateVPNStatus(false);
+        }
+      });
+    }
+
+    // Refresh button click
+    refreshBtn.addEventListener('click', checkVPNStatus);
+
+    // Open app button click
+    openAppBtn.addEventListener('click', () => {
+      chrome.tabs.create({
+        url: 'xyne-spaces://',
+        active: false,
+      }, (tab) => {
+        // Close the tab after triggering deep link
+        setTimeout(() => {
+          if (tab && tab.id) {
+            chrome.tabs.remove(tab.id).catch(() => {});
+          }
+        }, 500);
+      });
+      window.close();
+    });
+
+    // Initial check
+    checkVPNStatus();
+  </script>
+</body>
+</html>

@@ -65,6 +65,14 @@ const XyneAISidebar = ({
   const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [selectedActivities, setSelectedActivities] = useState<UserActivity[]>([]);
+  const [browserContext, setBrowserContext] = useState<{
+    type: 'browser';
+    text: string;
+    url: string;
+    domain: string;
+    title: string;
+    timestamp: number;
+  } | null>(null);
   const [activeSelectionInfos, setActiveSelectionInfos] = useState<SelectionInfo[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -151,6 +159,15 @@ const XyneAISidebar = ({
   });
 
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
+
+  // Auto-enable web search when browser context is provided (and user has access)
+  // Web search stays enabled for the session to allow follow-up questions
+  useEffect(() => {
+    if (browserContext && webSearchAccessible && !webSearchEnabled) {
+      console.log('[XyneAISidebar] Auto-enabling web search for browser context');
+      setWebSearchEnabled(true);
+    }
+  }, [browserContext, webSearchAccessible, webSearchEnabled]);
 
   // Suggestion queries - different based on context
   const suggestionQueries = channelId
@@ -687,10 +704,21 @@ const XyneAISidebar = ({
     // Allow submission if there's input, activities, OR selection contexts
     if (!inputValue.trim() && selectedActivities.length === 0 && activeSelectionInfos.length === 0)
       return;
+
+    // Store the display content (what the user typed, without hidden context)
+    const displayContent = inputValue.trim();
+
+    // Build the full query with all context for the AI
     let query = inputValue;
 
     if (selectedActivities.length > 0) {
       query = query + formatActivitiesAsText(selectedActivities);
+    }
+
+    // Add browser context if present (hidden from display but sent to AI)
+    if (browserContext) {
+      const contextText = `\n\n[Browser Context]\nSelected Text: "${browserContext.text}"\nFrom: ${browserContext.title} (${browserContext.url})\nDomain: ${browserContext.domain}`;
+      query = query + contextText;
     }
 
     // Note: Selection text is NOT appended to query here - it's handled internally in useXyneAIStream
@@ -719,6 +747,7 @@ const XyneAISidebar = ({
     setInputValue('');
     setAttachments([]);
     setSelectedActivities([]);
+    setBrowserContext(null); // Clear browser context after submit
     // Note: Don't clear selection infos - they persist for follow-up questions
 
     // Scroll immediately after clearing input, before query is submitted
@@ -726,12 +755,13 @@ const XyneAISidebar = ({
       scrollToBottom();
     }, 50);
 
-    await submitQuery(query, messageAttachments, selectionContexts);
+    await submitQuery(query, messageAttachments, selectionContexts, displayContent);
   }, [
     inputValue,
     attachments,
     selectedActivities,
     activeSelectionInfos,
+    browserContext,
     submitQuery,
     scrollToBottom,
   ]);
@@ -830,6 +860,7 @@ const XyneAISidebar = ({
             onThreadInfoChange={setActiveThreadInfo}
             onSelectionInfosChange={setActiveSelectionInfos}
             onAttachmentsChange={setAttachments}
+            onBrowserContextChange={setBrowserContext}
             selectedActivities={selectedActivities}
             onActivitiesChange={setSelectedActivities}
             isStreaming={messages.some(m => m.isStreaming)}

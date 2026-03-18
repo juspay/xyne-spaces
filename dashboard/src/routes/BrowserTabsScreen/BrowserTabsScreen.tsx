@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { isElectronApp } from '../../utils/electronApp';
 import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
 import { useActivityTracking } from '../../hooks/useActivityTracking';
+import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { BrowserSettingsMenu } from '../../components/BrowserPanel/BrowserSettingsMenu';
 
 // Define WebviewTag interface locally since Electron types may not be available in renderer
@@ -28,6 +29,22 @@ interface WebviewTag extends HTMLElement {
   canGoForward(): boolean;
   getURL(): string;
   openDevTools(): void;
+  addEventListener(event: string, callback: (e: Event) => void): void;
+  removeEventListener(event: string, callback: (e: Event) => void): void;
+}
+
+// Browser context data for Ask AI
+interface BrowserContextData {
+  text: string;
+  url: string;
+  domain: string;
+  title: string;
+}
+
+// IPC message event from webview
+interface WebviewIPCMessageEvent extends Event {
+  channel: string;
+  args: unknown[];
 }
 
 interface BrowserTabsScreenProps {
@@ -66,12 +83,16 @@ function WebviewTab({
 
     const onTitle = (e: Event) => {
       const detail = (e as CustomEvent<{ title: string }>).detail;
-      onUpdate(tab.id, { title: detail.title });
+      if (detail?.title) {
+        onUpdate(tab.id, { title: detail.title });
+      }
     };
     const onFavicon = (e: Event) => {
       const detail = (e as CustomEvent<{ favicons: string[] }>).detail;
-      const favicon = detail.favicons[0];
-      onUpdate(tab.id, { favicon: favicon ? favicon : undefined });
+      const favicon = detail?.favicons?.[0];
+      if (favicon !== undefined) {
+        onUpdate(tab.id, { favicon: favicon || undefined });
+      }
     };
     const onNav = () => {
       onUpdate(tab.id, {
@@ -88,6 +109,44 @@ function WebviewTab({
       onNewWindow(detail.url);
     };
 
+    // Handle Ask AI requests from webview
+    const onAskAI = (e: Event) => {
+      const ipcEvent = e as WebviewIPCMessageEvent;
+      const channel = ipcEvent.channel;
+      const args = ipcEvent.args || [];
+
+      if (channel !== 'ask-ai-request') return;
+
+      const detail = args[0] as BrowserContextData | undefined;
+      if (!detail) return;
+
+      // Open XyneAI sidebar with browser context
+      xyneAIActor.send({
+        type: 'OPEN',
+        contextType: 'general',
+      });
+
+      // Store the browser context in session storage for XyneAI to pick up
+      try {
+        const contextPill = {
+          type: 'browser',
+          text: detail.text,
+          url: detail.url,
+          domain: detail.domain,
+          title: detail.title,
+          timestamp: Date.now(),
+        };
+        sessionStorage.setItem('xyne-ai-browser-context', JSON.stringify(contextPill));
+
+        // Dispatch a custom event that XyneAI can listen to
+        window.dispatchEvent(
+          new CustomEvent('xyne-ai-browser-context-ready', { detail: contextPill }),
+        );
+      } catch (error) {
+        console.error('[BrowserTabsScreen] Failed to store browser context:', error);
+      }
+    };
+
     wv.addEventListener('page-title-updated', onTitle);
     wv.addEventListener('page-favicon-updated', onFavicon);
     wv.addEventListener('did-navigate', onNav);
@@ -95,6 +154,7 @@ function WebviewTab({
     wv.addEventListener('did-start-loading', onStart);
     wv.addEventListener('did-stop-loading', onStop);
     wv.addEventListener('new-window', onNewWin);
+    wv.addEventListener('ipc-message', onAskAI);
 
     return () => {
       wv.removeEventListener('page-title-updated', onTitle);
@@ -104,6 +164,7 @@ function WebviewTab({
       wv.removeEventListener('did-start-loading', onStart);
       wv.removeEventListener('did-stop-loading', onStop);
       wv.removeEventListener('new-window', onNewWin);
+      wv.removeEventListener('ipc-message', onAskAI);
       delete webviewRefs.current[tab.id];
     };
   }, [tab.id]);
@@ -112,6 +173,8 @@ function WebviewTab({
     ref,
     src: initialUrlRef.current,
     partition: 'persist:browser-tabs',
+    // Don't set preload here - let will-attach-webview event in main.ts set it automatically
+    // This avoids issues with file paths and ensures the correct absolute path is used
     style: {
       position: 'absolute' as const,
       inset: 0,
