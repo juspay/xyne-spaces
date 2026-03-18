@@ -1,3 +1,24 @@
+## [1.96.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.95.0...v1.96.0) (2026-03-18)
+
+
+### Features
+
+* add rerun in deterministic steps + more ui changes ([67cbd71](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/67cbd7178b2511efdcc41cf72db364e930f0e70a)), closes [#4202](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4202)
+* ask ai browser plugin ([372579f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/372579f510bc4b76f0743c7fa21766c9c6fb8039)), closes [#4167](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4167)
+* record multi user ([ca72649](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ca726494bdb187251134c70d59449837a5b4b393)), closes [#4198](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4198)
+* Retain Cached Conversations ([0ba6e5e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0ba6e5eec81b3fbae5bca6b7b90c9825771b8558)), closes [#4084](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4084)
+
+
+### Bug Fixes
+
+* :Auto-generate release notes upon ticket completion ([dd9ae70](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dd9ae708ffaaf9f425761fb1cf08719d85712a58)), closes [#4152](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4152)
+* Add pagination to Call History Screen ([719a8c2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/719a8c2094f806316693b8a9423a6abe907f31f2)), closes [#4200](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4200)
+* add ticket ID (xyneId) to search results subtitle in Cmd+K menu ([46b0f78](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/46b0f78c6dd1b9d11f1e1130f4ffb1d7cec2b67f)), closes [#4120](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4120)
+* Jiraffe migration bug ([48755bb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/48755bb440873a9354c2c0ac495d70b8bafaa69a)), closes [#4209](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4209)
+* remove unnecessary recap access check and simplify recap button rendering ([b719e26](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b719e2623c3d177ad91c2820b4158aaadc9d3e34)), closes [#4196](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4196)
+* Update workflow attempts view ([695a466](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/695a46681c785777c48c90e455d58880760335d5)), closes [#4180](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4180)
+* Xyne recording delete fix ([929bc17](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/929bc171acc8b3587370c43d049fb7a9b3a4876e)), closes [#4204](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4204)
+
 ## [1.95.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.94.0...v1.95.0) (2026-03-18)
 
 
