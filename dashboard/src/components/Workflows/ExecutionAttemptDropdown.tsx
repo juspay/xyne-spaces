@@ -39,9 +39,9 @@ const ExecutionAttemptDropdown: React.FC<ExecutionAttemptDropdownProps> = ({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className='flex items-center gap-1 px-2.5 py-1 rounded-md border border-input text-xs bg-background hover:bg-blue-100 hover:border-blue-300 transition-colors h-[26px] min-w-[120px] font-medium leading-[1.2]'>
+        <button className='flex items-center gap-1 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-medium hover:text-foreground hover:bg-muted/80 transition-colors'>
           Attempt {currentExecutionIndex + 1} of {orderedExecutionMetadata.length}
-          <ChevronDown size={14} />
+          <ChevronDown size={12} />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align='start' className='z-[100] min-w-[320px]'>
