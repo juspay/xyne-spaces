@@ -20,6 +20,18 @@ import { vespaQueue } from '../../queues/vespaQueue';
 
 const ENABLE_NOTIFICATIONS = true;
 
+// Jiraffe team name -> Xyne usergroup alias 
+const TEAM_NAME_TO_USERGROUP_ALIAS = new Map<string, string>([
+   ['INTEGRATIONS', 'euler-domain'],
+   ['FEATURES', 'features-oneteam'],
+   ['KVTEAM', 'kv-oneteam'],
+   ['MANDATES', 'mandates-oneteam'],
+   ['EMI', 'emi-oneteam'],
+   ['OFFERS', 'offers-oneteam'],
+   ['QA', 'qa-oneteam'],
+   ['CARDS', 'cards-oneteam'],
+]);
+
 interface BitbotTicket {
    id: string;
    assigned_username: string | null;
@@ -31,6 +43,7 @@ interface BitbotTicket {
    stage: string | null;
    task_description: string;
    task_type: string;
+   team_name: string | null;
 }
 
 interface MigrationJiraffeInput {
@@ -305,6 +318,20 @@ async function ingestTicket(
       titleText = fallbackTitle;
    }
 
+   let resolvedUserGroupId: string | undefined;
+   if (ticket.team_name?.trim()) {
+      const mappedAlias = TEAM_NAME_TO_USERGROUP_ALIAS.get(ticket.team_name.trim().toUpperCase());
+      if (mappedAlias) {
+         const userGroup = await db.userGroup.findFirst({
+            where: { alias: mappedAlias },
+            select: { id: true },
+         });
+         if (userGroup?.id) {
+            resolvedUserGroupId = userGroup.id;
+         } 
+      } 
+   }
+
    // Create conversation
    const conversation = await conversationService.createConversationWithMessage({
       channelId,
@@ -347,6 +374,7 @@ async function ingestTicket(
          channelId: channelId,
          projectId: projectId,
          boardId: boardId,
+         ...(resolvedUserGroupId && { userGroupId: resolvedUserGroupId }),
          stageName: ticket.stage?.replace(/_/g, ' ').toUpperCase() || 'TO BE PICKED',
          xyneId: xyneId,
          ...(assignedToUserId && { assignedTo: assignedToUserId }),
