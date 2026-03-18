@@ -37,6 +37,16 @@ const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
 
 import type { UserActivity } from '../../../../hooks/useUserActivity';
 
+// Browser context interface
+interface BrowserContext {
+  type: 'browser';
+  text: string;
+  url: string;
+  domain: string;
+  title: string;
+  timestamp: number;
+}
+
 interface XyneAIInputBoxProps {
   channelId?: string | null;
   channelName?: string;
@@ -54,6 +64,7 @@ interface XyneAIInputBoxProps {
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
   onAttachmentsChange?: (attachments: Attachment[]) => void;
+  onBrowserContextChange?: (context: BrowserContext | null) => void;
   selectedActivities?: UserActivity[];
   onActivitiesChange?: (activities: UserActivity[]) => void;
   isStreaming?: boolean;
@@ -97,6 +108,7 @@ export const XyneAIInputBox = ({
   onThreadInfoChange,
   onSelectionInfosChange,
   onAttachmentsChange,
+  onBrowserContextChange,
   selectedActivities = [],
   onActivitiesChange,
   isStreaming = false,
@@ -178,6 +190,9 @@ export const XyneAIInputBox = ({
     selectionInfos ?? [],
   );
 
+  // Browser context state
+  const [browserContext, setBrowserContext] = useState<BrowserContext | null>(null);
+
   // Update activeThreadInfo when threadInfo prop changes
   useEffect(() => {
     setActiveThreadInfo(threadInfo ?? null);
@@ -192,6 +207,73 @@ export const XyneAIInputBox = ({
   useEffect(() => {
     setActiveSelectionInfos(selectionInfos ?? []);
   }, [selectionInfos]);
+
+  // Listen for browser context from webview
+  useEffect(() => {
+    const handleBrowserContext = (event: CustomEvent<BrowserContext>) => {
+      const context = event.detail;
+
+      // Validate context data for security
+      if (!context || typeof context !== 'object') {
+        console.warn('[XyneAI] Invalid browser context received');
+        return;
+      }
+
+      // Sanitize text - limit length and remove potentially dangerous content
+      const sanitizedText = String(context.text || '')
+        .slice(0, 5000)
+        .trim();
+      const sanitizedUrl = String(context.url || '').slice(0, 2000);
+      const sanitizedDomain = String(context.domain || '').slice(0, 500);
+      const sanitizedTitle = String(context.title || '').slice(0, 500);
+
+      if (!sanitizedText || !sanitizedUrl) {
+        console.warn('[XyneAI] Browser context missing required fields');
+        return;
+      }
+
+      // Set the browser context
+      setBrowserContext({
+        type: 'browser',
+        text: sanitizedText,
+        url: sanitizedUrl,
+        domain: sanitizedDomain,
+        title: sanitizedTitle,
+        timestamp: Date.now(),
+      });
+
+      // Clear from session storage for security
+      try {
+        sessionStorage.removeItem('xyne-ai-browser-context');
+      } catch (error) {
+        console.error('[XyneAI] Failed to clear browser context from storage:', error);
+      }
+
+      // Don't auto-populate - let user type their own question
+      // The context is in the pill, user can ask anything about it
+    };
+
+    // Listen for the custom event
+    window.addEventListener('xyne-ai-browser-context-ready', handleBrowserContext as EventListener);
+
+    // Also check sessionStorage on mount (in case event was missed)
+    try {
+      const stored = sessionStorage.getItem('xyne-ai-browser-context');
+      if (stored) {
+        const parsed = JSON.parse(stored) as BrowserContext;
+        handleBrowserContext(new CustomEvent('xyne-ai-browser-context-ready', { detail: parsed }));
+      }
+    } catch (error) {
+      console.error('[XyneAI] Failed to parse browser context from storage:', error);
+    }
+
+    return () => {
+      window.removeEventListener(
+        'xyne-ai-browser-context-ready',
+        handleBrowserContext as EventListener,
+      );
+    };
+  }, []);
 
   // Handle removing thread info
   const handleRemoveThreadInfo = (e: React.MouseEvent): void => {
@@ -272,6 +354,24 @@ export const XyneAIInputBox = ({
     // Close XyneAI modal on mobile after navigation
     if (isMobile) {
       xyneAIActor.send({ type: 'CLOSE' });
+    }
+  };
+
+  // Handle removing browser context
+  const handleRemoveBrowserContext = (e: React.MouseEvent): void => {
+    e.stopPropagation();
+    setBrowserContext(null);
+  };
+
+  // Handle clicking browser context pill to open URL
+  const handleBrowserContextClick = (): void => {
+    if (!browserContext?.url) return;
+
+    // Open URL in system browser or new window
+    if (window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal(browserContext.url);
+    } else {
+      window.open(browserContext.url, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -754,6 +854,11 @@ export const XyneAIInputBox = ({
     onResearchContextChange?.(selectedResearch);
   }, [selectedResearch, onResearchContextChange]);
 
+  // Notify parent when browser context changes
+  useEffect(() => {
+    onBrowserContextChange?.(browserContext);
+  }, [browserContext, onBrowserContextChange]);
+
   // Filter research items based on search query
   const filteredResearchItems = useMemo(() => {
     const items = researchTab === 'products' ? products : repositories;
@@ -980,6 +1085,44 @@ export const XyneAIInputBox = ({
               </button>
             </div>
           ))}
+
+          {/* Browser Context Pill */}
+          {browserContext && (
+            <div
+              className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#667eea] bg-gradient-to-r from-[#667eea]/10 to-[#764ba2]/10 flex-shrink-0`}
+            >
+              <button
+                type='button'
+                onClick={handleBrowserContextClick}
+                className='flex items-center gap-1 cursor-pointer hover:bg-white/50 transition-colors bg-transparent border-0 p-0 rounded px-1'
+                aria-label={`Open ${browserContext.domain}`}
+                title={`${browserContext.title}\n${browserContext.url}`}
+                data-track-category='XYNE_AI'
+                data-track-name='ClickBrowserContextPill'
+                data-track-metadata={JSON.stringify({
+                  url: browserContext.url,
+                  domain: browserContext.domain,
+                })}
+              >
+                <Globe className='w-3.5 h-3.5 text-[#667eea] flex-shrink-0' />
+                <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
+                  {browserContext.text.slice(0, 50)}
+                  {browserContext.text.length > 50 ? '...' : ''} • {browserContext.domain}
+                </span>
+              </button>
+              <button
+                type='button'
+                onClick={handleRemoveBrowserContext}
+                className='hover:bg-white/70 rounded p-0.5 transition-colors flex-shrink-0'
+                aria-label='Remove browser context'
+                data-track-category='XYNE_AI'
+                data-track-name='RemoveBrowserContext'
+                data-track-metadata={JSON.stringify({ url: browserContext.url })}
+              >
+                <X className='w-3 h-3 text-[#667eea]' />
+              </button>
+            </div>
+          )}
 
           {/* Channel Pills */}
           {selectedChannels.map(channel => (

@@ -1,5 +1,6 @@
 export interface ElectronAPI {
   openExternal: (url: string) => void;
+  getWebviewPreloadPath?: () => string;
   clearAllCookies: () => void;
   setBadgeCount: (count: number) => void;
   showNotification: (data: { title: string; body: string; actionUrl?: string }) => void;
@@ -18,6 +19,15 @@ export interface ElectronAPI {
   onNavigateTo: (callback: (url: string) => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
   onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
+  onOpenXyneAIWithContext: (
+    callback: (data: {
+      text: string;
+      url: string;
+      domain: string;
+      title: string;
+      timestamp: number;
+    }) => void,
+  ) => () => void;
   onAuthSuccess: (callback: () => void) => void;
   onTokenExpired: (callback: () => void) => void;
   openPreviewWindow: (url: string, userAgent?: string) => void;

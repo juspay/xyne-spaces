@@ -14,7 +14,6 @@ import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
-import { browserSettingsService } from '../services/browser-settings';
 import { safeRecordMetric } from '../services/telemetry';
 import type { Counter } from '@opentelemetry/api';
 
@@ -158,17 +157,6 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 
   console.log('✅ setWindowOpenHandler configured for main window');
 
-  // Configure webview behavior when webviews are attached
-  mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
-    delete webPreferences.preload;
-    // Disable Node.js integration in webviews for security
-    webPreferences.nodeIntegration = false;
-    webPreferences.contextIsolation = true;
-    
-    // Apply browser settings to the webview
-    const settings = browserSettingsService.getSettings();
-    webPreferences.javascript = settings.javascript;
-  });
 
   // Setup spellchecker context menu
   setupSpellcheckerContextMenu(mainWindow);

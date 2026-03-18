@@ -1,4 +1,5 @@
 import { ipcMain, shell, app, BrowserView, BrowserWindow } from 'electron';
+import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData } from '../services/cookies';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
@@ -22,6 +23,13 @@ export function setupIpcHandlers(): void {
 
   // Set up mTLS IPC handlers
   setupMTLSIpcHandlers();
+
+  // Webview preload path handler
+  ipcMain.on('get-webview-preload-path', (event) => {
+    // Return absolute path to webview preload script
+    const preloadPath = path.join(__dirname, 'webview-preload.js');
+    event.returnValue = preloadPath;
+  });
 
   // Code Server IPC handlers
   ipcMain.handle('code-server:start', async () => {

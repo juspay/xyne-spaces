@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('open-external', url);
   },
 
+  // Get absolute path to webview preload script
+  getWebviewPreloadPath: (): string => {
+    return ipcRenderer.sendSync('get-webview-preload-path');
+  },
+
   clearAllCookies: () => {
     ipcRenderer.send('clear-all-cookies');
   },
@@ -53,6 +58,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_event: unknown, data: { ticketId: string }) => callback(data);
     ipcRenderer.on('navigate-to-ticket-thread', listener);
     return () => ipcRenderer.removeListener('navigate-to-ticket-thread', listener);
+  },
+
+  onOpenXyneAIWithContext: (callback: (data: { text: string; url: string; domain: string; title: string; timestamp: number }) => void) => {
+    const listener = (_event: unknown, data: { text: string; url: string; domain: string; title: string; timestamp: number }) => callback(data);
+    ipcRenderer.on('open-xyne-ai-with-context', listener);
+    return () => ipcRenderer.removeListener('open-xyne-ai-with-context', listener);
   },
 
   onOpenInBrowserPanel: (callback: (url: string) => void) => {
