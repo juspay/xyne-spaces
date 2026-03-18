@@ -588,16 +588,27 @@ export const queries = defineQueries({
       .orderBy('startsAt', 'asc')
       .related('participants');
   }),
-  userCallHistory: defineQuery(() => {
-    return zql.calls
-      .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
-      .where(helpers =>
-        helpers.cmp('status', 'NOT IN', [CallStatus.SCHEDULED, CallStatus.CANCELLED]),
-      )
-      .orderBy('startedAt', 'desc')
-      .limit(100)
-      .related('participants');
-  }),
+  userCallHistory: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+    }),
+    ({ args: { limit, start } }) => {
+      let query = zql.calls
+        .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
+        .where(helpers =>
+          helpers.cmp('status', 'NOT IN', [CallStatus.SCHEDULED, CallStatus.CANCELLED]),
+        )
+        .orderBy('startedAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
+      }
+
+      return query.limit(limit).related('participants');
+    },
+  ),
 
   userActivities: defineQuery(() => {
     return zql.activities
