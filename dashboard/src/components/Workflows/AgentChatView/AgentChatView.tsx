@@ -12,8 +12,18 @@ import {
   FileEdit,
   Bot,
   Repeat,
+  Zap,
+  Layers,
 } from 'lucide-react';
-import { CombinedWorkflowData } from '../../../services/Workflow/workflowGraphService.types';
+import { toast } from 'sonner';
+import { useWorkflowControl } from '../../../services/Workflow/workflowGraphService';
+import { StepRerunButton } from './StepRerunButton';
+import ExecutionAttemptDropdown from '../ExecutionAttemptDropdown';
+import {
+  CombinedWorkflowData,
+  ExecutionMetadata,
+  WorkflowStep,
+} from '../../../services/Workflow/workflowGraphService.types';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AgentAvatar } from './AgentAvatar';
 import { ReviewerFeedback, parseReviewerFeedback } from './ReviewerFeedback';
@@ -36,9 +46,10 @@ import { ResponseModal } from './ResponseModal';
 import LiveEditsPanel from '../LiveEditsPanel';
 import { useUser } from '../../../hooks/useUsers';
 import Avatar from '../../ui/Avatar/Avatar';
+import Tooltip from '../../ui/Tooltip/Tooltip';
 
 const StatusIcon: React.FC<{ status: string; size?: number }> = ({ status, size = 12 }) => {
-  const containerClass = 'flex items-center justify-center rounded-md p-1';
+  const containerClass = 'flex items-center justify-center rounded-md p-0.5';
   switch (status) {
     case 'running':
       return (
@@ -251,16 +262,22 @@ const EmptyState: React.FC = () => (
 export interface AgentChatViewProps {
   combinedStepsData: CombinedWorkflowData | null;
   graphNodes: GraphNodeInfo[];
-  onClose?: () => void;
-  hideTabs?: boolean;
-  ticketDescription?: string;
-  createdBy?: string | null;
+  onClose?: () => void | undefined;
+  hideTabs?: boolean | undefined;
+  ticketDescription?: string | undefined;
+  createdBy?: string | null | undefined;
+  executionId?: string | undefined;
+  onExecutionChange?: ((executionId: string) => void) | undefined;
+  onNavigateToStep?: (nodeIndex: number) => void;
 }
 
-const WorkflowRequestCard: React.FC<{ description: string; createdBy: string }> = ({
-  description,
-  createdBy,
-}) => {
+const WorkflowRequestCard: React.FC<{
+  description: string;
+  createdBy: string;
+  executionMetadata?: ExecutionMetadata[] | undefined;
+  selectedExecutionId?: string | undefined;
+  onExecutionSelect?: ((executionId: string) => void) | undefined;
+}> = ({ description, createdBy, executionMetadata, selectedExecutionId, onExecutionSelect }) => {
   const user = useUser(createdBy);
   const displayName = user?.name || user?.email || createdBy;
 
@@ -270,11 +287,15 @@ const WorkflowRequestCard: React.FC<{ description: string; createdBy: string }> 
         <Avatar userId={createdBy} size='rg' showActiveStatus={false} className='rounded-full' />
       </div>
       <div className='flex-1 min-w-0'>
-        <div className='flex items-center gap-1.5 mb-1.5'>
+        <div className='flex items-center gap-1.5 mb-1.5 flex-wrap'>
           <span className='text-xs font-semibold text-slate-700'>{displayName}</span>
-          <span className='text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-            Started workflow
-          </span>
+          {executionMetadata && selectedExecutionId && onExecutionSelect && (
+            <ExecutionAttemptDropdown
+              executionMetadata={executionMetadata}
+              selectedExecutionId={selectedExecutionId}
+              onExecutionSelect={onExecutionSelect}
+            />
+          )}
         </div>
         <div className='rounded-xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 bg-slate-50 border border-slate-200/60'>
           <TruncatableMarkdownContent
@@ -307,9 +328,14 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
   hideTabs,
   ticketDescription,
   createdBy: createdByProp,
+  executionId,
+  onExecutionChange,
+  onNavigateToStep,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(0);
+  const { continueAgenticStepAsync } = useWorkflowControl();
+  const [isSettingMode, setIsSettingMode] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'chat' | 'diff'>('chat');
 
@@ -409,14 +435,7 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
     });
   }, [combinedStepsData, graphNodes]);
 
-  const visibleMessages = agentMessages.filter(
-    m =>
-      m.summary ||
-      m.subMessages.length > 0 ||
-      m.editSteps.length > 0 ||
-      m.status === 'running' ||
-      m.status === 'failed',
-  );
+  const visibleMessages = agentMessages;
 
   const groupedContent = useMemo(() => {
     const result: (AgentMessage | { type: 'loop'; baseName: string; messages: AgentMessage[] })[] =
@@ -439,6 +458,58 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
 
     return result;
   }, [visibleMessages]);
+
+  const currentExecutionMetadata = combinedStepsData?.workflows?.[0]?.executionMetadata?.find(
+    meta => meta.executionId === executionId,
+  );
+  const executionMode = currentExecutionMetadata?.mode;
+  const executionStatus = currentExecutionMetadata?.executionStatus;
+
+  const handleGoToAutomatic = async (): Promise<void> => {
+    if (!executionId) return;
+
+    let lastAgentInputStep: WorkflowStep | null = null;
+    if (combinedStepsData?.workflows?.length) {
+      for (const workflow of combinedStepsData.workflows) {
+        for (const step of workflow.steps) {
+          if (step.stepExecutorType?.toLowerCase() === 'agent' && step.type === 'input') {
+            lastAgentInputStep = step;
+          }
+        }
+      }
+    }
+
+    if (!lastAgentInputStep) {
+      toast.error('Cannot switch mode', {
+        description: 'No agent checkpoint found',
+        duration: 3000,
+      });
+      return;
+    }
+
+    setIsSettingMode(true);
+    try {
+      await continueAgenticStepAsync({
+        executionId: lastAgentInputStep.workflowExecutionId || executionId,
+        stepId: lastAgentInputStep.id,
+        message: '',
+      });
+      toast.success('Mode switched', {
+        description: 'Execution will proceed automatically',
+        duration: 3000,
+      });
+    } catch (error: unknown) {
+      toast.error('Failed to switch mode', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+        duration: 4000,
+      });
+    } finally {
+      setIsSettingMode(false);
+    }
+  };
+
+  const showGoToAutomaticButton =
+    executionMode === 'MANUAL' && executionStatus === 'WAIT_FOR_EVENT';
 
   useEffect(() => {
     const currentCount = agentMessages.filter(m => m.summary || m.status === 'running').length;
@@ -534,7 +605,13 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
         ) : (
           <div className='flex flex-col gap-4'>
             {requestCreatedBy && requestDescription && (
-              <WorkflowRequestCard description={requestDescription} createdBy={requestCreatedBy} />
+              <WorkflowRequestCard
+                description={requestDescription}
+                createdBy={requestCreatedBy}
+                executionMetadata={combinedStepsData?.workflows?.[0]?.executionMetadata}
+                selectedExecutionId={executionId}
+                onExecutionSelect={onExecutionChange}
+              />
             )}
             {visibleMessages.length === 0 ? (
               <EmptyState />
@@ -572,6 +649,17 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
                                 message={msg}
                                 isLatest={msg === visibleMessages[visibleMessages.length - 1]}
                                 onViewMore={openModal}
+                                {...(executionId && combinedStepsData && graphNodes
+                                  ? {
+                                      executionId,
+                                      combinedStepsData,
+                                      graphNodes,
+                                      onExecutionChange,
+                                      executionMode,
+                                      executionStatus,
+                                      onNavigateToStep,
+                                    }
+                                  : {})}
                               />
                             </div>
                           ))}
@@ -593,9 +681,40 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
                       message={msg}
                       isLatest={msg === visibleMessages[visibleMessages.length - 1]}
                       onViewMore={openModal}
+                      {...(executionId && combinedStepsData && graphNodes
+                        ? {
+                            executionId,
+                            combinedStepsData,
+                            graphNodes,
+                            onExecutionChange,
+                            executionMode,
+                            executionStatus,
+                            onNavigateToStep,
+                          }
+                        : {})}
                     />
                   );
                 })}
+
+                {showGoToAutomaticButton && (
+                  <div className='flex justify-center mt-2 mb-4'>
+                    <button
+                      onClick={() => void handleGoToAutomatic()}
+                      disabled={isSettingMode}
+                      className='flex items-center gap-2 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 transition-all shadow-sm hover:shadow disabled:opacity-50'
+                      data-track-category='Workflows'
+                      data-track-name='GoToAutomaticFromChat'
+                      data-track-metadata={JSON.stringify({ executionId })}
+                    >
+                      {isSettingMode ? (
+                        <Loader2 size={16} className='animate-spin' />
+                      ) : (
+                        <Zap size={16} fill='currentColor' />
+                      )}
+                      Go to Automatic
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -625,8 +744,26 @@ const AgentMessageBubble: React.FC<{
     agentInfo: AgentInfo,
     stepName: string,
     timestamp?: string,
-  ) => void;
-}> = ({ message, isLatest, onViewMore }) => {
+  ) => void | undefined;
+  executionId?: string | undefined;
+  combinedStepsData?: CombinedWorkflowData | null | undefined;
+  graphNodes?: GraphNodeInfo[] | undefined;
+  onExecutionChange?: ((executionId: string) => void) | undefined;
+  executionMode?: string | undefined;
+  executionStatus?: string | undefined;
+  onNavigateToStep?: (nodeIndex: number) => void;
+}> = ({
+  message,
+  isLatest,
+  onViewMore,
+  executionId,
+  combinedStepsData,
+  graphNodes,
+  onExecutionChange,
+  executionMode,
+  executionStatus,
+  onNavigateToStep,
+}) => {
   const [isTurnsExpanded, setIsTurnsExpanded] = useState(false);
   const [isSummaryFullyVisible, setIsSummaryFullyVisible] = useState(true);
   const { agentInfo, stepName, status, summary, createdAt, subMessages, editSteps } = message;
@@ -668,10 +805,49 @@ const AgentMessageBubble: React.FC<{
             </span>
           )}
 
-          <span className='flex items-center gap-1 text-[10px] text-muted-foreground ml-auto'>
-            <StatusIcon status={status} size={10} />
-            <span className='capitalize hidden sm:inline'>{status}</span>
-          </span>
+          <div className='flex items-center gap-1 text-[10px] text-muted-foreground ml-auto'>
+            <Tooltip content={status.charAt(0).toUpperCase() + status.slice(1)}>
+              <div className='flex'>
+                <StatusIcon
+                  status={
+                    isRunning &&
+                    executionMode === 'MANUAL' &&
+                    executionStatus === 'WAIT_FOR_EVENT' &&
+                    isLatest
+                      ? 'pending'
+                      : status
+                  }
+                  size={13}
+                />
+              </div>
+            </Tooltip>
+            {onNavigateToStep && (
+              <Tooltip content='Jump to chat view'>
+                <button
+                  onClick={() => onNavigateToStep(message.nodeIndex)}
+                  className='p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
+                  data-track-category='Workflows'
+                  data-track-name='NavigateToAdvancedStep'
+                  data-track-metadata={JSON.stringify({ nodeIndex: message.nodeIndex })}
+                >
+                  <Layers size={14} className='text-muted-foreground' />
+                </button>
+              </Tooltip>
+            )}
+            {/* Rerun button */}
+            {executionId &&
+              combinedStepsData &&
+              graphNodes &&
+              message.nodeIndex < graphNodes.length && (
+                <StepRerunButton
+                  executionId={executionId}
+                  stepIds={graphNodes[message.nodeIndex]?.stepIds || []}
+                  combinedStepsData={combinedStepsData}
+                  {...(onExecutionChange ? { onRerun: onExecutionChange } : {})}
+                  size={13}
+                />
+              )}
+          </div>
           {/* Validation/Status metadata row ending */}
         </div>
 
@@ -694,8 +870,17 @@ const AgentMessageBubble: React.FC<{
               )
             ) : isRunning ? (
               <div className='flex items-center gap-2 text-sm text-muted-foreground py-0.5'>
-                <Loader2 size={14} className='animate-spin text-sky-400' />
-                <span>Running…</span>
+                {executionMode === 'MANUAL' && executionStatus === 'WAIT_FOR_EVENT' && isLatest ? (
+                  <>
+                    <Clock size={14} className='text-amber-500' />
+                    <span>Waiting for input…</span>
+                  </>
+                ) : (
+                  <>
+                    <Loader2 size={14} className='animate-spin text-sky-400' />
+                    <span>Running…</span>
+                  </>
+                )}
               </div>
             ) : (
               <span className='text-sm text-muted-foreground italic'>No output available</span>

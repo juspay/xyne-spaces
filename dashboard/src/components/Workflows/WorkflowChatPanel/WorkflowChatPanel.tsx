@@ -16,6 +16,7 @@ import {
   Zap,
   Check,
   Circle,
+  RotateCcw,
   AlertCircle,
   AlertTriangle,
   CheckCircle,
@@ -282,7 +283,13 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
     height: 0,
   });
   const headerRef = useRef<HTMLDivElement>(null);
-  const { continueAgenticStepAsync, isContinuing, resetContinue } = useWorkflowControl();
+  const {
+    continueAgenticStepAsync,
+    isContinuing,
+    resetContinue,
+    restoreExecutionAsync,
+    isRestoring,
+  } = useWorkflowControl();
   const [isSettingMode, setIsSettingMode] = useState(false);
 
   useEffect(() => {
@@ -754,15 +761,6 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
   );
   const executionMode = currentExecutionMetadata?.mode;
   const executionStatus = currentExecutionMetadata?.executionStatus;
-
-  // Debug logging
-  console.log('[WorkflowChatPanel] Debug:', {
-    executionId,
-    executionMode,
-    executionStatus,
-    showGoToAutomaticButton: executionMode === 'MANUAL' && executionStatus === 'WAIT_FOR_EVENT',
-    executionMetadata: combinedStepsData?.workflows?.[0]?.executionMetadata,
-  });
 
   // Handler for "Go to Automatic" button - uses continue API without a message
   const handleGoToAutomatic = async (): Promise<void> => {
@@ -1473,42 +1471,6 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
               </div>
             )}
 
-            {/* Search Bar Input */}
-            {isSearchOpen && (
-              <div className='mt-2.5 mb-1 px-1'>
-                <div className='relative flex items-center bg-background border border-border rounded-lg focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 shadow-sm'>
-                  <Search size={14} className='absolute left-3 text-muted-foreground' />
-                  {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
-                  <input
-                    type='text'
-                    placeholder='Search in steps, payloads, logs...'
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    className='w-full pl-9 pr-24 py-2 text-sm bg-transparent !outline-none border-none rounded-lg text-foreground focus:outline-none focus:ring-0 focus:border-transparent'
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
-                    autoFocus
-                    data-track-category='Workflows'
-                    data-track-name='SearchInput'
-                  />
-                  {searchQuery && (
-                    <div className='absolute right-2 flex items-center gap-1.5'>
-                      <span className='text-[10px] text-muted-foreground font-medium px-1.5 py-0.5 bg-muted border border-border rounded flex-shrink-0'>
-                        {searchedSteps.length} result{searchedSteps.length !== 1 ? 's' : ''}
-                      </span>
-                      <button
-                        onClick={() => setSearchQuery('')}
-                        className='p-1 rounded hover:bg-muted text-muted-foreground hover:text-muted-foreground transition-colors flex-shrink-0'
-                        data-track-category='Workflows'
-                        data-track-name='ClearSearch'
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* Legacy filter indicator (when selectedNodeStepIds is used without graphNodes) */}
             {graphNodes.length === 0 && selectedNodeStepIds && selectedNodeStepIds.length > 0 && (
               <div className='flex items-center gap-1.5 mt-2 px-1'>
@@ -1530,6 +1492,42 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
               </div>
             )}
           </div>
+
+          {/* Search Bar Input */}
+          {isSearchOpen && (
+            <div className='flex-shrink-0 border-b border-border px-3 py-2.5 bg-muted/10'>
+              <div className='relative flex items-center bg-background border border-border rounded-lg focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 shadow-sm'>
+                <Search size={14} className='absolute left-3 text-muted-foreground' />
+                {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+                <input
+                  type='text'
+                  placeholder='Search in steps, payloads, logs...'
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className='w-full pl-9 pr-24 py-2 flex-1 text-sm bg-transparent !outline-none border-none rounded-lg text-foreground focus:outline-none focus:ring-0 focus:border-transparent'
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
+                  data-track-category='Workflows'
+                  data-track-name='SearchInput'
+                />
+                {searchQuery && (
+                  <div className='absolute right-2 flex items-center gap-1.5'>
+                    <span className='text-[10px] text-muted-foreground font-medium px-1.5 py-0.5 bg-muted border border-border rounded flex-shrink-0'>
+                      {searchedSteps.length} result{searchedSteps.length !== 1 ? 's' : ''}
+                    </span>
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className='p-1 rounded hover:bg-muted text-muted-foreground hover:text-muted-foreground transition-colors flex-shrink-0'
+                      data-track-category='Workflows'
+                      data-track-name='ClearSearch'
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {/* Only show tab bar if there are more than one tab */}
           {tabs.length > 1 && (
             <div className='flex-shrink-0 border-b border-border'>
@@ -1558,6 +1556,12 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 graphNodes={graphNodes}
                 hideTabs={true}
                 {...(ticketDescription && { ticketDescription })}
+                executionId={executionId}
+                onExecutionChange={onExecutionChange}
+                onNavigateToStep={index => {
+                  setDesktopMode('advanced');
+                  setCurrentNodeIndex(index);
+                }}
               />
             </div>
           ) : (
@@ -1756,12 +1760,66 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       </button>
                     </div>
                   </div>
-                ) : !currentNode ? (
+                ) : currentNode ? (
+                  <div className='flex items-center justify-end py-2'>
+                    <button
+                      onClick={() => {
+                        if (!executionId || !currentNode) return;
+                        const stepId = currentNode.stepIds[0];
+                        if (!stepId) return;
+                        let stepExecutionId = executionId;
+                        if (combinedStepsData?.workflows?.length) {
+                          for (const workflow of combinedStepsData.workflows) {
+                            for (const step of workflow.steps) {
+                              if (step.id === stepId && step.workflowExecutionId) {
+                                stepExecutionId = step.workflowExecutionId;
+                                break;
+                              }
+                            }
+                          }
+                        }
+                        void restoreExecutionAsync({ executionId: stepExecutionId, stepId }).then(
+                          result => {
+                            toast.success('Rerun started', {
+                              description: 'Execution restarted from this step',
+                              duration: 3000,
+                            });
+                            if (result.rerunExecutionId && onExecutionChange) {
+                              onExecutionChange(result.rerunExecutionId);
+                            }
+                          },
+                          (error: unknown) => {
+                            toast.error('Rerun failed', {
+                              description:
+                                error instanceof Error ? error.message : 'Failed to rerun step',
+                              duration: 4000,
+                            });
+                          },
+                        );
+                      }}
+                      disabled={isRestoring || !executionId}
+                      className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition-colors disabled:opacity-50'
+                      data-track-category='Workflows'
+                      data-track-name='RerunDeterministicStep'
+                      data-track-metadata={JSON.stringify({
+                        executionId,
+                        stepName: currentNode?.stepName,
+                      })}
+                    >
+                      {isRestoring ? (
+                        <Loader2 size={14} className='animate-spin' />
+                      ) : (
+                        <RotateCcw size={14} />
+                      )}
+                      Rerun from here
+                    </button>
+                  </div>
+                ) : (
                   <div className='flex items-center justify-center gap-2 py-3 px-4 bg-gray-50 rounded-lg border border-gray-200'>
                     <Circle size={16} className='text-gray-300' />
                     <span className='text-sm text-gray-500'>No step selected</span>
                   </div>
-                ) : null}
+                )}
               </div>
             </>
           )}
@@ -1812,6 +1870,8 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     combinedStepsData={combinedStepsData}
                     graphNodes={graphNodes}
                     onClose={() => setIsAgentChatOpen(false)}
+                    executionId={executionId}
+                    onExecutionChange={onExecutionChange}
                   />
                 </div>
               </div>,
