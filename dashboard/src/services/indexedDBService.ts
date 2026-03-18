@@ -9,6 +9,8 @@ const DB_PREFIX = 'xyne-state-machine';
 const STORE_NAME = 'state';
 const SCHEMA_VERSION_KEY = '_schemaVersion';
 
+export const FINGERPRINT_FIELD = '__conversationFingerprint__';
+
 class IndexedDBService {
   private db: IDBDatabase | null = null;
   private initPromise: Promise<IDBDatabase> | null = null;
@@ -16,9 +18,8 @@ class IndexedDBService {
   private currentUserId: string | null = null;
 
   /**
-   * Initialize IndexedDB with schema version validation
-   * Drops and recreates DB if schema version doesn't match
-   * Scopes database to the provided userId
+   * Initialize IndexedDB.
+   * Scopes database to the provided userId.
    */
   async init(userId: string, schemaVersion: string): Promise<IDBDatabase> {
     // If already initialized with same userId and version, return existing
@@ -61,35 +62,17 @@ class IndexedDBService {
       request.onsuccess = async () => {
         const db = request.result;
 
-        // Check stored schema version
         try {
           const storedVersion = await this.getStoredSchemaVersion(db);
-
-          if (storedVersion !== null && storedVersion !== schemaVersion) {
-            // Schema version mismatch - drop and recreate
-            console.log(
-              `Schema version mismatch (stored: ${storedVersion}, current: ${schemaVersion}). Dropping database.`,
-            );
-            db.close();
-            await this.dropDatabase();
-            // Reopen with fresh DB
-            const newDb = await this.recreateDatabase(schemaVersion);
-            this.db = newDb;
-            resolve(newDb);
-            return;
-          }
-
-          // Store current schema version if not set
           if (storedVersion === null) {
             await this.setStoredSchemaVersion(db, schemaVersion);
           }
-
-          this.db = db;
-          resolve(db);
         } catch {
-          this.db = db;
-          resolve(db);
+          // Ignore errors
         }
+
+        this.db = db;
+        resolve(db);
       };
 
       request.onupgradeneeded = event => {
@@ -132,51 +115,6 @@ class IndexedDBService {
 
       request.onsuccess = () => resolve();
       request.onerror = () => reject(new Error('Failed to store schema version'));
-    });
-  }
-
-  private async dropDatabase(): Promise<void> {
-    if (!this.currentUserId) {
-      return;
-    }
-
-    const dbName = this.getDatabaseName(this.currentUserId);
-
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.deleteDatabase(dbName);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(new Error('Failed to delete database'));
-      request.onblocked = () => {
-        console.warn('Database deletion blocked, proceeding anyway');
-        resolve();
-      };
-    });
-  }
-
-  private async recreateDatabase(schemaVersion: string): Promise<IDBDatabase> {
-    if (!this.currentUserId) {
-      throw new Error('Cannot recreate database: no userId set');
-    }
-
-    const dbName = this.getDatabaseName(this.currentUserId);
-
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(dbName, 1);
-
-      request.onerror = () => reject(new Error('Failed to recreate IndexedDB'));
-
-      request.onsuccess = async () => {
-        const db = request.result;
-        await this.setStoredSchemaVersion(db, schemaVersion);
-        resolve(db);
-      };
-
-      request.onupgradeneeded = event => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME);
-        }
-      };
     });
   }
 

@@ -1,5 +1,5 @@
 import { setup, assign, createActor } from 'xstate';
-import { indexedDBService } from '../services/indexedDBService';
+import { indexedDBService, FINGERPRINT_FIELD } from '../services/indexedDBService';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
 import { QueryResult } from '@rocicorp/zero/react';
@@ -10,18 +10,14 @@ import { QueryResult } from '@rocicorp/zero/react';
  * XState machine for managing query result caching.
  * Stores query results in a Map indexed by query hash.
  * Persists to IndexedDB for cross-session caching.
- * Implements access-based TTL eviction (2 days).
  */
-
-const TTL_DEFAULT_MS = 2 * 24 * 60 * 60 * 1000; // 2 days in milliseconds
 
 /* -------------------------- TYPES -------------------------- */
 
-export type Conversation = QueryResultType<typeof queries.channelConversationsPaginated>[number];
+export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV2>[number];
 
 export interface CacheEntry<T> {
   data: QueryResult<T>;
-  lastAccessed: number; // Timestamp in ms
 }
 
 export interface QueryCacheContext {
@@ -50,9 +46,7 @@ export type QueryCacheEvent =
         [channelId: string]: Conversation[];
       };
     }
-  | { type: 'SET_CONVERSATIONS'; channelId: string; conversations: Conversation[] }
-  | { type: 'ACCESS_KEY'; hash: string }
-  | { type: 'EVICT_STALE_ENTRIES' };
+  | { type: 'SET_CONVERSATIONS'; channelId: string; conversations: Conversation[] };
 
 /* -------------------------- STATE MACHINE -------------------------- */
 
@@ -74,7 +68,6 @@ export const queryCacheMachine = setup({
       const newCache = new Map(context.cache);
       newCache.set(event.hash, {
         data: event.data,
-        lastAccessed: Date.now(),
       });
 
       return {
@@ -123,47 +116,6 @@ export const queryCacheMachine = setup({
         channelConversations: wrappedConversations,
       };
     }),
-    updateAccessTime: assign(({ event, context }) => {
-      if (event.type === 'ACCESS_KEY') {
-        const entry = context.cache.get(event.hash);
-        if (!entry) return context;
-
-        const newCache = new Map(context.cache);
-        newCache.set(event.hash, {
-          ...entry,
-          lastAccessed: Date.now(),
-        });
-
-        return {
-          ...context,
-          cache: newCache,
-        };
-      }
-      return context;
-    }),
-    evictStaleEntries: assign(({ context }) => {
-      const now = Date.now();
-
-      // Evict stale cache entries
-      //eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const newCache = new Map<string, CacheEntry<any>>();
-      for (const [key, entry] of context.cache) {
-        if (now - entry.lastAccessed < TTL_DEFAULT_MS) {
-          newCache.set(key, entry);
-        }
-      }
-
-      const cacheEvictedCount = context.cache.size - newCache.size;
-
-      if (cacheEvictedCount > 0) {
-        console.log(`Evicted ${cacheEvictedCount} stale cache entries`);
-      }
-
-      return {
-        ...context,
-        cache: newCache,
-      };
-    }),
   },
 }).createMachine({
   id: 'queryCache',
@@ -184,15 +136,6 @@ export const queryCacheMachine = setup({
     SET_CONVERSATIONS: {
       actions: 'setConversations',
     },
-    ACCESS_KEY: {
-      actions: 'updateAccessTime',
-    },
-    ACCESS_CONVERSATION: {
-      actions: 'updateAccessTime',
-    },
-    EVICT_STALE_ENTRIES: {
-      actions: 'evictStaleEntries',
-    },
   },
 });
 
@@ -203,10 +146,33 @@ let persistTimeout: NodeJS.Timeout | null = null;
 const PERSIST_DEBOUNCE_MS = 500;
 
 /**
+ * Get the AST-based hash for the channelConversationsPaginatedV2 query.
+ * This hash changes automatically when the query structure changes.
+ */
+export const getChannelConversationsQueryHash = (context: { userID: string }): string => {
+  try {
+    // Build the query with context and dummy args to get the Query object
+    // The fn() returns a QueryImpl which has the hash() method
+    const query = queries.channelConversationsPaginatedV2.fn({
+      args: {
+        channelId: '__dummy__',
+        limit: 1,
+        start: null,
+        direction: 'forward' as const,
+      },
+      ctx: context,
+    });
+    // @ts-expect-error - hash() is part of QueryImpl, not public Query interface
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return query.hash() as string;
+  } catch {
+    return '';
+  }
+};
+
+/**
  * Setup persistence middleware for query cache
- * Initializes IndexedDB and subscribes to state changes
- * Saves each cache entry and conversation as individual keys in IndexedDB
- * TTL logic is handled by XState machine via lastAccessed timestamps
+ * Initializes IndexedDB and subscribes to state changes.
  */
 export const setupQueryCachePersistence = (userId: string, schemaVersion: string): void => {
   // Initialize IndexedDB with schema version and userId
@@ -231,12 +197,17 @@ export const setupQueryCachePersistence = (userId: string, schemaVersion: string
             });
           });
 
-          // Save conversations
-          indexedDBService
-            .saveContextProperty(`channelConversations`, channelConversations)
-            .catch(error => {
-              console.error(`Failed to persist conversations to IndexedDB:`, error);
-            });
+          // Compute the hash for channelConversations query and embed it
+          const conversationHash = getChannelConversationsQueryHash({ userID: userId });
+
+          const payload: Record<string, unknown> = {
+            ...channelConversations,
+            [FINGERPRINT_FIELD]: conversationHash,
+          };
+
+          indexedDBService.saveContextProperty('channelConversations', payload).catch(error => {
+            console.error('Failed to persist conversations to IndexedDB:', error);
+          });
         }, PERSIST_DEBOUNCE_MS);
       }),
     )
@@ -246,8 +217,11 @@ export const setupQueryCachePersistence = (userId: string, schemaVersion: string
 };
 
 /**
- * Hydrate query cache and conversations from IndexedDB
- * Loads persisted cache entries and conversations in separate operations
+ * Hydrate query cache and conversations from IndexedDB.
+ *
+ * For channelConversations, the stored payload includes a hash that was computed
+ * from the query structure at save time. At hydration, we compare it with the
+ * current hash - if they differ, the query has changed and we discard the cached data.
  */
 export const hydrateQueryCacheFromIndexedDB = async (
   userId: string,
@@ -269,13 +243,35 @@ export const hydrateQueryCacheFromIndexedDB = async (
     const cacheData: Record<string, CacheEntry<any>> = {};
     const conversationsData: Record<string, Conversation[]> = {};
 
+    // Get current hash for channelConversations query
+    const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
+
     for (const [key, value] of Object.entries(context)) {
       if (key === 'channelConversations') {
-        Object.assign(conversationsData, value as Record<string, Conversation[]>);
+        const raw = value as Record<string, unknown>;
+
+        // Compare the stored query hash with the current hash
+        const storedHash = raw[FINGERPRINT_FIELD] as string | undefined;
+
+        if (storedHash !== undefined && storedHash !== currentConversationHash) {
+          console.log(
+            'channelConversations discarded: query has changed since last save ' +
+              `(stored hash: ${storedHash}, current: ${currentConversationHash}).`,
+          );
+          continue;
+        }
+
+        for (const [channelId, conversations] of Object.entries(raw)) {
+          if (channelId === FINGERPRINT_FIELD) continue;
+          if (Array.isArray(conversations) && conversations.length > 0) {
+            conversationsData[channelId] = conversations as Conversation[];
+          }
+        }
       } else {
-        // Regular cache entry - now storing CacheEntry objects directly
+        // Regular cache entry
+        const entry = value as CacheEntry<unknown>;
         //eslint-disable-next-line @typescript-eslint/no-explicit-any
-        cacheData[key] = value as CacheEntry<any>;
+        cacheData[key] = entry as CacheEntry<any>;
       }
     }
 

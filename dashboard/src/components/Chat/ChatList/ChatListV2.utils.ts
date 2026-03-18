@@ -387,8 +387,6 @@ export const useCombinedMesseges = (
     });
   }, [combinedMessages, isMobile, isNewMsgBoundaryIndex]);
 
-  console.log('V11 [DEBUG] itemHeights computed', itemHeights.length, itemHeights[0]);
-
   return {
     groupCounts,
     dateGroups,
