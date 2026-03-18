@@ -15,7 +15,6 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
-import { useSelf } from '../../../hooks/useUsers';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
 import { groupChannelsByScope } from './ChatDirectory.utils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
@@ -56,8 +55,6 @@ const ChatDirectory = ({
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel();
   const { isMobile } = usePlatform();
-  const currentUser = useSelf();
-  const [recapAccessible, setRecapAccessible] = useState(false);
 
   // Get unread activities count with cancelled reactions filtered out
   const activityCount = useUnreadActivitiesCount();
@@ -70,15 +67,6 @@ const ChatDirectory = ({
 
   // Get unread counts for all channels (for DMs)
   const unreadCounts = useAllUnreadCount();
-
-  // Check if user has access to recap from metadata
-  useEffect(() => {
-    if (currentUser?.metadata) {
-      const metadata = currentUser.metadata as { recap_enabled?: boolean };
-      const hasAccess = metadata.recap_enabled === true;
-      setRecapAccessible(hasAccess);
-    }
-  }, [currentUser?.metadata]);
 
   const createChannelMutation = useMutation({
     mutationFn: (data: CreateChannelFormData) => channelService.createChannel(data),
@@ -362,41 +350,39 @@ const ChatDirectory = ({
             </span>
           )}
         </button>
-        {recapAccessible && (
-          <button
-            className={cn(
-              'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
-              recapUnreadCount > 0
-                ? 'text-sidebar-primary-foreground'
-                : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-            )}
-            onMouseEnter={() => {
-              // Pre-fetch recap data on hover for instant load
-              prefetchRecap();
-            }}
-            onClick={() => {
-              // Always navigate to recap page first
-              void navigate('/chat/dir/recap');
-            }}
-            data-track-category='CHAT_SIDEBAR'
-            data-track-name='OPEN_RECAP'
-          >
+        <button
+          className={cn(
+            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
+            recapUnreadCount > 0
+              ? 'text-sidebar-primary-foreground'
+              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
+          )}
+          onMouseEnter={() => {
+            // Pre-fetch recap data on hover for instant load
+            prefetchRecap();
+          }}
+          onClick={() => {
+            // Always navigate to recap page first
+            void navigate('/chat/dir/recap');
+          }}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_RECAP'
+        >
+          <span className='size-5 flex items-center justify-center shrink-0'>
+            <Sparkles className='size-4' />
+          </span>
+          <span className='flex-1 min-w-0 text-left truncate block'>Recap</span>
+          {recapUnreadCount > 0 && (
             <span className='size-5 flex items-center justify-center shrink-0'>
-              <Sparkles className='size-4' />
+              <Badge
+                variant='success'
+                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
+              >
+                {recapUnreadCount > 10 ? '10+' : recapUnreadCount}
+              </Badge>
             </span>
-            <span className='flex-1 min-w-0 text-left truncate block'>Recap</span>
-            {recapUnreadCount > 0 && (
-              <span className='size-5 flex items-center justify-center shrink-0'>
-                <Badge
-                  variant='success'
-                  className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
-                >
-                  {recapUnreadCount > 10 ? '10+' : recapUnreadCount}
-                </Badge>
-              </span>
-            )}
-          </button>
-        )}
+          )}
+        </button>
       </div>
 
       <div className='py-3 w-full hidden md:block'>
