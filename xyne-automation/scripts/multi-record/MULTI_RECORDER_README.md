@@ -21,6 +21,7 @@ npm run record-multi-user -- --users 3
 ```
 
 You'll be prompted for:
+
 1. **Test name** → becomes the filename (`tests/actions/<name>.spec.ts`)
 2. **Number of users** (if not passed via `--users`)
 
@@ -30,27 +31,27 @@ You'll be prompted for:
 
 While interacting with the browser windows, use modifier keys to record different actions:
 
-| Action | What Gets Recorded | Use Case |
-|--------|-------------------|----------|
-| **Click** | `await locator.click()` | Normal button/element click |
-| **Shift + Click** | `await expect(locator).toBeVisible()` | Assert element is visible |
-| **Alt + Click** | `await locator.hover()` | Hover over element |
-| **Ctrl + Click** | `await expect(locator).toHaveText('...')` | Assert exact text match |
-| **Cmd + Click** | `await expect(locator).toContainText('...')` | Assert text contains |
-| **Shift + Alt + Click** | `await expect(locator).toBeHidden()` | Assert element is hidden |
-| **Ctrl + Shift + Click** | `await expect(locator).toBeEnabled()` | Assert element is enabled |
+| Action                   | What Gets Recorded                           | Use Case                    |
+| ------------------------ | -------------------------------------------- | --------------------------- |
+| **Click**                | `await locator.click()`                      | Normal button/element click |
+| **Shift + Click**        | `await expect(locator).toBeVisible()`        | Assert element is visible   |
+| **Alt + Click**          | `await locator.hover()`                      | Hover over element          |
+| **Ctrl + Click**         | `await expect(locator).toHaveText('...')`    | Assert exact text match     |
+| **Cmd + Click**          | `await expect(locator).toContainText('...')` | Assert text contains        |
+| **Shift + Alt + Click**  | `await expect(locator).toBeHidden()`         | Assert element is hidden    |
+| **Ctrl + Shift + Click** | `await expect(locator).toBeEnabled()`        | Assert element is enabled   |
 
 > **Note:** Modifier-key clicks prevent the actual click from happening in the app — they only record the assertion/hover.
 
 ### Input Recording
 
-| Action | What Gets Recorded |
-|--------|-------------------|
-| Type in an input | `await locator.fill('typed value')` (debounced 800ms) |
-| Press **Enter** | `await locator.press('Enter')` (flushes pending input first) |
-| Press **Escape** | `await locator.press('Escape')` |
-| Press **Tab** | `await locator.press('Tab')` |
-| URL changes (SPA) | `await page.waitForURL('...')` (polled every 500ms) |
+| Action            | What Gets Recorded                                           |
+| ----------------- | ------------------------------------------------------------ |
+| Type in an input  | `await locator.fill('typed value')` (debounced 800ms)        |
+| Press **Enter**   | `await locator.press('Enter')` (flushes pending input first) |
+| Press **Escape**  | `await locator.press('Escape')`                              |
+| Press **Tab**     | `await locator.press('Tab')`                                 |
+| URL changes (SPA) | `await page.waitForURL('...')` (polled every 500ms)          |
 
 ---
 
@@ -58,10 +59,10 @@ While interacting with the browser windows, use modifier keys to record differen
 
 The recorder picks locators in this order:
 
-1. **`data-testid`** → `page.getByTestId('my-button')` *(best — most stable)*
+1. **`data-testid`** → `page.getByTestId('my-button')` _(best — most stable)_
 2. **`role` + text** → `page.getByRole('button', { name: 'Submit' })`
-3. **Text content** → `page.getByText('Submit')` *(only for button, a, span, li, div)*
-4. **`placeholder`** → `page.getByPlaceholder('Search...')` *(for inputs)*
+3. **Text content** → `page.getByText('Submit')` _(only for button, a, span, li, div)_
+4. **`placeholder`** → `page.getByPlaceholder('Search...')` _(for inputs)_
 
 > **Tip:** Add `data-testid` attributes to your components for the most reliable test selectors.
 
@@ -135,6 +136,7 @@ Node.js:     page.on('console', msg => { /* parse MARKER + JSON */ })
 ### Available Browsers
 
 The recorder detects available browser configs by scanning:
+
 - Setup feature files (`*setup*.feature`) — Examples tables
 - All feature files — `Given using browser "..."` / `Given a browser "..."` steps
 - `tests/shared/browser.steps.ts`
@@ -148,6 +150,7 @@ If you need more than the currently configured browsers:
 1. Add a new row in the setup feature's Examples table:
 
    **`tests/03_e2e/04_messages/01_setup.feature`**
+
    ```gherkin
    Examples:
      | user  | browser        | user_context | landing_page |
@@ -157,6 +160,7 @@ If you need more than the currently configured browsers:
    ```
 
 2. This uses the existing step:
+
    ```gherkin
    Given a browser "user4-browser" with viewport 1280x720
    ```
@@ -173,7 +177,6 @@ The recorder generates a file like:
 import { test, expect } from '@playwright/test';
 
 test('my-test', async ({ browser }) => {
-
   // ============================================
   // User 1: Admin
   // ============================================
@@ -221,12 +224,12 @@ npm run codegen -- convert:skip-all tests/actions/my-test.spec.ts
 
 The recorder automatically filters out noise:
 
-| Filter | Why |
-|--------|-----|
-| Layout tags (`html`, `body`, `main`, `section`, etc.) | Not interactive elements |
-| Layout roles (`main`, `banner`, `navigation`, etc.) | Would produce useless selectors |
-| Text longer than 50 chars | Likely a container div, not a button |
-| Input debounce (800ms) | Records final value, not every keystroke |
+| Filter                                                | Why                                      |
+| ----------------------------------------------------- | ---------------------------------------- |
+| Layout tags (`html`, `body`, `main`, `section`, etc.) | Not interactive elements                 |
+| Layout roles (`main`, `banner`, `navigation`, etc.)   | Would produce useless selectors          |
+| Text longer than 50 chars                             | Likely a container div, not a button     |
+| Input debounce (800ms)                                | Records final value, not every keystroke |
 
 ---
 
@@ -254,26 +257,31 @@ npx cucumber-js --tags "@setup or @my-test" --profile e2e   ← Step 3: Run
 ## Troubleshooting
 
 ### Actions not being recorded
+
 - Check the terminal — every action is logged in real-time
 - Make sure you're clicking on interactive elements (buttons, links, inputs)
 - Elements without `data-testid`, `role`, or visible text won't be captured
 - The recorder re-injects on navigation, but iframe content is not captured
 
 ### Modifier-key clicks doing the normal action
+
 - `e.preventDefault()` and `e.stopPropagation()` should block the real click
 - Some framework-level event handlers might still fire
 - If so, the assertion is still recorded — just ignore the UI side-effect
 
 ### URL changes not captured
+
 - The recorder polls every 500ms — very fast navigations might be missed
 - SPA hash changes are captured
 - Full page reloads trigger re-injection automatically
 
 ### Too many duplicate `fill()` actions
+
 - The 800ms debounce reduces noise but typing slowly may produce multiple fills
 - The codegen conversion LLM will clean these up during the convert step
 
 ### Browser limit warning
+
 - The shell script warns if you request more users than configured browsers
 - Add more browsers via the setup feature (see "Adding More Browsers" above)
 
@@ -281,8 +289,8 @@ npx cucumber-js --tags "@setup or @my-test" --profile e2e   ← Step 3: Run
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable   | Default                 | Description                     |
+| ---------- | ----------------------- | ------------------------------- |
 | `BASE_URL` | `http://localhost:5173` | App URL for all browser windows |
 
 ---

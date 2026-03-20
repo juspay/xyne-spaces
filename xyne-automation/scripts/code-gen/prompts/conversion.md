@@ -115,6 +115,7 @@ Some elements look like inputs but are actually `<div>` containers for rich text
 - ✅ CORRECT: `And I type "user:user2-browser.email" on the element "#search"`
 
 ## Dynamic Value Handling Rules:
+
 - When the Playwright test navigates to a URL and later returns to it, use `I store the current path as "<variable>"` to capture the dynamic URL after creation, then `I open the Xyne-Space at "<variable>"` to navigate back.
 - NEVER hardcode dynamic URLs, IDs, or paths that are generated at runtime (e.g., canvas IDs, ticket IDs, project slugs).
 - When the Playwright code does `page.url()` or stores a URL/path, convert it to the store-path pattern.
@@ -128,11 +129,12 @@ Some elements look like inputs but are actually `<div>` containers for rich text
 - The .steps.ts file MUST compile with zero TypeScript errors.
 - Do NOT access properties that do not exist on Config, CustomWorld, Page, or Locator types.
 - **CRITICAL — Import Paths**: ALWAYS use `@/` path aliases for imports. NEVER use relative paths like `../../../`. The project has tsconfig path aliases configured:
+
   ```typescript
   // ✅ CORRECT
   import { CustomWorld } from '@/fixtures/cucumber.world';
   import '@/fixtures/cucumber.parameters';
-  
+
   // ❌ WRONG — NEVER use relative paths
   import { CustomWorld } from '../../../fixtures/cucumber.world';
   ```
@@ -358,6 +360,7 @@ Feature: My Feature
 ```
 
 ## Selector Rules:
+
 - **ABSOLUTELY FORBIDDEN**: NEVER use `[role='paragraph']`, `[role='textbox']`, `[role='application']` or ANY `[role='...']` selector as a click or type target. These do NOT work in Cucumber.
 - **ABSOLUTELY FORBIDDEN**: NEVER append `[role='...']` to a testid selector. If you have `[data-testid='canvas-editor']`, use it ALONE — never `[data-testid='canvas-editor'] [role='textbox']`.
 - **ABSOLUTELY FORBIDDEN**: NEVER use `:nth-of-type()`, `:nth-child()`, or similar CSS pseudo-selectors.

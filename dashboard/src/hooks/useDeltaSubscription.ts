@@ -98,6 +98,7 @@ export function useDeltaSubscription<
   useEffect(() => {
     if (!isHydrated) return;
     if (isLoaded) {
+      // Already have data from previous session - mark as done immediately
       setIsInitialFetchDone(true);
       return;
     }

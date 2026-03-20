@@ -9,15 +9,15 @@ npm run setup
 
 This single command does **everything** automatically:
 
-| Step | What it does |
-|------|-------------|
-| 1 | Checks Node.js version (requires 20, 22, or >=24) — installs v22 via nvm if needed |
-| 2 | Runs `npm install` for all xyne-automation dependencies |
-| 3 | Installs Playwright + Chromium browser |
-| 4 | Installs Claude CLI (`curl -fsSL https://claude.ai/install.sh \| bash`) |
-| 5 | Prompts for your **JUSPAY_API_KEY** and writes all env vars to `~/.zshrc` permanently |
-| 6 | Makes all helper scripts executable |
-| 7 | Verifies everything is working |
+| Step | What it does                                                                          |
+| ---- | ------------------------------------------------------------------------------------- |
+| 1    | Checks Node.js version (requires 20, 22, or >=24) — installs v22 via nvm if needed    |
+| 2    | Runs `npm install` for all xyne-automation dependencies                               |
+| 3    | Installs Playwright + Chromium browser                                                |
+| 4    | Installs Claude CLI (`curl -fsSL https://claude.ai/install.sh \| bash`)               |
+| 5    | Prompts for your **JUSPAY_API_KEY** and writes all env vars to `~/.zshrc` permanently |
+| 6    | Makes all helper scripts executable                                                   |
+| 7    | Verifies everything is working                                                        |
 
 ---
 
@@ -75,17 +75,20 @@ After running `npm run setup`, configure VS Code:
 ## Usage
 
 ### Run TestID Conversion
+
 ```bash
 cd xyne-automation
 npm run codegen -- <spec-file.spec.ts>
 ```
 
 ### Run Codegen + Execute Tests
+
 ```bash
 npm run codegen-and-test -- <spec-file.spec.ts>
 ```
 
 ### Cleanup Generated Files
+
 ```bash
 npm run codegen-cleanup
 ```
@@ -95,17 +98,20 @@ npm run codegen-cleanup
 ## Troubleshooting
 
 ### "Claude CLI not found" after setup
+
 ```bash
 source ~/.zshrc
 # or restart your terminal
 ```
 
 ### "API key not working"
+
 1. Verify your key at [grid.ai.example.com](https://grid.ai.example.com)
 2. Check: `echo $JUSPAY_API_KEY`
 3. Re-run: `npm run setup`
 
 ### "Node.js version not supported"
+
 ```bash
 nvm install 22
 nvm use 22
@@ -113,17 +119,21 @@ nvm alias default 22
 ```
 
 ### "Playwright browsers not installed"
+
 ```bash
 npx playwright install chromium
 ```
 
 ### Google Vertex / Authentication errors in Jenkins
+
 The error `Unexpected token '_', "_timestamp"... is not valid JSON` means `GOOGLE_APPLICATION_CREDENTIALS` points to an invalid file (likely an ADC token cache, not a service account JSON). The setup script clears all Vertex-related env vars since Claude routes through Juspay Grid instead.
 
 ### Re-run setup at any time
+
 ```bash
 npm run setup
 ```
+
 The script is **idempotent** — it won't duplicate entries or break existing config.
 
 ---
@@ -171,6 +181,7 @@ source ~/.zshrc
 Give this prompt to an LLM to set up the project:
 
 > Set up the Xyne Automation TestID conversion environment. Run `npm run setup` from the repo root (`xyne-spaces/`). This will:
+>
 > 1. Check/install Node.js 22
 > 2. Install npm dependencies
 > 3. Install Playwright with Chromium
