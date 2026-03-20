@@ -1,8 +1,9 @@
 import { useEffect, useMemo } from 'react';
 import type {
   QueryRequest,
-  Schema,
+  BaseDefaultSchema,
   DefaultSchema,
+  BaseDefaultContext,
   DefaultContext,
   PullRow,
   ReadonlyJSONValue,
@@ -32,9 +33,9 @@ export function useCachedQuery<
   TTable extends keyof TSchema['tables'] & string,
   TInput extends ReadonlyJSONValue | undefined,
   TOutput extends ReadonlyJSONValue | undefined,
-  TSchema extends Schema = DefaultSchema,
+  TSchema extends BaseDefaultSchema = DefaultSchema,
   TReturn = PullRow<TTable, TSchema>,
-  TContext = DefaultContext,
+  TContext extends BaseDefaultContext = DefaultContext,
 >(
   query: QueryRequest<TTable, TInput, TOutput, TSchema, TReturn, TContext>,
   options?: UseQueryOptions | boolean,

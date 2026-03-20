@@ -2,9 +2,10 @@ import { useEffect, useMemo } from 'react';
 import { useQueryWithFallback } from './useQueryWithFallback';
 import { useQuery as zeroUseQuery } from '@rocicorp/zero/react';
 import type {
-  Schema,
   DefaultSchema,
+  BaseDefaultSchema,
   DefaultContext,
+  BaseDefaultContext,
   PullRow,
   ReadonlyJSONValue,
   QueryRequest,
@@ -21,9 +22,9 @@ export function useQuery<
   TTable extends keyof TSchema['tables'] & string,
   TInput extends ReadonlyJSONValue | undefined,
   TOutput extends ReadonlyJSONValue | undefined,
-  TSchema extends Schema = DefaultSchema,
+  TSchema extends BaseDefaultSchema = DefaultSchema,
   TReturn = PullRow<TTable, TSchema>,
-  TContext = DefaultContext,
+  TContext extends BaseDefaultContext = DefaultContext,
 >(
   query: QueryRequest<TTable, TInput, TOutput, TSchema, TReturn, TContext>,
   options?: UseQueryOptions | boolean,
@@ -68,7 +69,7 @@ export function useQuery<
 // Requires explicit queryName argument for logging and metrics
 export function useRawQuery<
   TTable extends keyof TSchema['tables'] & string,
-  TSchema extends Schema = DefaultSchema,
+  TSchema extends BaseDefaultSchema = DefaultSchema,
   TReturn = PullRow<TTable, TSchema>,
 >(
   query: Query<TTable, TSchema, TReturn>,
