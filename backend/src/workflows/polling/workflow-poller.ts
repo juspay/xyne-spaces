@@ -123,14 +123,14 @@ export class WorkflowPoller {
       WITH stale AS (
         SELECT we."id"
         FROM "workflow_executions" we
-        LEFT JOIN "workflow_execution_locks" wel
+        LEFT JOIN "workflow"."workflow_execution_locks" wel
           ON wel."workflowExecutionId" = we."id"
         WHERE we."status" = ${WorkflowExecutionStatus.RUNNING}
           AND (wel."id" IS NULL OR wel."expiry" <= NOW())
         FOR UPDATE OF we SKIP LOCKED
       ),
       delete_locks AS (
-        DELETE FROM "workflow_execution_locks"
+        DELETE FROM "workflow"."workflow_execution_locks"
         WHERE "workflowExecutionId" IN (SELECT id FROM stale)
       )
       UPDATE "workflow_executions" we
