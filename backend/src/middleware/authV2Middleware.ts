@@ -50,10 +50,10 @@ class AuthV2Middleware {
   private attemptRefresh = async (req: Request, res: Response, next: NextFunction): Promise<boolean> => {
     try {
       const sessionId = req.cookies?.user_session_id;
-      logger.debug(`[Auto-Refresh] Attempting refresh. Cookie found: ${!!sessionId}`);
+      logger.info(`[Auto-Refresh] Attempting refresh. Cookie found: ${!!sessionId}`);
 
       if (!sessionId) {
-        logger.debug('[Auto-Refresh] No session ID cookie found - cannot refresh');
+        logger.info('[Auto-Refresh] No session ID cookie found - cannot refresh');
         return false;
       }
 
@@ -84,7 +84,7 @@ class AuthV2Middleware {
           // If the user has been deleted or suspended in Google, this should throw.
           await this.googleClient.getAccessToken();
           
-          logger.debug(`[Auto-Refresh] Google verification successful for user ${session.user.email}`);
+          logger.info(`[Auto-Refresh] Google verification successful for user ${session.user.email}`);
         } catch (err) {
           const googleError = err as gaxios.GaxiosError;
           // Check if it's a user-related error vs system error
@@ -102,7 +102,7 @@ class AuthV2Middleware {
       } else {
          // If for some reason we rely on a session without a refresh token (unlikely for Google auth flow, but consistent with prior logic)
          // we might want to log this.
-         logger.debug(`[Auto-Refresh] No refresh token in session for user ${session.user.email}. Skipping Google check.`);
+         logger.info(`[Auto-Refresh] No refresh token in session for user ${session.user.email}. Skipping Google check.`);
       }
       // --------------------------------
 
@@ -155,7 +155,7 @@ class AuthV2Middleware {
     try {
       // 1. Try to get a valid access token first
       const token = this.extractToken(req);
-      logger.debug(`${logPrefix} Step 1: Token extraction result: ${!!token}`);
+      logger.info(`${logPrefix} Step 1: Token extraction result: ${!!token}`);
       
       let tokenIsValid = false;
 
@@ -172,7 +172,7 @@ class AuthV2Middleware {
                  email: user.email,
                  name: user.name,
                };
-               logger.debug(`${logPrefix} Token verified successfully for user: ${user.email}`);
+               logger.info(`${logPrefix} Token verified successfully for user: ${user.email}`);
                tokenIsValid = true;
                return next();
              } else {
@@ -189,13 +189,13 @@ class AuthV2Middleware {
            }
         }
       } else {
-        logger.debug(`${logPrefix} No token provided. Falling back to refresh.`);
+        logger.info(`${logPrefix} No token provided. Falling back to refresh.`);
       }
 
       // If we reached here, token is either missing or invalid/expired.
       // 2. Fallback to Session Refresh
       if (!tokenIsValid) {
-        logger.debug(`${logPrefix} Step 2: Attempting session refresh`);
+        logger.info(`${logPrefix} Step 2: Attempting session refresh`);
         
         // Only attempt if we have a session cookie
         if (req.cookies?.user_session_id) {
@@ -204,10 +204,10 @@ class AuthV2Middleware {
              // Logs inside attemptRefresh will handle success details
              return; 
            } else {
-             logger.debug(`${logPrefix} Refresh attempt failed.`);
+             logger.info(`${logPrefix} Refresh attempt failed.`);
            }
         } else {
-          logger.debug(`${logPrefix} No session cookie (user_session_id) present.`);
+          logger.info(`${logPrefix} No session cookie (user_session_id) present.`);
         }
       }
 

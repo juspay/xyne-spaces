@@ -274,6 +274,11 @@ export const authMachine = createMachine(
       },
       authenticating: {
         on: {
+          GOOGLE_SIGNIN: {
+            actions: {
+              type: 'initiateGoogleSignIn',
+            },
+          },
           SESSION_VALIDATED: {
             target: 'authenticated',
             actions: {
